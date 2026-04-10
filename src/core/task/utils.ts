@@ -25,6 +25,8 @@ type UpdateApiReqMsgParams = {
 	api: ApiHandler
 	cancelReason?: DiracApiReqCancelReason
 	streamingFailedMessage?: string
+	contextWindow?: number
+	contextUsagePercentage?: number
 }
 
 // update api_req_started. we can't use api_req_finished anymore since it's a unique case where it could come after a streaming message (ie in the middle of being updated or executed)
@@ -53,6 +55,8 @@ export const updateApiReqMsg = async (params: UpdateApiReqMsgParams) => {
 				),
 			cancelReason: params.cancelReason,
 			streamingFailedMessage: params.streamingFailedMessage,
+			contextWindow: params.contextWindow,
+			contextUsagePercentage: params.contextUsagePercentage,
 		} satisfies DiracApiReqInfo),
 	})
 }

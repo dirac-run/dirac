@@ -18,6 +18,7 @@ import { getRequestRegistry } from "@/core/controller/grpc-handler"
 import { subscribeToState } from "@/core/controller/state/subscribeToState"
 import { showTaskWithId } from "@/core/controller/task/showTaskWithId"
 import { emitTaskStartedMessage } from "./task-start-output"
+import { getApiMetrics } from "@shared/getApiMetrics"
 
 export interface PlainTextTaskOptions {
 	controller: Controller
@@ -81,8 +82,10 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 
 	// Helper to process a message and track completion state
 	const processMessage = (message: DiracMessage) => {
+		const text = message.text || ""
 		const ts = message.ts || 0
-		if (message.partial || processedMessages.has(ts)) {
+		// Allow re-processing if the text has changed (e.g. api_req_started updated with cost)
+		if (message.partial || (processedMessages.has(ts) && processedMessages.get(ts) === text)) {
 			return
 		}
 
@@ -191,6 +194,27 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			.at(-1)
 		process.stdout.write(msg + "\n")
 	}
+
+	// Print final summary if verbose or yolo
+	if (!jsonOutput && (verbose || yolo)) {
+		const messages = controller.task?.messageStateHandler.getDiracMessages() || []
+		const metrics = getApiMetrics(messages)
+		if (metrics.totalTokensIn > 0 || metrics.totalCost > 0) {
+			process.stderr.write(`\n${"-".repeat(40)}\n`)
+			process.stderr.write(`Task Summary:\n`)
+			process.stderr.write(`Tokens: ${metrics.totalTokensIn.toLocaleString()} in, ${metrics.totalTokensOut.toLocaleString()} out\n`)
+			if (metrics.totalCacheReads || metrics.totalCacheWrites) {
+				process.stderr.write(
+					`Cache: ${(metrics.totalCacheReads || 0).toLocaleString()} read, ${(metrics.totalCacheWrites || 0).toLocaleString()} write\n`,
+				)
+			}
+			if (metrics.totalCost > 0) {
+				process.stderr.write(`Total Cost: $${metrics.totalCost.toFixed(4)}\n`)
+			}
+			process.stderr.write(`${"-".repeat(40)}\n`)
+		}
+	}
+
 
 	return !hasError
 }

@@ -248,8 +248,31 @@ function formatSayMessage(message: DiracMessage, prefix: string, verbose: boolea
 		case "browser_action_result":
 			return `${prefix} ${style.dim("Browser result")} ${message.text ? `- ${message.text.substring(0, 100)}...` : ""}`
 
-		case "api_req_started":
-			return verbose ? `${prefix} ${style.api("API request started")}` : `${message.text || ""}`
+		case "api_req_started": {
+			if (verbose) {
+				return `${prefix} ${style.api("API request started")}`
+			} else {
+				try {
+					const info = JSON.parse(message.text || "{}")
+					if (info.cost !== undefined || info.tokensIn !== undefined) {
+						const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
+						const tokensStr = info.tokensIn !== undefined ? `Tokens: ${info.tokensIn.toLocaleString()} in, ${info.tokensOut.toLocaleString()} out` : ""
+						const cacheStr =
+							info.cacheReadTokens !== undefined || info.cacheWriteTokens !== undefined
+								? ` (Cache: ${(info.cacheReadTokens || 0).toLocaleString()} read, ${(info.cacheWriteTokens || 0).toLocaleString()} write)`
+								: ""
+						const contextStr =
+							info.contextWindow !== undefined
+								? ` | Context: ${info.contextUsagePercentage}% of ${(info.contextWindow / 1000).toFixed(0)}K`
+								: ""
+						return `${prefix} ${style.api("API request finished")} ${style.dim(`[${tokensStr}${cacheStr}${contextStr} | ${costStr}]`)}`
+					}
+				} catch {
+					return `${message.text || ""}`
+				}
+				return "" // Don't show "API request started" in non-verbose mode if no cost yet
+			}
+		}
 
 		case "api_req_finished":
 			return verbose ? `${prefix} ${style.api("API request finished")}` : ""

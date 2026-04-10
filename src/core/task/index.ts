@@ -1294,6 +1294,14 @@ export class Task {
 				cancelReason?: DiracApiReqCancelReason,
 				streamingFailedMessage?: string,
 			) => {
+				const modelInfo = this.api.getModel().info
+				const contextWindow = modelInfo.contextWindow
+				const totalTokens =
+					taskMetrics.inputTokens +
+					taskMetrics.outputTokens +
+					(taskMetrics.cacheWriteTokens || 0) +
+					(taskMetrics.cacheReadTokens || 0)
+				const contextUsagePercentage = contextWindow ? Math.round((totalTokens / contextWindow) * 100) : undefined
 				await updateApiReqMsg({
 					messageStateHandler: this.messageStateHandler,
 					lastApiReqIndex,
@@ -1305,6 +1313,8 @@ export class Task {
 					totalCost: taskMetrics.totalCost,
 					cancelReason,
 					streamingFailedMessage,
+					contextWindow,
+					contextUsagePercentage,
 				})
 			}
 

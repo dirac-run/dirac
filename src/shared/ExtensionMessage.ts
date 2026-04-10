@@ -390,6 +390,8 @@ export interface DiracApiReqInfo {
 	cacheWrites?: number
 	cacheReads?: number
 	cost?: number
+	contextWindow?: number
+	contextUsagePercentage?: number
 	cancelReason?: DiracApiReqCancelReason
 	streamingFailedMessage?: string
 	retryStatus?: {

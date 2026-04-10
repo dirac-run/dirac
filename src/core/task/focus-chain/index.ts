@@ -148,7 +148,7 @@ export class FocusChainManager {
 			const percentComplete = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0
 
 			const introUpdateRequired =
-				"# TODO LIST UPDATE REQUIRED - You MUST include the task_progress parameter in your NEXT tool call."
+				"# task_progress RECOMMENDED - Update your progress"
 			const listCurrentProgress = `**Current Progress: ${completedItems}/${totalItems} items completed (${percentComplete}%)**`
 			const userHasUpdatedList =
 				"**CRITICAL INFORMATION:** The user has modified this todo list - review ALL changes carefully"
@@ -315,7 +315,12 @@ export class FocusChainManager {
 					this.taskState.currentFocusChainChecklist = markdownTodoList
 
 					// Create a task_progress message to display the focus chain list in the UI
-					await this.say("task_progress", markdownTodoList)
+					// Only create a new message if the content has changed (e.g. via user edit on disk)
+					if (markdownTodoList !== this.taskState.currentFocusChainChecklist) {
+						this.taskState.currentFocusChainChecklist = markdownTodoList
+						// Create a task_progress message to display the focus chain list in the UI
+						await this.say("task_progress", markdownTodoList)
+					}
 				} else {
 					Logger.debug(`[Task ${this.taskId}] focus chain list: No valid task progress to update with`)
 				}

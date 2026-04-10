@@ -1,8 +1,8 @@
 // Prompt for initial list creation
 const initial = `
-# task_progress REQUIRED - ACT MODE ACTIVATED
+# task_progress RECOMMENDED - ACT MODE ACTIVATED
 
-**You've switched to ACT MODE.** Create a comprehensive todo list in your NEXT tool call using the \`task_progress\` parameter.
+**You've switched to ACT MODE.** It is recommended to create a comprehensive todo list in your NEXT tool call using the \`task_progress\` parameter to track your progress.
 
 **Format:**
 - [ ] Task to be done
@@ -19,7 +19,7 @@ A list provides a clear roadmap and helps track progress throughout the task.`
 
 // Prompt for reminders to update the list periodically
 const reminder = `
-1. Update your todo list using the \`task_progress\` parameter in your next tool call.
+1. Update your todo list using the \`task_progress\` parameter in your next tool call whenever you make progress or update the plan. If no changes have occurred, you may omit this parameter to save tokens.
 2. Review each item: mark completed with \`- [x]\`, keep incomplete as \`- [ ]\`, and add any newly discovered steps.
 3. Ensure the list accurately reflects the current state of the task.`
 
