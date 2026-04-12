@@ -9,7 +9,7 @@ You have 4 file editing tools:
 1. \`write_to_file\` (for new files or complete overwrites) 
 2. \`edit_file\` (for targeted edits) 
 3. \`replace_symbol\` (for direct AST manipulation such as replacing a function or a symbol). updates AST precisely.
-4. \`execute_command\` with commands like grep/awk/sed/find etc for bulk updates. CHEAPEST to execute and very useful for updating files in bulk. You can update the files without necessarily loading them in the context window
+4. \`execute_command\` with commands like grep/awk/sed/find etc for bulk updates. CHEAPEST to execute and very useful for updating files in bulk. You can update the files without necessarily loading them in the context window. You can also write scripts that do the work for you.
 
 
 

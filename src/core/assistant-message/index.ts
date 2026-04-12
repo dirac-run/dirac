@@ -13,6 +13,8 @@ export interface TextStreamContent {
 export const toolParamNames = [
 	"command",
 	"commands",
+	"script",
+	"language",
 
 	"path",
 	"files",

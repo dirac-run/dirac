@@ -53,6 +53,14 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 	getDescription(block: ToolUse): string {
 		const commands = (block.params.commands as string[] | undefined) || []
 		const command = block.params.command as string | undefined
+		const script = block.params.script as string | undefined
+		const language = block.params.language as string | undefined
+
+		if (script) {
+			const langDisplay = language ? ` (${language})` : ""
+			return `[${block.name} for script${langDisplay}]`
+		}
+
 		const display = commands.length > 0 ? `${commands.length} commands` : `'${command}'`
 		return `[${block.name} for ${display}]`
 	}
@@ -76,12 +84,29 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		// execute() will show a more detailed progress view using MultiCommandState.
 	}
 
-		async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
+	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
 		const rawCommands = (block.params.commands as any) || []
 		const rawCommand = block.params.command as any
+		const script = block.params.script as string | undefined
+		const language = (block.params.language as string | undefined) || "bash"
 
 		// Normalize to a list of commands
-		const commandsToProcess = rawCommands.length > 0 ? rawCommands : rawCommand ? [rawCommand] : []
+		const commandsToProcess: { command: string; displayName?: string }[] = []
+
+		if (rawCommands.length > 0) {
+			rawCommands.forEach((cmd: string) => commandsToProcess.push({ command: cmd }))
+		} else if (rawCommand) {
+			commandsToProcess.push({ command: rawCommand })
+		}
+
+		if (script) {
+			const wrappedCommand = this.wrapScript(script, language)
+			const langDisplay = language.charAt(0).toUpperCase() + language.slice(1)
+			commandsToProcess.push({
+				command: wrappedCommand,
+				displayName: `${langDisplay} script`,
+			})
+		}
 
 		if (commandsToProcess.length === 0) {
 			config.taskState.consecutiveMistakeCount++
@@ -97,8 +122,9 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 
 		// Initialize multi-command state
 		const multiCommandState: MultiCommandState = {
-			commands: (commandsToProcess as string[]).map((cmd) => ({
-				command: cmd,
+			commands: commandsToProcess.map((item) => ({
+				command: item.command,
+				displayName: item.displayName,
 				status: "pending",
 			})),
 		}
@@ -137,7 +163,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			// We provide the first command as fallback text for legacy UI compatibility
 			initialResult = await ToolResultUtils.askApprovalAndPushFeedback(
 				"command",
-				commandsToProcess[0],
+				commandsToProcess[0].command,
 				config,
 				false,
 				multiCommandState,
@@ -182,7 +208,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			// We provide the first command as fallback text for legacy UI compatibility
 			initialResult = await ToolResultUtils.askApprovalAndPushFeedback(
 				"command",
-				commandsToProcess[0],
+				commandsToProcess[0].command,
 				config,
 				true,
 				multiCommandState,
@@ -199,6 +225,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				await config.callbacks.updateDiracMessage(index, {
 					multiCommandState: { ...multiCommandState },
 					commandCompleted: false,
+					partial: false,
 				})
 			}
 		}
@@ -208,6 +235,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		for (let i = 0; i < multiCommandState.commands.length; i++) {
 			const cmdState = multiCommandState.commands[i]
 			const originalCommand = cmdState.command
+			const displayName = cmdState.displayName || originalCommand
 
 			// Pre-process command (Gemini fix)
 			let commandToExecute = originalCommand
@@ -251,7 +279,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				cmdState.output = errorMessage
 				await updateMessage()
 
-				results.push(`--- Output for '${originalCommand}' ---\n${errorMessage}`)
+				results.push(`--- Output for '${displayName}' ---\n${errorMessage}`)
 				continue
 			}
 
@@ -262,7 +290,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				cmdState.output = `Diracignore error: ${ignoredFileAttemptedToAccess}`
 				await updateMessage()
 
-				results.push(`--- Output for '${originalCommand}' ---\nDiracignore error: ${ignoredFileAttemptedToAccess}`)
+				results.push(`--- Output for '${displayName}' ---\nDiracignore error: ${ignoredFileAttemptedToAccess}`)
 				continue
 			}
 
@@ -301,7 +329,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.output = "Command denied by user."
 					await updateMessage()
 
-					results.push(`--- Output for '${originalCommand}' ---\nCommand denied by user.`)
+					results.push(`--- Output for '${displayName}' ---\nCommand denied by user.`)
 					continue
 				}
 				cmdState.requiresApproval = false
@@ -334,7 +362,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.status = "failed"
 					cmdState.output = "Cancelled by pre-tool hook."
 					await updateMessage()
-					results.push(`--- Output for '${originalCommand}' ---\nCancelled by pre-tool hook.`)
+					results.push(`--- Output for '${displayName}' ---\nCancelled by pre-tool hook.`)
 					continue
 				}
 				throw error
@@ -390,7 +418,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.status = "failed"
 					cmdState.output = "Command was rejected or interrupted during execution."
 					await updateMessage()
-					results.push(`--- Output for '${originalCommand}' ---\nCommand was rejected or interrupted during execution.`)
+					results.push(`--- Output for '${displayName}' ---\nCommand was rejected or interrupted during execution.`)
 				} else {
 					const output =
 						typeof result === "string"
@@ -403,13 +431,13 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.output = output
 					await updateMessage()
 
-					results.push(`--- Output for '${originalCommand}' ---\n${output}`)
+					results.push(`--- Output for '${displayName}' ---\n${output}`)
 				}
 			} catch (error) {
 				cmdState.status = "failed"
 				cmdState.output = `Error during execution: ${error instanceof Error ? error.message : String(error)}`
 				await updateMessage()
-				results.push(`--- Output for '${originalCommand}' ---\n${cmdState.output}`)
+				results.push(`--- Output for '${displayName}' ---\n${cmdState.output}`)
 			} finally {
 				if (updateTimer) {
 					clearTimeout(updateTimer)
@@ -429,5 +457,27 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		}
 
 		return formatResponse.toolResult(results.join("\n\n"))
+	}
+
+	private wrapScript(script: string, language: string): string {
+		const delimiter = `EOF_DIRAC_SCRIPT_${Math.random().toString(36).substring(2, 10).toUpperCase()}`
+		const normalizedLanguage = language.toLowerCase().trim()
+
+		let interpreter = "bash"
+		if (normalizedLanguage === "python" || normalizedLanguage === "python3") {
+			interpreter = "python3"
+		} else if (normalizedLanguage === "node" || normalizedLanguage === "javascript") {
+			interpreter = "node"
+		} else if (normalizedLanguage === "sh") {
+			interpreter = "sh"
+		} else if (normalizedLanguage === "ruby") {
+			interpreter = "ruby"
+		} else if (normalizedLanguage === "perl") {
+			interpreter = "perl"
+		} else {
+			interpreter = normalizedLanguage
+		}
+
+		return `${interpreter} << '${delimiter}'\n${script}\n${delimiter}`
 	}
 }

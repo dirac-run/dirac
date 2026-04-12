@@ -224,6 +224,9 @@ export interface DiracSayTool {
 	| "executeCommand"
 	| "execute_command"
 
+	script?: string;
+	language?: string;
+
 	path?: string
 	paths?: string[]
 	diff?: string
@@ -416,6 +419,7 @@ export const COMPLETION_RESULT_CHANGES_FLAG = "HAS_CHANGES"
 export interface MultiCommandState {
 	commands: Array<{
 		command: string
+		displayName?: string
 		status: "pending" | "running" | "completed" | "failed" | "skipped"
 		output?: string
 		exitCode?: number
