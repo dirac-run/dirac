@@ -1,83 +1,72 @@
-# Dirac
+# Dirac - Accurate & Highly Token Efficient Open Source AI Agent
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/7123f9d1-afeb-48d5-93fa-e750dec0ebba" width="70%" />
-</p>
+It is a well studied phenomenon that any given model's reasoning ability degrades with the context length. If we can keep context tightly curated, we improve both accuracy and cost while making larger changes tractable in a single task. 
 
-<div align="center">
-<table>
-<tbody>
-<td align="center">
-<a href="https://www.npmjs.com/package/dirac-cli" target="_blank"><strong>NPM</strong></a>
-</td>
-<td align="center">
-<a href="https://discord.gg/dirac" target="_blank"><strong>Discord</strong></a>
-</td>
-<td align="center">
-<a href="https://www.reddit.com/r/dirac/" target="_blank"><strong>r/dirac</strong></a>
-</td>
-<td align="center">
-<a href="https://github.com/dirac-run/dirac/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop" target="_blank"><strong>Feature Requests</strong></a>
-</td>
-<td align="center">
-<a href="https://docs.dirac.run/getting-started/for-new-coders" target="_blank"><strong>Getting Started</strong></a>
-</td>
-</tbody>
-</table>
-</div>
+Dirac is an open-source coding agent built with this in mind. It reduces API costs by **64.8%** on average while producing better and faster work. Using hash-anchored parallel edits, AST manipulation, and a suite of advanced optimizations. Oh, and no MCP.
 
-Meet Dirac, an AI assistant that lives in your terminal.
+Our goal: Optimize for bang-for-the-buck on tooling with bare minimum prompting instead of going blindly minimalistic.
 
-Dirac can handle complex software development tasks step-by-step. With tools that let him create & edit files, explore large projects, use the browser, and execute terminal commands (after you grant permission), he can assist you in ways that go beyond code completion or tech support.
+## 📊 Evals
+
+Dirac is benchmarked against other leading open-source agents on complex, real-world refactoring tasks. Dirac consistently achieves 100% accuracy at a fraction of the cost. These evals are run on public github repos and should be reproducible by anyone. 
+
+| Task (Repo) | Files* | Cline | Kilo | Ohmypi | Opencode | Pimono | Roo | **Dirac** |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Task1 ([transformers](https://github.com/huggingface/transformers)) | 8 | 🟢 [$0.37] | 🔴 [N/A] | 🟡 [$0.24] | 🟢 [$0.20] | 🟢 [$0.34] | 🟢 [$0.49] | **🟢 [$0.13]** |
+| Task2 ([vscode](https://github.com/microsoft/vscode)) | 21 | 🟢 [$0.67] | 🟡 [$0.78] | 🟢 [$0.63] | 🟢 [$0.40] | 🟢 [$0.48] | 🟡 [$0.58] | **🟢 [$0.23]** |
+| Task3 ([vscode](https://github.com/microsoft/vscode)) | 12 | 🟡 [$0.42] | 🟢 [$0.70] | 🟢 [$0.64] | 🟢 [$0.32] | 🟢 [$0.25] | 🟡 [$0.45] | **🟢 [$0.16]** |
+| Task4 ([django](https://github.com/django/django)) | 14 | 🟢 [$0.36] | 🟢 [$0.42] | 🟡 [$0.32] | 🟢 [$0.24] | 🟡 [$0.24] | 🟢 [$0.17] | **🟢 [$0.08]** |
+| Task5 ([vscode](https://github.com/microsoft/vscode)) | 3 | 🔴 [N/A] | 🟢 [$0.71] | 🟢 [$0.43] | 🟢 [$0.53] | 🟢 [$0.50] | 🟢 [$0.36] | **🟢 [$0.17]** |
+| Task6 ([transformers](https://github.com/huggingface/transformers)) | 25 | 🟢 [$0.87] | 🟡 [$1.51] | 🟢 [$0.94] | 🟢 [$0.90] | 🟢 [$0.52] | 🟢 [$1.44] | **🟢 [$0.34]** |
+| Task7 ([vscode](https://github.com/microsoft/vscode)) | 13 | 🟡 [$0.51] | 🟢 [$0.77] | 🟢 [$0.74] | 🟢 [$0.67] | 🟡 [$0.45] | 🟢 [$1.05] | **🟢 [$0.25]** |
+| Task8 ([transformers](https://github.com/huggingface/transformers)) | 3 | 🟢 [$0.25] | 🟢 [$0.19] | 🟢 [$0.17] | 🟢 [$0.26] | 🟢 [$0.23] | 🟢 [$0.29] | **🟢 [$0.12]** |
+| **Total Correct** | | 5/8 | 5/8 | 6/8 | 8/8 | 6/8 | 6/8 | **8/8** |
+| **Avg Cost** | | $0.49 | $0.73 | $0.51 | $0.44 | $0.38 | $0.60 | **$0.18** |
+
+> 🟢 Success | 🟡 Incomplete | 🔴 Failure
+> **Cost Comparison**: Dirac is **64.8% cheaper** than the competition (a **2.8x** cost reduction).
+> \* Expected number of files to be modified/created to complete the task.
+> See [evals/README.md](https://github.com/dirac-run/dirac/blob/master/evals/README.md) for detailed task descriptions and methodology.
+
+## 🚀 Key Features
+
+- **Hash-Anchored Edits**: Dirac uses stable line hashes to target edits with extreme precision, avoiding the "lost in translation" issues of traditional line-number based editing.
+  ![Hash-Anchored Edits](https://www.dirac.run/static/images/multiple_edit.png)
+- **AST-Native Precision**: Built-in understanding of language syntax (TypeScript, Python, C++, etc.) allows Dirac to perform structural manipulations like function extraction or class refactoring with 100% accuracy.
+  ![AST-Native Precision](https://www.dirac.run/static/images/parallel_AST_edit.png)
+- **Multi-File Batching**: Dirac can process and edit multiple files in a single LLM roundtrip, significantly reducing latency and API costs.
+  ![Multi-File Batching](https://www.dirac.run/static/images/multi_function_read.png)
+- **High-Bandwidth Context**: Optimized context curation keeps the agent lean and fast, ensuring the LLM always has the most relevant information without wasting tokens.
+- **Autonomous Tool Use**: Dirac can read/write files, execute terminal commands, use a headless browser, and more - all while keeping you in control with an approval-based workflow.
+
+## 📦 Installation
+
+Install the Dirac CLI globally using npm:
 
 ```bash
-npm i -g dirac-cli
-
-# cd into your project and run:
-dirac
+npm install -g dirac-cli
 ```
 
-> Move your mouse around under the Dirac icon for a surprise!
+Alternatively, use our official installation script (macOS/Linux):
 
----
+```bash
+curl -fsSL https://raw.githubusercontent.com/dirac-run/dirac/master/scripts/install.sh | bash
+```
 
-<img align="right" width="340" src="https://github.com/user-attachments/assets/ceb74224-08aa-4b8b-a3e7-b438ac3d160a">
+## 🚀 Quick Start 
 
-### Use any API and Model
+1. **Authenticate**:
+   ```bash
+   dirac auth
+   ```
+2. **Run your first task**:
+   ```bash
+   dirac "Analyze the architecture of this project"
+   ```
 
-Dirac supports API providers like ChatGPT, Anthropic, OpenAI, Google Gemini, AWS Bedrock, Azure, GCP Vertex, Cerebras, Groq, and Moonshot. You can also configure any OpenAI compatible API, or use a local model through LM Studio/Ollama. If you're using a Dirac Account, you'll always have access to the newest models as soon as they're available.
+### Configuration (Environment Variables)
 
-<!-- Transparent pixel to create line break after floating image -->
-
-<img width="2000" height="0" src="https://github.com/user-attachments/assets/ee14e6f7-20b8-4391-9091-8e8e25561929"><br>
-
-<img align="left" width="370" src="https://github.com/user-attachments/assets/cad091f6-6c0f-4e4b-97ea-a1ff67e39b9b">
-
-### Stay in Control with Human-in-the-Loop
-
-Dirac asks for your approval before running commands, editing files, or taking any action. Review each step and approve or reject as you go—or enable auto-approve to let Dirac work autonomously to completion.
-
-<!-- Transparent pixel to create line break after floating image -->
-
-<img width="2000" height="0" src="https://github.com/user-attachments/assets/cad091f6-6c0f-4e4b-97ea-a1ff67e39b9b"><br>
-
-<img align="right" width="400" src="https://github.com/user-attachments/assets/4f264a0c-3802-49a7-8e5e-13d97beb659e">
-
-### Plan & Act Modes
-
-Toggle to Plan Mode to discuss implementation and architecture with Dirac. He'll ask clarifying questions, explore your codebase, and present a plan for you to align on. Once you're satisfied, switch to Act Mode and let Dirac execute the plan.
-
-<!-- Transparent pixel to create line break after floating image -->
-
-<img width="2000" height="0" src="https://github.com/user-attachments/assets/4f264a0c-3802-49a7-8e5e-13d97beb659e"><br>
-
-
-## Enterprise
-
-Get the same Dirac experience with enterprise-grade controls: SSO (SAML/OIDC), global policies and configuration, observability with audit trails, private networking (VPC/private link), and self-hosted or on-prem deployments, and enterprise support. Learn more at our [enterprise page](https://dirac.run/enterprise) or [talk to us](https://dirac.run/contact-sales).
-
-## Configuration (Environment Variables)
-You can also provide API keys via environment variables to skip the `dirac auth` step:
+You can provide API keys via environment variables to skip the `dirac auth` step. This is ideal for CI/CD or non-persistent environments:
 
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
@@ -89,7 +78,22 @@ You can also provide API keys via environment variables to skip the `dirac auth`
 - `HF_TOKEN` (HuggingFace)
 - ... and others (see `src/shared/storage/env-config.ts` for the full list).
 
+### Common Commands
 
-## License
+- `dirac "prompt"`: Start an interactive task.
+- `dirac -p "prompt"`: Run in **Plan Mode** to see the strategy before executing.
+- `dirac -y "prompt"`: **Yolo Mode** (auto-approve all actions, great for simple fixes).
+- `git diff | dirac "Review these changes"`: Pipe context directly into Dirac.
+- `dirac history`: View and resume previous tasks.
 
-[Apache 2.0 © 2026 Dirac Bot Inc.](./LICENSE)
+## 📄 License
+
+Dirac is **open source** and licensed under the [Apache License 2.0](LICENSE).
+
+## 🤝 Acknowledgments
+
+Dirac is a fork of the excellent [Cline](https://github.com/cline/cline) project. We are grateful to the Cline team and contributors for their foundational work.
+
+---
+
+Built with ❤️ by [Max Trivedi](https://www.linkedin.com/in/max-trivedi-49993aab/) at [Dirac Delta Labs](https://dirac.run)
