@@ -133,6 +133,8 @@ function createHandlerForProvider(
 				geminiBaseUrl: options.geminiBaseUrl,
 				reasoningEffort: mode === "plan" ? options.planModeReasoningEffort : options.actModeReasoningEffort,
 				ulid: options.ulid,
+				geminiSearchEnabled: options.geminiSearchEnabled,
+
 			})
 		case "openai":
 			return new OpenAiHandler({
@@ -173,6 +175,8 @@ function createHandlerForProvider(
 				reasoningEffort: mode === "plan" ? options.planModeReasoningEffort : options.actModeReasoningEffort,
 				apiModelId: mode === "plan" ? options.planModeApiModelId : options.actModeApiModelId,
 				ulid: options.ulid,
+				geminiSearchEnabled: options.geminiSearchEnabled,
+
 			})
 		case "openai-native":
 			return new OpenAiNativeHandler({

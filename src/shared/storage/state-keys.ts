@@ -88,6 +88,8 @@ const API_HANDLER_SETTINGS_FIELDS = {
 	lmStudioBaseUrl: { default: undefined as string | undefined },
 	lmStudioMaxTokens: { default: undefined as string | undefined },
 	geminiBaseUrl: { default: undefined as string | undefined },
+	geminiSearchEnabled: { default: true as boolean },
+
 	requestyBaseUrl: { default: undefined as string | undefined },
 	fireworksModelMaxCompletionTokens: { default: undefined as number | undefined },
 	fireworksModelMaxTokens: { default: undefined as number | undefined },

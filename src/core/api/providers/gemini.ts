@@ -9,7 +9,7 @@ import {
 	ThinkingLevel,
 } from "@google/genai"
 import { GeminiModelId, geminiDefaultModelId, geminiModels, ModelInfo } from "@shared/api"
-import { GEMINI_FLASH_MAX_OUTPUT_TOKENS, isGeminiFlash } from "@utils/model-utils"
+import { GEMINI_MAX_OUTPUT_TOKENS } from "@utils/model-utils"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { telemetryService } from "@/services/telemetry"
 import { DiracStorageMessage } from "@/shared/messages/content"
@@ -30,6 +30,8 @@ interface GeminiHandlerOptions extends CommonApiHandlerOptions {
 	thinkingBudgetTokens?: number
 	reasoningEffort?: string
 	apiModelId?: string
+	geminiSearchEnabled?: boolean
+
 	ulid?: string
 }
 
@@ -48,15 +50,11 @@ function mapReasoningEffortToGeminiThinkingLevel(effort: string): ThinkingLevel 
 }
 
 function getGeminiMaxOutputTokens(modelId: string, modelMaxTokens?: number): number | undefined {
-	if (!isGeminiFlash(modelId)) {
-		return undefined
-	}
-
 	if (modelMaxTokens && modelMaxTokens > 0) {
-		return Math.min(modelMaxTokens, GEMINI_FLASH_MAX_OUTPUT_TOKENS)
+		return Math.min(modelMaxTokens, GEMINI_MAX_OUTPUT_TOKENS)
 	}
 
-	return GEMINI_FLASH_MAX_OUTPUT_TOKENS
+	return GEMINI_MAX_OUTPUT_TOKENS
 }
 
 /**
@@ -199,6 +197,8 @@ export class GeminiHandler implements ApiHandler {
 		let ttftSdkMs: number | undefined
 		let apiSuccess = false
 		let apiError: string | undefined
+		let lastGroundingMetadata: any | undefined
+
 		let promptTokens = 0
 		let outputTokens = 0
 		let cacheReadTokens = 0
@@ -207,15 +207,27 @@ export class GeminiHandler implements ApiHandler {
 		let stopReason: string | undefined
 
 		const isNativeToolCallsEnabled = tools?.length
-		if (isNativeToolCallsEnabled) {
-			requestConfig.tools = [{ functionDeclarations: tools }]
-			requestConfig.toolConfig = {
-				// Force the model to call 'any' function.
-				functionCallingConfig: {
-					mode: FunctionCallingConfigMode.ANY,
-				},
+		if (isNativeToolCallsEnabled || this.options.geminiSearchEnabled) {
+			requestConfig.tools = []
+			if (isNativeToolCallsEnabled) {
+				requestConfig.tools.push({ functionDeclarations: tools })
 			}
+			if (this.options.geminiSearchEnabled) {
+				requestConfig.tools.push({ googleSearch: {} } as any)
+			}
+
+			requestConfig.toolConfig = {}
+			if (isNativeToolCallsEnabled) {
+				requestConfig.toolConfig.functionCallingConfig = {
+					mode: FunctionCallingConfigMode.ANY,
+				}
+			}
+			if (this.options.geminiSearchEnabled) {
+				;(requestConfig.toolConfig as any).includeServerSideToolInvocations = true
+			}
+
 		}
+
 
 		try {
 			const result = await client.models.generateContentStream({
@@ -282,6 +294,12 @@ export class GeminiHandler implements ApiHandler {
 					}
 				}
 
+				const candidate = chunk.candidates?.[0]
+				if (candidate?.groundingMetadata) {
+					lastGroundingMetadata = candidate.groundingMetadata
+				}
+
+
 				if (chunk.usageMetadata) {
 					responseId = chunk.responseId
 					lastUsageMetadata = chunk.usageMetadata
@@ -313,6 +331,22 @@ export class GeminiHandler implements ApiHandler {
 					id: responseId,
 					stopReason,
 				}
+
+			if (lastGroundingMetadata && lastGroundingMetadata.groundingChunks?.length > 0) {
+				let sourcesMarkdown = "\n\n**Sources:**\n"
+
+				lastGroundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
+					if (chunk.web) {
+						sourcesMarkdown += `${index + 1}. [${chunk.web.title || chunk.web.uri}](${chunk.web.uri})\n`
+					}
+				})
+				yield {
+					type: "text",
+					text: sourcesMarkdown,
+					id: responseId,
+				}
+			}
+
 			}
 		} catch (error) {
 			apiSuccess = false

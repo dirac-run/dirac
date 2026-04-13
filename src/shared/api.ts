@@ -49,6 +49,8 @@ export const DEFAULT_API_PROVIDER = "openrouter" as ApiProvider
 
 export interface ApiHandlerOptions extends Partial<ApiHandlerSettings> {
 	ulid?: string // Used to identify the task in API requests
+	geminiSearchEnabled?: boolean
+
 	onRetryAttempt?: (attempt: number, maxRetries: number, delay: number, error: any) => void // Callback function
 }
 

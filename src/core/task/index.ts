@@ -252,6 +252,8 @@ export class Task {
 		this.reinitExistingTaskFromId = reinitExistingTaskFromId
 		this.cancelTask = cancelTask
 		this.diracIgnoreController = new DiracIgnoreController(cwd)
+		this.diracIgnoreController.yoloMode = !!stateManager.getGlobalSettingsKey("yoloModeToggled")
+
 		this.commandPermissionController = new CommandPermissionController()
 		this.taskLockAcquired = taskLockAcquired
 		// Determine terminal execution mode and create appropriate terminal manager
@@ -913,12 +915,15 @@ export class Task {
 		const localWindsurfRulesFileInstructions = await getLocalWindsurfRules(this.cwd, windsurfLocalToggles)
 
 		const localAgentsRulesFileInstructions = await getLocalAgentsRules(this.cwd, agentsLocalToggles)
+		this.diracIgnoreController.yoloMode = !!this.stateManager.getGlobalSettingsKey("yoloModeToggled")
 
+		const isYolo = !!this.stateManager.getGlobalSettingsKey("yoloModeToggled")
 		const diracIgnoreContent = this.diracIgnoreController.diracIgnoreContent
 		let diracIgnoreInstructions: string | undefined
-		if (diracIgnoreContent) {
+		if (diracIgnoreContent && !isYolo) {
 			diracIgnoreInstructions = formatResponse.diracIgnoreInstructions(diracIgnoreContent)
 		}
+
 
 		// Prepare multi-root workspace information if enabled
 		let workspaceRoots: Array<{ path: string; name: string; vcs?: string }> | undefined
@@ -1460,6 +1465,8 @@ export class Task {
 
 				while (true) {
 					const chunk = await streamCoordinator.nextChunk()
+					if (chunk) {
+					}
 					if (!chunk) {
 						break
 					}
@@ -1636,6 +1643,7 @@ export class Task {
 			await finalizeApiReqMsg()
 			await this.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 			await this.postStateToWebview()
+
 
 			if (this.taskState.abort) {
 				throw new Error("Dirac instance aborted")

@@ -118,6 +118,8 @@ export const DEFAULT_IGNORE_PATTERNS = [
 ]
 
 export class DiracIgnoreController {
+	public yoloMode = false
+
 	private cwd: string
 	private ignoreInstance: Ignore
 	private fileWatcher?: FSWatcher
@@ -260,6 +262,10 @@ export class DiracIgnoreController {
 	 * @returns true if file is accessible, false if ignored
 	 */
 	validateAccess(filePath: string): boolean {
+		if (this.yoloMode) {
+			return true
+		}
+
 		try {
 			// Normalize path to be relative to cwd and use forward slashes
 			const absolutePath = path.resolve(this.cwd, filePath)
@@ -280,6 +286,10 @@ export class DiracIgnoreController {
 	 * @returns path of file that is being accessed if it is being accessed, undefined if command is allowed
 	 */
 	validateCommand(command: string): string | undefined {
+		if (this.yoloMode) {
+			return undefined
+		}
+
 		// Split command into parts and get the base command
 		const parts = command.trim().split(/\s+/)
 		const baseCommand = parts[0].toLowerCase()

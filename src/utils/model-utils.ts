@@ -4,7 +4,7 @@ import { AnthropicModelId, anthropicModels } from "@/shared/api"
 export { supportsReasoningEffortForModel } from "@shared/utils/reasoning-support"
 
 const CLAUDE_VERSION_MATCH_REGEX = /[-_ ]([\d](?:\.[05])?)[-_ ]?/
-export const GEMINI_FLASH_MAX_OUTPUT_TOKENS = 8_192
+export const GEMINI_MAX_OUTPUT_TOKENS = 32_768
 
 export function isNativeToolCallingProvider(providerInfo: ApiProviderInfo): boolean {
 	const providerId = normalize(providerInfo.providerId)

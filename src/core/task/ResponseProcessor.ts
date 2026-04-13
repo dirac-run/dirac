@@ -102,9 +102,7 @@ export class ResponseProcessor {
 			?.map((block: any) => ({ ...block, partial: false }))
 		await this.processNativeToolCalls(params.assistantTextOnly, partialToolBlocks)
 
-		if (partialBlocks.length > 0) {
-			await this.presentAssistantMessage()
-		}
+		await this.presentAssistantMessage()
 
 		return assistantHasContent
 	}
@@ -213,80 +211,84 @@ export class ResponseProcessor {
 		this.dependencies.taskState.presentAssistantMessageLocked = true
 		this.dependencies.taskState.presentAssistantMessageHasPendingUpdates = false
 
-		if (
-			this.dependencies.taskState.currentStreamingContentIndex >= this.dependencies.taskState.assistantMessageContent.length
-		) {
-			if (this.dependencies.taskState.didCompleteReadingStream) {
-				this.dependencies.taskState.userMessageContentReady = true
-			}
-			this.dependencies.taskState.presentAssistantMessageLocked = false
-			return
-		}
-
-		const block = cloneDeep(
-			this.dependencies.taskState.assistantMessageContent[this.dependencies.taskState.currentStreamingContentIndex],
-		)
-		switch (block.type) {
-			case "text": {
-				if (this.dependencies.taskState.didRejectTool) {
-					break
+		let block: any
+		try {
+			if (
+				this.dependencies.taskState.currentStreamingContentIndex >=
+				this.dependencies.taskState.assistantMessageContent.length
+			) {
+				if (this.dependencies.taskState.didCompleteReadingStream) {
+					this.dependencies.taskState.userMessageContentReady = true
 				}
-				let content = block.content
-				if (content) {
-					content = content.replace(/<function_calls>\s?/g, "")
-					content = content.replace(/\s?<\/function_calls>/g, "")
+				return
+			}
 
-					const lastOpenBracketIndex = content.lastIndexOf("<")
-					if (lastOpenBracketIndex !== -1) {
-						const possibleTag = content.slice(lastOpenBracketIndex)
-						const hasCloseBracket = possibleTag.includes(">")
-						if (!hasCloseBracket) {
-							let tagContent: string
-							if (possibleTag.startsWith("</")) {
-								tagContent = possibleTag.slice(2).trim()
-							} else {
-								tagContent = possibleTag.slice(1).trim()
-							}
-							const isLikelyTagName = /^[a-zA-Z_]+$/.test(tagContent)
-							const isOpeningOrClosing = possibleTag === "<" || possibleTag === "</"
-							if (isOpeningOrClosing || isLikelyTagName) {
-								content = content.slice(0, lastOpenBracketIndex).trim()
+			block = cloneDeep(
+				this.dependencies.taskState.assistantMessageContent[this.dependencies.taskState.currentStreamingContentIndex],
+			)
+			switch (block.type) {
+				case "text": {
+					if (this.dependencies.taskState.didRejectTool) {
+						break
+					}
+					let content = block.content
+					if (content) {
+						content = content.replace(/<function_calls>\s?/g, "")
+						content = content.replace(/\s?<\/function_calls>/g, "")
+
+						const lastOpenBracketIndex = content.lastIndexOf("<")
+						if (lastOpenBracketIndex !== -1) {
+							const possibleTag = content.slice(lastOpenBracketIndex)
+							const hasCloseBracket = possibleTag.includes(">")
+							if (!hasCloseBracket) {
+								let tagContent: string
+								if (possibleTag.startsWith("</")) {
+									tagContent = possibleTag.slice(2).trim()
+								} else {
+									tagContent = possibleTag.slice(1).trim()
+								}
+								const isLikelyTagName = /^[a-zA-Z_]+$/.test(tagContent)
+								const isOpeningOrClosing = possibleTag === "<" || possibleTag === "</"
+								if (isOpeningOrClosing || isLikelyTagName) {
+									content = content.slice(0, lastOpenBracketIndex).trim()
+								}
 							}
 						}
 					}
-				}
 
-				if (!block.partial) {
-					const match = content?.trimEnd().match(/```[a-zA-Z0-9_-]+$/)
-					if (match) {
-						const matchLength = match[0].length
-						content = content.trimEnd().slice(0, -matchLength)
+					if (!block.partial) {
+						const match = content?.trimEnd().match(/```[a-zA-Z0-9_-]+$/)
+						if (match) {
+							const matchLength = match[0].length
+							content = content.trimEnd().slice(0, -matchLength)
+						}
 					}
-				}
 
-				await this.dependencies.say("text", content, undefined, undefined, block.partial)
-				break
-			}
-			case "reasoning": {
-				await this.dependencies.say("reasoning", block.reasoning, undefined, undefined, block.partial)
-				break
-			}
-			case "tool_use":
-				if (this.dependencies.taskState.initialCheckpointCommitPromise) {
-					if (!READ_ONLY_TOOLS.includes(block.name as any)) {
-						await this.dependencies.taskState.initialCheckpointCommitPromise
-						this.dependencies.taskState.initialCheckpointCommitPromise = undefined
+					await this.dependencies.say("text", content, undefined, undefined, block.partial)
+					break
+				}
+				case "reasoning": {
+					await this.dependencies.say("reasoning", block.reasoning, undefined, undefined, block.partial)
+					break
+				}
+				case "tool_use":
+					if (this.dependencies.taskState.initialCheckpointCommitPromise) {
+						if (!READ_ONLY_TOOLS.includes(block.name as any)) {
+							await this.dependencies.taskState.initialCheckpointCommitPromise
+							this.dependencies.taskState.initialCheckpointCommitPromise = undefined
+						}
 					}
-				}
-				await this.dependencies.toolExecutor.executeTool(block)
-				if (block.call_id) {
-					Session.get().updateToolCall(block.call_id, block.name)
-				}
-				break
+					await this.dependencies.toolExecutor.executeTool(block)
+					if (block.call_id) {
+						Session.get().updateToolCall(block.call_id, block.name)
+					}
+					break
+			}
+		} finally {
+			this.dependencies.taskState.presentAssistantMessageLocked = false
 		}
 
-		this.dependencies.taskState.presentAssistantMessageLocked = false
-		if (!block.partial || this.dependencies.taskState.didRejectTool) {
+		if (block && (!block.partial || this.dependencies.taskState.didRejectTool)) {
 			if (
 				this.dependencies.taskState.currentStreamingContentIndex ===
 				this.dependencies.taskState.assistantMessageContent.length - 1
@@ -302,6 +304,7 @@ export class ResponseProcessor {
 				return
 			}
 		}
+
 		if (this.dependencies.taskState.presentAssistantMessageHasPendingUpdates) {
 			await this.presentAssistantMessage()
 		}

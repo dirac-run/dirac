@@ -290,4 +290,35 @@ describe("DiracIgnoreController", () => {
 			controller.validateAccess("file.log").should.be.true()
 		})
 	})
+
+	describe("YOLO Mode", () => {
+		it("should waive all restrictions when yoloMode is enabled", async () => {
+			// Setup controller with some ignored patterns
+			await fs.writeFile(path.join(tempDir, ".diracignore"), "*.secret\nprivate/")
+			controller = new DiracIgnoreController(tempDir)
+			await controller.initialize()
+
+			// Verify it normally blocks
+			controller.validateAccess("test.secret").should.be.false()
+			controller.validateAccess("private/file.txt").should.be.false()
+
+			const blockedCommand = "cat test.secret"
+			controller.validateCommand(blockedCommand)!.should.equal("test.secret")
+
+			// Enable YOLO mode
+			controller.yoloMode = true
+
+			// Verify it now allows everything
+			controller.validateAccess("test.secret").should.be.true()
+			controller.validateAccess("private/file.txt").should.be.true()
+			controller.validateAccess(".git/config").should.be.true()
+
+			const result = controller.validateCommand(blockedCommand)
+			;(result === undefined).should.be.true()
+
+			// Verify filterPaths also works
+			const paths = ["src/index.ts", "test.secret", "private/file.txt", ".env"]
+			controller.filterPaths(paths).should.deepEqual(paths)
+		})
+	})
 })

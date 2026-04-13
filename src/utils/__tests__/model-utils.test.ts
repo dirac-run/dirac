@@ -1,12 +1,12 @@
 import { describe, it } from "mocha"
 import "should"
 import {
-	GEMINI_FLASH_MAX_OUTPUT_TOKENS,
-	isClaude4Plus,
-	isGeminiFlash,
-	isGPT5,
-	isGptOss,
-	shouldSkipReasoningForModel,
+    GEMINI_MAX_OUTPUT_TOKENS,
+    isClaude4Plus,
+    isGeminiFlash,
+    isGPT5,
+    isGptOss,
+    shouldSkipReasoningForModel,
 } from "../model-utils"
 
 describe("shouldSkipReasoningForModel", () => {
@@ -137,8 +137,8 @@ describe("isGeminiFlash", () => {
 	})
 })
 
-describe("GEMINI_FLASH_MAX_OUTPUT_TOKENS", () => {
+describe("GEMINI_MAX_OUTPUT_TOKENS", () => {
 	it("should be set to 8192", () => {
-		GEMINI_FLASH_MAX_OUTPUT_TOKENS.should.equal(8_192)
+		GEMINI_MAX_OUTPUT_TOKENS.should.equal(8_192)
 	})
 })

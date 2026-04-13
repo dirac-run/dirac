@@ -1,7 +1,8 @@
 import { vertexGlobalModels, vertexModels } from "@shared/api"
 import type { Mode } from "@shared/ExtensionMessage"
 import VertexData from "@shared/providers/vertex.json"
-import { VSCodeDropdown, VSCodeLink, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeDropdown, VSCodeLink, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
+
 import { normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { DROPDOWN_Z_INDEX, DropdownContainer } from "../ApiOptions"
@@ -51,6 +52,8 @@ export const VertexProvider = ({ showModelOptions, isPopup, currentMode }: Verte
 
 	// Get the normalized configuration
 	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
+
+	const isGeminiModel = selectedModelId?.toLowerCase().includes("gemini")
 
 	// Determine which models to use based on region
 	const modelsToUse = apiConfiguration?.vertexRegion === "global" ? vertexGlobalModels : vertexModels
@@ -143,6 +146,26 @@ export const VertexProvider = ({ showModelOptions, isPopup, currentMode }: Verte
 
 					{selectedModelInfo.thinkingConfig?.supportsThinkingLevel && (
 						<ReasoningEffortSelector currentMode={currentMode} />
+					)}
+
+					{isGeminiModel && (
+						<>
+							<div className="flex items-center gap-2 mt-2">
+								<VSCodeCheckbox
+									checked={apiConfiguration?.geminiSearchEnabled || false}
+									onChange={(e: any) => handleFieldChange("geminiSearchEnabled", e.target.checked)}>
+									<span style={{ fontWeight: 500 }}>Grounding with Google Search</span>
+								</VSCodeCheckbox>
+							</div>
+							<p
+								style={{
+									fontSize: "12px",
+									marginTop: "5px",
+									color: "var(--vscode-descriptionForeground)",
+								}}>
+								Connects the Gemini model to real-time web content. Each search query is billed separately.
+							</p>
+						</>
 					)}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
