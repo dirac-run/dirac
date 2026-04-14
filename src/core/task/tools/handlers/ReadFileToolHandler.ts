@@ -18,6 +18,7 @@ import type { TaskConfig } from "../types/TaskConfig"
 import type { StronglyTypedUIHelpers } from "../types/UIHelpers"
 import { ToolResultUtils } from "../utils/ToolResultUtils"
 
+const MAX_FILE_READ_SIZE = 30 * 1024 // 30KB limit for full file reads
 export class ReadFileToolHandler implements IFullyManagedTool {
 	readonly name = DiracDefaultTool.FILE_READ
 
@@ -242,16 +243,16 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 					const stats = await fs.stat(absolutePath)
 					const ext = path.extname(absolutePath).toLowerCase()
 					const isImage = [".png", ".jpg", ".jpeg", ".webp"].includes(ext)
-					if (stats.isFile() && !isImage && stats.size > 30 * 1024) {
+					if (stats.isFile() && !isImage && stats.size > MAX_FILE_READ_SIZE) {
 						results.push(
 							`${header}The file size is ${Math.round(
 								stats.size / 1024,
-							)}KB, which exceeds the 30KB limit for full file reads. Reading this file will likely flood the context window. Please use more surgical means or specify a line range using 'start_line' and 'end_line' parameters.`,
+							)}KB, which exceeds the ${MAX_FILE_READ_SIZE / 1024}KB limit for full file reads. Reading this file will likely flood the context window. Please use more surgical means or specify a line range using 'start_line' and 'end_line' parameters.`,
 						)
 						readFileResults.push({
 							path: displayPath,
 							status: "error",
-							label: "File too large (> 30KB)",
+							label: `File too large (> ${MAX_FILE_READ_SIZE / 1024}KB)`,
 						})
 						anyFailed = true
 						continue

@@ -1,4 +1,4 @@
-import type { DiracAsk, DiracSay } from "@shared/ExtensionMessage"
+import type { DiracAsk, DiracSay, MultiCommandState } from "@shared/ExtensionMessage"
 import type { DiracDefaultTool } from "@shared/tools"
 import type { DiracAskResponse } from "@shared/WebviewMessage"
 import { telemetryService } from "@/services/telemetry"
@@ -12,12 +12,13 @@ import type { TaskConfig } from "./TaskConfig"
  */
 export interface StronglyTypedUIHelpers {
 	// Core UI methods
-	say: (type: DiracSay, text?: string, images?: string[], files?: string[], partial?: boolean) => Promise<number | undefined>
+	say: (type: DiracSay, text?: string, images?: string[], files?: string[], partial?: boolean, multiCommandState?: MultiCommandState) => Promise<number | undefined>
 
 	ask: (
 		type: DiracAsk,
 		text?: string,
 		partial?: boolean,
+		multiCommandState?: MultiCommandState,
 	) => Promise<{
 		response: DiracAskResponse
 		text?: string

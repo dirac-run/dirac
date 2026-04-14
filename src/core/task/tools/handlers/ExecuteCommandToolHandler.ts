@@ -12,11 +12,13 @@ import type { TaskConfig } from "../types/TaskConfig"
 import type { StronglyTypedUIHelpers } from "../types/UIHelpers"
 import { isSafeCommand } from "../utils/CommandSafetyChecker"
 import { applyModelContentFixes } from "../utils/ModelContentProcessor"
+import { truncateHeadTail } from "@/shared/content-limits"
 import { ToolResultUtils } from "../utils/ToolResultUtils"
 
 // Default timeout for commands in yolo mode and background exec mode
 const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30
 const LONG_RUNNING_COMMAND_TIMEOUT_SECONDS = 300
+const MAX_COMMAND_OUTPUT_SIZE = 10 * 1024 // 10KB limit to avoid context flooding, extra safety layer
 
 const LONG_RUNNING_COMMAND_PATTERNS: RegExp[] = [
 	/\b(npm|pnpm|yarn|bun)\s+(install|ci|build|test)\b/i,
@@ -28,6 +30,12 @@ const LONG_RUNNING_COMMAND_PATTERNS: RegExp[] = [
 	/\b(pytest|tox|nox|jest|vitest|mocha)\b/i,
 	/\b(docker|podman)\s+build\b/i,
 	/\b(torchrun|deepspeed|accelerate\s+launch)\b/i,
+	/\b(sleep|wait|watch)\b/i,
+	/\b(rails|rake|bundle\s+exec\s+rake)\s+db:(migrate|setup|seed)\b/i,
+	/\b(alembic|flask\s+db)\s+(upgrade|downgrade)\b/i,
+	/\b(prisma|npx\s+prisma)\s+(migrate|db\s+push)\b/i,
+	/\b(sequelize|npx\s+sequelize)\s+db:migrate\b/i,
+	/\b(django-admin|python\s+manage\.py)\s+migrate\b/i,
 	/\bffmpeg\b/i,
 	/\bpython(?:\d+(?:\.\d+)?)?\s+.*\b(train|finetune)\b/i,
 ]
@@ -61,27 +69,76 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			return `[${block.name} for script${langDisplay}]`
 		}
 
-		const display = commands.length > 0 ? `${commands.length} commands` : `'${command}'`
-		return `[${block.name} for ${display}]`
+		if (commands.length > 0) {
+			return `[${block.name} for ${commands.length} commands]`
+		}
+
+		return `[${block.name} for '${command || ""}']`
 	}
 
 	async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
-		const commands = (block.params.commands as string[] | undefined) || []
-		const command = (block.params.command as string | undefined) || (commands.length > 0 ? commands[0] : "")
-
-		if (uiHelpers.getConfig().isSubagentExecution) {
+		const config = uiHelpers.getConfig()
+		if (config.isSubagentExecution) {
 			return
 		}
 
-		// Check if this should be auto-approved to determine UI flow
-		const shouldAutoApprove = uiHelpers.shouldAutoApproveTool(this.name)
+		const rawCommands = (block.params.commands as any) || []
+		const rawCommand = block.params.command as any
+		const script = block.params.script as string | undefined
+		const language = (block.params.language as string | undefined) || "bash"
+
+		const commandsToProcess: { command: string; displayName?: string }[] = []
+		if (Array.isArray(rawCommands)) {
+			rawCommands.forEach((cmd: string) => {
+				if (cmd) {
+					commandsToProcess.push({
+						command: uiHelpers.removeClosingTag(block, "commands", cmd),
+					})
+				}
+			})
+		} else if (rawCommand) {
+			commandsToProcess.push({
+				command: uiHelpers.removeClosingTag(block, "command", rawCommand),
+			})
+		}
+
+		if (script) {
+			const langDisplay = language.charAt(0).toUpperCase() + language.slice(1)
+			commandsToProcess.push({
+				command: uiHelpers.removeClosingTag(block, "script", script),
+				displayName: `${langDisplay} script`,
+			})
+		}
+
+		if (commandsToProcess.length === 0) {
+			return
+		}
+
+		const multiCommandState: MultiCommandState = {
+			commands: commandsToProcess.map((item) => ({
+				command: item.command,
+				displayName: item.displayName,
+				status: "pending",
+			})),
+		}
+
+		// Determine if we should use 'ask' or 'say' based on auto-approval
+		// For simplicity, we check the first command's safety
+		const firstCommand = commandsToProcess[0].command
+		const isSafe = isSafeCommand(firstCommand)
+		const autoApproveResult = uiHelpers.shouldAutoApproveTool(this.name)
+		const autoApproveEnabled = Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult
+		const isYolo = config.yoloModeToggled || config.services.stateManager.getGlobalSettingsKey("autoApproveAllToggled")
+
+		const shouldAutoApprove = isYolo || (isSafe && autoApproveEnabled)
 
 		if (shouldAutoApprove) {
-			// For auto-approved commands, we wait for the complete block
-			return
+			await uiHelpers.removeLastPartialMessageIfExistsWithType("ask", "tool")
+			await uiHelpers.say("tool", firstCommand, undefined, undefined, block.partial, multiCommandState)
+		} else {
+			await uiHelpers.removeLastPartialMessageIfExistsWithType("say", "tool")
+			await uiHelpers.ask("tool", firstCommand, block.partial, multiCommandState).catch(() => {})
 		}
-		// We don't use the standard ask mechanism for partial blocks here because
-		// execute() will show a more detailed progress view using MultiCommandState.
 	}
 
 	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
@@ -90,10 +147,24 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		const script = block.params.script as string | undefined
 		const language = (block.params.language as string | undefined) || "bash"
 
+		// Validate required parameters
+		const validation = block.params.commands
+			? this.validator.assertRequiredParams(block, "commands")
+			: block.params.command
+				? this.validator.assertRequiredParams(block, "command")
+				: block.params.script
+					? this.validator.assertRequiredParams(block, "script")
+					: { ok: false, error: "Missing required parameter 'commands', 'command', or 'script'." }
+
+		if (!validation.ok) {
+			config.taskState.consecutiveMistakeCount++
+			return await config.callbacks.sayAndCreateMissingParamError(this.name, block.params.commands ? "commands" : block.params.command ? "command" : "script")
+		}
+
 		// Normalize to a list of commands
 		const commandsToProcess: { command: string; displayName?: string }[] = []
 
-		if (rawCommands.length > 0) {
+		if (Array.isArray(rawCommands) && rawCommands.length > 0) {
 			rawCommands.forEach((cmd: string) => commandsToProcess.push({ command: cmd }))
 		} else if (rawCommand) {
 			commandsToProcess.push({ command: rawCommand })
@@ -107,13 +178,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				displayName: `${langDisplay} script`,
 			})
 		}
-
-		if (commandsToProcess.length === 0) {
-			config.taskState.consecutiveMistakeCount++
-			return await config.callbacks.sayAndCreateMissingParamError(this.name, "commands")
-		}
-
-		config.taskState.consecutiveMistakeCount = 0
 
 		// Extract provider
 		const apiConfig = config.services.stateManager.getApiConfiguration()
@@ -149,9 +213,12 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			}
 		}
 
-		let globalApprovalGranted = false
 		let initialResult: any
 		let messageTs: number | undefined
+
+		// Clean up any previous partial messages
+		await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
+		await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
 
 		if (commandsRequiringApproval.length > 0) {
 			showNotificationForApproval(
@@ -159,8 +226,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				config.autoApprovalSettings.enableNotifications,
 			)
 
-			// Ask for approval once for all commands (using ask with partial: false to block)
-			// We provide the first command as fallback text for legacy UI compatibility
+			// Ask for approval once for all commands
 			initialResult = await ToolResultUtils.askApprovalAndPushFeedback(
 				"command",
 				commandsToProcess[0].command,
@@ -190,7 +256,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				return formatResponse.toolResult("Commands denied by user.")
 			}
 
-			globalApprovalGranted = true
 			// Clear requiresApproval flag for all commands since they were approved
 			for (const cmdState of multiCommandState.commands) {
 				cmdState.requiresApproval = false
@@ -204,8 +269,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				}
 			}
 		} else {
-			// Initial message to show all commands (using ask with partial: true to avoid creating multiple messages)
-			// We provide the first command as fallback text for legacy UI compatibility
+			// Initial message to show all commands
 			initialResult = await ToolResultUtils.askApprovalAndPushFeedback(
 				"command",
 				commandsToProcess[0].command,
@@ -219,7 +283,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		const updateMessage = async () => {
 			if (messageTs === undefined) return
 			const messages = config.callbacks.getDiracMessages()
-			// Find by timestamp which is more stable than index
 			const index = messages.findIndex((m) => m.ts === messageTs)
 			if (index !== -1) {
 				await config.callbacks.updateDiracMessage(index, {
@@ -231,6 +294,8 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		}
 
 		const results: string[] = []
+		let anyFailed = false
+		let anySucceeded = false
 
 		for (let i = 0; i < multiCommandState.commands.length; i++) {
 			const cmdState = multiCommandState.commands[i]
@@ -280,6 +345,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				await updateMessage()
 
 				results.push(`--- Output for '${displayName}' ---\n${errorMessage}`)
+				anyFailed = true
 				continue
 			}
 
@@ -291,6 +357,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				await updateMessage()
 
 				results.push(`--- Output for '${displayName}' ---\nDiracignore error: ${ignoredFileAttemptedToAccess}`)
+				anyFailed = true
 				continue
 			}
 
@@ -304,35 +371,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			if (config.isSubagentExecution || isYolo || (isSafe && autoApproveEnabled)) {
 				didAutoApprove = true
 				cmdState.wasAutoApproved = true
-			} else if (globalApprovalGranted) {
-				// Already approved by the global check
-				didAutoApprove = false
-			} else {
-				// This should not happen given the global check above, but keeping as fallback
-				cmdState.requiresApproval = true
-				await updateMessage()
-
-				showNotificationForApproval(
-					`Dirac wants to execute a command: ${actualCommand}`,
-					config.autoApprovalSettings.enableNotifications,
-				)
-
-				const { didApprove } = await ToolResultUtils.askApprovalAndPushFeedback(
-					"command",
-					actualCommand,
-					config,
-					false,
-					multiCommandState,
-				)
-				if (!didApprove) {
-					cmdState.status = "skipped"
-					cmdState.output = "Command denied by user."
-					await updateMessage()
-
-					results.push(`--- Output for '${displayName}' ---\nCommand denied by user.`)
-					continue
-				}
-				cmdState.requiresApproval = false
 			}
 
 			// Telemetry
@@ -363,6 +401,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.output = "Cancelled by pre-tool hook."
 					await updateMessage()
 					results.push(`--- Output for '${displayName}' ---\nCancelled by pre-tool hook.`)
+					anyFailed = true
 					continue
 				}
 				throw error
@@ -398,17 +437,23 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 				finalCommand = `cd "${executionDir}" && ${actualCommand}`
 			}
 
-			const timeoutSeconds = resolveCommandTimeoutSeconds(
-				actualCommand,
-				true,
-			)
+			const timeoutSeconds = resolveCommandTimeoutSeconds(actualCommand, true)
 
 			try {
 				const [userRejected, result] = await config.callbacks.executeCommandTool(finalCommand, timeoutSeconds, {
 					suppressUserInteraction: true,
 					useBackgroundExecution: true,
 					onOutputLine: (line) => {
-						cmdState.output = (cmdState.output || "") + line + "\n"
+						const currentOutput = cmdState.output || ""
+						if (currentOutput.includes("... [Output truncated")) {
+							return
+						}
+						const newOutput = currentOutput + line + "\n"
+						if (newOutput.length >= MAX_COMMAND_OUTPUT_SIZE) {
+							cmdState.output = truncateHeadTail(newOutput, MAX_COMMAND_OUTPUT_SIZE)
+						} else {
+							cmdState.output = newOutput
+						}
 						throttledUpdate()
 					},
 				})
@@ -419,31 +464,43 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 					cmdState.output = "Command was rejected or interrupted during execution."
 					await updateMessage()
 					results.push(`--- Output for '${displayName}' ---\nCommand was rejected or interrupted during execution.`)
+					anyFailed = true
 				} else {
-					const output =
+					const rawOutput =
 						typeof result === "string"
 							? result
 							: Array.isArray(result)
 								? result.map((c: any) => c.text || "").join("\n")
 								: JSON.stringify(result)
 
+					const output = truncateHeadTail(rawOutput, MAX_COMMAND_OUTPUT_SIZE)
+
 					cmdState.status = "completed"
 					cmdState.output = output
 					await updateMessage()
 
 					results.push(`--- Output for '${displayName}' ---\n${output}`)
+					anySucceeded = true
 				}
 			} catch (error) {
 				cmdState.status = "failed"
 				cmdState.output = `Error during execution: ${error instanceof Error ? error.message : String(error)}`
 				await updateMessage()
 				results.push(`--- Output for '${displayName}' ---\n${cmdState.output}`)
+				anyFailed = true
 			} finally {
 				if (updateTimer) {
 					clearTimeout(updateTimer)
 					updateTimer = null
 				}
 			}
+		}
+
+		// Update consecutive mistake count
+		if (anyFailed) {
+			config.taskState.consecutiveMistakeCount++
+		} else if (anySucceeded) {
+			config.taskState.consecutiveMistakeCount = 0
 		}
 
 		// Mark the final message as completed
