@@ -2,17 +2,18 @@ import React from "react"
 import { SymbolOutput } from "./ToolOutput/SymbolOutput"
 import { BrowserOutput } from "./ToolOutput/BrowserOutput"
 import { SystemOutput } from "./ToolOutput/SystemOutput"
-import { CodeOutput } from "./ToolOutput/CodeOutput"
 import { TerminalOutput } from "./ToolOutput/TerminalOutput"
 import { EditFileOutput } from "./ToolOutput/EditFileOutput"
 
 export const TOOL_COMPONENT_REGISTRY: Record<string, React.FC<any> | undefined> = {
 	editFile: EditFileOutput,
 	editedExistingFile: EditFileOutput,
-	readFile: CodeOutput,
-	read_file: CodeOutput,
-	readLineRange: CodeOutput,
-	read_line_range: CodeOutput,
+	readFile: SymbolOutput,
+	read_file: SymbolOutput,
+
+	readLineRange: SymbolOutput,
+	read_line_range: SymbolOutput,
+
 	listFilesTopLevel: undefined,
 	list_files_top_level: undefined,
 	listFilesRecursive: undefined,

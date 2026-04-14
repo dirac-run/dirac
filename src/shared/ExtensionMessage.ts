@@ -184,6 +184,13 @@ export type DiracSay =
 	| "use_subagents"
 	| "conditional_rules_applied"
 
+export interface ReadFileResult {
+	path: string
+	status: "success" | "error"
+	label: string
+}
+
+
 export interface DiracSayTool {
 	tool:
 	| "editedExistingFile"
@@ -260,6 +267,8 @@ export interface DiracSayTool {
 	endLine?: string
 	browser_action?: DiracSayBrowserAction
 	browser_action_result?: BrowserActionResult
+	readFileResults?: ReadFileResult[]
+
 	editSummaries?: Array<{
 		path: string
 		edits: Array<{ additions: number; deletions: number }>

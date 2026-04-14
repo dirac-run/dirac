@@ -19,6 +19,36 @@ interface SymbolOutputProps extends BaseToolOutputProps {
 
 export const SymbolOutput = ({ tool, unit, isExpanded, onToggleExpand, message }: SymbolOutputProps) => {
 	switch (tool.tool) {
+		case "readFile":
+		case "read_file":
+		case "readLineRange":
+		case "read_line_range": {
+			const result = tool.readFileResults?.find((r) => r.path === unit.path)
+			const isComplete = !!tool.readFileResults
+			return (
+				<div className="mt-1">
+					<div className="bg-code border border-editor-group-border overflow-hidden rounded-xs mb-2 py-[9px] px-2.5">
+						<div className="flex flex-col gap-1.5">
+							<div className="flex items-center gap-2 px-1">
+								{isComplete ? (
+									result?.status === "success" ? (
+										<Check className="size-3.5 text-success shrink-0" />
+									) : (
+										<X className="size-3.5 text-error shrink-0" />
+									)
+								) : (
+									<div className="size-3.5 border-2 border-description/30 border-t-description animate-spin rounded-full shrink-0" />
+								)}
+								<span className="font-mono text-xs truncate">
+									{result?.label || (isComplete ? "Unknown status" : "Reading...")}
+								</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			)
+		}
+
 		case "getFileSkeleton":
 		case "get_file_skeleton": {
 			const content = unit.content || tool.content!

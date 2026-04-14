@@ -1,4 +1,5 @@
 import path from "node:path"
+import fs from "node:fs/promises"
 import type { ToolUse } from "@core/assistant-message"
 import { formatResponse } from "@core/prompts/responses"
 import { resolveWorkspacePath } from "@core/workspace"
@@ -46,6 +47,11 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 			operationIsLocatedInWorkspace: (await Promise.all(relPaths.map((p) => isLocatedInWorkspace(p)))).every(Boolean),
 			startLine: uiHelpers.removeClosingTag(block, "start_line", block.params.start_line),
 			endLine: uiHelpers.removeClosingTag(block, "end_line", block.params.end_line),
+			readFileResults: relPaths.map((p) => ({
+				path: getReadablePath(config.cwd, uiHelpers.removeClosingTag(block, "paths", p)),
+				status: "success" as const,
+				label: "Reading...",
+			})),
 		}
 		const partialMessage = JSON.stringify(sharedMessageProps)
 
@@ -91,7 +97,7 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 										typeof resultBlock.content === "string"
 											? resultBlock.content
 											: Array.isArray(resultBlock.content)
-												? (resultBlock.content.find((c) => c.type === "text") as any)?.text
+												? (resultBlock.content.find((c: any) => c.type === "text") as any)?.text
 												: undefined
 
 									if (text) {
@@ -127,7 +133,30 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 
 		if ((block.params.start_line && isNaN(startLineNum!)) || (block.params.end_line && isNaN(endLineNum!))) {
 			config.taskState.consecutiveMistakeCount++
-			return formatResponse.toolError("Invalid line numbers. Please provide valid integers for start_line and end_line.")
+			const error = "Invalid line numbers. Please provide valid integers for start_line and end_line."
+
+			// Ensure UI is updated to mark the tool call as complete (avoiding "stuck" state)
+			const sharedMessageProps = {
+				tool: "readFile",
+				paths: relPaths.map((p) => getReadablePath(config.cwd, p)),
+				content: error,
+				operationIsLocatedInWorkspace: true,
+				path: relPaths[0],
+				startLine: block.params.start_line?.toString(),
+				endLine: block.params.end_line?.toString(),
+				readFileResults: relPaths.map((p) => ({
+					path: getReadablePath(config.cwd, p),
+					status: "error" as const,
+					label: "Invalid line numbers",
+				})),
+			} satisfies DiracSayTool
+			const completeMessage = JSON.stringify(sharedMessageProps)
+
+			await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
+			await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
+			await config.callbacks.say("tool", completeMessage, undefined, undefined, false)
+
+			return formatResponse.toolError(error)
 		}
 
 		// Ensure apiConversationHistory is passed into TaskConfig from the main Dirac instance
@@ -151,47 +180,85 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 		const absolutePaths: string[] = []
 		const displayPaths: string[] = []
 		const workspaceContexts: any[] = []
-
-		for (const relPath of relPaths) {
-			// Check diracignore access
-			const accessValidation = this.validator.checkDiracIgnorePath(relPath)
-			if (!accessValidation.ok) {
-				if (!config.isSubagentExecution) {
-					await config.callbacks.say("diracignore_error", relPath)
-				}
-				return formatResponse.toolError(formatResponse.diracIgnoreError(relPath))
-			}
-
-			// Resolve the absolute path based on multi-workspace configuration
-			const pathResult = resolveWorkspacePath(config, relPath, "ReadFileToolHandler.execute")
-			const { absolutePath, displayPath } =
-				typeof pathResult === "string" ? { absolutePath: pathResult, displayPath: relPath } : pathResult
-
-			absolutePaths.push(absolutePath)
-			displayPaths.push(displayPath)
-
-			// Determine workspace context for telemetry
-			const fallbackAbsolutePath = path.resolve(config.cwd, relPath)
-			workspaceContexts.push({
-				isMultiRootEnabled: config.isMultiRootEnabled || false,
-				usedWorkspaceHint: typeof pathResult !== "string",
-				resolvedToNonPrimary: !arePathsEqual(absolutePath, fallbackAbsolutePath),
-				resolutionMethod: (typeof pathResult !== "string" ? "hint" : "primary_fallback") as "hint" | "primary_fallback",
-			})
-		}
-
-		// Execute the file read operations before approval to show content in the UI
-		const supportsImages = config.api.getModel().info.supportsImages ?? false
 		const results: string[] = []
+		const readFileResults: any[] = []
+
+		const imageBlocks: any[] = []
 		let anyFailed = false
 		let anySucceeded = false
-		const imageBlocks: any[] = []
+
+		const supportsImages = config.api.getModel().info.supportsImages ?? false
 
 		for (let i = 0; i < relPaths.length; i++) {
 			const relPath = relPaths[i]
-			const absolutePath = absolutePaths[i]
+			const header = relPaths.length > 1 ? `--- ${relPath} ---\n` : ""
 
 			try {
+				// 1. Check diracignore access
+				const accessValidation = this.validator.checkDiracIgnorePath(relPath)
+				if (!accessValidation.ok) {
+					if (!config.isSubagentExecution) {
+						await config.callbacks.say("diracignore_error", relPath)
+					}
+					results.push(`${header}${formatResponse.diracIgnoreError(relPath)}`)
+					readFileResults.push({
+						path: relPath,
+						status: "error",
+						label: "Diracignore prevented file read",
+					})
+					anyFailed = true
+
+					// Fill telemetry/UI fallbacks
+					absolutePaths.push("")
+					displayPaths.push(relPath)
+					workspaceContexts.push({
+						isMultiRootEnabled: !!config.isMultiRootEnabled,
+						resolutionMethod: "ignored",
+					})
+					continue
+				}
+
+				// 2. Resolve the absolute path
+				const pathResult = resolveWorkspacePath(config, relPath, "ReadFileToolHandler.execute")
+				const { absolutePath, displayPath } =
+					typeof pathResult === "string" ? { absolutePath: pathResult, displayPath: relPath } : pathResult
+
+				absolutePaths.push(absolutePath)
+				displayPaths.push(displayPath)
+
+				// Determine workspace context for telemetry
+				const fallbackAbsolutePath = path.resolve(config.cwd, relPath)
+				workspaceContexts.push({
+					isMultiRootEnabled: config.isMultiRootEnabled || false,
+					usedWorkspaceHint: typeof pathResult !== "string",
+					resolvedToNonPrimary: !arePathsEqual(absolutePath, fallbackAbsolutePath),
+					resolutionMethod: (typeof pathResult !== "string" ? "hint" : "primary_fallback") as
+						| "hint"
+						| "primary_fallback",
+				})
+
+				// 3. Safety check: prevent reading files larger than 30KB without line range
+				if (!startLineNum && !endLineNum) {
+					const stats = await fs.stat(absolutePath)
+					const ext = path.extname(absolutePath).toLowerCase()
+					const isImage = [".png", ".jpg", ".jpeg", ".webp"].includes(ext)
+					if (stats.isFile() && !isImage && stats.size > 30 * 1024) {
+						results.push(
+							`${header}The file size is ${Math.round(
+								stats.size / 1024,
+							)}KB, which exceeds the 30KB limit for full file reads. Reading this file will likely flood the context window. Please use more surgical means or specify a line range using 'start_line' and 'end_line' parameters.`,
+						)
+						readFileResults.push({
+							path: displayPath,
+							status: "error",
+							label: "File too large (> 30KB)",
+						})
+						anyFailed = true
+						continue
+					}
+				}
+
+				// 4. Execute the file read operation
 				const providedHash = this.extractLastKnownHashFromHistory(history, relPath)
 				const fileContent = await extractFileContent(absolutePath, supportsImages)
 
@@ -205,7 +272,6 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 				}
 
 				const currentHash = contentHash(fileContent.text)
-				const header = relPaths.length > 1 ? `--- ${relPath} ---\n` : ""
 
 				if (providedHash === currentHash && !startLineNum && !endLineNum) {
 					results.push(`${header}no changes have been made to the file since your last read (Hash: ${providedHash})`)
@@ -219,15 +285,38 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 					}
 					results.push(`${header}[File Hash: ${currentHash}]\n${hashedContent}`)
 				}
+
+				const range =
+					startLineNum || endLineNum
+						? `lines ${startLineNum || 1} to ${endLineNum || "end"}`
+						: "full file"
+				readFileResults.push({
+					path: displayPath,
+					status: "success",
+					label: `Read ${range}`,
+				})
 			} catch (error) {
 				anyFailed = true
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				const normalizedMessage = errorMessage.startsWith("Error reading file:")
 					? errorMessage
 					: `Error reading file: ${errorMessage}`
-				results.push(`--- ${relPath} ---\n${normalizedMessage}`)
+				results.push(`${header}${normalizedMessage}`)
+
+				// Ensure arrays are filled for telemetry/UI if they haven't been yet
+				if (absolutePaths.length <= i) absolutePaths.push("")
+				if (displayPaths.length <= i) displayPaths.push(relPath)
+				if (workspaceContexts.length <= i)
+					workspaceContexts.push({ isMultiRootEnabled: !!config.isMultiRootEnabled, resolutionMethod: "error" })
+
+				readFileResults.push({
+					path: displayPaths[i] || relPath,
+					status: "error",
+					label: normalizedMessage,
+				})
 			}
 		}
+
 		if (anyFailed) {
 			config.taskState.consecutiveMistakeCount++
 		} else if (anySucceeded) {
@@ -245,6 +334,10 @@ export class ReadFileToolHandler implements IFullyManagedTool {
 			path: displayPaths[0],
 			startLine: startLineNum?.toString(),
 			endLine: endLineNum?.toString(),
+			readFileResults: readFileResults.map((r) => ({
+				...r,
+				path: getReadablePath(config.cwd, r.path),
+			})),
 		} satisfies DiracSayTool
 
 		const completeMessage = JSON.stringify(sharedMessageProps)
