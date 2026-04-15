@@ -82,8 +82,9 @@ export class AttemptCompletionHandler implements IToolHandler, IPartialBlockHand
 					"2. No steps were skipped or partially completed\n" +
 					"3. Edge cases and error handling are addressed\n" +
 					"4. The solution matches what was asked for, not just what was convenient\n" +
-					"5. Output files contain exactly what was specified--no extra columns, fields, debug output, or commentary\n" +
-					"6. If the task specifies numerical thresholds or accuracy targets, verify your result meets the criteria. If close but not passing, iterate rather than declaring completion" +
+					"5. Output files contain exactly what was specified - no extra columns, fields, debug output, or commentary\n" +
+					"6. If the task specifies numerical thresholds or accuracy targets, verify your result meets the criteria. If close but not passing, iterate rather than declaring completion" + 
+					"7. When appropriate, feel free to use scripts/execute_command for verification" +
 					taskSection +
 					"\n\nIf everything checks out, call attempt_completion again with your final result.",
 			)
