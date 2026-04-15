@@ -231,7 +231,7 @@ Otherwise, if you have not completed the task and do not need additional informa
 	},
 
 	planModeInstructions: () => {
-		return `Gather all necessary context to architect a solution before responding to the user. You may do whatever is necessary including but not limited to use of tools like get_file_skeleton, get_function, read_file, search_files, list_files, find_symbol_references, execute_command and so on. Once ready, present your plan for discussion. If the user asks you to make changes, tell them to manually "toggle to Act mode" (you cannot switch modes yourself).`
+		return `Gather all necessary context to architect a solution before responding to the user. Once ready, present your plan for discussion. If the user asks you to make changes, tell them to manually "toggle to Act mode" (you cannot switch modes yourself).`
 	},
 
 	fileEditWithUserChanges: (
