@@ -29,11 +29,11 @@ export class WriteToFileToolHandler implements IFullyManagedTool {
 	constructor(private validator: ToolValidator) {}
 
 	getDescription(block: ToolUse): string {
-		return `[${block.name} for '${block.params.path || block.params.absolutePath}']`
+		return `[${block.name} for '${block.params.path}']`
 	}
 
 	async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
-		const rawRelPath = block.params.path || block.params.absolutePath
+		const rawRelPath = block.params.path as string | undefined
 		const rawContent = block.params.content // for write_to_file
 
 		// Early return if we don't have enough data yet
@@ -58,7 +58,7 @@ export class WriteToFileToolHandler implements IFullyManagedTool {
 				tool: fileExists ? "editedExistingFile" : "newFileCreated",
 				path: getReadablePath(
 					config.cwd,
-					uiHelpers.removeClosingTag(block, block.params.path ? "path" : "absolutePath", relPath),
+					uiHelpers.removeClosingTag(block, "path", relPath),
 				),
 				content: content,
 				operationIsLocatedInWorkspace: await isLocatedInWorkspace(relPath),
@@ -90,7 +90,7 @@ export class WriteToFileToolHandler implements IFullyManagedTool {
 	}
 
 	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
-		const rawRelPath = block.params.path || block.params.absolutePath
+		const rawRelPath = block.params.path as string | undefined
 		const rawContent = block.params.content // for write_to_file
 
 		// Extract provider information for telemetry
@@ -102,7 +102,7 @@ export class WriteToFileToolHandler implements IFullyManagedTool {
 			await config.services.diffViewProvider.reset()
 			return await config.callbacks.sayAndCreateMissingParamError(
 				block.name,
-				block.params.absolutePath ? "absolutePath" : "path",
+				"path",
 			)
 		}
 
@@ -123,7 +123,7 @@ export class WriteToFileToolHandler implements IFullyManagedTool {
 
 			await config.callbacks.say(
 				"error",
-				`Dirac tried to use write_to_file for '${relPath}' without value for required parameter 'content'. ${
+				`Dirac tried to use write_to_file for '${relPath}' without providing a value for 'content'. ${
 					config.taskState.consecutiveMistakeCount >= 2
 						? "This has happened multiple times — Dirac will try a different approach."
 						: "Retrying..."

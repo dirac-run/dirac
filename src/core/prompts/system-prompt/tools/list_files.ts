@@ -7,7 +7,7 @@ export const list_files: DiracToolSpec = {
 	id,
 	name: "list_files",
 	description:
-		"List files and directories within the specified directory, or provide information about a specific file if a file path is provided. If recursive is true, it will list all files and directories recursively. Skips non-useful content (.git, node_modules, build artifacts, etc.). Files are sorted by most recently modified first within each directory. The output includes the line count for each file. Do not use this tool to confirm the existence of files you've just created.",
+		"List files and directories within the specified paths (one or more), or provide information about a specific file if a file path is provided. If recursive is true, it will list all files and directories recursively. Skips non-useful content (.git, node_modules, build artifacts, etc.). Files are sorted by most recently modified first within each directory. The output includes the line count for each file. Do not use this tool to confirm the existence of files you've just created.",
 	parameters: [
 		{
 			name: "paths",
@@ -15,7 +15,7 @@ export const list_files: DiracToolSpec = {
 			type: "array",
 			items: { type: "string" },
 			instruction:
-				"The path of the directory to list contents for (relative to the current working directory {{CWD}}){{MULTI_ROOT_HINT}}",
+				"The paths of the directory to list contents for (relative to the current working directory {{CWD}}){{MULTI_ROOT_HINT}}",
 			usage: '["src/components", "src/utils"]',
 		},
 		{

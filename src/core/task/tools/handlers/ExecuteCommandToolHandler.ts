@@ -60,7 +60,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 
 	getDescription(block: ToolUse): string {
 		const commands = Array.isArray(block.params.commands) ? block.params.commands : (block.params.commands ? [block.params.commands as string] : [])
-		const command = block.params.command as string | undefined
 		const script = block.params.script as string | undefined
 		const language = block.params.language as string | undefined
 
@@ -73,7 +72,7 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			return `[${block.name} for ${commands.length} commands]`
 		}
 
-		return `[${block.name} for '${command || ""}']`
+		return `[${block.name} for '${commands[0] || ""}']`
 	}
 
 	async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
@@ -83,7 +82,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		}
 
 		const rawCommands = (block.params.commands as any) || []
-		const rawCommand = block.params.command as any
 		const script = block.params.script as string | undefined
 		const language = (block.params.language as string | undefined) || "bash"
 
@@ -99,10 +97,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 		} else if (typeof rawCommands === "string" && rawCommands.trim() !== "") {
 			commandsToProcess.push({
 				command: uiHelpers.removeClosingTag(block, "commands", rawCommands),
-			})
-		} else if (rawCommand) {
-			commandsToProcess.push({
-				command: uiHelpers.removeClosingTag(block, "command", rawCommand),
 			})
 		}
 
@@ -147,22 +141,30 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 
 	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
 		const rawCommands = (block.params.commands as any) || []
-		const rawCommand = block.params.command as any
 		const script = block.params.script as string | undefined
 		const language = (block.params.language as string | undefined) || "bash"
 
 		// Validate required parameters
-		const validation = block.params.commands
-			? this.validator.assertRequiredParams(block, "commands")
-			: block.params.command
-				? this.validator.assertRequiredParams(block, "command")
-				: block.params.script
-					? this.validator.assertRequiredParams(block, "script")
-					: { ok: false, error: "Missing required parameter 'commands', 'command', or 'script'." }
+		let validation: { ok: boolean; error?: string; paramName?: string }
+		if (block.params.commands) {
+			validation = { ...this.validator.assertRequiredParams(block, "commands"), paramName: "commands" }
+		} else if (block.params.script) {
+			validation = { ...this.validator.assertRequiredParams(block, "script"), paramName: "script" }
+		} else {
+			validation = { ok: false, error: "Missing required parameter: 'commands' or 'script' must be provided." }
+		}
 
 		if (!validation.ok) {
 			config.taskState.consecutiveMistakeCount++
-			return await config.callbacks.sayAndCreateMissingParamError(this.name, block.params.commands ? "commands" : block.params.command ? "command" : "script")
+			if (validation.paramName) {
+				return await config.callbacks.sayAndCreateMissingParamError(this.name, validation.paramName as any)
+			} else {
+				await config.callbacks.say(
+					"error",
+					`Dirac tried to use ${this.name} without providing any commands or script. Retrying...`
+				)
+				return formatResponse.toolError(validation.error!)
+			}
 		}
 
 		// Normalize to a list of commands
@@ -172,8 +174,6 @@ export class ExecuteCommandToolHandler implements IFullyManagedTool {
 			rawCommands.forEach((cmd: string) => commandsToProcess.push({ command: cmd }))
 		} else if (typeof rawCommands === "string" && rawCommands.trim() !== "") {
 			commandsToProcess.push({ command: rawCommands })
-		} else if (rawCommand) {
-			commandsToProcess.push({ command: rawCommand })
 		}
 
 		if (script) {

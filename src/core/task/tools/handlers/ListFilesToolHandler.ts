@@ -21,12 +21,12 @@ export class ListFilesToolHandler implements IFullyManagedTool {
 	constructor(private validator: ToolValidator) {}
 
 		getDescription(block: ToolUse): string {
-		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : (block.params.path ? [block.params.path as string] : []))
+		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : [])
 		return `[${block.name} for ${relPaths.map((p) => `'${p}'`).join(", ")}]`
 	}
 
 		async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
-		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : (block.params.path ? [block.params.path as string] : []))
+		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : [])
 
 		// Get config access for services
 		const config = uiHelpers.getConfig()
@@ -39,7 +39,7 @@ export class ListFilesToolHandler implements IFullyManagedTool {
 		const recursive = String(recursiveRaw ?? "").toLowerCase() === "true"
 		const sharedMessageProps = {
 			tool: recursive ? "listFilesRecursive" : "listFilesTopLevel",
-			paths: relPaths.map((p) => getReadablePath(config.cwd, uiHelpers.removeClosingTag(block, block.params.paths ? "paths" : "path", p))),
+			paths: relPaths.map((p) => getReadablePath(config.cwd, uiHelpers.removeClosingTag(block, "paths", p))),
 			content: "",
 			operationIsLocatedInWorkspace: (await Promise.all(relPaths.map((p) => isLocatedInWorkspace(p)))).every(Boolean),
 		}
@@ -61,7 +61,7 @@ export class ListFilesToolHandler implements IFullyManagedTool {
 	}
 
 		async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
-		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : (block.params.path ? [block.params.path as string] : []))
+		const relPaths = Array.isArray(block.params.paths) ? block.params.paths : (block.params.paths ? [block.params.paths as string] : [])
 		const recursiveRaw = block.params.recursive
 		const recursive = String(recursiveRaw ?? "").toLowerCase() === "true"
 
@@ -71,10 +71,24 @@ export class ListFilesToolHandler implements IFullyManagedTool {
 		const provider = (currentMode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
 
 		// Validate required parameters
-		const pathValidation = this.validator.assertRequiredParams(block, block.params.paths ? "paths" : "path")
-		if (!pathValidation.ok) {
+		let validation: { ok: boolean; error?: string; paramName?: string }
+		if (block.params.paths) {
+			validation = { ...this.validator.assertRequiredParams(block, "paths"), paramName: "paths" }
+		} else {
+			validation = { ok: false, error: "Missing required parameter: 'paths' must be provided." }
+		}
+
+		if (!validation.ok) {
 			config.taskState.consecutiveMistakeCount++
-			return await config.callbacks.sayAndCreateMissingParamError(this.name, block.params.paths ? "paths" : "path")
+			if (validation.paramName) {
+				return await config.callbacks.sayAndCreateMissingParamError(this.name, validation.paramName as any)
+			} else {
+				await config.callbacks.say(
+					"error",
+					`Dirac tried to use ${this.name} without providing any paths. Retrying...`
+				)
+				return formatResponse.toolError(validation.error!)
+			}
 		}
 
 		const results: string[] = []

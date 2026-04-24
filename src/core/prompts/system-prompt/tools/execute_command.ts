@@ -6,12 +6,13 @@ export const execute_command: DiracToolSpec = {
 	name: "execute_command",
 	description:
 		"Executes CLI commands or scripts. " +
-		"Use 'commands' for simple sequences of shell operations. " +
+		"Use 'commands' for simple sequences of shell operations, can also be a single command. " +
 		"Use 'script' for complex multi-line logic, data processing, or when a high-level language like Python or Node.js is more efficient than shell scripting. Default language is bash" +
 		"'script' are also very useful for combinatorial problems such as looping over 'swap and try' pattern" +
 		"Scripts have full access to the file system and current environment, be careful. " +
 		"In multi-root workspaces, use the @workspace:command syntax for standard commands. " +
-		"Leverage the full power of the environment's interpreters (bash, python, node, etc.) to accomplish tasks with minimal round-trips.",
+		"Leverage the full power of the environment's interpreters (bash, python, node, etc.) to accomplish tasks with minimal round-trips." +
+		"NOTE: provide exactly one of the {commands,script}",
 	parameters: [
 		{
 			name: "commands",

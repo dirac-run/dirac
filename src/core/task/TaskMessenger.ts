@@ -338,7 +338,7 @@ export class TaskMessenger {
 
 		await this.say(
 			"error",
-			`Dirac tried to use ${toolName}${relPath ? ` for '${relPath.toPosix()}'` : ""} without value for required parameter '${paramName}'. Retrying...`,
+			`Dirac tried to use ${toolName}${relPath ? ` for '${relPath.toPosix()}'` : ""} without providing a value for '${paramName}'. Retrying...`,
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
