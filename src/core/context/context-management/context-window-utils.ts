@@ -1,5 +1,4 @@
 import { ApiHandler } from "@core/api"
-import { OpenAiHandler } from "@core/api/providers/openai"
 
 /**
  * Gets context window information for the given API handler
@@ -11,11 +10,6 @@ export function getContextWindowInfo(api: ApiHandler) {
 	const HARD_LIMIT = 250_000
 
 	let contextWindow = api.getModel().info.contextWindow || 128_000
-
-	// Handle special cases like DeepSeek
-	if (api instanceof OpenAiHandler && api.getModel().id.toLowerCase().includes("deepseek")) {
-		contextWindow = 128_000
-	}
 
 	const maxAllowedSize = Math.min(HARD_LIMIT, Math.max(contextWindow - 40_000, contextWindow * 0.8))
 
