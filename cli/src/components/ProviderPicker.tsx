@@ -93,7 +93,7 @@ function isProviderConfigured(providerId: string, config: ApiConfiguration): boo
 			return !!config.nousResearchApiKey
 		case "openai":
 			return !!(
-				(config.openAiBaseUrl && config.openAiApiKey) ||
+				(config.openAiBaseUrl && (config.openAiApiKey || config.openAiCompatibleCustomApiKey)) ||
 				config.planModeOpenAiModelId ||
 				config.actModeOpenAiModelId
 			)

@@ -1,4 +1,4 @@
-import { ApiConfiguration, ModelInfo, QwenApiRegions } from "@shared/api"
+import { ApiConfiguration, ModelInfo, openAiModelInfoSaneDefaults, QwenApiRegions } from "@shared/api"
 import { Mode } from "@shared/storage/types"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
@@ -136,17 +136,37 @@ function createHandlerForProvider(
 				geminiSearchEnabled: options.geminiSearchEnabled,
 
 			})
-		case "openai":
+		case "openai": {
+			const openAiModelId = mode === "plan" ? options.planModeOpenAiModelId : options.actModeOpenAiModelId
+			let openAiModelInfo = mode === "plan" ? options.planModeOpenAiModelInfo : options.actModeOpenAiModelInfo
+
+			const isCustomUrl = options.openAiBaseUrl && options.openAiBaseUrl.startsWith("http")
+			if (options.openAiCompatibleCustomApiKey || isCustomUrl) {
+				openAiModelInfo = {
+					...(openAiModelInfo || openAiModelInfoSaneDefaults),
+					supportsTools: true,
+					supportsReasoning: true,
+					isR1FormatRequired: true,
+				}
+			}
+
+			const apiKey = options.openAiCompatibleCustomApiKey || options.openAiApiKey
+			if (apiKey) {
+				const maskedKey = `${apiKey.slice(0, 4)}****${apiKey.slice(-4)}`
+				Logger.info(`Using OpenAI API key: ${maskedKey} (from ${options.openAiCompatibleCustomApiKey ? "custom key" : "standard key"})`)
+			}
+
 			return new OpenAiHandler({
 				onRetryAttempt: options.onRetryAttempt,
-				openAiApiKey: options.openAiApiKey,
+				openAiApiKey: apiKey,
 				openAiBaseUrl: options.openAiBaseUrl,
 				azureApiVersion: options.azureApiVersion,
 				openAiHeaders: options.openAiHeaders,
-				openAiModelId: mode === "plan" ? options.planModeOpenAiModelId : options.actModeOpenAiModelId,
-				openAiModelInfo: mode === "plan" ? options.planModeOpenAiModelInfo : options.actModeOpenAiModelInfo,
+				openAiModelId,
+				openAiModelInfo,
 				reasoningEffort: mode === "plan" ? options.planModeReasoningEffort : options.actModeReasoningEffort,
 			})
+		}
 		case "ollama":
 			return new OllamaHandler({
 				onRetryAttempt: options.onRetryAttempt,

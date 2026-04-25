@@ -50,7 +50,7 @@ export const ProviderToApiKeyMap: Partial<Record<ApiProvider, keyof Secrets | (k
 	anthropic: "apiKey",
 	openrouter: "openRouterApiKey",
 	bedrock: ["awsAccessKey", "awsBedrockApiKey"],
-	openai: "openAiApiKey",
+	openai: ["openAiApiKey", "openAiCompatibleCustomApiKey"],
 	gemini: "geminiApiKey",
 	"openai-native": "openAiNativeApiKey",
 	ollama: "ollamaApiKey",

@@ -299,6 +299,7 @@ const SECRETS_KEYS = [
 	"basetenApiKey",
 	"vercelAiGatewayApiKey",
 	"difyApiKey",
+	"openAiCompatibleCustomApiKey",
 	"minimaxApiKey",
 	"hicapApiKey",
 	"aihubmixApiKey",

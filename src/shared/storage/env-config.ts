@@ -28,7 +28,8 @@ export const ENV_VAR_TO_SECRET_KEY: Record<string, keyof Secrets> = {
 	QWEN_API_KEY: "qwenApiKey",
 	TOGETHER_API_KEY: "togetherApiKey",
 	FIREWORKS_API_KEY: "fireworksApiKey",
-	NEBIUS_API_KEY: "nebiusApiKey"
+	NEBIUS_API_KEY: "nebiusApiKey",
+	OPENAI_COMPATIBLE_CUSTOM_KEY: "openAiCompatibleCustomApiKey"
 }
 
 /**
@@ -48,6 +49,11 @@ export function getSecretsFromEnv(): Partial<Secrets> {
 	// Special case: OPENAI_API_KEY also maps to openAiNativeApiKey if not already set by OPENCODE_API_KEY or KIMI_API_KEY
 	if (process.env.OPENAI_API_KEY && !secrets.openAiNativeApiKey) {
 		secrets.openAiNativeApiKey = process.env.OPENAI_API_KEY
+	}
+
+	// Map OPENAI_COMPATIBLE_CUSTOM_KEY to openAiApiKey if not already set
+	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY && !secrets.openAiApiKey) {
+		secrets.openAiApiKey = process.env.OPENAI_COMPATIBLE_CUSTOM_KEY
 	}
 
 	return secrets
@@ -77,7 +83,7 @@ export function getProviderFromEnv(): ApiProvider | undefined {
 	if (process.env.TOGETHER_API_KEY) return "together"
 	if (process.env.FIREWORKS_API_KEY) return "fireworks"
 	if (process.env.NEBIUS_API_KEY) return "nebius"
-
+	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY) return "openai"
 	return undefined
 }
 

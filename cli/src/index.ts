@@ -101,6 +101,10 @@ async function validate_provider(provider: string): Promise<void> {
 	const { printError } = await import("./utils/display")
 	const { exit } = await import("node:process")
 
+	if (provider.startsWith("http://") || provider.startsWith("https://")) {
+		return
+	}
+
 	const validProviders = ALL_PROVIDERS || Array.from(new Set(ALL_MODEL_MAPS.map(([p]) => p)))
 	if (!validProviders.includes(provider as any)) {
 		printError(`Invalid provider '${provider}'. Valid providers: ${validProviders.sort().join(", ")}`)
@@ -133,6 +137,17 @@ async function applyTaskOptions(options: TaskOptions): Promise<void> {
 
 	const stateManager = StateManager.get()
 
+	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY) {
+		if (!options.provider || !options.model) {
+			printError("Error: OPENAI_COMPATIBLE_CUSTOM_KEY requires --provider (base URL) and --model to be specified.")
+			exit(1)
+		}
+		if (!options.provider || !options.provider.startsWith("http")) {
+			printError("Error: When using OPENAI_COMPATIBLE_CUSTOM_KEY, --provider must be a base URL (starting with http/https).")
+			exit(1)
+		}
+	}
+
 	// Apply mode flag first so currentMode is correct for overrides
 	if (options.plan) {
 		stateManager.setSessionOverride("mode", "plan")
@@ -158,8 +173,14 @@ async function applyTaskOptions(options: TaskOptions): Promise<void> {
 		}
 
 		// Determine the target provider based on current mode or explicit flag
-		const providerKey = currentMode === "act" ? "actModeApiProvider" : "planModeApiProvider"
-		const targetProvider = (options.provider as ApiProvider) || (stateManager.getGlobalSettingsKey(providerKey) as ApiProvider)
+		let targetProvider: ApiProvider
+		if (options.provider && (options.provider.startsWith("http://") || options.provider.startsWith("https://"))) {
+			targetProvider = "openai"
+			stateManager.setSessionOverride("openAiBaseUrl", options.provider)
+		} else {
+			const providerKey = currentMode === "act" ? "actModeApiProvider" : "planModeApiProvider"
+			targetProvider = (options.provider as ApiProvider) || (stateManager.getGlobalSettingsKey(providerKey) as ApiProvider)
+		}
 
 		await setModeScopedState(currentMode, (mode) => {
 			const pKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"

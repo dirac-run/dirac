@@ -105,7 +105,10 @@ export class OpenAiHandler implements ApiHandler {
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
 		const client = this.ensureClient()
 		const modelId = this.options.openAiModelId ?? ""
-		const isDeepseekReasoner = modelId.includes("deepseek-reasoner")
+		const isDeepseekReasoner =
+			modelId.toLowerCase().includes("deepseek-reasoner") ||
+			modelId.toLowerCase().includes("r1") ||
+			modelId.toLowerCase().includes("reasoner")
 		const isR1FormatRequired = this.options.openAiModelInfo?.isR1FormatRequired ?? false
 		const isReasoningModelFamily =
 			["o1", "o3", "o4", "gpt-5"].some((prefix) => modelId.includes(prefix)) && !modelId.includes("chat")
@@ -145,11 +148,15 @@ export class OpenAiHandler implements ApiHandler {
 			}
 		}
 
+		const requestedEffort = normalizeOpenaiReasoningEffort(this.options.reasoningEffort)
+		if (requestedEffort !== "none") {
+			reasoningEffort = requestedEffort as ChatCompletionReasoningEffort
+		}
+
+
 		if (isReasoningModelFamily) {
 			openAiMessages = [{ role: "developer", content: systemPrompt }, ...convertToOpenAiMessages(messages)]
 			temperature = undefined // does not support temperature
-			const requestedEffort = normalizeOpenaiReasoningEffort(this.options.reasoningEffort)
-			reasoningEffort = requestedEffort === "none" ? undefined : (requestedEffort as ChatCompletionReasoningEffort)
 		}
 
 		const stream = await client.chat.completions.create({
