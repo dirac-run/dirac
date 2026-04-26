@@ -2,7 +2,7 @@
 	"name": "dirac",
 	"displayName": "Dirac",
 	"description": "Reduces API costs by more than 50%, produces better and faster work. Uses Hash anchored parallel edits, AST manipulation and a whole lot of neat optimizations. Fully Open Source.",
-	"version": "0.2.43",
+	"version": "0.2.44",
 	"icon": "assets/icons/icon.png",
 	"workspaces": [
 		".",
