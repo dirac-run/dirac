@@ -1,6 +1,6 @@
 import { Command } from "commander"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { captureUnhandledException } from "."
+import { captureUnhandledException, hasExplicitAuthQuickSetupFlags } from "."
 
 /**
  * Tests for CLI command parsing and structure
@@ -410,6 +410,14 @@ describe("CLI Commands", () => {
 				expect(cmd.description()).toBeTruthy()
 			}
 		})
+	})
+})
+
+describe("auth quick setup detection", () => {
+	it("uses quick setup only when provider, API key, and model are explicit command options", () => {
+		expect(hasExplicitAuthQuickSetupFlags({ provider: "anthropic", apikey: "key", modelid: "claude-sonnet-4-6" })).toBe(true)
+		expect(hasExplicitAuthQuickSetupFlags({ provider: "anthropic", apikey: "key" })).toBe(false)
+		expect(hasExplicitAuthQuickSetupFlags({})).toBe(false)
 	})
 })
 

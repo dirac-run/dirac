@@ -431,6 +431,10 @@ export async function captureUnhandledException(reason: Error, context: string) 
 	}
 }
 
+export function hasExplicitAuthQuickSetupFlags(options: { provider?: string; apikey?: string; modelid?: string }): boolean {
+	return !!(options.provider && options.apikey && options.modelid)
+}
+
 const EXIT_TIMEOUT_MS = 3000
 async function onUnhandledException(reason: unknown, context: string) {
 	const { Logger } = await import("@/shared/services/Logger")
@@ -938,7 +942,7 @@ async function runAuth(options: {
 		}
 	}
 
-	const hasQuickSetupFlags = !!(provider && apikey && modelid)
+	const hasQuickSetupFlags = hasExplicitAuthQuickSetupFlags(options)
 
 	telemetryService.captureHostEvent("auth_command", hasQuickSetupFlags ? "quick_setup" : "interactive")
 

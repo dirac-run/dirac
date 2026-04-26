@@ -18,8 +18,11 @@ import { Logger } from "@/shared/services/Logger"
  */
 export const OPENAI_CODEX_OAUTH_CONFIG = {
 	authorizationEndpoint: "https://auth.openai.com/oauth/authorize",
+	deviceAuthorizationEndpoint: "https://auth.openai.com/api/accounts/deviceauth/usercode",
+	deviceTokenEndpoint: "https://auth.openai.com/api/accounts/deviceauth/token",
 	tokenEndpoint: "https://auth.openai.com/oauth/token",
 	clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
+	deviceRedirectUri: "https://auth.openai.com/deviceauth/callback",
 	redirectUri: "http://localhost:1455/auth/callback",
 	scopes: "openid profile email offline_access",
 	callbackPort: 1455,
@@ -50,6 +53,25 @@ const tokenResponseSchema = z.object({
 	expires_in: z.number(),
 	email: z.string().optional(),
 	token_type: z.string().optional(),
+})
+
+const deviceAuthorizationResponseSchema = z.object({
+	device_auth_id: z.string().min(1),
+	user_code: z.string().min(1),
+	interval: z.string().transform((value) => Number.parseInt(value, 10)),
+})
+
+export interface OpenAiCodexDeviceAuthorization {
+	device_code: string
+	user_code: string
+	verification_uri: string
+	interval?: number
+}
+
+const deviceTokenResponseSchema = z.object({
+	authorization_code: z.string().min(1),
+	code_challenge: z.string().min(1),
+	code_verifier: z.string().min(1),
 })
 
 /**
@@ -168,6 +190,87 @@ function parseOAuthErrorDetails(errorText: string): { errorCode?: string; errorM
 	}
 }
 
+function buildDeviceAuthUnavailableError(): Error {
+	return new Error(
+		"Device code authentication is not available. Enable device-code login in ChatGPT settings or use browser sign-in.",
+	)
+}
+
+function createCredentialsFromTokenResponse(tokenResponse: z.infer<typeof tokenResponseSchema>): OpenAiCodexCredentials {
+	if (!tokenResponse.refresh_token) {
+		throw new Error("Token exchange did not return a refresh_token")
+	}
+
+	const expiresAt = Date.now() + tokenResponse.expires_in * 1000
+	const accountId = extractAccountId({
+		id_token: tokenResponse.id_token,
+		access_token: tokenResponse.access_token,
+	})
+
+	return {
+		type: "openai-codex",
+		access_token: tokenResponse.access_token,
+		refresh_token: tokenResponse.refresh_token,
+		expires: expiresAt,
+		email: tokenResponse.email,
+		accountId,
+	}
+}
+
+async function exchangeCodeForTokensWithRedirectUri(
+	code: string,
+	codeVerifier: string,
+	redirectUri: string,
+): Promise<OpenAiCodexCredentials> {
+	const body = new URLSearchParams({
+		grant_type: "authorization_code",
+		client_id: OPENAI_CODEX_OAUTH_CONFIG.clientId,
+		code,
+		redirect_uri: redirectUri,
+		code_verifier: codeVerifier,
+	})
+
+	const response = await fetch(OPENAI_CODEX_OAUTH_CONFIG.tokenEndpoint, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+		body: body.toString(),
+		signal: AbortSignal.timeout(30000),
+	})
+
+	if (!response.ok) {
+		const errorText = await response.text()
+		throw new Error(`Token exchange failed: ${response.status} ${response.statusText} - ${errorText}`)
+	}
+
+	const data = await response.json()
+	const tokenResponse = tokenResponseSchema.parse(data)
+
+	return createCredentialsFromTokenResponse(tokenResponse)
+}
+
+function waitForDevicePollInterval(seconds: number, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) {
+		throw new Error("Device authentication was cancelled.")
+	}
+
+	return new Promise((resolve, reject) => {
+		let timeout: ReturnType<typeof setTimeout>
+		const onAbort = () => {
+			clearTimeout(timeout)
+			signal?.removeEventListener("abort", onAbort)
+			reject(new Error("Device authentication was cancelled."))
+		}
+		timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort)
+			resolve()
+		}, seconds * 1000)
+
+		signal?.addEventListener("abort", onAbort, { once: true })
+	})
+}
+
 /**
  * Generates a cryptographically random PKCE code verifier
  * Must be 43-128 characters long using unreserved characters
@@ -219,54 +322,7 @@ export function buildAuthorizationUrl(codeChallenge: string, state: string): str
  * Important: state must NOT be included in token exchange body
  */
 export async function exchangeCodeForTokens(code: string, codeVerifier: string): Promise<OpenAiCodexCredentials> {
-	// Per the implementation guide: use application/x-www-form-urlencoded
-	// and do NOT include state in the body (OpenAI returns error if included)
-	const body = new URLSearchParams({
-		grant_type: "authorization_code",
-		client_id: OPENAI_CODEX_OAUTH_CONFIG.clientId,
-		code,
-		redirect_uri: OPENAI_CODEX_OAUTH_CONFIG.redirectUri,
-		code_verifier: codeVerifier,
-	})
-
-	const response = await fetch(OPENAI_CODEX_OAUTH_CONFIG.tokenEndpoint, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded",
-		},
-		body: body.toString(),
-		signal: AbortSignal.timeout(30000),
-	})
-
-	if (!response.ok) {
-		const errorText = await response.text()
-		throw new Error(`Token exchange failed: ${response.status} ${response.statusText} - ${errorText}`)
-	}
-
-	const data = await response.json()
-	const tokenResponse = tokenResponseSchema.parse(data)
-
-	if (!tokenResponse.refresh_token) {
-		throw new Error("Token exchange did not return a refresh_token")
-	}
-
-	// Per the implementation guide: expires is in milliseconds since epoch
-	const expiresAt = Date.now() + tokenResponse.expires_in * 1000
-
-	// Extract ChatGPT account ID from JWT claims
-	const accountId = extractAccountId({
-		id_token: tokenResponse.id_token,
-		access_token: tokenResponse.access_token,
-	})
-
-	return {
-		type: "openai-codex",
-		access_token: tokenResponse.access_token,
-		refresh_token: tokenResponse.refresh_token,
-		expires: expiresAt,
-		email: tokenResponse.email,
-		accountId,
-	}
+	return exchangeCodeForTokensWithRedirectUri(code, codeVerifier, OPENAI_CODEX_OAUTH_CONFIG.redirectUri)
 }
 
 /**
@@ -490,6 +546,129 @@ export class OpenAiCodexOAuthManager {
 			await this.loadCredentials()
 		}
 		return this.credentials !== null
+	}
+
+	/**
+	 * Initiate OAuth device-code authentication for remote/headless CLI environments.
+	 */
+	async initiateDeviceFlow(): Promise<OpenAiCodexDeviceAuthorization> {
+		const body = JSON.stringify({
+			client_id: OPENAI_CODEX_OAUTH_CONFIG.clientId,
+		})
+
+		const response = await fetch(OPENAI_CODEX_OAUTH_CONFIG.deviceAuthorizationEndpoint, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body,
+			signal: AbortSignal.timeout(30000),
+		})
+
+		if (!response.ok) {
+			const errorText = await response.text()
+			const { errorCode, errorMessage } = parseOAuthErrorDetails(errorText)
+			if (response.status === 404 || /unsupported|disabled|not[_ -]?enabled|device/i.test(`${errorCode ?? ""} ${errorMessage ?? ""}`)) {
+				throw buildDeviceAuthUnavailableError()
+			}
+			const details = errorMessage ? errorMessage : errorText
+			throw new Error(
+				`Device authorization failed: ${response.status} ${response.statusText}${details ? ` - ${details}` : ""}`,
+			)
+		}
+
+		const data = await response.json()
+		const parsed = deviceAuthorizationResponseSchema.parse(data)
+		return {
+			device_code: parsed.device_auth_id,
+			user_code: parsed.user_code,
+			verification_uri: "https://auth.openai.com/codex/device",
+			interval: parsed.interval,
+		}
+	}
+
+	/**
+	 * Poll the token endpoint until the user completes device-code authentication.
+	 */
+	async pollForDeviceToken(
+		deviceCode: string,
+		userCode: string,
+		interval: number,
+		signal?: AbortSignal,
+	): Promise<OpenAiCodexCredentials> {
+		let currentInterval = interval
+		const expiresAt = Date.now() + 15 * 60 * 1000
+
+		while (true) {
+			if (signal?.aborted) {
+				throw new Error("Device authentication was cancelled.")
+			}
+
+			const body = JSON.stringify({
+				device_auth_id: deviceCode,
+				user_code: userCode,
+			})
+
+			const response = await fetch(OPENAI_CODEX_OAUTH_CONFIG.deviceTokenEndpoint, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body,
+				signal: signal ?? AbortSignal.timeout(30000),
+			})
+
+			const responseText = await response.text()
+			let data: unknown
+			try {
+				data = responseText ? JSON.parse(responseText) : {}
+			} catch {
+				throw new Error(`Device token polling failed: ${response.status} ${response.statusText} - ${responseText}`)
+			}
+
+			const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {}
+			const error = typeof obj.error === "string" ? obj.error : undefined
+			const errorDescription = typeof obj.error_description === "string" ? obj.error_description : undefined
+
+			if (response.ok && !error) {
+				const deviceTokenResponse = deviceTokenResponseSchema.parse(data)
+				const credentials = await exchangeCodeForTokensWithRedirectUri(
+					deviceTokenResponse.authorization_code,
+					deviceTokenResponse.code_verifier,
+					OPENAI_CODEX_OAUTH_CONFIG.deviceRedirectUri,
+				)
+				await this.saveCredentials(credentials)
+				return credentials
+			}
+
+			if (response.status === 403 || response.status === 404 || error === "authorization_pending") {
+				if (Date.now() >= expiresAt) {
+					throw new Error("The device code has expired. Please try again.")
+				}
+				await waitForDevicePollInterval(currentInterval, signal)
+				continue
+			}
+
+			if (error === "slow_down") {
+				currentInterval += 5
+				await waitForDevicePollInterval(currentInterval, signal)
+				continue
+			}
+
+			if (error === "expired_token") {
+				throw new Error("The device code has expired. Please try again.")
+			}
+
+			if (error === "access_denied") {
+				throw new Error("Access denied by user.")
+			}
+
+			if (/unsupported|disabled|not[_ -]?enabled|device/i.test(`${error ?? ""} ${errorDescription ?? ""}`)) {
+				throw buildDeviceAuthUnavailableError()
+			}
+
+			throw new Error(`OAuth error: ${errorDescription || error || responseText}`)
+		}
 	}
 
 	/**
