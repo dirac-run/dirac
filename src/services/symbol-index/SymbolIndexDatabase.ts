@@ -83,8 +83,7 @@ export class SymbolIndexDatabase {
 		}
 		Logger.info(`[SymbolIndexDatabase] Saving database to ${this.dbPath}`)
 		const data = this.db.export()
-		const buffer = Buffer.from(data)
-		fs.writeFileSync(this.dbPath, buffer)
+		fs.writeFileSync(this.dbPath, data)
 		this.isDirty = false
 		Logger.info(`[SymbolIndexDatabase] Database saved successfully`)
 	}
@@ -169,19 +168,20 @@ export class SymbolIndexDatabase {
 	): void {
 		this.isDirty = true
 		this.db.run("BEGIN TRANSACTION")
+		let insertSymbol: any = null
+		let deleteSymbols: any = null
+		let insertFile: any = null
 		try {
-			const insertSymbol = this.db.prepare(`
+			insertSymbol = this.db.prepare(`
 				INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			`)
+			deleteSymbols = this.db.prepare("DELETE FROM symbols WHERE file_path = ?")
+			insertFile = this.db.prepare("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)")
 
 			for (const update of updates) {
-				this.db.run("DELETE FROM symbols WHERE file_path = ?", [update.relPath])
-				this.db.run("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)", [
-					update.relPath,
-					update.mtime,
-					update.size,
-				])
+				deleteSymbols.run([update.relPath])
+				insertFile.run([update.relPath, update.mtime, update.size])
 
 				for (const sym of update.symbols) {
 					insertSymbol.run([
@@ -196,11 +196,14 @@ export class SymbolIndexDatabase {
 					])
 				}
 			}
-			insertSymbol.free()
 			this.db.run("COMMIT")
 		} catch (error) {
 			this.db.run("ROLLBACK")
 			throw error
+		} finally {
+			if (insertSymbol) insertSymbol.free()
+			if (deleteSymbols) deleteSymbols.free()
+			if (insertFile) insertFile.free()
 		}
 	}
 

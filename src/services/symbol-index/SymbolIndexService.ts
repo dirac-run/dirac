@@ -110,7 +110,7 @@ export class SymbolIndexService {
 	private static readonly MAX_FILE_SIZE = 1024 * 1024 // 1MB
 
 	// Performance and behavior constants
-	private static readonly FILES_PER_BATCH = 100
+	private static readonly FILES_PER_BATCH = 50
 	private static readonly PARALLEL_PARSING_LIMIT = 10
 	private static readonly INDEX_DIR = ".dirac-symbol-index"
 	private static readonly INDEX_FILE = "data.db"
@@ -121,6 +121,7 @@ export class SymbolIndexService {
 	private db: SymbolIndexDatabase | null = null
 	private saveTimeout: NodeJS.Timeout | null = null
 	private isScanningInternal = false
+	private isFullScanInProgress = false
 	private scanQueue: { absolutePath: string; relPath: string }[] = []
 	private isPersistenceEnabled = true
 	private pendingUpdates: Set<string> = new Set()
@@ -170,11 +171,14 @@ export class SymbolIndexService {
 				Logger.info(`[SymbolIndexService] Creating database instance at ${dbPath}`)
 				this.db = await SymbolIndexDatabase.create(dbPath)
 			}
+			this.isFullScanInProgress = true
 
 			Logger.info("[SymbolIndexService] Starting full scan")
 			await this.runFullScan()
 			Logger.info("[SymbolIndexService] Full scan completed")
+			this.scheduleSave()
 		} finally {
+			this.isFullScanInProgress = false
 			this.isScanningInternal = false
 		}
 	}
@@ -256,14 +260,15 @@ export class SymbolIndexService {
 		let filesIndexed = 0
 		const limit = pLimit(SymbolIndexService.PARALLEL_PARSING_LIMIT)
 
-		while (this.scanQueue.length > 0) {
+		let queueIndex = 0
+		while (queueIndex < this.scanQueue.length) {
 			if (this.projectRoot !== root) return
 
 			const filesToUpdate: { absolutePath: string; relPath: string }[] = []
 			let itemsProcessedInBatch = 0
 
-			while (this.scanQueue.length > 0 && itemsProcessedInBatch < SymbolIndexService.FILES_PER_BATCH) {
-				const { absolutePath, relPath } = this.scanQueue.shift()!
+			while (queueIndex < this.scanQueue.length && itemsProcessedInBatch < SymbolIndexService.FILES_PER_BATCH) {
+				const { absolutePath, relPath } = this.scanQueue[queueIndex++]!
 				itemsProcessedInBatch++
 
 				try {
@@ -299,13 +304,14 @@ export class SymbolIndexService {
 				try {
 					const absolutePaths = filesToUpdate.map((f) => f.absolutePath)
 					const languageParsers = await loadRequiredLanguageParsers(absolutePaths)
+					const nameCache = new Map<string, string>()
 
 					const results = await Promise.all(
 						filesToUpdate.map((file) =>
 							limit(async () => {
 								if (this.pendingUpdates.has(file.absolutePath)) return null
 								try {
-									const entry = await this.indexFile(file.absolutePath, languageParsers)
+									const entry = await this.indexFile(file.absolutePath, languageParsers, nameCache)
 									return entry ? { file, entry } : null
 								} catch (error) {
 									Logger.error(`Error indexing file ${file.absolutePath}:`, error)
@@ -325,8 +331,11 @@ export class SymbolIndexService {
 								symbols: r.entry.symbols,
 							})),
 						)
-						this.scheduleSave()
+						const previousIndexed = filesIndexed
 						filesIndexed += validResults.length
+						if (!this.isFullScanInProgress || Math.floor(previousIndexed / 1000) < Math.floor(filesIndexed / 1000)) {
+							this.scheduleSave()
+						}
 						Logger.info(`[SymbolIndexService] Indexed ${validResults.length} files in this batch`)
 					}
 				} catch (error) {
@@ -336,12 +345,14 @@ export class SymbolIndexService {
 
 			await new Promise((resolve) => setImmediate(resolve))
 		}
+		this.scanQueue = []
 
 		Logger.info(`Symbol index scan complete. Checked ${filesChecked} files, re-indexed ${filesIndexed} files.`)
 	}
 	private async indexFile(
 		absolutePath: string,
 		languageParsers: Record<string, { parser: Parser; query: Parser.Query }>,
+		nameCache?: Map<string, string>
 	): Promise<FileIndexEntry | null> {
 		try {
 			const stats = await fs.stat(absolutePath)
@@ -372,7 +383,15 @@ export class SymbolIndexService {
 						}
 					}
 					if (name === "name.reference" || name.includes("name.definition")) {
-						const text = fileContent.slice(node.startIndex, node.endIndex)
+						let text = fileContent.slice(node.startIndex, node.endIndex)
+						if (nameCache) {
+							const cached = nameCache.get(text)
+							if (cached) {
+								text = cached
+							} else {
+								nameCache.set(text, text)
+							}
+						}
 						symbols.push({
 							n: text,
 							t: name.includes("name.definition") ? "d" : "r",
@@ -437,6 +456,9 @@ export class SymbolIndexService {
 	}
 
 	private scheduleSave(): void {
+		if (this.isFullScanInProgress && this.saveTimeout) {
+			return // Don't reset timeout during full scan if one is already pending
+		}
 		if (!this.isPersistenceEnabled) {
 			return
 		}
