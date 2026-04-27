@@ -67,7 +67,7 @@ const checkGitHubAuth = async () => {
 
 const createIssueUrl = (systemInfo, issueTitle) => {
 	return (
-		`https://github.com/dirac/dirac/issues/new?template=bug_report.yml` +
+		`https://github.com/dirac-run/dirac/issues/new?template=bug_report.yml` +
 		`&title=${issueTitle}` +
 		`&operating-system=${systemInfo.os}` +
 		`&dirac-version=${systemInfo.diracVersion}` +

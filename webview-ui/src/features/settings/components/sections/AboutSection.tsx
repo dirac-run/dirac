@@ -29,11 +29,11 @@ const AboutSection = ({ version, renderSectionHeader }: AboutSectionProps) => {
 
 					<h3 className="text-md font-semibold">Development</h3>
 					<p>
-						<VSCodeLink href="https://github.com/dirac/dirac">GitHub</VSCodeLink>
+						<VSCodeLink href="https://github.com/dirac-run/dirac">GitHub</VSCodeLink>
 						{" • "}
-						<VSCodeLink href="https://github.com/dirac/dirac/issues"> Issues</VSCodeLink>
+						<VSCodeLink href="https://github.com/dirac-run/dirac/issues"> Issues</VSCodeLink>
 						{" • "}
-						<VSCodeLink href="https://github.com/dirac/dirac/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop">
+						<VSCodeLink href="https://github.com/dirac-run/dirac/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop">
 							{" "}
 							Feature Requests
 						</VSCodeLink>

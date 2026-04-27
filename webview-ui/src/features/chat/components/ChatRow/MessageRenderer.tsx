@@ -305,7 +305,7 @@ export const MessageRenderer = ({
 								Profile").
 								<a
 									className="px-1"
-									href="https://github.com/dirac/dirac/wiki/Troubleshooting-%E2%80%90-Shell-Integration-Unavailable">
+									href="https://github.com/dirac-run/dirac/wiki/Troubleshooting-%E2%80%90-Shell-Integration-Unavailable">
 									Still having trouble?
 								</a>
 							</div>

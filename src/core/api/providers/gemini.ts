@@ -398,7 +398,7 @@ export class GeminiHandler implements ApiHandler {
 					}
 
 					// Fallback in case Gemini throws a rate limit error without a 429 status code
-					// https://github.com/dirac/dirac/pull/5205#discussion_r2311761559
+					// https://github.com/dirac-run/dirac/pull/5205#discussion_r2311761559
 					const isRateLimit = rateLimitPatterns.some((pattern) => pattern.test(error.message))
 					if (isRateLimit) {
 						throw new RetriableError(apiError, undefined, { cause: error })

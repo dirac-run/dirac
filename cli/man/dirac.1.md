@@ -350,7 +350,7 @@ View logs with `dirac dev log`.
 
 # BUGS
 
-Report bugs at: <https://github.com/dirac/dirac/issues>
+Report bugs at: <https://github.com/dirac-run/dirac/issues>
 
 For real-time help, join the Discord community at: <https://discord.gg/dirac>
 

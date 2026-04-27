@@ -35,7 +35,7 @@ export const CheckpointError: React.FC<CheckpointErrorProps> = ({
 					{messages.showGitInstructions && (
 						<a
 							className="text-link underline"
-							href="https://github.com/dirac/dirac/wiki/Installing-Git-for-Checkpoints">
+							href="https://github.com/dirac-run/dirac/wiki/Installing-Git-for-Checkpoints">
 							See instructions
 						</a>
 					)}

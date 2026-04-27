@@ -125,7 +125,7 @@ export const WithLinks: Story = {
 	args: {
 		markdown: `Check out these resources:
 
-- Official documentation: https://github.com/dirac/dirac
+- Official documentation: https://github.com/dirac-run/dirac
 - API reference: https://api.dirac.run/docs
 - Support forum: https://community.dirac.run
 

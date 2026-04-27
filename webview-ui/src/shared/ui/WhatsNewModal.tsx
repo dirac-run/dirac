@@ -119,7 +119,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ open, onClose, ver
 							<a
 								aria-label="Star us on GitHub"
 								className="text-[var(--vscode-foreground)] hover:text-[var(--vscode-textLink-activeForeground)] transition-colors"
-								href="https://github.com/dirac/dirac"
+								href="https://github.com/dirac-run/dirac"
 								rel="noopener noreferrer"
 								target="_blank">
 								<GitHubIcon />

@@ -8,7 +8,7 @@ if ! buf format -w --exit-code; then
 fi
 
 if grep -rn "rpc .*[A-Z][A-Z].*[(]" --include="*.proto"; then
-  # See https://github.com/dirac/dirac/pull/7054
+  # See https://github.com/dirac-run/dirac/pull/7054
   echo Error: Proto RPC names cannot contain repeated capital letters
   exit 1
 fi
