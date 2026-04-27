@@ -109,6 +109,17 @@ You can provide API keys via environment variables to skip the `dirac auth` step
 
 Dirac is **open source** and licensed under the [Apache License 2.0](LICENSE).
 
+## 📈 Star History
+
+<a href="https://star-history.com/#dirac-run/dirac&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date" />
+  </picture>
+</a>
+
+
 ## 🤝 Acknowledgments
 
 Dirac is a fork of the excellent [Cline](https://github.com/cline/cline) project. We are grateful to the Cline team and contributors for their foundational work.
