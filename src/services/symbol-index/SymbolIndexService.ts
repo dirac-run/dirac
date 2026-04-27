@@ -140,12 +140,32 @@ export class SymbolIndexService {
 		this.isPersistenceEnabled = enabled
 	}
 
+	private async isRepository(dirPath: string): Promise<boolean> {
+		const vcsDirs = [".git", ".hg", ".svn"]
+		for (const vcs of vcsDirs) {
+			try {
+				await fs.access(path.join(dirPath, vcs))
+				return true
+			} catch {
+				// Continue checking
+			}
+		}
+		return false
+	}
+
 	async initialize(projectRoot: string): Promise<void> {
 		Logger.info(`[SymbolIndexService] Initializing for root: ${projectRoot}`)
 		if (this.isScanningInternal && this.projectRoot === projectRoot) {
 			Logger.info("[SymbolIndexService] Already scanning this root, skipping")
 			return
 		}
+
+		const isRepo = await this.isRepository(projectRoot)
+		if (!isRepo) {
+			Logger.info(`[SymbolIndexService] ${projectRoot} is not a repository. Skipping indexing to prevent performance issues.`)
+			return
+		}
+
 
 		this.isScanningInternal = true
 		try {
