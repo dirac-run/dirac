@@ -62,11 +62,6 @@ Install the Dirac CLI globally using npm:
 npm install -g dirac-cli
 ```
 
-Alternatively, use our official installation script (macOS/Linux):
-```bash
-curl -fsSL https://raw.githubusercontent.com/dirac-run/dirac/master/scripts/install.sh | bash
-```
-
 ## 🚀 CLI Quick Start 
 
 1. **Authenticate**:
