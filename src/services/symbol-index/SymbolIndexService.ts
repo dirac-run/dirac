@@ -285,6 +285,8 @@ export class SymbolIndexService {
 		let filesIndexed = 0
 		const limit = pLimit(SymbolIndexService.PARALLEL_PARSING_LIMIT)
 
+		const nameCache = new Map<string, string>()
+		let languageParsers: Record<string, { parser: Parser; query: Parser.Query }> = {}
 		let queueIndex = 0
 		while (queueIndex < this.scanQueue.length) {
 			if (this.projectRoot !== root) return
@@ -328,8 +330,18 @@ export class SymbolIndexService {
 				Logger.info(`[SymbolIndexService] Indexing batch of ${filesToUpdate.length} files`)
 				try {
 					const absolutePaths = filesToUpdate.map((f) => f.absolutePath)
-					const languageParsers = await loadRequiredLanguageParsers(absolutePaths)
-					const nameCache = new Map<string, string>()
+					const newExtensions = absolutePaths
+						.map((p) => path.extname(p).toLowerCase().slice(1))
+						.filter((ext) => ext && !(ext in languageParsers))
+					if (newExtensions.length > 0) {
+						const newParsers = await loadRequiredLanguageParsers(
+							absolutePaths.filter((p) => {
+								const ext = path.extname(p).toLowerCase().slice(1)
+								return ext && !(ext in languageParsers)
+							}),
+						)
+						languageParsers = { ...languageParsers, ...newParsers }
+					}
 
 					const results = await Promise.all(
 						filesToUpdate.map((file) =>
@@ -369,6 +381,11 @@ export class SymbolIndexService {
 			}
 
 			await new Promise((resolve) => setImmediate(resolve))
+
+			if (queueIndex > 1000) {
+				this.scanQueue.splice(0, queueIndex)
+				queueIndex = 0
+			}
 		}
 		this.scanQueue = []
 
@@ -401,12 +418,6 @@ export class SymbolIndexService {
 
 				for (const capture of captures) {
 					const { node, name } = capture
-					if (absolutePath.endsWith("src/core/task/index.ts")) {
-						const text = fileContent.slice(node.startIndex, node.endIndex)
-						if (text === "getEnvironmentDetails" || text === "loadContext") {
-							Logger.info(`[SymbolIndexService] Capture for ${text}: ${name}`)
-						}
-					}
 					if (name === "name.reference" || name.includes("name.definition")) {
 						let text = fileContent.slice(node.startIndex, node.endIndex)
 						if (nameCache) {
