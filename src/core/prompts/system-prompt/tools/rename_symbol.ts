@@ -7,7 +7,7 @@ export const rename_symbol: DiracToolSpec = {
 	id,
 	name: "rename_symbol",
 	description:
-		"Renames ALL occurences of a symbol (function, class, method, or variable) inside the specified files or directories. This tool can identify precise symbols using a language's AST and is more accurate than a simple search-and-replace because it understands the language structure. For renaming tasks, strongly prefer this as the first pass.",
+		"Renames ALL occurrences of a symbol (function, class, method, or variable) inside the specified files or directories. This tool can identify precise symbols using a language's AST and is more accurate than a simple search-and-replace because it understands the language structure. For renaming tasks, strongly prefer this as the first pass.",
 	parameters: [
 		{
 			name: "paths",
