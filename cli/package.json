@@ -1,6 +1,6 @@
 {
 	"name": "dirac-cli",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
 	"files": [
 		"dist",
@@ -31,7 +31,7 @@
 	"man": "./man/dirac.1",
 	"type": "module",
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=20.0.0 <25.0.0"
 	},
 	"scripts": {
 		"package:brew": "npx tsx ./scripts/update-brew-formula.mts",

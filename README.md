@@ -66,6 +66,8 @@ Install the Dirac CLI globally using npm:
 npm install -g dirac-cli
 ```
 
+> **Note**: Node.js v25 is currently not supported due to an upstream V8 Turboshaft compiler bug that causes out-of-memory crashes during WASM initialization. Please use Node.js v20, v22, or v24 (LTS versions).
+
 ## 🚀 CLI Quick Start 
 
 1. **Authenticate**:
