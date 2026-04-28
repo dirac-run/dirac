@@ -35,6 +35,9 @@ interface OpenAiNativeHandlerOptions extends CommonApiHandlerOptions {
 	thinkingBudgetTokens?: number
 	apiModelId?: string
 	openAiNativeUseResponsesWebsocket?: boolean
+	openAiBaseUrl?: string
+	openAiHeaders?: Record<string, string>
+	openAiModelInfo?: OpenAiCompatibleModelInfo
 }
 
 export class OpenAiNativeHandler implements ApiHandler {
@@ -55,8 +58,17 @@ export class OpenAiNativeHandler implements ApiHandler {
 				throw new Error("OpenAI API key is required")
 			}
 			try {
+				let baseUrl = this.options.openAiBaseUrl?.trim() || ""
+				if (baseUrl) {
+					// Normalize URL: strip trailing /responses and trailing slashes
+					// The OpenAI SDK appends /responses automatically.
+					baseUrl = baseUrl.replace(/\/responses\/?$/, "")
+					baseUrl = baseUrl.replace(/\/+$/, "")
+				}
 				this.client = createOpenAIClient({
 					apiKey: this.options.openAiNativeApiKey,
+					baseURL: baseUrl || undefined,
+					defaultHeaders: this.options.openAiHeaders,
 				})
 			} catch (error) {
 				throw new Error(`Error creating OpenAI client: ${error instanceof Error ? error.message : String(error)}`)
@@ -87,10 +99,10 @@ export class OpenAiNativeHandler implements ApiHandler {
 		// Responses API requires tool format to be set to OPENAI_RESPONSES with native tools calling enabled
 		const apiFormat = this.getModel()?.info?.apiFormat
 		if (apiFormat === ApiFormat.OPENAI_RESPONSES || apiFormat === ApiFormat.OPENAI_RESPONSES_WEBSOCKET_MODE) {
-			if (!tools?.length) {
+			if (!tools?.length && !this.options.openAiBaseUrl) {
 				throw new Error("Native Tool Call must be enabled in your setting for OpenAI Responses API")
 			}
-			yield* this.createResponseStream(systemPrompt, messages, tools)
+			yield* this.createResponseStream(systemPrompt, messages, tools || [])
 		} else {
 			yield* this.createCompletionStream(systemPrompt, messages, tools)
 		}
@@ -167,7 +179,7 @@ export class OpenAiNativeHandler implements ApiHandler {
 	private async *createResponseStream(
 		systemPrompt: string,
 		messages: DiracStorageMessage[],
-		tools: ChatCompletionTool[],
+		tools?: ChatCompletionTool[],
 	): ApiStream {
 		const model = this.getModel()
 		const usePreviousResponseId = this.useWebsocketMode(model.info.apiFormat)
@@ -223,9 +235,9 @@ export class OpenAiNativeHandler implements ApiHandler {
 		return false
 	}
 
-	private mapResponseTools(tools: ChatCompletionTool[]): OpenAI.Responses.Tool[] {
-		return tools
-			?.filter((tool): tool is ChatCompletionFunctionTool => tool?.type === "function")
+	private mapResponseTools(tools?: ChatCompletionTool[]): OpenAI.Responses.Tool[] {
+		return (tools || [])
+			.filter((tool): tool is ChatCompletionFunctionTool => tool?.type === "function")
 			.map((tool) => ({
 				type: "function" as const,
 				name: tool.function.name,
@@ -239,7 +251,7 @@ export class OpenAiNativeHandler implements ApiHandler {
 		modelId: string
 		systemPrompt: string
 		input: OpenAI.Responses.ResponseInput
-		tools: OpenAI.Responses.Tool[]
+		tools?: OpenAI.Responses.Tool[]
 		previousResponseId?: string
 	}): OpenAI.Responses.ResponseCreateParamsStreaming {
 		const requestedEffort = normalizeOpenaiReasoningEffort(this.options.reasoningEffort)
@@ -687,13 +699,18 @@ export class OpenAiNativeHandler implements ApiHandler {
 		this.abortController = undefined
 	}
 
-	getModel(): { id: OpenAiNativeModelId; info: OpenAiCompatibleModelInfo } {
-		const modelId = this.options.apiModelId
-		if (modelId && modelId in openAiNativeModels) {
+	getModel(): { id: string; info: OpenAiCompatibleModelInfo } {
+		const modelId = this.options.apiModelId || openAiNativeDefaultModelId
+		if (this.options.openAiModelInfo) {
+			return { id: modelId, info: this.options.openAiModelInfo }
+		}
+
+		if (modelId in openAiNativeModels) {
 			const id = modelId as OpenAiNativeModelId
 			const info = openAiNativeModels[id]
 			return { id, info: { ...info } }
 		}
+
 		return {
 			id: openAiNativeDefaultModelId,
 			info: { ...openAiNativeModels[openAiNativeDefaultModelId] },
