@@ -16,7 +16,7 @@ EDIT TYPES:
 3. insert_before: Inserts the provided text immediately before the line specified by anchor. end_anchor is not used.
 
 ANCHOR RULES:
-1. Anchors are a single opaque word (e.g., "AppleBanana") and basically hashes that carry no meaning, ollowed by ${getDelimiter()} which is followed by the actual line content.
+1. Anchors are a single opaque word (e.g., "AppleBanana") and basically hashes that carry no meaning, followed by ${getDelimiter()} which is followed by the actual line content.
 2. For 'replace', anchors are inclusive, meaning what you specify as anchor and end_anchor, the lines belonging to both and everything in between will be overwritten.
 3. Anchors are file scoped. "Apple${getDelimiter()}" in one file is different from "Apple${getDelimiter()}" in another file.  
 
