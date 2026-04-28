@@ -5,7 +5,6 @@ import { Logger } from "@/shared/services/Logger"
 import { DiracTool } from "@/shared/tools"
 import { AIhubmixHandler } from "./providers/aihubmix"
 import { AnthropicHandler } from "./providers/anthropic"
-import { AskSageHandler } from "./providers/asksage"
 import { BasetenHandler } from "./providers/baseten"
 import { AwsBedrockHandler } from "./providers/bedrock"
 import { CerebrasHandler } from "./providers/cerebras"
@@ -303,13 +302,6 @@ function createHandlerForProvider(
 			return new NebiusHandler({
 				onRetryAttempt: options.onRetryAttempt,
 				nebiusApiKey: options.nebiusApiKey,
-				apiModelId: mode === "plan" ? options.planModeApiModelId : options.actModeApiModelId,
-			})
-		case "asksage":
-			return new AskSageHandler({
-				onRetryAttempt: options.onRetryAttempt,
-				asksageApiKey: options.asksageApiKey,
-				asksageApiUrl: options.asksageApiUrl,
 				apiModelId: mode === "plan" ? options.planModeApiModelId : options.actModeApiModelId,
 			})
 		case "xai":

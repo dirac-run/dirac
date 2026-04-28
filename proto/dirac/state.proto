@@ -75,7 +75,7 @@ message Secrets {
   optional string doubao_api_key = 17;
   optional string mistral_api_key = 18;
   optional string lite_llm_api_key = 19;
-  optional string asksage_api_key = 21;
+  reserved 21; // was asksage_api_key
   optional string xai_api_key = 22;
   optional string moonshot_api_key = 23;
   optional string zai_api_key = 24;
@@ -130,7 +130,7 @@ message Settings {
   optional string azure_api_version = 27;
   optional string qwen_api_line = 29;
   optional string moonshot_api_line = 30;
-  optional string asksage_api_url = 31;
+  reserved 31; // was asksage_api_url
   optional int32 request_timeout_ms = 32;
   optional string sap_ai_resource_group = 33;
   optional string sap_ai_core_token_url = 34;

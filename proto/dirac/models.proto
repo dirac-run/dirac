@@ -166,7 +166,7 @@ message ModelsApiSecrets {
   optional string doubao_api_key = 18;
   optional string mistral_api_key = 19;
   optional string nebius_api_key = 20;
-  optional string asksage_api_key = 21;
+  reserved 21; // was asksage_api_key
   optional string xai_api_key = 22;
   optional string sambanova_api_key = 23;
   optional string cerebras_api_key = 24;
@@ -211,7 +211,7 @@ message ModelsApiOptions {
   optional int64 fireworks_model_max_tokens = 23;
   optional string azure_api_version = 24;
   optional string qwen_api_line = 25;
-  optional string asksage_api_url = 26;
+  reserved 26; // was asksage_api_url
   optional int64 request_timeout_ms = 27;
   optional string sap_ai_resource_group = 28;
   optional string sap_ai_core_token_url = 29;
@@ -413,7 +413,7 @@ enum ApiProvider {
   LITELLM = 17;
   NEBIUS = 18;
   FIREWORKS = 19;
-  ASKSAGE = 20;
+  reserved 20; // was ASKSAGE
   XAI = 21;
   SAMBANOVA = 22;
   CEREBRAS = 23;
@@ -528,8 +528,8 @@ message ModelsApiConfiguration {
   optional string azure_api_version = 41;
   optional string qwen_api_line = 42;
   optional string nebius_api_key = 43;
-  optional string asksage_api_url = 44;
-  optional string asksage_api_key = 45;
+  reserved 44; // was asksage_api_url
+  reserved 45; // was asksage_api_key
   optional string xai_api_key = 46;
   optional string sambanova_api_key = 47;
   optional string cerebras_api_key = 48;

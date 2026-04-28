@@ -290,8 +290,6 @@ function convertApiProviderToProto(provider: string | undefined): ProtoApiProvid
 			return ProtoApiProvider.WANDB
 		case "fireworks":
 			return ProtoApiProvider.FIREWORKS
-		case "asksage":
-			return ProtoApiProvider.ASKSAGE
 		case "xai":
 			return ProtoApiProvider.XAI
 		case "sambanova":
@@ -378,8 +376,6 @@ export function convertProtoToApiProvider(provider: ProtoApiProvider): ApiProvid
 			return "wandb"
 		case ProtoApiProvider.FIREWORKS:
 			return "fireworks"
-		case ProtoApiProvider.ASKSAGE:
-			return "asksage"
 		case ProtoApiProvider.XAI:
 			return "xai"
 		case ProtoApiProvider.SAMBANOVA:
@@ -470,8 +466,6 @@ export function convertApiConfigurationToProto(config: ApiConfiguration): ProtoA
 		huggingFaceApiKey: config.huggingFaceApiKey,
 		nebiusApiKey: config.nebiusApiKey,
 		wandbApiKey: config.wandbApiKey,
-		asksageApiUrl: config.asksageApiUrl,
-		asksageApiKey: config.asksageApiKey,
 		xaiApiKey: config.xaiApiKey,
 		sambanovaApiKey: config.sambanovaApiKey,
 		cerebrasApiKey: config.cerebrasApiKey,
@@ -635,8 +629,6 @@ export function convertProtoToApiConfiguration(protoConfig: ProtoApiConfiguratio
 		huggingFaceApiKey: protoConfig.huggingFaceApiKey,
 		nebiusApiKey: protoConfig.nebiusApiKey,
 		wandbApiKey: protoConfig.wandbApiKey,
-		asksageApiUrl: protoConfig.asksageApiUrl,
-		asksageApiKey: protoConfig.asksageApiKey,
 		xaiApiKey: protoConfig.xaiApiKey,
 		sambanovaApiKey: protoConfig.sambanovaApiKey,
 		cerebrasApiKey: protoConfig.cerebrasApiKey,

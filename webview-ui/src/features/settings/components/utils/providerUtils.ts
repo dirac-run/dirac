@@ -3,8 +3,6 @@ import {
     ApiProvider,
     anthropicDefaultModelId,
     anthropicModels,
-    askSageDefaultModelId,
-    askSageModels,
     basetenDefaultModelId,
     basetenModels,
     bedrockDefaultModelId,
@@ -115,8 +113,6 @@ export function getModelsForProvider(
 			return doubaoModels
 		case "mistral":
 			return mistralModels
-		case "asksage":
-			return askSageModels
 		case "xai":
 			return xaiModels
 		case "moonshot":
@@ -250,8 +246,6 @@ export function normalizeApiConfiguration(
 			return getProviderData(doubaoModels, doubaoDefaultModelId)
 		case "mistral":
 			return getProviderData(mistralModels, mistralDefaultModelId)
-		case "asksage":
-			return getProviderData(askSageModels, askSageDefaultModelId)
 		case "openrouter":
 			const openRouterModelId =
 				currentMode === "plan" ? apiConfiguration?.planModeOpenRouterModelId : apiConfiguration?.actModeOpenRouterModelId
@@ -797,7 +791,6 @@ export async function syncModeConfigurations(
 		case "qwen":
 		case "doubao":
 		case "mistral":
-		case "asksage":
 		case "xai":
 		case "nebius":
 		case "wandb":

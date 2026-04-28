@@ -12,8 +12,6 @@ import {
 	type ApiProvider,
 	anthropicDefaultModelId,
 	anthropicModels,
-	askSageDefaultModelId,
-	askSageModels,
 	basetenDefaultModelId,
 	basetenModels,
 	bedrockDefaultModelId,
@@ -78,7 +76,6 @@ export const CUSTOM_MODEL_ID = "__custom__"
 // Map providers to their static model lists and defaults
 export const providerModels: Record<string, { models: Record<string, unknown>; defaultId: string }> = {
 	anthropic: { models: anthropicModels, defaultId: anthropicDefaultModelId },
-	asksage: { models: askSageModels, defaultId: askSageDefaultModelId },
 	baseten: { models: basetenModels, defaultId: basetenDefaultModelId },
 	bedrock: { models: bedrockModels, defaultId: bedrockDefaultModelId },
 	cerebras: { models: cerebrasModels, defaultId: cerebrasDefaultModelId },

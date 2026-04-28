@@ -121,10 +121,6 @@
 			"label": "Nebius AI Studio"
 		},
 		{
-			"value": "asksage",
-			"label": "AskSage"
-		},
-		{
 			"value": "xai",
 			"label": "xAI"
 		},

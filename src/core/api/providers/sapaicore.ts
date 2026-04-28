@@ -603,15 +603,11 @@ export class SapAiCoreHandler implements ApiHandler {
 			"gpt-4o",
 			"gpt-4",
 			"gpt-4o-mini",
-			"o1",
 			"gpt-4.1",
 			"gpt-4.1-nano",
 			"gpt-5",
 			"gpt-5-nano",
 			"gpt-5-mini",
-			"o3-mini",
-			"o3",
-			"o4-mini",
 		]
 
 		const perplexityModels = ["sonar-pro", "sonar"]
@@ -642,8 +638,7 @@ export class SapAiCoreHandler implements ApiHandler {
 				model.id === "anthropic--claude-4.5-sonnet" ||
 				model.id === "anthropic--claude-4.5-haiku" ||
 				model.id === "anthropic--claude-4-sonnet" ||
-				model.id === "anthropic--claude-4-opus" ||
-				model.id === "anthropic--claude-3.7-sonnet"
+				model.id === "anthropic--claude-4-opus"
 			) {
 				// Use converse-stream endpoint with caching support
 				url = `${this.options.sapAiCoreBaseUrl}/v2/inference/deployments/${deploymentId}/converse-stream`
@@ -694,7 +689,7 @@ export class SapAiCoreHandler implements ApiHandler {
 				stream_options: { include_usage: true },
 			}
 
-			if (["o1", "o3-mini", "o3", "o4-mini", "gpt-5", "gpt-5-nano", "gpt-5-mini"].includes(model.id)) {
+			if (["gpt-5", "gpt-5-nano", "gpt-5-mini"].includes(model.id)) {
 				delete payload.max_tokens
 				delete payload.temperature
 
@@ -704,10 +699,6 @@ export class SapAiCoreHandler implements ApiHandler {
 				}
 			}
 
-			if (model.id === "o3-mini") {
-				delete payload.stream
-				delete payload.stream_options
-			}
 		} else if (perplexityModels.includes(model.id)) {
 			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 				{ role: "system", content: systemPrompt },
@@ -739,35 +730,7 @@ export class SapAiCoreHandler implements ApiHandler {
 				...getAxiosSettings(),
 			})
 
-			if (model.id === "o3-mini") {
-				const response = await axios.post(url, JSON.stringify(payload, null, 2), { headers, ...getAxiosSettings() })
-
-				// Yield the usage information
-				if (response.data.usage) {
-					yield {
-						type: "usage",
-						inputTokens: response.data.usage.prompt_tokens,
-						outputTokens: response.data.usage.completion_tokens,
-					}
-				}
-
-				// Yield the content
-				if (response.data.choices && response.data.choices.length > 0) {
-					yield {
-						type: "text",
-						text: response.data.choices[0].message.content,
-					}
-				}
-
-				// Final usage yield
-				if (response.data.usage) {
-					yield {
-						type: "usage",
-						inputTokens: response.data.usage.prompt_tokens,
-						outputTokens: response.data.usage.completion_tokens,
-					}
-				}
-			} else if (openAIModels.includes(model.id) || perplexityModels.includes(model.id)) {
+			if (openAIModels.includes(model.id) || perplexityModels.includes(model.id)) {
 				yield* this.streamCompletionGPT(response.data, model)
 			} else if (
 				model.id === "anthropic--claude-4.5-opus" ||
@@ -775,8 +738,7 @@ export class SapAiCoreHandler implements ApiHandler {
 				model.id === "anthropic--claude-4.5-sonnet" ||
 				model.id === "anthropic--claude-4.5-haiku" ||
 				model.id === "anthropic--claude-4-sonnet" ||
-				model.id === "anthropic--claude-4-opus" ||
-				model.id === "anthropic--claude-3.7-sonnet"
+				model.id === "anthropic--claude-4-opus"
 			) {
 				yield* this.streamCompletionSonnet37(response.data, model)
 			} else if (geminiModels.includes(model.id)) {

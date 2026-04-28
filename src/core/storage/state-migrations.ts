@@ -555,7 +555,6 @@ export async function migrateWelcomeViewCompleted(context: vscode.ExtensionConte
 			const qwenApiKey = await context.secrets.get("qwenApiKey")
 			const doubaoApiKey = await context.secrets.get("doubaoApiKey")
 			const mistralApiKey = await context.secrets.get("mistralApiKey")
-			const asksageApiKey = await context.secrets.get("asksageApiKey")
 			const xaiApiKey = await context.secrets.get("xaiApiKey")
 			const sambanovaApiKey = await context.secrets.get("sambanovaApiKey")
 			const sapAiCoreClientId = await context.secrets.get("sapAiCoreClientId")
@@ -594,7 +593,6 @@ export async function migrateWelcomeViewCompleted(context: vscode.ExtensionConte
 				planModeVsCodeLmModelSelector,
 				actModeVsCodeLmModelSelector,
 				diracAccountId,
-				asksageApiKey,
 				xaiApiKey,
 				sambanovaApiKey,
 				sapAiCoreClientId,

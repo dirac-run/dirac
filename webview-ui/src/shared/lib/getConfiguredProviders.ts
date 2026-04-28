@@ -106,10 +106,6 @@ export function getConfiguredProviders(
 		configured.push("nebius")
 	}
 
-	// AskSage - requires API key
-	if (apiConfiguration.asksageApiKey) {
-		configured.push("asksage")
-	}
 
 	// SambaNova - requires API key
 	if (apiConfiguration.sambanovaApiKey) {
