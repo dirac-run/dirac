@@ -148,6 +148,7 @@ vi.mock("../utils/tools", () => ({
 }))
 
 vi.mock("../utils/display", () => ({
+	centerText: vi.fn((text: string) => text),
 	setTerminalTitle: vi.fn(),
 }))
 

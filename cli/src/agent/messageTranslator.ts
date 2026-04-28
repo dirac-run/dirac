@@ -28,7 +28,8 @@ const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	listFilesTopLevel: "read",
 	listFilesRecursive: "read",
 	listCodeDefinitionNames: "read",
-	searchFiles: "read",
+	fileDeleted: "delete",
+	searchFiles: "search",
 	// Other
 	summarizeTask: "think",
 	useSkill: "other",
@@ -56,6 +57,18 @@ const BROWSER_ACTION_KIND_MAP: Record<string, acp.ToolKind> = {
  */
 function generateToolCallId(): string {
 	return crypto.randomUUID()
+}
+
+function truncateTitleValue(value: string, maxLength = 50): string {
+	return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
+}
+
+function buildCommandTitle(command: string): string {
+	return command ? `Execute: ${truncateTitleValue(command)}` : "Execute"
+}
+
+function buildBrowserActionTitle(action?: string): string {
+	return action ? `Browser: ${action}` : "Browser"
 }
 
 /**
@@ -308,7 +321,6 @@ function translateSayMessage(
 			// The ACP client already knows what they typed
 			break
 
-
 		case "hook_status":
 			// Format hook status as a human-readable message
 			if (message.text) {
@@ -420,15 +432,16 @@ function translateAskMessage(
 		case "command":
 			// Command permission request → tool_call + request_permission
 			{
+				const command = extractCommandFromText(message.text)
 				const toolCallId = generateToolCallId()
 				sessionState.currentToolCallId = toolCallId
 
 				const toolCall: acp.ToolCall = {
 					toolCallId,
-					title: "Execute",
+					title: buildCommandTitle(command),
 					kind: "execute",
 					status: "pending",
-					rawInput: { command: extractCommandFromText(message.text) },
+					rawInput: { command },
 				}
 
 				updates.push({
@@ -532,15 +545,21 @@ function translateAskMessage(
 		case "browser_action_launch":
 			// Browser launch permission
 			{
+				let action: DiracSayBrowserAction | null = null
+				try {
+					action = message.text ? (JSON.parse(message.text) as DiracSayBrowserAction) : null
+				} catch {
+					// Fall back to the raw text as URL below.
+				}
 				const toolCallId = generateToolCallId()
 				sessionState.currentToolCallId = toolCallId
 
 				const toolCall: acp.ToolCall = {
 					toolCallId,
-					title: "Browser",
+					title: buildBrowserActionTitle(action?.action || "launch"),
 					kind: "execute",
 					status: "pending",
-					rawInput: { url: message.text },
+					rawInput: action || { url: message.text },
 				}
 
 				updates.push({
@@ -689,7 +708,7 @@ function translateCommandMessage(message: DiracMessage, sessionState: AcpSession
 	updates.push({
 		sessionUpdate: "tool_call",
 		toolCallId,
-		title: "Execute",
+		title: buildCommandTitle(command),
 		kind: "execute",
 		status: message.partial ? "in_progress" : "completed",
 		rawInput: { command },
@@ -759,7 +778,7 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
 		if (!sessionState.currentToolCallId) {
 			sessionState.currentToolCallId = toolCallId
 		}
-		const title = "Browser"
+		const title = buildBrowserActionTitle(action?.action)
 		const kind = action ? BROWSER_ACTION_KIND_MAP[action.action] || "execute" : "execute"
 
 		updates.push({
@@ -794,28 +813,34 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
  */
 
 /**
-/**
  * Build a human-readable title for a tool operation.
  */
 function buildToolTitle(toolInfo: DiracSayTool): string {
+	const pathSuffix = toolInfo.path ? `: ${truncateTitleValue(toolInfo.path)}` : ""
+	const regexSuffix = (toolInfo as { regex?: string }).regex
+		? `: ${truncateTitleValue((toolInfo as { regex?: string }).regex!)}`
+		: ""
+
 	switch (toolInfo.tool) {
 		case "editFile":
 		case "editedExistingFile":
-			return "Edit"
+			return `Edit${pathSuffix}`
 		case "replaceSymbol":
-			return "Replace"
+			return `Replace${pathSuffix}`
 		case "newFileCreated":
-			return "Create"
+			return `Create file${pathSuffix}`
+		case "fileDeleted":
+			return `Delete file${pathSuffix}`
 		case "readFile":
 		case "readLineRange":
-			return "Read"
+			return `Read${pathSuffix}`
 		case "listFilesTopLevel":
 		case "listFilesRecursive":
-			return "List"
+			return `List${pathSuffix}`
 		case "listCodeDefinitionNames":
-			return "Definitions"
+			return `Definitions${pathSuffix}`
 		case "searchFiles":
-			return "Search"
+			return `Search${regexSuffix || pathSuffix}`
 		case "summarizeTask":
 			return "Summarize"
 		case "useSkill":
