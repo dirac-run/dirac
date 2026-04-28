@@ -370,7 +370,7 @@ export class SymbolIndexService {
 						)
 						const previousIndexed = filesIndexed
 						filesIndexed += validResults.length
-						if (!this.isFullScanInProgress || Math.floor(previousIndexed / 1000) < Math.floor(filesIndexed / 1000)) {
+						if (!this.isFullScanInProgress || Math.floor(previousIndexed / 5000) < Math.floor(filesIndexed / 5000)) {
 							this.scheduleSave()
 						}
 						Logger.info(`[SymbolIndexService] Indexed ${validResults.length} files in this batch`)

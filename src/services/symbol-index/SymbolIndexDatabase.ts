@@ -34,9 +34,28 @@ export class SymbolIndexDatabase {
 		let db: Database
 
 		if (fs.existsSync(dbPath)) {
-			Logger.info(`[SymbolIndexDatabase] Loading existing database from ${dbPath}`)
-			const fileBuffer = fs.readFileSync(dbPath)
-			db = new SQL.Database(fileBuffer)
+			try {
+				Logger.info(`[SymbolIndexDatabase] Loading existing database from ${dbPath}`)
+				const stats = fs.statSync(dbPath)
+				const size = stats.size
+				const fileBuffer = new Uint8Array(size)
+				const fd = fs.openSync(dbPath, "r")
+				try {
+					let offset = 0
+					const chunkSize = 1024 * 1024 * 512 // 512MB chunks
+					while (offset < size) {
+						const length = Math.min(chunkSize, size - offset)
+						fs.readSync(fd, fileBuffer, offset, length, offset)
+						offset += length
+					}
+				} finally {
+					fs.closeSync(fd)
+				}
+				db = new SQL.Database(fileBuffer)
+			} catch (error) {
+				Logger.error(`[SymbolIndexDatabase] Failed to load database from ${dbPath}: ${error}. Creating new database.`)
+				db = new SQL.Database()
+			}
 		} else {
 			Logger.info(`[SymbolIndexDatabase] Creating new database`)
 			db = new SQL.Database()
@@ -82,8 +101,24 @@ export class SymbolIndexDatabase {
 			return
 		}
 		Logger.info(`[SymbolIndexDatabase] Saving database to ${this.dbPath}`)
+		try {
+			this.db.run("VACUUM")
+		} catch (error) {
+			Logger.warn(`[SymbolIndexDatabase] VACUUM failed: ${error}`)
+		}
 		const data = this.db.export()
-		fs.writeFileSync(this.dbPath, data)
+		const fd = fs.openSync(this.dbPath, "w")
+		try {
+			let offset = 0
+			const chunkSize = 1024 * 1024 * 512 // 512MB chunks
+			while (offset < data.length) {
+				const length = Math.min(chunkSize, data.length - offset)
+				fs.writeSync(fd, data, offset, length)
+				offset += length
+			}
+		} finally {
+			fs.closeSync(fd)
+		}
 		this.isDirty = false
 		Logger.info(`[SymbolIndexDatabase] Database saved successfully`)
 	}
