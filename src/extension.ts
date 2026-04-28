@@ -552,8 +552,13 @@ ${ctx.cellJson || "{}"}
 		}
 		const timeout = setTimeout(async () => {
 			debounceMap.delete(fsPath)
-			await SymbolIndexService.getInstance().updateFile(fsPath)
+			try {
+				await SymbolIndexService.getInstance().updateFile(fsPath)
+			} catch (error) {
+				Logger.error(`[Dirac] Symbol index watcher failed to update ${fsPath}:`, error)
+			}
 		}, DEBOUNCE_MS)
+		timeout.unref?.()
 		debounceMap.set(fsPath, timeout)
 	}
 
@@ -565,7 +570,11 @@ ${ctx.cellJson || "{}"}
 			clearTimeout(debounceMap.get(fsPath))
 			debounceMap.delete(fsPath)
 		}
-		await SymbolIndexService.getInstance().removeFile(fsPath)
+		try {
+			await SymbolIndexService.getInstance().removeFile(fsPath)
+		} catch (error) {
+			Logger.error(`[Dirac] Symbol index watcher failed to remove ${fsPath}:`, error)
+		}
 	})
 
 	context.subscriptions.push(fileWatcher)

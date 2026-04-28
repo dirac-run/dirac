@@ -3,29 +3,100 @@ import * as path from "path"
 import type { Database } from "sql.js"
 import initSqlJs from "sql.js"
 import { Logger } from "../../shared/services/Logger"
-import { SymbolLocation } from "./SymbolIndexService"
+import type { SymbolLocation } from "./SymbolIndexService"
 
 export interface FileMetadata {
 	mtime: number
 	size: number
 }
 
+export interface SymbolIndexDatabaseOptions {
+	maxPersistedBytes?: number
+}
+
+export interface SymbolIndexDatabaseStats {
+	estimatedSizeBytes: number | null
+	fileCount: number
+	symbolCount: number
+}
+
+const CHUNK_SIZE = 1024 * 1024 * 512 // 512 MiB
+const DEFAULT_MAX_PERSISTED_BYTES = 128 * 1024 * 1024
+
+function getConfiguredMaxPersistedBytes(): number {
+	const raw = process.env.DIRAC_SYMBOL_INDEX_MAX_DB_BYTES
+	if (!raw) return DEFAULT_MAX_PERSISTED_BYTES
+
+	const value = Number.parseInt(raw, 10)
+	if (!Number.isFinite(value) || value <= 0) return DEFAULT_MAX_PERSISTED_BYTES
+	return value
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`
+	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`
+}
+
+function readFileChunked(filePath: string): Uint8Array {
+	const stats = fs.statSync(filePath)
+	const fileBuffer = new Uint8Array(stats.size)
+	const fd = fs.openSync(filePath, "r")
+	try {
+		let offset = 0
+		while (offset < stats.size) {
+			const length = Math.min(CHUNK_SIZE, stats.size - offset)
+			fs.readSync(fd, fileBuffer, offset, length, offset)
+			offset += length
+		}
+	} finally {
+		fs.closeSync(fd)
+	}
+	return fileBuffer
+}
+
+function writeFileChunked(filePath: string, data: Uint8Array): void {
+	const fd = fs.openSync(filePath, "w")
+	try {
+		let offset = 0
+		while (offset < data.length) {
+			const length = Math.min(CHUNK_SIZE, data.length - offset)
+			fs.writeSync(fd, data, offset, length)
+			offset += length
+		}
+	} finally {
+		fs.closeSync(fd)
+	}
+}
+
 export class SymbolIndexDatabase {
 	private db: Database
-	private dbPath: string
+	private dbPath: string | null
 	private isDirty = false
+	private maxPersistedBytes: number
 
-	private constructor(db: Database, dbPath: string) {
+	private constructor(db: Database, dbPath: string | null, options: SymbolIndexDatabaseOptions = {}) {
 		this.db = db
 		this.dbPath = dbPath
+		this.maxPersistedBytes = options.maxPersistedBytes ?? getConfiguredMaxPersistedBytes()
 	}
 
-	public static async create(dbPath: string): Promise<SymbolIndexDatabase> {
-		Logger.info(`[SymbolIndexDatabase] Initializing database at ${dbPath}`)
-		const dbDir = path.dirname(dbPath)
-		if (!fs.existsSync(dbDir)) {
-			Logger.info(`[SymbolIndexDatabase] Creating database directory: ${dbDir}`)
-			fs.mkdirSync(dbDir, { recursive: true })
+	public static async create(dbPath?: string | null, options: SymbolIndexDatabaseOptions = {}): Promise<SymbolIndexDatabase> {
+		Logger.info(`[SymbolIndexDatabase] Initializing database${dbPath ? ` at ${dbPath}` : " in memory"}`)
+
+		let skipExistingDb = false
+		if (dbPath) {
+			const dbDir = path.dirname(dbPath)
+			if (!fs.existsSync(dbDir)) {
+				Logger.info(`[SymbolIndexDatabase] Creating database directory: ${dbDir}`)
+				fs.mkdirSync(dbDir, { recursive: true })
+			}
+
+			skipExistingDb = SymbolIndexDatabase.quarantineOversizedExistingDatabase(
+				dbPath,
+				options.maxPersistedBytes ?? getConfiguredMaxPersistedBytes(),
+			)
 		}
 
 		const SQL = await initSqlJs({
@@ -33,27 +104,21 @@ export class SymbolIndexDatabase {
 		})
 		let db: Database
 
-		if (fs.existsSync(dbPath)) {
+		if (dbPath && !skipExistingDb && fs.existsSync(dbPath)) {
+			Logger.info(`[SymbolIndexDatabase] Loading existing database from ${dbPath}`)
 			try {
-				Logger.info(`[SymbolIndexDatabase] Loading existing database from ${dbPath}`)
-				const stats = fs.statSync(dbPath)
-				const size = stats.size
-				const fileBuffer = new Uint8Array(size)
-				const fd = fs.openSync(dbPath, "r")
-				try {
-					let offset = 0
-					const chunkSize = 1024 * 1024 * 512 // 512MB chunks
-					while (offset < size) {
-						const length = Math.min(chunkSize, size - offset)
-						fs.readSync(fd, fileBuffer, offset, length, offset)
-						offset += length
-					}
-				} finally {
-					fs.closeSync(fd)
-				}
-				db = new SQL.Database(fileBuffer)
+				db = new SQL.Database(readFileChunked(dbPath))
 			} catch (error) {
-				Logger.error(`[SymbolIndexDatabase] Failed to load database from ${dbPath}: ${error}. Creating new database.`)
+				const corruptPath = `${dbPath}.corrupt-${Date.now()}`
+				Logger.error(
+					`[SymbolIndexDatabase] Failed to load existing database. Quarantining at ${corruptPath} and rebuilding:`,
+					error,
+				)
+				try {
+					fs.renameSync(dbPath, corruptPath)
+				} catch (renameError) {
+					Logger.error(`[SymbolIndexDatabase] Failed to quarantine corrupt database at ${dbPath}:`, renameError)
+				}
 				db = new SQL.Database()
 			}
 		} else {
@@ -61,9 +126,54 @@ export class SymbolIndexDatabase {
 			db = new SQL.Database()
 		}
 
-		const instance = new SymbolIndexDatabase(db, dbPath)
-		instance.initialize()
-		return instance
+		const instance = new SymbolIndexDatabase(db, dbPath ?? null, options)
+		try {
+			instance.initialize()
+			return instance
+		} catch (error) {
+			if (!dbPath) {
+				throw error
+			}
+
+			const corruptPath = `${dbPath}.corrupt-${Date.now()}`
+			Logger.error(
+				`[SymbolIndexDatabase] Failed to initialize existing database. Quarantining at ${corruptPath} and rebuilding:`,
+				error,
+			)
+			try {
+				db.close()
+			} catch {
+				// Best-effort close before rebuilding.
+			}
+			try {
+				if (fs.existsSync(dbPath)) fs.renameSync(dbPath, corruptPath)
+			} catch (renameError) {
+				Logger.error(`[SymbolIndexDatabase] Failed to quarantine corrupt database at ${dbPath}:`, renameError)
+			}
+
+			const rebuilt = new SymbolIndexDatabase(new SQL.Database(), dbPath, options)
+			rebuilt.initialize()
+			return rebuilt
+		}
+	}
+
+	private static quarantineOversizedExistingDatabase(dbPath: string, maxPersistedBytes: number): boolean {
+		if (!fs.existsSync(dbPath)) return false
+
+		try {
+			const stats = fs.statSync(dbPath)
+			if (stats.size <= maxPersistedBytes) return false
+
+			const quarantinePath = `${dbPath}.oversized-${Date.now()}`
+			Logger.error(
+				`[SymbolIndexDatabase] Existing index database is ${formatBytes(stats.size)}, exceeding max ${formatBytes(maxPersistedBytes)}. Quarantining at ${quarantinePath} and rebuilding.`,
+			)
+			fs.renameSync(dbPath, quarantinePath)
+			return false
+		} catch (error) {
+			Logger.error(`[SymbolIndexDatabase] Failed to quarantine oversized database at ${dbPath}; skipping load:`, error)
+			return true
+		}
 	}
 
 	private initialize(): void {
@@ -96,31 +206,84 @@ export class SymbolIndexDatabase {
 		Logger.info("[SymbolIndexDatabase] Schema initialization complete")
 	}
 
-	public save(): void {
+	public save(): boolean {
 		if (!this.isDirty) {
-			return
+			return true
 		}
-		Logger.info(`[SymbolIndexDatabase] Saving database to ${this.dbPath}`)
-		try {
-			this.db.run("VACUUM")
-		} catch (error) {
-			Logger.warn(`[SymbolIndexDatabase] VACUUM failed: ${error}`)
+		if (!this.dbPath) {
+			this.isDirty = false
+			return true
 		}
-		const data = this.db.export()
-		const fd = fs.openSync(this.dbPath, "w")
+
+		const stats = this.getStats()
+		if (stats.estimatedSizeBytes !== null && stats.estimatedSizeBytes > this.maxPersistedBytes) {
+			Logger.error(
+				`[SymbolIndexDatabase] Refusing to save oversized symbol index. estimate=${formatBytes(stats.estimatedSizeBytes)} max=${formatBytes(this.maxPersistedBytes)} files=${stats.fileCount} symbols=${stats.symbolCount}`,
+			)
+			this.isDirty = false
+			return false
+		}
+
+		let tmpPath: string | null = null
 		try {
-			let offset = 0
-			const chunkSize = 1024 * 1024 * 512 // 512MB chunks
-			while (offset < data.length) {
-				const length = Math.min(chunkSize, data.length - offset)
-				fs.writeSync(fd, data, offset, length)
-				offset += length
+			Logger.info(`[SymbolIndexDatabase] Saving database to ${this.dbPath}`)
+			try {
+				this.db.run("VACUUM")
+			} catch (error) {
+				Logger.warn(`[SymbolIndexDatabase] VACUUM failed: ${error}`)
 			}
-		} finally {
-			fs.closeSync(fd)
+
+			const data = this.db.export()
+			if (data.byteLength > this.maxPersistedBytes) {
+				Logger.error(
+					`[SymbolIndexDatabase] Refusing to write oversized exported symbol index. export=${formatBytes(data.byteLength)} max=${formatBytes(this.maxPersistedBytes)} files=${stats.fileCount} symbols=${stats.symbolCount}`,
+				)
+				this.isDirty = false
+				return false
+			}
+
+			tmpPath = `${this.dbPath}.${process.pid}.${Date.now()}.tmp`
+			writeFileChunked(tmpPath, data)
+			fs.renameSync(tmpPath, this.dbPath)
+			this.isDirty = false
+			Logger.info(`[SymbolIndexDatabase] Database saved successfully (${formatBytes(data.byteLength)})`)
+			return true
+		} catch (error) {
+			Logger.error(`[SymbolIndexDatabase] Failed to save database to ${this.dbPath}:`, error)
+			if (tmpPath) {
+				try {
+					if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+				} catch (cleanupError) {
+					Logger.error(`[SymbolIndexDatabase] Failed to remove temporary database ${tmpPath}:`, cleanupError)
+				}
+			}
+			this.isDirty = false
+			return false
 		}
-		this.isDirty = false
-		Logger.info(`[SymbolIndexDatabase] Database saved successfully`)
+	}
+
+	private getScalarNumber(query: string): number | null {
+		try {
+			const result = this.db.exec(query)
+			const value = result[0]?.values?.[0]?.[0]
+			const num = Number(value)
+			return Number.isFinite(num) ? num : null
+		} catch {
+			return null
+		}
+	}
+
+	public getStats(): SymbolIndexDatabaseStats {
+		const pageCount = this.getScalarNumber("PRAGMA page_count")
+		const pageSize = this.getScalarNumber("PRAGMA page_size")
+		const fileCount = this.getScalarNumber("SELECT COUNT(*) FROM files") ?? 0
+		const symbolCount = this.getScalarNumber("SELECT COUNT(*) FROM symbols") ?? 0
+
+		return {
+			estimatedSizeBytes: pageCount !== null && pageSize !== null ? pageCount * pageSize : null,
+			fileCount,
+			symbolCount,
+		}
 	}
 
 	public getFileMetadata(relPath: string): FileMetadata | null {
@@ -159,11 +322,12 @@ export class SymbolIndexDatabase {
 	): void {
 		this.isDirty = true
 		this.db.run("BEGIN TRANSACTION")
+		let insertSymbol: any = null
 		try {
 			this.db.run("DELETE FROM symbols WHERE file_path = ?", [relPath])
 			this.db.run("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)", [relPath, mtime, size])
 
-			const insertSymbol = this.db.prepare(`
+			insertSymbol = this.db.prepare(`
 				INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			`)
@@ -180,11 +344,12 @@ export class SymbolIndexDatabase {
 					sym.r[3],
 				])
 			}
-			insertSymbol.free()
 			this.db.run("COMMIT")
 		} catch (error) {
 			this.db.run("ROLLBACK")
 			throw error
+		} finally {
+			if (insertSymbol) insertSymbol.free()
 		}
 	}
 
@@ -247,7 +412,7 @@ export class SymbolIndexDatabase {
 		this.db.run("DELETE FROM files WHERE path = ?", [relPath])
 	}
 
-		public getSymbolsByName(name: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
+	public getSymbolsByName(name: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
 		let query =
 			"SELECT file_path, name, type, kind, start_line, start_column, end_line, end_column FROM symbols WHERE name = ?"
 		const params: any[] = [name]
@@ -281,8 +446,10 @@ export class SymbolIndexDatabase {
 		return results
 	}
 
-	public close(): void {
-		this.save()
+	public close(saveBeforeClose = true): void {
+		if (saveBeforeClose) {
+			this.save()
+		}
 		this.db.close()
 	}
 }

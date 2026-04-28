@@ -1,10 +1,23 @@
 import { loadRequiredLanguageParsers } from "@services/tree-sitter/languageParser"
 import * as fs from "fs/promises"
+import ignore from "ignore"
 import pLimit from "p-limit"
 import * as path from "path"
 import Parser from "web-tree-sitter"
 import { Logger } from "../../shared/services/Logger"
 import { SymbolIndexDatabase } from "./SymbolIndexDatabase"
+
+function getPositiveIntegerEnv(name: string, fallback: number): number {
+	const raw = process.env[name]
+	if (!raw) return fallback
+
+	const value = Number.parseInt(raw, 10)
+	return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function toIgnorePath(relPath: string): string {
+	return relPath.split(/[\\/]/).join("/")
+}
 
 export interface SymbolLocation {
 	path: string
@@ -115,6 +128,10 @@ export class SymbolIndexService {
 	private static readonly INDEX_DIR = ".dirac-symbol-index"
 	private static readonly INDEX_FILE = "data.db"
 	private static readonly SAVE_DEBOUNCE_MS = 2000
+	private static readonly MAX_FILES_PER_SCAN = getPositiveIntegerEnv("DIRAC_SYMBOL_INDEX_MAX_FILES", 20_000)
+	private static readonly MAX_SCAN_QUEUE_LENGTH = getPositiveIntegerEnv("DIRAC_SYMBOL_INDEX_MAX_SCAN_QUEUE", 100_000)
+	private static readonly MAX_SYMBOLS_PER_FILE = getPositiveIntegerEnv("DIRAC_SYMBOL_INDEX_MAX_SYMBOLS_PER_FILE", 2_000)
+	private static readonly MAX_REFERENCES_PER_FILE = getPositiveIntegerEnv("DIRAC_SYMBOL_INDEX_MAX_REFERENCES_PER_FILE", 1_000)
 	private static readonly VERSION = 1
 
 	private projectRoot = ""
@@ -126,6 +143,7 @@ export class SymbolIndexService {
 	private isPersistenceEnabled = true
 	private skipRepoCheck = false
 	private pendingUpdates: Set<string> = new Set()
+	private ignoreMatcher: ReturnType<typeof ignore> | null = null
 
 	private constructor() {}
 
@@ -143,6 +161,9 @@ export class SymbolIndexService {
 
 	public setPersistenceEnabled(enabled: boolean): void {
 		this.isPersistenceEnabled = enabled
+		if (!enabled) {
+			this.clearSaveTimer()
+		}
 	}
 
 	private async isRepository(dirPath: string): Promise<boolean> {
@@ -167,33 +188,32 @@ export class SymbolIndexService {
 
 		const isRepo = this.skipRepoCheck || (await this.isRepository(projectRoot))
 		if (!isRepo) {
-			Logger.info(`[SymbolIndexService] ${projectRoot} is not a repository. Skipping indexing to prevent performance issues.`)
+			Logger.info(
+				`[SymbolIndexService] ${projectRoot} is not a repository. Skipping indexing to prevent performance issues.`,
+			)
 			return
 		}
-
-
 		this.isScanningInternal = true
 		try {
 			const oldRoot = this.projectRoot
 			this.projectRoot = projectRoot
+			this.ignoreMatcher = await this.loadIgnoreMatcher(projectRoot)
 
 			if (oldRoot !== projectRoot) {
 				Logger.info(`[SymbolIndexService] Root changed from ${oldRoot} to ${projectRoot}`)
 				this.scanQueue = []
 				this.pendingUpdates.clear()
-
-				if (this.db) {
-					Logger.info("[SymbolIndexService] Closing old database")
-					this.db.close()
-					this.db = null
-				}
+				this.clearSaveTimer()
+				this.closeDatabase("root change")
 
 				if (this.isPersistenceEnabled) {
 					await this.ensureIndexDir()
 					await this.excludeIndexDirFromGit()
 				}
-				const dbPath = path.join(this.projectRoot, SymbolIndexService.INDEX_DIR, SymbolIndexService.INDEX_FILE)
-				Logger.info(`[SymbolIndexService] Creating database instance at ${dbPath}`)
+				const dbPath = this.isPersistenceEnabled
+					? path.join(this.projectRoot, SymbolIndexService.INDEX_DIR, SymbolIndexService.INDEX_FILE)
+					: null
+				Logger.info(`[SymbolIndexService] Creating database instance${dbPath ? ` at ${dbPath}` : " in memory"}`)
 				this.db = await SymbolIndexDatabase.create(dbPath)
 			}
 			this.isFullScanInProgress = true
@@ -206,6 +226,44 @@ export class SymbolIndexService {
 			this.isFullScanInProgress = false
 			this.isScanningInternal = false
 		}
+	}
+
+	private clearSaveTimer(): void {
+		if (!this.saveTimeout) return
+		clearTimeout(this.saveTimeout)
+		this.saveTimeout = null
+	}
+
+	private closeDatabase(reason: string): void {
+		if (!this.db) return
+		const db = this.db
+		this.db = null
+		try {
+			Logger.info(`[SymbolIndexService] Closing database (${reason})`)
+			db.close(this.isPersistenceEnabled)
+		} catch (error) {
+			Logger.error(`[SymbolIndexService] Failed to close database during ${reason}:`, error)
+		}
+	}
+
+	private async loadIgnoreMatcher(projectRoot: string): Promise<ReturnType<typeof ignore> | null> {
+		const matcher = ignore()
+		let hasPatterns = false
+
+		for (const fileName of [".gitignore", ".diracignore"]) {
+			const ignorePath = path.join(projectRoot, fileName)
+			try {
+				const content = await fs.readFile(ignorePath, "utf8")
+				if (content.trim()) {
+					matcher.add(content)
+					hasPatterns = true
+				}
+			} catch {
+				// Ignore files are optional.
+			}
+		}
+
+		return hasPatterns ? matcher : null
 	}
 
 	private async ensureIndexDir(): Promise<void> {
@@ -248,7 +306,8 @@ export class SymbolIndexService {
 			const entry = SymbolIndexService.INDEX_DIR + "/"
 			if (!lines.some((line) => line.trim() === entry || line.trim() === SymbolIndexService.INDEX_DIR)) {
 				Logger.info(`[SymbolIndexService] Adding ${entry} to .git/info/exclude`)
-				const newContent = content.endsWith("\n") || content === "" ? content + entry + "\n" : content + "\n" + entry + "\n"
+				const newContent =
+					content.endsWith("\n") || content === "" ? content + entry + "\n" : content + "\n" + entry + "\n"
 				await fs.writeFile(excludePath, newContent)
 			}
 		} catch (error) {
@@ -263,8 +322,21 @@ export class SymbolIndexService {
 		return false
 	}
 
+	private isIgnoredRelPath(relPath: string, isDirectory = false): boolean {
+		if (!this.ignoreMatcher || !relPath) return false
+		const ignorePath = toIgnorePath(relPath)
+		return this.ignoreMatcher.ignores(ignorePath) || (isDirectory && this.ignoreMatcher.ignores(`${ignorePath}/`))
+	}
+
+	private isRelPathInsideProject(relPath: string): boolean {
+		return relPath !== "" && !relPath.startsWith("..") && !path.isAbsolute(relPath)
+	}
+
 	private shouldIndexFile(relPath: string): boolean {
-		const parts = relPath.split(path.sep)
+		if (!this.isRelPathInsideProject(relPath)) return false
+		if (this.isIgnoredRelPath(relPath)) return false
+
+		const parts = relPath.split(/[\\/]/)
 		for (const part of parts) {
 			if (this.isExcluded(part)) return false
 		}
@@ -283,12 +355,13 @@ export class SymbolIndexService {
 
 		let filesChecked = 0
 		let filesIndexed = 0
+		let scanLimitReached = false
 		const limit = pLimit(SymbolIndexService.PARALLEL_PARSING_LIMIT)
 
 		const nameCache = new Map<string, string>()
 		let languageParsers: Record<string, { parser: Parser; query: Parser.Query }> = {}
 		let queueIndex = 0
-		while (queueIndex < this.scanQueue.length) {
+		while (queueIndex < this.scanQueue.length && !scanLimitReached) {
 			if (this.projectRoot !== root) return
 
 			const filesToUpdate: { absolutePath: string; relPath: string }[] = []
@@ -299,18 +372,38 @@ export class SymbolIndexService {
 				itemsProcessedInBatch++
 
 				try {
-					const stats = await fs.stat(absolutePath)
+					const stats = await fs.lstat(absolutePath)
+					if (stats.isSymbolicLink()) {
+						continue
+					}
 
 					if (stats.isDirectory()) {
+						if (relPath && this.isIgnoredRelPath(relPath, true)) continue
 						const entries = await fs.readdir(absolutePath, { withFileTypes: true })
 						for (const entry of entries) {
 							if (this.isExcluded(entry.name)) continue
+							if (entry.isSymbolicLink()) continue
 							const entryAbsPath = path.join(absolutePath, entry.name)
 							const entryRelPath = relPath === "" ? entry.name : path.join(relPath, entry.name)
+							if (this.isIgnoredRelPath(entryRelPath, entry.isDirectory())) continue
+							if (this.scanQueue.length >= SymbolIndexService.MAX_SCAN_QUEUE_LENGTH) {
+								Logger.error(
+									`[SymbolIndexService] Scan queue reached ${SymbolIndexService.MAX_SCAN_QUEUE_LENGTH}; stopping traversal to prevent runaway indexing.`,
+								)
+								scanLimitReached = true
+								break
+							}
 							this.scanQueue.push({ absolutePath: entryAbsPath, relPath: entryRelPath })
 						}
 					} else if (stats.isFile()) {
 						if (this.shouldIndexFile(relPath)) {
+							if (filesChecked >= SymbolIndexService.MAX_FILES_PER_SCAN) {
+								Logger.error(
+									`[SymbolIndexService] Reached ${SymbolIndexService.MAX_FILES_PER_SCAN} indexable files; stopping scan to prevent oversized idle background index.`,
+								)
+								scanLimitReached = true
+								break
+							}
 							filesChecked++
 							const existing = this.db?.getFileMetadata(relPath)
 							const mtimeSecs = existing ? Math.floor(existing.mtime / 1000) : 0
@@ -370,7 +463,7 @@ export class SymbolIndexService {
 						)
 						const previousIndexed = filesIndexed
 						filesIndexed += validResults.length
-						if (!this.isFullScanInProgress || Math.floor(previousIndexed / 5000) < Math.floor(filesIndexed / 5000)) {
+						if (!this.isFullScanInProgress || Math.floor(previousIndexed / 1000) < Math.floor(filesIndexed / 1000)) {
 							this.scheduleSave()
 						}
 						Logger.info(`[SymbolIndexService] Indexed ${validResults.length} files in this batch`)
@@ -394,10 +487,13 @@ export class SymbolIndexService {
 	private async indexFile(
 		absolutePath: string,
 		languageParsers: Record<string, { parser: Parser; query: Parser.Query }>,
-		nameCache?: Map<string, string>
+		nameCache?: Map<string, string>,
 	): Promise<FileIndexEntry | null> {
 		try {
-			const stats = await fs.stat(absolutePath)
+			const stats = await fs.lstat(absolutePath)
+			if (stats.isSymbolicLink()) {
+				return null
+			}
 			if (stats.size > SymbolIndexService.MAX_FILE_SIZE) {
 				return null
 			}
@@ -414,11 +510,15 @@ export class SymbolIndexService {
 				if (!tree || !tree.rootNode) return null
 
 				const symbols: FileIndexEntry["symbols"] = []
+				let referenceCount = 0
 				const captures = query.captures(tree.rootNode)
 
 				for (const capture of captures) {
 					const { node, name } = capture
 					if (name === "name.reference" || name.includes("name.definition")) {
+						if (symbols.length >= SymbolIndexService.MAX_SYMBOLS_PER_FILE) break
+						const isReference = name === "name.reference"
+						if (isReference && referenceCount >= SymbolIndexService.MAX_REFERENCES_PER_FILE) continue
 						let text = fileContent.slice(node.startIndex, node.endIndex)
 						if (nameCache) {
 							const cached = nameCache.get(text)
@@ -430,10 +530,11 @@ export class SymbolIndexService {
 						}
 						symbols.push({
 							n: text,
-							t: name.includes("name.definition") ? "d" : "r",
+							t: isReference ? "r" : "d",
 							k: name.split(".").pop(),
 							r: [node.startPosition.row, node.startPosition.column, node.endPosition.row, node.endPosition.column],
 						})
+						if (isReference) referenceCount++
 					}
 				}
 
@@ -454,7 +555,7 @@ export class SymbolIndexService {
 		}
 	}
 
-		public getSymbols(symbol: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
+	public getSymbols(symbol: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
 		return this.db?.getSymbolsByName(symbol, type, limit) || []
 	}
 
@@ -480,6 +581,8 @@ export class SymbolIndexService {
 				this.db.updateFileSymbols(relPath, entry.mtime, entry.size, entry.symbols)
 				this.scheduleSave()
 			}
+		} catch (error) {
+			Logger.error(`[SymbolIndexService] Failed to update symbol index for ${absolutePath}:`, error)
 		} finally {
 			this.pendingUpdates.delete(absolutePath)
 		}
@@ -487,8 +590,13 @@ export class SymbolIndexService {
 
 	async removeFile(absolutePath: string): Promise<void> {
 		const relPath = path.relative(this.projectRoot, absolutePath)
-		this.db?.removeFile(relPath)
-		this.scheduleSave()
+		if (!this.isRelPathInsideProject(relPath)) return
+		try {
+			this.db?.removeFile(relPath)
+			this.scheduleSave()
+		} catch (error) {
+			Logger.error(`[SymbolIndexService] Failed to remove ${absolutePath} from symbol index:`, error)
+		}
 	}
 
 	private scheduleSave(): void {
@@ -503,20 +611,26 @@ export class SymbolIndexService {
 		}
 		this.saveTimeout = setTimeout(() => {
 			this.saveTimeout = null
-			if (this.db) {
-				this.db.save()
+			try {
+				if (this.db) {
+					const saved = this.db.save()
+					if (!saved) {
+						Logger.error(
+							"[SymbolIndexService] Disabling symbol-index persistence after save failure; in-memory lookup remains available for this session.",
+						)
+						this.isPersistenceEnabled = false
+					}
+				}
+			} catch (error) {
+				Logger.error("[SymbolIndexService] Unhandled symbol-index save failure; disabling persistence:", error)
+				this.isPersistenceEnabled = false
 			}
 		}, SymbolIndexService.SAVE_DEBOUNCE_MS)
+		this.saveTimeout.unref?.()
 	}
 
 	public dispose(): void {
-		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout)
-			this.saveTimeout = null
-		}
-		if (this.db) {
-			this.db.close()
-			this.db = null
-		}
+		this.clearSaveTimer()
+		this.closeDatabase("dispose")
 	}
 }

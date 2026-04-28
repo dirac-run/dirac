@@ -81,19 +81,25 @@ export async function initialize(storageContext: StorageContext): Promise<DiracW
 	// =============== Symbol Index Service ===============
 	// Initialize symbol index for the project in background with a delay to avoid blocking startup
 	const INITIALIZATION_DELAY_MS = 5000
-	setTimeout(() => {
-		HostProvider.workspace.getWorkspacePaths({}).then((response) => {
-			const paths = response.paths
-			if (paths && paths.length > 0) {
-				const projectRoot = paths[0]
-				SymbolIndexService.getInstance()
-					.initialize(projectRoot)
-					.catch((error) => {
-						Logger.error("[Dirac] Failed to initialize SymbolIndexService:", error)
-					})
-			}
-		})
+	const symbolIndexTimer = setTimeout(() => {
+		HostProvider.workspace
+			.getWorkspacePaths({})
+			.then((response) => {
+				const paths = response.paths
+				if (paths && paths.length > 0) {
+					const projectRoot = paths[0]
+					SymbolIndexService.getInstance()
+						.initialize(projectRoot)
+						.catch((error) => {
+							Logger.error("[Dirac] Failed to initialize SymbolIndexService:", error)
+						})
+				}
+			})
+			.catch((error) => {
+				Logger.error("[Dirac] Failed to resolve workspace paths for SymbolIndexService:", error)
+			})
 	}, INITIALIZATION_DELAY_MS)
+	symbolIndexTimer.unref?.()
 
 	return webview
 }

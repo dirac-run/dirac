@@ -151,7 +151,12 @@ export class SyncWorker {
 		}
 
 		this.emit({ type: WorkerEvent.WorkerStarted })
-		this.interval = setInterval(() => this.processQueue(), this.options.intervalMs)
+		this.interval = setInterval(() => {
+			this.processQueue().catch((err) => {
+				Logger.error("SyncWorker interval process error:", err)
+			})
+		}, this.options.intervalMs)
+		this.interval.unref?.()
 
 		// Run immediately but don't await
 		this.processQueue().catch((err) => {
