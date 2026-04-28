@@ -109,7 +109,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ open, onClose, ver
 							<a
 								aria-label="Join our Discord"
 								className="text-[var(--vscode-foreground)] hover:text-[var(--vscode-textLink-activeForeground)] transition-colors"
-								href="https://discord.gg/dirac"
+								href="https://discord.gg/mWkzrF4h"
 								rel="noopener noreferrer"
 								target="_blank">
 								<DiscordIcon />

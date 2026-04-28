@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/dirac-run/dirac"><strong>GitHub</strong></a> |
   <a href="https://www.npmjs.com/package/dirac-cli"><strong>NPM</strong></a> |
-  <a href="https://discord.gg/dirac"><strong>Discord</strong></a>
+  <a href="https://discord.gg/mWkzrF4h"><strong>Discord</strong></a>
 </p>
 
 
