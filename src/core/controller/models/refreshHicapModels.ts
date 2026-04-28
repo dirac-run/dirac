@@ -23,13 +23,8 @@ interface HicapRawModelInfo {
  * @param request Empty request object
  * @returns Response containing the OpenRouter models
  */
-export async function refreshHicapModels(
-	controller: Controller,
-	_request: EmptyRequest,
-): Promise<OpenRouterCompatibleModelInfo> {
-
+export async function refreshHicapModels(controller: Controller, _request: EmptyRequest): Promise<OpenRouterCompatibleModelInfo> {
 	const hicapModelsFilePath = path.join(await ensureCacheDirectoryExists(), GlobalFileNames.hicapModels)
-
 
 	const models: Record<string, OpenRouterModelInfo> = {}
 	try {

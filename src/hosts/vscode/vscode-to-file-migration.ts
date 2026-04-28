@@ -45,7 +45,6 @@ import type { StorageContext } from "@/shared/storage/storage-context"
 /** Bump this when adding new migration steps. */
 const CURRENT_MIGRATION_VERSION = 2
 
-
 /** Sentinel key written to both globalState and workspaceState to track migration independently. */
 const MIGRATION_VERSION_KEY = "__vscodeMigrationVersion"
 
@@ -200,7 +199,6 @@ export async function exportVSCodeStorageToSharedFiles(
 		// ─── 3. Migrate global storage folders (tasks, history, etc.) ───
 		await migrateGlobalStorageFolders(vscodeContext, storage)
 
-
 		Logger.info(
 			`[Migration] Complete: ${result.globalStateCount} global state keys, ` +
 				`${result.secretsCount} secrets, ${result.workspaceStateCount} workspace state keys migrated. ` +
@@ -214,7 +212,6 @@ export async function exportVSCodeStorageToSharedFiles(
 
 	return result
 }
-
 
 /**
  * Migrate global storage folders (tasks, checkpoints, etc.) to the shared Dirac directory.
@@ -300,4 +297,3 @@ async function mergeTaskHistory(sourceFile: string, destFile: string) {
 		Logger.error("[Migration] Error merging task history files:", error)
 	}
 }
-
