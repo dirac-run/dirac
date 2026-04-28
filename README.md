@@ -90,6 +90,13 @@ You can provide API keys via environment variables to skip the `dirac auth` step
 - `HF_TOKEN` (HuggingFace)
 - ... and others (see `src/shared/storage/env-config.ts` for the full list).
 
+#### Using Any OpenAI compatible endpoint
+
+You can use OPENAI_COMPATIBLE_CUSTOM_KEY for any provider and model as long as it exposes an OpenAI compatible endpoint. Using OPENAI_COMPATIBLE_CUSTOM_KEY requires providing both the model and the provider in the cli
+
+`$ OPENAI_COMPATIBLE_CUSTOM_KEY="xxx" dirac -y --provider "https://api.deepseek.com/v1" --model deepseek-v4-flash "explain Dirac Delta function"`
+
+
 #### AWS Bedrock
 Use Bedrock by setting AWS credentials and region. When any of these are present, Dirac automatically switches to the Bedrock provider:
 
