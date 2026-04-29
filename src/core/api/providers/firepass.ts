@@ -13,8 +13,6 @@ import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-p
 interface FirepassHandlerOptions extends CommonApiHandlerOptions {
 	fireworksApiKey?: string
 	firepassModelId?: string
-	fireworksModelMaxCompletionTokens?: number
-	fireworksModelMaxTokens?: number
 }
 
 export class FirepassHandler implements ApiHandler {
@@ -36,7 +34,7 @@ export class FirepassHandler implements ApiHandler {
 					apiKey: this.options.fireworksApiKey,
 				})
 			} catch (error) {
-				throw new Error(`Error creating Firepass client: ${error.message}`)
+				throw new Error(`Error creating Firepass client: ${error instanceof Error ? error.message : String(error)}`)
 			}
 		}
 		return this.client
@@ -45,9 +43,8 @@ export class FirepassHandler implements ApiHandler {
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: DiracTool[]): ApiStream {
 		const client = this.ensureClient()
-		const modelId = this.options.firepassModelId ?? ""
-
 		const model = this.getModel()
+		const modelId = model.id
 		const convertedMessages = convertToOpenAiMessages(messages)
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -71,10 +68,6 @@ export class FirepassHandler implements ApiHandler {
 			const delta = chunk.choices?.[0]?.delta
 			if (reasoning || delta?.content?.includes("<thinking>")) {
 				reasoning = (reasoning || "") + (delta.content ?? "")
-			}
-
-			if (delta?.tool_calls) {
-				yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
 			}
 
 			if (delta?.tool_calls) {
