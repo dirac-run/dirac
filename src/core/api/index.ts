@@ -1,5 +1,4 @@
 import { ApiConfiguration, ModelInfo, openAiModelInfoSaneDefaults, QwenApiRegions } from "@shared/api"
-import { ApiFormat } from "@shared/proto/dirac/models"
 import { Mode } from "@shared/storage/types"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
@@ -138,24 +137,6 @@ function createHandlerForProvider(
 		case "openai": {
 			const openAiModelId = mode === "plan" ? options.planModeOpenAiModelId : options.actModeOpenAiModelId
 			let openAiModelInfo = mode === "plan" ? options.planModeOpenAiModelInfo : options.actModeOpenAiModelInfo
-
-			const isResponsesApi = options.openAiBaseUrl?.includes("responses") && !options.openAiBaseUrl?.includes("completions")
-			if (isResponsesApi) {
-				return new OpenAiNativeHandler({
-					onRetryAttempt: options.onRetryAttempt,
-					openAiNativeApiKey: options.openAiCompatibleCustomApiKey || options.openAiApiKey,
-					openAiBaseUrl: options.openAiBaseUrl,
-					openAiHeaders: options.openAiHeaders,
-					apiModelId: openAiModelId,
-					openAiModelInfo: {
-						...(openAiModelInfo || openAiModelInfoSaneDefaults),
-						apiFormat: ApiFormat.OPENAI_RESPONSES,
-					},
-					reasoningEffort: mode === "plan" ? options.planModeReasoningEffort : options.actModeReasoningEffort,
-					thinkingBudgetTokens:
-						mode === "plan" ? options.planModeThinkingBudgetTokens : options.actModeThinkingBudgetTokens,
-				})
-			}
 
 			const isCustomUrl = options.openAiBaseUrl && options.openAiBaseUrl.startsWith("http")
 			if (options.openAiCompatibleCustomApiKey || isCustomUrl) {
