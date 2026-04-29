@@ -2307,12 +2307,12 @@ export const firepassModels = {
 		supportsImages: true,
 		supportsReasoning: true,
 		supportsPromptCache: true,
-		inputPrice: 0.6,
-		outputPrice: 3,
-		cacheWritesPrice: 0.6,
-		cacheReadsPrice: 0.1,
-		description:
-			"Kimi K2.5 Turbo via Fireworks AI - a high-performance model with tool support and reasoning capabilities.",
+		// Fireworks AI operates on a fixed pricing model, not per-token pricing
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description: "Kimi K2.5 Turbo via Fireworks AI - a high-performance model with tool support and reasoning capabilities.",
 	},
 } as const satisfies Record<string, OpenAiCompatibleModelInfo>
 
