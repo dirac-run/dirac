@@ -290,6 +290,8 @@ function convertApiProviderToProto(provider: string | undefined): ProtoApiProvid
 			return ProtoApiProvider.WANDB
 		case "fireworks":
 			return ProtoApiProvider.FIREWORKS
+		case "firepass":
+			return ProtoApiProvider.FIREPASS
 		case "xai":
 			return ProtoApiProvider.XAI
 		case "sambanova":
@@ -376,6 +378,8 @@ export function convertProtoToApiProvider(provider: ProtoApiProvider): ApiProvid
 			return "wandb"
 		case ProtoApiProvider.FIREWORKS:
 			return "fireworks"
+		case ProtoApiProvider.FIREPASS:
+			return "firepass"
 		case ProtoApiProvider.XAI:
 			return "xai"
 		case ProtoApiProvider.SAMBANOVA:

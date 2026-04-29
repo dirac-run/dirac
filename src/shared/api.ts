@@ -43,6 +43,7 @@ export type ApiProvider =
 	| "hicap"
 	| "nousResearch"
 	| "wandb"
+	| "firepass"
 
 export const ALL_PROVIDERS: ApiProvider[] = [
 	"anthropic",
@@ -86,6 +87,7 @@ export const ALL_PROVIDERS: ApiProvider[] = [
 	"hicap",
 	"nousResearch",
 	"wandb",
+	"firepass",
 ]
 
 export const DEFAULT_API_PROVIDER = "openrouter" as ApiProvider
@@ -205,7 +207,6 @@ export const GPT_5_5_TIERS = [
 		cacheReadsPrice: 1.0,
 	},
 ]
-
 
 export const GPT_5_4_TIERS = [
 	{
@@ -1150,7 +1151,7 @@ export const deepSeekModels = {
 		maxTokens: 384_000,
 		contextWindow: 1_048_576,
 		supportsImages: false,
-		supportsPromptCache: true, 
+		supportsPromptCache: true,
 		supportsReasoning: true,
 		supportsReasoningEffort: true,
 		supportsTools: true,
@@ -1163,7 +1164,7 @@ export const deepSeekModels = {
 		maxTokens: 384_000,
 		contextWindow: 1_048_576,
 		supportsImages: false,
-		supportsPromptCache: true, 
+		supportsPromptCache: true,
 		supportsReasoning: true,
 		supportsReasoningEffort: true,
 		supportsTools: true,
@@ -1537,7 +1538,6 @@ export const liteLlmModelInfoSaneDefaults: LiteLLMModelInfo = {
 	cacheReadsPrice: 0,
 	temperature: 0,
 }
-
 
 // Nebius AI Studio
 // https://docs.nebius.com/studio/inference/models
@@ -2295,6 +2295,27 @@ export const fireworksModels = {
 	},
 } as const satisfies Record<string, OpenAiCompatibleModelInfo>
 
+// Firepass (Fireworks Router Service)
+// Uses Fireworks API key but accesses models via router path
+export type FirepassModelId = keyof typeof firepassModels
+export const firepassDefaultModelId: FirepassModelId = "accounts/fireworks/routers/kimi-k2p5-turbo"
+export const firepassModels = {
+	"accounts/fireworks/routers/kimi-k2p5-turbo": {
+		supportsTools: true,
+		maxTokens: 16384,
+		contextWindow: 262144,
+		supportsImages: true,
+		supportsReasoning: true,
+		supportsPromptCache: true,
+		inputPrice: 0.6,
+		outputPrice: 3,
+		cacheWritesPrice: 0.6,
+		cacheReadsPrice: 0.1,
+		description:
+			"Kimi K2.5 Turbo via Fireworks AI - a high-performance model with tool support and reasoning capabilities.",
+	},
+} as const satisfies Record<string, OpenAiCompatibleModelInfo>
+
 // Qwen Code
 // https://chat.qwen.ai/
 export const qwenCodeModels = {
@@ -2443,6 +2464,7 @@ export const ALL_MODEL_MAPS: [ApiProvider, Record<string, ModelInfo>][] = [
 	["qwen-code", qwenCodeModels],
 	["minimax", minimaxModels],
 	["nousResearch", nousResearchModels],
+	["firepass", firepassModels],
 ]
 
 /**

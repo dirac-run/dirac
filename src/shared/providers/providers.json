@@ -89,6 +89,10 @@
 			"label": "Fireworks AI"
 		},
 		{
+			"value": "firepass",
+			"label": "Firepass (Fireworks AI)"
+		},
+		{
 			"value": "together",
 			"label": "Together"
 		},

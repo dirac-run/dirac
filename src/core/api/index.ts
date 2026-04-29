@@ -12,8 +12,10 @@ import { ClaudeCodeHandler } from "./providers/claude-code"
 import { DeepSeekHandler } from "./providers/deepseek"
 import { DifyHandler } from "./providers/dify"
 import { DoubaoHandler } from "./providers/doubao"
+import { FirepassHandler } from "./providers/firepass"
 import { FireworksHandler } from "./providers/fireworks"
 import { GeminiHandler } from "./providers/gemini"
+import { GithubCopilotHandler } from "./providers/github-copilot"
 import { GroqHandler } from "./providers/groq"
 import { HicapHandler } from "./providers/hicap"
 import { HuaweiCloudMaaSHandler } from "./providers/huawei-cloud-maas"
@@ -38,7 +40,6 @@ import { TogetherHandler } from "./providers/together"
 import { VercelAIGatewayHandler } from "./providers/vercel-ai-gateway"
 import { VertexHandler } from "./providers/vertex"
 import { VsCodeLmHandler } from "./providers/vscode-lm"
-import { GithubCopilotHandler } from "./providers/github-copilot"
 import { WandbHandler } from "./providers/wandb"
 import { XAIHandler } from "./providers/xai"
 import { ZAiHandler } from "./providers/zai"
@@ -132,7 +133,6 @@ function createHandlerForProvider(
 				geminiBaseUrl: options.geminiBaseUrl,
 				reasoningEffort: mode === "plan" ? options.planModeReasoningEffort : options.actModeReasoningEffort,
 				ulid: options.ulid,
-
 			})
 		case "openai": {
 			const openAiModelId = mode === "plan" ? options.planModeOpenAiModelId : options.actModeOpenAiModelId
@@ -151,7 +151,9 @@ function createHandlerForProvider(
 			const apiKey = options.openAiCompatibleCustomApiKey || options.openAiApiKey
 			if (apiKey) {
 				const maskedKey = `${apiKey.slice(0, 4)}****${apiKey.slice(-4)}`
-				Logger.info(`Using OpenAI API key: ${maskedKey} (from ${options.openAiCompatibleCustomApiKey ? "custom key" : "standard key"})`)
+				Logger.info(
+					`Using OpenAI API key: ${maskedKey} (from ${options.openAiCompatibleCustomApiKey ? "custom key" : "standard key"})`,
+				)
 			}
 
 			return new OpenAiHandler({
@@ -185,7 +187,6 @@ function createHandlerForProvider(
 				apiModelId: mode === "plan" ? options.planModeApiModelId : options.actModeApiModelId,
 				ulid: options.ulid,
 				geminiSearchEnabled: options.geminiSearchEnabled,
-
 			})
 		case "openai-native":
 			return new OpenAiNativeHandler({
@@ -225,6 +226,12 @@ function createHandlerForProvider(
 				onRetryAttempt: options.onRetryAttempt,
 				fireworksApiKey: options.fireworksApiKey,
 				fireworksModelId: mode === "plan" ? options.planModeFireworksModelId : options.actModeFireworksModelId,
+			})
+		case "firepass":
+			return new FirepassHandler({
+				onRetryAttempt: options.onRetryAttempt,
+				fireworksApiKey: options.fireworksApiKey,
+				firepassModelId: mode === "plan" ? options.planModeFirepassModelId : options.actModeFirepassModelId,
 			})
 		case "together":
 			return new TogetherHandler({
