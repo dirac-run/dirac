@@ -15,7 +15,6 @@ import { DoubaoHandler } from "./providers/doubao"
 import { FirepassHandler } from "./providers/firepass"
 import { FireworksHandler } from "./providers/fireworks"
 import { GeminiHandler } from "./providers/gemini"
-import { GithubCopilotHandler } from "./providers/github-copilot"
 import { GroqHandler } from "./providers/groq"
 import { HicapHandler } from "./providers/hicap"
 import { HuaweiCloudMaaSHandler } from "./providers/huawei-cloud-maas"
@@ -40,6 +39,7 @@ import { TogetherHandler } from "./providers/together"
 import { VercelAIGatewayHandler } from "./providers/vercel-ai-gateway"
 import { VertexHandler } from "./providers/vertex"
 import { VsCodeLmHandler } from "./providers/vscode-lm"
+import { GithubCopilotHandler } from "./providers/github-copilot"
 import { WandbHandler } from "./providers/wandb"
 import { XAIHandler } from "./providers/xai"
 import { ZAiHandler } from "./providers/zai"
@@ -152,9 +152,7 @@ function createHandlerForProvider(
 			const apiKey = options.openAiCompatibleCustomApiKey || options.openAiApiKey
 			if (apiKey) {
 				const maskedKey = `${apiKey.slice(0, 4)}****${apiKey.slice(-4)}`
-				Logger.info(
-					`Using OpenAI API key: ${maskedKey} (from ${options.openAiCompatibleCustomApiKey ? "custom key" : "standard key"})`,
-				)
+				Logger.info(`Using OpenAI API key: ${maskedKey} (from ${options.openAiCompatibleCustomApiKey ? "custom key" : "standard key"})`)
 			}
 
 			return new OpenAiHandler({
@@ -188,6 +186,7 @@ function createHandlerForProvider(
 				apiModelId: mode === "plan" ? options.planModeApiModelId : options.actModeApiModelId,
 				ulid: options.ulid,
 				geminiSearchEnabled: options.geminiSearchEnabled,
+
 			})
 		case "openai-native":
 			return new OpenAiNativeHandler({
