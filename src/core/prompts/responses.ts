@@ -220,7 +220,7 @@ Otherwise, if you have not completed the task and do not need additional informa
 			? ""
 			: `[TASK RESUMPTION] (${agoText}) CWD: '${cwd.toPosix()}'\n\n${
 					mode === "plan"
-						? "Note: Assume any previous tool use without a result failed. You are in PLAN MODE; respond to the user's message using plan_mode_respond."
+						? "Note: Assume any previous tool use without a result failed. You are in PLAN MODE; respond using plan_mode_respond. Avoid redundant text."
 						: "Note: Assume any previous tool use without a result failed. Reassess the task context and continue if incomplete."
 				}`
 
@@ -234,7 +234,7 @@ Otherwise, if you have not completed the task and do not need additional informa
 	},
 
 	planModeInstructions: () => {
-		return `Gather all necessary context to architect a solution before responding to the user. Once ready, present your plan for discussion. You are not allowed make code changes in this mode. If the user asks you to make changes, tell them to manually "toggle to Act mode" (you cannot switch modes yourself).`
+		return `Gather all necessary context to architect a solution before responding to the user. Once ready, present your plan for discussion. You are not allowed make code changes in this mode. If the user asks you to make changes, tell them to manually "toggle to Act mode" (you cannot switch modes yourself). Prefer tools for communication; avoid redundant text.`
 	},
 
 	fileEditWithUserChanges: (

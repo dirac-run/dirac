@@ -6,7 +6,7 @@ const id = DiracDefaultTool.ATTEMPT
 export const attempt_completion: DiracToolSpec = {
 	id,
 	name: "attempt_completion",
-	description: "Presents a brief and informative summary of the final result. Keep it concise while covering important changes.",
+	description: "Presents a brief and informative summary of the final result. Keep it concise while covering important changes. Avoid redundant text.",
 	parameters: [
 		{
 			name: "result",

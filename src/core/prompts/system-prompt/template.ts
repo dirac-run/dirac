@@ -38,6 +38,7 @@ ${
 		? " You may use multiple tools in a single response when the operations are independent (e.g., reading several files, searching in parallel). When refactoring a single file, multiple edits to different sections of the file are considered INDEPENDENT operations because we have stable hash anchors. You should batch them into a single response to save roundtrips."
 		: ""
 }
+- Prefer tools for communication; avoid redundant text in assistant responses.
 
 
 ACT MODE VS PLAN MODE

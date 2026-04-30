@@ -320,7 +320,9 @@ export class ResponseProcessor {
 							? correspondingBlock.reasoning
 							: ""
 				lastMessage.text = content
-				lastMessage.partial = correspondingBlock.partial
+				if (correspondingBlock.partial) {
+					lastMessage.partial = true
+				}
 				await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 				const protoMessage = convertDiracMessageToProto(lastMessage)
 				await sendPartialMessageEvent(protoMessage)
