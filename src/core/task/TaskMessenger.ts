@@ -7,6 +7,7 @@ import { DiracAsk, DiracSay, MultiCommandState } from "@shared/ExtensionMessage"
 import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { Logger } from "@shared/services/Logger"
 import { DiracDefaultTool } from "@shared/tools"
+import { TOOL_EXAMPLES } from "../prompts/tool-examples"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import { TaskMessengerDependencies } from "./types/task-messenger"
@@ -340,7 +341,8 @@ export class TaskMessenger {
 			"error",
 			`Dirac tried to use ${toolName}${relPath ? ` for '${relPath.toPosix()}'` : ""} without providing a value for '${paramName}'. Retrying...`,
 		)
-		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
+		const example = TOOL_EXAMPLES[toolName]
+		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName, example))
 	}
 
 	async removeLastPartialMessageIfExistsWithType(type: "ask" | "say", askOrSay: DiracAsk | DiracSay) {

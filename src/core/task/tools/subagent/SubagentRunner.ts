@@ -22,6 +22,7 @@ import { ToolValidator } from "../ToolValidator"
 import type { TaskConfig } from "../types/TaskConfig"
 import { SubagentBuilder } from "./SubagentBuilder"
 import { excerpt } from "../../utils/excerpt"
+import { TOOL_EXAMPLES } from "../../../prompts/tool-examples"
 
 const MAX_EMPTY_ASSISTANT_RETRIES = 3
 const MAX_INITIAL_STREAM_ATTEMPTS = 3
@@ -727,7 +728,8 @@ ${partialResult}`
 					if (toolName === DiracDefaultTool.ATTEMPT) {
 						const completionResult = toolCallParams.result?.trim()
 						if (!completionResult) {
-							const missingResultError = formatResponse.missingToolParameterError("result")
+							const example = TOOL_EXAMPLES[DiracDefaultTool.ATTEMPT]
+							const missingResultError = formatResponse.missingToolParameterError("result", example)
 							pushSubagentToolResultBlock(toolResultBlocks, call, toolName, missingResultError)
 							continue
 						}
@@ -861,7 +863,7 @@ ${partialResult}`
 				...baseCallbacks,
 				say: async () => undefined,
 				sayAndCreateMissingParamError: async (_toolName, paramName) =>
-					formatResponse.toolError(formatResponse.missingToolParameterError(paramName)),
+					formatResponse.toolError(formatResponse.missingToolParameterError(paramName, TOOL_EXAMPLES[_toolName as DiracDefaultTool])),
 				executeCommandTool: async (command: string, timeoutSeconds: number | undefined) => {
 					this.activeCommandExecutions += 1
 					try {
