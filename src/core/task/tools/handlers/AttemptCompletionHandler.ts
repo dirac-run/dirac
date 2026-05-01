@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk"
 import type { ToolUse } from "@core/assistant-message"
+import { DiracSaySubagentStatus, DiracSubagentUsageInfo, SubagentStatusItem } from "@shared/ExtensionMessage"
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { formatResponse } from "@core/prompts/responses"
@@ -8,6 +9,7 @@ import { showSystemNotification } from "@integrations/notifications"
 import { telemetryService } from "@services/telemetry"
 import { findLastIndex } from "@shared/array"
 import { COMPLETION_RESULT_CHANGES_FLAG } from "@shared/ExtensionMessage"
+import { SubagentRunner } from "../subagent/SubagentRunner"
 import { Logger } from "@shared/services/Logger"
 import { DiracDefaultTool } from "@shared/tools"
 import type { ToolResponse } from "../../index"
@@ -35,6 +37,15 @@ function getInitialTaskPreview(config: TaskConfig): string | undefined {
 	return `${firstTaskMessage.slice(0, TASK_PREVIEW_MAX_CHARS)}\n...[truncated]`
 }
 
+function getVerificationInstructions(): string {
+	return `1. All requested changes have been made (verify using a test script/\`execute_command\` when possible)
+2. No steps were skipped or partially completed
+3. Edge cases and error handling are addressed
+4. The solution matches what was asked for, not just what was convenient
+5. Output files contain exactly what was specified - no extra columns, fields, debug output, or commentary
+6. If the task specifies numerical thresholds or accuracy targets, verify your result meets the criteria. If close but not passing, iterate rather than declaring completion`
+}
+
 export class AttemptCompletionHandler implements IToolHandler, IPartialBlockHandler {
 	readonly name = DiracDefaultTool.ATTEMPT
 
@@ -46,8 +57,6 @@ export class AttemptCompletionHandler implements IToolHandler, IPartialBlockHand
 	 * Handle partial block streaming for attempt_completion
 	 */
 	async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
-
-
 		const result = uiHelpers.removeClosingTag(block, "result", block.params.result)
 		if (result) {
 			await uiHelpers.say("completion_result", result, undefined, undefined, block.partial)
@@ -68,26 +77,11 @@ export class AttemptCompletionHandler implements IToolHandler, IPartialBlockHand
 		config.taskState.consecutiveMistakeCount = 0
 
 		// Double-check completion: reject attempt_completion calls that haven't been re-verified
-		if (config.doubleCheckCompletionEnabled && !config.taskState.doubleCheckCompletionPending) {
-			config.taskState.doubleCheckCompletionPending = true
-			// Remove the partial completion_result message that was shown during streaming
-			await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "completion_result")
-
-			const taskPreview = getInitialTaskPreview(config)
-			const taskSection = taskPreview ? `\n\n<initial_task>\n${taskPreview}\n</initial_task>` : ""
-			return `Verification Required: User wants you to fully verify your solution before submitting.
-
-<verification_checklist>
-1. All requested changes have been made (verify using a test script/\`exceute_command\` when possible)
-2. No steps were skipped or partially completed
-3. Edge cases and error handling are addressed
-4. The solution matches what was asked for, not just what was convenient
-5. Output files contain exactly what was specified - no extra columns, fields, debug output, or commentary
-6. If the task specifies numerical thresholds or accuracy targets, verify your result meets the criteria. If close but not passing, iterate rather than declaring completion
-</verification_checklist>${taskSection}
-
-If everything checks out, call attempt_completion again with your final result.`
+		const doubleCheckResponse = await this.handleDoubleCheckCompletion(config, result)
+		if (doubleCheckResponse) {
+			return doubleCheckResponse
 		}
+
 		// Reset so the next attempt_completion pair triggers double-check again
 		config.taskState.doubleCheckCompletionPending = false
 
@@ -111,94 +105,221 @@ If everything checks out, call attempt_completion again with your final result.`
 			})
 		}
 
-		const addNewChangesFlagToLastCompletionResultMessage = async () => {
-			// Add newchanges flag if there are new changes to the workspace
-			const hasNewChanges = await config.callbacks.doesLatestTaskCompletionHaveNewChanges()
-			const diracMessages = config.messageState.getDiracMessages()
-
-			const lastCompletionResultMessageIndex = findLastIndex(diracMessages, (m: any) => m.say === "completion_result")
-			const lastCompletionResultMessage =
-				lastCompletionResultMessageIndex !== -1 ? diracMessages[lastCompletionResultMessageIndex] : undefined
-			if (
-				lastCompletionResultMessage &&
-				lastCompletionResultMessageIndex !== -1 &&
-				hasNewChanges &&
-				!lastCompletionResultMessage.text?.endsWith(COMPLETION_RESULT_CHANGES_FLAG)
-			) {
-				await config.messageState.updateDiracMessage(lastCompletionResultMessageIndex, {
-					text: lastCompletionResultMessage.text + COMPLETION_RESULT_CHANGES_FLAG,
-				})
-			}
-		}
-
 		// Remove any partial completion_result message that may exist
 		await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "completion_result")
 
 		let commandResult: any
+		if (command) {
+			const cmdExecResult = await this.handleCommandExecution(config, block, result, command)
+			if (cmdExecResult.userRejected) {
+				return cmdExecResult.commandResult
+			}
+			commandResult = cmdExecResult.commandResult
+		} else {
+			await this.handleCompletionResult(config, block, result)
+		}
+
+		// End command_output ask if necessary
+		if (config.messageState.getDiracMessages().at(-1)?.ask === "command_output") {
+			await config.callbacks.say("command_output", "")
+		}
+
+		// Run hooks
+		await this.runTaskCompleteHook(config, block)
+		await this.runNotificationHook(config, {
+			event: "task_complete",
+			source: "attempt_completion",
+			message: result,
+			waitingForUserInput: false,
+		})
+
+		return await this.handlePostCompletionFeedback(config, block, result, commandResult)
+	}
+
+	private async handleDoubleCheckCompletion(config: TaskConfig, result: string): Promise<ToolResponse | undefined> {
+		if (!config.doubleCheckCompletionEnabled || config.taskState.doubleCheckCompletionPending) {
+			return undefined
+		}
+
+		// Remove the partial completion_result message that was shown during streaming
+		await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "completion_result")
+
+		const subagentsEnabled = config.services.stateManager.getGlobalSettingsKey("subagentsEnabled")
+		const taskPreview = getInitialTaskPreview(config)
+		const verificationInstructions = getVerificationInstructions()
+
+		if (subagentsEnabled) {
+			return await this.runVerificationSubagent(config, result, taskPreview, verificationInstructions)
+		}
+
+		config.taskState.doubleCheckCompletionPending = true
+		const taskSection = taskPreview ? `\n\n<initial_task>\n${taskPreview}\n</initial_task>` : ""
+		return `Verification Required: User wants you to fully verify your solution before submitting.
+
+<verification_checklist>
+${verificationInstructions}
+</verification_checklist>${taskSection}
+
+If everything checks out, call attempt_completion again with your final result.`
+	}
+
+	private async runVerificationSubagent(
+		config: TaskConfig,
+		result: string,
+		taskPreview: string | undefined,
+		verificationInstructions: string,
+	): Promise<ToolResponse> {
+		const runner = new SubagentRunner(config, "verifier")
+
+		// UI state for subagent
+		const entry: SubagentStatusItem = {
+			index: 1,
+			prompt: "Verification",
+			status: "pending",
+			toolCalls: 0,
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheWrites: 0,
+			cacheReads: 0,
+			totalCost: 0,
+			contextTokens: 0,
+			contextWindow: 0,
+			contextUsagePercentage: 0,
+			latestToolCall: undefined,
+		}
+
+		const emitStatus = async (status: DiracSaySubagentStatus["status"], partial: boolean) => {
+			const payload: DiracSaySubagentStatus = {
+				status,
+				total: 1,
+				completed: entry.status === "completed" || entry.status === "failed" ? 1 : 0,
+				successes: entry.status === "completed" ? 1 : 0,
+				failures: entry.status === "failed" ? 1 : 0,
+				toolCalls: entry.toolCalls,
+				inputTokens: entry.inputTokens,
+				outputTokens: entry.outputTokens,
+				cacheWrites: entry.cacheWrites,
+				cacheReads: entry.cacheReads,
+				contextWindow: entry.contextWindow,
+				maxContextTokens: entry.contextTokens,
+				maxContextUsagePercentage: entry.contextUsagePercentage,
+				items: [entry],
+			}
+			await config.callbacks.say("subagent", JSON.stringify(payload), undefined, undefined, partial)
+		}
+
+		let statusUpdateQueue: Promise<void> = Promise.resolve()
+		const queueStatusUpdate = (status: DiracSaySubagentStatus["status"], partial: boolean): Promise<void> => {
+			statusUpdateQueue = statusUpdateQueue.catch(() => undefined).then(() => emitStatus(status, partial))
+			return statusUpdateQueue
+		}
+
+		await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "subagent")
+		await queueStatusUpdate("running", true)
+
+		const abortPollInterval = setInterval(() => {
+			if (!config.taskState.abort) {
+				return
+			}
+			clearInterval(abortPollInterval)
+			void runner.abort()
+		}, 100)
+
+		try {
+			const subagentPrompt = `You are the verifier of a given solution. Please verify the following task completion.
+
+<initial_task>
+${taskPreview || "No task description available."}
+</initial_task>
+
+<completion_result>
+${result}
+</completion_result>
+
+<verification_checklist>
+${verificationInstructions}
+</verification_checklist>
+
+If the solution passes all checks, respond with "VERIFICATION: SUCCESS".
+Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on what failed.`
+
+			const runResult = await runner.run(
+				subagentPrompt,
+				async (update) => {
+					if (update.status) entry.status = update.status
+					if (update.result) entry.result = update.result
+					if (update.error) entry.error = update.error
+					if (update.latestToolCall) entry.latestToolCall = update.latestToolCall
+					if (update.stats) {
+						entry.toolCalls = update.stats.toolCalls
+						entry.inputTokens = update.stats.inputTokens
+						entry.outputTokens = update.stats.outputTokens
+						entry.cacheWrites = update.stats.cacheWriteTokens
+						entry.cacheReads = update.stats.cacheReadTokens
+						entry.totalCost = update.stats.totalCost
+						entry.contextTokens = update.stats.contextTokens
+						entry.contextWindow = update.stats.contextWindow
+						entry.contextUsagePercentage = update.stats.contextUsagePercentage
+					}
+					await queueStatusUpdate("running", true)
+				},
+				300, // timeout
+				undefined, // maxTurns
+				false, // includeHistory
+			)
+
+			clearInterval(abortPollInterval)
+			await queueStatusUpdate(runResult.status === "failed" ? "failed" : "completed", false)
+
+			const subagentUsagePayload: DiracSubagentUsageInfo = {
+				source: "subagents",
+				tokensIn: runResult.stats.inputTokens,
+				tokensOut: runResult.stats.outputTokens,
+				cacheWrites: runResult.stats.cacheWriteTokens,
+				cacheReads: runResult.stats.cacheReadTokens,
+				cost: runResult.stats.totalCost,
+			}
+			await config.callbacks.say("subagent_usage", JSON.stringify(subagentUsagePayload))
+
+			if (runResult.status === "completed") {
+				const isSuccess = runResult.result?.includes("VERIFICATION: SUCCESS")
+				if (isSuccess) {
+					config.taskState.doubleCheckCompletionPending = true
+					return `Verification Subagent Report:
+${runResult.result}
+
+The verification was successful.`
+				} else {
+					return `Verification Subagent Report:
+${runResult.result}
+
+The solution could not be verified successfully. Please address the issues listed above and try again.`
+				}
+			} else {
+				return `Verification Subagent Failed:
+${runResult.error}
+
+Please verify the task manually or try again.`
+			}
+		} catch (error) {
+			clearInterval(abortPollInterval)
+			return `Verification Subagent Error: ${(error as Error).message}`
+		}
+	}
+
+	private async handleCommandExecution(
+		config: TaskConfig,
+		block: ToolUse,
+		result: string,
+		command: string,
+	): Promise<{ userRejected: boolean; commandResult: any }> {
 		const lastMessage = config.messageState.getDiracMessages().at(-1)
 
-		if (command) {
-			if (lastMessage && lastMessage.ask !== "command") {
-				// haven't sent a command message yet so first send completion_result then command
-				const completionMessageTs = await config.callbacks.say("completion_result", result, undefined, undefined, false)
-				await config.callbacks.saveCheckpoint(true, completionMessageTs)
-				await addNewChangesFlagToLastCompletionResultMessage()
-				telemetryService.captureTaskCompleted(config.ulid, getTaskCompletionTelemetry(config))
-				const apiConfig = config.services.stateManager.getApiConfiguration()
-				const provider = (config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
-				telemetryService.captureToolUsage(
-					config.ulid,
-					this.name,
-					config.api.getModel().id,
-					provider,
-					false,
-					true,
-					undefined,
-					block.isNativeToolCall,
-				)
-			} else {
-				// we already sent a command message, meaning the complete completion message has also been sent
-				await config.callbacks.saveCheckpoint(true)
-			}
-
-			// Check if command should be auto-approved
-			// attempt_completion commands are treated as safe commands
-			const autoApproveResult = config.autoApprover?.shouldAutoApproveTool(DiracDefaultTool.BASH)
-			const autoApproveSafe = Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult
-
-			if (autoApproveSafe) {
-				// Auto-approve flow - show command as 'say' instead of 'ask'
-				await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "command")
-				await config.callbacks.say("command", command, undefined, undefined, false)
-			} else {
-				// Manual approval flow - need to ask for approval
-				showNotificationForApproval(
-					`Dirac wants to execute a command: ${command}`,
-					config.autoApprovalSettings.enableNotifications,
-				)
-
-				const { didApprove } = await ToolResultUtils.askApprovalAndPushFeedback("command", command, config)
-				if (!didApprove) {
-					return formatResponse.toolDenied()
-				}
-			}
-
-			// Execute the command
-			const [userRejected, execCommandResult] = await config.callbacks.executeCommandTool(command!, undefined, {
-				useBackgroundExecution: true,
-			}) // no timeout for attempt_completion command
-
-			if (userRejected) {
-				config.taskState.didRejectTool = true
-				return execCommandResult
-			}
-			// user didn't reject, but the command may have output
-			commandResult = execCommandResult
-		} else {
-			// Send the complete completion_result message (partial was already removed above)
+		if (lastMessage && lastMessage.ask !== "command") {
+			// haven't sent a command message yet so first send completion_result then command
 			const completionMessageTs = await config.callbacks.say("completion_result", result, undefined, undefined, false)
 			await config.callbacks.saveCheckpoint(true, completionMessageTs)
-			await addNewChangesFlagToLastCompletionResultMessage()
+			await this.addNewChangesFlagToLastCompletionResultMessage(config)
 			telemetryService.captureTaskCompleted(config.ulid, getTaskCompletionTelemetry(config))
 			const apiConfig = config.services.stateManager.getApiConfiguration()
 			const provider = (config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
@@ -212,29 +333,76 @@ If everything checks out, call attempt_completion again with your final result.`
 				undefined,
 				block.isNativeToolCall,
 			)
+		} else {
+			// we already sent a command message, meaning the complete completion message has also been sent
+			await config.callbacks.saveCheckpoint(true)
 		}
 
-		// we already sent completion_result says, an empty string asks relinquishes control over button and field
-		// in case last command was interactive and in partial state, the UI is expecting an ask response. This ends the command ask response, freeing up the UI to proceed with the completion ask.
-		if (config.messageState.getDiracMessages().at(-1)?.ask === "command_output") {
-			await config.callbacks.say("command_output", "")
+		// Check if command should be auto-approved
+		const autoApproveResult = config.autoApprover?.shouldAutoApproveTool(DiracDefaultTool.BASH)
+		const autoApproveSafe = Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult
+
+		if (autoApproveSafe) {
+			// Auto-approve flow - show command as 'say' instead of 'ask'
+			await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "command")
+			await config.callbacks.say("command", command, undefined, undefined, false)
+		} else {
+			// Manual approval flow - need to ask for approval
+			showNotificationForApproval(
+				`Dirac wants to execute a command: ${command}`,
+				config.autoApprovalSettings.enableNotifications,
+			)
+
+			const { didApprove } = await ToolResultUtils.askApprovalAndPushFeedback("command", command, config)
+			if (!didApprove) {
+				return { userRejected: true, commandResult: formatResponse.toolDenied() }
+			}
 		}
 
-
-		// Run TaskComplete hook BEFORE presenting the "Start New Task" button
-		// At this point we know: task is complete, checkpoint saved, result shown to user
-		await this.runTaskCompleteHook(config, block)
-		await this.runNotificationHook(config, {
-			event: "task_complete",
-			source: "attempt_completion",
-			message: result,
-			waitingForUserInput: false,
+		// Execute the command
+		const [userRejected, execCommandResult] = await config.callbacks.executeCommandTool(command, undefined, {
+			useBackgroundExecution: true,
 		})
 
+		if (userRejected) {
+			config.taskState.didRejectTool = true
+			return { userRejected: true, commandResult: execCommandResult }
+		}
+
+		return { userRejected: false, commandResult: execCommandResult }
+	}
+
+	private async handleCompletionResult(config: TaskConfig, block: ToolUse, result: string): Promise<void> {
+		// Send the complete completion_result message (partial was already removed above)
+		const completionMessageTs = await config.callbacks.say("completion_result", result, undefined, undefined, false)
+		await config.callbacks.saveCheckpoint(true, completionMessageTs)
+		await this.addNewChangesFlagToLastCompletionResultMessage(config)
+		telemetryService.captureTaskCompleted(config.ulid, getTaskCompletionTelemetry(config))
+		const apiConfig = config.services.stateManager.getApiConfiguration()
+		const provider = (config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
+		telemetryService.captureToolUsage(
+			config.ulid,
+			this.name,
+			config.api.getModel().id,
+			provider,
+			false,
+			true,
+			undefined,
+			block.isNativeToolCall,
+		)
+	}
+
+	private async handlePostCompletionFeedback(
+		config: TaskConfig,
+		block: ToolUse,
+		result: string,
+		commandResult: any,
+	): Promise<ToolResponse> {
 		const { response, text, images, files: completionFiles } = await config.callbacks.ask("completion_result", "", false)
 		const prefix = "[attempt_completion] Result: Done"
+
 		if (response === "yesButtonClicked") {
-			return prefix // signals to recursive loop to stop (for now this never happens since yesButtonClicked will trigger a new task)
+			return prefix
 		}
 
 		await config.callbacks.say("user_feedback", text ?? "", images, completionFiles)
@@ -243,24 +411,18 @@ If everything checks out, call attempt_completion again with your final result.`
 		let hookContextModification: string | undefined
 		if (text || (images && images.length > 0) || (completionFiles && completionFiles.length > 0)) {
 			const userContentForHook = await buildUserFeedbackContent(text, images, completionFiles)
-
 			const hookResult = await config.callbacks.runUserPromptSubmitHook(userContentForHook, "feedback")
 
 			if (hookResult.cancel === true) {
 				return formatResponse.toolDenied()
 			}
-
-			// Capture hook context modification to add to tool results
 			hookContextModification = hookResult.contextModification
 		}
 
 		const toolResults: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = []
 		if (commandResult) {
 			if (typeof commandResult === "string") {
-				toolResults.push({
-					type: "text",
-					text: commandResult,
-				})
+				toolResults.push({ type: "text", text: commandResult })
 			} else if (Array.isArray(commandResult)) {
 				toolResults.push(...commandResult)
 			}
@@ -279,7 +441,6 @@ If everything checks out, call attempt_completion again with your final result.`
 			)
 		}
 
-		// Add hook context modification if provided
 		if (hookContextModification) {
 			toolResults.push({
 				type: "text" as const,
@@ -289,47 +450,51 @@ If everything checks out, call attempt_completion again with your final result.`
 
 		const fileContentString = completionFiles?.length ? await processFilesIntoText(completionFiles) : ""
 		if (fileContentString) {
-			toolResults.push({
-				type: "text" as const,
-				text: fileContentString,
-			})
+			toolResults.push({ type: "text" as const, text: fileContentString })
 		}
 
 		if (images && images.length > 0) {
 			toolResults.push(...formatResponse.imageBlocks(images))
 		}
 
-		// Return the tool results as a complex response
 		const apiConfig = config.services.stateManager.getApiConfiguration()
 		const provider = (config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
-
 		telemetryService.captureToolUsage(
 			config.ulid,
 			this.name,
 			config.api.getModel().id,
 			provider,
-			false, // autoApproved - attempt_completion is never auto-approved
-			false, // success=false because we reached here (user provided feedback instead of clicking "Yes")
+			false,
+			false,
 			undefined,
 			block.isNativeToolCall,
 		)
 
-
-
 		return [
-			{
-				type: "text" as const,
-				text: prefix,
-			},
+			{ type: "text" as const, text: prefix },
 			...toolResults,
 		]
 	}
 
-	/**
-	 * Runs the TaskComplete hook after user confirms task completion.
-	 * This is a non-cancellable, observation-only hook similar to TaskCancel.
-	 * Errors are logged but do not affect task completion.
-	 */
+	private async addNewChangesFlagToLastCompletionResultMessage(config: TaskConfig) {
+		const hasNewChanges = await config.callbacks.doesLatestTaskCompletionHaveNewChanges()
+		const diracMessages = config.messageState.getDiracMessages()
+		const lastCompletionResultMessageIndex = findLastIndex(diracMessages, (m: any) => m.say === "completion_result")
+		const lastCompletionResultMessage =
+			lastCompletionResultMessageIndex !== -1 ? diracMessages[lastCompletionResultMessageIndex] : undefined
+
+		if (
+			lastCompletionResultMessage &&
+			lastCompletionResultMessageIndex !== -1 &&
+			hasNewChanges &&
+			!lastCompletionResultMessage.text?.endsWith(COMPLETION_RESULT_CHANGES_FLAG)
+		) {
+			await config.messageState.updateDiracMessage(lastCompletionResultMessageIndex, {
+				text: lastCompletionResultMessage.text + COMPLETION_RESULT_CHANGES_FLAG,
+			})
+		}
+	}
+
 	private async runTaskCompleteHook(config: TaskConfig, block: ToolUse): Promise<void> {
 		const hooksEnabled = getHooksEnabledSafe(config.services.stateManager.getGlobalSettingsKey("hooksEnabled"))
 		if (!hooksEnabled) {
