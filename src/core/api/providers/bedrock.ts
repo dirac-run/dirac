@@ -3,14 +3,21 @@
 import type { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import type { ContentBlock, Message, ToolConfiguration } from "@aws-sdk/client-bedrock-runtime"
 import {
-    BedrockRuntimeClient,
-    ConversationRole,
-    ConverseCommand,
-    ConverseStreamCommand,
-    InvokeModelWithResponseStreamCommand,
+	BedrockRuntimeClient,
+	ConversationRole,
+	ConverseCommand,
+	ConverseStreamCommand,
+	InvokeModelWithResponseStreamCommand,
 } from "@aws-sdk/client-bedrock-runtime"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import { type BedrockModelId, bedrockDefaultModelId, bedrockModels, CLAUDE_SONNET_1M_SUFFIX, type ModelInfo } from "@shared/api"
+import {
+	type BedrockModelId,
+	bedrockDefaultModelId,
+	bedrockModels,
+	CLAUDE_SONNET_1M_SUFFIX,
+	type ModelInfo,
+	isAnthropicAdaptiveThinkingSupported,
+} from "@shared/api"
 import { calculateApiCostOpenAI, calculateApiCostQwen } from "@utils/cost"
 import { ExtensionRegistryInfo } from "@/registry"
 import type { DiracStorageMessage } from "@/shared/messages/content"
@@ -38,6 +45,7 @@ export interface AwsBedrockHandlerOptions extends CommonApiHandlerOptions {
 	awsBedrockCustomSelected?: boolean
 	awsBedrockCustomModelBaseId?: string
 	thinkingBudgetTokens?: number
+	reasoningEffort?: string
 }
 
 // Extend AWS SDK types to include additionalModelResponseFields
@@ -411,7 +419,7 @@ export class AwsBedrockHandler implements ApiHandler {
 			body: JSON.stringify({
 				prompt: formattedPrompt,
 				max_tokens: model.info.maxTokens || 8000,
-				temperature: 0,
+				temperature: model.info.temperature ?? 0,
 			}),
 		})
 
@@ -896,13 +904,13 @@ export class AwsBedrockHandler implements ApiHandler {
 
 			return {
 				maxTokens: modelInfo.maxTokens || 8192,
-				temperature: reasoningOn ? 1 : 0,
+				temperature: reasoningOn ? undefined : (modelInfo.temperature ?? undefined),
 			}
 		}
 
 		return {
 			maxTokens: modelInfo.maxTokens || (modelType === "nova" ? 5000 : 8192),
-			temperature: 0,
+			temperature: modelInfo.temperature ?? 0,
 		}
 	}
 
@@ -937,6 +945,7 @@ export class AwsBedrockHandler implements ApiHandler {
 		// Get thinking configuration
 		const budget_tokens = this.options.thinkingBudgetTokens || 0
 		const reasoningOn = model.info.supportsReasoning && budget_tokens > 0
+		const useAdaptive = isAnthropicAdaptiveThinkingSupported(modelId, model.info)
 
 		// Prepare request for Anthropic model using Converse API
 		const toolConfig = this.mapDiracToolsToBedrockToolConfig(tools)
@@ -949,10 +958,12 @@ export class AwsBedrockHandler implements ApiHandler {
 			additionalModelRequestFields: {
 				// Add thinking configuration as per LangChain documentation
 				...(reasoningOn && {
-					thinking: {
-						type: "enabled",
-						budget_tokens: budget_tokens,
-					},
+					thinking: useAdaptive
+						? { type: "adaptive", display: "summarized" }
+						: { type: "enabled", budget_tokens: budget_tokens },
+				}),
+				...(reasoningOn && useAdaptive && {
+					output_config: { effort: this.options.reasoningEffort || "high" },
 				}),
 				...(enable1mContextWindow && {
 					anthropic_beta: ["context-1m-2025-08-07"],
@@ -1221,7 +1232,7 @@ export class AwsBedrockHandler implements ApiHandler {
 			system: systemMessages,
 			inferenceConfig: {
 				maxTokens: model.info.maxTokens || 8192,
-				temperature: 0,
+				temperature: model.info.temperature ?? 0,
 			},
 			...(toolConfig ? { toolConfig } : {}),
 		})
@@ -1359,7 +1370,7 @@ export class AwsBedrockHandler implements ApiHandler {
 			system: systemMessages,
 			inferenceConfig: {
 				maxTokens: model.info.maxTokens || 8192,
-				temperature: 0,
+				temperature: model.info.temperature ?? 0,
 			},
 			...(toolConfig ? { toolConfig } : {}),
 		})

@@ -1,7 +1,14 @@
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
 import { FunctionDeclaration as GoogleTool } from "@google/genai"
-import { CLAUDE_SONNET_1M_SUFFIX, ModelInfo, VertexModelId, vertexDefaultModelId, vertexModels } from "@shared/api"
+import {
+	CLAUDE_SONNET_1M_SUFFIX,
+	ModelInfo,
+	VertexModelId,
+	vertexDefaultModelId,
+	vertexModels,
+	isAnthropicAdaptiveThinkingSupported,
+} from "@shared/api"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { DiracTool } from "@/shared/tools"
@@ -93,18 +100,24 @@ export class VertexHandler implements ApiHandler {
 		const budget_tokens = this.options.thinkingBudgetTokens || 0
 		// Use model metadata to determine if reasoning should be enabled
 		const reasoningOn = (model.info.supportsReasoning ?? false) && budget_tokens !== 0
+		const useAdaptive = isAnthropicAdaptiveThinkingSupported(modelId, model.info)
 
 		// Tools are available only when native tools are enabled.
 		const nativeToolsOn = tools?.length ? tools?.length > 0 : false
 
 		const anthropicMessages = sanitizeAnthropicMessages(messages, model.info.supportsPromptCache ?? false)
 
-		const stream = await clientAnthropic.beta.messages.create(
+		const stream = await (clientAnthropic.beta.messages.create as any)(
 			{
 				model: modelId,
 				max_tokens: model.info.maxTokens || 8192,
-				thinking: reasoningOn ? { type: "enabled", budget_tokens: budget_tokens } : undefined,
-				temperature: reasoningOn ? undefined : 0,
+				thinking: reasoningOn
+					? useAdaptive
+						? { type: "adaptive", display: "summarized" }
+						: { type: "enabled", budget_tokens: budget_tokens }
+					: undefined,
+				...(reasoningOn && useAdaptive ? { output_config: { effort: this.options.reasoningEffort || "high" } } : {}),
+				temperature: reasoningOn ? undefined : (model.info.temperature ?? undefined),
 				system: [
 					{
 						text: systemPrompt,

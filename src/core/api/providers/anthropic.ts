@@ -13,6 +13,7 @@ import {
 	anthropicModels,
 	CLAUDE_SONNET_1M_SUFFIX,
 	ModelInfo,
+	isAnthropicAdaptiveThinkingSupported,
 } from "@shared/api"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
@@ -29,6 +30,7 @@ interface AnthropicHandlerOptions extends CommonApiHandlerOptions {
 	anthropicBaseUrl?: string
 	apiModelId?: string
 	thinkingBudgetTokens?: number
+	reasoningEffort?: string
 }
 
 export class AnthropicHandler implements ApiHandler {
@@ -93,16 +95,24 @@ export class AnthropicHandler implements ApiHandler {
 		// Tools are available only when native tools are enabled.
 		const nativeToolsOn = tools?.length && tools?.length > 0
 		const reasoningOn = (model.info.supportsReasoning ?? false) && budget_tokens !== 0
+		const useAdaptive = isAnthropicAdaptiveThinkingSupported(modelId, model.info)
 
 		if (model.info.supportsPromptCache) {
 			const anthropicMessages = sanitizeAnthropicMessages(messages, true)
-			const requestBody: AnthropicMessageCreateParamsStreaming = {
+			const requestBody: any = {
 				model: modelId,
-				thinking: reasoningOn ? { type: "enabled", budget_tokens: budget_tokens } : undefined,
+				thinking: reasoningOn
+					? useAdaptive
+						? { type: "adaptive", display: "summarized" }
+						: { type: "enabled", budget_tokens: budget_tokens }
+					: undefined,
+				...(reasoningOn && useAdaptive
+					? { output_config: { effort: (this.options.reasoningEffort as any) || "high" } }
+					: {}),
 				max_tokens: model.info.maxTokens || 8192,
 				// "Thinking isn’t compatible with temperature, top_p, or top_k modifications as well as forced tool use."
 				// (https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#important-considerations-when-using-extended-thinking)
-				temperature: reasoningOn ? undefined : 0,
+				temperature: reasoningOn ? undefined : (model.info.temperature ?? undefined),
 				system: [
 					{
 						text: systemPrompt,
@@ -123,8 +133,8 @@ export class AnthropicHandler implements ApiHandler {
 			}
 
 			stream = useFastMode
-				? await createFastModeMessage(requestBody)
-				: await client.messages.create(
+				? (await createFastModeMessage(requestBody) as any)
+				: (await client.messages.create(
 						requestBody,
 						(() => {
 							// 1m context window beta header
@@ -137,12 +147,20 @@ export class AnthropicHandler implements ApiHandler {
 							}
 							return undefined
 						})(),
-					)
+					) as any)
 		} else {
-			const requestBody: AnthropicMessageCreateParamsStreaming = {
+			const requestBody: any = {
 				model: modelId,
 				max_tokens: model.info.maxTokens || 8192,
-				temperature: 0,
+				thinking: reasoningOn
+					? useAdaptive
+						? { type: "adaptive", display: "summarized" }
+						: { type: "enabled", budget_tokens: budget_tokens }
+					: undefined,
+				...(reasoningOn && useAdaptive
+					? { output_config: { effort: (this.options.reasoningEffort as any) || "high" } }
+					: {}),
+				temperature: reasoningOn ? undefined : (model.info.temperature ?? undefined),
 				system: [{ text: systemPrompt, type: "text" }],
 				messages: sanitizeAnthropicMessages(messages, false),
 				tools: nativeToolsOn ? tools : undefined,
@@ -150,7 +168,9 @@ export class AnthropicHandler implements ApiHandler {
 				stream: true,
 			}
 
-			stream = useFastMode ? await createFastModeMessage(requestBody) : await client.messages.create(requestBody)
+			stream = useFastMode
+				? (await createFastModeMessage(requestBody) as any)
+				: (await client.messages.create(requestBody) as any)
 		}
 
 		const lastStartedToolCall = { id: "", name: "", arguments: "" }

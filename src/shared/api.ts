@@ -109,6 +109,7 @@ export interface ModelInfo {
 	supportsImages?: boolean
 	supportsPromptCache: boolean // this value is hardcoded for now
 	supportsReasoning?: boolean // Whether the model supports reasoning/thinking mode
+	supportsAdaptiveThinking?: boolean // Whether the model supports adaptive thinking mode (Anthropic)
 	inputPrice?: number // Keep for non-tiered input models
 	outputPrice?: number // Keep for non-tiered output models
 	thinkingConfig?: {
@@ -244,6 +245,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
@@ -255,6 +257,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
@@ -278,6 +281,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
@@ -289,6 +293,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 30.0,
 		outputPrice: 150.0,
 		cacheWritesPrice: 37.5,
@@ -302,6 +307,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
@@ -314,6 +320,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 30.0,
 		outputPrice: 150.0,
 		cacheWritesPrice: 37.5,
@@ -327,6 +334,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
@@ -339,6 +347,7 @@ export const anthropicModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		inputPrice: 30.0,
 		outputPrice: 150.0,
 		cacheWritesPrice: 37.5,
@@ -347,6 +356,46 @@ export const anthropicModels = {
 			"Anthropic fast mode preview for Claude Opus 4.6 with the 1M context beta enabled. Same model and capabilities with higher output token speed at premium pricing across the full 1M context window. Requires both fast mode and 1M context access on your Anthropic account.",
 	},
 } as const satisfies Record<string, ModelInfo> // as const assertion makes the object deeply readonly
+
+/**
+ * Helper to determine if an Anthropic model supports adaptive thinking.
+ * Default opt-in pattern: If it's a known "old" model (<= 4.5), use enabled.
+ * Otherwise (>= 4.6 or unknown future model), use adaptive.
+ */
+export function isAnthropicAdaptiveThinkingSupported(modelId: string, info?: ModelInfo): boolean {
+	if (info?.supportsAdaptiveThinking !== undefined) {
+		return info.supportsAdaptiveThinking
+	}
+
+	const id = modelId.toLowerCase()
+	// Check if it's an Anthropic model
+	const isAnthropic = id.startsWith("claude-") || id.includes("anthropic.claude-") || id.startsWith("anthropic/")
+
+	if (!isAnthropic) {
+		return false
+	}
+
+	// Default opt-in pattern:
+	// If it's a known "old" model (<= 4.5), use enabled.
+	// Otherwise (>= 4.6 or unknown future model), use adaptive.
+
+	const versionMatch = id.match(/claude-(\d+)[.-](\d+)/)
+	if (versionMatch) {
+		const major = parseInt(versionMatch[1])
+		const minor = parseInt(versionMatch[2])
+		if (major < 4 || (major === 4 && minor <= 5)) {
+			return false // Old model
+		}
+	}
+
+	// Also check for specific old models that might not match the regex perfectly
+	if (id.includes("claude-3")) {
+		return false
+	}
+
+	return true // Default to adaptive for everything else
+}
+
 
 // Claude Code
 export type ClaudeCodeModelId = keyof typeof claudeCodeModels
@@ -400,6 +449,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		supportsGlobalEndpoint: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
@@ -412,6 +462,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		supportsGlobalEndpoint: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
@@ -463,6 +514,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		supportsGlobalEndpoint: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
@@ -475,6 +527,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		supportsGlobalEndpoint: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
@@ -673,6 +726,7 @@ export const vertexModels = {
 		cacheWritesPrice: 3.75,
 		cacheReadsPrice: 0.3,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 	},
 	"claude-sonnet-4-6:1m": {
 		maxTokens: 64_000,
@@ -684,6 +738,7 @@ export const vertexModels = {
 		cacheWritesPrice: 3.75,
 		cacheReadsPrice: 0.3,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		tiers: CLAUDE_SONNET_1M_TIERS,
 	},
 	"claude-haiku-4-5@20251001": {
@@ -708,6 +763,7 @@ export const vertexModels = {
 		cacheWritesPrice: 6.25,
 		cacheReadsPrice: 0.5,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 	},
 	"claude-opus-4-6:1m": {
 		maxTokens: 128_000,
@@ -720,6 +776,7 @@ export const vertexModels = {
 		cacheWritesPrice: 6.25,
 		cacheReadsPrice: 0.5,
 		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
 		tiers: CLAUDE_OPUS_1M_TIERS,
 	},
 	"mistral-small-2503": {

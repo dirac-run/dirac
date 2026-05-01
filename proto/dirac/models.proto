@@ -105,6 +105,7 @@ message OpenRouterModelInfo {
   optional bool supports_reasoning = 15;
   optional ApiFormat api_format = 16;
   optional bool supports_tools = 17;
+  optional bool supports_adaptive_thinking = 18;
 }
 
 // Shared response message for model information
@@ -350,6 +351,7 @@ message OcaModelInfo {
   // reasoning effort options
   repeated string reasoning_effort_options = 20;
   optional bool supports_tools = 21;
+  optional bool supports_adaptive_thinking = 22;
 }
 
 // Aggregated OCA model catalog keyed by model identifier
@@ -431,6 +433,7 @@ message OpenAiCompatibleModelInfo {
   optional bool is_r1_format_required = 14;
   optional ApiFormat api_format = 15;
   optional bool supports_tools = 16;
+  optional bool supports_adaptive_thinking = 17;
 }
 
 // Model info for LiteLLM models
@@ -450,6 +453,7 @@ message LiteLLMModelInfo {
   optional double temperature = 13;
   optional ApiFormat api_format = 14;
   optional bool supports_reasoning = 15;
+  optional bool supports_adaptive_thinking = 16;
 }
 
 // Main ApiConfiguration message

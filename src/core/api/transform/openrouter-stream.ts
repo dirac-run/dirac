@@ -128,7 +128,7 @@ export async function createOpenRouterStream(
 			break
 	}
 
-	let temperature: number | undefined = 0
+	let temperature: number | undefined = model.info.temperature ?? (model.id.startsWith("anthropic/") ? undefined : 0)
 	let topP: number | undefined
 	if (
 		model.id.startsWith("deepseek/deepseek-r1") ||
@@ -155,6 +155,8 @@ export async function createOpenRouterStream(
 
 	let reasoning: { max_tokens: number } | undefined
 	switch (model.id) {
+		case "anthropic/claude-opus-4.7":
+		case "anthropic/claude-4.7-opus":
 		case "anthropic/claude-opus-4.6":
 		case "anthropic/claude-haiku-4.5":
 		case "anthropic/claude-4.5-haiku":
