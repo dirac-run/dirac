@@ -51,11 +51,14 @@ export class OpenAiResponsesCompatibleHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
+		// Add web_search tool for OpenAI
+		const finalTools = [...(tools || [])]
+		finalTools.push({ type: "web_search" } as any)
 		const client = this.ensureClient()
 		const model = this.getModel()
 		const { input, previousResponseId } = convertToOpenAIResponsesInput(messages, { usePreviousResponseId: true })
 		const { input: fullInput } = convertToOpenAIResponsesInput(messages, { usePreviousResponseId: false })
-		const responseTools = mapResponseTools(tools || [])
+		const responseTools = mapResponseTools(finalTools)
 		this.abortController = new AbortController()
 
 		const buildParams = (inp: any, prevId?: string) =>

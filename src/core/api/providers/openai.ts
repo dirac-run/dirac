@@ -104,6 +104,10 @@ export class OpenAiHandler implements ApiHandler {
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
 		const client = this.ensureClient()
+
+		// Add web_search tool for OpenAI
+		const finalTools = [...(tools || [])]
+		finalTools.push({ type: "web_search" } as any)
 		const modelId = this.options.openAiModelId ?? ""
 		const isDeepseek =
 			modelId.toLowerCase().includes("deepseek")
@@ -174,7 +178,7 @@ export class OpenAiHandler implements ApiHandler {
 			reasoning_effort: reasoningEffort,
 			stream: true,
 			stream_options: { include_usage: true },
-			...getOpenAIToolParams(tools),
+			...getOpenAIToolParams(finalTools),
 		})
 
 		const toolCallProcessor = new ToolCallProcessor()

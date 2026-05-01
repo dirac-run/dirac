@@ -5,7 +5,7 @@ import { calculateApiCostOpenAI } from "@utils/cost"
 import { Logger } from "@/shared/services/Logger"
 import { normalizeOpenaiReasoningEffort } from "@shared/storage/types"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
-import { ChatCompletionFunctionTool, ChatCompletionReasoningEffort, ChatCompletionTool } from "openai/resources/chat/completions"
+import { ChatCompletionReasoningEffort, ChatCompletionTool } from "openai/resources/chat/completions"
 
 export interface ResponsesWebsocketOptions {
 	apiKey: string
@@ -48,15 +48,31 @@ export async function* yieldUsage(info: ModelInfo, usage: any, id?: string): Asy
 }
 
 export function mapResponseTools(tools: ChatCompletionTool[]): OpenAI.Responses.Tool[] {
-	return tools
-		?.filter((tool): tool is ChatCompletionFunctionTool => tool?.type === "function")
-		.map((tool) => ({
-			type: "function" as const,
-			name: tool.function.name,
-			description: tool.function.description,
-			parameters: tool.function.parameters ?? null,
-			strict: tool.function.strict ?? true,
-		}))
+	const mapped = (tools || []).map((tool) => {
+		if (tool.type === "function") {
+			return {
+				type: "function" as const,
+				name: tool.function.name,
+				description: tool.function.description,
+				parameters: tool.function.parameters ?? null,
+				strict: tool.function.strict ?? true,
+			}
+		}
+		if ((tool as any).type === "web_search") {
+			return {
+				type: "web_search" as any,
+				...(tool as any).search_context_size ? { search_context_size: (tool as any).search_context_size } : {},
+				...(tool as any).filters ? { filters: (tool as any).filters } : {},
+				...(tool as any).user_location ? { user_location: (tool as any).user_location } : {},
+				...(tool as any).external_web_access !== undefined
+					? { external_web_access: (tool as any).external_web_access }
+					: {},
+			}
+		}
+		return undefined
+	})
+
+	return mapped.filter((tool) => tool !== undefined) as any[]
 }
 
 export function buildResponseCreateParams(args: {
@@ -157,6 +173,15 @@ export async function* processResponsesEvents(
 					id: item.id,
 					reasoning: "",
 					redacted_data: item.encrypted_content,
+				}
+			}
+			if ((item as any).type === "web_search_call" && item.id) {
+				yield {
+					id: item.id,
+					type: "text",
+					text: `
+[Web Search: ${(item as any).action?.query || "Searching..."}]
+`,
 				}
 			}
 		}

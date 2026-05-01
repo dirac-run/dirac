@@ -65,6 +65,9 @@ export class OpenAiCodexHandler implements ApiHandler {
 
 
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
+		// Add web_search tool for OpenAI
+		const finalTools = [...(tools || [])]
+		finalTools.push({ type: "web_search" } as any)
 		const model = this.getModel()
 
 		// Reset state for this request
@@ -82,8 +85,8 @@ export class OpenAiCodexHandler implements ApiHandler {
 		const usePreviousResponseId = !!previousResponseId
 
 		// Build request body
-		const requestBody = this.buildRequestBody(model, input, systemPrompt, tools, previousResponseId)
-		const fallbackRequestBody = this.buildRequestBody(model, fullInput, systemPrompt, tools)
+		const requestBody = this.buildRequestBody(model, input, systemPrompt, finalTools, previousResponseId)
+		const fallbackRequestBody = this.buildRequestBody(model, fullInput, systemPrompt, finalTools)
 
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
@@ -150,14 +153,30 @@ export class OpenAiCodexHandler implements ApiHandler {
 		// Pass through strict value from tool (custom tools have strict: false, built-in tools default to true)
 		if (tools && tools.length > 0) {
 			body.tools = tools
-				.filter((tool: any) => tool?.type === "function")
-				.map((tool: any) => ({
-					type: "function",
-					name: tool.function.name,
-					description: tool.function.description,
-					parameters: tool.function.parameters,
-					strict: tool.function.strict ?? true,
-				}))
+				.map((tool: any) => {
+					if (tool.type === "function") {
+						return {
+							type: "function",
+							name: tool.function.name,
+							description: tool.function.description,
+							parameters: tool.function.parameters,
+							strict: tool.function.strict ?? true,
+						}
+					}
+					if (tool.type === "web_search") {
+						return {
+							type: "web_search",
+							...(tool.search_context_size ? { search_context_size: tool.search_context_size } : {}),
+							...(tool.filters ? { filters: tool.filters } : {}),
+							...(tool.user_location ? { user_location: tool.user_location } : {}),
+							...(tool.external_web_access !== undefined
+								? { external_web_access: tool.external_web_access }
+								: {}),
+						}
+					}
+					return undefined
+				})
+				.filter(Boolean)
 		}
 
 		return body

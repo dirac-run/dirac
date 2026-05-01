@@ -102,15 +102,18 @@ export class OpenAiNativeHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
+		// Add web_search tool for OpenAI
+		const finalTools = [...(tools || [])]
+		finalTools.push({ type: "web_search" } as any)
 		// Responses API requires tool format to be set to OPENAI_RESPONSES with native tools calling enabled
 		const apiFormat = this.getModel()?.info?.apiFormat
 		if (apiFormat === ApiFormat.OPENAI_RESPONSES || apiFormat === ApiFormat.OPENAI_RESPONSES_WEBSOCKET_MODE) {
 			if (!tools?.length) {
 				throw new Error("Native Tool Call must be enabled in your setting for OpenAI Responses API")
 			}
-			yield* this.createResponseStream(systemPrompt, messages, tools)
+			yield* this.createResponseStream(systemPrompt, messages, finalTools)
 		} else {
-			yield* this.createCompletionStream(systemPrompt, messages, tools)
+			yield* this.createCompletionStream(systemPrompt, messages, finalTools)
 		}
 	}
 
