@@ -45,20 +45,20 @@ const MARKERS = {
 /**
  * Parse SEARCH/REPLACE format and extract pairs of search/replace text
  */
-function parseSearchReplacePairs(content: string): Array<{ search: string; replace: string }> {
-	const pairs: Array<{ search: string; replace: string }> = []
+function parseSearchReplacePairs(content: string): Array<{ search: string; replace: string; startLine?: number }> {
+	const pairs: Array<{ search: string; replace: string; startLine?: number }> = []
 
 	// Find all SEARCH blocks
-	const searchRegex = /(?:-{7,}|<{7,}) SEARCH/g
-	const searchPositions: number[] = []
+	const searchRegex = /(?:-{7,}|<{7,}) SEARCH(?:[: ](\d+))?/g
+	const searchPositions: Array<{ index: number; startLine?: number }> = []
 	let match: RegExpExecArray | null
 	while ((match = searchRegex.exec(content)) !== null) {
-		searchPositions.push(match.index)
+		searchPositions.push({ index: match.index, startLine: match[1] ? parseInt(match[1], 10) : undefined })
 	}
 
 	for (let i = 0; i < searchPositions.length; i++) {
-		const start = searchPositions[i]
-		const end = i < searchPositions.length - 1 ? searchPositions[i + 1] : content.length
+		const { index: start, startLine } = searchPositions[i]
+		const end = i < searchPositions.length - 1 ? searchPositions[i + 1].index : content.length
 		const blockContent = content.substring(start, end)
 
 		// Extract content after SEARCH marker
@@ -70,7 +70,7 @@ function parseSearchReplacePairs(content: string): Array<{ search: string; repla
 		if (separatorIndex === -1) {
 			// Still streaming - only SEARCH block available, treat as deletion
 			const searchContent = afterSearch.trimEnd()
-			pairs.push({ search: searchContent, replace: "" })
+			pairs.push({ search: searchContent, replace: "", startLine })
 		} else {
 			// Extract SEARCH block
 			const searchContent = afterSearch.substring(0, separatorIndex).replace(/\r?\n$/, "")
@@ -86,7 +86,7 @@ function parseSearchReplacePairs(content: string): Array<{ search: string; repla
 					? afterSeparator.substring(0, replaceEndIndex).replace(/\r?\n$/, "")
 					: afterSeparator.trimEnd()
 
-			pairs.push({ search: searchContent, replace: replaceContent })
+			pairs.push({ search: searchContent, replace: replaceContent, startLine })
 		}
 	}
 
@@ -143,7 +143,7 @@ function parseApplyPatchPairs(content: string): Array<{ search: string; replace:
  * Compute line-level diff between search and replace text
  * Uses Myers diff algorithm via the diff library
  */
-function computeLineDiff(search: string, replace: string): DiffBlock {
+function computeLineDiff(search: string, replace: string, startLine?: number): DiffBlock {
 	const lines: DiffLine[] = []
 	let additions = 0
 	let deletions = 0
@@ -157,8 +157,8 @@ function computeLineDiff(search: string, replace: string): DiffBlock {
 	// The newlineIsToken option treats newlines as separate tokens for cleaner diffs
 	const changes = Diff.diffLines(search, replace, { newlineIsToken: false })
 
-	let oldLineNum = 1
-	let newLineNum = 1
+	let oldLineNum = startLine ?? 1
+	let newLineNum = startLine ?? 1
 
 	for (const change of changes) {
 		// Split the value into individual lines, preserving empty lines
@@ -259,9 +259,9 @@ function parseNewFormat(content: string): Array<{ search: string; replace: strin
 
 export function computeDiff(content: string): ComputedDiff {
 	// Detect format and parse pairs
-	let pairs: Array<{ search: string; replace: string }>
+	let pairs: Array<{ search: string; replace: string; startLine?: number }>
 
-	if (content.includes(MARKERS.SEARCH_BLOCK) || content.includes("------- SEARCH")) {
+	if (content.includes(MARKERS.SEARCH_BLOCK) || content.includes("------- SEARCH") || content.match(/<{7,} SEARCH:\d+/)) {
 		pairs = parseSearchReplacePairs(content)
 	} else if (content.includes(MARKERS.NEW_BEGIN)) {
 		pairs = parseApplyPatchPairs(content)
@@ -293,7 +293,7 @@ export function computeDiff(content: string): ComputedDiff {
 	let totalDeletions = 0
 
 	for (const pair of pairs) {
-		const block = computeLineDiff(pair.search, pair.replace)
+		const block = computeLineDiff(pair.search, pair.replace, pair.startLine)
 		blocks.push(block)
 		totalAdditions += block.additions
 		totalDeletions += block.deletions

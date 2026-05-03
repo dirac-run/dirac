@@ -11,6 +11,7 @@ interface Patch {
 	lines: string[]
 	additions: number
 	deletions: number
+	isUserModified?: boolean
 }
 
 // Constants for format markers
@@ -21,6 +22,7 @@ const MARKERS = {
 	NEW_BEGIN: "*** Begin Patch",
 	NEW_END: "*** End Patch",
 	FILE_PATTERN: /^\*\*\* (Add|Update|Delete) File: (.+)$/m,
+	USER_MODIFIED_PATTERN: /^\*\*\* User Modified File: (.+)$/m,
 } as const
 
 // Style mappings for actions
@@ -154,6 +156,11 @@ const FileBlock = memo<{ file: Patch; isStreaming: boolean; startLineNumber?: nu
 									onClick={handleOpenFile}
 									title="Open file in editor">
 									{file.path}
+									{file.isUserModified && (
+										<span className="ml-2 px-1.5 py-0.5 bg-info/20 text-info text-[10px] font-bold rounded-xs uppercase tracking-wider border border-info/30">
+											User Modified
+										</span>
+									)}
 									{!isExpanded && (
 										<span className="ml-2 opacity-70 font-normal">
 											<DiffStats additions={file.additions} deletions={file.deletions} />
@@ -293,6 +300,24 @@ function parsePatch(patch: string, path: string): ParseResult {
 			}
 		}
 	}
+
+	// Try User Modified format
+	if (patch.includes("*** User Modified File:")) {
+		const match = patch.match(MARKERS.USER_MODIFIED_PATTERN)
+		if (match) {
+			const filePath = match[1].trim()
+			const content = patch.substring(match[0].length).trim()
+			const parsed = parseNewFormat(content)
+			if (parsed.length > 0) {
+				parsed.forEach((p) => {
+					p.isUserModified = true
+					if (!p.path) p.path = filePath
+				})
+				return { parsedFiles: parsed, isStreaming: false }
+			}
+		}
+	}
+
 
 	// Try new format (*** Begin Patch / *** End Patch)
 	if (patch.includes(MARKERS.NEW_BEGIN)) {

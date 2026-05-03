@@ -1,6 +1,7 @@
 import { resolveWorkspacePath } from "@core/workspace"
 import { isMultiRootEnabled } from "@core/workspace/multi-root-utils"
 import { DiracDefaultTool } from "@shared/tools"
+import { CommandPermissionController } from "@/core/permissions/CommandPermissionController"
 import { StateManager } from "@/core/storage/StateManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { getCwd, getDesktopDir, isLocatedInPath, isLocatedInWorkspace } from "@/utils/path"
@@ -16,13 +17,15 @@ const WRITE_TOOLS: DiracDefaultTool[] = [
 
 export class AutoApprove {
 	private stateManager: StateManager
+	private commandPermissionController: CommandPermissionController
 	// Cache for workspace paths - populated on first access and reused for the task lifetime
 	// NOTE: This assumes that the task has a fixed set of workspace roots(which is currently true).
 	private workspacePathsCache: { paths: string[] } | null = null
 	private isMultiRootScenarioCache: boolean | null = null
 
-	constructor(stateManager: StateManager) {
+	constructor(stateManager: StateManager, commandPermissionController: CommandPermissionController) {
 		this.stateManager = stateManager
+		this.commandPermissionController = commandPermissionController
 	}
 
 	/**
@@ -173,9 +176,25 @@ export class AutoApprove {
 			? autoApproveResult
 			: [autoApproveResult, false]
 
+		// 3. Check permission rules
+		if (this.shouldAutoApproveWithRules(blockname, autoApproveActionpath)) {
+			return true
+		}
+
+
 		if ((isLocalRead && autoApproveLocal) || (!isLocalRead && autoApproveLocal && autoApproveExternal)) {
 			return true
 		}
 		return false
 	}
+
+	/**
+	 * Check if the tool should be auto-approved based on the permission rules.
+	 */
+	public shouldAutoApproveWithRules(toolName: DiracDefaultTool, path?: string): boolean {
+		const result = this.commandPermissionController.validateTool(toolName, path)
+		return result.allowed && result.reason === "allowed"
+	}
+
 }
+

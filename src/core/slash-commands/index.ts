@@ -3,6 +3,8 @@ import { DiracRulesToggles } from "@shared/dirac-rules"
 import fs from "fs/promises"
 import { telemetryService } from "@/services/telemetry"
 import { Logger } from "@/shared/services/Logger"
+import { handlePermissionsCommand } from "./PermissionsCommandHandler"
+import { CommandPermissionController } from "../permissions/CommandPermissionController"
 import {
 	condenseToolResponse,
 	explainChangesToolResponse,
@@ -39,9 +41,10 @@ export async function parseSlashCommands(
 	globalWorkflowToggles: DiracRulesToggles,
 	ulid: string,
 	providerInfo?: ApiProviderInfo,
-	availableSkills: SkillMetadata[] = []
+	availableSkills: SkillMetadata[] = [],
+	permissionController?: CommandPermissionController
 ): Promise<{ processedText: string; needsDiracrulesFileCheck: boolean }> {
-	const SUPPORTED_DEFAULT_COMMANDS = ["newtask", "smol", "compact", "newrule", "reportbug", "explain-changes"]
+	const SUPPORTED_DEFAULT_COMMANDS = ["newtask", "smol", "compact", "newrule", "reportbug", "explain-changes", "permissions"]
 
 	const willUseNativeTools = true
 
@@ -120,6 +123,15 @@ export async function parseSlashCommands(
 
 			// we give preference to the default commands if the user has a file with the same name
 			if (SUPPORTED_DEFAULT_COMMANDS.includes(commandName)) {
+				if (commandName === "permissions" && permissionController) {
+					const { processedText: feedback } = await handlePermissionsCommand(tagContent, permissionController)
+					const textWithoutSlashCommand = removeSlashCommand(text, tagContent, contentStartIndex, slashMatch)
+					// We return the feedback as a system instruction so the agent knows it happened
+					const processedText = `<explicit_instructions type="permissions">\n${feedback}\n</explicit_instructions>\n` + textWithoutSlashCommand
+					telemetryService.captureSlashCommandUsed(ulid, commandName, "builtin")
+					return { processedText, needsDiracrulesFileCheck: false }
+				}
+
 				// remove the slash command and add custom instructions at the top of this message
 				const textWithoutSlashCommand = removeSlashCommand(text, tagContent, contentStartIndex, slashMatch)
 				const processedText = commandReplacements[commandName] + textWithoutSlashCommand

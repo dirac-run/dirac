@@ -8,6 +8,7 @@ import type { DiracMessage, ExtensionState } from "@shared/ExtensionMessage"
 import { convertProtoToDiracMessage } from "@shared/proto-conversions/dirac-message"
 import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react"
 
+
 interface TaskContextType {
 	state: Partial<ExtensionState>
 	controller: any
@@ -35,6 +36,7 @@ export const TaskContextProvider: React.FC<TaskContextProviderProps> = ({ contro
 	)
 	const [isComplete, setIsComplete] = useState(false)
 	const [lastError, setLastError] = useState<string | null>(null)
+
 
 	// Use ref to track latest state for partial message callback
 	const stateRef = useRef(state)

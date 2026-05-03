@@ -352,7 +352,8 @@ export class ContextLoader {
             globalWorkflowToggles,
             ulid,
             providerInfo,
-            availableSkills
+            availableSkills,
+            this.dependencies.commandPermissionController
         )
 
         // Skip automatic path and symbol detection for subsequent turns

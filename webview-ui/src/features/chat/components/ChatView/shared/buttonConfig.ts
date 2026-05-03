@@ -10,6 +10,8 @@ export type ButtonActionType =
 	| "new_task" // Start a new task
 	| "cancel" // Cancel streaming
 	| "utility" // Execute utility function (condense, report_bug)
+	| "edit" // Send editButtonClicked
+	| "view" // Send viewButtonClicked
 	| "retry" // Retry the last action
 
 /**

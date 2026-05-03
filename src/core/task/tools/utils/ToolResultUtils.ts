@@ -3,6 +3,7 @@ import { formatResponse } from "@core/prompts/responses"
 import { ToolResponse } from "@core/task"
 import { processFilesIntoText } from "@/integrations/misc/extract-text"
 import { DiracAsk, MultiCommandState } from "@/shared/ExtensionMessage"
+import { DiracAskResponse } from "@/shared/WebviewMessage"
 import { Logger } from "@/shared/services/Logger"
 import type { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import { TaskConfig } from "../types/TaskConfig"
@@ -130,11 +131,11 @@ export class ToolResultUtils {
 		multiCommandState?: MultiCommandState,
 	) {
 		if (config.isSubagentExecution) {
-			return { didApprove: true, askTs: undefined as number | undefined }
+			return { didApprove: true, response: "yesButtonClicked" as DiracAskResponse, askTs: undefined as number | undefined }
 		}
 
 		const result = await config.callbacks.ask(type, completeMessage, partial, multiCommandState)
-		const { response, text, images, files } = result
+		const { response, text, images, files, userEdits } = result
 
 		if (text || (images && images.length > 0) || (files && files.length > 0)) {
 			let fileContentString = ""
@@ -152,11 +153,19 @@ export class ToolResultUtils {
 			return { didApprove: false, ...result }
 		}
 
-		if (response !== "yesButtonClicked") {
-			// User pressed reject button or responded with a message, which we treat as a rejection
-			config.taskState.didRejectTool = true // Prevent further tool uses in this message
+		// Handle intermediate states (edit/view)
+		if (response === "editButtonClicked" || response === "viewButtonClicked") {
 			return { didApprove: false, ...result }
 		}
+
+		if (response !== "yesButtonClicked") {
+			// User pressed reject button or responded with a message, which we treat as a rejection
+			if (response === "noButtonClicked") {
+				config.taskState.didRejectTool = true // Prevent further tool uses in this message
+			}
+			return { didApprove: false, ...result }
+		}
+
 		// User hit the approve button, and may have provided feedback
 		return { didApprove: true, ...result }
 	}

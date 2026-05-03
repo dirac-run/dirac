@@ -94,6 +94,7 @@ export interface TaskCallbacks {
 		images?: string[]
 		askTs?: number
 		files?: string[]
+		userEdits?: Record<string, string>
 	}>
 
 	saveCheckpoint: (isAttemptCompletionMessage?: boolean, completionMessageTs?: number) => Promise<void>

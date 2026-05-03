@@ -5,7 +5,7 @@ import { execSync } from "child_process"
 import fs from "fs"
 import { cp } from "fs/promises"
 import { glob } from "glob"
-import minimatch from "minimatch"
+import picomatch from "picomatch"
 import os from "os"
 import path from "path"
 import { rmrf } from "./file-utils.mjs"
@@ -221,11 +221,11 @@ function createIsIgnored(standaloneIgnores) {
 		[[], []],
 	)
 
+	const ignoreMatchers = ignore.map((i) => picomatch(i, MinimatchOptions))
+	const negateMatchers = negate.map((i) => picomatch(i.slice(1), MinimatchOptions))
+
 	function isIgnored(f) {
-		return (
-			ignore.some((i) => minimatch(f, i, MinimatchOptions)) &&
-			!negate.some((i) => minimatch(f, i.substr(1), MinimatchOptions))
-		)
+		return ignoreMatchers.some((matcher) => matcher(f)) && !negateMatchers.some((matcher) => matcher(f))
 	}
 	return isIgnored
 }

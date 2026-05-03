@@ -16,6 +16,52 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	private activeLineController?: DecorationController
 	private notebookDiffView?: NotebookDiffView
 
+	private static reviewingFiles: Map<string, string> = new Map()
+	private static contextKeyDisposables: vscode.Disposable[] = []
+	private static isInitialized = false
+
+	constructor() {
+		super()
+		if (!VscodeDiffViewProvider.isInitialized) {
+			VscodeDiffViewProvider.contextKeyDisposables.push(
+				vscode.window.onDidChangeActiveTextEditor((editor) => VscodeDiffViewProvider.updateContextKeys(editor)),
+				vscode.workspace.onDidChangeTextDocument((event) => {
+					const activeEditor = vscode.window.activeTextEditor
+					if (activeEditor && event.document === activeEditor.document) {
+						VscodeDiffViewProvider.updateContextKeys(activeEditor)
+					}
+				}),
+			)
+			VscodeDiffViewProvider.isInitialized = true
+		}
+	}
+
+	private static updateContextKeys(editor: vscode.TextEditor | undefined) {
+		if (!editor || editor.document.uri.scheme === DIFF_VIEW_URI_SCHEME) {
+			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
+			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
+			return
+		}
+
+		const fsPath = editor.document.uri.fsPath
+		let proposedContent: string | undefined
+		for (const [path, content] of VscodeDiffViewProvider.reviewingFiles.entries()) {
+			if (arePathsEqual(path, fsPath)) {
+				proposedContent = content
+				break
+			}
+		}
+
+		if (proposedContent === undefined) {
+			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
+			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
+		} else {
+			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", true)
+			const isModified = editor.document.getText() !== proposedContent
+			vscode.commands.executeCommand("setContext", "dirac.isFileModified", isModified)
+		}
+	}
+
 	override async openDiffEditor(): Promise<void> {
 		if (!this.absolutePath) {
 			throw new Error("No file path set")
@@ -50,42 +96,40 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 			)
 
 		if (diffTab && diffTab.input instanceof vscode.TabInputTextDiff) {
-			// Use already open diff editor.
-			this.activeDiffEditor = await vscode.window.showTextDocument(diffTab.input.modified, {
-				preserveFocus: true,
-			})
-		} else {
-			// Open new diff editor.
-			this.activeDiffEditor = await new Promise<vscode.TextEditor>((resolve, reject) => {
-				const fileName = path.basename(uri.fsPath)
-				const fileExists = this.editType === "modify"
-				const disposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
-					if (editor && arePathsEqual(editor.document.uri.fsPath, uri.fsPath)) {
-						disposable.dispose()
-						resolve(editor)
-					}
-				})
-				vscode.commands.executeCommand(
-					"vscode.diff",
-					vscode.Uri.parse(
-						`${DIFF_VIEW_URI_SCHEME}:${fileName.replace(/%/g, "%25").replace(/#/g, "%23").replace(/\?/g, "%3F")}`,
-					).with({
-						query: Buffer.from(this.originalContent ?? "").toString("base64"),
-					}),
-					uri,
-					`${fileName}: ${fileExists ? "Original ↔ Dirac's Changes" : "New File"} (Editable)`,
-					{
-						preserveFocus: true,
-					},
-				)
-				// This may happen on very slow machines ie project idx
-				setTimeout(() => {
-					disposable.dispose()
-					reject(new Error("Failed to open diff editor, please try again..."))
-				}, 10_000)
-			})
+			// Close the existing diff tab so we can open a fresh one with the correct original content
+			try {
+				await vscode.window.tabGroups.close(diffTab)
+			} catch (e) {}
 		}
 
+		// Open new diff editor.
+		this.activeDiffEditor = await new Promise<vscode.TextEditor>((resolve, reject) => {
+			const fileName = path.basename(uri.fsPath)
+			const fileExists = this.editType === "modify"
+			const disposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+				if (editor && arePathsEqual(editor.document.uri.fsPath, uri.fsPath)) {
+					disposable.dispose()
+					resolve(editor)
+				}
+			})
+			vscode.commands.executeCommand(
+				"vscode.diff",
+				uri.with({
+					scheme: DIFF_VIEW_URI_SCHEME,
+					query: Buffer.from(this.originalContent ?? "").toString("base64"),
+				}),
+				uri,
+				`${fileName}: ${fileExists ? "Original ↔ Dirac's Changes" : "New File"} (Editable)`,
+				{
+					preserveFocus: true,
+				},
+			)
+			// This may happen on very slow machines ie project idx
+			setTimeout(() => {
+				disposable.dispose()
+				reject(new Error("Failed to open diff editor, please try again..."))
+			}, 10_000)
+		})
 		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
 		this.activeLineController = new DecorationController("activeLine", this.activeDiffEditor)
 		// Apply faded overlay to all lines initially
@@ -111,7 +155,7 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 		const edit = new vscode.WorkspaceEdit()
 		const range = new vscode.Range(rangeToReplace.startLine, 0, rangeToReplace.endLine, 0)
 		edit.replace(document.uri, range, content)
-		await vscode.workspace.applyEdit(edit)
+		const success = await vscode.workspace.applyEdit(edit)
 
 		// VS Code can normalize trailing newlines on full-document replacements.
 		// Only fix up when replacing to the end to avoid touching untouched content.
@@ -196,7 +240,7 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 			return false
 		}
 		if (!this.activeDiffEditor.document.isDirty) {
-			return false
+			return true
 		}
 		return await pTimeout(this.activeDiffEditor.document.save(), {
 			milliseconds: 10_000,
@@ -301,6 +345,30 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 			autoFormattingEdits,
 			userEdits: undefined,
 		}
+	}
+
+	override async showReview(files: { absolutePath: string; displayPath: string; content: string }[]): Promise<void> {
+		VscodeDiffViewProvider.reviewingFiles = new Map(files.map((f) => [f.absolutePath, f.content]))
+		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)
+
+		// Open diff editors for all files in the batch
+		for (const file of files) {
+			this.editType = "modify"
+			await this.open(file.absolutePath, { displayPath: file.displayPath })
+			await this.update(file.content, true)
+			await this.scrollToFirstDiff()
+			// Small delay to ensure VS Code processes the updates
+			await new Promise((resolve) => setTimeout(resolve, 200))
+		}
+	}
+
+	override async hideReview(): Promise<void> {
+		VscodeDiffViewProvider.reviewingFiles.clear()
+		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)
+
+		// Close diff views (if not dirty) and reset state
+		await this.closeAllDiffViews()
+		await this.reset()
 	}
 }
 

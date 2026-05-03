@@ -226,6 +226,22 @@
 				"category": "Dirac",
 				"icon": "$(link-external)"
 			}
+,
+			{
+				"command": "dirac.acceptEdit",
+				"title": "Accept",
+				"icon": "assets/icons/review-accept.svg"
+			},
+			{
+				"command": "dirac.saveWithMyChanges",
+				"title": "Save with My Changes",
+				"icon": "assets/icons/review-save.svg"
+			},
+			{
+				"command": "dirac.rejectEdit",
+				"title": "Reject",
+				"icon": "assets/icons/review-reject.svg"
+			}
 		],
 		"keybindings": [
 			{
@@ -255,6 +271,23 @@
 			}
 		],
 		"menus": {
+			"editor/title": [
+				{
+					"command": "dirac.acceptEdit",
+					"group": "navigation@1",
+					"when": "dirac.isFileUnderReview && !dirac.isFileModified"
+				},
+				{
+					"command": "dirac.saveWithMyChanges",
+					"group": "navigation@1",
+					"when": "dirac.isFileUnderReview && dirac.isFileModified"
+				},
+				{
+					"command": "dirac.rejectEdit",
+					"group": "navigation@2",
+					"when": "dirac.isFileUnderReview"
+				}
+			],
 			"view/title": [
 				{
 					"command": "dirac.plusButtonClicked",
@@ -460,7 +493,6 @@
 		"grpc-tools": "^1.13.0",
 		"husky": "^9.1.7",
 		"lint-staged": "^16.1.0",
-		"minimatch": "^3.0.3",
 		"npm-run-all": "^4.1.5",
 		"nyc": "^17.1.0",
 		"prebuild-install": "^7.1.3",

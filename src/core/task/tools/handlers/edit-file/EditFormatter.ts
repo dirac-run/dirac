@@ -178,7 +178,7 @@ export class EditFormatter {
 		}
 
 		if (userEdits) {
-			results.push(`The user made the following updates to your content:\n\n${userEdits}`)
+			results.push(`*** User Modified File CRITICAL: The user manually modified the file during review. You MUST NOT revert these changes. If you need to fix syntax errors in the same area, you MUST incorporate the user's changes into your new edits.): ${prepared.displayPath}\n\n${userEdits}`)
 		}
 
 		if (autoFormattingEdits) {

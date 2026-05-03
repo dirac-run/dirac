@@ -1,4 +1,5 @@
 import { DiracContent } from "@shared/messages/content"
+import { CommandPermissionController } from "../../permissions/CommandPermissionController"
 import { ApiHandler } from "../../../core/api"
 import { ICheckpointManager } from "../../../integrations/checkpoints/types"
 import { DiffViewProvider } from "../../../integrations/editor/DiffViewProvider"
@@ -35,6 +36,7 @@ export interface LifecycleManagerDependencies {
 	fileContextTracker: FileContextTracker
 	contextManager: ContextManager
 	commandExecutor: CommandExecutor
+	commandPermissionController: CommandPermissionController
 	cwd: string
 	hookManager: HookManager
 	initiateTaskLoop: (userContent: DiracContent[]) => Promise<void>

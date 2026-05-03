@@ -103,12 +103,18 @@ export const ToolOutput = ({ tool, message, isExpanded, onToggleExpand, backgrou
 				? `Approve ${displayUnits.length} actions`
 				: `Approve ${displayUnits[0].label}`
 
+		const hint = tool.hint ? `
+
+\${tool.hint}` : ""
+		const fullDescription = description + hint
+
 		return (
 			<ApprovalBox
 				isProcessing={isProcessing}
-				description={description}
+				description={fullDescription}
 				onApprove={() => handleAction("approve")}
-				onReject={() => handleAction("reject")}>
+				onReject={() => handleAction("reject")}
+				onEdit={undefined}>
 				{content}
 			</ApprovalBox>
 		)

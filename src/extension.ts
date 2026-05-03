@@ -155,6 +155,33 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 	})()
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_VIEW_URI_SCHEME, diffContentProvider))
+	// Register commands for Accept/Reject from CodeLens
+	context.subscriptions.push(
+		vscode.commands.registerCommand("dirac.acceptEdit", async () => {
+			const sidebarInstance = DiracWebviewProvider.getInstance()
+			if (sidebarInstance.controller?.task) {
+				await sidebarInstance.controller.task.handleWebviewAskResponse("yesButtonClicked")
+			}
+		}),
+	)
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("dirac.saveWithMyChanges", async () => {
+			const sidebarInstance = DiracWebviewProvider.getInstance()
+			if (sidebarInstance.controller?.task) {
+				await sidebarInstance.controller.task.handleWebviewAskResponse("yesButtonClicked")
+			}
+		}),
+	)
+	context.subscriptions.push(
+		vscode.commands.registerCommand("dirac.rejectEdit", async () => {
+			const sidebarInstance = DiracWebviewProvider.getInstance()
+			if (sidebarInstance.controller?.task) {
+				await sidebarInstance.controller.task.handleWebviewAskResponse("noButtonClicked")
+			}
+		}),
+	)
+
 
 	const handleUri = async (uri: vscode.Uri) => {
 		const url = decodeURIComponent(uri.toString())

@@ -20,6 +20,8 @@ const DiracCommands = {
 	ExplainCode: prefix + ".explainCode",
 	ImproveCode: prefix + ".improveCode",
 	FocusChatInput: prefix + ".focusChatInput",
+	UndoUserEdits: prefix + ".undoUserEdits",
+	CommentFromEditor: prefix + ".commentFromEditor",
 	Walkthrough: prefix + ".openWalkthrough",
 	GenerateCommit: prefix + ".generateGitCommitMessage",
 	AbortCommit: prefix + ".abortGitCommitMessage",

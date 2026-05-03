@@ -80,6 +80,7 @@ export class LifecycleManager {
 	public async startTask(task?: string, images?: string[], files?: string[]): Promise<void> {
 		try {
 			await this.dependencies.diracIgnoreController.initialize()
+			await this.dependencies.commandPermissionController.initialize(this.dependencies.cwd)
 		} catch (error) {
 			Logger.error("Failed to initialize DiracIgnoreController:", error)
 		}
@@ -192,6 +193,7 @@ export class LifecycleManager {
 	public async resumeTaskFromHistory() {
 		try {
 			await this.dependencies.diracIgnoreController.initialize()
+			await this.dependencies.commandPermissionController.initialize(this.dependencies.cwd)
 		} catch (error) {
 			Logger.error("Failed to initialize DiracIgnoreController:", error)
 		}

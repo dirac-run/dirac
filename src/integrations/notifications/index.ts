@@ -54,13 +54,22 @@ async function showWindowsNotification(options: NotificationOptions): Promise<vo
 async function showLinuxNotification(options: NotificationOptions): Promise<void> {
 	const { title = "", subtitle = "", message } = options
 
+	// Check if we have a display (required for notify-send)
+	if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+		return
+	}
+
 	// Combine subtitle and message if subtitle exists
 	const fullMessage = subtitle ? `${subtitle}\n${message}` : message
 
 	try {
 		await execa("notify-send", [title, fullMessage])
 	} catch (error) {
-		throw new Error(`Failed to show Linux notification: ${error}`)
+		// Only log if it's not a D-Bus error which is common in headless environments
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		if (!errorMessage.includes("Cannot autolaunch D-Bus")) {
+			throw new Error(`Failed to show Linux notification: ${error}`)
+		}
 	}
 }
 

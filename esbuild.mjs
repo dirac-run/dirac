@@ -224,7 +224,7 @@ const extensionConfig = {
 	...baseConfig,
 	entryPoints: ["src/extension.ts"],
 	outfile: `${destDir}/extension.js`,
-	external: ["vscode", "web-tree-sitter"],
+	external: ["vscode", "web-tree-sitter", "better-sqlite3"],
 }
 
 // Standalone-specific configuration

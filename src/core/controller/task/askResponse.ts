@@ -30,13 +30,25 @@ export async function askResponse(controller: Controller, request: AskResponseRe
 			case "messageResponse":
 				responseType = "messageResponse"
 				break
+			case "editButtonClicked":
+				responseType = "editButtonClicked"
+				break
+			case "viewButtonClicked":
+				responseType = "viewButtonClicked"
+				break
 			default:
 				Logger.warn(`askResponse: Unknown response type: ${request.responseType}`)
 				return Empty.create()
 		}
 
 		// Call the task's handler for webview responses
-		await controller.task.handleWebviewAskResponse(responseType, request.text, request.images, request.files)
+		await controller.task.handleWebviewAskResponse(
+			responseType,
+			request.text,
+			request.images,
+			request.files,
+			request.userEdits,
+		)
 
 		return Empty.create()
 	} catch (error) {

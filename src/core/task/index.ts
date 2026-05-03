@@ -284,10 +284,10 @@ export class Task {
 		this.stateManager = stateManager
 		this.workspaceManager = workspaceManager
 
-		// DiffViewProvider opens Diff Editor during edits while FileEditProvider performs
-		// edits in the background without stealing user's editor's focus.
-		const backgroundEditEnabled = this.stateManager.getGlobalSettingsKey("backgroundEditEnabled")
-		this.diffViewProvider = backgroundEditEnabled ? new FileEditProvider() : HostProvider.get().createDiffViewProvider()
+		// Prefer the host's DiffViewProvider if available, as it handles both background
+		// and interactive edits. Fall back to FileEditProvider for headless environments.
+		const hostDiffViewProvider = HostProvider.get().createDiffViewProvider()
+		this.diffViewProvider = hostDiffViewProvider || new FileEditProvider()
 
 		this.taskId = taskId
 		AnchorStateManager.reset(this.taskId)
@@ -535,6 +535,7 @@ export class Task {
 			taskState: this.taskState,
 			getCurrentProviderInfo: this.getCurrentProviderInfo.bind(this),
 			getEnvironmentDetails: this.getEnvironmentDetails.bind(this),
+			commandPermissionController: this.commandPermissionController,
 		})
 
 		this.taskMessenger = new TaskMessenger({
@@ -585,6 +586,7 @@ export class Task {
 			hookManager: this.hookManager,
 			initiateTaskLoop: this.initiateTaskLoop.bind(this),
 			recordEnvironment: () => this.environmentContextTracker.recordEnvironment(),
+			commandPermissionController: this.commandPermissionController,
 		})
 
 		this.apiConversationManager = new ApiConversationManager({
@@ -633,14 +635,96 @@ export class Task {
 		})
 	}
 
+	async processNativeToolCalls(assistantTextOnly: string, toolBlocks: ToolUse[], isStreamComplete: boolean = false) {
+		return this.responseProcessor.processNativeToolCalls(assistantTextOnly, toolBlocks, isStreamComplete)
+	}
+
+	async getEnvironmentDetails(includeFileDetails = false): Promise<string> {
+		return this.environmentManager.getEnvironmentDetails(includeFileDetails)
+	}
+
+	private async handleMistakeLimitReached(
+		userContent: DiracContent[],
+	): Promise<{ didEndLoop: boolean; userContent: DiracContent[] }> {
+		if (this.taskState.consecutiveMistakeCount < this.stateManager.getGlobalSettingsKey("maxConsecutiveMistakes")) {
+			return { didEndLoop: false, userContent }
+		}
+
+		// In yolo mode, don't wait for user input - fail the task
+		if (this.stateManager.getGlobalSettingsKey("yoloModeToggled")) {
+			const errorMessage =
+				`[YOLO MODE] Task failed: Too many consecutive mistakes (${this.taskState.consecutiveMistakeCount}). ` +
+				`The model may not be capable enough for this task. Consider using a more capable model.`
+			await this.say("error", errorMessage)
+			// End the task loop with failure
+			return { didEndLoop: true, userContent } // didEndLoop = true, signals task completion/failure
+		}
+
+		const autoApprovalSettings = this.stateManager.getGlobalSettingsKey("autoApprovalSettings")
+		if (autoApprovalSettings.enableNotifications) {
+			showSystemNotification({
+				subtitle: "Error",
+				message: "Dirac is having trouble. Would you like to continue the task?",
+			})
+		}
+
+		const { response, text, images, files } = await this.ask(
+			"mistake_limit_reached",
+			`Tool use failure. Can potentially be mitigated with some user guidance (e.g. "Try breaking down the task into smaller steps").`
+		)
+
+		if (response === "messageResponse") {
+			// Display the user's message in the chat UI
+			await this.say("user_feedback", text, images, files)
+
+			// This userContent is for the *next* API call.
+			const feedbackUserContent: DiracUserContent[] = []
+			feedbackUserContent.push({
+				type: "text",
+				text: formatResponse.tooManyMistakes(text),
+			})
+
+			if (images && images.length > 0) {
+				feedbackUserContent.push(...formatResponse.imageBlocks(images))
+			}
+
+			let fileContentString = ""
+			if (files && files.length > 0) {
+				fileContentString = await processFilesIntoText(files)
+			}
+
+			if (fileContentString) {
+				feedbackUserContent.push({
+					type: "text",
+					text: fileContentString,
+				})
+			}
+
+			userContent = feedbackUserContent
+		}
+
+		this.taskState.consecutiveMistakeCount = 0
+		this.taskState.autoRetryAttempts = 0 // need to reset this if the user chooses to manually retry after the mistake limit is reached
+		return { didEndLoop: false, userContent }
+	}
+
+	async loadContext(
+		userContent: DiracContent[],
+		includeFileDetails = false,
+		useCompactPrompt = false,
+	): Promise<[DiracContent[], string, boolean, SkillMetadata[]]> {
+		return this.contextLoader.loadContext(userContent, includeFileDetails, useCompactPrompt)
+	}
+
+
 	// Communicate with webview
 
 	async ask(type: DiracAsk, text?: string, partial?: boolean, multiCommandState?: MultiCommandState) {
 		return this.taskMessenger.ask(type, text, partial, multiCommandState)
 	}
 
-	async handleWebviewAskResponse(askResponse: DiracAskResponse, text?: string, images?: string[], files?: string[]) {
-		return this.taskMessenger.handleWebviewAskResponse(askResponse, text, images, files)
+	async handleWebviewAskResponse(askResponse: DiracAskResponse, text?: string, images?: string[], files?: string[], userEdits?: Record<string, string>) {
+		return this.taskMessenger.handleWebviewAskResponse(askResponse, text, images, files, userEdits)
 	}
 
 	async say(
@@ -1733,89 +1817,6 @@ ${notice}`
 			return true
 		}
 	}
-
-	async loadContext(
-		userContent: DiracContent[],
-		includeFileDetails = false,
-		useCompactPrompt = false,
-	): Promise<[DiracContent[], string, boolean, SkillMetadata[]]> {
-		return this.contextLoader.loadContext(userContent, includeFileDetails, useCompactPrompt)
-	}
-
-	async processNativeToolCalls(assistantTextOnly: string, toolBlocks: ToolUse[], isStreamComplete: boolean = false) {
-		return this.responseProcessor.processNativeToolCalls(assistantTextOnly, toolBlocks, isStreamComplete)
-	}
-
-	async getEnvironmentDetails(includeFileDetails = false): Promise<string> {
-		return this.environmentManager.getEnvironmentDetails(includeFileDetails)
-	}
-
-	private async handleMistakeLimitReached(
-		userContent: DiracContent[],
-	): Promise<{ didEndLoop: boolean; userContent: DiracContent[] }> {
-		if (this.taskState.consecutiveMistakeCount < this.stateManager.getGlobalSettingsKey("maxConsecutiveMistakes")) {
-			return { didEndLoop: false, userContent }
-		}
-
-		// In yolo mode, don't wait for user input - fail the task
-		if (this.stateManager.getGlobalSettingsKey("yoloModeToggled")) {
-			const errorMessage =
-				`[YOLO MODE] Task failed: Too many consecutive mistakes (${this.taskState.consecutiveMistakeCount}). ` +
-				`The model may not be capable enough for this task. Consider using a more capable model.`
-			await this.say("error", errorMessage)
-			// End the task loop with failure
-			return { didEndLoop: true, userContent } // didEndLoop = true, signals task completion/failure
-		}
-
-		const autoApprovalSettings = this.stateManager.getGlobalSettingsKey("autoApprovalSettings")
-		if (autoApprovalSettings.enableNotifications) {
-			showSystemNotification({
-				subtitle: "Error",
-				message: "Dirac is having trouble. Would you like to continue the task?",
-			})
-		}
-
-		const { response, text, images, files } = await this.ask(
-			"mistake_limit_reached",
-			`Tool use failure. Can potentially be mitigated with some user guidance (e.g. "Try breaking down the task into smaller steps").`
-			,
-		)
-
-		if (response === "messageResponse") {
-			// Display the user's message in the chat UI
-			await this.say("user_feedback", text, images, files)
-
-			// This userContent is for the *next* API call.
-			const feedbackUserContent: DiracUserContent[] = []
-			feedbackUserContent.push({
-				type: "text",
-				text: formatResponse.tooManyMistakes(text),
-			})
-
-			if (images && images.length > 0) {
-				feedbackUserContent.push(...formatResponse.imageBlocks(images))
-			}
-
-			let fileContentString = ""
-			if (files && files.length > 0) {
-				fileContentString = await processFilesIntoText(files)
-			}
-
-			if (fileContentString) {
-				feedbackUserContent.push({
-					type: "text",
-					text: fileContentString,
-				})
-			}
-
-			userContent = feedbackUserContent
-		}
-
-		this.taskState.consecutiveMistakeCount = 0
-		this.taskState.autoRetryAttempts = 0 // need to reset this if the user chooses to manually retry after the mistake limit is reached
-		return { didEndLoop: false, userContent }
-	}
-
 	private async initializeCheckpoints(isFirstRequest: boolean): Promise<void> {
 		return this.lifecycleManager.initializeCheckpoints(isFirstRequest)
 	}
@@ -1873,4 +1874,5 @@ ${notice}`
 	}): Promise<boolean> {
 		return this.responseProcessor.handleEmptyAssistantResponse(params)
 	}
+
 }

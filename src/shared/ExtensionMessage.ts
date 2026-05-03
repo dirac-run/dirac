@@ -255,6 +255,7 @@ export interface DiracSayTool {
 	operationIsLocatedInWorkspace?: boolean
 	/** Starting line numbers in the original file where each SEARCH block matched */
 	startLineNumbers?: number[]
+	hint?: string
 	editsCount?: number
 	functionNames?: string[]
 	foundFunctionNames?: string[]

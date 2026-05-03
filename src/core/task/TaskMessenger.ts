@@ -26,6 +26,7 @@ export class TaskMessenger {
 		images?: string[]
 		files?: string[]
 		askTs?: number
+		userEdits?: Record<string, string>
 	}> {
 		// Allow resume asks even when aborted to enable resume button after cancellation
 		if (this.dependencies.taskState.abort && type !== "resume_task" && type !== "resume_completed_task") {
@@ -65,6 +66,7 @@ export class TaskMessenger {
 						images: this.dependencies.taskState.askResponseImages,
 						files: this.dependencies.taskState.askResponseFiles,
 						askTs: lastMessage!.ts,
+						userEdits: this.dependencies.taskState.askResponseUserEdits,
 					}
 				}
 				// this is a new partial message, so add it with partial state
@@ -169,12 +171,14 @@ export class TaskMessenger {
 			text: this.dependencies.taskState.askResponseText,
 			images: this.dependencies.taskState.askResponseImages,
 			files: this.dependencies.taskState.askResponseFiles,
+			userEdits: this.dependencies.taskState.askResponseUserEdits,
 		}
 
 		this.dependencies.taskState.askResponse = undefined
 		this.dependencies.taskState.askResponseText = undefined
 		this.dependencies.taskState.askResponseImages = undefined
 		this.dependencies.taskState.askResponseFiles = undefined
+		this.dependencies.taskState.askResponseUserEdits = undefined
 		return result
 	}
 
@@ -207,11 +211,12 @@ export class TaskMessenger {
 		}
 	}
 
-	async handleWebviewAskResponse(askResponse: DiracAskResponse, text?: string, images?: string[], files?: string[]) {
+	async handleWebviewAskResponse(askResponse: DiracAskResponse, text?: string, images?: string[], files?: string[], userEdits?: Record<string, string>) {
 		this.dependencies.taskState.askResponse = askResponse
 		this.dependencies.taskState.askResponseText = text
 		this.dependencies.taskState.askResponseImages = images
 		this.dependencies.taskState.askResponseFiles = files
+		this.dependencies.taskState.askResponseUserEdits = userEdits
 	}
 
 	async say(

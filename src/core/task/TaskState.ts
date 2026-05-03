@@ -29,6 +29,7 @@ export class TaskState {
 
 	// Ask/Response handling
 	askResponse?: DiracAskResponse
+	askResponseUserEdits?: Record<string, string>
 	askResponseText?: string
 	askResponseImages?: string[]
 	askResponseFiles?: string[]

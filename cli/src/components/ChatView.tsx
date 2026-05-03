@@ -82,7 +82,8 @@ import { extractSlashQuery, filterCommands, insertSlashCommand, sortCommandsWork
 import { waitFor } from "../utils/timeout"
 import { isFileEditTool, parseToolFromMessage } from "../utils/tools"
 import { shutdownEvent } from "../vscode-shim"
-import { ActionButtons, type ButtonActionType, getButtonConfig, getVisibleButtons } from "./ActionButtons"
+import { type ButtonActionType, getButtonConfig, getVisibleButtons } from "./ActionButtons"
+import { AskPrompt } from "./AskPrompt"
 import { AsciiMotionCli, StaticRobotFrame } from "./AsciiMotionCli"
 import { ChatMessage } from "./ChatMessage"
 import { FileMentionMenu } from "./FileMentionMenu"
@@ -758,10 +759,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
 			try {
 				await ctrl.task.handleWebviewAskResponse(responseType, expandedText)
-				if (responseType !== "yesButtonClicked") {
-					setIsProcessing(false)
-				}
-			} catch {
+			} catch (error) {
+			} finally {
 				setIsProcessing(false)
 			}
 		},
@@ -800,18 +799,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	}, [messages, isSpinnerActive])
 
 	useEffect(() => {
-		if (isProcessing && !buttonConfig.enableButtons) {
+		if (isProcessing && (!buttonConfig.enableButtons || isSpinnerActive)) {
 			setIsProcessing(false)
 		}
-	}, [isProcessing, buttonConfig.enableButtons])
+	}, [isProcessing, buttonConfig.enableButtons, isSpinnerActive])
 
 	// Handle button actions (1 for primary, 2 for secondary)
 	const handleButtonAction = useCallback(
-		async (action: ButtonActionType | undefined, _isPrimary: boolean) => {
+		async (action: ButtonActionType | undefined, _isPrimary: boolean = true) => {
 			if (!action || !ctrl || isProcessing) return
 			setIsProcessing(true)
 			try {
-
 				switch (action) {
 					case "approve":
 					case "retry":
@@ -850,17 +848,111 @@ export const ChatView: React.FC<ChatViewProps> = ({
 						await handleCancel()
 						break
 				}
-			} catch {
+			} catch (error) {
+			} finally {
 				setIsProcessing(false)
 			}
 		},
 		[controller, taskController, sendAskResponse, pendingAsk, handleExit, handleCancel, clearViewAndResetTask, isProcessing],
 	)
 
+	// Handle smart shortcuts for pending asks
+	const handleAskShortcuts = useCallback(
+		(input: string, key: any, currentTextInput: string) => {
+			if (!pendingAsk || currentTextInput !== "" || isSpinnerActive || isProcessing) return false
+
+			const askType = pendingAsk.ask as DiracAsk
+
+			// 1. Confirmation shortcuts (y/n/a)
+			if (
+				askType === "command" ||
+				askType === "tool" ||
+				askType === "resume_task" ||
+				askType === "resume_completed_task" ||
+				askType === "browser_action_launch"
+			) {
+				if (input.toLowerCase() === "y") {
+					handleButtonAction("approve", true)
+					return true
+				}
+				if (input.toLowerCase() === "n") {
+					handleButtonAction("reject", false)
+					return true
+				}
+				if (input.toLowerCase() === "a" && askType === "tool") {
+					StateManager.get().setSessionOverride("yoloModeToggled", true)
+					handleButtonAction("approve", true)
+					return true
+				}
+			}
+
+			// 2. Option shortcuts (1-9)
+			if (askType === "followup" || askType === "plan_mode_respond") {
+				const parts = jsonParseSafe(pendingAsk.text || "", { options: [] as string[] })
+				if (parts.options && parts.options.length > 0) {
+					const num = Number.parseInt(input, 10)
+					if (!Number.isNaN(num) && num >= 1 && num <= parts.options.length) {
+						sendAskResponse("messageResponse", parts.options[num - 1])
+						return true
+					}
+				}
+			}
+
+			// 3. Exit shortcut (q)
+			if (askType === "completion_result") {
+				if (input.toLowerCase() === "q") {
+					handleExit()
+					return true
+				}
+			}
+
+			return false
+		},
+		[pendingAsk, isSpinnerActive, isProcessing, handleButtonAction, sendAskResponse, handleExit],
+	)
+
 	// Handle task submission (new task)
 	const handleSubmit = useCallback(
 		async (text: string, images: string[]) => {
 			if (!ctrl || !text.trim() || isProcessing) return
+
+			// If we have a pending ask, this is a response to it
+			if (pendingAsk) {
+				const prompt = text.trim()
+				const normalized = prompt.toLowerCase()
+				const askType = pendingAsk.ask as DiracAsk
+
+				// Special handling for exit/resume commands
+				if (askType === "resume_task" || askType === "resume_completed_task" || askType === "completion_result") {
+					if (normalized === "q" || normalized === "quit" || normalized === "exit") {
+						handleExit()
+						return
+					}
+					if (askType !== "completion_result" && (normalized === "n" || normalized === "no")) {
+						handleExit()
+						return
+					}
+				}
+
+				// Map y/yes to yesButtonClicked for confirmation asks
+				if (
+					(askType === "command" ||
+						askType === "tool" ||
+						askType === "resume_task" ||
+						askType === "resume_completed_task" ||
+						askType === "browser_action_launch") &&
+					(normalized === "y" || normalized === "yes")
+				) {
+					await sendAskResponse("yesButtonClicked")
+				} else {
+					await sendAskResponse("messageResponse", prompt)
+				}
+
+				setTextInput("")
+				setCursorPos(0)
+				return
+			}
+
 			setIsProcessing(true)
 
 			// Expand any pasted text placeholders
@@ -1046,6 +1138,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		const currentCursorPos = cursorPosRef.current
 		const currentMentionInfo = extractMentionQuery(currentTextInput)
 		const currentSlashInfo = extractSlashQuery(currentTextInput, currentCursorPos)
+
+		// 2.5. Handle smart shortcuts for pending asks (only when input is empty)
+		if (handleAskShortcuts(input, key, currentTextInput)) {
+			return
+		}
+
 
 		// 3. Handle Option+arrow escape sequences for word navigation
 		if (handleKeyboardSequence(input)) {
@@ -1280,22 +1378,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		}
 
 		// 10. Handle ask responses for options and text input
-		if (pendingAsk && !isYoloSuppressed(yolo, pendingAsk.ask as DiracAsk | undefined)) {
-			// Allow sending text message for any ask type where sending is enabled
-			if (key.return && !key.shift && !key.meta && input !== "\n" && currentTextInput.trim() && !buttonConfig.sendingDisabled && !isProcessing) {
-				sendAskResponse("messageResponse", currentTextInput.trim())
-				return
-			}
-			// Number selection for options (only when no text typed yet)
-			if (askType === "options") {
-				const num = Number.parseInt(input, 10)
-				if (currentTextInput === "" && !Number.isNaN(num) && num >= 1 && num <= askOptions.length) {
-					const selectedOption = askOptions[num - 1]
-					sendAskResponse("messageResponse", selectedOption)
-					return
-				}
-			}
-		}
+		// (Handled by AskPrompt component)
+
 
 		// 11. Handle Ctrl+ shortcuts (Ctrl+A, Ctrl+E, Ctrl+W, etc.)
 		if (key.ctrl && input && handleCtrlShortcut(input)) {
@@ -1378,7 +1462,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			toggleMode()
 			return
 		}
-		if (key.return && !key.shift && !key.meta && input !== "\n" && !currentMentionInfo.inMentionMode && !currentSlashInfo.inSlashMode && !pendingAsk && !isSpinnerActive && !isProcessing) {
+		if (key.return && !key.shift && !key.meta && input !== "\n" && !currentMentionInfo.inMentionMode && !currentSlashInfo.inSlashMode && !isSpinnerActive && !isProcessing) {
 			const { prompt: currentPrompt, imagePaths: currentImagePaths } = parseImagesFromInput(currentTextInput)
 			if (currentPrompt.trim() || currentImagePaths.length > 0) {
 				handleSubmit(currentPrompt.trim(), currentImagePaths)
@@ -1493,11 +1577,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 				)}
 
 				{/* Action buttons for tool approvals and other asks (not during streaming) */}
-				{buttonConfig.enableButtons &&
-					!isSpinnerActive &&
-					!isYoloSuppressed(yolo, pendingAsk?.ask as DiracAsk | undefined) && (
-						<ActionButtons config={buttonConfig} isProcessing={isProcessing} mode={mode} />
-					)}
+				{pendingAsk && !isYoloSuppressed(yolo, pendingAsk.ask as DiracAsk | undefined) && !isSpinnerActive && (
+					<Box paddingX={1}>
+						<AskPrompt />
+					</Box>
+				)}
 
 				{/* Thinking indicator when processing */}
 				{isSpinnerActive && <ThinkingIndicator mode={mode} onCancel={handleCancel} startTime={spinnerStartTime} />}

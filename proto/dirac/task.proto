@@ -112,6 +112,7 @@ message AskResponseRequest {
   string text = 3;
   repeated string images = 4;
   repeated string files = 5;
+  map<string, string> user_edits = 6;
 }
 
 // Request for executing a quick win task

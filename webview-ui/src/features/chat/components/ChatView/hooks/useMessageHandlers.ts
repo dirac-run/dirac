@@ -260,6 +260,21 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 							break
 					}
 					break
+				case "edit":
+					await TaskServiceClient.askResponse(
+						AskResponseRequest.create({
+							responseType: "editButtonClicked",
+						}),
+					)
+					break
+				case "view":
+					await TaskServiceClient.askResponse(
+						AskResponseRequest.create({
+							responseType: "viewButtonClicked",
+						}),
+					)
+					break
+
 			}
 
 			if ("disableAutoScrollRef" in chatState) {

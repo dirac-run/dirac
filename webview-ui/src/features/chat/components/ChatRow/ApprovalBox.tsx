@@ -8,9 +8,10 @@ interface ApprovalBoxProps {
 	onReject: () => void
 	isProcessing?: boolean
 	description?: string
+	onEdit?: () => void
 }
 
-export const ApprovalBox: React.FC<ApprovalBoxProps> = ({ children, onApprove, onReject, isProcessing, description }) => {
+export const ApprovalBox: React.FC<ApprovalBoxProps> = ({ children, onApprove, onReject, isProcessing, description, onEdit }) => {
 	if (!children) return null
 	return (
 		<div className={cn("my-2 p-3 border border-editor-group-border rounded-sm bg-code-background/40", isProcessing && "opacity-60 pointer-events-none")}>
@@ -33,6 +34,16 @@ export const ApprovalBox: React.FC<ApprovalBoxProps> = ({ children, onApprove, o
 					disabled={isProcessing}>
 					Reject
 				</Button>
+				{onEdit && (
+					<Button
+						size="sm"
+						variant="outline"
+						className="h-7 text-xs px-4 border-editor-group-border hover:bg-info/10 hover:text-info hover:border-info/50 font-semibold transition-all active:scale-95"
+						onClick={onEdit}
+						disabled={isProcessing}>
+						Review &amp; Edit
+					</Button>
+				)}
 			</div>
 		</div>
 	)

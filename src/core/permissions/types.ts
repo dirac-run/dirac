@@ -1,10 +1,19 @@
 /**
  * Configuration structure for command permissions from environment variable
  */
+export type PermissionAction = "allow" | "deny"
+
+export interface ToolPermissionRule {
+	tool: string // e.g. "read_file", "execute_command", or "*"
+	pattern?: string // glob for files or command string
+	action: PermissionAction
+}
+
 export interface CommandPermissionConfig {
-	allow?: string[] // Glob patterns for allowed commands
-	deny?: string[] // Glob patterns for denied commands
+	allow?: string[] // Glob patterns for allowed commands (backward compatibility)
+	deny?: string[] // Glob patterns for denied commands (backward compatibility)
 	allowRedirects?: boolean // Whether to allow shell redirects (>, >>, <, etc.) - defaults to false
+	rules?: ToolPermissionRule[] // New general rules
 }
 
 /**

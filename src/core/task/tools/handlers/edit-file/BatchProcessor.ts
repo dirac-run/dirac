@@ -10,6 +10,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { getDiagnosticsProviders } from "@/integrations/diagnostics/getDiagnosticsProviders"
 
 import { DiracSayTool } from "@/shared/ExtensionMessage"
+import { DiracAskResponse } from "@/shared/WebviewMessage"
 import { DiracDefaultTool } from "@/shared/tools"
 import { ToolResponse } from "../../../index"
 import { showNotificationForApproval } from "../../../utils"
@@ -105,23 +106,43 @@ export class BatchProcessor {
 
                 // Generate diff for the summary
                 let diff = `*** Update File: ${batch.displayPath}\n\n`
-                for (const applied of appliedEdits) {
+                
+                const sortedEdits = [...appliedEdits].sort((a, b) => a.originalStartIdx - b.originalStartIdx)
+
+                for (const applied of sortedEdits) {
                     const editType = applied.edit.edit_type
-                    let searchContent: string
-                    let replaceContent: string
+                    let searchLines: string[] = []
+                    let replaceLines: string[] = []
+
+                    const replaceTextLines = applied.edit.text === "" ? [] : applied.edit.text.split("\n")
 
                     if (editType === "insert_after") {
-                        searchContent = prepared.lines[applied.originalStartIdx]
-                        replaceContent = `${searchContent}\n${applied.edit.text}`
+                        searchLines = [prepared.lines[applied.originalStartIdx]]
+                        replaceLines = [prepared.lines[applied.originalStartIdx], ...replaceTextLines]
                     } else if (editType === "insert_before") {
-                        searchContent = prepared.lines[applied.originalStartIdx]
-                        replaceContent = `${applied.edit.text}\n${searchContent}`
+                        searchLines = [prepared.lines[applied.originalStartIdx]]
+                        replaceLines = [...replaceTextLines, prepared.lines[applied.originalStartIdx]]
                     } else {
-                        searchContent = prepared.lines.slice(applied.originalStartIdx, applied.originalEndIdx + 1).join("\n")
-                        replaceContent = applied.edit.text
+                        searchLines = prepared.lines.slice(applied.originalStartIdx, applied.originalEndIdx + 1)
+                        replaceLines = replaceTextLines
                     }
 
-                    diff += `<<<<<<< SEARCH\n${searchContent}\n=======\n${replaceContent}\n>>>>>>> REPLACE\n\n`
+                    const contextBeforeStart = Math.max(0, applied.originalStartIdx - 2)
+                    const contextBefore = prepared.lines.slice(contextBeforeStart, applied.originalStartIdx)
+                    
+                    let afterStartIdx = applied.originalEndIdx + 1
+                    if (editType === "insert_after" || editType === "insert_before") {
+                        afterStartIdx = applied.originalStartIdx + 1
+                    }
+                    const contextAfterEnd = Math.min(prepared.lines.length, afterStartIdx + 2)
+                    const contextAfter = prepared.lines.slice(afterStartIdx, contextAfterEnd)
+
+                    const searchContent = [...contextBefore, ...searchLines, ...contextAfter].join("\n")
+                    const replaceContent = [...contextBefore, ...replaceLines, ...contextAfter].join("\n")
+
+                    const startLineNumber = contextBeforeStart + 1
+
+                    diff += `<<<<<<< SEARCH:${startLineNumber}\n${searchContent}\n=======\n${replaceContent}\n>>>>>>> REPLACE\n\n`
                 }
                 prepared.diff = diff
 
@@ -132,30 +153,6 @@ export class BatchProcessor {
         if (preparedBatches.length === 0) {
             return results
         }
-
-        await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
-        await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
-
-        // Send an intermediate partial message to show that we are now applying edits and running diagnostics
-        const intermediateMessage = await this.buildEditMessage(config, preparedBatches)
-        await config.callbacks.say("tool", JSON.stringify(intermediateMessage), undefined, undefined, true)
-
-
-        const shouldAutoApprove = await this.checkAutoApproval(config, preparedBatches)
-        if (!shouldAutoApprove) {
-            const didApprove = await this.requestCombinedApproval(config, preparedBatches)
-            if (!didApprove) {
-                const denied = formatResponse.toolDenied()
-                for (const batch of preparedBatches) {
-                    results.set(batch.absolutePath, denied)
-                }
-                return results
-            }
-        } else {
-            const completeMessage = await this.buildEditMessage(config, preparedBatches)
-            await config.callbacks.say("tool", JSON.stringify(completeMessage), undefined, undefined, true)
-        }
-
         const providers = getDiagnosticsProviders(
             this.useLinterOnlyForSyntax,
             this.diagnosticsTimeoutMs,
@@ -167,95 +164,194 @@ export class BatchProcessor {
             await Promise.all(providers.map((p) => p.capturePreSaveState()))
         ).flat()
 
-        const appliedResults = new Map<string, {
-            saveResult: { finalContent: string; autoFormattingEdits?: string; userEdits?: string }
-            finalContent: string
-            finalLines: string[]
-            newLineHashes: string[]
-        }>()
+        const allAutoApproved = await this.checkAutoApproval(config, preparedBatches)
 
-        let anyFailed = false;
-        let anySucceeded = false;
-        // 2. Apply and save all files (sequentially to avoid UI mess)
-        for (let i = 0; i < preparedBatches.length; i++) {
-            const batch = preparedBatches[i]
-            const isLast = i === preparedBatches.length - 1
+        if (allAutoApproved) {
+            // FAST PATH: All files auto-approved, apply them all silently
+            const appliedResults = new Map<string, any>()
+            let anyFailed = false
+            let anySucceeded = false
+
+            for (const batch of preparedBatches) {
+                try {
+                    const applied = await this.applyAndSave(config, batch, { silent: true })
+                    appliedResults.set(batch.absolutePath, applied)
+                    anySucceeded = true
+                } catch (error) {
+                    anyFailed = true
+                    const errorMessage = error instanceof Error ? error.message : String(error)
+                    results.set(batch.absolutePath, formatResponse.toolError(`Error applying edits to ${batch.displayPath}: ${errorMessage}`))
+                } finally {
+                    await config.services.diffViewProvider.reset().catch(() => { })
+                }
+            }
+
+            if (anyFailed) {
+                config.taskState.consecutiveMistakeCount++
+            } else if (anySucceeded) {
+                config.taskState.consecutiveMistakeCount = 0
+            }
+
+            // Run diagnostics and format results
+            await this.processDiagnosticsAndFormatResults(config, preparedBatches, appliedResults, providers, preDiagnostics, results)
+            
+            await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
+            await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
+
+            const successfulBatches = preparedBatches.filter((b) => appliedResults.has(b.absolutePath))
+            const finalMessage = await this.buildEditMessage(config, successfulBatches)
+            await config.callbacks.say("tool", JSON.stringify(finalMessage), undefined, undefined, false)
+
+            return results
+        }
+
+        // ITERATIVE PATH: At least one file needs approval
+        let forceAutoApproveRemaining = false
+        const appliedResults = new Map<string, any>()
+        let anyFailed = false
+        let anySucceeded = false
+
+        for (const batch of preparedBatches) {
+            let shouldAutoApprove = forceAutoApproveRemaining || await this.checkAutoApproval(config, [batch])
+
+            if (!shouldAutoApprove) {
+                await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
+                await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
+
+                // Show the diff for this specific file
+                await config.services.diffViewProvider.showReview([{
+                    absolutePath: batch.absolutePath,
+                    displayPath: batch.displayPath,
+                    content: batch.prepared!.finalContent
+                }])
+
+                const intermediateMessage = await this.buildEditMessage(config, [batch])
+                await config.callbacks.say("tool", JSON.stringify(intermediateMessage), undefined, undefined, true)
+
+                const approvalResult = await this.requestCombinedApproval(config, [batch])
+                const { didApprove, response, text, userEdits } = approvalResult
+
+                if (!didApprove && response !== "messageResponse") {
+                    await config.services.diffViewProvider.hideReview()
+                }
+                
+                if (response === "yesButtonClicked" && config.services.stateManager.getGlobalSettingsKey("yoloModeToggled")) {
+                    forceAutoApproveRemaining = true
+                }
+
+                if (response === "messageResponse") {
+                    results.set(batch.absolutePath, formatResponse.toolDeniedWithFeedback(text || ""))
+                    continue
+                }
+
+
+                if (!didApprove) {
+                    results.set(batch.absolutePath, formatResponse.toolDenied())
+                    
+                    // Fill remaining files with skipped message
+                    const currentIndex = preparedBatches.indexOf(batch)
+                    for (let i = currentIndex + 1; i < preparedBatches.length; i++) {
+                        const rb = preparedBatches[i]
+                        results.set(rb.absolutePath, "Skipped due to rejection of a previous file in the same batch.")
+                    }
+                    break
+                }
+
+                if (userEdits && userEdits[batch.displayPath] !== undefined) {
+                    batch.prepared!.finalContent = userEdits[batch.displayPath]
+                    batch.prepared!.finalLines = batch.prepared!.finalContent.split(/\r?\n/)
+                }
+
+                if (didApprove) {
+                    // Don't call hideReview here if we are about to apply and save, 
+                    // as it clears the CodeLenses and closes the editor we need.
+                    // hideReview() will be called implicitly by reset() in the finally block or after the loop.
+                }
+            }
+
+            // Apply and save this file
             try {
-                const applied = await this.applyAndSave(config, batch, { silent: !isLast })
+                const applied = await this.applyAndSave(config, batch, { silent: false })
                 appliedResults.set(batch.absolutePath, applied)
-                anySucceeded = true;
+                anySucceeded = true
             } catch (error) {
-                anyFailed = true;
+                anyFailed = true
                 const errorMessage = error instanceof Error ? error.message : String(error)
                 results.set(batch.absolutePath, formatResponse.toolError(`Error applying edits to ${batch.displayPath}: ${errorMessage}`))
             } finally {
                 await config.services.diffViewProvider.reset().catch(() => { })
             }
-
         }
 
         if (anyFailed) {
-            config.taskState.consecutiveMistakeCount++;
+            config.taskState.consecutiveMistakeCount++
         } else if (anySucceeded) {
-            config.taskState.consecutiveMistakeCount = 0;
+            config.taskState.consecutiveMistakeCount = 0
         }
 
-        // 3. Run diagnostics for all successfully applied files in parallel
-        const successfulBatches = preparedBatches.filter((b) => appliedResults.has(b.absolutePath))
-        if (successfulBatches.length > 0) {
-            const diagnosticsData = successfulBatches.map((b) => {
-                const applied = appliedResults.get(b.absolutePath)!
-                return {
-                    filePath: b.absolutePath,
-                    content: applied.finalContent,
-                    hashes: applied.newLineHashes,
-                }
-            })
-
-            const providerDiagnostics = await Promise.all(
-                providers.map((p) => p.getDiagnosticsFeedbackForFiles(diagnosticsData, preDiagnostics))
-            )
-
-            // Combine diagnostics from all providers for each file
-            for (let i = 0; i < successfulBatches.length; i++) {
-                const batch = successfulBatches[i]
-                const applied = appliedResults.get(batch.absolutePath)!
-                let finalDiagnosticsResult = { newProblemsMessage: "", fixedCount: 0 }
-
-                for (const resultsOfProvider of providerDiagnostics) {
-                    const res = resultsOfProvider[i]
-                    if (res.newProblemsMessage && !finalDiagnosticsResult.newProblemsMessage) {
-                        // Found new problems, stop and return these (prioritize first provider with problems)
-                        finalDiagnosticsResult.newProblemsMessage = res.newProblemsMessage
-                    }
-                    finalDiagnosticsResult.fixedCount += res.fixedCount
-                }
-
-                batch.diagnostics = finalDiagnosticsResult
-
-                // 4. Format final results
-                const result = this.formatter.createResultsResponse(
-                    batch.prepared!,
-                    applied.finalLines,
-                    applied.newLineHashes,
-                    finalDiagnosticsResult,
-                    this.diffMode,
-                    applied.saveResult.autoFormattingEdits,
-                    applied.saveResult.userEdits,
-                    batch.wasStringified
-                )
-                results.set(batch.absolutePath, result)
-            }
-        }
-
+        // Run diagnostics and format results for all successfully applied files
+        await this.processDiagnosticsAndFormatResults(config, preparedBatches, appliedResults, providers, preDiagnostics, results)
 
         await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
         await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
-
-        const finalMessage = await this.buildEditMessage(config, preparedBatches)
+        const successfulBatches = preparedBatches.filter((b) => appliedResults.has(b.absolutePath))
+        const finalMessage = await this.buildEditMessage(config, successfulBatches)
         await config.callbacks.say("tool", JSON.stringify(finalMessage), undefined, undefined, false)
 
         return results
+    }
+
+    private async processDiagnosticsAndFormatResults(
+        config: TaskConfig,
+        preparedBatches: PreparedFileBatch[],
+        appliedResults: Map<string, any>,
+        providers: any[],
+        preDiagnostics: any[],
+        results: Map<string, ToolResponse>
+    ): Promise<void> {
+        const successfulBatches = preparedBatches.filter((b) => appliedResults.has(b.absolutePath))
+        if (successfulBatches.length === 0) return
+
+        const diagnosticsData = successfulBatches.map((b) => {
+            const applied = appliedResults.get(b.absolutePath)!
+            return {
+                filePath: b.absolutePath,
+                content: applied.finalContent,
+                hashes: applied.newLineHashes,
+            }
+        })
+
+        const providerDiagnostics = await Promise.all(
+            providers.map((p) => p.getDiagnosticsFeedbackForFiles(diagnosticsData, preDiagnostics))
+        )
+
+        for (let i = 0; i < successfulBatches.length; i++) {
+            const batch = successfulBatches[i]
+            const applied = appliedResults.get(batch.absolutePath)!
+            let finalDiagnosticsResult = { newProblemsMessage: "", fixedCount: 0 }
+
+            for (const resultsOfProvider of providerDiagnostics) {
+                const res = resultsOfProvider[i]
+                if (res.newProblemsMessage && !finalDiagnosticsResult.newProblemsMessage) {
+                    finalDiagnosticsResult.newProblemsMessage = res.newProblemsMessage
+                }
+                finalDiagnosticsResult.fixedCount += res.fixedCount
+            }
+
+            batch.diagnostics = finalDiagnosticsResult
+
+            const result = this.formatter.createResultsResponse(
+                batch.prepared!,
+                applied.finalLines,
+                applied.newLineHashes,
+                finalDiagnosticsResult,
+                this.diffMode,
+                applied.saveResult.autoFormattingEdits,
+                applied.saveResult.userEdits,
+                batch.wasStringified
+            )
+            results.set(batch.absolutePath, result)
+        }
     }
 
     async validateAndPrepare(
@@ -318,7 +414,7 @@ export class BatchProcessor {
         return true
     }
 
-    async requestCombinedApproval(config: TaskConfig, batches: PreparedFileBatch[]): Promise<boolean> {
+    async requestCombinedApproval(config: TaskConfig, batches: PreparedFileBatch[]): Promise<{ didApprove: boolean; response: DiracAskResponse; text?: string; userEdits?: Record<string, string> }> {
         const totalRequestedEdits = batches.reduce(
             (acc, b) =>
                 acc + b.blocks.reduce((acc2, b2) => acc2 + (Array.isArray(b2.params.edits) ? b2.params.edits.length : 0), 0),
@@ -326,15 +422,51 @@ export class BatchProcessor {
         )
 
         const fileNames = batches.map((b) => path.basename(b.absolutePath)).join(", ")
-        const notificationMessage = `Dirac wants to edit ${fileNames} with ${totalRequestedEdits} anchored edits`
+        const notificationMessage = batches.length === 1 
+            ? `Dirac wants to edit ${batches[0].displayPath} with ${totalRequestedEdits} anchored edits`
+            : `Dirac wants to edit ${fileNames} with ${totalRequestedEdits} anchored edits`
         showNotificationForApproval(notificationMessage, config.autoApprovalSettings.enableNotifications)
 
-        const completeMessage = await this.buildEditMessage(config, batches)
-        await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
-        await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
+        while (true) {
+            const completeMessage = await this.buildEditMessage(config, batches)
+            await config.callbacks.removeLastPartialMessageIfExistsWithType("say", "tool")
+            await config.callbacks.removeLastPartialMessageIfExistsWithType("ask", "tool")
 
-        const { didApprove } = await ToolResultUtils.askApprovalAndPushFeedback("tool", JSON.stringify(completeMessage), config)
-        return didApprove
+            const result = await ToolResultUtils.askApprovalAndPushFeedback("tool", JSON.stringify(completeMessage), config)
+            const { response, userEdits } = result
+
+            if (response === "editButtonClicked") {
+                // Re-trigger showReview to ensure editors are open
+                await config.services.diffViewProvider.showReview(batches.map(b => ({
+                    absolutePath: b.absolutePath,
+                    displayPath: b.displayPath,
+                    content: b.prepared!.finalContent
+                })))
+                await config.services.diffViewProvider.scrollToFirstDiff()
+                continue
+            }
+
+            if (response === "viewButtonClicked") {
+                // Re-trigger showReview and scroll to first diff
+                await config.services.diffViewProvider.showReview(batches.map(b => ({
+                    absolutePath: b.absolutePath,
+                    displayPath: b.displayPath,
+                    content: b.prepared!.finalContent
+                })))
+                await config.services.diffViewProvider.scrollToFirstDiff()
+                for (const batch of batches) {
+                    await config.services.diffViewProvider.scrollToFirstDiff()
+                }
+                continue
+            }
+
+            if (response === "undoButtonClicked") {
+                await config.services.diffViewProvider.undoUserEdits()
+                continue
+            }
+
+            return { didApprove: result.didApprove, response, text: result.text, userEdits }
+        }
     }
 
     async buildEditMessage(config: TaskConfig, batches: PreparedFileBatch[]): Promise<DiracSayTool> {
@@ -358,6 +490,7 @@ export class BatchProcessor {
                     })) || [],
                 diagnostics: b.diagnostics,
                 diff: b.prepared?.diff,
+                finalContent: b.prepared?.finalContent,
             })),
         )
 
@@ -374,6 +507,7 @@ export class BatchProcessor {
             diff: diffs + warning,
             editSummaries,
             operationIsLocatedInWorkspace,
+            hint: "Review and edit in the editor before approving.",
         }
     }
 
@@ -424,7 +558,9 @@ export class BatchProcessor {
         config.services.diffViewProvider.editType = "modify"
         // Stage the changes in the diff view provider before saving
         await config.services.diffViewProvider.open(absolutePath, { displayPath })
-        await config.services.diffViewProvider.update(finalContent, true)
+        if (!config.services.diffViewProvider.isEditing) {
+            await config.services.diffViewProvider.update(finalContent, true)
+        }
 
         // Wait for the diff view to update before saving to ensure auto-formatting is triggered
         await setTimeoutPromise(200)
@@ -474,6 +610,7 @@ export class BatchProcessor {
                 lines,
                 lineHashes,
                 finalLines: lines, // Placeholder
+                displayPath,
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error)

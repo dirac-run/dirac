@@ -348,12 +348,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, mode, isStrea
 								<Box flexDirection="column" key={idx} marginLeft={2} marginTop={idx > 0 ? 1 : 0}>
 									<ResultRow isFirst={true}>
 										<Text bold color={toolColor}>
-											{summary.path}
+											📄 {summary.path}
 										</Text>
 									</ResultRow>
 									{summary.diff && (
 										<Box marginLeft={3}>
-											<DiffView content={summary.diff} filePath={summary.path} />
+											<DiffView content={summary.diff} contextLines={2} filePath={summary.path} />
 										</Box>
 									)}
 								</Box>
@@ -371,7 +371,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, mode, isStrea
 								<ToolCallText args={toolInfo.args} isAsk={isToolAsk} mode={mode} toolName={toolInfo.toolName} />
 							</DotRow>
 							<Box marginLeft={2}>
-								<DiffView content={diffContent} filePath={filePath as string | undefined} />
+								<DiffView content={diffContent} contextLines={2} filePath={filePath as string | undefined} />
 							</Box>
 						</Box>
 					)

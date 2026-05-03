@@ -1,6 +1,6 @@
 {
 	"name": "dirac-cli",
-	"version": "0.3.23",
+	"version": "0.3.25",
 	"description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
 	"files": [
 		"dist",
@@ -88,6 +88,7 @@
 		"vitest": "^4.0.17"
 	},
 	"dependencies": {
+		"better-sqlite3": "^12.4.1",
 		"@agentclientprotocol/sdk": "^0.13.1",
 		"@vscode/ripgrep": "^1.15.9",
 		"aws4fetch": "^1.0.20",

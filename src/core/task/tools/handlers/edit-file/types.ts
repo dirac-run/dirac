@@ -44,6 +44,7 @@ export interface PreparedEdits {
 	lines: string[]
 	lineHashes: string[]
 	finalLines: string[]
+	displayPath: string
 }
 
 export interface PreparedFileBatch {

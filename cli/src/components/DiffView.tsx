@@ -21,17 +21,20 @@ interface DiffViewProps {
 	contextLines?: number
 }
 
-// Diff colors - muted backgrounds with readable foreground text
 const DIFF_COLORS = {
-	addBg: "rgb(35, 61, 41)", // dark muted green
-	addFg: "rgb(156, 204, 122)", // light green text
-	removeBg: "rgb(62, 36, 36)", // dark muted red
-	removeFg: "rgb(224, 139, 139)", // light red/pink text
-	gutterFg: "gray", // line number color
+  addBg:    "#080f0a",
+  addFg:    "#52C97A",
+  removeBg: "#120707",
+  removeFg: "#DD6B68",
+  gutterFg: "#505866",
 } as const
 
 // Default number of context lines to show
 const DEFAULT_CONTEXT_LINES = 3
+
+// Threshold for "large" diffs that should be viewed in a pager
+const LARGE_DIFF_THRESHOLD = 50
+
 
 /**
  * Render a single diff line with gutter and colored content
@@ -44,62 +47,33 @@ const DiffLineRow: React.FC<{
 		return <Text> </Text>
 	}
 
-	// Determine which line number to show
-	// For additions: show new line number
-	// For deletions: show old line number
-	// For context: show new line number (both are available)
 	const lineNum = line.type === "add" ? line.newLineNumber : line.type === "remove" ? line.oldLineNumber : line.newLineNumber
-
 	const lineNumStr = lineNum !== undefined ? lineNum.toString().padStart(gutterWidth, " ") : " ".repeat(gutterWidth)
-
 	const prefix = line.type === "add" ? "+" : line.type === "remove" ? "-" : " "
 
-	switch (line.type) {
-		case "add":
-			return (
-				<Box flexDirection="row">
-					<Box backgroundColor={DIFF_COLORS.addBg} flexShrink={0}>
-						<Text color={DIFF_COLORS.gutterFg}>{lineNumStr} </Text>
-					</Box>
-					<Box backgroundColor={DIFF_COLORS.addBg} flexGrow={1}>
-						<Text color={DIFF_COLORS.addFg}>
-							{prefix}
-							{line.content}
-						</Text>
-					</Box>
-				</Box>
-			)
-		case "remove":
-			return (
-				<Box flexDirection="row">
-					<Box backgroundColor={DIFF_COLORS.removeBg} flexShrink={0}>
-						<Text color={DIFF_COLORS.gutterFg}>{lineNumStr} </Text>
-					</Box>
-					<Box backgroundColor={DIFF_COLORS.removeBg} flexGrow={1}>
-						<Text color={DIFF_COLORS.removeFg}>
-							{prefix}
-							{line.content}
-						</Text>
-					</Box>
-				</Box>
-			)
-		case "context":
-			return (
-				<Box flexDirection="row">
-					<Box flexShrink={0}>
-						<Text color={DIFF_COLORS.gutterFg}>{lineNumStr} </Text>
-					</Box>
-					<Box flexGrow={1}>
-						<Text dimColor>
-							{prefix}
-							{line.content}
-						</Text>
-					</Box>
-				</Box>
-			)
-		default:
-			return null
-	}
+	const bgColor = line.type === "add" ? DIFF_COLORS.addBg : line.type === "remove" ? DIFF_COLORS.removeBg : undefined
+	const fgColor = line.type === "add" ? DIFF_COLORS.addFg : line.type === "remove" ? DIFF_COLORS.removeFg : undefined
+
+	return (
+		<Box flexDirection="row" width="100%">
+			{/* Gutter (Line Numbers) */}
+			<Box flexShrink={0} width={gutterWidth + 2}>
+				<Text color={DIFF_COLORS.gutterFg} dimColor>
+					{lineNumStr}
+					{"  "}
+				</Text>
+			</Box>
+
+			{/* Content */}
+			<Box backgroundColor={bgColor} flexGrow={1} paddingX={1}>
+				<Text color={fgColor} dimColor={line.type === "context"}>
+					{prefix}
+					{" "}
+					{line.content || " "}
+				</Text>
+			</Box>
+		</Box>
+	)
 }
 
 /**
@@ -229,9 +203,15 @@ export const DiffView: React.FC<DiffViewProps> = ({ content, contextLines = DEFA
 		return diff.blocks.map((block) => collapseContext(block, contextLines))
 	}, [diff, contextLines])
 
+	const totalLines = useMemo(() => {
+		if (!diff) return 0
+		return diff.blocks.reduce((acc, block) => acc + block.lines.length, 0)
+	}, [diff])
+
 	if (!diff || diff.blocks.length === 0) {
 		return null
 	}
+
 
 	return (
 		<Box flexDirection="column" width="100%">

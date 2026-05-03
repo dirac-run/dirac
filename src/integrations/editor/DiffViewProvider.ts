@@ -25,7 +25,7 @@ export abstract class DiffViewProvider {
 	protected absolutePath?: string
 	protected fileEncoding = "utf8"
 	private streamedLines: string[] = []
-	private newContent?: string
+	protected newContent?: string
 
 	constructor() {}
 
@@ -547,5 +547,28 @@ export abstract class DiffViewProvider {
 		userEdits: string | undefined
 	}>
 
+
+	/**
+	 * Shows the review UI for the specified files.
+	 * This is called when user approval is required for a batch of edits.
+	 */
+	async showReview(_files: { absolutePath: string; displayPath: string; content: string }[]): Promise<void> {
+		// Default no-op
+	}
+
+	/**
+	 * Hides the review UI.
+	 * This is called after the user has approved or rejected the edits.
+	 */
+	async undoUserEdits() {
+		if (this.newContent !== undefined) {
+			await this.update(this.newContent, true)
+		}
+	}
+
+
+	async hideReview(): Promise<void> {
+		// Default no-op
+	}
 
 }

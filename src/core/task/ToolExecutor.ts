@@ -98,6 +98,8 @@ export class ToolExecutor {
 			images?: string[]
 			files?: string[]
 			askTs?: number
+			userEdits?: Record<string, string>
+
 		}>,
 		private saveCheckpoint: (isAttemptCompletionMessage?: boolean, completionMessageTs?: number) => Promise<void>,
 		private sayAndCreateMissingParamError: (toolName: DiracDefaultTool, paramName: string, relPath?: string) => Promise<any>,
@@ -122,7 +124,7 @@ export class ToolExecutor {
 			context: "initial_task" | "resume" | "feedback",
 		) => Promise<{ cancel?: boolean; wasCancelled?: boolean; contextModification?: string; errorMessage?: string }>,
 	) {
-		this.autoApprover = new AutoApprove(this.stateManager)
+		this.autoApprover = new AutoApprove(this.stateManager, this.commandPermissionController)
 
 		// Initialize the coordinator and register all tool handlers
 		this.coordinator = new ToolExecutorCoordinator()

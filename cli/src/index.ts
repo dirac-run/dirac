@@ -12,6 +12,7 @@ import { suppressConsoleUnlessVerbose } from "./utils/console"
 // Kept explicit here so importing the library bundle does not mutate global console methods.
 suppressConsoleUnlessVerbose()
 
+
 // Types and interfaces that don't trigger heavy module loading
 import type { ApiProvider } from "@shared/api"
 import type { Controller } from "@/core/controller"
@@ -60,10 +61,28 @@ async function disposeTelemetryServices(): Promise<void> {
 }
 
 async function disposeCliContext(ctx: CliContext): Promise<void> {
+	if (!ctx) {
+		try {
+			const { SymbolIndexService } = await import("@/services/symbol-index/SymbolIndexService")
+			SymbolIndexService.getInstance().dispose()
+		} catch {
+			// Best effort
+		}
+		await disposeTelemetryServices()
+		return
+	}
+
 	const { ErrorService } = await import("@/services/error/ErrorService")
 	await ctx.controller.stateManager.flushPendingState()
 	await ctx.controller.dispose()
 	await ErrorService.get().dispose()
+	try {
+		const { SymbolIndexService } = await import("@/services/symbol-index/SymbolIndexService")
+		SymbolIndexService.getInstance().dispose()
+	} catch {
+		// Best effort
+	}
+
 	await disposeTelemetryServices()
 }
 

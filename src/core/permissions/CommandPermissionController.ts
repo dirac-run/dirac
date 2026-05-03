@@ -1,6 +1,17 @@
 import { ParseEntry, parse } from "shell-quote"
+import picomatch from "picomatch"
+import fs from "fs/promises"
+import path from "path"
+import chokidar, { FSWatcher } from "chokidar"
 import { Logger } from "@/shared/services/Logger"
-import { COMMAND_PERMISSIONS_ENV_VAR, CommandPermissionConfig, PermissionValidationResult, ShellOperatorMatch } from "./types"
+import { fileExistsAtPath } from "@utils/fs"
+import {
+	COMMAND_PERMISSIONS_ENV_VAR,
+	CommandPermissionConfig,
+	PermissionValidationResult,
+	ShellOperatorMatch,
+	ToolPermissionRule,
+} from "./types"
 
 const REDIRECT_OPERATORS = new Set([">", ">>", "<", ">&", "<&", "|&", "<(", ">("])
 const COMMAND_SEPARATOR_OPERATORS = new Set(["&&", "||", "|", ";"])
@@ -39,17 +50,138 @@ interface ParsedCommand {
  * 6. If no rules are defined (env var not set) → ALLOWED (backward compatibility)
  */
 export class CommandPermissionController {
+	private workspaceRoot: string | null = null
+	private fileWatcher?: FSWatcher
 	private config: CommandPermissionConfig | null = null
 
 	constructor() {
-		this.config = this.parseConfig()
+		this.config = this.parseConfigFromEnv()
+	}
+
+	/**
+	 * Initialize the controller with a workspace root and load configuration from file.
+	 * @param workspaceRoot - The root directory of the workspace
+	 */
+	async initialize(workspaceRoot: string): Promise<void> {
+		this.workspaceRoot = workspaceRoot
+		await this.loadConfig()
+		await this.setupFileWatcher()
+	}
+
+	/**
+	 * Set up a file watcher for .dirac/permissions.json
+	 */
+	private async setupFileWatcher(): Promise<void> {
+		if (this.fileWatcher) {
+			await this.fileWatcher.close()
+			this.fileWatcher = undefined
+		}
+		if (!this.workspaceRoot) return
+
+		const configPath = path.join(this.workspaceRoot, ".dirac", "permissions.json")
+
+		this.fileWatcher = chokidar.watch(configPath, {
+			persistent: true,
+			ignoreInitial: true,
+			awaitWriteFinish: {
+				stabilityThreshold: 100,
+				pollInterval: 100,
+			},
+			atomic: true,
+		})
+
+		this.fileWatcher.on("all", () => {
+			this.loadConfig()
+		})
+	}
+
+	/**
+	 * Load configuration from environment and file.
+	 */
+	private async loadConfig(): Promise<void> {
+		const envConfig = this.parseConfigFromEnv()
+		const fileConfig = await this.loadConfigFromFile()
+
+		this.config = {
+			...envConfig,
+			...fileConfig,
+			rules: [...(envConfig?.rules || []), ...(fileConfig?.rules || [])],
+		}
+	}
+
+	/**
+	 * Load configuration from .dirac/permissions.json
+	 */
+	private async loadConfigFromFile(): Promise<CommandPermissionConfig | null> {
+		if (!this.workspaceRoot) return null
+
+		const configPath = path.join(this.workspaceRoot, ".dirac", "permissions.json")
+		if (!(await fileExistsAtPath(configPath))) {
+			return null
+		}
+
+		try {
+			const content = await fs.readFile(configPath, "utf8")
+			return JSON.parse(content) as CommandPermissionConfig
+		} catch (error) {
+			return null
+		}
+	}
+
+	/**
+	 * Save configuration to .dirac/permissions.json
+	 * @param config - The configuration to save
+	 */
+	/**
+	 * Add a new permission rule and save to file.
+	 * @param rule - The rule to add
+	 */
+	async addRule(rule: ToolPermissionRule): Promise<void> {
+		const currentConfig = (await this.loadConfigFromFile()) || { rules: [] }
+		const rules = currentConfig.rules || []
+
+		// Check if rule already exists to avoid duplicates
+		const exists = rules.some(
+			(r) => r.tool === rule.tool && r.pattern === rule.pattern && r.action === rule.action
+		)
+
+		if (!exists) {
+			rules.push(rule)
+			await this.saveConfig({ ...currentConfig, rules })
+		}
+	}
+
+
+	async saveConfig(config: CommandPermissionConfig): Promise<void> {
+		if (!this.workspaceRoot) {
+			throw new Error("Workspace root not set. Cannot save permissions.")
+		}
+
+		const diracDir = path.join(this.workspaceRoot, ".dirac")
+		const configPath = path.join(diracDir, "permissions.json")
+
+		try {
+			await fs.mkdir(diracDir, { recursive: true })
+			await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf8")
+			
+			// Update in-memory config. loadConfig() will be called by file watcher,
+			// but we update it here for immediate effect.
+			const envConfig = this.parseConfigFromEnv()
+			this.config = {
+				...envConfig,
+				...config,
+				rules: [...(envConfig?.rules || []), ...(config.rules || [])],
+			}
+		} catch (error) {
+			throw error
+		}
 	}
 
 	/**
 	 * Parse the DIRAC_COMMAND_PERMISSIONS environment variable
 	 * @returns Parsed configuration or null if not set or invalid
 	 */
-	private parseConfig(): CommandPermissionConfig | null {
+	private parseConfigFromEnv(): CommandPermissionConfig | null {
 		const envValue = process.env[COMMAND_PERMISSIONS_ENV_VAR]
 		if (!envValue) {
 			return null
@@ -68,13 +200,69 @@ export class CommandPermissionController {
 		}
 	}
 
+	validateTool(tool: string, pattern?: string): PermissionValidationResult {
+		if (!this.config) {
+			return { allowed: true, reason: "no_config" }
+		}
+
+		// Check general rules first
+		if (this.config.rules) {
+			// Deny rules take precedence
+			for (const rule of this.config.rules) {
+				if (rule.action === "deny" && this.matchesRule(rule, tool, pattern)) {
+					return { allowed: false, reason: "denied", matchedPattern: rule.pattern }
+				}
+			}
+
+			// Then check allow rules
+			for (const rule of this.config.rules) {
+				if (rule.action === "allow" && this.matchesRule(rule, tool, pattern)) {
+					// For execute_command, we still need to run full validation (dangerous chars, redirects, etc.)
+					// even if it matches an allow rule.
+					if (tool === "execute_command" && pattern) {
+						const validationResult = this.validateCommand(pattern)
+						// If validationResult is allowed, we return it but with the matchedPattern from our rule
+						if (validationResult.allowed) {
+							return { ...validationResult, matchedPattern: rule.pattern }
+						}
+						return validationResult
+					}
+					return { allowed: true, reason: "allowed", matchedPattern: rule.pattern }
+				}
+			}
+		}
+
+		// Fallback to legacy command validation if it's execute_command
+		if (tool === "execute_command" && pattern) {
+			return this.validateCommand(pattern)
+		}
+
+		return { allowed: true, reason: "no_config" }
+	}
+
 	/**
-	 * Validate if a command is allowed to execute based on configured permissions.
-	 * For chained commands (using &&, ||, |, ;), each segment is validated separately.
-	 *
-	 * @param command - The command string to validate
-	 * @returns PermissionValidationResult indicating if command is allowed and why
+	 * Check if a rule matches the given tool and pattern.
 	 */
+	private matchesRule(rule: ToolPermissionRule, tool: string, pattern?: string): boolean {
+		if (rule.tool !== "*" && rule.tool !== tool) {
+			return false
+		}
+
+		if (!rule.pattern) {
+			return true
+		}
+
+		if (!pattern) {
+			return false
+		}
+
+		if (tool === "execute_command") {
+			return this.matchesPattern(pattern, rule.pattern)
+		} else {
+			return picomatch(rule.pattern, { dot: true })(pattern)
+		}
+	}
+
 	validateCommand(command: string): PermissionValidationResult {
 		// No config = allow everything (backward compatibility)
 		if (!this.config) {
@@ -155,14 +343,29 @@ export class CommandPermissionController {
 		return { allowed: true, reason: "allowed" }
 	}
 
-	/**
-	 * Validate a single command (no operators) against allow/deny rules.
-	 *
-	 * @param command - A single command without shell operators
-	 * @returns PermissionValidationResult for this command
-	 */
 	private validateSingleCommand(command: string): PermissionValidationResult {
-		// Check deny rules first (deny takes precedence)
+		// Check rules array first (new format)
+		if (this.config?.rules) {
+			// Deny rules take precedence
+			for (const rule of this.config.rules) {
+				if (rule.tool === "execute_command" || rule.tool === "*") {
+					if (rule.action === "deny" && rule.pattern && this.matchesPattern(command, rule.pattern)) {
+						return { allowed: false, matchedPattern: rule.pattern, reason: "denied" }
+					}
+				}
+			}
+
+			// Then check allow rules
+			for (const rule of this.config.rules) {
+				if (rule.tool === "execute_command" || rule.tool === "*") {
+					if (rule.action === "allow" && rule.pattern && this.matchesPattern(command, rule.pattern)) {
+						return { allowed: true, matchedPattern: rule.pattern, reason: "allowed" }
+					}
+				}
+			}
+		}
+
+		// Check legacy deny rules
 		if (this.config?.deny) {
 			for (const pattern of this.config.deny) {
 				if (this.matchesPattern(command, pattern)) {
@@ -171,7 +374,7 @@ export class CommandPermissionController {
 			}
 		}
 
-		// Check allow rules
+		// Check legacy allow rules
 		if (this.config?.allow && this.config.allow.length > 0) {
 			for (const pattern of this.config.allow) {
 				if (this.matchesPattern(command, pattern)) {
@@ -330,6 +533,17 @@ export class CommandPermissionController {
 	 * @param command - The command string to check
 	 * @returns ShellOperatorMatch if dangerous chars found outside appropriate quotes, null otherwise
 	 */
+	/**
+	 * Clean up resources when the controller is no longer needed
+	 */
+	async dispose(): Promise<void> {
+		if (this.fileWatcher) {
+			await this.fileWatcher.close()
+			this.fileWatcher = undefined
+		}
+	}
+
+
 	private detectDangerousCharsOutsideQuotes(command: string): ShellOperatorMatch | null {
 		let inSingleQuote = false
 		let inDoubleQuote = false
