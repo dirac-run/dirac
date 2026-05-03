@@ -23,7 +23,7 @@ export function useChatMessages(messages: any[]) {
 	const firstMessageTs = displayMessages[0]?.ts ?? null
 	useEffect(() => {
 		if (prevFirstMessageTs.current !== null && firstMessageTs !== null && prevFirstMessageTs.current !== firstMessageTs) {
-			process.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+			process.stdout.write("\x1b[2J\x1b[H")
 			setTaskSwitchKey((k) => k + 1)
 		}
 		prevFirstMessageTs.current = firstMessageTs

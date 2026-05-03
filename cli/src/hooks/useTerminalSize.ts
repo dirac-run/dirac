@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
  *
  * WHAT WORKS (borrowed from Gemini CLI's approach):
  * 1. Debounce resize events (300ms) so we wait until the user stops dragging
- * 2. Clear the entire terminal including scrollback (\x1b[2J\x1b[3J\x1b[H)
+ * 2. Clear the visible terminal screen (\x1b[2J\x1b[H)
  * 3. Increment a `resizeKey` used as a React key on the content tree, forcing React
  *    to unmount and remount everything from scratch. This resets Ink's internal tracking
  *    AND re-renders Static content since the components are brand new instances.
@@ -49,11 +49,11 @@ export function useTerminalSize() {
 
 	const refreshAfterResize = useCallback(() => {
 		// Clear terminal + scrollback to wipe stale content from old width
-		// \x1b[2J clears visible screen, \x1b[3J clears scrollback, \x1b[H moves cursor home
+		// \x1b[2J clears visible screen, \x1b[H moves cursor home
 		// Use process.stdout directly with callback to ensure clear completes before React re-renders.
 		// Without the callback, the state update can trigger a re-render that interleaves with
 		// the buffered escape sequences, causing visual artifacts in the scrollback.
-		process.stdout.write("\x1b[2J\x1b[3J\x1b[H", () => {
+		process.stdout.write("\x1b[2J\x1b[H", () => {
 			// Increment key to force React remount only after clear is flushed
 			setResizeKey((prev) => prev + 1)
 		})

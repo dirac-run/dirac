@@ -68,7 +68,7 @@ export function useChatTask({
 		if (ctrl) {
 			await ctrl.clearTask()
 		}
-		process.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+		process.stdout.write("\x1b[2J\x1b[H")
 		setTaskSwitchKey((k) => k + 1)
 		clearState()
 		setTextInput("")

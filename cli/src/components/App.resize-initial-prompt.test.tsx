@@ -4,7 +4,7 @@ import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { App } from "./App"
 
-const CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H"
+const CLEAR_SEQUENCE = "\x1b[2J\x1b[H"
 
 function setTerminalSize(columns: number, rows: number) {
 	Object.defineProperty(process.stdout, "columns", {

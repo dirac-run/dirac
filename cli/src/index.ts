@@ -724,7 +724,7 @@ async function runInkApp(element: any, cleanup: () => Promise<void>): Promise<vo
 	const { restoreConsole } = await import("./utils/console")
 
 	// Clear terminal for clean UI - robot will render at row 1
-	process.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+	process.stdout.write("\x1b[2J\x1b[H")
 
 	// Note: incrementalRendering is enabled to reduce terminal bandwidth and improve responsiveness.
 	// We previously disabled this due to resize glitches, but our useTerminalSize hook now
