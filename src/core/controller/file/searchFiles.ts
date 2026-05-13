@@ -5,6 +5,9 @@ import { convertSearchResultsToProtoFileInfos } from "@shared/proto-conversions/
 import { getWorkspacePath } from "@utils/path"
 import { Logger } from "@/shared/services/Logger"
 import { Controller } from ".."
+import { HostProvider } from "@/hosts/host-provider"
+import * as path from "path"
+import { workspaceResolver } from "@core/workspace"
 
 /**
  * Searches for files in the workspace with fuzzy matching
@@ -59,6 +62,42 @@ export async function searchFiles(controller: Controller, request: FileSearchReq
 				request.limit || 20, // Use default limit of 20 if not specified
 				selectedTypeString,
 			)
+		}
+
+		// If prioritize_active_file is set, place the active editor file at position 0
+		if (request.prioritizeActiveFile && searchResults.length > 0) {
+			try {
+				const activeEditorResponse = await HostProvider.window.getActiveEditor({})
+				const activeFilePath = activeEditorResponse.filePath
+				if (activeFilePath) {
+					// Convert absolute path to workspace-relative
+					const workspacePath = await getWorkspacePath()
+					if (workspacePath) {
+						const resolvedWs = workspaceResolver.resolveWorkspacePath(workspacePath, "", "searchFiles.prioritize")
+						const wsAbsPath = typeof resolvedWs === "string" ? resolvedWs : resolvedWs.absolutePath
+						const resolvedActive = workspaceResolver.resolveWorkspacePath(
+							activeFilePath,
+							"",
+							"searchFiles.prioritize",
+						)
+						const activeAbsPath = typeof resolvedActive === "string" ? resolvedActive : resolvedActive.absolutePath
+						let relativeActivePath = path.relative(wsAbsPath, activeAbsPath)
+						if (path.sep === "\\") {
+							relativeActivePath = relativeActivePath.replace(/\\/g, "/")
+						}
+						// Find and move the active file to position 0
+						const activeIndex = searchResults.findIndex(
+							(r) => r.path === relativeActivePath || r.path === `/${relativeActivePath}`,
+						)
+						if (activeIndex > 0) {
+							const [activeItem] = searchResults.splice(activeIndex, 1)
+							searchResults.unshift(activeItem)
+						}
+					}
+				}
+			} catch (err) {
+				Logger.error("Error prioritizing active file:", err)
+			}
 		}
 
 		// Convert search results to proto FileInfo objects using the conversion function

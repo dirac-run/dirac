@@ -17,25 +17,25 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, StateServiceClient } from "@/shared/api/grpc-client"
 import {
-    ContextMenuOptionType,
-    getContextMenuOptionIndex,
-    getContextMenuOptions,
-    insertMention,
-    insertMentionDirectly,
-    removeMention,
-    type SearchResult,
-    shouldShowContextMenu,
+	ContextMenuOptionType,
+	getContextMenuOptionIndex,
+	getContextMenuOptions,
+	insertMention,
+	insertMentionDirectly,
+	removeMention,
+	type SearchResult,
+	shouldShowContextMenu,
 } from "@/shared/lib/context-mentions"
 import { useMetaKeyDetection, useShortcut } from "@/shared/lib/hooks"
 import { isSafari } from "@/shared/lib/platformUtils"
 import {
-    getMatchingSlashCommands,
-    insertSlashCommand,
-    removeSlashCommand,
-    shouldShowSlashCommandsMenu,
-    slashCommandDeleteRegex,
-    slashCommandRegexGlobal,
-    validateSlashCommand,
+	getMatchingSlashCommands,
+	insertSlashCommand,
+	removeSlashCommand,
+	shouldShowSlashCommandsMenu,
+	slashCommandDeleteRegex,
+	slashCommandRegexGlobal,
+	validateSlashCommand,
 } from "@/shared/lib/slash-commands"
 import Thumbnails from "@/shared/ui/Thumbnails"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
@@ -258,6 +258,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									query: "",
 									mentionsRequestId: "",
 									selectedType: searchType,
+									prioritizeActiveFile: true,
 								}),
 							)
 								.then((results: any) => {
@@ -677,6 +678,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									mentionsRequestId: query,
 									selectedType: searchType,
 									workspaceHint: workspaceHint,
+									prioritizeActiveFile: true,
 								}),
 							)
 								.then((results: any) => {
