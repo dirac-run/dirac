@@ -142,6 +142,7 @@ message FileSearchRequest {
   optional int32 limit = 4; // Optional limit for results (default: 20)
   optional FileSearchType selected_type = 5; // Optional selected type filter
   optional string workspace_hint = 6; // Optional workspace name to search in
+  optional bool prioritize_active_file = 7; // When true, the active editor file is placed first in results
 }
 
 // Result for file search operations
