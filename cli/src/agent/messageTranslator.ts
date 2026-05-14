@@ -23,12 +23,13 @@ const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	write_to_file: "edit", // Keep for backward compatibility if needed, but DiracSayTool uses camelCase
 	newFileCreated: "edit",
 	editedExistingFile: "edit",
+	fileDeleted: "delete",
 	readFile: "read",
 	readLineRange: "read",
 	listFilesTopLevel: "read",
 	listFilesRecursive: "read",
 	listCodeDefinitionNames: "read",
-	searchFiles: "read",
+	searchFiles: "search",
 	// Other
 	summarizeTask: "think",
 	useSkill: "other",
@@ -425,7 +426,7 @@ function translateAskMessage(
 
 				const toolCall: acp.ToolCall = {
 					toolCallId,
-					title: "Execute",
+					title: buildCommandTitle(extractCommandFromText(message.text)),
 					kind: "execute",
 					status: "pending",
 					rawInput: { command: extractCommandFromText(message.text) },
@@ -689,7 +690,7 @@ function translateCommandMessage(message: DiracMessage, sessionState: AcpSession
 	updates.push({
 		sessionUpdate: "tool_call",
 		toolCallId,
-		title: "Execute",
+		title: buildCommandTitle(command),
 		kind: "execute",
 		status: message.partial ? "in_progress" : "completed",
 		rawInput: { command },
@@ -759,7 +760,7 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
 		if (!sessionState.currentToolCallId) {
 			sessionState.currentToolCallId = toolCallId
 		}
-		const title = "Browser"
+		const title = action ? `Browser ${action.action}` : "Browser"
 		const kind = action ? BROWSER_ACTION_KIND_MAP[action.action] || "execute" : "execute"
 
 		updates.push({
@@ -798,24 +799,27 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
  * Build a human-readable title for a tool operation.
  */
 function buildToolTitle(toolInfo: DiracSayTool): string {
+	const suffix = getToolTitleSuffix(toolInfo)
 	switch (toolInfo.tool) {
 		case "editFile":
 		case "editedExistingFile":
-			return "Edit"
+			return suffix ? `Edit ${suffix}` : "Edit"
 		case "replaceSymbol":
-			return "Replace"
+			return suffix ? `Replace ${suffix}` : "Replace"
 		case "newFileCreated":
-			return "Create"
+			return suffix ? `Create file ${suffix}` : "Create file"
+		case "fileDeleted" as any:
+			return suffix ? `Delete ${suffix}` : "Delete"
 		case "readFile":
 		case "readLineRange":
-			return "Read"
+			return suffix ? `Read ${suffix}` : "Read"
 		case "listFilesTopLevel":
 		case "listFilesRecursive":
-			return "List"
+			return suffix ? `List ${suffix}` : "List"
 		case "listCodeDefinitionNames":
-			return "Definitions"
+			return suffix ? `Definitions ${suffix}` : "Definitions"
 		case "searchFiles":
-			return "Search"
+			return suffix ? `Search ${suffix}` : "Search"
 		case "summarizeTask":
 			return "Summarize"
 		case "useSkill":
@@ -825,16 +829,30 @@ function buildToolTitle(toolInfo: DiracSayTool): string {
 		case "use_subagents" as any:
 			return "Subagents"
 		case "getFunction":
-			return "Get function"
+			return suffix ? `Get function ${suffix}` : "Get function"
 		case "getFileSkeleton":
-			return "Get skeleton"
+			return suffix ? `Get skeleton ${suffix}` : "Get skeleton"
 		case "findSymbolReferences":
-			return "References"
+			return suffix ? `References ${suffix}` : "References"
 		case "diagnosticsScan" as any:
 			return "Scan"
 		default:
 			return "Tool"
 	}
+}
+
+function getToolTitleSuffix(toolInfo: DiracSayTool): string {
+	if (toolInfo.tool === "searchFiles") {
+		const searchCandidate = (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
+		return typeof searchCandidate === "string" ? searchCandidate : ""
+	}
+	const candidate = (toolInfo as any).path || (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
+	return typeof candidate === "string" ? candidate : ""
+}
+
+function buildCommandTitle(command: string): string {
+	const truncated = command.length > 50 ? `${command.slice(0, 50)}...` : command
+	return truncated ? `Execute: ${truncated}` : "Execute"
 }
 
 /**

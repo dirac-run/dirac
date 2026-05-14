@@ -74,6 +74,8 @@ export interface DiracAgentOptions {
 	debug?: boolean
 	/** Dirac Config Directory (defaults to ~/.dirac) */
 	diracDir?: string
+	/** Workspace directory for CLI context initialization */
+	cwd?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
 }
@@ -84,6 +86,10 @@ export interface DiracAgentOptions {
 export interface AcpAgentOptions {
 	/** Whether debug logging is enabled */
 	debug?: boolean
+	/** Dirac Config Directory (defaults to ~/.dirac) */
+	diracDir?: string
+	/** Workspace directory for CLI context initialization */
+	cwd?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
 }

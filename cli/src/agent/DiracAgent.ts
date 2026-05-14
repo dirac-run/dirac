@@ -15,26 +15,6 @@ import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { DiracMessageChange } from "@core/task/message-state"
 import type { ApiProvider } from "@shared/api"
-import {
-    anthropicDefaultModelId,
-    anthropicModels,
-    bedrockDefaultModelId,
-    bedrockModels,
-    deepSeekDefaultModelId,
-    deepSeekModels,
-    geminiDefaultModelId,
-    geminiModels,
-    groqDefaultModelId,
-    groqModels,
-    mistralDefaultModelId,
-    mistralModels,
-    moonshotDefaultModelId,
-    moonshotModels,
-    openAiNativeDefaultModelId,
-    openAiNativeModels,
-    xaiDefaultModelId,
-    xaiModels,
-} from "@shared/api"
 import type { DiracAsk, DiracMessage as DiracMessageType } from "@shared/ExtensionMessage"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
@@ -55,7 +35,11 @@ import { version as AGENT_VERSION } from "../../package.json"
 import { ACPDiffViewProvider } from "../acp/ACPDiffViewProvider.js"
 import { ACPHostBridgeClientProvider } from "../acp/ACPHostBridgeClientProvider.js"
 import { AcpTerminalManager } from "../acp/AcpTerminalManager.js"
+import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
+import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
+import { getDefaultModelId, getModelList, hasStaticModels } from "../utils/model-metadata.js"
 import { fetchOpenRouterModels, usesOpenRouterModels } from "../utils/openrouter-models"
+import { getProviderLabel, getValidCliProviders, isValidCliProvider } from "../utils/providers.js"
 import { CliContextResult, initializeCliContext } from "../vscode-context.js"
 import { DiracSessionEmitter } from "./DiracSessionEmitter.js"
 import { translateMessage } from "./messageTranslator.js"
@@ -64,27 +48,27 @@ import type { DiracAcpSession, DiracAgentOptions, PermissionHandler } from "./pu
 import { AcpSessionStatus } from "./public-types.js"
 import { type AcpSessionState } from "./types.js"
 
-// Map providers to their static model lists and defaults (copied from ModelPicker.tsx)
-const providerModels: Record<string, { models: Record<string, unknown>; defaultId: string }> = {
-	anthropic: { models: anthropicModels, defaultId: anthropicDefaultModelId },
-	"openai-native": { models: openAiNativeModels, defaultId: openAiNativeDefaultModelId },
-	gemini: { models: geminiModels, defaultId: geminiDefaultModelId },
-	bedrock: { models: bedrockModels, defaultId: bedrockDefaultModelId },
-	deepseek: { models: deepSeekModels, defaultId: deepSeekDefaultModelId },
-	mistral: { models: mistralModels, defaultId: mistralDefaultModelId },
-	moonshot: { models: moonshotModels, defaultId: moonshotDefaultModelId },
-	groq: { models: groqModels, defaultId: groqDefaultModelId },
-	xai: { models: xaiModels, defaultId: xaiDefaultModelId },
-}
+const ACP_MODE_OPTIONS: acp.SessionConfigSelectOption[] = [
+	{ value: "plan", name: "Plan", description: "Gather information and create a detailed plan" },
+	{ value: "act", name: "Act", description: "Execute actions to accomplish the task" },
+]
 
-function hasStaticModels(provider: string): boolean {
-	return provider in providerModels
-}
+const REASONING_EFFORT_OPTIONS: acp.SessionConfigSelectOption[] = [
+	{ value: "none", name: "None" },
+	{ value: "low", name: "Low" },
+	{ value: "medium", name: "Medium" },
+	{ value: "high", name: "High" },
+	{ value: "xhigh", name: "Extra high" },
+]
 
-function getModelList(provider: string): string[] {
-	if (!hasStaticModels(provider)) return []
-	return Object.keys(providerModels[provider].models)
-}
+const THINKING_BUDGET_OPTIONS: acp.SessionConfigSelectOption[] = [
+	{ value: "0", name: "Off" },
+	{ value: "1024", name: "1,024 tokens" },
+	{ value: "4096", name: "4,096 tokens" },
+	{ value: "8192", name: "8,192 tokens" },
+	{ value: "16384", name: "16,384 tokens" },
+	{ value: "32768", name: "32,768 tokens" },
+]
 
 /**
  * Dirac's implementation of the ACP Agent interface.
@@ -148,7 +132,7 @@ export class DiracAgent implements acp.Agent {
 	constructor(options: DiracAgentOptions) {
 		this.options = options
 		setRuntimeHooksDir(options.hooksDir)
-		this.ctx = initializeCliContext({ diracDir: options.diracDir })
+		this.ctx = initializeCliContext({ diracDir: options.diracDir, workspaceDir: options.cwd })
 	}
 
 	/**
@@ -318,25 +302,97 @@ export class DiracAgent implements acp.Agent {
 
 		this.sessionStates.set(sessionId, sessionState)
 
-		// Send available slash commands to the client
-		// This is done asynchronously after session creation
-		await this.sendAvailableCommands(sessionId, controller).catch((error) => {
-			Logger.debug("[DiracAgent] Failed to send available commands:", error)
-		})
-
 		// Get current model configuration for the response
 		const modelState = await this.getSessionModelState(session.mode)
+		const configOptions = await this.getSessionConfigOptions(session)
 
 		return {
 			sessionId,
-			modes: {
-				availableModes: [
-					{ id: "plan", name: "Plan", description: "Gather information and create a detailed plan" },
-					{ id: "act", name: "Act", description: "Execute actions to accomplish the task" },
-				],
-				currentModeId: session.mode,
-			},
+			modes: this.getSessionModeState(session.mode),
 			models: modelState,
+			configOptions,
+		}
+	}
+
+	/**
+	 * Load an existing session from task history.
+	 *
+	 * The ACP LoadSessionRequest sessionId is treated as the historical task ID.
+	 * The task is rehydrated lazily on first prompt to align with the ACP flow.
+	 */
+	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
+		const sessionId = params.sessionId
+		const existingSession = this.sessions.get(sessionId)
+		if (existingSession) {
+			const modelState = await this.getSessionModelState(existingSession.mode)
+			const configOptions = await this.getSessionConfigOptions(existingSession)
+			return {
+				modes: this.getSessionModeState(existingSession.mode),
+				models: modelState,
+				configOptions,
+			}
+		}
+
+		Logger.debug("[DiracAgent] loadSession called:", { sessionId })
+
+		const controller = new Controller(this.ctx.extensionContext)
+		const history = await controller.getTaskWithId(sessionId)
+		const historyCwd =
+			history.historyItem.cwdOnTaskInitialization || history.historyItem.workspaceRootPath || params.cwd || this.options.cwd
+
+		const session: DiracAcpSession = {
+			sessionId,
+			cwd: historyCwd || process.cwd(),
+			mode: (await controller.getStateToPostToWebview()).mode,
+			createdAt: Date.now(),
+			lastActivityAt: Date.now(),
+			isLoadedFromHistory: true,
+		}
+
+		this.#sessionControllers.set(session, controller)
+		this.sessions.set(sessionId, session)
+		this.sessionStates.set(sessionId, {
+			sessionId,
+			status: AcpSessionStatus.Idle,
+			pendingToolCalls: new Map(),
+		})
+
+		const modelState = await this.getSessionModelState(session.mode)
+		const configOptions = await this.getSessionConfigOptions(session)
+		return {
+			modes: this.getSessionModeState(session.mode),
+			models: modelState,
+			configOptions,
+		}
+	}
+
+	/**
+	 * Emit initial session updates that must happen after the ACP stdio wrapper
+	 * has registered and subscribed to the session.
+	 */
+	async publishSessionSetupUpdates(sessionId: string): Promise<void> {
+		const session = this.sessions.get(sessionId)
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`)
+		}
+
+		const controller = this.#sessionControllers.get(session)
+		if (!controller) {
+			throw new Error("Controller not initialized for session. This is a bug in the ACP agent setup.")
+		}
+
+		await this.sendAvailableCommands(sessionId, controller)
+		await this.emitConfigOptionsUpdate(sessionId)
+	}
+
+	private getSessionModeState(mode: Mode): acp.SessionModeState {
+		return {
+			availableModes: ACP_MODE_OPTIONS.map(({ value, name, description }) => ({
+				id: value,
+				name,
+				description,
+			})),
+			currentModeId: mode,
 		}
 	}
 
@@ -353,7 +409,9 @@ export class DiracAgent implements acp.Agent {
 
 		// Use provider-specific model ID key (e.g., dirac uses actModeOpenRouterModelId)
 		const modelKey = currentProvider ? getProviderModelIdKey(currentProvider, mode) : null
-		const currentModelId = modelKey ? stateManager.getGlobalSettingsKey(modelKey) : undefined
+		const currentModelId =
+			((modelKey ? stateManager.getGlobalSettingsKey(modelKey) : undefined) as string | undefined) ||
+			(currentProvider ? getDefaultModelId(currentProvider) : undefined)
 
 		// Build the current model ID in provider/model format
 		const currentFullModelId =
@@ -365,11 +423,17 @@ export class DiracAgent implements acp.Agent {
 		if (currentProvider) {
 			if (usesOpenRouterModels(currentProvider)) {
 				// Fetch OpenRouter models (async)
-				modelIds = await fetchOpenRouterModels()
+				modelIds = filterOpenRouterModelIds(await fetchOpenRouterModels(), currentProvider)
+			} else if (currentProvider === "github-copilot") {
+				modelIds = Object.keys(await refreshGithubCopilotModels()).sort((a, b) => a.localeCompare(b))
 			} else if (hasStaticModels(currentProvider)) {
 				// Use static model list
 				modelIds = getModelList(currentProvider)
 			}
+		}
+
+		if (currentModelId && !modelIds.includes(currentModelId)) {
+			modelIds = [currentModelId, ...modelIds]
 		}
 
 		// Convert to ACP ModelInfo format with provider prefix
@@ -382,6 +446,115 @@ export class DiracAgent implements acp.Agent {
 			currentModelId: currentFullModelId,
 			availableModels,
 		}
+	}
+
+	private async getSessionConfigOptions(session: DiracAcpSession): Promise<acp.SessionConfigOption[]> {
+		const stateManager = StateManager.get()
+		const currentProvider = stateManager.getGlobalSettingsKey(
+			session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider",
+		) as ApiProvider | undefined
+		const currentModelId = await this.getCurrentModeModelId(session.mode, currentProvider)
+		const thinkingBudget = String(
+			stateManager.getGlobalSettingsKey(
+				session.mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens",
+			) ?? 0,
+		)
+		const reasoningEffort = String(
+			stateManager.getGlobalSettingsKey(session.mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort") ??
+				"medium",
+		)
+
+		return [
+			{
+				id: "mode",
+				name: "Mode",
+				description: "Session operating mode",
+				type: "select",
+				category: "mode",
+				currentValue: session.mode,
+				options: ACP_MODE_OPTIONS,
+			},
+			{
+				id: "provider",
+				name: "Provider",
+				description: "API provider",
+				type: "select",
+				category: "model",
+				currentValue: currentProvider || "",
+				options: getValidCliProviders().map((provider) => ({
+					value: provider,
+					name: getProviderLabel(provider),
+				})),
+			},
+			{
+				id: "model",
+				name: "Model",
+				description: "Model for the current mode",
+				type: "select",
+				category: "model",
+				currentValue: currentModelId || "",
+				options: await this.getModelConfigOptions(currentProvider, currentModelId),
+			},
+			{
+				id: "reasoning_effort",
+				name: "Reasoning Effort",
+				description: "Reasoning effort for models that support it",
+				type: "select",
+				category: "thought_level",
+				currentValue: reasoningEffort,
+				options: REASONING_EFFORT_OPTIONS,
+			},
+			{
+				id: "thinking_budget",
+				name: "Thinking Budget",
+				description: "Extended thinking budget for models that support it",
+				type: "select",
+				category: "thought_level",
+				currentValue: thinkingBudget,
+				options: this.withCurrentSelectOption(THINKING_BUDGET_OPTIONS, thinkingBudget, `${thinkingBudget} tokens`),
+			},
+		]
+	}
+
+	private async getCurrentModeModelId(mode: Mode, provider?: ApiProvider): Promise<string> {
+		if (!provider) return ""
+		const modelKey = getProviderModelIdKey(provider, mode)
+		return (StateManager.get().getGlobalSettingsKey(modelKey) as string | undefined) || getDefaultModelId(provider)
+	}
+
+	private async getModelConfigOptions(
+		provider: ApiProvider | undefined,
+		currentModelId: string | undefined,
+	): Promise<acp.SessionConfigSelectOption[]> {
+		if (!provider) {
+			return []
+		}
+
+		let modelIds: string[] = []
+		if (usesOpenRouterModels(provider)) {
+			modelIds = filterOpenRouterModelIds(await fetchOpenRouterModels(), provider)
+		} else if (provider === "github-copilot") {
+			modelIds = Object.keys(await refreshGithubCopilotModels()).sort((a, b) => a.localeCompare(b))
+		} else if (hasStaticModels(provider)) {
+			modelIds = getModelList(provider)
+		}
+
+		if (currentModelId && !modelIds.includes(currentModelId)) {
+			modelIds = [currentModelId, ...modelIds]
+		}
+
+		return modelIds.map((modelId) => ({ value: modelId, name: modelId }))
+	}
+
+	private withCurrentSelectOption(
+		options: acp.SessionConfigSelectOption[],
+		currentValue: string,
+		currentName: string,
+	): acp.SessionConfigSelectOption[] {
+		if (!currentValue || options.some((option) => option.value === currentValue)) {
+			return options
+		}
+		return [{ value: currentValue, name: currentName }, ...options]
 	}
 
 	/**
@@ -413,32 +586,137 @@ export class DiracAgent implements acp.Agent {
 		const provider = params.modelId.substring(0, slashIndex) as ApiProvider
 		const modelId = params.modelId.substring(slashIndex + 1)
 
-		const stateManager = StateManager.get()
-
-		// Update provider for both modes
-		stateManager.setGlobalState("actModeApiProvider", provider)
-		stateManager.setGlobalState("planModeApiProvider", provider)
-
-		// Update model ID using provider-specific keys (e.g., dirac uses actModeOpenRouterModelId)
-		const actProviderModelKey = getProviderModelIdKey(provider, "act")
-		if (actProviderModelKey) {
-			stateManager.setGlobalState(actProviderModelKey, modelId)
-		}
-		const planProviderModelKey = getProviderModelIdKey(provider, "plan")
-		if (planProviderModelKey) {
-			stateManager.setGlobalState(planProviderModelKey, modelId)
-		}
-
-		// Store the model override in the session for both modes
-		session.actModeModelId = params.modelId
-		session.planModeModelId = params.modelId
-
+		await this.applyProviderAndModel(session, provider, modelId)
 		session.lastActivityAt = Date.now()
 
-		// Flush state changes
-		await stateManager.flushPendingState()
+		await StateManager.get().flushPendingState()
+		await this.emitConfigOptionsUpdate(params.sessionId)
 
 		return {}
+	}
+
+	async unstable_setSessionConfigOption(
+		params: acp.SetSessionConfigOptionRequest,
+	): Promise<acp.SetSessionConfigOptionResponse> {
+		const session = this.sessions.get(params.sessionId)
+		if (!session) {
+			throw new Error(`Session not found: ${params.sessionId}`)
+		}
+
+		Logger.debug("[DiracAgent] unstable_setSessionConfigOption called:", {
+			sessionId: params.sessionId,
+			configId: params.configId,
+			value: params.value,
+		})
+
+		let emittedConfigUpdate = false
+		switch (params.configId) {
+			case "mode":
+				await this.setSessionMode({ sessionId: params.sessionId, modeId: params.value })
+				emittedConfigUpdate = true
+				break
+			case "provider":
+				await this.applyProviderConfigOption(session, params.value)
+				break
+			case "model":
+				await this.applyModelConfigOption(session, params.value)
+				break
+			case "reasoning_effort":
+				this.applyReasoningEffortConfigOption(session, params.value)
+				break
+			case "thinking_budget":
+				this.applyThinkingBudgetConfigOption(session, params.value)
+				break
+			default:
+				throw new Error(`Unknown session config option: ${params.configId}`)
+		}
+
+		session.lastActivityAt = Date.now()
+		await StateManager.get().flushPendingState()
+		const configOptions = await this.getSessionConfigOptions(session)
+		if (!emittedConfigUpdate) {
+			await this.emitSessionUpdate(params.sessionId, {
+				sessionUpdate: "config_option_update",
+				configOptions,
+			})
+		}
+		return { configOptions }
+	}
+
+	private async applyProviderConfigOption(session: DiracAcpSession, providerValue: string): Promise<void> {
+		if (!isValidCliProvider(providerValue)) {
+			throw new Error(`Invalid provider: ${providerValue}`)
+		}
+
+		const provider = providerValue as ApiProvider
+		const currentModelId = await this.getCurrentModeModelId(session.mode, provider)
+		await this.applyProviderAndModel(session, provider, currentModelId)
+	}
+
+	private async applyModelConfigOption(session: DiracAcpSession, modelValue: string): Promise<void> {
+		const stateManager = StateManager.get()
+		const provider = stateManager.getGlobalSettingsKey(
+			session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider",
+		) as ApiProvider | undefined
+
+		if (!provider) {
+			throw new Error("Cannot set model before a provider is selected")
+		}
+
+		await this.applyProviderAndModel(session, provider, modelValue)
+	}
+
+	private applyReasoningEffortConfigOption(session: DiracAcpSession, effort: string): void {
+		if (!REASONING_EFFORT_OPTIONS.some((option) => option.value === effort)) {
+			throw new Error(`Invalid reasoning effort: ${effort}`)
+		}
+
+		this.setModeScopedSessionState(session.mode, (mode) => {
+			StateManager.get().setGlobalState(
+				mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort",
+				effort as any,
+			)
+		})
+	}
+
+	private applyThinkingBudgetConfigOption(session: DiracAcpSession, budgetValue: string): void {
+		const budget = Number.parseInt(budgetValue, 10)
+		if (Number.isNaN(budget) || budget < 0) {
+			throw new Error(`Invalid thinking budget: ${budgetValue}`)
+		}
+
+		this.setModeScopedSessionState(session.mode, (mode) => {
+			StateManager.get().setGlobalState(
+				mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens",
+				budget as any,
+			)
+		})
+	}
+
+	private async applyProviderAndModel(session: DiracAcpSession, provider: ApiProvider, modelId: string): Promise<void> {
+		this.setModeScopedSessionState(session.mode, (mode) => {
+			const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
+			StateManager.get().setGlobalState(providerKey, provider)
+
+			const modelKey = getProviderModelIdKey(provider, mode)
+			StateManager.get().setGlobalState(modelKey, modelId as any)
+
+			if (mode === "act") {
+				session.actModeModelId = `${provider}/${modelId}`
+			} else {
+				session.planModeModelId = `${provider}/${modelId}`
+			}
+		})
+	}
+
+	private setModeScopedSessionState(currentMode: Mode, setter: (mode: Mode) => void): void {
+		const stateManager = StateManager.get()
+		setter(currentMode)
+
+		const separateModels = stateManager.getGlobalSettingsKey("planActSeparateModelsSetting") ?? false
+		if (!separateModels) {
+			setter(currentMode === "act" ? "plan" : "act")
+		}
 	}
 
 	/**
@@ -967,6 +1245,13 @@ export class DiracAgent implements acp.Agent {
 			}
 		}
 
+		await StateManager.get().flushPendingState()
+		await this.emitSessionUpdate(params.sessionId, {
+			sessionUpdate: "current_mode_update",
+			currentModeId: session.mode,
+		})
+		await this.emitConfigOptionsUpdate(params.sessionId)
+
 		return {}
 	}
 
@@ -983,6 +1268,16 @@ export class DiracAgent implements acp.Agent {
 			Logger.debug("[DiracAgent] Error emitting session update:", error)
 			emitter.emit("error", error instanceof Error ? error : new Error(String(error)))
 		}
+	}
+
+	private async emitConfigOptionsUpdate(sessionId: string): Promise<void> {
+		const session = this.sessions.get(sessionId)
+		if (!session) return
+
+		await this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "config_option_update",
+			configOptions: await this.getSessionConfigOptions(session),
+		})
 	}
 
 	private async sendAvailableCommands(sessionId: string, controller: Controller): Promise<void> {

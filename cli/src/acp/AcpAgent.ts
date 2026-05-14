@@ -31,6 +31,10 @@ export class AcpAgent implements acp.Agent {
 
 	/** Track which sessions we've subscribed to for event forwarding */
 	private readonly subscribedSessions: Set<string> = new Set()
+	/** Track which sessions have already published initial ACP setup updates */
+	private readonly initializedSessions: Set<string> = new Set()
+	/** Deduplicate in-flight initial session setup update publication */
+	private readonly sessionInitializationPromises: Map<string, Promise<void>> = new Map()
 
 	constructor(connection: acp.AgentSideConnection, options: AcpAgentOptions) {
 		this.connection = connection
@@ -97,6 +101,43 @@ export class AcpAgent implements acp.Agent {
 		this.subscribedSessions.add(sessionId)
 	}
 
+	/**
+	 * Publish session setup updates once per session.
+	 *
+	 * This is intentionally separated from `newSession()` response handling so
+	 * ACP clients such as Zed only receive command/config notifications after
+	 * the session creation response has been delivered.
+	 */
+	private async ensureSessionSetupUpdates(sessionId: string): Promise<void> {
+		if (this.initializedSessions.has(sessionId)) {
+			return
+		}
+
+		const existingPromise = this.sessionInitializationPromises.get(sessionId)
+		if (existingPromise) {
+			await existingPromise
+			return
+		}
+
+		const publishPromise = this.diracAgent
+			.publishSessionSetupUpdates(sessionId)
+			.then(() => {
+				this.initializedSessions.add(sessionId)
+			})
+			.finally(() => {
+				this.sessionInitializationPromises.delete(sessionId)
+			})
+
+		this.sessionInitializationPromises.set(sessionId, publishPromise)
+		await publishPromise
+	}
+
+	private scheduleSessionSetupUpdates(sessionId: string): void {
+		setImmediate(() => {
+			void this.ensureSessionSetupUpdates(sessionId)
+		})
+	}
+
 	// ============================================================
 	// acp.Agent Interface Implementation - Delegate to DiracAgent
 	// ============================================================
@@ -109,12 +150,21 @@ export class AcpAgent implements acp.Agent {
 		const response = await this.diracAgent.newSession(params)
 		// Subscribe to events for this new session
 		this.subscribeToSessionEvents(response.sessionId)
+		this.scheduleSessionSetupUpdates(response.sessionId)
+		return response
+	}
+
+	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
+		const response = await this.diracAgent.loadSession(params)
+		this.subscribeToSessionEvents(params.sessionId)
+		this.scheduleSessionSetupUpdates(params.sessionId)
 		return response
 	}
 
 	async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
 		// Ensure we're subscribed to this session's events
 		this.subscribeToSessionEvents(params.sessionId)
+		await this.ensureSessionSetupUpdates(params.sessionId)
 		return this.diracAgent.prompt(params)
 	}
 
@@ -130,12 +180,20 @@ export class AcpAgent implements acp.Agent {
 		return this.diracAgent.unstable_setSessionModel(params)
 	}
 
+	async unstable_setSessionConfigOption(
+		params: acp.SetSessionConfigOptionRequest,
+	): Promise<acp.SetSessionConfigOptionResponse> {
+		return this.diracAgent.unstable_setSessionConfigOption(params)
+	}
+
 	async authenticate(params: acp.AuthenticateRequest): Promise<acp.AuthenticateResponse> {
 		return this.diracAgent.authenticate(params)
 	}
 
 	async shutdown(): Promise<void> {
 		this.subscribedSessions.clear()
+		this.initializedSessions.clear()
+		this.sessionInitializationPromises.clear()
 		return this.diracAgent.shutdown()
 	}
 }
