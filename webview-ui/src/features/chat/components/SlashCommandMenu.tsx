@@ -89,7 +89,7 @@ const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 		return (
 			<>
 				<div
-					className="text-xs text-(--vscode-descriptionForeground) px-3 py-1 font-bold border-b border-(--vscode-editorGroup-border)"
+					className="text-xs opacity-70 px-3 py-1 font-bold border-b border-(--vscode-editorGroup-border)"
 					role="presentation">
 					{title}
 				</div>
@@ -102,7 +102,7 @@ const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 								itemIndex === selectedIndex
 									? "bg-(--vscode-quickInputList-focusBackground) text-(--vscode-quickInputList-focusForeground)"
 									: ""
-							} hover:bg-(--vscode-list-hoverBackground)`}
+							}`}
 							id={`slash-command-menu-item-${itemIndex}`}
 							key={command.name}
 							onClick={() => handleClick(command)}
@@ -112,7 +112,7 @@ const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 								<span className="ph-no-capture">/{command.name}</span>
 							</div>
 							{showDescriptions && command.description && (
-								<div className="text-[0.85em] text-(--vscode-descriptionForeground) whitespace-normal overflow-hidden text-ellipsis">
+								<div className="text-[0.85em] whitespace-normal overflow-hidden text-ellipsis opacity-80">
 									<span className="ph-no-capture">{command.description}</span>
 								</div>
 							)}
@@ -144,7 +144,7 @@ const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 					</>
 				) : (
 					<div aria-selected="false" className="py-2 px-3 cursor-default flex flex-col" role="option">
-						<div className="text-[0.85em] text-(--vscode-descriptionForeground)">No matching commands found</div>
+						<div className="text-[0.85em] opacity-70">No matching commands found</div>
 					</div>
 				)}
 			</div>
