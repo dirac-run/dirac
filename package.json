@@ -55,15 +55,6 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
-		"icons": {
-			"dirac-icon": {
-				"description": "dirac",
-				"default": {
-					"fontPath": "node_modules/@vscode/codicons/dist/codicon.ttf",
-					"fontCharacter": "\\e900"
-				}
-			}
-		},
 		"walkthroughs": [
 			{
 				"id": "DiracWalkthrough",
@@ -168,7 +159,10 @@
 				"command": "dirac.generateGitCommitMessage",
 				"title": "Generate Commit Message with Dirac",
 				"category": "Dirac",
-				"icon": "$(dirac-icon)"
+				"icon": {
+					"light": "assets/icons/icon.svg",
+					"dark": "assets/icons/icon.svg"
+				}
 			},
 			{
 				"command": "dirac.abortGitCommitMessage",
@@ -255,10 +249,6 @@
 				"win": "ctrl+'",
 				"linux": "ctrl+'",
 				"when": "editorHasSelection"
-			},
-			{
-				"command": "dirac.generateGitCommitMessage",
-				"when": "config.git.enabled && scmProvider == git"
 			},
 			{
 				"command": "dirac.focusChatInput",

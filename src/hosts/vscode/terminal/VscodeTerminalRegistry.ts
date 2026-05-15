@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import { getDiracIconUri } from "@/hosts/vscode/iconUtils"
 
 export interface TerminalInfo {
 	terminal: vscode.Terminal
@@ -28,7 +29,7 @@ export class TerminalRegistry {
 		const terminalOptions: vscode.TerminalOptions = {
 			cwd,
 			name: "Dirac",
-			iconPath: new vscode.ThemeIcon("dirac-icon"),
+			iconPath: getDiracIconUri(),
 			env: {
 				DIRAC_ACTIVE: "true",
 				...env,

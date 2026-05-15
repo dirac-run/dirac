@@ -1,5 +1,6 @@
 import { ExecuteCommandInTerminalRequest, ExecuteCommandInTerminalResponse } from "@shared/proto/host/workspace"
 import * as vscode from "vscode"
+import { getDiracIconUri } from "@/hosts/vscode/iconUtils"
 import { Logger } from "@/shared/services/Logger"
 
 /**
@@ -14,7 +15,7 @@ export async function executeCommandInTerminal(
 		// Create terminal with fixed options
 		const terminalOptions: vscode.TerminalOptions = {
 			name: "Dirac",
-			iconPath: new vscode.ThemeIcon("dirac-icon"),
+			iconPath: getDiracIconUri(),
 			env: {
 				DIRAC_ACTIVE: "true",
 			},
