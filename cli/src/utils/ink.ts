@@ -7,6 +7,19 @@ export async function runInkApp(element: any, cleanup: () => Promise<void>): Pro
 
 	// Clear terminal for clean UI - robot will render at row 1
 	process.stdout.write("\x1b[2J\x1b[H")
+	const shouldPrimeRawMode =
+		process.platform === "win32" && process.stdin.isTTY && typeof process.stdin.setRawMode === "function"
+	const wasRaw = process.stdin.isRaw === true
+	const wasPaused = process.stdin.isPaused()
+
+	if (shouldPrimeRawMode) {
+		try {
+			process.stdin.setRawMode(true)
+			process.stdin.resume()
+		} catch {
+			// Ink will still attempt to initialize raw mode.
+		}
+	}
 
 	// Note: incrementalRendering is enabled to reduce terminal bandwidth and improve responsiveness.
 	// We previously disabled this due to resize glitches, but our useTerminalSize hook now
@@ -27,6 +40,16 @@ export async function runInkApp(element: any, cleanup: () => Promise<void>): Pro
 			unmount()
 		} catch {
 			// Already unmounted
+		}
+		if (shouldPrimeRawMode) {
+			try {
+				process.stdin.setRawMode(wasRaw)
+				if (wasPaused) {
+					process.stdin.pause()
+				}
+			} catch {
+				// Ignore cleanup failures on nonstandard terminals.
+			}
 		}
 		restoreConsole()
 		await cleanup()
