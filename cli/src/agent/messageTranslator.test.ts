@@ -374,6 +374,7 @@ describe("translateMessage - say messages", () => {
 			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
 			expect(call.kind).toBe("execute")
 			expect(call.title).toContain("npm install")
+			expect(call.status).toBe("in_progress")
 			expect(call.rawInput).toEqual({ command: "npm install" })
 
 			// Should set currentToolCallId
@@ -478,8 +479,39 @@ describe("translateMessage - say messages", () => {
 
 			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
 			expect(call.kind).toBe("read")
+			expect(call.status).toBe("in_progress")
+			expect(call.title).toContain("Read")
 			expect(call.title).toContain("/src/index.ts")
 			expect(call.locations).toContainEqual({ path: "/src/index.ts" })
+
+			const toolUpdate = result.updates.find((u) => u.sessionUpdate === "tool_call_update")
+			expect(toolUpdate).toBeDefined()
+			assertValidToolCallUpdate(toolUpdate!)
+			expect((toolUpdate as acp.ToolCallUpdate & { sessionUpdate: "tool_call_update" }).status).toBe("completed")
+		})
+
+		it("should build read titles from paths when path is omitted", () => {
+			const toolInfo = {
+				tool: "readFile",
+				paths: ["/src/a.ts", "/src/b.ts"],
+				readFileResults: [
+					{ path: "/src/a.ts", status: "success", label: "Read full file" },
+					{ path: "/src/b.ts", status: "success", label: "Read full file" },
+				],
+			}
+			const message = createDiracMessage({
+				type: "say",
+				say: "tool",
+				text: JSON.stringify(toolInfo),
+			})
+
+			const result = translateMessage(message, sessionState)
+			const toolCall = result.updates.find((u) => u.sessionUpdate === "tool_call") as acp.ToolCall & {
+				sessionUpdate: "tool_call"
+			}
+
+			expect(toolCall.title).toContain("/src/a.ts")
+			expect(toolCall.title).toContain("/src/b.ts")
 		})
 
 		it("should translate say:tool for file edit operations", () => {
@@ -506,6 +538,8 @@ describe("translateMessage - say messages", () => {
 
 			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
 			expect(call.kind).toBe("edit")
+			expect(call.status).toBe("in_progress")
+			expect(call.title).toContain("Edit")
 			expect(call.title).toContain("/src/app.ts")
 
 			// Should have diff content
@@ -531,7 +565,8 @@ describe("translateMessage - say messages", () => {
 				sessionUpdate: "tool_call"
 			}
 			expect(toolCall.kind).toBe("edit")
-			expect(toolCall.title).toContain("Create file")
+			expect(toolCall.status).toBe("in_progress")
+			expect(toolCall.title).toContain("Create")
 		})
 
 		it("should translate say:tool for file deletion", () => {
@@ -551,6 +586,8 @@ describe("translateMessage - say messages", () => {
 				sessionUpdate: "tool_call"
 			}
 			expect(toolCall.kind).toBe("delete")
+			expect(toolCall.status).toBe("in_progress")
+			expect(toolCall.title).toContain("Delete")
 		})
 
 		it("should translate say:tool for search operations", () => {
@@ -572,6 +609,8 @@ describe("translateMessage - say messages", () => {
 				sessionUpdate: "tool_call"
 			}
 			expect(toolCall.kind).toBe("search")
+			expect(toolCall.status).toBe("in_progress")
+			expect(toolCall.title).toContain("Search")
 			expect(toolCall.title).toContain("TODO|FIXME")
 		})
 
@@ -652,6 +691,7 @@ describe("translateMessage - say messages", () => {
 
 			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
 			expect(call.kind).toBe("execute")
+			expect(call.status).toBe("in_progress")
 			expect(call.title).toContain("launch")
 		})
 
@@ -672,6 +712,7 @@ describe("translateMessage - say messages", () => {
 			expect(toolCall).toBeDefined()
 
 			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
+			expect(call.status).toBe("in_progress")
 			expect(call.title).toContain("click")
 		})
 
@@ -1297,13 +1338,13 @@ describe("tool title building", () => {
 	})
 
 	const titleCases: Array<{ tool: string; path?: string; regex?: string; expectedContains: string }> = [
-		{ tool: "readFile", path: "/src/index.ts", expectedContains: "/src/index.ts" },
-		{ tool: "editedExistingFile", path: "/src/app.ts", expectedContains: "/src/app.ts" },
-		{ tool: "newFileCreated", path: "/src/new.ts", expectedContains: "/src/new.ts" },
-		{ tool: "fileDeleted", path: "/old.ts", expectedContains: "/old.ts" },
-		{ tool: "listFilesTopLevel", path: "/src", expectedContains: "/src" },
-		{ tool: "listFilesRecursive", path: "/src", expectedContains: "/src" },
-		{ tool: "searchFiles", regex: "TODO", expectedContains: "TODO" },
+		{ tool: "readFile", path: "/src/index.ts", expectedContains: "Read /src/index.ts" },
+		{ tool: "editedExistingFile", path: "/src/app.ts", expectedContains: "Edit /src/app.ts" },
+		{ tool: "newFileCreated", path: "/src/new.ts", expectedContains: "Create /src/new.ts" },
+		{ tool: "fileDeleted", path: "/old.ts", expectedContains: "Delete /old.ts" },
+		{ tool: "listFilesTopLevel", path: "/src", expectedContains: "List /src" },
+		{ tool: "listFilesRecursive", path: "/src", expectedContains: "List /src" },
+		{ tool: "searchFiles", regex: "TODO", expectedContains: "Search TODO" },
 	]
 
 	titleCases.forEach(({ tool, path, regex, expectedContains }) => {
@@ -1322,6 +1363,27 @@ describe("tool title building", () => {
 
 			expect(toolCall.title.toLowerCase()).toContain(expectedContains.toLowerCase())
 		})
+	})
+
+	it("should use regular tool titles even when MCP-style identifiers are present", () => {
+		const toolInfo = {
+			tool: "readFile",
+			serverName: "serena",
+			toolName: "activate_project",
+			path: "/repo",
+		}
+		const message = createDiracMessage({
+			type: "say",
+			say: "tool",
+			text: JSON.stringify(toolInfo),
+		})
+
+		const result = translateMessage(message, sessionState)
+		const toolCall = result.updates.find((u) => u.sessionUpdate === "tool_call") as acp.ToolCall & {
+			sessionUpdate: "tool_call"
+		}
+
+		expect(toolCall.title).toBe("Read /repo")
 	})
 })
 

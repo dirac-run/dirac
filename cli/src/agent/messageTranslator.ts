@@ -639,18 +639,29 @@ function translateToolMessage(message: DiracMessage, sessionState: AcpSessionSta
 		}
 
 		if (!sessionState.currentToolCallId) {
-			// New tool call
+			// New tool call. ACP clients behave better when execution always starts with
+			// a tool_call lifecycle event, then completes via tool_call_update.
 			sessionState.currentToolCallId = toolCallId
 			updates.push({
 				sessionUpdate: "tool_call",
 				toolCallId,
 				title,
 				kind,
-				status,
+				status: "in_progress",
 				rawInput: toolInfo,
 				content: content.length > 0 ? content : undefined,
 				locations: locations.length > 0 ? locations : undefined,
 			})
+
+			if (status === "completed") {
+				updates.push({
+					sessionUpdate: "tool_call_update",
+					toolCallId,
+					status,
+					rawOutput: toolInfo,
+					content: content.length > 0 ? content : undefined,
+				})
+			}
 		} else {
 			// Update existing tool call
 			updates.push({
@@ -692,7 +703,9 @@ function translateCommandMessage(message: DiracMessage, sessionState: AcpSession
 		toolCallId,
 		title: buildCommandTitle(command),
 		kind: "execute",
-		status: message.partial ? "in_progress" : "completed",
+		// Command execution finishes via command_output, so the initial lifecycle
+		// event should stay in progress even for non-partial messages.
+		status: "in_progress",
 		rawInput: { command },
 		// Use text content to display the command being executed
 		content: [
@@ -768,7 +781,7 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
 			toolCallId,
 			title,
 			kind,
-			status: message.partial ? "in_progress" : "completed",
+			status: "in_progress",
 			rawInput: action,
 		})
 	} catch {
@@ -800,42 +813,47 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
  */
 function buildToolTitle(toolInfo: DiracSayTool): string {
 	const suffix = getToolTitleSuffix(toolInfo)
-	switch (toolInfo.tool) {
+	const verb = getToolDisplayVerb(toolInfo.tool)
+	return suffix ? `${verb} ${suffix}` : verb
+}
+
+function getToolDisplayVerb(toolName: string): string {
+	switch (toolName) {
 		case "editFile":
 		case "editedExistingFile":
-			return suffix ? `Edit ${suffix}` : "Edit"
+			return "Edit"
 		case "replaceSymbol":
-			return suffix ? `Replace ${suffix}` : "Replace"
+			return "Edit"
 		case "newFileCreated":
-			return suffix ? `Create file ${suffix}` : "Create file"
+			return "Create"
 		case "fileDeleted" as any:
-			return suffix ? `Delete ${suffix}` : "Delete"
+			return "Delete"
 		case "readFile":
 		case "readLineRange":
-			return suffix ? `Read ${suffix}` : "Read"
+			return "Read"
 		case "listFilesTopLevel":
 		case "listFilesRecursive":
-			return suffix ? `List ${suffix}` : "List"
+			return "List"
 		case "listCodeDefinitionNames":
-			return suffix ? `Definitions ${suffix}` : "Definitions"
+			return "List"
 		case "searchFiles":
-			return suffix ? `Search ${suffix}` : "Search"
+			return "Search"
 		case "summarizeTask":
 			return "Summarize"
 		case "useSkill":
-			return "Use skill"
+			return "Use Skill"
 		case "listSkills":
-			return "List skills"
+			return "List Skills"
 		case "use_subagents" as any:
-			return "Subagents"
+			return "Use Subagents"
 		case "getFunction":
-			return suffix ? `Get function ${suffix}` : "Get function"
+			return "Read"
 		case "getFileSkeleton":
-			return suffix ? `Get skeleton ${suffix}` : "Get skeleton"
+			return "Read"
 		case "findSymbolReferences":
-			return suffix ? `References ${suffix}` : "References"
+			return "Search"
 		case "diagnosticsScan" as any:
-			return "Scan"
+			return "Diagnostics"
 		default:
 			return "Tool"
 	}
@@ -846,7 +864,24 @@ function getToolTitleSuffix(toolInfo: DiracSayTool): string {
 		const searchCandidate = (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
 		return typeof searchCandidate === "string" ? searchCandidate : ""
 	}
-	const candidate = (toolInfo as any).path || (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
+
+	const readFileResults = Array.isArray((toolInfo as any).readFileResults) ? (toolInfo as any).readFileResults : []
+	const resultPaths = readFileResults
+		.map((result: any) => (typeof result?.path === "string" ? result.path : ""))
+		.filter(Boolean)
+
+	const paths = Array.isArray((toolInfo as any).paths) ? (toolInfo as any).paths.filter((path: unknown) => typeof path === "string") : []
+	const pathList = [toolInfo.path, ...paths, ...resultPaths].filter((path): path is string => typeof path === "string" && path.length > 0)
+
+	if (pathList.length > 1) {
+		return pathList.join(", ")
+	}
+
+	if (pathList.length === 1) {
+		return pathList[0]
+	}
+
+	const candidate = (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
 	return typeof candidate === "string" ? candidate : ""
 }
 

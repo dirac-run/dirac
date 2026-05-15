@@ -46,6 +46,7 @@ import { translateMessage } from "./messageTranslator.js"
 import { handlePermissionResponse } from "./permissionHandler.js"
 import type { DiracAcpSession, DiracAgentOptions, PermissionHandler } from "./public-types.js"
 import { AcpSessionStatus } from "./public-types.js"
+import { ACP_REVIEW_COMMANDS, handleAcpReviewCommand } from "./review.js"
 import { type AcpSessionState } from "./types.js"
 
 const ACP_MODE_OPTIONS: acp.SessionConfigSelectOption[] = [
@@ -795,6 +796,21 @@ export class DiracAgent implements acp.Agent {
 				.filter((block): block is acp.EmbeddedResource & { type: "resource" } => block.type === "resource")
 				.map((block) => block.resource.uri)
 
+			const interceptedReviewResponse =
+				imageContent.length === 0 && fileResources.length === 0
+					? await handleAcpReviewCommand({
+							commandText: textContent,
+							controller,
+							sessionId: params.sessionId,
+							cwd: session.cwd,
+							emitSessionUpdate: this.emitSessionUpdate.bind(this),
+						})
+					: null
+
+			if (interceptedReviewResponse) {
+				return interceptedReviewResponse
+			}
+
 			// Determine if this is a new task, continuation, or loaded session resume
 			const hasActiveTask = controller.task !== undefined
 			const isLoadedSession = session.isLoadedFromHistory === true
@@ -1301,6 +1317,12 @@ export class DiracAgent implements acp.Agent {
 					hint: cmd.description,
 				},
 			}))
+
+			for (const reviewCommand of ACP_REVIEW_COMMANDS) {
+				if (!availableCommands.some((cmd) => cmd.name === reviewCommand.name)) {
+					availableCommands.push(reviewCommand)
+				}
+			}
 
 			// Send the available_commands_update notification
 			await this.emitSessionUpdate(sessionId, {
