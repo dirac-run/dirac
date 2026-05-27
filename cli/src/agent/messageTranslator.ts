@@ -540,12 +540,13 @@ function translateAskMessage(
 			{
 				const toolCallId = generateToolCallId()
 				sessionState.currentToolCallId = toolCallId
+				const commandRequiresPermission = commandAskRequiresPermission(message)
 
 				const toolCall: acp.ToolCall = {
 					toolCallId,
 					title: buildCommandTitle(extractCommandFromText(message.text)),
 					kind: "execute",
-					status: "pending",
+					status: commandRequiresPermission ? "pending" : "in_progress",
 					rawInput: { command: extractCommandFromText(message.text) },
 				}
 
@@ -555,14 +556,16 @@ function translateAskMessage(
 				})
 
 				sessionState.pendingToolCalls.set(toolCallId, toolCall)
-				requiresPermission = true
-				permissionRequest = {
-					toolCall,
-					options: [
-						{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
-						{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
-						{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
-					],
+				if (commandRequiresPermission) {
+					requiresPermission = true
+					permissionRequest = {
+						toolCall,
+						options: [
+							{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
+							{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
+							{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+						],
+					}
 				}
 			}
 			break
@@ -572,6 +575,9 @@ function translateAskMessage(
 			{
 				const toolInfo = message.text ? parseToolInfo(message.text) : null
 				const isUpdate = !!options?.existingToolCallId
+				const permissionGatedToolAsk = toolInfo ? toolAskRequiresPermission(toolInfo.tool) : true
+				const toolRequiresPermission = !message.partial && permissionGatedToolAsk
+				const toolCallStatus: acp.ToolCallStatus = toolRequiresPermission ? "pending" : "in_progress"
 
 				// Reuse existing toolCallId if this is an update to a streaming tool call
 				toolCallId = options?.existingToolCallId || generateToolCallId()
@@ -582,7 +588,7 @@ function translateAskMessage(
 					updates.push({
 						sessionUpdate: "tool_call_update",
 						toolCallId,
-						status: "pending",
+						status: toolCallStatus,
 						rawInput: toolInfo?.input,
 						content: toolInfo?.path
 							? [
@@ -602,7 +608,8 @@ function translateAskMessage(
 							existingToolCall.rawInput = toolInfo?.input
 							existingToolCall.locations = toolInfo?.path ? [{ path: toolInfo.path }] : undefined
 							existingToolCall.title = toolInfo?.title || existingToolCall.title
-							if (toolInfo ? toolAskRequiresPermission(toolInfo.tool) : true) {
+							existingToolCall.status = toolCallStatus
+							if (toolRequiresPermission) {
 								requiresPermission = true
 								permissionRequest = {
 									toolCall: existingToolCall,
@@ -621,7 +628,7 @@ function translateAskMessage(
 						toolCallId,
 						title: toolInfo?.title || "Tool operation",
 						kind: toolInfo?.kind || "other",
-						status: "pending",
+						status: toolCallStatus,
 						rawInput: toolInfo?.input,
 						locations: toolInfo?.path ? [{ path: toolInfo.path }] : undefined,
 					}
@@ -634,17 +641,15 @@ function translateAskMessage(
 					sessionState.pendingToolCalls.set(toolCallId, toolCall)
 
 					// Only request permission for non-partial messages (complete tool calls)
-					if (!message.partial) {
-						if (toolInfo ? toolAskRequiresPermission(toolInfo.tool) : true) {
-							requiresPermission = true
-							permissionRequest = {
-								toolCall,
-								options: [
-									{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
-									{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
-									{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
-								],
-							}
+					if (toolRequiresPermission) {
+						requiresPermission = true
+						permissionRequest = {
+							toolCall,
+							options: [
+								{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
+								{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
+								{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+							],
 						}
 					}
 				}
@@ -1146,6 +1151,14 @@ function parseToolInfo(text: string): { title: string; kind: acp.ToolKind; path?
 	} catch {
 		return null
 	}
+}
+
+function commandAskRequiresPermission(message: DiracMessage): boolean {
+	if (!message.partial) {
+		return true
+	}
+
+	return message.multiCommandState?.commands.some((command) => command.requiresApproval === true) ?? false
 }
 
 function toolAskRequiresPermission(toolInfo: DiracSayTool): boolean {
