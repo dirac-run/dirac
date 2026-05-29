@@ -968,12 +968,22 @@ export class DiracAgent implements acp.Agent {
 			const resetIdleTimer = () => {
 				if (idleTimer) clearTimeout(idleTimer)
 				idleTimer = setTimeout(async () => {
+					// First check: bail if another path (cancel, terminal message) already
+					// claimed the slot before this callback was dequeued.
 					if (promptResolved.value) return
-					promptResolved.value = true
+					// Prepare everything before committing — no await yet, so no race here.
 					const seconds = Math.round(IDLE_TIMEOUT_MS / 1000)
 					const message = `Agent stalled — no progress for ${seconds}s. Likely an upstream provider hang.`
-					Logger.error(`[DiracAgent] Prompt stalled — no message activity for ${seconds}s`)
 					const stallToolCallId = crypto.randomUUID()
+					// Second check + atomic claim: still synchronous, no yield since the
+					// first check above. The double-check is a belt-and-suspenders guard
+					// against future refactors introducing a yield between the two checks.
+					// cancel() now claims the flag before awaiting cancelTask(), so if
+					// cancel arrived between the timer expiry and this callback running,
+					// this check will catch it.
+					if (promptResolved.value) return
+					promptResolved.value = true
+					Logger.error(`[DiracAgent] Prompt stalled — no message activity for ${seconds}s`)
 					try {
 						await this.emitSessionUpdate(params.sessionId, {
 							sessionUpdate: "tool_call",
@@ -1001,8 +1011,14 @@ export class DiracAgent implements acp.Agent {
 				if (idleTimer) clearTimeout(idleTimer)
 			})
 
-			// Subscribe to diracMessages changes after task is created
-			if (controller.task) {
+			// Subscribe to diracMessages changes after task is created.
+			// Capture the task reference once so that if cancelTask() triggers a
+			// Controller.initTask() reinit (which replaces controller.task with a
+			// new Task instance), our cleanup still removes the listener from the
+			// *original* task — not from whatever controller.task points to at
+			// cleanup time — and the runPromise catch is wired to the same instance.
+			const task = controller.task
+			if (task) {
 				const onDiracMessagesChanged = (change: DiracMessageChange) => {
 					resetIdleTimer()
 					this.handleDiracMessagesChanged(params.sessionId, sessionState, change, resolvePrompt, promptResolved).catch(
@@ -1010,16 +1026,16 @@ export class DiracAgent implements acp.Agent {
 					)
 				}
 
-				controller.task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
+				task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
 				cleanupFunctions.push(() => {
-					controller.task?.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged)
+					task.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged)
 				})
 
 				// Safety net: Task.startTask/resumeTaskFromHistory are kicked off
 				// detached by Controller.initTask, so any uncaught throw inside the
 				// task's run loop never reaches the outer try/catch below. Without
 				// this handler the only failure signal is the 60s idle watchdog.
-				controller.task.runPromise?.catch((error) => {
+				task.runPromise?.catch((error) => {
 					this.handleUnhandledHandlerError(params.sessionId, promptResolved, resolvePrompt, error)
 				})
 			}
@@ -1439,6 +1455,21 @@ export class DiracAgent implements acp.Agent {
 		if (sessionState) {
 			sessionState.status = AcpSessionStatus.Cancelled
 
+			// Claim the prompt-resolver slot BEFORE any await so the idle watchdog
+			// cannot steal it while we're awaiting cancelTask(). The ACP spec
+			// (prompt-turn.mdx) requires the agent to respond with stopReason:
+			// "cancelled" once the task is aborted; claiming here ensures that even
+			// if the watchdog timer fires and its callback runs during the cancelTask()
+			// await, the watchdog sees the flag and returns without emitting a phantom
+			// "Agent stalled" tool_call or resolving with "end_turn".
+			const pending = this.pendingPromptResolvers.get(params.sessionId)
+			const cancelClaimed = pending != null && !pending.resolved.value
+			if (cancelClaimed) {
+				pending!.resolved.value = true
+				// Actual resolve() call is deferred until after cancelTask() so the
+				// response goes out once the task is truly stopped (see below).
+			}
+
 			// If we have an active controller task, cancel it
 			const controller = this.#sessionControllers.get(session)
 			if (controller?.task) {
@@ -1451,14 +1482,9 @@ export class DiracAgent implements acp.Agent {
 
 			// Per ACP spec (prompt-turn.mdx): "After all ongoing operations have
 			// been successfully aborted ... the Agent MUST respond to the original
-			// session/prompt request with the cancelled stop reason." Resolve any
-			// in-flight prompt for this session with `cancelled` rather than
-			// letting it fall through to whatever terminal message (typically
-			// end_turn) the cancellation eventually triggers.
-			const pending = this.pendingPromptResolvers.get(params.sessionId)
-			if (pending && !pending.resolved.value) {
-				pending.resolved.value = true
-				pending.resolve({ stopReason: "cancelled" })
+			// session/prompt request with the cancelled stop reason."
+			if (cancelClaimed) {
+				pending!.resolve({ stopReason: "cancelled" })
 			}
 		}
 	}
