@@ -10,7 +10,6 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 	const { setRuntimeHooksDir } = await import("@/core/storage/disk")
 	const { initializeCliContext } = await import("./vscode-context")
 	const { Logger } = await import("@/shared/services/Logger")
-	const { DiracEndpoint } = await import("@/config")
 	const { autoUpdateOnStartup } = await import("./utils/update")
 	const { Session } = await import("@/shared/services/Session")
 	const { AuthHandler } = await import("@/hosts/external/AuthHandler")
@@ -22,7 +21,7 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 	const { createCliHostBridgeProvider } = await import("./controllers")
 	const { getCliBinaryPath, DIRAC_CLI_DIR } = await import("./utils/path")
 	const { StateManager } = await import("@/core/storage/StateManager")
-	const { ErrorService } = await import("@/services/error/ErrorService")
+	const { initCoreServices } = await import("./initCoreServices")
 	const { telemetryService } = await import("@/services/telemetry")
 	const { SymbolIndexService } = await import("@/services/symbol-index/SymbolIndexService")
 
@@ -40,22 +39,8 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 	// Configure the shared Logging class early to capture all initialization logs
 	Logger.subscribe(logToChannel)
 
-	await DiracEndpoint.initialize(EXTENSION_DIR)
-
-	// Auto-update check (after endpoints initialized, so we can detect bundled configs)
-	autoUpdateOnStartup(CLI_VERSION)
-
-	// Initialize/reset session tracking for this CLI run
-	Session.reset()
-
-	if (options.enableAuth) {
-		AuthHandler.getInstance().setEnabled(true)
-	}
-
-	outputChannel.appendLine(
-		`Dirac CLI initialized. Data dir: ${DATA_DIR}, Extension dir: ${EXTENSION_DIR}, Log dir: ${DIRAC_CLI_DIR.log}`,
-	)
-
+	// HostProvider must be initialized before StateManager (initCoreServices →
+	// StateManager.initialize → initializeDistinctId reaches into HostProvider.env).
 	HostProvider.initialize(
 		"cli",
 		() => new CliWebviewProvider(extensionContext as any),
@@ -71,7 +56,24 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 		async (_cwd: string) => undefined,
 	)
 
-	await StateManager.initialize(storageContext)
+	// DiracEndpoint + StateManager + ErrorService go through the shared
+	// helper so the ACP entrypoint can't drift out of sync (see initCoreServices).
+	await initCoreServices({ extensionDir: EXTENSION_DIR, storageContext })
+
+	// Auto-update check (after endpoints initialized, so we can detect bundled configs)
+	autoUpdateOnStartup(CLI_VERSION)
+
+	// Initialize/reset session tracking for this CLI run
+	Session.reset()
+
+	if (options.enableAuth) {
+		AuthHandler.getInstance().setEnabled(true)
+	}
+
+	outputChannel.appendLine(
+		`Dirac CLI initialized. Data dir: ${DATA_DIR}, Extension dir: ${EXTENSION_DIR}, Log dir: ${DIRAC_CLI_DIR.log}`,
+	)
+
 	const stateManager = StateManager.get()
 	const { getProviderFromEnv } = await import("@shared/storage/env-config")
 	const envProvider = getProviderFromEnv()
@@ -83,7 +85,6 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 			stateManager.setSessionOverride("planModeApiProvider", envProvider)
 		}
 	}
-	await ErrorService.initialize()
 
 	const webview = HostProvider.get().createDiracWebviewProvider() as any
 	const controller = webview.controller as any
