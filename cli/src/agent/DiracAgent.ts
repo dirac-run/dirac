@@ -127,6 +127,19 @@ export class DiracAgent implements acp.Agent {
 	/** Current active session ID for use by DiffViewProvider */
 	private currentActiveSessionId: string | undefined
 
+	/**
+	 * In-flight prompt resolvers, keyed by session id. {@link cancel} uses these
+	 * to resolve the current `session/prompt` request with `stopReason: "cancelled"`
+	 * as required by the ACP spec
+	 * (agent-client-protocol/docs/protocol/prompt-turn.mdx — "After all ongoing
+	 * operations have been successfully aborted ... the Agent MUST respond to
+	 * the original session/prompt request with the cancelled stop reason").
+	 */
+	private readonly pendingPromptResolvers: Map<
+		string,
+		{ resolve: (response: acp.PromptResponse) => void; resolved: { value: boolean } }
+	> = new Map()
+
 	/** Shared WebviewProvider instance for auth and other operations */
 	private webviewProvider: ReturnType<typeof HostProvider.get.prototype.createWebviewProvider> | undefined
 
@@ -784,6 +797,10 @@ export class DiracAgent implements acp.Agent {
 		// Track if we've already resolved/rejected (object for pass-by-reference)
 		const promptResolved = { value: false }
 
+		// Register the resolver so cancel() can resolve the in-flight prompt with
+		// `stopReason: "cancelled"`. Cleared in the finally block.
+		this.pendingPromptResolvers.set(params.sessionId, { resolve: resolvePrompt!, resolved: promptResolved })
+
 		try {
 			// Extract text content from prompt
 			const textContent = params.prompt
@@ -843,12 +860,21 @@ export class DiracAgent implements acp.Agent {
 				const messages = controller.task.messageStateHandler.getDiracMessages()
 				const lastAskMessage = [...messages].reverse().find((m) => m.type === "ask")
 
-				if (lastAskMessage) {
+				// `api_req_failed` and `mistake_limit_reached` are terminal failures:
+				// the turn already ended (see checkMessageForPromptResolution). Routing
+				// the next prompt as a `messageResponse` to that dead ask makes the
+				// Task throw "API request failed" through the streaming catch, which
+				// then misreports the new turn using stale autoRetryAttempts from the
+				// failed turn (e.g. "Failed after 3 retries"). Start a fresh task
+				// instead — Controller.initTask clears the previous one first.
+				const terminalAskTypes = new Set<DiracAsk>(["api_req_failed", "mistake_limit_reached"])
+				const lastAskIsTerminal =
+					lastAskMessage?.ask !== undefined && terminalAskTypes.has(lastAskMessage.ask as DiracAsk)
+
+				if (lastAskMessage && !lastAskIsTerminal) {
 					await controller.task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
 				} else {
-					// No pending ask - treat as new user message
-					// This shouldn't normally happen but handle gracefully
-					Logger.debug("[DiracAgent] No pending ask found, starting new task")
+					Logger.debug("[DiracAgent] Starting new task (no pending ask or last ask was terminal failure)")
 					await controller.initTask(textContent, imageContent, fileResources)
 				}
 			} else {
@@ -857,19 +883,69 @@ export class DiracAgent implements acp.Agent {
 				await controller.initTask(textContent, imageContent, fileResources)
 			}
 
+			// Idle watchdog: if no diracMessagesChanged events fire for this many ms,
+			// the upstream is hung (e.g. the model provider stream stalled). Surface
+			// it as a structured failure (tool_call + tool_call_update status:"failed")
+			// so clients can distinguish "we don't know what happened" from real
+			// model output, rather than masquerading the watchdog as agent text.
+			const IDLE_TIMEOUT_MS = Number.parseInt(process.env.DIRAC_ACP_IDLE_TIMEOUT_MS ?? "60000", 10) || 60_000
+			let idleTimer: NodeJS.Timeout | undefined
+			const resetIdleTimer = () => {
+				if (idleTimer) clearTimeout(idleTimer)
+				idleTimer = setTimeout(async () => {
+					if (promptResolved.value) return
+					promptResolved.value = true
+					const seconds = Math.round(IDLE_TIMEOUT_MS / 1000)
+					const message = `Agent stalled — no progress for ${seconds}s. Likely an upstream provider hang.`
+					Logger.error(`[DiracAgent] Prompt stalled — no message activity for ${seconds}s`)
+					const stallToolCallId = crypto.randomUUID()
+					try {
+						await this.emitSessionUpdate(params.sessionId, {
+							sessionUpdate: "tool_call",
+							toolCallId: stallToolCallId,
+							title: "Agent stalled",
+							kind: "other",
+							status: "in_progress",
+							rawInput: { reason: "idle-timeout", timeoutSeconds: seconds },
+						})
+						await this.emitSessionUpdate(params.sessionId, {
+							sessionUpdate: "tool_call_update",
+							toolCallId: stallToolCallId,
+							status: "failed",
+							rawOutput: { reason: "idle-timeout", message },
+						})
+					} catch (e) {
+						Logger.error("[DiracAgent] Failed to emit stall update:", e)
+					} finally {
+						resolvePrompt({ stopReason: "end_turn" })
+					}
+				}, IDLE_TIMEOUT_MS)
+			}
+			resetIdleTimer()
+			cleanupFunctions.push(() => {
+				if (idleTimer) clearTimeout(idleTimer)
+			})
+
 			// Subscribe to diracMessages changes after task is created
 			if (controller.task) {
 				const onDiracMessagesChanged = (change: DiracMessageChange) => {
+					resetIdleTimer()
 					this.handleDiracMessagesChanged(params.sessionId, sessionState, change, resolvePrompt, promptResolved).catch(
-						(error) => {
-							Logger.debug("[DiracAgent] Error handling diracMessagesChanged:", error)
-						},
+						(error) => this.handleUnhandledHandlerError(params.sessionId, promptResolved, resolvePrompt, error),
 					)
 				}
 
 				controller.task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
 				cleanupFunctions.push(() => {
 					controller.task?.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged)
+				})
+
+				// Safety net: Task.startTask/resumeTaskFromHistory are kicked off
+				// detached by Controller.initTask, so any uncaught throw inside the
+				// task's run loop never reaches the outer try/catch below. Without
+				// this handler the only failure signal is the 60s idle watchdog.
+				controller.task.runPromise?.catch((error) => {
+					this.handleUnhandledHandlerError(params.sessionId, promptResolved, resolvePrompt, error)
 				})
 			}
 
@@ -886,7 +962,7 @@ export class DiracAgent implements acp.Agent {
 						text: `Error: ${error instanceof Error ? error.message : String(error)}`,
 					},
 				})
-				return { stopReason: "error" as acp.StopReason }
+				return { stopReason: "end_turn" }
 			}
 			throw error
 		} finally {
@@ -898,6 +974,7 @@ export class DiracAgent implements acp.Agent {
 					Logger.debug("[DiracAgent] Error during cleanup:", error)
 				}
 			}
+			this.pendingPromptResolvers.delete(params.sessionId)
 			sessionState.status = AcpSessionStatus.Idle
 		}
 	}
@@ -936,8 +1013,41 @@ export class DiracAgent implements acp.Agent {
 					break
 			}
 		} catch (error) {
-			Logger.debug("[DiracAgent] Error handling diracMessagesChanged:", error)
+			// Propagate so the outer `.catch` on the handler invocation can fail
+			// the prompt cleanly. Swallowing here left the promptPromise stuck
+			// and surfaced as an eternal spinner on the client.
+			Logger.error("[DiracAgent] Error handling diracMessagesChanged:", error)
+			throw error
 		}
+	}
+
+	/**
+	 * Terminate the in-flight prompt after an unhandled throw inside
+	 * {@link handleDiracMessagesChanged}.
+	 *
+	 * Without this the promise wired up in {@link prompt} would never resolve
+	 * and the client (Zed et al.) would spin forever. Emits an
+	 * `agent_message_chunk` carrying the error text, then resolves the prompt
+	 * with `stopReason: "end_turn"` — ACP at the Zed-pinned protocol version
+	 * doesn't accept `"error"` as a stop reason, so we surface the failure
+	 * exclusively through the chunk text and let the turn end cleanly.
+	 */
+	private handleUnhandledHandlerError(
+		sessionId: string,
+		promptResolved: { value: boolean },
+		resolvePrompt: (response: acp.PromptResponse) => void,
+		error: unknown,
+	): void {
+		Logger.error("[DiracAgent] Unhandled error in diracMessagesChanged:", error)
+		if (promptResolved.value) return
+		promptResolved.value = true
+		const message = error instanceof Error ? error.message : String(error)
+		this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: `Error: ${message}` },
+		})
+			.catch((emitError) => Logger.error("[DiracAgent] Failed to emit error update:", emitError))
+			.finally(() => resolvePrompt({ stopReason: "end_turn" }))
 	}
 
 	/**
@@ -1058,7 +1168,14 @@ export class DiracAgent implements acp.Agent {
 				askType === "act_mode_respond" ||
 				askType === "completion_result" ||
 				askType === "resume_task" ||
-				askType === "resume_completed_task"
+				askType === "resume_completed_task" ||
+				// `api_req_failed` and `mistake_limit_reached` pause the task waiting
+				// for the user to decide whether to retry. End the turn so the client
+				// stops spinning and the next user prompt becomes the answer. Without
+				// this, Zed (and any other ACP client) spins forever after an API
+				// failure such as a missing/invalid provider key.
+				askType === "api_req_failed" ||
+				askType === "mistake_limit_reached"
 			) {
 				promptResolved.value = true
 				resolvePrompt({ stopReason: "end_turn" })
@@ -1066,10 +1183,34 @@ export class DiracAgent implements acp.Agent {
 			}
 		}
 
-		// Check for completion_result say message
-		if (message.type === "say" && message.say === "completion_result") {
-			promptResolved.value = true
-			resolvePrompt({ stopReason: "end_turn" })
+		if (message.type === "say") {
+			// Terminal "the task ended in failure" message. The error text itself
+			// is already emitted to the client by translateMessage; here we just
+			// have to resolve the prompt so the client knows the turn is over.
+			if (message.say === "error") {
+				promptResolved.value = true
+				resolvePrompt({ stopReason: "end_turn" })
+				return
+			}
+			// `error_retry` fires once per retry attempt. The final attempt has
+			// `failed: true` in its JSON payload — that's the terminal signal for
+			// retry-exhausted requests (e.g. bedrock with bad creds), where no
+			// subsequent `say: "error"` or `ask: "api_req_failed"` is emitted.
+			if (message.say === "error_retry" && message.text) {
+				try {
+					if (JSON.parse(message.text).failed === true) {
+						promptResolved.value = true
+						resolvePrompt({ stopReason: "end_turn" })
+						return
+					}
+				} catch {
+					// Unparseable payload — fall through and wait for another signal.
+				}
+			}
+			if (message.say === "completion_result") {
+				promptResolved.value = true
+				resolvePrompt({ stopReason: "end_turn" })
+			}
 		}
 	}
 
@@ -1225,6 +1366,18 @@ export class DiracAgent implements acp.Agent {
 				} catch (error) {
 					Logger.debug("[DiracAgent] Error cancelling task:", error)
 				}
+			}
+
+			// Per ACP spec (prompt-turn.mdx): "After all ongoing operations have
+			// been successfully aborted ... the Agent MUST respond to the original
+			// session/prompt request with the cancelled stop reason." Resolve any
+			// in-flight prompt for this session with `cancelled` rather than
+			// letting it fall through to whatever terminal message (typically
+			// end_turn) the cancellation eventually triggers.
+			const pending = this.pendingPromptResolvers.get(params.sessionId)
+			if (pending && !pending.resolved.value) {
+				pending.resolved.value = true
+				pending.resolve({ stopReason: "cancelled" })
 			}
 		}
 	}

@@ -248,9 +248,9 @@ export class Controller {
 		})
 
 		if (historyItem) {
-			this.task.resumeTaskFromHistory()
+			this.task.runPromise = this.task.resumeTaskFromHistory()
 		} else if (task || images || files) {
-			this.task.startTask(task, images, files)
+			this.task.runPromise = this.task.startTask(task, images, files)
 		}
 
 		return this.task.taskId

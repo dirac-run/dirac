@@ -149,6 +149,10 @@ export interface AcpSessionState {
 	status: AcpSessionStatus
 	/** Current tool call ID being executed (if any) */
 	currentToolCallId?: string
+	/** Shared tool_call id for the in-flight auto-retry sequence (if any).
+	 *  Reused across multiple `error_retry` messages so the client sees one
+	 *  evolving item rather than three white text lines. */
+	retryToolCallId?: string
 	/** Accumulated tool calls for permission batching */
 	pendingToolCalls: Map<string, acp.ToolCall>
 }
