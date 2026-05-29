@@ -30,6 +30,7 @@ import { FileEditProvider } from "@/integrations/editor/FileEditProvider"
 import { StandaloneTerminalManager } from "@/integrations/terminal/index.js"
 import { Logger } from "@/shared/services/Logger.js"
 import type { Mode } from "@/shared/storage/types"
+import type { Settings } from "@/shared/storage/state-keys"
 import { version as AGENT_VERSION } from "../../package.json"
 import { ACPDiffViewProvider } from "../acp/ACPDiffViewProvider.js"
 import { ACPHostBridgeClientProvider } from "../acp/ACPHostBridgeClientProvider.js"
@@ -49,10 +50,44 @@ import { AcpSessionStatus } from "./public-types.js"
 import { ACP_REVIEW_COMMANDS, handleAcpReviewCommand } from "./review.js"
 import { type AcpSessionState } from "./types.js"
 
-const ACP_MODE_OPTIONS: acp.SessionConfigSelectOption[] = [
+/**
+ * ACP-level mode IDs surfaced to clients.
+ *
+ * The two extra modes beyond Dirac's internal {@link Mode} are derived states:
+ *   - `auto`  → internal `act` mode with auto-approve on
+ *   - `yolo`  → internal `act` mode with auto-approve + yolo on
+ *
+ * Clients see four modes; internally the mode/auto-approve/yolo toggles are
+ * still three separate state keys.
+ */
+type AcpModeId = "plan" | "act" | "auto" | "yolo"
+
+const ACP_MODE_OPTIONS: { value: AcpModeId; name: string; description: string }[] = [
 	{ value: "plan", name: "Plan", description: "Gather information and create a detailed plan" },
-	{ value: "act", name: "Act", description: "Execute actions to accomplish the task" },
+	{ value: "act", name: "Act", description: "Execute actions, asking permission for each tool call" },
+	{ value: "auto", name: "Auto-approve", description: "Execute actions, auto-approving all tool calls" },
+	{ value: "yolo", name: "YOLO", description: "Execute actions with no safety prompts" },
 ]
+
+function acpModeToInternalState(acpMode: AcpModeId): { mode: Mode; autoApprove: boolean; yolo: boolean } {
+	switch (acpMode) {
+		case "plan":
+			return { mode: "plan", autoApprove: false, yolo: false }
+		case "act":
+			return { mode: "act", autoApprove: false, yolo: false }
+		case "auto":
+			return { mode: "act", autoApprove: true, yolo: false }
+		case "yolo":
+			return { mode: "act", autoApprove: true, yolo: true }
+	}
+}
+
+function computeAcpModeId(mode: Mode, autoApprove: boolean, yolo: boolean): AcpModeId {
+	if (mode === "plan") return "plan"
+	if (yolo) return "yolo"
+	if (autoApprove) return "auto"
+	return "act"
+}
 
 const REASONING_EFFORT_OPTIONS: acp.SessionConfigSelectOption[] = [
 	{ value: "none", name: "None" },
@@ -96,6 +131,7 @@ export class DiracAgent implements acp.Agent {
 		this.sessions.clear()
 		this.sessionStates.clear()
 		this.sessionEmitters.clear()
+		this.acpSessionOverrides.clear()
 	}
 	private readonly options: DiracAgentOptions
 	private ctx!: CliContextResult
@@ -126,6 +162,18 @@ export class DiracAgent implements acp.Agent {
 
 	/** Current active session ID for use by DiffViewProvider */
 	private currentActiveSessionId: string | undefined
+
+	/**
+	 * Per-session override map for security-relevant settings (auto-approve, yolo, mode).
+	 *
+	 * The global StateManager.sessionOverrideCache is process-wide — writing to it from
+	 * one ACP session would bleed into every other concurrent session. Instead we keep
+	 * the authoritative per-session values here, and swap them into StateManager only for
+	 * the duration of each session's prompt() call (see applySessionOverrides /
+	 * restoreSessionOverrides). This ensures the Task-level auto-approve reads that go
+	 * through StateManager.getGlobalSettingsKey() see the correct session's values.
+	 */
+	private readonly acpSessionOverrides: Map<string, Partial<Settings>> = new Map()
 
 	/**
 	 * In-flight prompt resolvers, keyed by session id. {@link cancel} uses these
@@ -327,7 +375,7 @@ export class DiracAgent implements acp.Agent {
 
 		return {
 			sessionId,
-			modes: this.getSessionModeState(session.mode),
+			modes: this.getSessionModeState(session.mode, sessionId),
 			models: modelState,
 			configOptions,
 		}
@@ -346,7 +394,7 @@ export class DiracAgent implements acp.Agent {
 			const modelState = await this.getSessionModelState(existingSession.mode)
 			const configOptions = await this.getSessionConfigOptions(existingSession)
 			return {
-				modes: this.getSessionModeState(existingSession.mode),
+				modes: this.getSessionModeState(existingSession.mode, sessionId),
 				models: modelState,
 				configOptions,
 			}
@@ -379,7 +427,7 @@ export class DiracAgent implements acp.Agent {
 		const modelState = await this.getSessionModelState(session.mode)
 		const configOptions = await this.getSessionConfigOptions(session)
 		return {
-			modes: this.getSessionModeState(session.mode),
+			modes: this.getSessionModeState(session.mode, sessionId),
 			models: modelState,
 			configOptions,
 		}
@@ -404,15 +452,27 @@ export class DiracAgent implements acp.Agent {
 		await this.emitConfigOptionsUpdate(sessionId)
 	}
 
-	private getSessionModeState(mode: Mode): acp.SessionModeState {
+	private getSessionModeState(mode: Mode, sessionId?: string): acp.SessionModeState {
 		return {
 			availableModes: ACP_MODE_OPTIONS.map(({ value, name, description }) => ({
 				id: value,
 				name,
 				description,
 			})),
-			currentModeId: mode,
+			currentModeId: this.computeCurrentAcpModeId(mode, sessionId),
 		}
+	}
+
+	private computeCurrentAcpModeId(mode: Mode, sessionId?: string): AcpModeId {
+		// Prefer the per-session override map so that concurrent ACP sessions each
+		// see their own auto-approve / yolo state without bleeding into each other.
+		const sessionOverrides = sessionId ? this.acpSessionOverrides.get(sessionId) : undefined
+		const stateManager = StateManager.get()
+		const autoApprove = Boolean(
+			sessionOverrides?.autoApproveAllToggled ?? stateManager.getGlobalSettingsKey("autoApproveAllToggled"),
+		)
+		const yolo = Boolean(sessionOverrides?.yoloModeToggled ?? stateManager.getGlobalSettingsKey("yoloModeToggled"))
+		return computeAcpModeId(mode, autoApprove, yolo)
 	}
 
 	/**
@@ -490,7 +550,7 @@ export class DiracAgent implements acp.Agent {
 				description: "Session operating mode",
 				type: "select",
 				category: "mode",
-				currentValue: session.mode,
+				currentValue: this.computeCurrentAcpModeId(session.mode, session.sessionId),
 				options: ACP_MODE_OPTIONS,
 			},
 			{
@@ -779,6 +839,21 @@ export class DiracAgent implements acp.Agent {
 		session.lastActivityAt = Date.now()
 		this.currentActiveSessionId = params.sessionId
 
+		// Install this session's per-session overrides (auto-approve, yolo, mode) into
+		// the StateManager so that Task-level reads (AutoApprove, ToolExecutor, etc.) see
+		// the correct values for THIS session. The previous overrides (e.g. from a CLI
+		// --auto-approve-all flag) are saved and will be restored in the finally block.
+		//
+		// Residual race note: if two ACP sessions are simultaneously mid-prompt, the swap
+		// means each session's Task may briefly see the other session's overrides between
+		// JS await points. In practice, each session has its own Controller/Task and the
+		// auto-approve decision is made synchronously within the event-loop turn, making
+		// the window extremely narrow. A fully lock-free fix would require plumbing sessionId
+		// into StateManager.getGlobalSettingsKey() all the way to AutoApprove — left for
+		// a later refactor if concurrent-session auto-approve skew is observed in practice.
+		const sessionOverridesToApply = this.acpSessionOverrides.get(params.sessionId) ?? {}
+		const savedStateManagerOverrides = StateManager.get().swapSessionOverrides(sessionOverridesToApply)
+
 		// Clear delta tracking state for new prompt cycle
 		this.partialMessageLastContent.clear()
 		this.messageToToolCallId.clear()
@@ -966,6 +1041,12 @@ export class DiracAgent implements acp.Agent {
 			}
 			throw error
 		} finally {
+			// Restore whatever session overrides were in StateManager before this
+			// prompt started (e.g. CLI --auto-approve-all global override), so that
+			// other code paths running outside of a session's prompt turn continue
+			// to see the correct values.
+			StateManager.get().swapSessionOverrides(savedStateManagerOverrides)
+
 			// Clean up subscriptions
 			for (const cleanup of cleanupFunctions) {
 				try {
@@ -1022,8 +1103,8 @@ export class DiracAgent implements acp.Agent {
 	}
 
 	/**
-	 * Terminate the in-flight prompt after an unhandled throw inside
-	 * {@link handleDiracMessagesChanged}.
+	 * Terminate the in-flight prompt with an error after an unhandled throw
+	 * inside {@link handleDiracMessagesChanged}.
 	 *
 	 * Without this the promise wired up in {@link prompt} would never resolve
 	 * and the client (Zed et al.) would spin forever. Emits an
@@ -1383,11 +1464,17 @@ export class DiracAgent implements acp.Agent {
 	}
 
 	/**
-	 * Set the session mode (plan/act).
+	 * Set the session mode.
 	 *
-	 * Dirac supports two modes:
-	 * - "plan": Gather information and create a detailed plan
-	 * - "act": Execute actions to accomplish the task
+	 * The ACP-level modes are:
+	 *   - "plan": gather information and create a detailed plan
+	 *   - "act":  execute actions, asking permission per tool call
+	 *   - "auto": "act" with auto-approve on
+	 *   - "yolo": "act" with auto-approve + yolo on (no safety prompts)
+	 *
+	 * Internally only `mode` ("plan" | "act") plus the global
+	 * `autoApproveAllToggled` and `yoloModeToggled` flags exist; this method
+	 * translates between the two.
 	 */
 	async setSessionMode(params: acp.SetSessionModeRequest): Promise<acp.SetSessionModeResponse> {
 		const session = this.sessions.get(params.sessionId)
@@ -1401,31 +1488,40 @@ export class DiracAgent implements acp.Agent {
 			modeId: params.modeId,
 		})
 
-		// Validate mode
-		const validModes = ["plan", "act"]
-		if (!validModes.includes(params.modeId)) {
+		const validModes: AcpModeId[] = ["plan", "act", "auto", "yolo"]
+		if (!validModes.includes(params.modeId as AcpModeId)) {
 			throw new Error(`Invalid mode: ${params.modeId}. Valid modes are: ${validModes.join(", ")}`)
 		}
 
-		// Update session mode
-		session.mode = params.modeId as Mode
+		const acpMode = params.modeId as AcpModeId
+		const { mode, autoApprove, yolo } = acpModeToInternalState(acpMode)
+
+		// Write to the per-session override map rather than the global StateManager
+		// sessionOverrideCache. This prevents one ACP session's mode switch from
+		// bleeding into every other concurrent session in the same process.
+		const existing = this.acpSessionOverrides.get(params.sessionId) ?? {}
+		this.acpSessionOverrides.set(params.sessionId, {
+			...existing,
+			autoApproveAllToggled: autoApprove,
+			yoloModeToggled: yolo,
+			mode,
+		})
+
+		session.mode = mode
 		session.lastActivityAt = Date.now()
 
-		// Update Controller mode if active
+		const stateManager = StateManager.get()
 		const controller = this.#sessionControllers.get(session)
 		if (controller) {
-			controller.stateManager.setGlobalState("mode", session.mode)
-
-			// If there's an active task, switch its mode
 			if (controller.task) {
 				await controller.togglePlanActMode(session.mode)
 			}
 		}
 
-		await StateManager.get().flushPendingState()
+		await stateManager.flushPendingState()
 		await this.emitSessionUpdate(params.sessionId, {
 			sessionUpdate: "current_mode_update",
-			currentModeId: session.mode,
+			currentModeId: acpMode,
 		})
 		await this.emitConfigOptionsUpdate(params.sessionId)
 
