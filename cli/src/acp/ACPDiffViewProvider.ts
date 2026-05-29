@@ -200,8 +200,7 @@ export class ACPDiffViewProvider extends FileEditProvider {
 	 * Opens the diff editor.
 	 */
 	protected override async openDiffEditor(): Promise<void> {
-		// Set up in-memory document content from the original content
-		// no-op: No visual editor to open
+		await super.openDiffEditor()
 	}
 
 	/**

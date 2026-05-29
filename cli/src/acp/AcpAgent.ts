@@ -43,18 +43,18 @@ export class AcpAgent implements acp.Agent {
 		this.diracAgent = new DiracAgent(options)
 
 		// Wire up the permission handler to use the connection
-		this.diracAgent.setPermissionHandler(async (request) => {
-			try {
-				Logger.debug("[AcpAgent] Forwarding permission request to connection")
-				return await this.connection.requestPermission({
+		this.diracAgent.setPermissionHandler((request, resolve) => {
+			this.connection
+				.requestPermission({
 					sessionId: request.sessionId,
 					toolCall: request.toolCall,
 					options: request.options,
 				})
-			} catch (error) {
-				Logger.debug("[AcpAgent] Error requesting permission:", error)
-				return { outcome: { outcome: "cancelled" } }
-			}
+				.then(resolve)
+				.catch((error) => {
+					Logger.debug("[AcpAgent] Error requesting permission:", error)
+					resolve({ outcome: { outcome: "cancelled" } })
+				})
 		})
 	}
 
