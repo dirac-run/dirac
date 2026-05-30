@@ -159,6 +159,24 @@ export class DiracAgent implements acp.Agent {
 	/** Track last sent content for partial messages to compute deltas */
 	private partialMessageLastContent: Map<number, string> = new Map()
 
+	/**
+	 * Accumulated streamed text for message subtypes whose final (non-partial)
+	 * emission arrives under a NEW ts, keyed by a stable per-subtype string.
+	 *
+	 * Two distinct mechanisms produce this ts change mid-stream:
+	 *   - completion_result: AttemptCompletionHandler delete-and-replaces the message
+	 *     (partial ts=T1 removed, fresh non-partial ts=T2 created).
+	 *   - followup / plan_mode_respond: the tool handler issues the final ask() with
+	 *     partial=undefined, which TaskMessenger.ask() stores under a fresh Date.now()
+	 *     ts rather than reusing the streaming partial's ts.
+	 *
+	 * In both cases the ts-keyed partialMessageLastContent sees "" for the new ts and
+	 * re-emits the full text, duplicating it. Accumulating under a stable subtype key
+	 * bridges the gap so the delta computes correctly. Keys: "completion_result",
+	 * "followup", "plan_mode_respond". Cleared at the start of each prompt cycle.
+	 */
+	private tsUnstableStreamLastContent: Map<string, string> = new Map()
+
 	/** Map message timestamps to toolCallIds to avoid creating duplicate tool calls during streaming */
 	private messageToToolCallId: Map<number, string> = new Map()
 
@@ -864,6 +882,7 @@ export class DiracAgent implements acp.Agent {
 
 		// Clear delta tracking state for new prompt cycle
 		this.partialMessageLastContent.clear()
+		this.tsUnstableStreamLastContent.clear()
 		this.messageToToolCallId.clear()
 
 		// Track cleanup functions for subscriptions
@@ -1396,6 +1415,10 @@ export class DiracAgent implements acp.Agent {
 			message.type === "say" && message.say === "text" && parseWebSearchMarkerText(message.text) !== undefined
 
 		if (isTextStreamingMessage && message.text && !isWebSearchMarkerMessage) {
+			const isCompletionResult =
+				(message.type === "say" && message.say === "completion_result") ||
+				(message.type === "ask" && message.ask === "completion_result")
+
 			// Extract the actual text content for JSON-wrapped messages
 			// plan_mode_respond uses { response: string, options?: string[] }
 			// followup uses { question: string, options?: string[] }
@@ -1413,36 +1436,54 @@ export class DiracAgent implements acp.Agent {
 				}
 			}
 
+			// completion_result, followup and plan_mode_respond all emit their final
+			// (non-partial) text under a NEW ts (see tsUnstableStreamLastContent). The
+			// ts-keyed partialMessageLastContent sees "" for that new ts and would re-emit
+			// the whole text, so for these subtypes we accumulate under a stable key.
+			const stableStreamKey = isCompletionResult
+				? "completion_result"
+				: message.type === "ask" && message.ask === "followup"
+					? "followup"
+					: message.type === "ask" && message.ask === "plan_mode_respond"
+						? "plan_mode_respond"
+						: undefined
+			const lastTextForDelta = stableStreamKey
+				? (this.tsUnstableStreamLastContent.get(stableStreamKey) ?? "")
+				: lastText
+
 			// For streaming text messages, compute delta to avoid sending duplicates
 			let textDelta: string
-			if (textContent.startsWith(lastText)) {
-				textDelta = textContent.slice(lastText.length)
+			if (textContent.startsWith(lastTextForDelta)) {
+				textDelta = textContent.slice(lastTextForDelta.length)
 			} else {
 				// Content changed entirely (rare), send all
 				textDelta = textContent
 			}
 
+			// Determine the correct update type based on message type
+			const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" =
+				message.type === "say" && message.say === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk"
+
+			// For completion_result messages, add a leading newline to separate from previous content
+			// This ensures the completion message appears on a new line after any preceding text
+			const needsNewline = isCompletionResult && lastTextForDelta === ""
+
+			// Update tracking BEFORE the await: concurrent event handlers share these accumulators,
+			// and an await yields the event loop — a second handler could otherwise read stale state
+			// and re-send the full accumulated text instead of just the delta.
+			if (stableStreamKey) {
+				this.tsUnstableStreamLastContent.set(stableStreamKey, textContent)
+			} else {
+				this.partialMessageLastContent.set(messageKey, textContent)
+			}
+
 			// Only send if there's new content
 			if (textDelta) {
-				// Determine the correct update type based on message type
-				const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" =
-					message.type === "say" && message.say === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk"
-
-				// For completion_result messages, add a leading newline to separate from previous content
-				// This ensures the completion message appears on a new line after any preceding text
-				const isCompletionResult =
-					(message.type === "say" && message.say === "completion_result") ||
-					(message.type === "ask" && message.ask === "completion_result")
-				const needsNewline = isCompletionResult && lastText === ""
-
 				await this.emitSessionUpdate(sessionId, {
 					sessionUpdate,
 					content: { type: "text", text: needsNewline ? `\n${textDelta}` : textDelta },
 				})
 			}
-
-			// Track what we've sent (use extracted text, not raw JSON)
-			this.partialMessageLastContent.set(messageKey, textContent)
 		} else {
 			// For non-streaming messages, use the full translator
 			// Check if we already have a toolCallId for this message (from a previous partial update)

@@ -694,13 +694,16 @@ function translateAskMessage(
 						}
 					}
 				} else {
+					// For plain command strings (e.g. from handlePartialBlock streaming),
+					// use execute kind so translatePlainCommandToolMessage can update it later.
+					const plainCommand = !toolInfo ? extractCommandFromText(message.text) : undefined
 					// This is a new tool call
 					const toolCall: acp.ToolCall = {
 						toolCallId,
-						title: toolInfo?.title || "Tool operation",
-						kind: toolInfo?.kind || "other",
+						title: plainCommand ? buildCommandTitle(plainCommand) : (toolInfo?.title || "Tool operation"),
+						kind: plainCommand ? "execute" : (toolInfo?.kind || "other"),
 						status: "pending",
-						rawInput: toolInfo?.input,
+						rawInput: plainCommand ? { command: plainCommand } : toolInfo?.input,
 						locations: toolInfo?.path ? [{ path: toolInfo.path }] : undefined,
 					}
 
@@ -893,13 +896,11 @@ function translateToolMessage(
 		const commandUpdate = translatePlainCommandToolMessage(message, sessionState, clientCapabilities)
 		if (commandUpdate) {
 			updates.push(commandUpdate)
-		} else {
-			// If parsing fails, treat as plain text
-			updates.push({
-				sessionUpdate: "agent_message_chunk",
-				content: { type: "text", text: message.text },
-			})
 		}
+		// No agent_message_chunk fallback: say:tool messages with non-JSON content are
+		// partial streaming previews from handlePartialBlock. The real execute tool call
+		// lifecycle arrives via ask:command when execute() runs — emitting text here
+		// would produce cumulative command text spam in the client.
 	}
 
 	return updates
