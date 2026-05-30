@@ -10,6 +10,7 @@
  *   new                           initialize + newSession, drain setup updates, exit
  *   prompt <text...>              initialize + newSession + one prompt
  *   load   <sessionId>            initialize + loadSession, drain replay, exit
+ *   load-prompt <sessionId> <text..> loadSession + prompt (tests resumed-session flow)
  *   chat                          interactive multi-prompt (read stdin)
  *   set <configId> <value>        new + unstable_setSessionConfigOption + exit
  *
@@ -383,6 +384,45 @@ async function main(): Promise<number> {
 					await waitForIdle(client, argv.idleMs, argv.timeoutMs)
 				} catch (err) {
 					log("error", `loadSession failed: ${(err as Error).message}`)
+					exitCode = 1
+				}
+			}
+		} else if (argv.sub === "load-prompt") {
+			const [sessionId, ...rest] = argv.rest
+			const promptText = rest.join(" ")
+			if (!sessionId || !promptText) {
+				log("error", "load-prompt requires <sessionId> <text...>")
+				exitCode = 2
+			} else {
+				log("call", `loadSession ${sessionId}`)
+				try {
+					const res = await conn.loadSession({ sessionId, cwd: argv.cwd, mcpServers: [] })
+					log("ok", `loadSession → sessionId=${sessionId}`)
+					await waitForIdle(client, argv.idleMs, argv.timeoutMs)
+					log("info", `post-load summary: ${JSON.stringify(client.summary())}`)
+					for (const { configId, value } of argv.preSets) {
+						log("call", `pre-set ${configId}=${value}`)
+						try {
+							const r: any = await (conn as any).unstable_setSessionConfigOption({ sessionId, configId, value })
+							const echoed = r?.configOptions?.find((o: any) => o.id === configId)
+							log("ok", `pre-set ${configId}.currentValue=${echoed?.currentValue ?? "<not in response>"}`)
+						} catch (err) {
+							log("error", `pre-set ${configId} failed: ${(err as Error).message}`)
+						}
+					}
+					log("call", `prompt: ${JSON.stringify(promptText)}`)
+					client.lastAgentText = ""
+					const promptRes = await conn.prompt({
+						sessionId,
+						prompt: [{ type: "text", text: promptText }],
+					})
+					log("ok", `prompt → stopReason=${promptRes.stopReason}`)
+					if (client.lastAgentText) {
+						log("info", `agent text (${client.lastAgentText.length} chars): ${JSON.stringify(client.lastAgentText.slice(0, 500))}`)
+					}
+					log("summary", JSON.stringify(client.summary()))
+				} catch (err) {
+					log("error", `load-prompt failed: ${(err as Error).message}`)
 					exitCode = 1
 				}
 			}

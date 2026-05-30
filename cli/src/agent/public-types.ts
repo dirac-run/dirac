@@ -117,6 +117,10 @@ export interface DiracAcpSession {
 	lastActivityAt: number
 	/** Whether this session was loaded from history (needs resume on first prompt) */
 	isLoadedFromHistory?: boolean
+	/** TaskId reserved for the first initTask call in this session (sessionId itself). Consumed on first use. */
+	reservedTaskId?: string
+	/** Resolved taskId stashed by loadSession for use by the first prompt's resume path. */
+	loadedTaskId?: string
 	/** Model ID override for plan mode (format: "provider/modelId") */
 	planModeModelId?: string
 	/** Model ID override for act mode (format: "provider/modelId") */

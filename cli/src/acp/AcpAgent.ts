@@ -157,6 +157,7 @@ export class AcpAgent implements acp.Agent {
 	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
 		const response = await this.diracAgent.loadSession(params)
 		this.subscribeToSessionEvents(params.sessionId)
+		// Replay history after subscribing so events reach the client
 		await this.diracAgent.replayLoadedSessionHistory(params.sessionId)
 		this.scheduleSessionSetupUpdates(params.sessionId)
 		return response

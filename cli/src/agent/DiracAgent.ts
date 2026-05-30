@@ -11,6 +11,7 @@
  * @module acp
  */
 
+import * as fs from "node:fs/promises"
 import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { DiracMessageChange } from "@core/task/message-state"
@@ -32,6 +33,7 @@ import { Logger } from "@/shared/services/Logger.js"
 import type { Mode } from "@/shared/storage/types"
 import type { Settings } from "@/shared/storage/state-keys"
 import { version as AGENT_VERSION } from "../../package.json"
+import { getLatestTaskIdForSession, recordTaskForSession } from "../acp/acp-session-tasks.js"
 import { ACPDiffViewProvider } from "../acp/ACPDiffViewProvider.js"
 import { ACPHostBridgeClientProvider } from "../acp/ACPHostBridgeClientProvider.js"
 import { AcpTerminalManager } from "../acp/AcpTerminalManager.js"
@@ -354,6 +356,7 @@ export class DiracAgent implements acp.Agent {
 			mode: (await controller.getStateToPostToWebview()).mode,
 			createdAt: Date.now(),
 			lastActivityAt: Date.now(),
+			reservedTaskId: sessionId,
 		}
 
 		this.#sessionControllers.set(session, controller)
@@ -402,8 +405,12 @@ export class DiracAgent implements acp.Agent {
 
 		Logger.debug("[DiracAgent] loadSession called:", { sessionId })
 
+		// Resolve the actual taskId: check the replacement-task map first (multi-task session),
+		// then fall back to sessionId itself (the common single-task case where taskId === sessionId).
+		const resolvedTaskId = getLatestTaskIdForSession(sessionId) ?? sessionId
+
 		const controller = new Controller(this.ctx.extensionContext)
-		const history = await controller.getTaskWithId(sessionId)
+		const history = await controller.getTaskWithId(resolvedTaskId)
 		const historyCwd =
 			history.historyItem.cwdOnTaskInitialization || history.historyItem.workspaceRootPath || params.cwd || this.options.cwd
 
@@ -414,6 +421,7 @@ export class DiracAgent implements acp.Agent {
 			createdAt: Date.now(),
 			lastActivityAt: Date.now(),
 			isLoadedFromHistory: true,
+			loadedTaskId: resolvedTaskId,
 		}
 
 		this.#sessionControllers.set(session, controller)
@@ -919,13 +927,49 @@ export class DiracAgent implements acp.Agent {
 				// Clear the flag so subsequent prompts are handled normally
 				session.isLoadedFromHistory = false
 
-				// Resume the task using its history item
-				await controller.reinitExistingTaskFromId(params.sessionId)
+				// Use loadedTaskId if set (multi-task session resolved in loadSession),
+				// otherwise fall back to sessionId (common case where taskId === sessionId).
+				const taskIdToResume = session.loadedTaskId ?? params.sessionId
+				session.loadedTaskId = undefined
 
-				// After reinit, the task should be in a waiting state (resume_task ask)
-				// Send the user's prompt as a response to continue
+				// Resume the task using its history item
+				await controller.reinitExistingTaskFromId(taskIdToResume)
+
+				// After reinit, resumeTaskFromHistory() is running asynchronously. We must
+				// NOT call handleWebviewAskResponse yet — TaskMessenger.ask() clears
+				// taskState.askResponse at its start (to reset stale state), so any
+				// response set before ask() runs gets wiped, leaving pWaitFor spinning
+				// forever and the idle watchdog firing after 60 s.
+				//
+				// Instead, wait for the task to actually issue ask("resume_task" |
+				// "resume_completed_task") — signalled by a diracMessagesChanged "add"
+				// event — and only then deliver the user's prompt as the response.
 				if (controller.task) {
-					await controller.task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
+					const task = controller.task
+					await new Promise<void>((resolve, reject) => {
+						// Guard: if runPromise rejects before ask() fires (e.g. task init
+						// error), bail out so we don't leak a listener that would never fire.
+						const onRunPromiseError = (err: unknown) => {
+							task.messageStateHandler.off("diracMessagesChanged", onChanged)
+							reject(err instanceof Error ? err : new Error(String(err)))
+						}
+						const onChanged = (change: DiracMessageChange) => {
+							if (
+								change.type === "add" &&
+								change.message?.type === "ask" &&
+								(change.message.ask === "resume_task" || change.message.ask === "resume_completed_task")
+							) {
+								task.messageStateHandler.off("diracMessagesChanged", onChanged)
+								resolve()
+							}
+						}
+						// runPromise may not be set yet if resumeTaskFromHistory was started
+						// in the same tick; use Promise.resolve() so we only see rejections,
+						// not an absent value. Calling reject() after resolve() is a no-op.
+						Promise.resolve(task.runPromise).catch(onRunPromiseError)
+						task.messageStateHandler.on("diracMessagesChanged", onChanged)
+					})
+					await task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
 				}
 			} else if (hasActiveTask && controller.task) {
 				// Continue existing task - respond to pending ask
@@ -951,11 +995,19 @@ export class DiracAgent implements acp.Agent {
 				} else {
 					Logger.debug("[DiracAgent] Starting new task (no pending ask or last ask was terminal failure)")
 					await controller.initTask(textContent, imageContent, fileResources)
+					// reservedTaskId was already consumed on first prompt; record the
+					// replacement task so loadSession can recover it after a restart.
+					if (controller.task) {
+						await recordTaskForSession(params.sessionId, controller.task.taskId)
+					}
 				}
 			} else {
-				// Start new task
+				// Start new task — consume reservedTaskId (sessionId) so the task's taskId
+				// equals the sessionId, enabling loadSession to find it without a map lookup.
+				const taskIdOverride = session.reservedTaskId
+				session.reservedTaskId = undefined
 				Logger.debug("[DiracAgent] Starting new task")
-				await controller.initTask(textContent, imageContent, fileResources)
+				await controller.initTask(textContent, imageContent, fileResources, undefined, undefined, taskIdOverride)
 			}
 
 			// Idle watchdog: if no diracMessagesChanged events fire for this many ms,
@@ -1264,8 +1316,6 @@ export class DiracAgent implements acp.Agent {
 				askType === "plan_mode_respond" ||
 				askType === "act_mode_respond" ||
 				askType === "completion_result" ||
-				askType === "resume_task" ||
-				askType === "resume_completed_task" ||
 				// `api_req_failed` and `mistake_limit_reached` pause the task waiting
 				// for the user to decide whether to retry. End the turn so the client
 				// stops spinning and the next user prompt becomes the answer. Without
@@ -1577,6 +1627,70 @@ export class DiracAgent implements acp.Agent {
 			sessionUpdate: "config_option_update",
 			configOptions: await this.getSessionConfigOptions(session),
 		})
+	}
+
+	/**
+	 * Replay the historical messages for a loaded session as ACP sessionUpdate events.
+	 * Called by AcpAgent after subscribing to session events, so the events reach the client.
+	 */
+	async replayLoadedSessionHistory(sessionId: string): Promise<void> {
+		const session = this.sessions.get(sessionId)
+		if (!session) return
+
+		const controller = this.#sessionControllers.get(session)
+		if (!controller) return
+
+		const taskId = session.loadedTaskId ?? sessionId
+		let uiMessages: DiracMessageType[]
+		try {
+			const { uiMessagesFilePath } = await controller.getTaskWithId(taskId)
+			const raw = await fs.readFile(uiMessagesFilePath, "utf8")
+			uiMessages = JSON.parse(raw)
+		} catch (error) {
+			Logger.debug("[DiracAgent] replayLoadedSessionHistory: could not read ui_messages:", error)
+			return
+		}
+
+		// Use a fresh session state for replay — don't pollute the live session's tool call tracking
+		const replayState: AcpSessionState = {
+			sessionId,
+			status: AcpSessionStatus.Idle,
+			pendingToolCalls: new Map(),
+		}
+
+		// Message types that are internal Dirac housekeeping and should not be replayed
+		const SKIP_SAY = new Set(["api_req_started", "api_req_finished", "api_req_retried"])
+
+		for (const message of uiMessages) {
+			// Skip partial (mid-stream) messages — they were never complete
+			if (message.partial) continue
+			// Skip internal housekeeping messages
+			if (message.type === "say" && message.say && SKIP_SAY.has(message.say)) continue
+
+			try {
+				// User-facing input messages that translateMessage skips — emit as user_message_chunk
+				if (
+					message.type === "say" &&
+					(message.say === "task" || message.say === "user_feedback" || message.say === "user_feedback_diff") &&
+					message.text
+				) {
+					await this.emitSessionUpdate(sessionId, {
+						sessionUpdate: "user_message_chunk",
+						content: { type: "text", text: message.text },
+					} as acp.SessionUpdate)
+					continue
+				}
+
+				const result = translateMessage(message, replayState, {
+					clientCapabilities: this.clientCapabilities,
+				})
+				for (const update of result.updates) {
+					await this.emitSessionUpdate(sessionId, update)
+				}
+			} catch (error) {
+				Logger.debug("[DiracAgent] replayLoadedSessionHistory: error translating message:", error)
+			}
+		}
 	}
 
 	private async sendAvailableCommands(sessionId: string, controller: Controller): Promise<void> {
