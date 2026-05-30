@@ -522,7 +522,7 @@ describe("translateMessage - say messages", () => {
 			})
 		})
 
-		it("should truncate long command titles", () => {
+		it("should include full command text in title without truncation", () => {
 			const longCommand = "npm install --save-dev very-long-package-name-that-exceeds-fifty-characters-limit"
 			const message = createDiracMessage({
 				type: "say",
@@ -535,9 +535,8 @@ describe("translateMessage - say messages", () => {
 			const toolCall = result.updates.find((u) => u.sessionUpdate === "tool_call") as acp.ToolCall & {
 				sessionUpdate: "tool_call"
 			}
-			// Title format is "Execute: {command up to 50 chars}..." so max ~63 chars
-			expect(toolCall.title.length).toBeLessThanOrEqual(65)
-			expect(toolCall.title).toContain("...")
+			expect(toolCall.title).toBe(`Execute: ${longCommand}`)
+			expect(toolCall.title).not.toContain("...")
 		})
 	})
 
@@ -941,7 +940,10 @@ describe("translateMessage - say messages", () => {
 			expect(toolUpdate).toBeDefined()
 		})
 
-		it("should handle invalid JSON in tool message gracefully", () => {
+		it("should emit no update for non-JSON say:tool (streaming preview from handlePartialBlock)", () => {
+			// Plain-text say:tool messages are partial streaming previews. The real tool_call
+			// lifecycle comes from ask:command/ask:tool. Emitting agent_message_chunk here would
+			// produce cumulative command-text spam in the client.
 			const message = createDiracMessage({
 				type: "say",
 				say: "tool",
@@ -950,9 +952,7 @@ describe("translateMessage - say messages", () => {
 
 			const result = translateMessage(message, sessionState)
 
-			// Should fall back to agent_message_chunk
-			const messageChunk = result.updates.find((u) => u.sessionUpdate === "agent_message_chunk")
-			expect(messageChunk).toBeDefined()
+			expect(result.updates).toHaveLength(0)
 		})
 
 		it("should advance partial ask:tool command previews when an auto-approved say:tool command arrives", () => {
@@ -1088,6 +1088,111 @@ describe("translateMessage - say messages", () => {
 				signal: null,
 			})
 			expect(sessionState.currentToolCallId).toBeUndefined()
+		})
+	})
+
+	describe("command streaming preview identity (regression: misaligned permission)", () => {
+		// Reproduces the real Zed bug: as a command streams, the handler flips between
+		// say:tool and ask:tool and each re-add mints a fresh ts. A single command must
+		// still map to ONE tool call, and its ask:command permission must reference that
+		// same id — never an earlier/orphan preview.
+		it("reuses one tool call across ts-flipping previews and aligns the permission", () => {
+			const sessionState = createTestSessionState()
+
+			// First streaming fragment (ts=1) — a brand-new command preview.
+			const first = translateMessage(
+				createDiracMessage({ ts: 1, type: "ask", ask: "tool", text: "c", partial: true }),
+				sessionState,
+			)
+			const created = first.updates.find((u) => u.sessionUpdate === "tool_call") as acp.ToolCall & {
+				sessionUpdate: "tool_call"
+			}
+			expect(created).toBeDefined()
+			const toolCallId = created.toolCallId
+
+			// Same command continues to stream but under a NEW ts (the say/ask flip). This
+			// must NOT create a second tool call — it must update the existing one.
+			const grown = translateMessage(
+				createDiracMessage({ ts: 2, type: "ask", ask: "tool", text: "cd /tmp && git log", partial: true }),
+				sessionState,
+			)
+			expect(grown.updates.some((u) => u.sessionUpdate === "tool_call")).toBe(false)
+			expect(grown.toolCallId).toBe(toolCallId)
+
+			// The blocking permission request (non-partial first encounter) must target the
+			// same tool call — not a stale/orphan id.
+			const perm = translateMessage(
+				createDiracMessage({ ts: 3, type: "ask", ask: "command", text: "cd /tmp && git log", partial: false }),
+				sessionState,
+			)
+			expect(perm.requiresPermission).toBe(true)
+			expect(perm.toolCallId).toBe(toolCallId)
+			expect(perm.permissionRequest?.toolCall.toolCallId).toBe(toolCallId)
+		})
+
+		it("gives each command in a multi-command turn its own tool call (api_req_started boundary)", () => {
+			const sessionState = createTestSessionState()
+
+			// Command 1.
+			const cmd1 = translateMessage(
+				createDiracMessage({ ts: 10, type: "ask", ask: "tool", text: "git log", partial: true }),
+				sessionState,
+			)
+			const id1 = (cmd1.updates[0] as acp.ToolCall & { sessionUpdate: "tool_call" }).toolCallId
+			translateMessage(
+				createDiracMessage({ ts: 11, type: "ask", ask: "command", text: "git log", partial: false }),
+				sessionState,
+			)
+
+			// Turn boundary: the next request begins (carries command 1's result). This
+			// releases currentToolCallId so command 2 cannot collapse onto command 1.
+			translateMessage(
+				createDiracMessage({ ts: 12, type: "say", say: "api_req_started", text: "{}", partial: false }),
+				sessionState,
+			)
+			expect(sessionState.currentToolCallId).toBeUndefined()
+
+			// Command 2 — distinct id, permission aligned to it.
+			const cmd2 = translateMessage(
+				createDiracMessage({ ts: 13, type: "ask", ask: "tool", text: "find . -name x", partial: true }),
+				sessionState,
+			)
+			const id2 = (cmd2.updates[0] as acp.ToolCall & { sessionUpdate: "tool_call" }).toolCallId
+			expect(id2).not.toBe(id1)
+
+			const perm2 = translateMessage(
+				createDiracMessage({ ts: 14, type: "ask", ask: "command", text: "find . -name x", partial: false }),
+				sessionState,
+			)
+			expect(perm2.toolCallId).toBe(id2)
+			expect(perm2.permissionRequest?.toolCall.toolCallId).toBe(id2)
+		})
+
+		it("does not release currentToolCallId on repeated api_req_started partials of the same turn", () => {
+			const sessionState = createTestSessionState()
+
+			// The turn opens with its api_req_started (establishing the current turn's ts),
+			// then the command streams.
+			translateMessage(
+				createDiracMessage({ ts: 20, type: "say", say: "api_req_started", text: "{}", partial: true }),
+				sessionState,
+			)
+			translateMessage(
+				createDiracMessage({ ts: 21, type: "ask", ask: "tool", text: "git log", partial: true }),
+				sessionState,
+			)
+			const active = sessionState.currentToolCallId
+			expect(active).toBeDefined()
+
+			// The SAME api_req_started (ts=20) keeps emitting partial token/cost updates
+			// while the command is still in flight — these must NOT clear currentToolCallId.
+			for (let n = 0; n < 3; n++) {
+				translateMessage(
+					createDiracMessage({ ts: 20, type: "say", say: "api_req_started", text: "{}", partial: true }),
+					sessionState,
+				)
+				expect(sessionState.currentToolCallId).toBe(active)
+			}
 		})
 	})
 
@@ -1871,5 +1976,104 @@ describe("session state management", () => {
 		translateMessage(message, sessionState)
 
 		expect(sessionState.pendingToolCalls.size).toBe(1)
+	})
+
+	describe("streaming preview deduplication", () => {
+		it("should reuse ask:tool streaming preview ID when ask:command arrives", () => {
+			// Simulate: ask:tool (partial, ts=T1) creates a tool_call for "ec"
+			// Then ask:command (non-partial, ts=T2, different message) arrives.
+			// The fix: ask:command detects currentToolCallId in pendingToolCalls and
+			// emits tool_call_update instead of a second tool_call.
+			const partialAskTool = createDiracMessage({
+				type: "ask",
+				ask: "tool",
+				text: "ec",
+				partial: true,
+			})
+			const r1 = translateMessage(partialAskTool, sessionState)
+			const toolCall = r1.updates.find((u) => u.sessionUpdate === "tool_call") as any
+			expect(toolCall).toBeDefined()
+			const previewId = toolCall.toolCallId
+
+			// ask:command (non-partial) arrives — should NOT create a second tool_call
+			const askCommand = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo hello world",
+			})
+			const r2 = translateMessage(askCommand, sessionState)
+
+			const secondToolCall = r2.updates.find((u) => u.sessionUpdate === "tool_call")
+			expect(secondToolCall).toBeUndefined()
+
+			// Should emit a tool_call_update with the final command text
+			const titleUpdate = r2.updates.find((u) => u.sessionUpdate === "tool_call_update") as any
+			expect(titleUpdate).toBeDefined()
+			expect(titleUpdate.toolCallId).toBe(previewId)
+			expect(titleUpdate.title).toBe("Execute: echo hello world")
+
+			// Should require permission using the original tool call ID
+			expect(r2.requiresPermission).toBe(true)
+			expect(r2.permissionRequest!.toolCall.toolCallId).toBe(previewId)
+
+			// currentToolCallId stays as the preview ID
+			expect(sessionState.currentToolCallId).toBe(previewId)
+		})
+
+		it("should not re-request permission on subsequent update events for the same ask:command", () => {
+			// Set up an existing tool call (as if ask:command already ran once)
+			const existingId = "existing-id-123"
+			const toolCall: acp.ToolCall = {
+				toolCallId: existingId,
+				title: "Execute: echo test",
+				kind: "execute",
+				status: "pending",
+			}
+			sessionState.currentToolCallId = existingId
+			sessionState.pendingToolCalls.set(existingId, toolCall)
+
+			// Second encounter with existingToolCallId set (same-ts update path)
+			const askCommand = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo test",
+			})
+			const r = translateMessage(askCommand, sessionState, { existingToolCallId: existingId })
+
+			// Should NOT emit a new tool_call
+			expect(r.updates.find((u) => u.sessionUpdate === "tool_call")).toBeUndefined()
+			// Should NOT re-request permission
+			expect(r.requiresPermission).toBe(false)
+		})
+
+		it("should not create duplicate tool_call when say:command follows ask:command", () => {
+			// Set up an existing pending tool call (from ask:command)
+			const existingId = "pending-id-456"
+			const toolCall: acp.ToolCall = {
+				toolCallId: existingId,
+				title: "Execute: ls",
+				kind: "execute",
+				status: "pending",
+			}
+			sessionState.currentToolCallId = existingId
+			sessionState.pendingToolCalls.set(existingId, toolCall)
+
+			// say:command arrives (command is now running)
+			const sayCommand = createDiracMessage({
+				type: "say",
+				say: "command",
+				text: "ls",
+			})
+			const r = translateMessage(sayCommand, sessionState)
+
+			// Should NOT create a new tool_call — should update the existing one
+			expect(r.updates.find((u) => u.sessionUpdate === "tool_call")).toBeUndefined()
+			const update = r.updates.find((u) => u.sessionUpdate === "tool_call_update") as any
+			expect(update).toBeDefined()
+			expect(update.toolCallId).toBe(existingId)
+			expect(update.status).toBe("in_progress")
+			// currentToolCallId should remain unchanged
+			expect(sessionState.currentToolCallId).toBe(existingId)
+		})
 	})
 })

@@ -1517,10 +1517,11 @@ export class DiracAgent implements acp.Agent {
 				this.partialMessageLastContent.set(messageKey, message.text)
 			}
 
-			// Clean up the mapping when the message is complete (not partial)
-			if (!message.partial && result.toolCallId) {
-				this.messageToToolCallId.delete(messageKey)
-			}
+			// NOTE: Do NOT delete messageToToolCallId here. A message can receive multiple
+			// non-partial updates (e.g. ask:command status updates during execution).
+			// Deleting on the first partial=false would cause subsequent updates to lose the
+			// existingToolCallId, generating new tool_call + permission events.
+			// The map is cleared at the start of each prompt cycle (messageToToolCallId.clear()).
 		}
 	}
 

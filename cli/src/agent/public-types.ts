@@ -159,6 +159,14 @@ export interface AcpSessionState {
 	retryToolCallId?: string
 	/** Accumulated tool calls for permission batching */
 	pendingToolCalls: Map<string, acp.ToolCall>
+	/**
+	 * ts of the most recently seen `api_req_started` message. Used to detect a genuine
+	 * turn boundary: api_req_started keeps streaming partial updates (token/cost) across
+	 * a whole turn under one ts, so only a *new* ts marks the start of the next turn —
+	 * the point at which the previous turn's command tool call is finished and
+	 * currentToolCallId should be released.
+	 */
+	lastApiReqStartedTs?: number
 }
 
 // ============================================================

@@ -448,6 +448,24 @@ function translateSayMessage(
 			// 	sessionUpdate: "agent_thought_chunk",
 			// 	content: { type: "text", text: "Making API Request" },
 			// })
+			//
+			// Turn boundary: each assistant turn runs at most one tool, and a tool's
+			// result is fed back in the *next* turn's request. execute_command in ACP
+			// never emits a command_output/say:command completion event (the result is
+			// swallowed into this api_req_started payload), so currentToolCallId would
+			// otherwise never clear and every command in the task would collapse onto the
+			// first command's tool call.
+			//
+			// Only release currentToolCallId when a NEW api_req_started begins (different
+			// ts). The same api_req_started keeps streaming partial token/cost updates
+			// across the whole turn — clearing on those would fire *between* a command's
+			// streaming preview and its ask:command, splitting one command into two tool
+			// calls. A new ts means the previous turn (and its command) is done, so the
+			// next command's preview mints a fresh tool call and its permission aligns.
+			if (message.ts !== sessionState.lastApiReqStartedTs) {
+				sessionState.lastApiReqStartedTs = message.ts
+				sessionState.currentToolCallId = undefined
+			}
 			break
 
 		case "api_req_finished":
@@ -618,31 +636,92 @@ function translateAskMessage(
 		case "command":
 			// Command permission request → tool_call + request_permission
 			{
-				const toolCallId = generateToolCallId()
+				// Match this command to the streaming-preview tool call that was created
+				// while its text was being typed (say:tool / ask:tool). The task executes
+				// commands sequentially, so the active preview is always currentToolCallId.
+				// We cannot match on ts: the handler flips between say:tool and ask:tool as
+				// the command streams and each re-add mints a fresh ts. currentToolCallId is
+				// stable for the command's lifetime and is cleared on completion
+				// (translateCommandOutputMessage), so it reliably points at *this* command.
+				const streamingPreviewId =
+					!options?.existingToolCallId &&
+					sessionState.currentToolCallId &&
+					sessionState.pendingToolCalls.has(sessionState.currentToolCallId)
+						? sessionState.currentToolCallId
+						: undefined
+				const isUpdate = !!options?.existingToolCallId || !!streamingPreviewId
+				// Assign to outer toolCallId so processMessageWithDelta can track this message
+				toolCallId = options?.existingToolCallId ?? streamingPreviewId ?? generateToolCallId()
 				sessionState.currentToolCallId = toolCallId
 
-				const toolCall: acp.ToolCall = {
-					toolCallId,
-					title: buildCommandTitle(extractCommandFromText(message.text)),
-					kind: "execute",
-					status: "pending",
-					rawInput: { command: extractCommandFromText(message.text) },
-				}
+				if (isUpdate) {
+					// This is an update to an existing tool call.
+					// When coming from existingToolCallId (same-ts or subsequent-update path):
+					//   → update metadata only; permission was already requested on first encounter.
+					// When coming from streamingPreviewId (first encounter of ask:command after
+					//   ask:tool streaming): → also update title and request permission.
+					const existingToolCall = sessionState.pendingToolCalls.get(toolCallId)
+					const command = extractCommandFromText(message.text)
+					if (existingToolCall) {
+						existingToolCall.title = buildCommandTitle(command)
+						existingToolCall.rawInput = { command }
+					}
+					if (streamingPreviewId) {
+						// First encounter via streaming continuation — send title update and
+						// request permission. Subsequent update events arrive with existingToolCallId
+						// set (skipping this branch) so permission is only requested once.
+						if (command) {
+							updates.push({
+								sessionUpdate: "tool_call_update",
+								toolCallId,
+								title: buildCommandTitle(command),
+								rawInput: { command },
+							})
+						}
+						if (!message.partial) {
+							const tc = sessionState.pendingToolCalls.get(toolCallId)
+							if (tc) {
+								requiresPermission = true
+								permissionRequest = {
+									toolCall: tc,
+									options: [
+										{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
+										{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
+										{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+									],
+								}
+							}
+						}
+					}
+					// existingToolCallId path: metadata already updated above; no emit, no permission.
+				} else {
+					const toolCall: acp.ToolCall = {
+						toolCallId,
+						title: buildCommandTitle(extractCommandFromText(message.text)),
+						kind: "execute",
+						status: "pending",
+						rawInput: { command: extractCommandFromText(message.text) },
+					}
 
-				updates.push({
-					sessionUpdate: "tool_call",
-					...toolCall,
-				})
+					updates.push({
+						sessionUpdate: "tool_call",
+						...toolCall,
+					})
 
-				sessionState.pendingToolCalls.set(toolCallId, toolCall)
-				requiresPermission = true
-				permissionRequest = {
-					toolCall,
-					options: [
-						{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
-						{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
-						{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
-					],
+					sessionState.pendingToolCalls.set(toolCallId, toolCall)
+
+					// Only request permission for non-partial (complete) command messages
+					if (!message.partial) {
+						requiresPermission = true
+						permissionRequest = {
+							toolCall,
+							options: [
+								{ kind: "allow_once", optionId: "allow_once", name: "Allow Once" },
+								{ kind: "allow_always", optionId: "allow_always", name: "Always Allow" },
+								{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+							],
+						}
+					}
 				}
 			}
 			break
@@ -651,10 +730,20 @@ function translateAskMessage(
 			// Tool permission request → tool_call + request_permission
 			{
 				const toolInfo = message.text ? parseToolInfo(message.text) : null
-				const isUpdate = !!options?.existingToolCallId
+				// Reuse the active command's tool call across the say:tool↔ask:tool flips
+				// that happen as a command streams: each flip re-adds the message under a
+				// fresh ts, so existingToolCallId (keyed by ts) misses and we would otherwise
+				// mint a duplicate tool call for the same command — polluting matching and
+				// leaving an orphan "Execute: <partial>" entry in the client. currentToolCallId
+				// is stable for the command's lifetime (cleared on completion).
+				const reuseId =
+					options?.existingToolCallId ??
+					(sessionState.currentToolCallId && sessionState.pendingToolCalls.has(sessionState.currentToolCallId)
+						? sessionState.currentToolCallId
+						: undefined)
+				const isUpdate = !!reuseId
 
-				// Reuse existing toolCallId if this is an update to a streaming tool call
-				toolCallId = options?.existingToolCallId || generateToolCallId()
+				toolCallId = reuseId ?? generateToolCallId()
 				sessionState.currentToolCallId = toolCallId
 
 				if (isUpdate) {
@@ -957,9 +1046,40 @@ function translateCommandMessage(
 	const updates: acp.SessionUpdate[] = []
 
 	const command = extractCommandFromText(message.text)
+	const supportsTerminalOutput = clientSupportsTerminalOutput(clientCapabilities)
+
+	// Reuse the existing pending tool call when one was already created by
+	// ask:command (permission flow) or ask:tool (streaming preview). Generating
+	// a fresh ID here would produce a second "in_progress" tool_call alongside
+	// the existing "pending" one, showing two entries for the same command.
+	const existingId =
+		sessionState.currentToolCallId && sessionState.pendingToolCalls.has(sessionState.currentToolCallId)
+			? sessionState.currentToolCallId
+			: undefined
+
+	if (existingId) {
+		// Transition the existing pending tool call to in_progress now that the
+		// command is actually running.
+		const pendingToolCall = sessionState.pendingToolCalls.get(existingId)
+		if (pendingToolCall) {
+			pendingToolCall.status = "in_progress"
+		}
+		updates.push({
+			sessionUpdate: "tool_call_update",
+			toolCallId: existingId,
+			status: "in_progress",
+			rawInput: { command },
+			content: supportsTerminalOutput
+				? [{ type: "terminal", terminalId: existingId }]
+				: [{ type: "content", content: { type: "text", text: `$ ${command}` } }],
+			_meta: supportsTerminalOutput ? { terminal_info: { terminal_id: existingId } } : undefined,
+		})
+		return updates
+	}
+
+	// No existing tool call — auto-approve path where ask:command was never sent.
 	const toolCallId = generateToolCallId()
 	sessionState.currentToolCallId = toolCallId
-	const supportsTerminalOutput = clientSupportsTerminalOutput(clientCapabilities)
 
 	updates.push({
 		sessionUpdate: "tool_call",
@@ -972,19 +1092,8 @@ function translateCommandMessage(
 		rawInput: { command },
 		content: supportsTerminalOutput
 			? [{ type: "terminal", terminalId: toolCallId }]
-			: [
-					{
-						type: "content",
-						content: { type: "text", text: `$ ${command}` },
-					},
-				],
-		_meta: supportsTerminalOutput
-			? {
-					terminal_info: {
-						terminal_id: toolCallId,
-					},
-				}
-			: undefined,
+			: [{ type: "content", content: { type: "text", text: `$ ${command}` } }],
+		_meta: supportsTerminalOutput ? { terminal_info: { terminal_id: toolCallId } } : undefined,
 	})
 
 	return updates
@@ -1284,8 +1393,7 @@ function getToolTitleSuffix(toolInfo: DiracSayTool): string {
 }
 
 function buildCommandTitle(command: string): string {
-	const truncated = command.length > 50 ? `${command.slice(0, 50)}...` : command
-	return truncated ? `Execute: ${truncated}` : "Execute"
+	return command ? `Execute: ${command}` : "Execute"
 }
 
 /**
