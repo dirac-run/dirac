@@ -832,13 +832,7 @@ function translateToolMessage(
 		const title = buildToolTitle(toolInfo)
 
 		// Build content
-		const content: acp.ToolCallContent[] = []
-		if (toolInfo.content) {
-			content.push({
-				type: "content",
-				content: { type: "text", text: toolInfo.content },
-			})
-		}
+		const content: acp.ToolCallContent[] = buildToolContent(toolInfo)
 		if (toolInfo.diff) {
 			// Parse the unified diff to extract old and new text
 			const parsedDiff = parseUnifiedDiff(toolInfo.diff)
@@ -1131,7 +1125,96 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
  * - Currently working on this
  */
 
+const READ_TOOL_KINDS = new Set([
+	"readFile", "read_file", "readLineRange", "read_line_range",
+	"getFunction", "get_function", "getFileSkeleton", "get_file_skeleton",
+	"newFileCreated",
+])
+const LIST_TOOL_KINDS = new Set([
+	"listFilesTopLevel", "list_files_top_level",
+	"listFilesRecursive", "list_files_recursive",
+	"listCodeDefinitionNames",
+])
+
 /**
+ * Format tool call display content as markdown.
+ *
+ * Read tools show `* path: [File Hash: xxx]` bullets rather than raw source.
+ * List tools convert the directory listing to a markdown bullet list.
+ */
+function buildToolContent(toolInfo: DiracSayTool): acp.ToolCallContent[] {
+	if (!toolInfo.content) return []
+
+	if (READ_TOOL_KINDS.has(toolInfo.tool)) {
+		// Extract all [File Hash: ...] lines from the combined content blob
+		const hashLines = toolInfo.content.split("\n").filter((l) => l.startsWith("[File Hash:"))
+
+		// Gather the ordered list of paths from readFileResults, falling back to paths/path
+		const paths = getDistinctPaths(toolInfo)
+
+		if (paths.length > 0) {
+			const bullets = paths
+				.map((p, i) => {
+					const hash = hashLines[i]
+					return hash ? `* ${p}: ${hash}` : `* ${p}`
+				})
+				.join("\n")
+			return [{ type: "content", content: { type: "text", text: bullets } }]
+		}
+
+		// No paths available — show hash lines only (or fall through to code-fence)
+		if (hashLines.length > 0) {
+			return [{ type: "content", content: { type: "text", text: hashLines.join("\n") } }]
+		}
+
+		return [{ type: "content", content: { type: "text", text: `\`\`\`\n${toolInfo.content}\n\`\`\`` } }]
+	}
+
+	if (LIST_TOOL_KINDS.has(toolInfo.tool)) {
+		// Convert directory listing header + entries into a markdown bullet list
+		const lines = toolInfo.content
+			.split("\n")
+			.filter(
+				(l) =>
+					l.trim() !== "" &&
+					!l.startsWith("Contents of") &&
+					!l.startsWith("[Note:") &&
+					!/^\d+ out of \d+/.test(l),
+			)
+			.map((l) => `* ${l}`)
+			.join("\n")
+		return lines ? [{ type: "content", content: { type: "text", text: lines } }] : []
+	}
+
+	// Default: pass through as-is
+	return [{ type: "content", content: { type: "text", text: toolInfo.content } }]
+}
+
+/**
+ * Return the deduplicated ordered list of file paths referenced by a tool call,
+ * preferring readFileResults order (which matches the actual reads) then paths, then path.
+ */
+function getDistinctPaths(toolInfo: DiracSayTool): string[] {
+	const readFileResults = Array.isArray((toolInfo as any).readFileResults) ? (toolInfo as any).readFileResults : []
+	const resultPaths: string[] = readFileResults
+		.map((r: any) => (typeof r?.path === "string" ? r.path : ""))
+		.filter(Boolean)
+
+	const extraPaths: string[] = Array.isArray((toolInfo as any).paths)
+		? (toolInfo as any).paths.filter((p: unknown) => typeof p === "string")
+		: []
+
+	const seen = new Set<string>()
+	const ordered: string[] = []
+	for (const p of [...resultPaths, ...extraPaths, ...(toolInfo.path ? [toolInfo.path] : [])]) {
+		if (!seen.has(p)) {
+			seen.add(p)
+			ordered.push(p)
+		}
+	}
+	return ordered
+}
+
 /**
  * Build a human-readable title for a tool operation.
  */
@@ -1189,20 +1272,10 @@ function getToolTitleSuffix(toolInfo: DiracSayTool): string {
 		return typeof searchCandidate === "string" ? searchCandidate : ""
 	}
 
-	const readFileResults = Array.isArray((toolInfo as any).readFileResults) ? (toolInfo as any).readFileResults : []
-	const resultPaths = readFileResults
-		.map((result: any) => (typeof result?.path === "string" ? result.path : ""))
-		.filter(Boolean)
+	const pathList = getDistinctPaths(toolInfo)
 
-	const paths = Array.isArray((toolInfo as any).paths) ? (toolInfo as any).paths.filter((path: unknown) => typeof path === "string") : []
-	const pathList = [toolInfo.path, ...paths, ...resultPaths].filter((path): path is string => typeof path === "string" && path.length > 0)
-
-	if (pathList.length > 1) {
+	if (pathList.length > 0) {
 		return pathList.join(", ")
-	}
-
-	if (pathList.length === 1) {
-		return pathList[0]
 	}
 
 	const candidate = (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
