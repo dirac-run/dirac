@@ -9,7 +9,7 @@
  */
 
 import type * as acp from "@agentclientprotocol/sdk"
-import type { DiracMessage, DiracSayBrowserAction, DiracSayTool } from "@shared/ExtensionMessage"
+import type { DiracMessage, DiracSayBrowserAction, DiracSayTool, MultiCommandState } from "@shared/ExtensionMessage"
 import type { AcpSessionState, TranslatedMessage } from "./types.js"
 import { AcpSessionStatus } from "./types.js"
 
@@ -723,6 +723,31 @@ function translateAskMessage(
 						}
 					}
 				}
+
+				// Surface execution progress/output. execute_command never emits
+				// say:command_output — it mutates *this* ask:command message in place,
+				// carrying the command's output in multiCommandState and flipping
+				// commandCompleted false (running) → true (done). commandCompleted is
+				// undefined during the permission/preview phase handled above (no
+				// output yet); once it is defined we emit tool_call_update(s) so the
+				// client sees the output and a terminal completed/failed status,
+				// instead of the tool_call freezing at pending/in_progress. The
+				// permission/preview branches above are left untouched — this is
+				// purely additive.
+				if (toolCallId && message.multiCommandState && message.commandCompleted !== undefined) {
+					const existing = sessionState.pendingToolCalls.get(toolCallId)
+					const alreadyTerminal = existing?.status === "completed" || existing?.status === "failed"
+					if (!alreadyTerminal) {
+						const exec = buildCommandExecutionUpdates(
+							toolCallId,
+							message.multiCommandState,
+							message.commandCompleted === true,
+							options?.clientCapabilities,
+						)
+						updates.push(...exec.updates)
+						if (existing) existing.status = exec.status
+					}
+				}
 			}
 			break
 
@@ -1186,6 +1211,89 @@ function clientSupportsTerminalOutput(clientCapabilities?: acp.ClientCapabilitie
 
 function formatCommandOutputContent(output: string): string {
 	return `\`\`\`console\n${output.trimEnd()}\n\`\`\``
+}
+
+/**
+ * Aggregate the human-readable output of an execute_command run. The output is
+ * stored per-command on multiCommandState (mutated in place as the command
+ * runs): for a single command this is just its stdout/stderr; for several it
+ * labels each segment.
+ */
+function formatMultiCommandOutput(multiCommandState: MultiCommandState): string {
+	const many = multiCommandState.commands.length > 1
+	const parts: string[] = []
+	for (const cmd of multiCommandState.commands) {
+		const out = (cmd.output ?? "").trimEnd()
+		if (many) {
+			parts.push(`$ ${cmd.displayName || cmd.command}`)
+			parts.push(out || "(no output)")
+		} else if (out) {
+			parts.push(out)
+		}
+	}
+	return parts.join("\n")
+}
+
+/**
+ * Translate an execute_command's in-place progress (carried on the ask:command
+ * message via multiCommandState + commandCompleted) into tool_call_update(s).
+ *
+ * This is the only place a command's output and terminal completed/failed
+ * status reach the client — execute_command never emits say:command_output, so
+ * without this the command tool_call would freeze at "pending"/"in_progress"
+ * with no output and the model would be the sole consumer of the result.
+ */
+function buildCommandExecutionUpdates(
+	toolCallId: string,
+	multiCommandState: MultiCommandState,
+	completed: boolean,
+	clientCapabilities?: acp.ClientCapabilities,
+): { updates: acp.SessionUpdate[]; status: acp.ToolCallStatus } {
+	const anyFailed = multiCommandState.commands.some((c) => c.status === "failed")
+	const status: acp.ToolCallStatus = completed ? (anyFailed ? "failed" : "completed") : "in_progress"
+	const output = formatMultiCommandOutput(multiCommandState)
+	const updates: acp.SessionUpdate[] = []
+
+	if (clientSupportsTerminalOutput(clientCapabilities)) {
+		// Terminal-capable clients render output through the terminal channel.
+		// execute_command delivers its output in one shot at completion (it is
+		// not streamed incrementally), so emit the data + exit once on completion.
+		if (completed) {
+			if (output) {
+				updates.push({
+					sessionUpdate: "tool_call_update",
+					toolCallId,
+					_meta: { terminal_output: { terminal_id: toolCallId, data: output } },
+				})
+			}
+			updates.push({
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				status,
+				rawOutput: output ? { output } : undefined,
+				_meta: { terminal_exit: { terminal_id: toolCallId, exit_code: anyFailed ? 1 : 0, signal: null } },
+			})
+		} else {
+			updates.push({ sessionUpdate: "tool_call_update", toolCallId, status })
+		}
+		return { updates, status }
+	}
+
+	// Only include content when there is actual output to show.
+	// Matches claude-agent-acp's pattern: empty Bash results return no content
+	// field rather than a placeholder, so the client doesn't render stale text.
+	const content: acp.ToolCallContent[] | undefined = output
+		? [{ type: "content", content: { type: "text", text: formatCommandOutputContent(output) } }]
+		: undefined
+
+	updates.push({
+		sessionUpdate: "tool_call_update",
+		toolCallId,
+		status,
+		rawOutput: output ? { output } : undefined,
+		...(content ? { content } : {}),
+	})
+	return { updates, status }
 }
 
 /**

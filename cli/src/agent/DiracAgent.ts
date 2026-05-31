@@ -1029,59 +1029,6 @@ export class DiracAgent implements acp.Agent {
 				await controller.initTask(textContent, imageContent, fileResources, undefined, undefined, taskIdOverride)
 			}
 
-			// Idle watchdog: if no diracMessagesChanged events fire for this many ms,
-			// the upstream is hung (e.g. the model provider stream stalled). Surface
-			// it as a structured failure (tool_call + tool_call_update status:"failed")
-			// so clients can distinguish "we don't know what happened" from real
-			// model output, rather than masquerading the watchdog as agent text.
-			const IDLE_TIMEOUT_MS = Number.parseInt(process.env.DIRAC_ACP_IDLE_TIMEOUT_MS ?? "60000", 10) || 60_000
-			let idleTimer: NodeJS.Timeout | undefined
-			const resetIdleTimer = () => {
-				if (idleTimer) clearTimeout(idleTimer)
-				idleTimer = setTimeout(async () => {
-					// First check: bail if another path (cancel, terminal message) already
-					// claimed the slot before this callback was dequeued.
-					if (promptResolved.value) return
-					// Prepare everything before committing — no await yet, so no race here.
-					const seconds = Math.round(IDLE_TIMEOUT_MS / 1000)
-					const message = `Agent stalled — no progress for ${seconds}s. Likely an upstream provider hang.`
-					const stallToolCallId = crypto.randomUUID()
-					// Second check + atomic claim: still synchronous, no yield since the
-					// first check above. The double-check is a belt-and-suspenders guard
-					// against future refactors introducing a yield between the two checks.
-					// cancel() now claims the flag before awaiting cancelTask(), so if
-					// cancel arrived between the timer expiry and this callback running,
-					// this check will catch it.
-					if (promptResolved.value) return
-					promptResolved.value = true
-					Logger.error(`[DiracAgent] Prompt stalled — no message activity for ${seconds}s`)
-					try {
-						await this.emitSessionUpdate(params.sessionId, {
-							sessionUpdate: "tool_call",
-							toolCallId: stallToolCallId,
-							title: "Agent stalled",
-							kind: "other",
-							status: "in_progress",
-							rawInput: { reason: "idle-timeout", timeoutSeconds: seconds },
-						})
-						await this.emitSessionUpdate(params.sessionId, {
-							sessionUpdate: "tool_call_update",
-							toolCallId: stallToolCallId,
-							status: "failed",
-							rawOutput: { reason: "idle-timeout", message },
-						})
-					} catch (e) {
-						Logger.error("[DiracAgent] Failed to emit stall update:", e)
-					} finally {
-						resolvePrompt({ stopReason: "end_turn" })
-					}
-				}, IDLE_TIMEOUT_MS)
-			}
-			resetIdleTimer()
-			cleanupFunctions.push(() => {
-				if (idleTimer) clearTimeout(idleTimer)
-			})
-
 			// Subscribe to diracMessages changes after task is created.
 			// Capture the task reference once so that if cancelTask() triggers a
 			// Controller.initTask() reinit (which replaces controller.task with a
@@ -1091,7 +1038,6 @@ export class DiracAgent implements acp.Agent {
 			const task = controller.task
 			if (task) {
 				const onDiracMessagesChanged = (change: DiracMessageChange) => {
-					resetIdleTimer()
 					this.handleDiracMessagesChanged(params.sessionId, sessionState, change, resolvePrompt, promptResolved).catch(
 						(error) => this.handleUnhandledHandlerError(params.sessionId, promptResolved, resolvePrompt, error),
 					)
@@ -1104,8 +1050,8 @@ export class DiracAgent implements acp.Agent {
 
 				// Safety net: Task.startTask/resumeTaskFromHistory are kicked off
 				// detached by Controller.initTask, so any uncaught throw inside the
-				// task's run loop never reaches the outer try/catch below. Without
-				// this handler the only failure signal is the 60s idle watchdog.
+				// task's run loop never reaches the outer try/catch below. This
+				// handler ensures task errors surface as failures rather than hanging.
 				task.runPromise?.catch((error) => {
 					this.handleUnhandledHandlerError(params.sessionId, promptResolved, resolvePrompt, error)
 				})

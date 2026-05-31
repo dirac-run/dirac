@@ -1470,6 +1470,145 @@ describe("translateMessage - ask messages", () => {
 		})
 	})
 
+	describe("command execution output", () => {
+		// execute_command does not emit say:command_output. It mutates the
+		// ask:command message in place, carrying the command's output in
+		// multiCommandState and flipping commandCompleted false→true. These
+		// updates must surface as tool_call_update(s) so the client shows the
+		// output and a terminal completed/failed status (rather than freezing
+		// the command tool_call at "pending"/"in_progress" forever).
+		const seedRunningCommandToolCall = (toolCallId: string) => {
+			sessionState.currentToolCallId = toolCallId
+			sessionState.pendingToolCalls.set(toolCallId, {
+				toolCallId,
+				title: "Execute: echo hi",
+				kind: "execute",
+				status: "in_progress",
+			} as acp.ToolCall)
+		}
+
+		it("surfaces output and a completed status when commandCompleted is true", () => {
+			const toolCallId = "cmd-exec-1"
+			seedRunningCommandToolCall(toolCallId)
+
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo hi",
+				partial: false,
+				commandCompleted: true,
+				multiCommandState: { commands: [{ command: "echo hi", status: "completed", output: "hi\n" }] },
+			})
+
+			const result = translateMessage(message, sessionState, { existingToolCallId: toolCallId })
+
+			const completed = result.updates.find(
+				(u) => u.sessionUpdate === "tool_call_update" && (u as { status?: string }).status === "completed",
+			)
+			expect(completed).toBeDefined()
+			// The command's stdout must be present in the surfaced update.
+			expect(JSON.stringify(completed)).toContain("hi")
+			expect(sessionState.pendingToolCalls.get(toolCallId)?.status).toBe("completed")
+		})
+
+		it("reports in_progress with output while the command is still running", () => {
+			const toolCallId = "cmd-exec-2"
+			seedRunningCommandToolCall(toolCallId)
+
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo hi",
+				partial: false,
+				commandCompleted: false,
+				multiCommandState: { commands: [{ command: "echo hi", status: "running", output: "partial out\n" }] },
+			})
+
+			const result = translateMessage(message, sessionState, { existingToolCallId: toolCallId })
+
+			const update = result.updates.find(
+				(u) => u.sessionUpdate === "tool_call_update" && (u as { status?: string }).status === "in_progress",
+			)
+			expect(update).toBeDefined()
+			expect(JSON.stringify(update)).toContain("partial out")
+		})
+
+		it("marks the tool_call failed when a command failed", () => {
+			const toolCallId = "cmd-exec-3"
+			seedRunningCommandToolCall(toolCallId)
+
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "false",
+				partial: false,
+				commandCompleted: true,
+				multiCommandState: { commands: [{ command: "false", status: "failed", output: "boom\n" }] },
+			})
+
+			const result = translateMessage(message, sessionState, { existingToolCallId: toolCallId })
+
+			const failed = result.updates.find(
+				(u) => u.sessionUpdate === "tool_call_update" && (u as { status?: string }).status === "failed",
+			)
+			expect(failed).toBeDefined()
+			expect(sessionState.pendingToolCalls.get(toolCallId)?.status).toBe("failed")
+		})
+
+		it("still completes a command that produced no output", () => {
+			const toolCallId = "cmd-exec-4"
+			seedRunningCommandToolCall(toolCallId)
+
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "true",
+				partial: false,
+				commandCompleted: true,
+				multiCommandState: { commands: [{ command: "true", status: "completed", output: "" }] },
+			})
+
+			const result = translateMessage(message, sessionState, { existingToolCallId: toolCallId })
+
+			const completed = result.updates.find(
+				(u) => u.sessionUpdate === "tool_call_update" && (u as { status?: string }).status === "completed",
+			)
+			expect(completed).toBeDefined()
+		})
+
+		it("does not regress a completed command back to in_progress on a duplicate update", () => {
+			const toolCallId = "cmd-exec-5"
+			seedRunningCommandToolCall(toolCallId)
+
+			const done = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo hi",
+				partial: false,
+				commandCompleted: true,
+				multiCommandState: { commands: [{ command: "echo hi", status: "completed", output: "hi\n" }] },
+			})
+			translateMessage(done, sessionState, { existingToolCallId: toolCallId })
+
+			// A stray late "running" update for the same command must be ignored.
+			const stray = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "echo hi",
+				partial: false,
+				commandCompleted: false,
+				multiCommandState: { commands: [{ command: "echo hi", status: "completed", output: "hi\n" }] },
+			})
+			const result = translateMessage(stray, sessionState, { existingToolCallId: toolCallId })
+
+			const regressed = result.updates.find(
+				(u) => u.sessionUpdate === "tool_call_update" && (u as { status?: string }).status === "in_progress",
+			)
+			expect(regressed).toBeUndefined()
+			expect(sessionState.pendingToolCalls.get(toolCallId)?.status).toBe("completed")
+		})
+	})
+
 	describe("tool permissions", () => {
 		it("should translate ask:tool to tool_call with permission request", () => {
 			const toolInfo = {
