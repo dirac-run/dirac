@@ -1,7 +1,7 @@
 import type {
-	ChatCompletionChunk,
-	ChatCompletionToolChoiceOption,
-	ChatCompletionTool as OpenAITool,
+    ChatCompletionChunk,
+    ChatCompletionToolChoiceOption,
+    ChatCompletionTool as OpenAITool,
 } from "openai/resources/chat/completions";
 import { Logger } from "@/shared/services/Logger";
 import type { ApiStreamToolCallsChunk } from "./stream";
@@ -68,6 +68,7 @@ export class ToolCallProcessor {
 							  }
 							: {
 									...toolCallDelta,
+									call_id: toolCallState.id,
 									function: {
 										...toolCallDelta.function,
 										id: toolCallState.id,

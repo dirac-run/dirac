@@ -359,21 +359,135 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 		}
 	}
 
-	override async showReview(files: { absolutePath: string; displayPath: string; content: string }[]): Promise<void> {
+	override async showReview(
+		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
+	): Promise<void> {
 		VscodeDiffViewProvider.reviewingFiles = new Map(files.map((f) => [f.absolutePath, f.content]))
 		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)
 
-		// Open diff editors for all files in the batch
-		for (const file of files) {
-			this.editType = "modify"
-			await this.open(file.absolutePath, { displayPath: file.displayPath })
-			await this.update(file.content, true)
-			await this.scrollToFirstDiff()
-			// Small delay to ensure VS Code processes the updates
-			await new Promise((resolve) => setTimeout(resolve, 200))
-		}
+		await vscode.commands.executeCommand(
+			"vscode.changes",
+			"Review Dirac Edits",
+			files.map((file) => {
+				const absolutePath = file.absolutePath.toPosix()
+				return [
+					vscode.Uri.file(file.absolutePath),
+					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
+						query: Buffer.from(file.originalContent ?? "").toString("base64"), // original content
+					}),
+					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
+						query: Buffer.from(file.content).toString("base64"), // new content
+					}),
+				]
+			}),
+		)
+		vscode.commands.executeCommand("workbench.action.closePanel")
 	}
 
+	override async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<
+		Map<
+			string,
+			{
+				finalContent: string | undefined
+				autoFormattingEdits: string | undefined
+				userEdits: string | undefined
+			}
+		>
+	> {
+		const results = new Map<
+			string,
+			{
+				finalContent: string | undefined
+				autoFormattingEdits: string | undefined
+				userEdits: string | undefined
+			}
+		>()
+
+		const edit = new vscode.WorkspaceEdit()
+		const documents: vscode.TextDocument[] = []
+
+		for (const file of files) {
+			const uri = vscode.Uri.file(file.path)
+			await createDirectoriesForFile(file.path)
+			try {
+				await vscode.workspace.fs.stat(uri)
+			} catch (error) {
+				await vscode.workspace.fs.writeFile(uri, new Uint8Array())
+			}
+
+			const document = await vscode.workspace.openTextDocument(uri)
+			documents.push(document)
+			const range = new vscode.Range(0, 0, document.lineCount, 0)
+			edit.replace(uri, range, file.content)
+		}
+
+		await vscode.workspace.applyEdit(edit)
+
+		await Promise.all(
+			documents.map((doc) =>
+				pTimeout(doc.save(), {
+					milliseconds: 10_000,
+					message: `Failed to save document ${doc.uri.fsPath} in VS Code within 10 seconds`,
+				}),
+			),
+		)
+
+		const cwd = await (await import("@utils/path")).getCwd()
+		const { formatResponse } = await import("@core/prompts/responses")
+
+		for (let i = 0; i < files.length; i++) {
+			const file = files[i]
+			const document = documents[i]
+			const postSaveContent = document.getText()
+			const newContentEOL = file.content.includes("\r\n") ? "\r\n" : "\n"
+			const normalizedNewContent = file.content.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
+			const normalizedPostSaveContent = postSaveContent.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
+
+			let autoFormattingEdits: string | undefined
+			if (normalizedNewContent !== normalizedPostSaveContent) {
+				autoFormattingEdits = formatResponse.createPrettyPatch(
+					path.relative(cwd, file.path).replace(/\\/g, "/"),
+					normalizedNewContent,
+					normalizedPostSaveContent,
+				)
+			}
+
+			results.set(file.path, {
+				finalContent: normalizedPostSaveContent,
+				autoFormattingEdits,
+				userEdits: undefined,
+			})
+		}
+
+		return results
+	}
+
+	override async format(filePath: string): Promise<string> {
+		const uri = vscode.Uri.file(filePath)
+		try {
+			const document = await vscode.workspace.openTextDocument(uri)
+			const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", uri, {
+				insertSpaces: true,
+				tabSize: 4,
+			})
+			if (edits && edits.length > 0) {
+				const edit = new vscode.WorkspaceEdit()
+				edit.set(uri, edits)
+				await vscode.workspace.applyEdit(edit)
+				const editor = vscode.window.visibleTextEditors.find((e) => arePathsEqual(e.document.uri.fsPath, filePath))
+				if (editor) {
+					await editor.document.save()
+				} else {
+					await document.save()
+				}
+			}
+			return document.getText()
+		} catch (error) {
+			Logger.warn(`[VscodeDiffViewProvider] Format failed for ${filePath}: ${error}`)
+			const document = await vscode.workspace.openTextDocument(uri)
+			return document.getText()
+		}
+	}
 	override async hideReview(): Promise<void> {
 		VscodeDiffViewProvider.reviewingFiles.clear()
 		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)

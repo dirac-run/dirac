@@ -75,3 +75,38 @@ export function preserveEscaping(originalText: string, newText: string): string 
 
 	return result
 }
+
+
+/**
+ * Regex for detecting file paths:
+ * - Optional ./ or ../ or / or [A-Z]:\
+ * - Followed by alphanumeric, underscore, hyphen, dot, or slash
+ * - Ending with a dot and 2-5 alphanumeric characters (extension)
+ * - OR common extensionless files (Dockerfile, Makefile, LICENSE, etc.)
+ */
+export const PATH_REGEX =
+	/(?:\.\.?\/|(?:\/|[a-zA-Z]:\\))?[a-zA-Z0-9._\-\/]+(?:\.[a-zA-Z0-9]{2,5}|(?:\/|^)(?:Dockerfile|Makefile|LICENSE|NOTICE|CHANGELOG|README)(?:\b|$))/g
+
+/**
+ * Extracts the first valid file path from a string.
+ * Filters out version numbers, IP addresses, and URLs.
+ */
+export function extractFirstPath(text: string | undefined): string | null {
+	if (!text) return null
+
+	const matches = text.match(PATH_REGEX)
+	if (!matches) return null
+
+	for (const match of matches) {
+		// Avoid version numbers (e.g., v1.2.3)
+		if (/^v?\d+(\.\d+)+$/.test(match)) continue
+		// Avoid IP addresses
+		if (/^\d{1,3}(\.\d{1,3}){3}$/.test(match)) continue
+		// Avoid things that are already URLs
+		if (match.includes("://")) continue
+
+		return match
+	}
+
+	return null
+}

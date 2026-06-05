@@ -140,6 +140,8 @@ export function cleanContentBlock(block: DiracContent): Anthropic.ContentBlock {
 		"reasoning_details" in block ||
 		"call_id" in block ||
 		"summary" in block ||
+		"isComplete" in block ||
+		"isNativeToolCall" in block ||
 		(block.type !== "thinking" && "signature" in block)
 
 	if (!hasDiracFields) {
@@ -147,7 +149,7 @@ export function cleanContentBlock(block: DiracContent): Anthropic.ContentBlock {
 	}
 
 	// Removes Dirac-specific fields & the signature field that's added for Gemini.
-	const { reasoning_details, call_id, summary, ...rest } = block as any
+	const { reasoning_details, call_id, summary, isComplete, isNativeToolCall, ...rest } = block as any
 
 	// Remove signature from non-thinking blocks that were added for Gemini
 	if (block.type !== "thinking" && rest.signature) {

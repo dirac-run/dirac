@@ -1,4 +1,6 @@
 import { serializeError } from "serialize-error"
+import { checkContextWindowExceededError } from "../../core/context/context-management/context-error-handling"
+
 import { DIRAC_ACCOUNT_AUTH_ERROR_MESSAGE } from "../../shared/DiracAccount"
 
 export enum DiracErrorType {
@@ -6,6 +8,8 @@ export enum DiracErrorType {
 	Network = "network",
 	RateLimit = "rateLimit",
 	Balance = "balance",
+	ContextWindowExceeded = "contextWindowExceeded",
+
 }
 
 interface ErrorDetails {
@@ -161,6 +165,11 @@ export class DiracError extends Error {
 			if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(lowerMessage))) {
 				return DiracErrorType.RateLimit
 			}
+
+			if (checkContextWindowExceededError(err._error)) {
+				return DiracErrorType.ContextWindowExceeded
+			}
+
 		}
 
 		return undefined

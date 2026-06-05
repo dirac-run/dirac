@@ -40,9 +40,10 @@ type BuildArgs = {
 
 	// callbacks for single-root TaskCheckpointManager
 	updateTaskHistory: (historyItem: any) => Promise<any[]>
-	say: (...args: any[]) => Promise<number | undefined>
+	taskMessenger: import("../../core/task/TaskMessenger").TaskMessenger
 	cancelTask: () => Promise<void>
 	postStateToWebview: () => Promise<void>
+	resetTransientState: () => Promise<void>
 
 	// initial state for single-root
 	initialConversationHistoryDeletedRange?: [number, number]
@@ -65,9 +66,10 @@ export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 		taskState,
 		workspaceManager,
 		updateTaskHistory,
-		say,
+		taskMessenger,
 		cancelTask,
 		postStateToWebview,
+		resetTransientState,
 		initialConversationHistoryDeletedRange,
 		initialCheckpointManagerErrorMessage,
 		stateManager,
@@ -93,9 +95,11 @@ export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 		},
 		{
 			updateTaskHistory,
-			say,
+			taskMessenger,
 			cancelTask,
 			postStateToWebview,
+			resetTransientState,
+
 		},
 		{
 			conversationHistoryDeletedRange: initialConversationHistoryDeletedRange,

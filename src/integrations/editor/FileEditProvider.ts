@@ -151,5 +151,36 @@ export class FileEditProvider extends DiffViewProvider {
 		}
 	}
 
+	override async applyAndSaveBatchSilently(
+		files: { path: string; content: string }[]
+	): Promise<Map<string, {
+		finalContent: string | undefined
+		autoFormattingEdits: string | undefined
+		userEdits: string | undefined
+	}>> {
+		const results = new Map()
+		for (const file of files) {
+			results.set(file.path, await this.applyAndSaveSilently(file.path, file.content))
+		}
+		return results
+	}
 
+
+	override async format(path: string): Promise<string> {
+		const { exec } = await import("child_process")
+		const { promisify } = await import("util")
+		const execAsync = promisify(exec)
+
+		try {
+			await execAsync(`biome check --write "${path}"`, {
+				cwd: process.cwd(),
+				timeout: 10_000,
+			})
+		} catch (error) {
+			// biome may not be installed or may fail — return content as-is
+			Logger.warn(`[FileEditProvider] Format failed for ${path}: ${error}`)
+		}
+
+		return await fs.readFile(path, "utf-8")
+	}
 }

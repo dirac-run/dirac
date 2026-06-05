@@ -10,6 +10,7 @@ import { Logger } from "@/shared/services/Logger"
 import { telemetryService } from "../../../services/telemetry"
 import { BrowserSettings as SharedBrowserSettings } from "../../../shared/BrowserSettings"
 import { Controller } from ".."
+import { ToolRegistry } from "@core/task/tools/registry/ToolRegistry"
 
 /**
  * Updates multiple extension settings in a single request
@@ -259,6 +260,13 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 
 		if (request.writePromptMetadataDirectory !== undefined) {
 			controller.stateManager.setGlobalState("writePromptMetadataDirectory", request.writePromptMetadataDirectory)
+		}
+
+		if (request.toolToggles !== undefined) {
+			const toggles = JSON.parse(request.toolToggles) as Record<string, boolean>
+			controller.stateManager.setGlobalState("toolToggles", toggles)
+			ToolRegistry.getInstance().loadToggles(toggles)
+			controller.task?.markToolsDirty("tool_toggles_changed")
 		}
 
 		// Post updated state to webview

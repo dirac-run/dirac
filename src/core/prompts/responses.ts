@@ -44,14 +44,14 @@ export const formatResponse = {
 		`Command execution blocked by DIRAC_COMMAND_PERMISSIONS: ${reason}. You must try a different approach or ask the user to update the permission settings.`,
 
 	noToolsUsed: (usingNativeToolCalls: boolean) =>
-		`[ERROR] You did not use a tool in your previous response! Please retry with a tool use.
-
+		`[PROTOCOL REMINDER] Your previous response did not include any tool calls. In ACT MODE, every response MUST include at least one tool call to move the task forward.
 
 # Next Steps
+- If you have completed the user's task, use the 'attempt_completion' tool.
+- If you require additional information from the user, use the 'ask_followup_question' tool.
+- If you want to provide an interim update or narration, use the 'say' tool.
+- Otherwise, proceed with the next step of the task using the appropriate tool.
 
-If you have completed the user's task, use the attempt_completion tool. 
-If you require additional information from the user, use the ask_followup_question tool. 
-Otherwise, if you have not completed the task and do not need additional information, then proceed with the next step of the task. 
 (This is an automated message, so do not respond to it conversationally.)`,
 
 	tooManyMistakes: (feedback?: string) =>

@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { ApiHandler } from "@core/api"
-import { DiracApiReqInfo, DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage } from "@shared/ExtensionMessage"
 import cloneDeep from "clone-deep"
 import { Logger } from "@/shared/services/Logger"
 import { getContextWindowInfo } from "./context-window-utils"
@@ -64,10 +64,11 @@ export class ContextManager {
 		thresholdPercentage?: number,
 	): boolean {
 		if (previousApiReqIndex >= 0) {
-			const previousRequestText = diracMessages[previousApiReqIndex]?.text
-			if (previousRequestText) {
+			const previousRequest = diracMessages[previousApiReqIndex]
+			const previousRequestStatus = previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
+			if (previousRequestStatus) {
 				try {
-					const { tokensIn, tokensOut, cacheWrites, cacheReads }: DiracApiReqInfo = JSON.parse(previousRequestText)
+					const { tokensIn, tokensOut, cacheWrites, cacheReads } = previousRequestStatus || {}
 					const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 
 					const { contextWindow, maxAllowedSize } = getContextWindowInfo(api)
@@ -103,7 +104,7 @@ export class ContextManager {
 		} else {
 			// Find all API request indices
 			const apiReqIndices = diracMessages
-				.map((msg, index) => (msg.say === "api_req_started" ? index : -1))
+				.map((msg, index) => (msg.content.type === "api_status" ? index : -1))
 				.filter((index) => index !== -1)
 
 			// We want the second-to-last API request (the one that caused summarization)
@@ -111,10 +112,11 @@ export class ContextManager {
 		}
 
 		if (targetIndex >= 0) {
-			const targetRequestText = diracMessages[targetIndex]?.text
-			if (targetRequestText) {
+			const targetRequest = diracMessages[targetIndex]
+			const targetRequestStatus = targetRequest?.content.type === "api_status" ? targetRequest.content.status : undefined
+			if (targetRequestStatus) {
 				try {
-					const { tokensIn, tokensOut, cacheWrites, cacheReads }: DiracApiReqInfo = JSON.parse(targetRequestText)
+					const { tokensIn, tokensOut, cacheWrites, cacheReads } = targetRequestStatus || {}
 					const tokensUsed = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 
 					const { contextWindow } = getContextWindowInfo(api)
@@ -148,9 +150,10 @@ export class ContextManager {
 		if (!useAutoCondense) {
 			// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 			if (previousApiReqIndex >= 0) {
-				const previousRequestText = diracMessages[previousApiReqIndex]?.text
-				if (previousRequestText) {
-					const { tokensIn, tokensOut, cacheWrites, cacheReads }: DiracApiReqInfo = JSON.parse(previousRequestText)
+				const previousRequest = diracMessages[previousApiReqIndex]
+				const previousRequestStatus = previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
+				if (previousRequestStatus) {
+					const { tokensIn, tokensOut, cacheWrites, cacheReads } = previousRequestStatus || {}
 					const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 					const { maxAllowedSize } = getContextWindowInfo(api)
 
@@ -289,6 +292,19 @@ export class ContextManager {
 	 * and that tool_result blocks immediately follow their corresponding tool_use blocks
 	 */
 	private ensureToolResultsFollowToolUse(messages: Anthropic.Messages.MessageParam[]): void {
+		// 1. Ensure first message (if user) doesn't have tool_results
+		const firstMessage = messages[0]
+		if (firstMessage && firstMessage.role === "user" && Array.isArray(firstMessage.content)) {
+			const hasToolResults = firstMessage.content.some((block) => block.type === "tool_result")
+			if (hasToolResults) {
+				const clonedMessage = cloneDeep(firstMessage)
+				clonedMessage.content = (firstMessage.content as Anthropic.Messages.ContentBlockParam[]).filter(
+					(block) => block.type !== "tool_result",
+				)
+				messages[0] = clonedMessage
+			}
+		}
+
 		for (let i = 0; i < messages.length - 1; i++) {
 			const message = messages[i]
 
@@ -303,11 +319,6 @@ export class ContextManager {
 				if (block.type === "tool_use" && block.id) {
 					toolUseIds.push(block.id)
 				}
-			}
-
-			// Skip if no tool_use blocks found
-			if (toolUseIds.length === 0) {
-				continue
 			}
 
 			const nextMessage = messages[i + 1]
@@ -347,9 +358,11 @@ export class ContextManager {
 						break
 					}
 				}
-				if (!needsUpdate && expectedIndex < toolResultMap.size) {
+				if (!needsUpdate && (expectedIndex < toolResultMap.size || expectedIndex < toolUseIds.length)) {
 					needsUpdate = true
 				}
+			} else if (toolUseIds.length > 0) {
+				needsUpdate = true
 			}
 
 			// Add missing tool_results

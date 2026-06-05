@@ -40,35 +40,38 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
 	}
 
 	messages.forEach((message) => {
-		if (
-			message.type === "say" &&
-			(message.say === "api_req_started" || message.say === "deleted_api_reqs" || message.say === "subagent_usage") &&
-			message.text
-		) {
-			try {
-				const parsedData = JSON.parse(message.text)
-				const { tokensIn, tokensOut, cacheWrites, cacheReads, cost, reasoningTokens } = parsedData
+		if (message.content.type === "api_status") {
+			const { tokensIn, tokensOut, cacheWrites, cacheReads, cost, reasoningTokens } = message.content.status
 
-				if (typeof tokensIn === "number") {
-					result.totalTokensIn += tokensIn
-				}
-				if (typeof tokensOut === "number") {
-					result.totalTokensOut += tokensOut
-				}
-				if (typeof cacheWrites === "number") {
-					result.totalCacheWrites = (result.totalCacheWrites ?? 0) + cacheWrites
-				}
-				if (typeof cacheReads === "number") {
-					result.totalCacheReads = (result.totalCacheReads ?? 0) + cacheReads
-				}
-				if (typeof cost === "number") {
-					result.totalCost += cost
-				}
-				if (typeof reasoningTokens === "number") {
-					result.totalReasoningTokens += reasoningTokens
-				}
+			if (typeof tokensIn === "number") {
+				result.totalTokensIn += tokensIn
+			}
+			if (typeof tokensOut === "number") {
+				result.totalTokensOut += tokensOut
+			}
+			if (typeof cacheWrites === "number") {
+				result.totalCacheWrites = (result.totalCacheWrites ?? 0) + cacheWrites
+			}
+			if (typeof cacheReads === "number") {
+				result.totalCacheReads = (result.totalCacheReads ?? 0) + cacheReads
+			}
+			if (typeof cost === "number") {
+				result.totalCost += cost
+			}
+			if (typeof reasoningTokens === "number") {
+				result.totalReasoningTokens += reasoningTokens
+			}
+		} else if (message.content.type === "card" && message.content.card.header === "Subagent Usage") {
+			// Handle subagent usage cards
+			try {
+				const usage = JSON.parse(message.content.card.body || "{}")
+				if (usage.tokensIn) result.totalTokensIn += usage.tokensIn
+				if (usage.tokensOut) result.totalTokensOut += usage.tokensOut
+				if (usage.cacheWrites) result.totalCacheWrites = (result.totalCacheWrites ?? 0) + usage.cacheWrites
+				if (usage.cacheReads) result.totalCacheReads = (result.totalCacheReads ?? 0) + usage.cacheReads
+				if (usage.cost) result.totalCost += usage.cost
 			} catch {
-				// Ignore JSON parse errors
+				// Ignore parse errors
 			}
 		}
 	})
@@ -88,15 +91,11 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
 export function getLastApiReqTotalTokens(messages: DiracMessage[]): number {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i]
-		if (msg.type === "say" && msg.say === "api_req_started" && msg.text) {
-			try {
-				const { tokensIn, tokensOut, cacheWrites, cacheReads } = JSON.parse(msg.text)
-				const total = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
-				if (total > 0) {
-					return total
-				}
-			} catch {
-				// Ignore JSON parse errors, continue searching
+		if (msg.content.type === "api_status") {
+			const info = msg.content.status
+			const total = (info.tokensIn || 0) + (info.tokensOut || 0) + (info.cacheWrites || 0) + (info.cacheReads || 0)
+			if (total > 0) {
+				return total
 			}
 		}
 	}
@@ -115,15 +114,11 @@ export function getLastApiReqTotalTokens(messages: DiracMessage[]): number {
 export function getLastApiReqInfo(messages: DiracMessage[]): DiracApiReqInfo | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i]
-		if (msg.type === "say" && msg.say === "api_req_started" && msg.text) {
-			try {
-				const info: DiracApiReqInfo = JSON.parse(msg.text)
-				const total = (info.tokensIn || 0) + (info.tokensOut || 0) + (info.cacheWrites || 0) + (info.cacheReads || 0)
-				if (total > 0) {
-					return info
-				}
-			} catch {
-				// Ignore JSON parse errors, continue searching
+		if (msg.content.type === "api_status") {
+			const info = msg.content.status
+			const total = (info.tokensIn || 0) + (info.tokensOut || 0) + (info.cacheWrites || 0) + (info.cacheReads || 0)
+			if (total > 0) {
+				return info
 			}
 		}
 	}

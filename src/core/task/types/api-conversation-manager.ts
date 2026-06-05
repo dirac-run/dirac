@@ -20,8 +20,7 @@ export interface ApiConversationManagerDependencies {
 	taskId: string
 	ulid: string
 	cwd: string
-	say: TaskMessenger["say"]
-	ask: TaskMessenger["ask"]
+	taskMessenger: TaskMessenger
 	postStateToWebview: () => Promise<void>
 	diffViewProvider: DiffViewProvider
 	toolExecutor: ToolExecutor
@@ -34,6 +33,10 @@ export interface ApiConversationManagerDependencies {
 	) => Promise<[DiracContent[], string, boolean, SkillMetadata[], boolean, string?]>
 	getCurrentProviderInfo: () => ApiProviderInfo
 	getEnvironmentDetails: (includeFileDetails?: boolean) => Promise<string>
+	runUserPromptSubmitHook: (
+		userContent: DiracContent[],
+		context: "initial_task" | "resume" | "feedback",
+	) => Promise<{ cancel?: boolean; wasCancelled?: boolean; contextModification?: string; errorMessage?: string }>
 	writePromptMetadataArtifacts: (params: {
 		systemPrompt: string
 		providerInfo: ApiProviderInfo

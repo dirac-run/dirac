@@ -390,6 +390,7 @@ message UpdateSettingsRequest {
   optional bool write_prompt_metadata_enabled = 42;
   optional string write_prompt_metadata_directory = 43;
   optional bool auto_approve_all_toggled = 44;
+  optional string tool_toggles = 45;
 }
 
 message UpdateTerminalConnectionTimeoutRequest {

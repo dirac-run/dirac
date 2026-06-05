@@ -16,7 +16,14 @@ export type GrpcCancel = {
 	request_id: string // ID of the request to cancel
 }
 
-export type DiracAskResponse = "yesButtonClicked" | "noButtonClicked" | "messageResponse" | "editButtonClicked" | "viewButtonClicked" | "undoButtonClicked"
+export enum DiracAskResponse {
+	APPROVE = "approve",
+	REJECT = "reject",
+	MESSAGE = "message",
+	EDIT = "edit",
+	VIEW = "view",
+	UNDO = "undo",
+}
 
 export type DiracCheckpointRestore = "task" | "workspace" | "taskAndWorkspace"
 

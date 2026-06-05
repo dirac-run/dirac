@@ -7,6 +7,7 @@ import { getSkillsDirectoriesForScan } from "@/core/storage/disk"
 import { HostProvider } from "@/hosts/host-provider"
 import { fileExistsAtPath, isDirectory } from "@/utils/fs"
 import { Controller } from ".."
+import { BUILTIN_SKILLS } from "@core/context/instructions/user-instructions/skills"
 
 /**
  * Scan a directory for skill subdirectories containing SKILL.md files.
@@ -94,6 +95,21 @@ export async function refreshSkills(controller: Controller): Promise<RefreshedSk
 					globalSkillsMap.set(skill.path, skill)
 				}
 			}
+		}
+	}
+
+	// Add built-in skills that ship with the product
+	for (const builtinSkill of BUILTIN_SKILLS) {
+		if (!globalSkillsMap.has(builtinSkill.path)) {
+			globalSkillsMap.set(
+				builtinSkill.path,
+				SkillInfo.create({
+					name: builtinSkill.name,
+					description: builtinSkill.description,
+					path: builtinSkill.path,
+					enabled: true,
+				}),
+			)
 		}
 	}
 

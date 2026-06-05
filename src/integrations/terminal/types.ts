@@ -311,7 +311,7 @@ export interface ActiveBackgroundCommand {
  * Response from an ask() call
  */
 export interface AskResponse {
-	response: string // "yesButtonClicked" | "noButtonClicked" | "messageResponse"
+	response: string // DiracAskResponse.APPROVE | DiracAskResponse.REJECT | DiracAskResponse.MESSAGE
 	text?: string
 	images?: string[]
 	files?: string[]
@@ -322,23 +322,19 @@ export interface AskResponse {
  * These are bound methods from the Task class that allow CommandExecutor
  * to update UI and state without owning that state directly.
  */
+import { TaskMessenger } from "../../core/task/TaskMessenger"
 export interface CommandExecutorCallbacks {
-	/** Display a message in the chat UI (non-blocking) */
-	say: (type: string, text?: string, images?: string[], files?: string[], partial?: boolean) => Promise<number | undefined>
-	/**
-	 * Ask the user a question and wait for response (blocking)
-	 * This is used for "Proceed While Running" flow where we need to wait for user input
-	 */
-	ask: (type: string, text?: string, partial?: boolean) => Promise<AskResponse>
+	/** Task messenger for UI interaction */
+	taskMessenger: TaskMessenger
 	/** Update the background command running state in the controller */
 	updateBackgroundCommandState: (running: boolean) => void
 	/**
 	 * Update a dirac message by index
 	 * Supports updating commandCompleted status and/or text content
 	 */
-	updateDiracMessage: (index: number, updates: { commandCompleted?: boolean; text?: string }) => Promise<void>
+	updateDiracMessage: (index: number, updates: Partial<import("@shared/ExtensionMessage").DiracMessage>) => Promise<void>
 	/** Get dirac messages array */
-	getDiracMessages: () => Array<{ ask?: string; say?: string; text?: string }>
+	getDiracMessages: () => Array<import("@shared/ExtensionMessage").DiracMessage>
 	/** Add content to user message for next API request */
 	addToUserMessageContent: (content: { type: string; text: string }) => void
 	/** Get environment variables for the specified directory */

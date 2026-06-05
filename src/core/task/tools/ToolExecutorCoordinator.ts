@@ -1,163 +1,197 @@
 import type { ToolUse } from "@core/assistant-message"
+import { ToolSkippedByUserMessage } from "./types/ToolSkippedByUserMessage"
+import { IDiracTool } from "./interfaces/IDiracTool"
+import { CardStatus } from "../../../shared/ExtensionMessage"
+
+import { DiracContext } from "./context/DiracContext"
+import { SurfaceAdapter } from "./adapters/SurfaceAdapter"
+
 import { DiracDefaultTool } from "@/shared/tools"
+import { createUIHelpers } from "./types/UIHelpers"
 import type { ToolResponse } from "../index"
-import { AskFollowupQuestionToolHandler } from "./handlers/AskFollowupQuestionToolHandler"
-import { AttemptCompletionHandler } from "./handlers/AttemptCompletionHandler"
-import { BrowserToolHandler } from "./handlers/BrowserToolHandler"
-import { CondenseHandler } from "./handlers/CondenseHandler"
-import { EditFileToolHandler } from "./handlers/EditFileToolHandler"
-import { DiagnosticsScanToolHandler } from "./handlers/DiagnosticsScanToolHandler"
-import { ExecuteCommandToolHandler } from "./handlers/ExecuteCommandToolHandler"
-import { FindSymbolReferencesToolHandler } from "./handlers/FindSymbolReferencesToolHandler"
-import { GenerateExplanationToolHandler } from "./handlers/GenerateExplanationToolHandler"
-import { GetFileSkeletonToolHandler } from "./handlers/GetFileSkeletonToolHandler"
-import { GetFunctionToolHandler } from "./handlers/GetFunctionToolHandler"
-import { ListFilesToolHandler } from "./handlers/ListFilesToolHandler"
-import { NewTaskHandler } from "./handlers/NewTaskHandler"
-import { PlanModeRespondHandler } from "./handlers/PlanModeRespondHandler"
-import { ReadFileToolHandler } from "./handlers/ReadFileToolHandler"
-import { ReplaceSymbolToolHandler } from "./handlers/ReplaceSymbolToolHandler"
-import { RenameSymbolToolHandler } from "./handlers/RenameSymbolToolHandler"
-import { ReportBugHandler } from "./handlers/ReportBugHandler"
-import { SearchFilesToolHandler } from "./handlers/SearchFilesToolHandler"
-import { UseSubagentsToolHandler } from "./handlers/SubagentToolHandler"
-import { SummarizeTaskHandler } from "./handlers/SummarizeTaskHandler"
-import { UseSkillToolHandler } from "./handlers/UseSkillToolHandler"
-import { ListSkillsToolHandler } from "./handlers/ListSkillsToolHandler"
 
-import { WriteToFileToolHandler } from "./handlers/WriteToFileToolHandler"
 import { AgentConfigLoader } from "./subagent/AgentConfigLoader"
-import { ToolValidator } from "./ToolValidator"
 import type { TaskConfig } from "./types/TaskConfig"
-import type { StronglyTypedUIHelpers } from "./types/UIHelpers"
 
-export interface IToolHandler {
-	readonly name: DiracDefaultTool
-	execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse>
-	getDescription(block: ToolUse): string
-}
-
-export interface IPartialBlockHandler {
-	handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void>
-}
-
-export interface IFullyManagedTool extends IToolHandler, IPartialBlockHandler {
-	// Marker interface for tools that handle their own complete approval flow
-}
-
-/**
- * A wrapper class that allows a single tool handler to be registered under multiple names.
- * This provides proper typing for tools that share the same implementation logic.
- */
-export class SharedToolHandler implements IFullyManagedTool {
-	constructor(
-		public readonly name: DiracDefaultTool,
-		private baseHandler: IFullyManagedTool,
-	) {}
-
-	getDescription(block: ToolUse): string {
-		return this.baseHandler.getDescription(block)
-	}
-
-	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
-		return this.baseHandler.execute(config, block)
-	}
-
-	async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
-		return this.baseHandler.handlePartialBlock(block, uiHelpers)
-	}
-}
 
 /**
  * Coordinates tool execution by routing to registered handlers.
- * Falls back to legacy switch for unregistered tools.
+ * Throws an error for unregistered tools.
  */
 export class ToolExecutorCoordinator {
-	private handlers = new Map<string, IToolHandler>()
-	private dynamicSubagentHandlers = new Map<string, IToolHandler>()
+    constructor() { }
 
-	private readonly toolHandlersMap: Record<DiracDefaultTool, (v: ToolValidator) => IToolHandler | undefined> = {
-		[DiracDefaultTool.ASK]: (_v: ToolValidator) => new AskFollowupQuestionToolHandler(),
-		[DiracDefaultTool.ATTEMPT]: (_v: ToolValidator) => new AttemptCompletionHandler(),
-		[DiracDefaultTool.BASH]: (v: ToolValidator) => new ExecuteCommandToolHandler(v),
-		[DiracDefaultTool.FILE_READ]: (v: ToolValidator) => new ReadFileToolHandler(v),
-		[DiracDefaultTool.FILE_NEW]: (v: ToolValidator) => new WriteToFileToolHandler(v),
-		[DiracDefaultTool.SEARCH]: (v: ToolValidator) => new SearchFilesToolHandler(v),
-		[DiracDefaultTool.LIST_FILES]: (v: ToolValidator) => new ListFilesToolHandler(v),
-		[DiracDefaultTool.GET_FUNCTION]: (v: ToolValidator) => new GetFunctionToolHandler(v),
-		[DiracDefaultTool.GET_FILE_SKELETON]: (v: ToolValidator) => new GetFileSkeletonToolHandler(v),
-		[DiracDefaultTool.FIND_SYMBOL_REFERENCES]: (v: ToolValidator) => new FindSymbolReferencesToolHandler(v),
+    private modularTools = new Map<string, IDiracTool>()
 
-		[DiracDefaultTool.EDIT_FILE]: (v: ToolValidator) => new EditFileToolHandler(v),
-		[DiracDefaultTool.DIAGNOSTICS_SCAN]: (v: ToolValidator) => new DiagnosticsScanToolHandler(v),
-		[DiracDefaultTool.REPLACE_SYMBOL]: (v: ToolValidator) => new ReplaceSymbolToolHandler(v),
-		[DiracDefaultTool.RENAME_SYMBOL]: (v: ToolValidator) => new RenameSymbolToolHandler(v),
-		[DiracDefaultTool.BROWSER]: (_v: ToolValidator) => new BrowserToolHandler(),
 
-		[DiracDefaultTool.NEW_TASK]: (_v: ToolValidator) => new NewTaskHandler(),
-		[DiracDefaultTool.PLAN_MODE]: (_v: ToolValidator) => new PlanModeRespondHandler(),
-		[DiracDefaultTool.CONDENSE]: (_v: ToolValidator) => new CondenseHandler(),
-		[DiracDefaultTool.SUMMARIZE_TASK]: (_v: ToolValidator) => new SummarizeTaskHandler(_v),
-		[DiracDefaultTool.REPORT_BUG]: (_v: ToolValidator) => new ReportBugHandler(),
-		[DiracDefaultTool.NEW_RULE]: (v: ToolValidator) =>
-			new SharedToolHandler(DiracDefaultTool.NEW_RULE, new WriteToFileToolHandler(v)),
-		[DiracDefaultTool.GENERATE_EXPLANATION]: (_v: ToolValidator) => new GenerateExplanationToolHandler(),
-		[DiracDefaultTool.USE_SKILL]: (_v: ToolValidator) => new UseSkillToolHandler(),
-		[DiracDefaultTool.LIST_SKILLS]: (_v: ToolValidator) => new ListSkillsToolHandler(),
-		[DiracDefaultTool.USE_SUBAGENTS]: (_v: ToolValidator) => new UseSubagentsToolHandler(),
-	}
+    async handlePartialBlock(block: ToolUse, config: TaskConfig): Promise<void> {
+        const modularTool = this.modularTools.get(block.name)
+        if (modularTool && "handlePartialBlock" in modularTool) {
+            const uiHelpers = createUIHelpers(config)
+            await (modularTool as any).handlePartialBlock(block, uiHelpers)
+        }
+    }
 
-	/**
-	 * Register a tool handler
-	 */
-	register(handler: IToolHandler): void {
-		this.handlers.set(handler.name, handler)
-	}
+    registerModularTool(tool: IDiracTool): void {
+        const spec = tool.spec()
+        const name = spec.name
+        if (name) {
+            this.modularTools.set(name, tool)
+        }
+    }
 
-	registerByName(toolName: DiracDefaultTool, validator: ToolValidator): void {
-		const handler = this.toolHandlersMap[toolName]?.(validator)
-		if (handler) {
-			this.register(handler)
-		}
-	}
 
-	/**
-	 * Check if a handler is registered for the given tool
-	 */
-	has(toolName: string): boolean {
-		return this.getHandler(toolName) !== undefined
-	}
+    has(toolName: string): boolean {
+        if (this.modularTools.has(toolName)) {
+            return true
+        }
 
-	/**
-	 * Get a handler for the given tool name
-	 */
-	getHandler(toolName: string): IToolHandler | undefined {
-		const staticHandler = this.handlers.get(toolName)
-		if (staticHandler) {
-			return staticHandler
-		}
+        return AgentConfigLoader.getInstance().isDynamicSubagentTool(toolName) && this.modularTools.has(DiracDefaultTool.USE_SUBAGENTS)
+    }
 
-		if (AgentConfigLoader.getInstance().isDynamicSubagentTool(toolName)) {
-			const existingHandler = this.dynamicSubagentHandlers.get(toolName)
-			if (existingHandler) {
-				return existingHandler
-			}
-			const handler = new SharedToolHandler(toolName as DiracDefaultTool, new UseSubagentsToolHandler())
-			this.dynamicSubagentHandlers.set(toolName, handler)
-			return handler
-		}
 
-		return undefined
-	}
+    async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
+        const modularTool = this.modularTools.get(block.name)
 
-	/**
-	 * Execute a tool through its registered handler
-	 */
-	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
-		const handler = this.getHandler(block.name)
-		if (!handler) {
-			throw new Error(`No handler registered for tool: ${block.name}`)
-		}
-		return handler.execute(config, block)
-	}
+        if (!modularTool && AgentConfigLoader.getInstance().isDynamicSubagentTool(block.name)) {
+            const subagentTool = this.modularTools.get(DiracDefaultTool.USE_SUBAGENTS)
+            if (subagentTool) {
+                return this.executeModularTool(subagentTool, config, block)
+            }
+        }
+
+        if (modularTool) {
+            return this.executeModularTool(modularTool, config, block)
+        }
+
+        throw new Error(`No modular tool registered for: ${block.name}`)
+    }
+
+    private async executeModularTool(tool: IDiracTool, config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
+        const startTime = Date.now()
+
+        // 1. Initialize Tool Environment (Surface Adapter)
+        const env = new SurfaceAdapter(config, block.name)
+
+        // 2. Load Context
+        await (env.context as DiracContext).load()
+
+        // 3. Filter (Surface Check)
+        const supported = tool.supportedSurfaces()
+        const currentSurface = config.vscodeTerminalExecutionMode === "vscodeTerminal" ? "ide" : "cli"
+
+        if (supported.length > 0 && !supported.includes("all") && !supported.includes(currentSurface as any)) {
+            const error = new Error(`Surface mismatch: ${currentSurface}`)
+            return `Tool '${block.name}' is not supported on the current surface (${currentSurface}).`
+        }
+
+        // 4. Pre-tool Hooks
+        try {
+            const { ToolHookUtils } = await import("./utils/ToolHookUtils")
+            await ToolHookUtils.runPreToolUseIfEnabled(config, block)
+        } catch (error: any) {
+            const { PreToolUseHookCancellationError } = await import("@core/hooks/PreToolUseHookCancellationError")
+            if (error instanceof PreToolUseHookCancellationError) {
+                return `Cancelled by pre-tool hook: ${error.message}`
+            }
+            throw error
+        }
+
+        // 5. Observability: "Calling..." (Removed redundant message)
+
+        let executionSuccess = false
+        let result: any
+
+        const initialMistakeCount = config.taskState.consecutiveMistakeCount
+        try {
+            // 6. Execute (Dispatcher)
+            result = await tool.processCall(block.params, env)
+            executionSuccess = true
+
+            // 7. Persist Context
+            await (env.context as DiracContext).save()
+
+            // 8. Observability: "Finished..." (Removed redundant message)
+
+            // 9. Update Mistake Count (Success)
+            config.taskState.consecutiveMistakeCount = (config.taskState.consecutiveMistakeCount > initialMistakeCount) ? initialMistakeCount + 1 : 0;
+
+            // 10. Return Result
+            return result
+
+        } catch (error: any) {
+            executionSuccess = false
+
+            // Handle user text-based tool skip
+            if (error instanceof ToolSkippedByUserMessage) {
+                executionSuccess = false // Tool did not execute; distinguished via customMetadata.skippedByUser
+
+                // Don't increment mistake count - this is intentional user action
+                config.taskState.consecutiveMistakeCount = initialMistakeCount
+
+                // Store the user's message for forwarding to the LLM
+                config.taskState.pendingUserMessage = error.userMessage
+                config.taskState.pendingUserImages = error.userImages
+                config.taskState.pendingUserFiles = error.userFiles
+
+                // Finalize all cards as SKIPPED immediately
+                for (const card of env.getCreatedCards()) {
+                    const finalStates: CardStatus[] = [CardStatus.SUCCESS, CardStatus.ERROR, CardStatus.SKIPPED, CardStatus.ABANDONED, CardStatus.CANCELLED]
+                    if (!finalStates.includes(card.status)) {
+                        await card.finalize(CardStatus.SKIPPED)
+                    }
+                }
+
+                env.telemetry.captureCustomMetadata({ skippedByUser: true, userMessageLength: error.userMessage.length })
+                return `[Tool '${block.name}' skipped by user with message: "${error.userMessage}"]`
+            }
+
+            // 11. Update Mistake Count (Failure)
+            config.taskState.consecutiveMistakeCount = initialMistakeCount + 1
+
+            return `Execution failed: ${error.message || error}`
+        } finally {
+            // 12. Telemetry
+            const duration = Date.now() - startTime
+            const customMetadata = env.getCustomMetadata()
+
+            const { telemetryService } = await import("@/services/telemetry")
+            const { getProviderForModel } = await import("@shared/api")
+
+            const modelId = config.api.getModel().id
+            const providerId = getProviderForModel(modelId) || "unknown"
+
+            telemetryService.captureToolUsage(
+                config.ulid,
+                block.name,
+                modelId,
+                providerId,
+                false, // didAutoApprove
+                executionSuccess,
+                {
+                    ...customMetadata,
+                    durationMs: duration,
+                    modular: true,
+                },
+                block.isNativeToolCall,
+            )
+
+            // 13. Forgotten Card Protocol: Ensure all cards are finalized
+            const finalStates: CardStatus[] = [CardStatus.SUCCESS, CardStatus.ERROR, CardStatus.SKIPPED, CardStatus.ABANDONED, CardStatus.CANCELLED]
+            for (const card of env.getCreatedCards()) {
+                if (!finalStates.includes(card.status)) {
+                    let finalStatus = CardStatus.ABANDONED
+                    if (card.cleanupStrategy === "success") {
+                        finalStatus = CardStatus.SUCCESS
+                    } else if (card.cleanupStrategy === "error") {
+                        finalStatus = CardStatus.ERROR
+                    } else if (card.cleanupStrategy === "keep_running") {
+                        continue
+                    }
+
+                    await card.finalize(finalStatus)
+                }
+            }
+        }
+    }
 }

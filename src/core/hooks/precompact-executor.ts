@@ -1,6 +1,7 @@
 import { findLastIndex } from "@shared/array"
-import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
+import type { HookExecution } from "../task/types/HookExecution"
 import { Logger } from "@/shared/services/Logger"
 import type { ContextManager } from "../context/context-management/ContextManager"
 import type { MessageStateHandler } from "../task/message-state"
@@ -10,12 +11,6 @@ import type { HookModelInputContext } from "./hook-factory"
  * Active hook execution state
  * Represents a hook process that is currently running
  */
-export type HookExecution = {
-	hookName: string
-	toolName?: string
-	messageTs: number
-	abortController: AbortController
-}
 
 /**
  * Custom error class for hook cancellation
@@ -54,21 +49,16 @@ export function extractTokenUsageFromMessage(message: DiracMessage | undefined):
 		tokensOutCache: 0,
 	}
 
-	if (!message?.text) {
+	if (message?.content?.type !== DiracMessageType.API_STATUS) {
 		return defaultUsage
 	}
 
-	try {
-		const apiReqInfo = JSON.parse(message.text)
-		return {
-			tokensIn: apiReqInfo.tokensIn || 0,
-			tokensOut: apiReqInfo.tokensOut || 0,
-			tokensInCache: apiReqInfo.cacheWrites || 0,
-			tokensOutCache: apiReqInfo.cacheReads || 0,
-		}
-	} catch (error) {
-		Logger.error("[PreCompact] Failed to parse API request token usage:", error)
-		return defaultUsage
+	const apiReqInfo = message.content.status
+	return {
+		tokensIn: apiReqInfo.tokensIn || 0,
+		tokensOut: apiReqInfo.tokensOut || 0,
+		tokensInCache: apiReqInfo.cacheWrites || 0,
+		tokensOutCache: apiReqInfo.cacheReads || 0,
 	}
 }
 
@@ -145,7 +135,7 @@ export interface PreCompactHookParams {
 
 	// UI callbacks
 	/** Callback to display messages */
-	say: (type: any, text?: string, images?: string[], files?: string[], partial?: boolean) => Promise<number | undefined>
+	messenger: import("@shared/ExtensionMessage").ITaskMessenger
 	/** Callback to save state and post to webview */
 	postStateToWebview: () => Promise<void>
 
@@ -204,7 +194,7 @@ export async function executePreCompactHookWithCleanup(params: PreCompactHookPar
 		contextRawPath = contextFiles.contextRawPath
 
 		// Extract token usage from the most recent API request
-		const previousApiReqIndex = findLastIndex(params.diracMessages, (m) => m.say === "api_req_started")
+		const previousApiReqIndex = findLastIndex(params.diracMessages, (m) => m.content.type === DiracMessageType.API_STATUS)
 		const previousRequest = previousApiReqIndex !== -1 ? params.diracMessages[previousApiReqIndex] : undefined
 		const { tokensIn, tokensOut, tokensInCache, tokensOutCache } = extractTokenUsageFromMessage(previousRequest)
 
@@ -238,9 +228,10 @@ export async function executePreCompactHookWithCleanup(params: PreCompactHookPar
 				},
 			},
 			isCancellable: true,
-			say: params.say,
 			setActiveHookExecution: params.setActiveHookExecution,
 			clearActiveHookExecution: params.clearActiveHookExecution,
+			messenger: params.messenger,
+
 			messageStateHandler: params.messageStateHandler,
 			taskId: params.taskId,
 			hooksEnabled: params.hooksEnabled,

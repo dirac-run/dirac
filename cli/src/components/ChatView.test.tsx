@@ -166,10 +166,6 @@ vi.mock("@/core/controller/task/showTaskWithId", () => ({
 	showTaskWithId: vi.fn(async () => {}),
 }))
 
-vi.mock("@shared/combineCommandSequences", () => ({
-	combineCommandSequences: vi.fn((messages: unknown[]) => messages),
-}))
-
 vi.mock("@shared/getApiMetrics", () => ({
 	getApiMetrics: vi.fn(() => ({
 		totalTokensIn: 0,

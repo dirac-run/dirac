@@ -20,6 +20,9 @@ import { SymbolIndexService, SymbolLocation } from "../../services/symbol-index/
 import { ensureLocalDiracDirExists } from "../context/instructions/user-instructions/rule-helpers"
 import { refreshWorkflowToggles } from "../context/instructions/user-instructions/workflows"
 
+import { refreshToolRegistryForWorkspace } from "./tools/registry/refreshToolRegistry"
+import { ToolRegistry } from "./tools/registry/ToolRegistry"
+
 import { ContextLoaderDependencies } from "./types/context-loader"
 
 // Thresholds for automatic symbol enrichment
@@ -357,6 +360,35 @@ export class ContextLoader {
             this.dependencies.extensionPath,
             this.dependencies.sourceDir
         )
+
+        // Handle /reloadtools direct response: trigger tool registry refresh
+        if (isDirectResponse && directResponseText === "__RELOAD_TOOLS__") {
+            const primaryRootPath = this.dependencies.controller.getWorkspaceManager()?.getPrimaryRoot()?.path
+            await refreshToolRegistryForWorkspace({
+                workspaceRoot: primaryRootPath,
+                includeUserTools: true,
+            })
+            await this.dependencies.controller.postStateToWebview()
+
+            const registry = ToolRegistry.getInstance()
+            const allTools = registry.getAllTools()
+            const userTools = allTools.filter((t) => t.source !== "builtin")
+            const enabledTools = registry.getEnabledTools()
+            const userToolSummary = userTools.length > 0
+                ? userTools.map((t) => `  - ${t.id} (${t.source}) — ${enabledTools.some((e) => e.id === t.id) ? "enabled" : "disabled"}`).join("\n")
+                : "  (none found)"
+
+            const reloadResponse = [
+                `Tools reloaded. Found ${allTools.length} total tools (${userTools.length} user tools).`,
+                "",
+                "User tools:",
+                userToolSummary,
+                "",
+                "Note: User tools are disabled by default. Enable them in Settings \u2192 Tools or by toggling the switch.",
+            ].join("\n")
+
+            return { enrichedText: "", needsDiracrulesFileCheck: false, isDirectResponse: true, directResponseText: reloadResponse }
+        }
 
         // Skip automatic path and symbol detection for subsequent turns
         if (!includePathContext) {

@@ -1,7 +1,10 @@
 import { ApiHandler } from "@core/api"
 import { execSync } from "child_process"
 import { showSystemNotification } from "@/integrations/notifications"
-import { DiracApiReqCancelReason, DiracApiReqInfo } from "@/shared/ExtensionMessage"
+import { DiracApiReqCancelReason, DiracApiReqInfo, DiracMessageType } from "@/shared/ExtensionMessage"
+
+import { sendPartialMessageEvent } from "@core/controller/ui/subscribeToPartialMessage"
+import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { calculateApiCostAnthropic } from "@/utils/cost"
 import { calculateApiCostOpenAI, calculateApiCostQwen } from "@/utils/cost"
 import { MessageStateHandler } from "./message-state"
@@ -27,71 +30,96 @@ type UpdateApiReqMsgParams = {
 	api: ApiHandler
 	cancelReason?: DiracApiReqCancelReason
 	streamingFailedMessage?: string
+	author?: string
 	contextWindow?: number
 	contextUsagePercentage?: number
-	partial?: boolean
 }
 
-// update api_req_started. we can't use api_req_finished anymore since it's a unique case where it could come after a streaming message (ie in the middle of being updated or executed)
-// fortunately api_req_finished was always parsed out for the gui anyways, so it remains solely for legacy purposes to keep track of prices in tasks from history
-// (it's worth removing a few months from now)
+export const calculateCost = (params: {
+	inputTokens: number
+	outputTokens: number
+	cacheWriteTokens: number
+	cacheReadTokens: number
+	reasoningTokens: number
+	api: ApiHandler
+}): number => {
+	const info = params.api.getModel().info
+	const provider = params.api.constructor.name
+	if (provider === "ZAiHandler" || provider === "OpenAiHandler" || provider === "DeepSeekHandler") {
+		return calculateApiCostOpenAI(
+			info,
+			params.inputTokens,
+			params.outputTokens,
+			params.cacheWriteTokens,
+			params.cacheReadTokens,
+			undefined,
+			params.reasoningTokens,
+		)
+	}
+	if (provider === "QwenHandler") {
+		return calculateApiCostQwen(
+			info,
+			params.inputTokens,
+			params.outputTokens,
+			params.cacheWriteTokens,
+			params.cacheReadTokens,
+			undefined,
+			params.reasoningTokens,
+		)
+	}
+	return calculateApiCostAnthropic(
+		info,
+		params.inputTokens,
+		params.outputTokens,
+		params.cacheWriteTokens,
+		params.cacheReadTokens,
+		undefined,
+		params.reasoningTokens,
+	)
+}
+
 export const updateApiReqMsg = async (params: UpdateApiReqMsgParams) => {
 	const diracMessages = params.messageStateHandler.getDiracMessages()
-	const currentApiReqInfo: DiracApiReqInfo = JSON.parse(diracMessages[params.lastApiReqIndex].text || "{}")
+	const msg = diracMessages[params.lastApiReqIndex]
+	if (!msg || msg.content.type !== DiracMessageType.API_STATUS) {
+		throw new Error(`Message at index ${params.lastApiReqIndex} is not an api_status message`)
+	}
+
+	const currentApiReqInfo: DiracApiReqInfo = msg.content.status
 	delete currentApiReqInfo.retryStatus // Clear retry status when request is finalized
 
 	await params.messageStateHandler.updateDiracMessage(params.lastApiReqIndex, {
-		text: JSON.stringify({
-			...currentApiReqInfo, // Spread the modified info (with retryStatus removed)
-			tokensIn: params.inputTokens,
-			tokensOut: params.outputTokens,
-			reasoningTokens: params.reasoningTokens,
-			cacheWrites: params.cacheWriteTokens,
-			cacheReads: params.cacheReadTokens,
-			cost:
-				params.totalCost ??
-				(() => {
-					const info = params.api.getModel().info
-					const provider = params.api.constructor.name
-					if (provider === "ZAiHandler" || provider === "OpenAiHandler" || provider === "DeepSeekHandler") {
-						return calculateApiCostOpenAI(
-							info,
-							params.inputTokens,
-							params.outputTokens,
-							params.cacheWriteTokens,
-							params.cacheReadTokens,
-							undefined,
-							params.reasoningTokens,
-						)
-					}
-					if (provider === "QwenHandler") {
-						return calculateApiCostQwen(
-							info,
-							params.inputTokens,
-							params.outputTokens,
-							params.cacheWriteTokens,
-							params.cacheReadTokens,
-							undefined,
-							params.reasoningTokens,
-						)
-					}
-					return calculateApiCostAnthropic(
-						info,
-						params.inputTokens,
-						params.outputTokens,
-						params.cacheWriteTokens,
-						params.cacheReadTokens,
-						undefined,
-						params.reasoningTokens,
-					)
-				})(),
-			cancelReason: params.cancelReason,
-			streamingFailedMessage: params.streamingFailedMessage,
-			contextWindow: params.contextWindow,
-			contextUsagePercentage: params.contextUsagePercentage,
-		} satisfies DiracApiReqInfo),
-		partial: params.partial,
+		content: {
+			type: DiracMessageType.API_STATUS,
+
+			status: {
+				...currentApiReqInfo, // Spread the modified info (with retryStatus removed)
+				tokensIn: Math.max(params.inputTokens, currentApiReqInfo.tokensIn ?? 0),
+				tokensOut: Math.max(params.outputTokens, currentApiReqInfo.tokensOut ?? 0),
+				reasoningTokens: Math.max(params.reasoningTokens, currentApiReqInfo.reasoningTokens ?? 0),
+				cacheWrites: Math.max(params.cacheWriteTokens, currentApiReqInfo.cacheWrites ?? 0),
+				cacheReads: Math.max(params.cacheReadTokens, currentApiReqInfo.cacheReads ?? 0),
+				cost:
+					params.totalCost ??
+					calculateCost({
+						inputTokens: params.inputTokens,
+						outputTokens: params.outputTokens,
+						cacheWriteTokens: params.cacheWriteTokens,
+						cacheReadTokens: params.cacheReadTokens,
+						reasoningTokens: params.reasoningTokens,
+						api: params.api,
+					}),
+				cancelReason: params.cancelReason,
+				streamingFailedMessage: params.streamingFailedMessage,
+				contextWindow: params.contextWindow ?? currentApiReqInfo.contextWindow,
+				contextUsagePercentage: params.contextUsagePercentage ?? currentApiReqInfo.contextUsagePercentage,
+			} satisfies DiracApiReqInfo,
+		},
 	})
+
+	// Ensure UI is updated
+	const updatedMsg = params.messageStateHandler.getDiracMessages()[params.lastApiReqIndex]
+	await sendPartialMessageEvent(convertDiracMessageToProto(updatedMsg))
 }
 
 /**
@@ -103,6 +131,7 @@ const CLI_TOOLS = [
 	"docker",
 	"podman",
 	"kubectl",
+	"care",
 	"aws",
 	"gcloud",
 	"az",

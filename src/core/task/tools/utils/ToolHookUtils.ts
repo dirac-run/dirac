@@ -66,7 +66,7 @@ export class ToolHookUtils {
 				},
 			},
 			isCancellable: true,
-			say: config.callbacks.say,
+			messenger: config.taskMessenger,
 			setActiveHookExecution: config.callbacks.setActiveHookExecution,
 			clearActiveHookExecution: config.callbacks.clearActiveHookExecution,
 			messageStateHandler: config.messageState,
@@ -138,11 +138,9 @@ export class ToolHookUtils {
 			content = typeMatch[2] ? [typeMatch[2], ...remainingLines].join("\n") : remainingLines.join("\n")
 		}
 
-		const hookContextBlock = {
-			type: "text" as const,
+		config.taskState.userMessageContent.push({
+			type: "text",
 			text: `<hook_context source="${source}" type="${contextType}">\n${content}\n</hook_context>`,
-		}
-
-		config.taskState.userMessageContent.push(hookContextBlock)
+		})
 	}
 }

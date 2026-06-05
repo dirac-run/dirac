@@ -1,6 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
-import { Logger } from "@/shared/services/Logger"
 
 const o1SystemPrompt = (systemPrompt: string) => `
 # System Prompt
@@ -311,33 +310,7 @@ function parseToolCall(toolName: string, content: string): ToolCall | null {
 		tool_input[paramName] = paramValue.replace(/^\s+|\s+$/g, "")
 	}
 
-	// Validate required parameters
-	if (!validateToolInput(toolName, tool_input)) {
-		Logger.error(`Invalid tool call for ${toolName}:`, content)
-		return null
-	}
-
 	return { tool: toolName, tool_input }
-}
-
-function validateToolInput(toolName: string, tool_input: Record<string, string>): boolean {
-	switch (toolName) {
-		case "execute_command":
-			return "command" in tool_input
-		case "read_file":
-		case "list_files":
-			return "path" in tool_input
-		case "search_files":
-			return "path" in tool_input && "regex" in tool_input
-		case "write_to_file":
-			return "path" in tool_input && "content" in tool_input
-		case "ask_followup_question":
-			return "question" in tool_input
-		case "attempt_completion":
-			return "result" in tool_input
-		default:
-			return false
-	}
 }
 
 // Example usage:

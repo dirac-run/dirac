@@ -4,7 +4,7 @@ import pWaitFor from "p-wait-for"
 import { HostProvider } from "@/hosts/host-provider"
 import { ShowMessageType } from "@/shared/proto/index.host"
 import { Logger } from "@/shared/services/Logger"
-import { DiracCheckpointRestore } from "../../../shared/WebviewMessage"
+import { DiracCheckpointRestore } from "@shared/WebviewMessage"
 import { Controller } from ".."
 
 export async function checkpointRestore(controller: Controller, request: CheckpointRestoreRequest): Promise<Empty> {
@@ -24,11 +24,14 @@ export async function checkpointRestore(controller: Controller, request: Checkpo
 		})
 
 		// NOTE: cancelTask awaits abortTask, which awaits diffViewProvider.revertChanges, which reverts any edited files, allowing us to reset to a checkpoint rather than running into a state where the revertChanges function is called alongside or after the checkpoint reset
-		await controller.task?.checkpointManager?.restoreCheckpoint(
-			request.number,
-			request.restoreType as DiracCheckpointRestore,
-			request.offset,
-		)
+		const message = controller.task?.messageStateHandler.getDiracMessages().find((m) => m.ts === request.number)
+		if (message) {
+			await controller.task?.checkpointManager?.restoreCheckpoint(
+				message.id,
+				request.restoreType as DiracCheckpointRestore,
+				request.offset,
+			)
+		}
 	}
 	return Empty.create({})
 }

@@ -1,15 +1,23 @@
-import type { ToolUse } from "@core/assistant-message"
 import { JSONParser } from "@streamparser/json"
 import { nanoid } from "nanoid"
 import {
-	DiracAssistantRedactedThinkingBlock,
-	DiracAssistantThinkingBlock,
-	DiracAssistantToolUseBlock,
-	DiracReasoningDetailParam,
-	DiracAssistantContent,
+    DiracAssistantRedactedThinkingBlock,
+    DiracAssistantThinkingBlock,
+    DiracAssistantToolUseBlock,
+    DiracReasoningDetailParam,
+    DiracAssistantContent,
 } from "@/shared/messages/content"
 import { Session } from "@/shared/services/Session"
-import { DiracDefaultTool } from "@/shared/tools"
+import { Logger } from "@shared/services/Logger"
+
+export interface ParsedToolUseState {
+	id: string
+	name: string
+	input: Record<string, any>
+	signature?: string
+	call_id: string
+	isComplete: boolean
+}
 
 export interface PendingToolUse {
 	id: string
@@ -19,6 +27,7 @@ export interface PendingToolUse {
 	signature?: string
 	jsonParser?: JSONParser
 	call_id: string
+	isComplete: boolean
 }
 
 interface ToolUseDeltaBlock {
@@ -43,6 +52,7 @@ export interface PendingReasoning {
 	signature: string
 	redactedThinking: DiracAssistantRedactedThinkingBlock[]
 	summary: unknown[] | DiracReasoningDetailParam[]
+	isComplete: boolean
 }
 
 const ESCAPE_MAP: Record<string, string> = {
@@ -56,6 +66,7 @@ const ESCAPE_MAP: Record<string, string> = {
 const ESCAPE_PATTERN = /\\[ntr"\\]/g
 
 export class StreamResponseHandler {
+	private lastActiveId: string | undefined
 	private toolUseHandler = new ToolUseHandler()
 	private reasoningHandler = new ReasoningHandler()
 	private blockSequence: string[] = []
@@ -73,6 +84,10 @@ export class StreamResponseHandler {
 		return this._requestId
 	}
 
+	public getParsedToolUseStates(isComplete: boolean = false): ParsedToolUseState[] {
+		return this.toolUseHandler.getParsedToolUseStates(isComplete)
+	}
+
 	public getHandlers() {
 		return {
 			toolUseHandler: this.toolUseHandler,
@@ -82,12 +97,24 @@ export class StreamResponseHandler {
 
 	private recordId(id: string) {
 		if (!this.blockSequence.includes(id)) {
+			if (this.lastActiveId && this.lastActiveId !== id) {
+				this.toolUseHandler.markAsComplete(this.lastActiveId)
+				this.reasoningHandler.markAsComplete(this.lastActiveId)
+			}
+			this.lastActiveId = id
 			this.blockSequence.push(id)
 		}
 	}
 
 	public processTextDelta(delta: { id?: string; text?: string; signature?: string }) {
-		const id = delta.id || "default_text"
+		let id = delta.id
+		if (!id) {
+			if (this.lastActiveId && this.textBlocks.has(this.lastActiveId)) {
+				id = this.lastActiveId
+			} else {
+				id = "text_" + nanoid(8)
+			}
+		}
 		this.recordId(id)
 		let textData = this.textBlocks.get(id)
 		if (!textData) {
@@ -150,6 +177,7 @@ export class StreamResponseHandler {
 		this.reasoningHandler = new ReasoningHandler()
 		this.blockSequence = []
 		this.textBlocks.clear()
+		this.lastActiveId = undefined
 	}
 }
 
@@ -157,6 +185,12 @@ export class StreamResponseHandler {
  * Handles streaming native tool use blocks and converts them to DiracAssistantToolUseBlock format
  */
 class ToolUseHandler {
+	markAsComplete(id: string) {
+		const pending = this.pendingToolUses.get(id)
+		if (pending) {
+			pending.isComplete = true
+		}
+	}
 	private pendingToolUses = new Map<string, PendingToolUse>()
 
 	processToolUseDelta(delta: ToolUseDeltaBlock, call_id?: string): void {
@@ -187,7 +221,7 @@ class ToolUseHandler {
 		}
 	}
 
-	getFinalizedToolUse(id: string): DiracAssistantToolUseBlock | undefined {
+	getFinalizedToolUse(id: string): DiracAssistantToolUseBlock & { isComplete: boolean } | undefined {
 		const pending = this.pendingToolUses.get(id)
 		if (!pending?.name) {
 			return undefined
@@ -211,6 +245,7 @@ class ToolUseHandler {
 			input,
 			signature: pending.signature,
 			call_id: pending.call_id,
+			isComplete: pending.isComplete,
 		}
 	}
 
@@ -229,8 +264,8 @@ class ToolUseHandler {
 		return this.pendingToolUses.has(id)
 	}
 
-	getPartialToolUsesAsContent(): ToolUse[] {
-		const results: ToolUse[] = []
+	getParsedToolUseStates(isComplete: boolean = false): ParsedToolUseState[] {
+		const results: ParsedToolUseState[] = []
 		const pendingToolUses = this.pendingToolUses.values()
 
 		for (const pending of pendingToolUses) {
@@ -244,7 +279,8 @@ class ToolUseHandler {
 			} else if (pending.input) {
 				try {
 					input = JSON.parse(pending.input)
-				} catch {
+				} catch (error) {
+					Logger.debug(`[ToolUseHandler] Partial JSON parse error for tool ${pending.name}: ${error}`)
 					input = this.extractPartialJsonFields(pending.input)
 				}
 			}
@@ -255,21 +291,17 @@ class ToolUseHandler {
 					params[key] = value
 				}
 			}
+
 			results.push({
-				type: "tool_use",
-				name: pending.name as DiracDefaultTool,
-				params: params as any,
-				partial: true,
+				id: pending.id,
+				name: pending.name,
+				input: params,
 				signature: pending.signature,
-				isNativeToolCall: true,
 				call_id: pending.call_id,
+				isComplete: isComplete || pending.isComplete,
 			})
 		}
-		return results.map((t) => ({ ...t, partial: true }))
-	}
-
-	reset(): void {
-		this.pendingToolUses.clear()
+		return results
 	}
 
 	private createPendingToolUse(id: string, name: string, callId?: string): PendingToolUse {
@@ -290,6 +322,7 @@ class ToolUseHandler {
 			jsonParser,
 			call_id: callId || id || nanoid(8),
 			signature: undefined,
+			isComplete: false,
 		}
 
 		this.pendingToolUses.set(id, pending)
@@ -300,12 +333,22 @@ class ToolUseHandler {
 
 	private extractPartialJsonFields(partialJson: string): Record<string, any> {
 		const result: Record<string, any> = {}
-		const pattern = /"(\w+)":\s*"((?:[^"\\]|\\.)*)(?:")?/g
-
-		for (const match of partialJson.matchAll(pattern)) {
+		// Match string values: "key": "value"
+		const stringPattern = /"(\w+)":\s*"((?:[^"\\]|\\.)*)(?:")?/g
+		for (const match of partialJson.matchAll(stringPattern)) {
 			result[match[1]] = match[2].replace(ESCAPE_PATTERN, (m) => ESCAPE_MAP[m])
 		}
-
+		// Match array values: "key": ["val1", "val2"]
+		const arrayPattern = /"(\w+)":\s*\[\s*([^\]]*)\s*\]?/g
+		for (const match of partialJson.matchAll(arrayPattern)) {
+			const key = match[1]
+			const arrayContent = match[2]
+			const values = arrayContent
+				.split(",")
+				.map((v) => v.trim().replace(/^"(.*)"$/, "$1"))
+				.filter((v) => v !== "")
+			result[key] = values
+		}
 		return result
 	}
 }
@@ -314,6 +357,12 @@ class ToolUseHandler {
  * Handles streaming reasoning content and converts it to the appropriate message format
  */
 class ReasoningHandler {
+	markAsComplete(id: string) {
+		const pending = this.pendingReasonings.get(id)
+		if (pending) {
+			pending.isComplete = true
+		}
+	}
 	private pendingReasonings = new Map<string, PendingReasoning>()
 	private lastReasoningId: string | undefined
 
@@ -346,6 +395,7 @@ class ReasoningHandler {
 		let pending = this.pendingReasonings.get(id)
 		if (!pending) {
 			pending = {
+				isComplete: false,
 				id,
 				content: "",
 				signature: "",
@@ -398,7 +448,7 @@ class ReasoningHandler {
 		return results
 	}
 
-	private mapToThinkingBlock(pending: PendingReasoning): DiracAssistantThinkingBlock | null {
+	private mapToThinkingBlock(pending: PendingReasoning): DiracAssistantThinkingBlock & { isComplete: boolean } | null {
 		if (!pending.summary.length && !pending.content && pending.redactedThinking.length > 0) {
 			return null
 		}
@@ -418,6 +468,7 @@ class ReasoningHandler {
 			signature: pending.signature,
 			summary: pending.summary,
 			call_id: pending.id,
+			isComplete: pending.isComplete,
 		}
 	}
 

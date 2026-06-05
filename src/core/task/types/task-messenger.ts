@@ -9,6 +9,6 @@ export interface TaskMessengerDependencies {
 	postStateToWebview: () => Promise<void>
 	stateManager: StateManager
 	taskId: string
-	api: ApiHandler
+	api?: ApiHandler
 	getCurrentProviderInfo: () => ApiProviderInfo
 }

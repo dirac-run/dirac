@@ -1,6 +1,7 @@
 import { Logger } from "@/shared/services/Logger"
 import { PromptRegistry } from "./registry/PromptRegistry"
 import type { SystemPromptContext } from "./types"
+import type { ToolRequestSnapshot } from "@core/task/tools/runtime/ToolSnapshot"
 
 export { DiracToolSet } from "./registry/DiracToolSet"
 export { SubagentBuilder } from "../../task/tools/subagent/SubagentBuilder"
@@ -13,12 +14,10 @@ export * from "./types"
 /**
  * Get the system prompt
  */
-export async function getSystemPrompt(context: SystemPromptContext) {
-	const registry = PromptRegistry.getInstance()
-	const systemPrompt = await registry.get(context)
-	const tools = registry.nativeTools
+export async function getSystemPrompt(context: SystemPromptContext, toolSnapshot: ToolRequestSnapshot) {
+    const registry = PromptRegistry.getInstance()
+    const systemPrompt = await registry.get(context, toolSnapshot)
+    Logger.log(`[DEBUG] System prompt char length: ${systemPrompt.length}`)
 
-	Logger.log(`[DEBUG] System prompt char length: ${systemPrompt.length}`)
-
-	return { systemPrompt, tools }
+    return { systemPrompt }
 }

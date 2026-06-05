@@ -23,8 +23,7 @@ export interface LifecycleManagerDependencies {
 	api: ApiHandler
 	taskId: string
 	ulid: string
-	say: TaskMessenger["say"]
-	ask: TaskMessenger["ask"]
+	taskMessenger: TaskMessenger
 	postStateToWebview: () => Promise<void>
 	cancelTask: () => Promise<void>
 	checkpointManager?: ICheckpointManager
@@ -41,4 +40,5 @@ export interface LifecycleManagerDependencies {
 	hookManager: HookManager
 	initiateTaskLoop: (userContent: DiracContent[]) => Promise<void>
 	recordEnvironment: () => Promise<void>
+	time: () => Promise<void>
 }

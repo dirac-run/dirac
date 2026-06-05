@@ -4,6 +4,8 @@ import { telemetryService } from "@/services/telemetry"
 import { CommandContext, Empty } from "@/shared/proto/index.dirac"
 import { Logger } from "@/shared/services/Logger"
 import { Controller } from "../index"
+import { DiracAskResponse } from "../../../shared/WebviewMessage"
+
 import { sendAddToInputEvent } from "../ui/subscribeToAddToInput"
 
 // 'Add to Dirac' context menu in editor and code action
@@ -32,7 +34,10 @@ export async function addToDirac(controller: Controller, request: CommandContext
 
 	// Notebooks send immediately, regular adds just fill input
 	if (notebookContext && controller.task) {
-		await controller.task.handleWebviewAskResponse("messageResponse", input)
+		const cardId = controller.task.taskState.lastWaitingCardId
+		if (cardId) {
+			await controller.task.submitCardResponse(cardId, DiracAskResponse.MESSAGE, input)
+		}
 	} else if (notebookContext) {
 		await controller.initTask(input)
 	} else {

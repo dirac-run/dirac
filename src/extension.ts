@@ -6,6 +6,8 @@ import assert from "node:assert"
 import { DIFF_VIEW_URI_SCHEME } from "@hosts/vscode/VscodeDiffViewProvider"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"
+import { DiracAskResponse } from "./shared/WebviewMessage"
+
 import { sendChatButtonClickedEvent } from "./core/controller/ui/subscribeToChatButtonClicked"
 import { sendHistoryButtonClickedEvent } from "./core/controller/ui/subscribeToHistoryButtonClicked"
 import { sendSettingsButtonClickedEvent } from "./core/controller/ui/subscribeToSettingsButtonClicked"
@@ -29,19 +31,19 @@ import { sendAddToInputEvent } from "./core/controller/ui/subscribeToAddToInput"
 import { sendShowWebviewEvent } from "./core/controller/ui/subscribeToShowWebview"
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
 import {
-	cleanupOldApiKey,
-	migrateCustomInstructionsToGlobalRules,
-	migrateTaskHistoryToFile,
-	migrateWelcomeViewCompleted,
-	migrateWorkspaceToGlobalStorage,
+    cleanupOldApiKey,
+    migrateCustomInstructionsToGlobalRules,
+    migrateTaskHistoryToFile,
+    migrateWelcomeViewCompleted,
+    migrateWorkspaceToGlobalStorage,
 } from "./core/storage/state-migrations"
 import { workspaceResolver } from "./core/workspace"
 import { findMatchingNotebookCell, getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
 import { abortCommitGeneration, generateCommitMsg } from "./hosts/vscode/commit-message-generator"
 import { registerDiracOutputChannel as registerDiracOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
 import {
-	disposeVscodeCommentReviewController,
-	getVscodeCommentReviewController,
+    disposeVscodeCommentReviewController,
+    getVscodeCommentReviewController,
 } from "./hosts/vscode/review/VscodeCommentReviewController"
 import { VscodeTerminalManager } from "./hosts/vscode/terminal/VscodeTerminalManager"
 import { VscodeDiffViewProvider } from "./hosts/vscode/VscodeDiffViewProvider"
@@ -54,418 +56,419 @@ import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler
 import { ShowMessageType } from "./shared/proto/host/window"
 import { fileExistsAtPath } from "./utils/fs"
 
+let extensionRootForBinaryResolution: string | undefined
 // This method is called when the VS Code extension is activated.
 // NOTE: This is VS Code specific - services that should be registered
 // for all-platform should be registered in common.ts.
 export async function activate(context: vscode.ExtensionContext) {
-	const activationStartTime = performance.now()
+    const activationStartTime = performance.now()
 
-	// 1. Create storage context to determine shared data directory
-	const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-	const storageContext = createStorageContext({ workspacePath })
+    // 1. Create storage context to determine shared data directory
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    const storageContext = createStorageContext({ workspacePath })
 
-	// 2. Set up HostProvider for VSCode using shared data directory
-	// IMPORTANT: This must be done before any service can be registered
-	setupHostProvider(context, storageContext.dataDir)
+    // 2. Set up HostProvider for VSCode using shared data directory
+    // IMPORTANT: This must be done before any service can be registered
+    setupHostProvider(context, storageContext.dataDir)
 
-	// 3. Clean up legacy data patterns within VSCode's native storage.
-	// Moves workspace→global keys, task history→file, custom instructions→rules, etc.
-	// Must run BEFORE the file export so we copy clean state.
-	await cleanupLegacyVSCodeStorage(context)
+    // 3. Clean up legacy data patterns within VSCode's native storage.
+    // Moves workspace→global keys, task history→file, custom instructions→rules, etc.
+    // Must run BEFORE the file export so we copy clean state.
+    await cleanupLegacyVSCodeStorage(context)
 
-	// 4. One-time export of VSCode's native storage to shared file-backed stores.
-	// After this, all platforms (VSCode, CLI, JetBrains) read from ~/.dirac/data/.
-	await exportVSCodeStorageToSharedFiles(context, storageContext)
-
-
-	// 4. Register services and perform common initialization
-	// IMPORTANT: Must be done after host provider is setup and migrations are complete
-	const webview = (await initialize(storageContext)) as VscodeDiracWebviewProvider
-
-	// 5. Register services and commands specific to VS Code
-	// Initialize test mode and add disposables to context
-	const testModeWatchers = await initializeTestMode(webview)
-	context.subscriptions.push(...testModeWatchers)
-
-	// Initialize hook discovery cache for performance optimization
-	HookDiscoveryCache.getInstance().initialize(
-		context as any, // Adapt VSCode ExtensionContext to generic interface
-		(dir: string) => {
-			try {
-				const pattern = new vscode.RelativePattern(dir, "*")
-				const watcher = vscode.workspace.createFileSystemWatcher(pattern)
-				// Ensure watcher is disposed when extension is deactivated
-				context.subscriptions.push(watcher)
-				// Adapt VSCode FileSystemWatcher to generic interface
-				return {
-					onDidCreate: (listener: () => void) => watcher.onDidCreate(listener),
-					onDidChange: (listener: () => void) => watcher.onDidChange(listener),
-					onDidDelete: (listener: () => void) => watcher.onDidDelete(listener),
-					dispose: () => watcher.dispose(),
-				}
-			} catch {
-				return null
-			}
-		},
-		(callback: () => void) => {
-			// Adapt VSCode Disposable to generic interface
-			const disposable = vscode.workspace.onDidChangeWorkspaceFolders(callback)
-			context.subscriptions.push(disposable)
-			return disposable
-		},
-	)
-
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(VscodeDiracWebviewProvider.SIDEBAR_ID, webview, {
-			webviewOptions: { retainContextWhenHidden: true },
-		}),
-	)
-
-	// NOTE: Commands must be added to the internal registry before registering them with VSCode
-	const { commands } = ExtensionRegistryInfo
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.PlusButton, async () => {
-			const sidebarInstance = DiracWebviewProvider.getInstance()
-			await sidebarInstance.controller.clearTask()
-			await sidebarInstance.controller.postStateToWebview()
-			await sendChatButtonClickedEvent()
-		}),
-	)
-	context.subscriptions.push(vscode.commands.registerCommand(commands.SettingsButton, () => sendSettingsButtonClickedEvent()))
-	context.subscriptions.push(vscode.commands.registerCommand(commands.HistoryButton, () => sendHistoryButtonClickedEvent()))
-	context.subscriptions.push(vscode.commands.registerCommand(commands.WorktreesButton, () => sendWorktreesButtonClickedEvent()))
-
-	/*
-	We use the text document content provider API to show the left side for diff view by creating a
-	virtual document for the original content. This makes it readonly so users know to edit the right
-	side if they want to keep their changes.
-
-	- This API allows you to create readonly documents in VSCode from arbitrary sources, and works by
-	claiming an uri-scheme for which your provider then returns text contents. The scheme must be
-	provided when registering a provider and cannot change afterwards.
-	- Note how the provider doesn't create uris for virtual documents - its role is to provide contents
-	 given such an uri. In return, content providers are wired into the open document logic so that
-	 providers are always considered.
-	https://code.visualstudio.com/api/extension-guides/virtual-documents
-	*/
-	const diffContentProvider = new (class implements vscode.TextDocumentContentProvider {
-		provideTextDocumentContent(uri: vscode.Uri): string {
-			return Buffer.from(uri.query, "base64").toString("utf-8")
-		}
-	})()
-	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_VIEW_URI_SCHEME, diffContentProvider))
-	// Register commands for Accept/Reject from CodeLens
-	context.subscriptions.push(
-		vscode.commands.registerCommand("dirac.acceptEdit", async () => {
-			const sidebarInstance = DiracWebviewProvider.getInstance()
-			if (sidebarInstance.controller?.task) {
-				await sidebarInstance.controller.task.handleWebviewAskResponse("yesButtonClicked")
-			}
-		}),
-	)
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand("dirac.saveWithMyChanges", async () => {
-			const sidebarInstance = DiracWebviewProvider.getInstance()
-			if (sidebarInstance.controller?.task) {
-				await sidebarInstance.controller.task.handleWebviewAskResponse("yesButtonClicked")
-			}
-		}),
-	)
-	context.subscriptions.push(
-		vscode.commands.registerCommand("dirac.rejectEdit", async () => {
-			const sidebarInstance = DiracWebviewProvider.getInstance()
-			if (sidebarInstance.controller?.task) {
-				await sidebarInstance.controller.task.handleWebviewAskResponse("noButtonClicked")
-			}
-		}),
-	)
+    // 4. One-time export of VSCode's native storage to shared file-backed stores.
+    // After this, all platforms (VSCode, CLI, JetBrains) read from ~/.dirac/data/.
+    await exportVSCodeStorageToSharedFiles(context, storageContext)
 
 
-	const handleUri = async (uri: vscode.Uri) => {
-		const url = decodeURIComponent(uri.toString())
-		const isTaskUri = getUriPath(url) === TASK_URI_PATH
+    // 4. Register services and perform common initialization
+    // IMPORTANT: Must be done after host provider is setup and migrations are complete
+    const webview = (await initialize(storageContext)) as VscodeDiracWebviewProvider
 
-		if (isTaskUri) {
-			await openDiracSidebarForTaskUri()
-		}
+    // 5. Register services and commands specific to VS Code
+    // Initialize test mode and add disposables to context
+    const testModeWatchers = await initializeTestMode(webview)
+    context.subscriptions.push(...testModeWatchers)
 
-		let success = await SharedUriHandler.handleUri(url)
+    // Initialize hook discovery cache for performance optimization
+    HookDiscoveryCache.getInstance().initialize(
+        context as any, // Adapt VSCode ExtensionContext to generic interface
+        (dir: string) => {
+            try {
+                const pattern = new vscode.RelativePattern(dir, "*")
+                const watcher = vscode.workspace.createFileSystemWatcher(pattern)
+                // Ensure watcher is disposed when extension is deactivated
+                context.subscriptions.push(watcher)
+                // Adapt VSCode FileSystemWatcher to generic interface
+                return {
+                    onDidCreate: (listener: () => void) => watcher.onDidCreate(listener),
+                    onDidChange: (listener: () => void) => watcher.onDidChange(listener),
+                    onDidDelete: (listener: () => void) => watcher.onDidDelete(listener),
+                    dispose: () => watcher.dispose(),
+                }
+            } catch {
+                return null
+            }
+        },
+        (callback: () => void) => {
+            // Adapt VSCode Disposable to generic interface
+            const disposable = vscode.workspace.onDidChangeWorkspaceFolders(callback)
+            context.subscriptions.push(disposable)
+            return disposable
+        },
+    )
 
-		// Task deeplinks can race with first-time sidebar initialization.
-		if (!success && isTaskUri) {
-			await openDiracSidebarForTaskUri()
-			success = await SharedUriHandler.handleUri(url)
-		}
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(VscodeDiracWebviewProvider.SIDEBAR_ID, webview, {
+            webviewOptions: { retainContextWhenHidden: true },
+        }),
+    )
 
-		if (!success) {
-			Logger.warn("Extension URI handler: Failed to process URI:", uri.toString())
-		}
-	}
-	context.subscriptions.push(vscode.window.registerUriHandler({ handleUri }))
+    // NOTE: Commands must be added to the internal registry before registering them with VSCode
+    const { commands } = ExtensionRegistryInfo
 
-	// Register size testing commands in development mode
-	if (IS_DEV) {
-		vscode.commands.executeCommand("setContext", "dirac.isDevMode", IS_DEV)
-		// Use dynamic import to avoid loading the module in production
-		import("./dev/commands/tasks")
-			.then((module) => {
-				const devTaskCommands = module.registerTaskCommands(webview.controller)
-				context.subscriptions.push(...devTaskCommands)
-				Logger.log("[Dirac Dev] Dev mode activated & dev commands registered")
-			})
-			.catch((error) => {
-				Logger.log("[Dirac Dev] Failed to register dev commands: " + error)
-			})
-	}
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.PlusButton, async () => {
+            const sidebarInstance = DiracWebviewProvider.getInstance()
+            await sidebarInstance.controller.clearTask()
+            await sidebarInstance.controller.postStateToWebview()
+            await sendChatButtonClickedEvent()
+        }),
+    )
+    context.subscriptions.push(vscode.commands.registerCommand(commands.SettingsButton, () => sendSettingsButtonClickedEvent()))
+    context.subscriptions.push(vscode.commands.registerCommand(commands.HistoryButton, () => sendHistoryButtonClickedEvent()))
+    context.subscriptions.push(vscode.commands.registerCommand(commands.WorktreesButton, () => sendWorktreesButtonClickedEvent()))
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.TerminalOutput, async () => {
-			const terminal = vscode.window.activeTerminal
-			if (!terminal) {
-				return
-			}
+    /*
+    We use the text document content provider API to show the left side for diff view by creating a
+    virtual document for the original content. This makes it readonly so users know to edit the right
+    side if they want to keep their changes.
 
-			// Save current clipboard content
-			const tempCopyBuffer = await readTextFromClipboard()
+    - This API allows you to create readonly documents in VSCode from arbitrary sources, and works by
+    claiming an uri-scheme for which your provider then returns text contents. The scheme must be
+    provided when registering a provider and cannot change afterwards.
+    - Note how the provider doesn't create uris for virtual documents - its role is to provide contents
+     given such an uri. In return, content providers are wired into the open document logic so that
+     providers are always considered.
+    https://code.visualstudio.com/api/extension-guides/virtual-documents
+    */
+    const diffContentProvider = new (class implements vscode.TextDocumentContentProvider {
+        provideTextDocumentContent(uri: vscode.Uri): string {
+            return Buffer.from(uri.query, "base64").toString("utf-8")
+        }
+    })()
+    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_VIEW_URI_SCHEME, diffContentProvider))
+    // Register commands for Accept/Reject from CodeLens
+    context.subscriptions.push(
+        vscode.commands.registerCommand("dirac.acceptEdit", async () => {
+            const sidebarInstance = DiracWebviewProvider.getInstance()
+            if (sidebarInstance.controller?.task) {
+                await sidebarInstance.controller.task.submitCardResponse("", DiracAskResponse.APPROVE)
+            }
+        }),
+    )
 
-			try {
-				// Copy the *existing* terminal selection (without selecting all)
-				await vscode.commands.executeCommand("workbench.action.terminal.copySelection")
+    context.subscriptions.push(
+        vscode.commands.registerCommand("dirac.saveWithMyChanges", async () => {
+            const sidebarInstance = DiracWebviewProvider.getInstance()
+            if (sidebarInstance.controller?.task) {
+                await sidebarInstance.controller.task.submitCardResponse("", DiracAskResponse.APPROVE)
+            }
+        }),
+    )
+    context.subscriptions.push(
+        vscode.commands.registerCommand("dirac.rejectEdit", async () => {
+            const sidebarInstance = DiracWebviewProvider.getInstance()
+            if (sidebarInstance.controller?.task) {
+                await sidebarInstance.controller.task.submitCardResponse("", DiracAskResponse.REJECT)
+            }
+        }),
+    )
 
-				// Get copied content
-				const terminalContents = (await readTextFromClipboard()).trim()
 
-				// Restore original clipboard content
-				await writeTextToClipboard(tempCopyBuffer)
+    const handleUri = async (uri: vscode.Uri) => {
+        const url = decodeURIComponent(uri.toString())
+        const isTaskUri = getUriPath(url) === TASK_URI_PATH
 
-				if (!terminalContents) {
-					// No terminal content was copied (either nothing selected or some error)
-					return
-				}
-				// Ensure the sidebar view is visible but preserve editor focus
-				await showWebview(true)
+        if (isTaskUri) {
+            await openDiracSidebarForTaskUri()
+        }
 
-				await sendAddToInputEvent(`Terminal output:\n\`\`\`\n${terminalContents}\n\`\`\``)
+        let success = await SharedUriHandler.handleUri(url)
 
-				Logger.log("addSelectedTerminalOutputToChat", terminalContents, terminal.name)
-			} catch (error) {
-				// Ensure clipboard is restored even if an error occurs
-				await writeTextToClipboard(tempCopyBuffer)
-				Logger.error("Error getting terminal contents:", error)
-				HostProvider.window.showMessage({
-					type: ShowMessageType.ERROR,
-					message: "Failed to get terminal contents",
-				})
-			}
-		}),
-	)
+        // Task deeplinks can race with first-time sidebar initialization.
+        if (!success && isTaskUri) {
+            await openDiracSidebarForTaskUri()
+            success = await SharedUriHandler.handleUri(url)
+        }
 
-	// Register code action provider
-	context.subscriptions.push(
-		vscode.languages.registerCodeActionsProvider(
-			"*",
-			new (class implements vscode.CodeActionProvider {
-				public static readonly providedCodeActionKinds = [vscode.CodeActionKind.QuickFix, vscode.CodeActionKind.Refactor]
+        if (!success) {
+            Logger.warn("Extension URI handler: Failed to process URI:", uri.toString())
+        }
+    }
+    context.subscriptions.push(vscode.window.registerUriHandler({ handleUri }))
 
-				provideCodeActions(
-					document: vscode.TextDocument,
-					range: vscode.Range,
-					context: vscode.CodeActionContext,
-				): vscode.CodeAction[] {
-					const CONTEXT_LINES_TO_EXPAND = 3
-					const START_OF_LINE_CHAR_INDEX = 0
-					const LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING = 1
+    // Register size testing commands in development mode
+    if (IS_DEV) {
+        vscode.commands.executeCommand("setContext", "dirac.isDevMode", IS_DEV)
+        // Use dynamic import to avoid loading the module in production
+        import("./dev/commands/tasks")
+            .then((module) => {
+                const devTaskCommands = module.registerTaskCommands(webview.controller)
+                context.subscriptions.push(...devTaskCommands)
+                Logger.log("[Dirac Dev] Dev mode activated & dev commands registered")
+            })
+            .catch((error) => {
+                Logger.log("[Dirac Dev] Failed to register dev commands: " + error)
+            })
+    }
 
-					const actions: vscode.CodeAction[] = []
-					const editor = vscode.window.activeTextEditor // Get active editor for selection check
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.TerminalOutput, async () => {
+            const terminal = vscode.window.activeTerminal
+            if (!terminal) {
+                return
+            }
 
-					// Expand range to include surrounding 3 lines or use selection if broader
-					const selection = editor?.selection
-					let expandedRange = range
-					if (
-						editor &&
-						selection &&
-						!selection.isEmpty &&
-						selection.contains(range.start) &&
-						selection.contains(range.end)
-					) {
-						expandedRange = selection
-					} else {
-						expandedRange = new vscode.Range(
-							Math.max(0, range.start.line - CONTEXT_LINES_TO_EXPAND),
-							START_OF_LINE_CHAR_INDEX,
-							Math.min(
-								document.lineCount - LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING,
-								range.end.line + CONTEXT_LINES_TO_EXPAND,
-							),
-							document.lineAt(
-								Math.min(
-									document.lineCount - LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING,
-									range.end.line + CONTEXT_LINES_TO_EXPAND,
-								),
-							).text.length,
-						)
-					}
+            // Save current clipboard content
+            const tempCopyBuffer = await readTextFromClipboard()
 
-					// Add to Dirac (Always available)
-					const addAction = new vscode.CodeAction("Add to Dirac", vscode.CodeActionKind.QuickFix)
-					addAction.command = {
-						command: commands.AddToChat,
-						title: "Add to Dirac",
-						arguments: [expandedRange, context.diagnostics],
-					}
-					actions.push(addAction)
+            try {
+                // Copy the *existing* terminal selection (without selecting all)
+                await vscode.commands.executeCommand("workbench.action.terminal.copySelection")
 
-					// Explain with Dirac (Always available)
-					const explainAction = new vscode.CodeAction("Explain with Dirac", vscode.CodeActionKind.RefactorExtract) // Using a refactor kind
-					explainAction.command = {
-						command: commands.ExplainCode,
-						title: "Explain with Dirac",
-						arguments: [expandedRange],
-					}
-					actions.push(explainAction)
+                // Get copied content
+                const terminalContents = (await readTextFromClipboard()).trim()
 
-					// Improve with Dirac (Always available)
-					const improveAction = new vscode.CodeAction("Improve with Dirac", vscode.CodeActionKind.RefactorRewrite) // Using a refactor kind
-					improveAction.command = {
-						command: commands.ImproveCode,
-						title: "Improve with Dirac",
-						arguments: [expandedRange],
-					}
-					actions.push(improveAction)
+                // Restore original clipboard content
+                await writeTextToClipboard(tempCopyBuffer)
 
-					// Fix with Dirac (Only if diagnostics exist)
-					if (context.diagnostics.length > 0) {
-						const fixAction = new vscode.CodeAction("Fix with Dirac", vscode.CodeActionKind.QuickFix)
-						fixAction.isPreferred = true
-						fixAction.command = {
-							command: commands.FixWithDirac,
-							title: "Fix with Dirac",
-							arguments: [expandedRange, context.diagnostics],
-						}
-						actions.push(fixAction)
-					}
-					return actions
-				}
-			})(),
-			{
-				providedCodeActionKinds: [
-					vscode.CodeActionKind.QuickFix,
-					vscode.CodeActionKind.RefactorExtract,
-					vscode.CodeActionKind.RefactorRewrite,
-				],
-			},
-		),
-	)
+                if (!terminalContents) {
+                    // No terminal content was copied (either nothing selected or some error)
+                    return
+                }
+                // Ensure the sidebar view is visible but preserve editor focus
+                await showWebview(true)
 
-	// Register the command handlers
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.AddToChat, async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-			const context = await getContextForCommand(range, diagnostics)
-			if (!context) {
-				return
-			}
-			await addToDirac(context.controller, context.commandContext)
-		}),
-	)
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.FixWithDirac, async (range: vscode.Range, diagnostics: vscode.Diagnostic[]) => {
-			const context = await getContextForCommand(range, diagnostics)
-			if (!context) {
-				return
-			}
-			await fixWithDirac(context.controller, context.commandContext)
-		}),
-	)
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.ExplainCode, async (range: vscode.Range) => {
-			const context = await getContextForCommand(range)
-			if (!context) {
-				return
-			}
-			await explainWithDirac(context.controller, context.commandContext)
-		}),
-	)
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.ImproveCode, async (range: vscode.Range) => {
-			const context = await getContextForCommand(range)
-			if (!context) {
-				return
-			}
-			await improveWithDirac(context.controller, context.commandContext)
-		}),
-	)
+                await sendAddToInputEvent(`Terminal output:\n\`\`\`\n${terminalContents}\n\`\`\``)
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.FocusChatInput, async (preserveEditorFocus = false) => {
-			const webview = DiracWebviewProvider.getInstance() as VscodeDiracWebviewProvider
+                Logger.log("addSelectedTerminalOutputToChat", terminalContents, terminal.name)
+            } catch (error) {
+                // Ensure clipboard is restored even if an error occurs
+                await writeTextToClipboard(tempCopyBuffer)
+                Logger.error("Error getting terminal contents:", error)
+                HostProvider.window.showMessage({
+                    type: ShowMessageType.ERROR,
+                    message: "Failed to get terminal contents",
+                })
+            }
+        }),
+    )
 
-			// Show the webview
-			const webviewView = webview.getWebview()
-			if (webviewView) {
-				if (preserveEditorFocus) {
-					// Only make webview visible without forcing focus
-					webviewView.show(false)
-				} else {
-					// Show and force focus (default behavior for explicit focus actions)
-					webviewView.show(true)
-				}
-			}
+    // Register code action provider
+    context.subscriptions.push(
+        vscode.languages.registerCodeActionsProvider(
+            "*",
+            new (class implements vscode.CodeActionProvider {
+                public static readonly providedCodeActionKinds = [vscode.CodeActionKind.QuickFix, vscode.CodeActionKind.Refactor]
 
-			// Send show webview event with preserveEditorFocus flag
-			sendShowWebviewEvent(preserveEditorFocus)
-			telemetryService.captureButtonClick("command_focusChatInput", webview.controller?.task?.ulid)
-		}),
-	)
+                provideCodeActions(
+                    document: vscode.TextDocument,
+                    range: vscode.Range,
+                    context: vscode.CodeActionContext,
+                ): vscode.CodeAction[] {
+                    const CONTEXT_LINES_TO_EXPAND = 3
+                    const START_OF_LINE_CHAR_INDEX = 0
+                    const LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING = 1
 
-	// Register Jupyter Notebook command handlers
-	const NOTEBOOK_EDIT_INSTRUCTIONS = `Special considerations for using edit_file on *.ipynb files:
+                    const actions: vscode.CodeAction[] = []
+                    const editor = vscode.window.activeTextEditor // Get active editor for selection check
+
+                    // Expand range to include surrounding 3 lines or use selection if broader
+                    const selection = editor?.selection
+                    let expandedRange = range
+                    if (
+                        editor &&
+                        selection &&
+                        !selection.isEmpty &&
+                        selection.contains(range.start) &&
+                        selection.contains(range.end)
+                    ) {
+                        expandedRange = selection
+                    } else {
+                        expandedRange = new vscode.Range(
+                            Math.max(0, range.start.line - CONTEXT_LINES_TO_EXPAND),
+                            START_OF_LINE_CHAR_INDEX,
+                            Math.min(
+                                document.lineCount - LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING,
+                                range.end.line + CONTEXT_LINES_TO_EXPAND,
+                            ),
+                            document.lineAt(
+                                Math.min(
+                                    document.lineCount - LINE_COUNT_ADJUSTMENT_FOR_ZERO_INDEXING,
+                                    range.end.line + CONTEXT_LINES_TO_EXPAND,
+                                ),
+                            ).text.length,
+                        )
+                    }
+
+                    // Add to Dirac (Always available)
+                    const addAction = new vscode.CodeAction("Add to Dirac", vscode.CodeActionKind.QuickFix)
+                    addAction.command = {
+                        command: commands.AddToChat,
+                        title: "Add to Dirac",
+                        arguments: [expandedRange, context.diagnostics],
+                    }
+                    actions.push(addAction)
+
+                    // Explain with Dirac (Always available)
+                    const explainAction = new vscode.CodeAction("Explain with Dirac", vscode.CodeActionKind.RefactorExtract) // Using a refactor kind
+                    explainAction.command = {
+                        command: commands.ExplainCode,
+                        title: "Explain with Dirac",
+                        arguments: [expandedRange],
+                    }
+                    actions.push(explainAction)
+
+                    // Improve with Dirac (Always available)
+                    const improveAction = new vscode.CodeAction("Improve with Dirac", vscode.CodeActionKind.RefactorRewrite) // Using a refactor kind
+                    improveAction.command = {
+                        command: commands.ImproveCode,
+                        title: "Improve with Dirac",
+                        arguments: [expandedRange],
+                    }
+                    actions.push(improveAction)
+
+                    // Fix with Dirac (Only if diagnostics exist)
+                    if (context.diagnostics.length > 0) {
+                        const fixAction = new vscode.CodeAction("Fix with Dirac", vscode.CodeActionKind.QuickFix)
+                        fixAction.isPreferred = true
+                        fixAction.command = {
+                            command: commands.FixWithDirac,
+                            title: "Fix with Dirac",
+                            arguments: [expandedRange, context.diagnostics],
+                        }
+                        actions.push(fixAction)
+                    }
+                    return actions
+                }
+            })(),
+            {
+                providedCodeActionKinds: [
+                    vscode.CodeActionKind.QuickFix,
+                    vscode.CodeActionKind.RefactorExtract,
+                    vscode.CodeActionKind.RefactorRewrite,
+                ],
+            },
+        ),
+    )
+
+    // Register the command handlers
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.AddToChat, async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
+            const context = await getContextForCommand(range, diagnostics)
+            if (!context) {
+                return
+            }
+            await addToDirac(context.controller, context.commandContext)
+        }),
+    )
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.FixWithDirac, async (range: vscode.Range, diagnostics: vscode.Diagnostic[]) => {
+            const context = await getContextForCommand(range, diagnostics)
+            if (!context) {
+                return
+            }
+            await fixWithDirac(context.controller, context.commandContext)
+        }),
+    )
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.ExplainCode, async (range: vscode.Range) => {
+            const context = await getContextForCommand(range)
+            if (!context) {
+                return
+            }
+            await explainWithDirac(context.controller, context.commandContext)
+        }),
+    )
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.ImproveCode, async (range: vscode.Range) => {
+            const context = await getContextForCommand(range)
+            if (!context) {
+                return
+            }
+            await improveWithDirac(context.controller, context.commandContext)
+        }),
+    )
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.FocusChatInput, async (preserveEditorFocus = false) => {
+            const webview = DiracWebviewProvider.getInstance() as VscodeDiracWebviewProvider
+
+            // Show the webview
+            const webviewView = webview.getWebview()
+            if (webviewView) {
+                if (preserveEditorFocus) {
+                    // Only make webview visible without forcing focus
+                    webviewView.show(false)
+                } else {
+                    // Show and force focus (default behavior for explicit focus actions)
+                    webviewView.show(true)
+                }
+            }
+
+            // Send show webview event with preserveEditorFocus flag
+            sendShowWebviewEvent(preserveEditorFocus)
+            telemetryService.captureButtonClick("command_focusChatInput", webview.controller?.task?.ulid)
+        }),
+    )
+
+    // Register Jupyter Notebook command handlers
+    const NOTEBOOK_EDIT_INSTRUCTIONS = `Special considerations for using edit_file on *.ipynb files:
 * Jupyter notebook files are JSON format with specific structure for source code cells
 * Source code in cells is stored as JSON string arrays ending with explicit \\n characters and commas
 * Always match the exact JSON format including quotes, commas, and escaped newlines.`
 
-	// Helper to get notebook context for Jupyter commands
-	async function getNotebookCommandContext(range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) {
-		const activeNotebook = vscode.window.activeNotebookEditor
-		if (!activeNotebook) {
-			HostProvider.window.showMessage({
-				type: ShowMessageType.ERROR,
-				message: "No active Jupyter notebook found. Please open a .ipynb file first.",
-			})
-			return null
-		}
+    // Helper to get notebook context for Jupyter commands
+    async function getNotebookCommandContext(range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) {
+        const activeNotebook = vscode.window.activeNotebookEditor
+        if (!activeNotebook) {
+            HostProvider.window.showMessage({
+                type: ShowMessageType.ERROR,
+                message: "No active Jupyter notebook found. Please open a .ipynb file first.",
+            })
+            return null
+        }
 
-		const ctx = await getContextForCommand(range, diagnostics)
-		if (!ctx) {
-			return null
-		}
+        const ctx = await getContextForCommand(range, diagnostics)
+        if (!ctx) {
+            return null
+        }
 
-		const filePath = ctx.commandContext.filePath || ""
-		let cellJson: string | null = null
-		if (activeNotebook.notebook.cellCount > 0) {
-			const cellIndex = activeNotebook.notebook.cellAt(activeNotebook.selection.start).index
-			cellJson = await findMatchingNotebookCell(filePath, cellIndex)
-		}
+        const filePath = ctx.commandContext.filePath || ""
+        let cellJson: string | null = null
+        if (activeNotebook.notebook.cellCount > 0) {
+            const cellIndex = activeNotebook.notebook.cellAt(activeNotebook.selection.start).index
+            cellJson = await findMatchingNotebookCell(filePath, cellIndex)
+        }
 
-		return { ...ctx, cellJson }
-	}
+        return { ...ctx, cellJson }
+    }
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterGenerateCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const userPrompt = await showJupyterPromptInput(
-					"Generate Notebook Cell",
-					"Enter your prompt for generating notebook cell (press Enter to confirm & Esc to cancel)",
-				)
-				if (!userPrompt) return
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            commands.JupyterGenerateCell,
+            async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
+                const userPrompt = await showJupyterPromptInput(
+                    "Generate Notebook Cell",
+                    "Enter your prompt for generating notebook cell (press Enter to confirm & Esc to cancel)",
+                )
+                if (!userPrompt) return
 
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
+                const ctx = await getNotebookCommandContext(range, diagnostics)
+                if (!ctx) return
 
-				const notebookContext = `User prompt: ${userPrompt}
+                const notebookContext = `User prompt: ${userPrompt}
 Insert a new Jupyter notebook cell above or below the current cell based on user prompt.
 ${NOTEBOOK_EDIT_INSTRUCTIONS}
 
@@ -474,41 +477,41 @@ Current Notebook Cell Context (JSON, sanitized of image data):
 ${ctx.cellJson || "{}"}
 \`\`\``
 
-				await addToDirac(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
-	)
+                await addToDirac(ctx.controller, ctx.commandContext, notebookContext)
+            },
+        ),
+    )
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterExplainCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            commands.JupyterExplainCell,
+            async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
+                const ctx = await getNotebookCommandContext(range, diagnostics)
+                if (!ctx) return
 
-				const notebookContext = ctx.cellJson
-					? `\n\nCurrent Notebook Cell Context (JSON, sanitized of image data):\n\`\`\`json\n${ctx.cellJson}\n\`\`\``
-					: undefined
+                const notebookContext = ctx.cellJson
+                    ? `\n\nCurrent Notebook Cell Context (JSON, sanitized of image data):\n\`\`\`json\n${ctx.cellJson}\n\`\`\``
+                    : undefined
 
-				await explainWithDirac(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
-	)
+                await explainWithDirac(ctx.controller, ctx.commandContext, notebookContext)
+            },
+        ),
+    )
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterImproveCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const userPrompt = await showJupyterPromptInput(
-					"Improve Notebook Cell",
-					"Enter your prompt for improving the current notebook cell (press Enter to confirm & Esc to cancel)",
-				)
-				if (!userPrompt) return
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            commands.JupyterImproveCell,
+            async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
+                const userPrompt = await showJupyterPromptInput(
+                    "Improve Notebook Cell",
+                    "Enter your prompt for improving the current notebook cell (press Enter to confirm & Esc to cancel)",
+                )
+                if (!userPrompt) return
 
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
+                const ctx = await getNotebookCommandContext(range, diagnostics)
+                if (!ctx) return
 
-				const notebookContext = `User prompt: ${userPrompt}
+                const notebookContext = `User prompt: ${userPrompt}
 ${NOTEBOOK_EDIT_INSTRUCTIONS}
 
 Current Notebook Cell Context (JSON, sanitized of image data):
@@ -516,253 +519,286 @@ Current Notebook Cell Context (JSON, sanitized of image data):
 ${ctx.cellJson || "{}"}
 \`\`\``
 
-				await improveWithDirac(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
-	)
+                await improveWithDirac(ctx.controller, ctx.commandContext, notebookContext)
+            },
+        ),
+    )
 
-	// Register the openWalkthrough command handler
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.Walkthrough, async () => {
-			await vscode.commands.executeCommand("workbench.action.openWalkthrough", `${context.extension.id}#DiracWalkthrough`)
-			telemetryService.captureButtonClick("command_openWalkthrough")
-		}),
-	)
+    // Register the openWalkthrough command handler
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.Walkthrough, async () => {
+            await vscode.commands.executeCommand("workbench.action.openWalkthrough", `${context.extension.id}#DiracWalkthrough`)
+            telemetryService.captureButtonClick("command_openWalkthrough")
+        }),
+    )
 
-	// Register the reconstructTaskHistory command handler
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.ReconstructTaskHistory, async () => {
-			const { reconstructTaskHistory } = await import("./core/commands/reconstructTaskHistory")
-			await reconstructTaskHistory()
-			telemetryService.captureButtonClick("command_reconstructTaskHistory")
-		}),
-	)
+    // Register the reconstructTaskHistory command handler
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.ReconstructTaskHistory, async () => {
+            const { reconstructTaskHistory } = await import("./core/commands/reconstructTaskHistory")
+            await reconstructTaskHistory()
+            telemetryService.captureButtonClick("command_reconstructTaskHistory")
+        }),
+    )
 
-	// Register the generateGitCommitMessage command handler
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.GenerateCommit, async (scm) => {
-			generateCommitMsg(webview.controller, scm)
-		}),
-		vscode.commands.registerCommand(commands.AbortCommit, () => {
-			abortCommitGeneration()
-		}),
-	)
+    // Register the generateGitCommitMessage command handler
+    context.subscriptions.push(
+        vscode.commands.registerCommand(commands.GenerateCommit, async (scm) => {
+            generateCommitMsg(webview.controller, scm)
+        }),
+        vscode.commands.registerCommand(commands.AbortCommit, () => {
+            abortCommitGeneration()
+        }),
+    )
 
-	// =============== Symbol Index File Watchers ===============
-	const supportedExts = [
-		"js",
-		"jsx",
-		"ts",
-		"tsx",
-		"py",
-		"rs",
-		"go",
-		"c",
-		"h",
-		"cpp",
-		"hpp",
-		"cs",
-		"rb",
-		"java",
-		"php",
-		"swift",
-		"kt",
-	]
-	const fileWatcher = vscode.workspace.createFileSystemWatcher(`**/*.{${supportedExts.join(",")}}`)
+    // =============== Symbol Index File Watchers ===============
+    const supportedExts = [
+        "js",
+        "jsx",
+        "ts",
+        "tsx",
+        "py",
+        "rs",
+        "go",
+        "c",
+        "h",
+        "cpp",
+        "hpp",
+        "cs",
+        "rb",
+        "java",
+        "php",
+        "swift",
+        "kt",
+    ]
+    const fileWatcher = vscode.workspace.createFileSystemWatcher(`**/*.{${supportedExts.join(",")}}`)
 
-	const debounceMap = new Map<string, NodeJS.Timeout>()
-	const DEBOUNCE_MS = 1000
+    const debounceMap = new Map<string, NodeJS.Timeout>()
+    const DEBOUNCE_MS = 1000
 
-	const debouncedUpdate = (uri: vscode.Uri) => {
-		const fsPath = uri.fsPath
-		if (debounceMap.has(fsPath)) {
-			clearTimeout(debounceMap.get(fsPath))
-		}
-		const timeout = setTimeout(async () => {
-			debounceMap.delete(fsPath)
-			await SymbolIndexService.getInstance().updateFile(fsPath)
-		}, DEBOUNCE_MS)
-		debounceMap.set(fsPath, timeout)
-	}
+    const debouncedUpdate = (uri: vscode.Uri) => {
+        const fsPath = uri.fsPath
+        if (debounceMap.has(fsPath)) {
+            clearTimeout(debounceMap.get(fsPath))
+        }
+        const timeout = setTimeout(async () => {
+            debounceMap.delete(fsPath)
+            await SymbolIndexService.getInstance().updateFile(fsPath)
+        }, DEBOUNCE_MS)
+        debounceMap.set(fsPath, timeout)
+    }
 
-	fileWatcher.onDidChange(debouncedUpdate)
-	fileWatcher.onDidCreate(debouncedUpdate)
-	fileWatcher.onDidDelete(async (uri) => {
-		const fsPath = uri.fsPath
-		if (debounceMap.has(fsPath)) {
-			clearTimeout(debounceMap.get(fsPath))
-			debounceMap.delete(fsPath)
-		}
-		await SymbolIndexService.getInstance().removeFile(fsPath)
-	})
+    fileWatcher.onDidChange(debouncedUpdate)
+    fileWatcher.onDidCreate(debouncedUpdate)
+    fileWatcher.onDidDelete(async (uri) => {
+        const fsPath = uri.fsPath
+        if (debounceMap.has(fsPath)) {
+            clearTimeout(debounceMap.get(fsPath))
+            debounceMap.delete(fsPath)
+        }
+        await SymbolIndexService.getInstance().removeFile(fsPath)
+    })
 
-	context.subscriptions.push(fileWatcher)
+    context.subscriptions.push(fileWatcher)
 
-	Logger.log(`[Dirac] extension activated in ${performance.now() - activationStartTime} ms`)
+    Logger.log(`[Dirac] extension activated in ${performance.now() - activationStartTime} ms`)
 
-	return createDiracAPI(webview.controller)
+    return createDiracAPI(webview.controller)
 }
 
 async function showJupyterPromptInput(title: string, placeholder: string): Promise<string | undefined> {
-	return new Promise((resolve) => {
-		const quickPick = vscode.window.createQuickPick()
-		quickPick.title = title
-		quickPick.placeholder = placeholder
-		quickPick.ignoreFocusOut = true
+    return new Promise((resolve) => {
+        const quickPick = vscode.window.createQuickPick()
+        quickPick.title = title
+        quickPick.placeholder = placeholder
+        quickPick.ignoreFocusOut = true
 
-		// Allow free text input
-		quickPick.canSelectMany = false
+        // Allow free text input
+        quickPick.canSelectMany = false
 
-		let userInput = ""
+        let userInput = ""
 
-		quickPick.onDidChangeValue((value) => {
-			userInput = value
-			// Update items to show the current input
-			if (value) {
-				quickPick.items = [
-					{
-						label: "$(check) Use this prompt",
-						detail: value,
-						alwaysShow: true,
-					},
-				]
-			} else {
-				quickPick.items = []
-			}
-		})
+        quickPick.onDidChangeValue((value) => {
+            userInput = value
+            // Update items to show the current input
+            if (value) {
+                quickPick.items = [
+                    {
+                        label: "$(check) Use this prompt",
+                        detail: value,
+                        alwaysShow: true,
+                    },
+                ]
+            } else {
+                quickPick.items = []
+            }
+        })
 
-		quickPick.onDidAccept(() => {
-			if (userInput) {
-				resolve(userInput)
-				quickPick.hide()
-			}
-		})
+        quickPick.onDidAccept(() => {
+            if (userInput) {
+                resolve(userInput)
+                quickPick.hide()
+            }
+        })
 
-		quickPick.onDidHide(() => {
-			if (!userInput) {
-				resolve(undefined)
-			}
-			quickPick.dispose()
-		})
+        quickPick.onDidHide(() => {
+            if (!userInput) {
+                resolve(undefined)
+            }
+            quickPick.dispose()
+        })
 
-		quickPick.show()
-	})
+        quickPick.show()
+    })
 }
 
 function setupHostProvider(context: ExtensionContext, globalStorageFsPath: string) {
+    extensionRootForBinaryResolution = context.extensionUri.fsPath
 
-	const outputChannel = registerDiracOutputChannel(context)
-	outputChannel.appendLine("[Dirac] Setting up VS Code host...")
+    const outputChannel = registerDiracOutputChannel(context)
+    outputChannel.appendLine("[Dirac] Setting up VS Code host...")
 
-	const createWebview = () => new VscodeDiracWebviewProvider(context)
-	const createDiffView = () => new VscodeDiffViewProvider()
-	const createCommentReview = () => getVscodeCommentReviewController()
-	const createTerminalManager = () => new VscodeTerminalManager()
-		const getEnvironmentVariables = async (cwd: string) => {
-		const { getPythonEnvironmentVariables } = await import("@utils/python")
-		const env = await getPythonEnvironmentVariables(vscode.Uri.file(cwd))
-		if (env) {
-			Logger.info(`[Extension] Python environment variables for ${cwd}: ${JSON.stringify(env)}`)
-			if (env.VIRTUAL_ENV) {
-				Logger.info(`[Extension] Detected virtual environment: ${env.VIRTUAL_ENV}`)
-			}
-		} else {
-			Logger.info(`[Extension] No Python environment variables found for ${cwd}`)
-		}
-		return env
-	}
+    const createWebview = () => new VscodeDiracWebviewProvider(context)
+    const createDiffView = () => new VscodeDiffViewProvider()
+    const createCommentReview = () => getVscodeCommentReviewController()
+    const createTerminalManager = () => new VscodeTerminalManager()
+    const getEnvironmentVariables = async (cwd: string) => {
+        const { getPythonEnvironmentVariables } = await import("@utils/python")
+        const env = await getPythonEnvironmentVariables(vscode.Uri.file(cwd))
+        if (env) {
+            Logger.info(`[Extension] Python environment variables for ${cwd}: ${JSON.stringify(env)}`)
+            if (env.VIRTUAL_ENV) {
+                Logger.info(`[Extension] Detected virtual environment: ${env.VIRTUAL_ENV}`)
+            }
+        } else {
+            Logger.info(`[Extension] No Python environment variables found for ${cwd}`)
+        }
+        return env
+    }
 
-	const getCallbackUrl = async (path: string, _preferredPort?: number) => {
-		const scheme = vscode.env.uriScheme || "vscode"
-		const callbackUri = vscode.Uri.parse(`${scheme}://${context.extension.id}${path}`)
+    const getCallbackUrl = async (path: string, _preferredPort?: number) => {
+        const scheme = vscode.env.uriScheme || "vscode"
+        const callbackUri = vscode.Uri.parse(`${scheme}://${context.extension.id}${path}`)
 
-		if (vscode.env.uiKind === vscode.UIKind.Web) {
-			// In VS Code Web (Codespaces, code serve-web), vscode:// URIs redirect to the
-			// desktop app instead of staying in the browser. Use asExternalUri to convert
-			// to a web-reachable HTTPS URL that routes back to the extension's URI handler.
-			const externalUri = await vscode.env.asExternalUri(callbackUri)
-			return externalUri.toString(true)
-		}
+        if (vscode.env.uiKind === vscode.UIKind.Web) {
+            // In VS Code Web (Codespaces, code serve-web), vscode:// URIs redirect to the
+            // desktop app instead of staying in the browser. Use asExternalUri to convert
+            // to a web-reachable HTTPS URL that routes back to the extension's URI handler.
+            const externalUri = await vscode.env.asExternalUri(callbackUri)
+            return externalUri.toString(true)
+        }
 
-		// In regular desktop VS Code, use the vscode:// URI protocol handler directly.
-		return callbackUri.toString(true)
-	}
-	HostProvider.initialize(
-		"extension",
-		createWebview,
-		createDiffView,
-		createCommentReview,
-		createTerminalManager,
-		vscodeHostBridgeClient,
-		() => {}, // No-op logger, logging is handled via HostProvider.env.debugLog
-		getCallbackUrl,
-		getBinaryLocation,
-		context.extensionUri.fsPath,
-		globalStorageFsPath,
+        // In regular desktop VS Code, use the vscode:// URI protocol handler directly.
+        return callbackUri.toString(true)
+    }
+    HostProvider.initialize(
+        "extension",
+        createWebview,
+        createDiffView,
+        createCommentReview,
+        createTerminalManager,
+        vscodeHostBridgeClient,
+        (msg: string) => outputChannel.appendLine(msg),
+        getCallbackUrl,
+        getBinaryLocation,
+        context.extensionUri.fsPath,
+        globalStorageFsPath,
 
-		getEnvironmentVariables
-	)
+        getEnvironmentVariables
+    )
 }
 
 function getUriPath(url: string): string | undefined {
-	try {
-		return new URL(url).pathname
-	} catch {
-		return undefined
-	}
+    try {
+        return new URL(url).pathname
+    } catch {
+        return undefined
+    }
 }
 
 async function openDiracSidebarForTaskUri(): Promise<void> {
-	const sidebarWaitTimeoutMs = 3000
-	const sidebarWaitIntervalMs = 50
+    const sidebarWaitTimeoutMs = 3000
+    const sidebarWaitIntervalMs = 50
 
-	await vscode.commands.executeCommand(`${ExtensionRegistryInfo.views.Sidebar}.focus`)
+    await vscode.commands.executeCommand(`${ExtensionRegistryInfo.views.Sidebar}.focus`)
 
-	const startedAt = Date.now()
-	while (Date.now() - startedAt < sidebarWaitTimeoutMs) {
-		if (DiracWebviewProvider.getVisibleInstance()) {
-			return
-		}
-		await new Promise((resolve) => setTimeout(resolve, sidebarWaitIntervalMs))
-	}
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < sidebarWaitTimeoutMs) {
+        if (DiracWebviewProvider.getVisibleInstance()) {
+            return
+        }
+        await new Promise((resolve) => setTimeout(resolve, sidebarWaitIntervalMs))
+    }
 
-	Logger.warn("Task URI handling timed out waiting for Dirac sidebar visibility")
+    Logger.warn("Task URI handling timed out waiting for Dirac sidebar visibility")
 }
 
 async function getBinaryLocation(name: string): Promise<string> {
-	// The only binary currently supported is the rg binary from the VSCode installation.
-	if (!name.startsWith("rg")) {
-		throw new Error(`Binary '${name}' is not supported`)
-	}
+    // The only binary currently supported is ripgrep. Prefer the extension-bundled
+    // @vscode/ripgrep package, then fall back to VS Code's bundled copy for older
+    // installs / dev layouts. PATH is intentionally not used: this should be a
+    // packaged runtime dependency, not a machine-local prerequisite.
+    if (!name.startsWith("rg")) {
+        throw new Error(`Binary '${name}' is not supported`)
+    }
 
-	const checkPath = async (pkgFolder: string) => {
-		const fullPathResult = workspaceResolver.resolveWorkspacePath(
-			vscode.env.appRoot,
-			path.join(pkgFolder, name),
-			"Services.ripgrep.getBinPath",
-		)
-		const fullPath = typeof fullPathResult === "string" ? fullPathResult : fullPathResult.absolutePath
-		return (await fileExistsAtPath(fullPath)) ? fullPath : undefined
-	}
+    const checkedPaths: string[] = []
+    const binaryNames = process.platform === "win32" && !name.endsWith(".exe") ? [name, `${name}.exe`] : [name]
+    const universalPlatformDir = `${process.platform}-${process.env.npm_config_arch || process.arch}`
+    const packageRelativeDirs = [
+        "dist/node_modules/@vscode/ripgrep/bin",
+        "dist/node_modules/vscode-ripgrep/bin",
+        "node_modules/@vscode/ripgrep/bin",
+        "node_modules/vscode-ripgrep/bin",
+        "node_modules.asar.unpacked/@vscode/ripgrep/bin",
+        "node_modules.asar.unpacked/vscode-ripgrep/bin",
+    ]
+    const universalPackageRelativeDirs = [
+        path.join("dist/node_modules/@vscode/ripgrep-universal/bin", universalPlatformDir),
+        path.join("node_modules/@vscode/ripgrep-universal/bin", universalPlatformDir),
+        path.join("node_modules.asar.unpacked/@vscode/ripgrep-universal/bin", universalPlatformDir),
+    ]
 
-	const binPath =
-		(await checkPath("node_modules/@vscode/ripgrep/bin/")) ||
-		(await checkPath("node_modules/vscode-ripgrep/bin")) ||
-		(await checkPath("node_modules.asar.unpacked/vscode-ripgrep/bin/")) ||
-		(await checkPath("node_modules.asar.unpacked/@vscode/ripgrep/bin/"))
-	if (!binPath) {
-		throw new Error("Could not find ripgrep binary")
-	}
-	return binPath
+    const checkPath = async (root: string, relativePath: string) => {
+        const fullPathResult = workspaceResolver.resolveWorkspacePath(
+            root,
+            relativePath,
+            "Services.ripgrep.getBinPath",
+        )
+        const fullPath = typeof fullPathResult === "string" ? fullPathResult : fullPathResult.absolutePath
+        checkedPaths.push(fullPath)
+        return (await fileExistsAtPath(fullPath)) ? fullPath : undefined
+    }
+
+    const roots = [
+        ...(extensionRootForBinaryResolution
+            ? [{ label: "extension", path: extensionRootForBinaryResolution }]
+            : []),
+        { label: "vscode", path: vscode.env.appRoot },
+    ]
+
+    for (const root of roots) {
+        for (const pkgFolder of [...packageRelativeDirs, ...universalPackageRelativeDirs]) {
+            for (const binaryName of binaryNames) {
+                const binPath = await checkPath(root.path, path.join(pkgFolder, binaryName))
+                if (binPath) {
+                    Logger.info(`[Dirac] Resolved ${name} from ${root.label} bundled path: ${binPath}`)
+                    return binPath
+                }
+            }
+        }
+    }
+
+    throw new Error(`Could not find bundled ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}`)
 }
 
 // This method is called when your extension is deactivated
 export async function deactivate() {
-	// Dispose Non-VSCode-specific services
-	tearDown()
+    // Dispose Non-VSCode-specific services
+    tearDown()
 
-	// VSCode-specific services
-	disposeVscodeCommentReviewController()
+    // VSCode-specific services
+    disposeVscodeCommentReviewController()
 }
 
 // TODO: Find a solution for automatically removing DEV related content from production builds.
@@ -776,45 +812,45 @@ const DEV_WORKSPACE_FOLDER = process.env.DEV_WORKSPACE_FOLDER
 
 // Set up development mode file watcher
 if (IS_DEV) {
-	assert(DEV_WORKSPACE_FOLDER, "DEV_WORKSPACE_FOLDER must be set in development")
-	const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(DEV_WORKSPACE_FOLDER, "src/**/*"))
+    assert(DEV_WORKSPACE_FOLDER, "DEV_WORKSPACE_FOLDER must be set in development")
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(DEV_WORKSPACE_FOLDER, "src/**/*"))
 
-	watcher.onDidChange(({ scheme, path }) => {
-		Logger.info(`${scheme} ${path} changed. Reloading VSCode...`)
+    watcher.onDidChange(({ scheme, path }) => {
+        Logger.info(`${scheme} ${path} changed. Reloading VSCode...`)
 
-		vscode.commands.executeCommand("workbench.action.reloadWindow")
-	})
+        vscode.commands.executeCommand("workbench.action.reloadWindow")
+    })
 }
 
 // VSCode-specific storage migrations
 async function cleanupLegacyVSCodeStorage(context: ExtensionContext): Promise<void> {
-	try {
-		await cleanupOldApiKey(context)
-		// Migrate is not done if the new storage does not have the lastShownAnnouncementId flag
-		const hasMigrated = context.globalState.get("lastShownAnnouncementId")
-		if (hasMigrated !== undefined) {
-			return
-		}
+    try {
+        await cleanupOldApiKey(context)
+        // Migrate is not done if the new storage does not have the lastShownAnnouncementId flag
+        const hasMigrated = context.globalState.get("lastShownAnnouncementId")
+        if (hasMigrated !== undefined) {
+            return
+        }
 
-		Logger.info("[VS Code Storage Migrations] Starting")
+        Logger.info("[VS Code Storage Migrations] Starting")
 
-		// Migrate custom instructions to global Dirac rules (one-time cleanup)
-		await migrateCustomInstructionsToGlobalRules(context)
+        // Migrate custom instructions to global Dirac rules (one-time cleanup)
+        await migrateCustomInstructionsToGlobalRules(context)
 
-		// Migrate welcomeViewCompleted setting based on existing API keys (one-time cleanup)
-		await migrateWelcomeViewCompleted(context)
+        // Migrate welcomeViewCompleted setting based on existing API keys (one-time cleanup)
+        await migrateWelcomeViewCompleted(context)
 
-		// Migrate workspace storage values back to global storage (reverting previous migration)
-		await migrateWorkspaceToGlobalStorage(context)
+        // Migrate workspace storage values back to global storage (reverting previous migration)
+        await migrateWorkspaceToGlobalStorage(context)
 
-		// Ensure taskHistory.json exists and migrate legacy state (runs once)
-		await migrateTaskHistoryToFile(context)
+        // Ensure taskHistory.json exists and migrate legacy state (runs once)
+        await migrateTaskHistoryToFile(context)
 
-		// lastShownAnnouncementId will be set when announcement is shown
-		// after activation so we don't need to set it here.
+        // lastShownAnnouncementId will be set when announcement is shown
+        // after activation so we don't need to set it here.
 
-		Logger.info("[VS Code Storage Migrations] Completed")
-	} catch (error) {
-		Logger.warn("[VS Code Storage Migrations] Failed" + (error instanceof Error ? `: ${error.message}` : ""))
-	}
+        Logger.info("[VS Code Storage Migrations] Completed")
+    } catch (error) {
+        Logger.warn("[VS Code Storage Migrations] Failed" + (error instanceof Error ? `: ${error.message}` : ""))
+    }
 }

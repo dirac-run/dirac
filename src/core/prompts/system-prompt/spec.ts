@@ -2,46 +2,13 @@ import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { FunctionDeclaration as GoogleTool, Type as GoogleToolParamType } from "@google/genai"
 import { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
 import { FunctionTool as OpenAIResponseFunctionTool, Tool as OpenAIResponseTool } from "openai/resources/responses/responses"
-import type { DiracDefaultTool } from "@/shared/tools"
 import { MULTI_ROOT_HINT } from "./constants"
 import type { SystemPromptContext } from "./types"
 
-export interface DiracToolSpec {
-	id: DiracDefaultTool
-	name: string
-	description: string
-	instruction?: string
-	contextRequirements?: (context: SystemPromptContext) => boolean
-	parameters?: Array<DiracToolSpecParameter>
-}
+import { DiracToolSpec as BaseSpec, DiracToolSpecParameter as BaseParam } from "@/shared/tools"
 
-interface DiracToolSpecParameter {
-	name: string
-	required: boolean
-	instruction: string | ((context: SystemPromptContext) => string)
-	usage?: string
-	dependencies?: DiracDefaultTool[]
-	description?: string
-	contextRequirements?: (context: SystemPromptContext) => boolean
-	// TODO: Confirm if "integer" is actually supported across providers
-	/**
-	 * The type of the parameter. Default to string if not provided.
-	 * Supported types: string, boolean, integer, array, object
-	 */
-	type?: "string" | "boolean" | "integer" | "array" | "object"
-	/**
-	 * For array types, this defines the schema of array items
-	 */
-	items?: any
-	/**
-	 * For object types, this defines the properties
-	 */
-	properties?: Record<string, any>
-	/**
-	 * Additional JSON Schema fields to preserve from MCP tools
-	 */
-	[key: string]: any
-}
+export type DiracToolSpec = BaseSpec<SystemPromptContext>
+export type DiracToolSpecParameter = BaseParam<SystemPromptContext>
 
 /**
  * Converts a DiracToolSpec into an OpenAI ChatCompletionTool definition

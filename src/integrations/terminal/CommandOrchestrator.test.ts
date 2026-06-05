@@ -62,8 +62,12 @@ class FakeTerminalProcess extends EventEmitter<TerminalProcessEvents> implements
 
 function createCallbacks(): CommandExecutorCallbacks {
 	return {
-		say: async () => undefined,
-		ask: async () => ({ response: "messageResponse" }),
+		taskMessenger: {
+			upsertText: async () => {},
+			streamText: async () => ({ id: "1", append: async () => {}, close: async () => {}, setImages: async () => {}, setFiles: async () => {} }),
+			createCard: async () => ({ id: "1", update: async () => {}, appendBody: async () => {}, finalize: async () => {}, waitForInteraction: async () => ({}) as any }),
+			upsertApiStatus: async () => {},
+		} as any,
 		updateBackgroundCommandState: () => {},
 		updateDiracMessage: async () => {},
 		getDiracMessages: () => [],

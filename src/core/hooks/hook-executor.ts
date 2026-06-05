@@ -1,21 +1,28 @@
-import type { HookOutputStreamMeta } from "@shared/ExtensionMessage"
-import { DiracMessage } from "@shared/ExtensionMessage"
+import { CardStatus, DiracMessageType, type HookOutputStreamMeta } from "@shared/ExtensionMessage"
 import type { HookOutput } from "@shared/proto/dirac/hooks"
 import { Logger } from "@/shared/services/Logger"
 import { MessageStateHandler } from "../task/message-state"
 import { HookExecutionError } from "./HookError"
-import type { HookModelInputContext } from "./hook-factory"
+import type { HookModelInputContext, Hooks } from "./hook-factory"
+
 import { HookFactory } from "./hook-factory"
+
+import { ITaskMessenger } from "@shared/ExtensionMessage"
+
+
+
 
 export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	hookName: Name
 	hookInput: Hooks[Name]
 	isCancellable: boolean
-	say: (type: any, text?: string, images?: string[], files?: string[], partial?: boolean) => Promise<number | undefined>
+	messenger: ITaskMessenger
+
 	setActiveHookExecution?: (execution: {
 		hookName: string
 		toolName: string | undefined
-		messageTs: number
+		messageId: string
+
 		abortController: AbortController
 	}) => Promise<void>
 	clearActiveHookExecution?: () => Promise<void>
@@ -27,8 +34,7 @@ export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	pendingToolInfo?: any // Optional metadata about pending tool execution for PreToolUse
 }
 
-// Import Hooks type from HookFactory
-type Hooks = import("./hook-factory").Hooks
+
 
 export interface HookExecutionResult {
 	cancel?: boolean
@@ -60,7 +66,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		hookName,
 		hookInput,
 		isCancellable,
-		say,
+		messenger,
+
 		setActiveHookExecution,
 		clearActiveHookExecution,
 		messageStateHandler,
@@ -83,7 +90,7 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		return { wasCancelled: false }
 	}
 
-	let hookMessageTs: number | undefined
+	let hookMessageId: string | undefined
 	const abortController = new AbortController()
 
 	// Declare hookInfo with empty default - populated inside try block.
@@ -102,7 +109,13 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 			scriptPaths: hookInfo.scriptPaths,
 			...(options.pendingToolInfo && { pendingToolInfo: options.pendingToolInfo }),
 		}
-		hookMessageTs = await say("hook_status", JSON.stringify(hookMetadata))
+		const cardHandle = await messenger.createCard({
+			header: `${hookName} Hook`,
+			status: CardStatus.RUNNING,
+			body: JSON.stringify(hookMetadata),
+		})
+		hookMessageId = cardHandle.id
+
 
 		// Reorder messages immediately so hook UI appears above tool UI
 		// This must happen right after creating the hook message, before the hook runs
@@ -111,11 +124,11 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		}
 
 		// Track active hook execution for cancellation (only if cancellable and message was created)
-		if (isCancellable && hookMessageTs !== undefined && setActiveHookExecution) {
+		if (isCancellable && hookMessageId !== undefined && setActiveHookExecution) {
 			await setActiveHookExecution({
 				hookName,
 				toolName: options.toolName,
-				messageTs: hookMessageTs,
+				messageId: hookMessageId,
 				abortController,
 			})
 		}
@@ -137,7 +150,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 				prefixParts.push(parts.slice(-3).join("/"))
 			}
 			const prefix = prefixParts.length ? `[${prefixParts.join(" ")}] ` : ""
-			await say("hook_output_stream", prefix + line)
+			await messenger.upsertText(prefix + line)
+
 		}
 
 		// Create and execute hook
@@ -165,8 +179,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		// Check if hook wants to cancel
 		if (result.cancel === true) {
 			// Update hook status to cancelled
-			if (hookMessageTs !== undefined) {
-				await updateHookMessage(messageStateHandler, hookMessageTs, {
+			if (hookMessageId !== undefined) {
+				await updateHookMessage(messageStateHandler, hookMessageId, {
 					hookName,
 					...(options.toolName && { toolName: options.toolName }),
 					status: "cancelled",
@@ -185,8 +199,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		}
 
 		// Update hook status to completed (only if not cancelled)
-		if (hookMessageTs !== undefined) {
-			await updateHookMessage(messageStateHandler, hookMessageTs, {
+		if (hookMessageId !== undefined) {
+			await updateHookMessage(messageStateHandler, hookMessageId, {
 				hookName,
 				...(options.toolName && { toolName: options.toolName }),
 				status: "completed",
@@ -206,8 +220,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		// Check if this was a user cancellation via abort controller
 		if (abortController.signal.aborted) {
 			// Update hook status to cancelled
-			if (hookMessageTs !== undefined) {
-				await updateHookMessage(messageStateHandler, hookMessageTs, {
+			if (hookMessageId !== undefined) {
+				await updateHookMessage(messageStateHandler, hookMessageId, {
 					hookName,
 					status: "cancelled",
 					exitCode: 130,
@@ -226,8 +240,8 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		const isStructuredError = HookExecutionError.isHookError(hookError)
 		const errorInfo = isStructuredError ? hookError.errorInfo : null
 
-		if (hookMessageTs !== undefined) {
-			await updateHookMessage(messageStateHandler, hookMessageTs, {
+		if (hookMessageId !== undefined) {
+			await updateHookMessage(messageStateHandler, hookMessageId, {
 				hookName,
 				status: "failed",
 				exitCode: errorInfo?.exitCode ?? 1,
@@ -261,39 +275,34 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
  */
 async function updateHookMessage(
 	messageStateHandler: MessageStateHandler,
-	hookMessageTs: number,
+	hookMessageId: string,
 	metadata: Record<string, any>,
 ): Promise<void> {
-	const diracMessages = messageStateHandler.getDiracMessages()
-	const hookMessageIndex = diracMessages.findIndex((m: DiracMessage) => m.ts === hookMessageTs)
-	if (hookMessageIndex !== -1) {
-		await messageStateHandler.updateDiracMessage(hookMessageIndex, {
-			text: JSON.stringify(metadata),
-		})
+	const index = messageStateHandler.findMessageIndexById(hookMessageId)
+	if (index !== -1) {
+		const msg = messageStateHandler.getDiracMessages()[index]
+		if (msg.content.type === DiracMessageType.CARD) {
+			msg.content.card.body = JSON.stringify(metadata)
+			msg.content.card.status = metadata.status === "completed" ? CardStatus.SUCCESS : 
+									 metadata.status === "failed" ? CardStatus.ERROR :
+									 metadata.status === "cancelled" ? CardStatus.CANCELLED : CardStatus.RUNNING
+			await messageStateHandler.updateDiracMessage(index, msg)
+		}
 	}
 }
 
 /**
  * Reorders hook and tool messages so hook UI appears before tool UI.
  * This is called immediately after a hook message is created.
- *
- * The algorithm:
- * 1. Find the most recent tool message (ask or say with type "tool", "command", or "browser_action_launch")
- * 2. Find any hook messages that came after it
- * 3. Delete the tool message
- * 4. Re-add the tool message at the end (after hook messages)
  */
 async function reorderHookAndToolMessages(messageStateHandler: MessageStateHandler): Promise<void> {
 	const diracMessages = messageStateHandler.getDiracMessages()
 
-	// Define all message types that represent tool executions with PreToolUse hooks
-	const toolMessageTypes = ["tool", "command", "browser_action_launch"]
-
-	// Find the most recent tool message
+	// Find the most recent tool message (Card with a tool-like header)
 	let lastToolMessageIndex = -1
 	for (let i = diracMessages.length - 1; i >= 0; i--) {
-		const msgType = diracMessages[i].ask || diracMessages[i].say
-		if (msgType && toolMessageTypes.includes(msgType)) {
+		const msg = diracMessages[i]
+		if (msg.content.type === DiracMessageType.CARD && !msg.content.card.header.startsWith("Hook:")) {
 			lastToolMessageIndex = i
 			break
 		}
@@ -306,7 +315,8 @@ async function reorderHookAndToolMessages(messageStateHandler: MessageStateHandl
 	// Check if there are any hook messages after the tool message
 	let hasHookMessagesAfterTool = false
 	for (let i = lastToolMessageIndex + 1; i < diracMessages.length; i++) {
-		if (diracMessages[i].say === "hook_status" || diracMessages[i].say === "hook_output_stream") {
+		const msg = diracMessages[i]
+		if (msg.content.type === DiracMessageType.CARD && msg.content.card.header.startsWith("Hook:")) {
 			hasHookMessagesAfterTool = true
 			break
 		}

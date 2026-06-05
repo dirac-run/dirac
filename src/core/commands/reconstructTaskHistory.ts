@@ -1,6 +1,6 @@
 import { getSavedDiracMessages, getTaskMetadata, readTaskHistoryFromState, writeTaskHistoryToState } from "@core/storage/disk"
 import { HostProvider } from "@hosts/host-provider"
-import { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import { ShowMessageType } from "@shared/proto/host/window"
 import { fileExistsAtPath } from "@utils/fs"
@@ -214,16 +214,18 @@ interface TaskInfo {
 
 function extractTaskInformation(diracMessages: DiracMessage[], metadata: any): TaskInfo {
 	// Find the first user message (task description)
-	const firstUserMessage = diracMessages.find((msg) => msg.type === "say" && msg.say === "text" && msg.text)
+	const firstUserMessage = diracMessages.find(
+		(msg) => msg.content.type === DiracMessageType.MARKDOWN && !msg.content.isReasoning && msg.content.content,
+	)
 
 	// Extract timestamp from first message or use task ID as fallback
 	const timestamp = diracMessages.length > 0 ? diracMessages[0].ts : Date.now()
 
 	// Extract task description
 	let taskDescription = "Untitled Task"
-	if (firstUserMessage?.text) {
+	if (firstUserMessage?.content.type === DiracMessageType.MARKDOWN && firstUserMessage.content.content) {
 		// Clean up the task description
-		const cleanText = firstUserMessage.text
+		const cleanText = firstUserMessage.content.content
 			.replace(/<task>\s*/g, "")
 			.replace(/\s*<\/task>/g, "")
 			.trim()
@@ -242,37 +244,16 @@ function extractTaskInformation(diracMessages: DiracMessage[], metadata: any): T
 	let totalCost = 0
 
 	// Look for usage-carrying messages with token info
-	const apiReqMessages = diracMessages.filter(
-		(msg) => msg.type === "say" && (msg.say === "api_req_started" || msg.say === "subagent_usage") && msg.text,
-	)
+	const apiReqMessages = diracMessages.filter((msg) => msg.content.type === DiracMessageType.API_STATUS)
 
 	for (const msg of apiReqMessages) {
-		try {
-			if (msg.text) {
-				const apiInfo = JSON.parse(msg.text) as unknown
-				if (!apiInfo || typeof apiInfo !== "object") {
-					continue
-				}
-
-				const usage = apiInfo as Record<string, unknown>
-				if (typeof usage.tokensIn === "number" && Number.isFinite(usage.tokensIn)) {
-					tokensIn += usage.tokensIn
-				}
-				if (typeof usage.tokensOut === "number" && Number.isFinite(usage.tokensOut)) {
-					tokensOut += usage.tokensOut
-				}
-				if (typeof usage.cacheWrites === "number" && Number.isFinite(usage.cacheWrites)) {
-					cacheWrites += usage.cacheWrites
-				}
-				if (typeof usage.cacheReads === "number" && Number.isFinite(usage.cacheReads)) {
-					cacheReads += usage.cacheReads
-				}
-				if (typeof usage.cost === "number" && Number.isFinite(usage.cost)) {
-					totalCost += usage.cost
-				}
-			}
-		} catch {
-			// Ignore parsing errors
+		if (msg.content.type === DiracMessageType.API_STATUS) {
+			const status = msg.content.status
+			tokensIn += status.tokensIn || 0
+			tokensOut += status.tokensOut || 0
+			cacheWrites += status.cacheWrites || 0
+			cacheReads += status.cacheReads || 0
+			totalCost += status.cost || 0
 		}
 	}
 

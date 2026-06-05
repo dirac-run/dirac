@@ -128,4 +128,37 @@ export class ExternalDiffViewProvider extends DiffViewProvider {
 			userEdits: saveResult.userEdits,
 		}
 	}
+	override async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<
+		Map<
+			string,
+			{
+				finalContent: string | undefined
+				autoFormattingEdits: string | undefined
+				userEdits: string | undefined
+			}
+		>
+	> {
+		const results = new Map()
+		for (const file of files) {
+			results.set(file.path, await this.applyAndSaveSilently(file.path, file.content))
+		}
+		return results
+	}
+	override async format(path: string): Promise<string> {
+		const { exec } = await import("child_process")
+		const { promisify } = await import("util")
+		const execAsync = promisify(exec)
+		const fs = await import("fs/promises")
+
+		try {
+			await execAsync(`biome check --write "${path}"`, {
+				cwd: process.cwd(),
+				timeout: 10_000,
+			})
+		} catch (error) {
+			Logger.warn(`[ExternalDiffViewProvider] Format failed for ${path}: ${error}`)
+		}
+
+		return await fs.readFile(path, "utf-8")
+	}
 }

@@ -1,47 +1,59 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
-import type { DiracMessage } from "../ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "../ExtensionMessage"
 import { getApiMetrics, getLastApiReqTotalTokens } from "../getApiMetrics"
 
 describe("getApiMetrics", () => {
 	it("includes subagent_usage in aggregate totals", () => {
 		const messages: DiracMessage[] = [
 			{
+				id: "1",
 				ts: 1,
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({
-					tokensIn: 10,
-					tokensOut: 20,
-					cacheWrites: 3,
-					cacheReads: 1,
-					cost: 0.12,
-				}),
+				content: {
+					type: DiracMessageType.API_STATUS,
+					status: {
+						tokensIn: 10,
+						tokensOut: 20,
+						cacheWrites: 3,
+						cacheReads: 1,
+						cost: 0.12,
+					},
+				},
 			},
 			{
+				id: "2",
 				ts: 2,
-				type: "say",
-				say: "subagent_usage",
-				text: JSON.stringify({
-					source: "subagents",
-					tokensIn: 4,
-					tokensOut: 8,
-					cacheWrites: 2,
-					cacheReads: 1,
-					cost: 0.05,
-				}),
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: "card-2",
+						header: "Subagent Usage",
+						status: "success" as any,
+						renderType: "text",
+						body: JSON.stringify({
+							source: "subagents",
+							tokensIn: 4,
+							tokensOut: 8,
+							cacheWrites: 2,
+							cacheReads: 1,
+							cost: 0.05,
+						}),
+					},
+				},
 			},
 			{
+				id: "3",
 				ts: 3,
-				type: "say",
-				say: "deleted_api_reqs",
-				text: JSON.stringify({
-					tokensIn: 6,
-					tokensOut: 9,
-					cacheWrites: 1,
-					cacheReads: 0,
-					cost: 0.03,
-				}),
+				content: {
+					type: DiracMessageType.API_STATUS,
+					status: {
+						tokensIn: 6,
+						tokensOut: 9,
+						cacheWrites: 1,
+						cacheReads: 0,
+						cost: 0.03,
+					},
+				},
 			},
 		]
 
@@ -57,10 +69,18 @@ describe("getApiMetrics", () => {
 	it("ignores malformed usage payloads", () => {
 		const messages: DiracMessage[] = [
 			{
+				id: "1",
 				ts: 1,
-				type: "say",
-				say: "subagent_usage",
-				text: "{not-json",
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: "card-1",
+						header: "Subagent Usage",
+						status: "success" as any,
+						renderType: "text",
+						body: "{not-json",
+					},
+				},
 			},
 		]
 
@@ -75,25 +95,35 @@ describe("getLastApiReqTotalTokens", () => {
 	it("uses only the latest api_req_started payload", () => {
 		const messages: DiracMessage[] = [
 			{
+				id: "1",
 				ts: 1,
-				type: "say",
-				say: "subagent_usage",
-				text: JSON.stringify({
-					source: "subagents",
-					tokensIn: 100,
-					tokensOut: 200,
-				}),
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: "card-1",
+						header: "Subagent Usage",
+						status: "success" as any,
+						renderType: "text",
+						body: JSON.stringify({
+							source: "subagents",
+							tokensIn: 100,
+							tokensOut: 200,
+						}),
+					},
+				},
 			},
 			{
+				id: "2",
 				ts: 2,
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({
-					tokensIn: 11,
-					tokensOut: 7,
-					cacheWrites: 2,
-					cacheReads: 3,
-				}),
+				content: {
+					type: DiracMessageType.API_STATUS,
+					status: {
+						tokensIn: 11,
+						tokensOut: 7,
+						cacheWrites: 2,
+						cacheReads: 3,
+					},
+				},
 			},
 		]
 

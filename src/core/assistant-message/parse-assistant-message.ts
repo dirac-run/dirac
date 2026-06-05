@@ -8,7 +8,7 @@ import { AssistantMessageContent } from "."
  * @param assistantMessage The raw string output from the assistant.
  * @returns An array of `AssistantMessageContent` objects, which can be `TextContent` or `ReasoningContent`.
  */
-export function parseAssistantMessageV2(assistantMessage: string): AssistantMessageContent[] {
+export function parseAssistantMessageV2(assistantMessage: string, isStreamActive: boolean = false): AssistantMessageContent[] {
 	const contentBlocks: AssistantMessageContent[] = []
 	let i = 0
 	const len = assistantMessage.length
@@ -32,19 +32,23 @@ export function parseAssistantMessageV2(assistantMessage: string): AssistantMess
 					contentBlocks.push({
 						type: "reasoning",
 						reasoning: content,
-						partial: false,
+						isComplete: true,
 					})
 				}
 				i += closingTagIndex + closingTag.length
 				continue
 			}
 			// Partial reasoning block (tag not closed)
-			const content = remaining.slice(openingTag.length).trim()
+			let content = remaining.slice(openingTag.length)
+			const partialCloseMatch = content.match(/<\/(?:t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?)?$/i)
+			if (partialCloseMatch) {
+				content = content.slice(0, partialCloseMatch.index)
+			}
+			content = content.trim()
 			if (content) {
 				contentBlocks.push({
 					type: "reasoning",
 					reasoning: content,
-					partial: true,
 				})
 			}
 			i = len // Done
@@ -60,19 +64,31 @@ export function parseAssistantMessageV2(assistantMessage: string): AssistantMess
 				contentBlocks.push({
 					type: "text",
 					content: text,
-					partial: false,
+					isComplete: true,
 				})
 			}
 			i += nextTagMatch.index
 		} else if (!nextTagMatch) {
-			// No more tags, finalize remaining as text
-			const text = remaining.trim()
-			if (text) {
-				contentBlocks.push({
-					type: "text",
-					content: text,
-					partial: true,
-				})
+			// Check for partial opening tag at the end of the string
+			const partialTagMatch = remaining.match(/<t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?$/i)
+			
+			if (partialTagMatch && partialTagMatch.index !== undefined) {
+				const text = isStreamActive ? remaining.slice(0, partialTagMatch.index) : remaining.slice(0, partialTagMatch.index).trim()
+				if (text) {
+					contentBlocks.push({
+						type: "text",
+						content: text,
+					})
+				}
+			} else {
+				// No more tags, finalize remaining as text
+				const text = isStreamActive ? remaining : remaining.trim()
+				if (text) {
+					contentBlocks.push({
+						type: "text",
+						content: text,
+					})
+				}
 			}
 			i = len
 		} else if (nextTagMatch.index === 0) {
@@ -85,7 +101,6 @@ export function parseAssistantMessageV2(assistantMessage: string): AssistantMess
 				contentBlocks.push({
 					type: "text",
 					content: text,
-					partial: true,
 				})
 			}
 			i++

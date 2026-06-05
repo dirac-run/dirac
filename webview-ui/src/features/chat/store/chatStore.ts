@@ -1,10 +1,17 @@
-import type { DiracMessage, ExtensionState } from "@shared/ExtensionMessage"
+import type { DiracMessage, ExtensionState, TaskStatus } from "@shared/ExtensionMessage"
+
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import { create } from "zustand"
 import { StateServiceClient } from "@/shared/api/grpc-client"
 
 interface ChatState {
 	diracMessages: DiracMessage[]
+	uiActionState?: ExtensionState["uiActionState"]
+	activeVoiceStreamId?: string
+	isApiRequestActive?: boolean
+	taskStatus?: TaskStatus
+
+
 
 	// Actions
 	setDiracMessages: (messages: DiracMessage[]) => void
@@ -16,6 +23,12 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>((set) => ({
 	diracMessages: [],
+	uiActionState: undefined,
+	activeVoiceStreamId: undefined,
+	isApiRequestActive: false,
+	taskStatus: undefined,
+
+
 
 	setDiracMessages: (messages) => set({ diracMessages: messages }),
 
@@ -38,11 +51,17 @@ export const useChatStore = create<ChatState>((set) => ({
 				const parsedState = JSON.parse(state.stateJson) as ExtensionState
 
 				if (parsedState.diracMessages) {
-					const lastUserMessage = parsedState.diracMessages.filter((m) => m.type === "say" && m.say === "text").at(-1)
 
 					set((state) => {
 
-						return { diracMessages: parsedState.diracMessages }
+						return {
+							diracMessages: parsedState.diracMessages,
+							uiActionState: parsedState.uiActionState,
+							activeVoiceStreamId: parsedState.activeVoiceStreamId,
+							isApiRequestActive: parsedState.isApiRequestActive,
+							taskStatus: parsedState.taskStatus,
+
+						}
 					})
 				}
 			},

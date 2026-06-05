@@ -3,15 +3,15 @@
  * Allows single-root and multi-root managers to be used interchangeably
  */
 export interface ICheckpointManager {
-	saveCheckpoint(isAttemptCompletionMessage?: boolean, completionMessageTs?: number): Promise<void>
+	saveCheckpoint(isAttemptCompletionMessage?: boolean, completionMessageId?: string): Promise<void>
 
-	restoreCheckpoint(messageTs: number, restoreType: any, offset?: number): Promise<any>
+	restoreCheckpoint(messageId: string, restoreType: any, offset?: number): Promise<any>
 
 	doesLatestTaskCompletionHaveNewChanges(): Promise<boolean>
 
 	commit(): Promise<string | undefined>
 
-	presentMultifileDiff?(messageTs: number, seeNewChangesSinceLastTaskCompletion: boolean): Promise<void>
+	presentMultifileDiff?(messageId: string, seeNewChangesSinceLastTaskCompletion: boolean): Promise<void>
 
 	// Optional method for multi-root specific initialization
 	initialize?(): Promise<void>

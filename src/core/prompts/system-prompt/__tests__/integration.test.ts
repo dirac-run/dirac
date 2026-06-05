@@ -24,6 +24,7 @@ import { SymbolIndexService } from "@/services/symbol-index/SymbolIndexService"
 import { expect } from "chai"
 import { getSystemPrompt } from "../index"
 import type { SystemPromptContext } from "../types"
+import type { ToolRequestSnapshot } from "@core/task/tools/runtime/ToolSnapshot"
 
 // ============================================================================
 // Configuration
@@ -51,59 +52,59 @@ ${details}
 `
 
 const compareStrings = (expected: string, actual: string): string | null => {
-	if (expected === actual) {
-		return null
-	}
+    if (expected === actual) {
+        return null
+    }
 
-	const expectedLines = expected.split("\n")
-	const actualLines = actual.split("\n")
-	const diffs: string[] = []
+    const expectedLines = expected.split("\n")
+    const actualLines = actual.split("\n")
+    const diffs: string[] = []
 
-	for (let i = 0; i < Math.max(expectedLines.length, actualLines.length) && diffs.length < MAX_DIFF_LINES; i++) {
-		const exp = expectedLines[i] || ""
-		const act = actualLines[i] || ""
-		if (exp !== act) {
-			diffs.push(`Line ${i + 1}:`)
-			if (exp) {
-				diffs.push(`  - Expected: ${exp.substring(0, 100)}${exp.length > 100 ? "..." : ""}`)
-			}
-			if (act) {
-				diffs.push(`  + Actual:   ${act.substring(0, 100)}${act.length > 100 ? "..." : ""}`)
-			}
-		}
-	}
+    for (let i = 0; i < Math.max(expectedLines.length, actualLines.length) && diffs.length < MAX_DIFF_LINES; i++) {
+        const exp = expectedLines[i] || ""
+        const act = actualLines[i] || ""
+        if (exp !== act) {
+            diffs.push(`Line ${i + 1}:`)
+            if (exp) {
+                diffs.push(`  - Expected: ${exp.substring(0, 100)}${exp.length > 100 ? "..." : ""}`)
+            }
+            if (act) {
+                diffs.push(`  + Actual:   ${act.substring(0, 100)}${act.length > 100 ? "..." : ""}`)
+            }
+        }
+    }
 
-	return [
-		`Expected: ${expected.length} chars, ${expectedLines.length} lines`,
-		`Actual: ${actual.length} chars, ${actualLines.length} lines`,
-		"",
-		...diffs,
-		diffs.length >= MAX_DIFF_LINES ? "... and more differences" : "",
-	].join("\n")
+    return [
+        `Expected: ${expected.length} chars, ${expectedLines.length} lines`,
+        `Actual: ${actual.length} chars, ${actualLines.length} lines`,
+        "",
+        ...diffs,
+        diffs.length >= MAX_DIFF_LINES ? "... and more differences" : "",
+    ].join("\n")
 }
 
 async function assertSnapshot(name: string, content: string): Promise<void> {
-	const snapshotPath = path.join(SNAPSHOTS_DIR, name)
+    const snapshotPath = path.join(SNAPSHOTS_DIR, name)
 
-	if (UPDATE_SNAPSHOTS) {
-		await fs.writeFile(snapshotPath, content, "utf-8")
-		console.log(`Updated snapshot: ${name} (${content.length} chars)`)
-		return
-	}
+    if (UPDATE_SNAPSHOTS) {
+        await fs.writeFile(snapshotPath, content, "utf-8")
+        console.log(`Updated snapshot: ${name} (${content.length} chars)`)
+        return
+    }
 
-	try {
-		const existing = await fs.readFile(snapshotPath, "utf-8")
-		const diff = compareStrings(existing, content)
-		if (diff) {
-			throw new Error(formatSnapshotError(name, diff))
-		}
-		console.log(`✓ Snapshot matches: ${name}`)
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			throw new Error(formatSnapshotError(name, `Snapshot does not exist. Run with --update-snapshots to create it.`))
-		}
-		throw error
-	}
+    try {
+        const existing = await fs.readFile(snapshotPath, "utf-8")
+        const diff = compareStrings(existing, content)
+        if (diff) {
+            throw new Error(formatSnapshotError(name, diff))
+        }
+        console.log(`✓ Snapshot matches: ${name}`)
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            throw new Error(formatSnapshotError(name, `Snapshot does not exist. Run with --update-snapshots to create it.`))
+        }
+        throw error
+    }
 }
 
 // ============================================================================
@@ -111,43 +112,57 @@ async function assertSnapshot(name: string, content: string): Promise<void> {
 // ============================================================================
 
 export const mockProviderInfo = {
-	providerId: "test",
-	model: { id: "fast", info: { supportsPromptCache: false } },
-	mode: "act" as const,
+    providerId: "test",
+    model: { id: "fast", info: { supportsPromptCache: false } },
+    mode: "act" as const,
 }
 
 const makeProviderInfo = (modelId: string, providerId = "test") => ({
-	providerId,
-	model: { ...mockProviderInfo.model, id: modelId },
-	mode: "act" as const,
-	customPrompt: providerId.includes("lmstudio") ? "compact" : undefined,
+    providerId,
+    model: { ...mockProviderInfo.model, id: modelId },
+    mode: "act" as const,
+    customPrompt: providerId.includes("lmstudio") ? "compact" : undefined,
 })
 
 const baseContext: SystemPromptContext = {
-	cwd: "/test/project",
-	ide: "TestIde",
-	supportsBrowserUse: true,
-	diracWebToolsEnabled: true,
-	subagentsEnabled: true,
-	browserSettings: { viewport: { width: 1280, height: 720 } },
-	globalDiracRulesFileInstructions: "Follow global rules",
-	localDiracRulesFileInstructions: "Follow local rules",
-	preferredLanguageInstructions: "Prefer TypeScript",
-	isTesting: true,
-	providerInfo: mockProviderInfo,
+    cwd: "/test/project",
+    ide: "TestIde",
+    supportsBrowserUse: true,
+    diracWebToolsEnabled: true,
+    subagentsEnabled: true,
+    browserSettings: { viewport: { width: 1280, height: 720 } },
+    globalDiracRulesFileInstructions: "Follow global rules",
+    localDiracRulesFileInstructions: "Follow local rules",
+    preferredLanguageInstructions: "Prefer TypeScript",
+    isTesting: true,
+    providerInfo: mockProviderInfo,
 }
 
 type TestRunner = Mocha.Context & { skip(): void; timeout(ms: number): void }
 
+function emptyToolSnapshot(): ToolRequestSnapshot {
+    return {
+        inventoryVersion: 0,
+        requestId: "test",
+        promptVisibleSpecs: [],
+        inventoryEnabledTools: [],
+        nativeTools: [],
+        coordinator: { has: () => false } as any,
+        executableToolNames: new Set(),
+        dynamicSubagentToolNames: new Set(),
+    }
+}
+
 async function runPromptTest(
-	testCtx: TestRunner,
-	context: SystemPromptContext,
-	modelId: string,
-	handler: (result: Awaited<ReturnType<typeof getSystemPrompt>>) => Promise<void>,
+    testCtx: TestRunner,
+    context: SystemPromptContext,
+    modelId: string,
+    handler: (result: Awaited<ReturnType<typeof getSystemPrompt>> & { tools: ToolRequestSnapshot["nativeTools"] }) => Promise<void>,
 ): Promise<void> {
-	testCtx.timeout(TEST_TIMEOUT)
-	const result = await getSystemPrompt(context)
-	await handler(result)
+    testCtx.timeout(TEST_TIMEOUT)
+    const toolSnapshot = emptyToolSnapshot()
+    const result = await getSystemPrompt(context, toolSnapshot)
+    await handler({ ...result, tools: toolSnapshot.nativeTools })
 }
 
 // ============================================================================
@@ -155,15 +170,15 @@ async function runPromptTest(
 // ============================================================================
 
 const contextVariations: Array<{ name: string; override: Partial<SystemPromptContext> }> = [
-	{ name: "basic", override: {} },
-	{ name: "no-browser", override: { supportsBrowserUse: false } },
+    { name: "basic", override: {} },
+    { name: "no-browser", override: { supportsBrowserUse: false } },
 ]
 
 const modelTestCases = [
-	{ modelId: "claude-4-5-sonnet", providerId: "anthropic" }, // Anthropic format
-	{ modelId: "gpt-5", providerId: "openai" }, // OpenAI format
-	{ modelId: "gemini-3", providerId: "gemini" }, // Gemini format
-	{ modelId: "gemini-3", providerId: "vertex" }, // Vertex/Gemini format
+    { modelId: "claude-4-5-sonnet", providerId: "anthropic" }, // Anthropic format
+    { modelId: "gpt-5", providerId: "openai" }, // OpenAI format
+    { modelId: "gemini-3", providerId: "gemini" }, // Gemini format
+    { modelId: "gemini-3", providerId: "vertex" }, // Vertex/Gemini format
 ]
 
 // ============================================================================
@@ -171,101 +186,99 @@ const modelTestCases = [
 // ============================================================================
 
 describe("Prompt System Integration Tests", () => {
-	before(async () => {
-		SymbolIndexService.getInstance().setPersistenceEnabled(false)
-		SymbolIndexService.getInstance().setSkipRepoCheck(true)
-		console.log(UPDATE_SNAPSHOTS ? "🔄 SNAPSHOT UPDATE MODE" : "✅ SNAPSHOT TEST MODE")
-		await fs.mkdir(SNAPSHOTS_DIR, { recursive: true }).catch(() => {})
-	})
+    before(async () => {
+        SymbolIndexService.getInstance().setPersistenceEnabled(false)
+        SymbolIndexService.getInstance().setSkipRepoCheck(true)
+        console.log(UPDATE_SNAPSHOTS ? "🔄 SNAPSHOT UPDATE MODE" : "✅ SNAPSHOT TEST MODE")
+        await fs.mkdir(SNAPSHOTS_DIR, { recursive: true }).catch(() => { })
+    })
 
-	describe("Snapshot Testing", () => {
-		for (const { modelId, providerId } of modelTestCases) {
-			describe(`Model: ${modelId} (${providerId})`, () => {
-				it(`should generate consistent native tools object`, async function () {
-					const providerInfo = makeProviderInfo(modelId, providerId)
+    describe("Snapshot Testing", () => {
+        for (const { modelId, providerId } of modelTestCases) {
+            describe(`Model: ${modelId} (${providerId})`, () => {
+                it(`should generate consistent native tools object`, async function () {
+                    const providerInfo = makeProviderInfo(modelId, providerId)
 
-					const context: SystemPromptContext = {
-						...baseContext,
-						providerInfo,
-					}
+                    const context: SystemPromptContext = {
+                        ...baseContext,
+                        providerInfo,
+                    }
 
-					await runPromptTest(this, context, modelId, async ({ tools }) => {
-						expect(tools).to.be.an("array").that.is.not.empty
-						const snapshotName = `${providerId}_${modelId.replace(/[^a-zA-Z0-9]/g, "_")}.tools.snap`
-						await assertSnapshot(snapshotName, JSON.stringify(tools, null, 2))
-					})
-				})
+                    await runPromptTest(this, context, modelId, async ({ tools }) => {
+                        const snapshotName = `${providerId}_${modelId.replace(/[^a-zA-Z0-9]/g, "_")}.tools.snap`
+                        await assertSnapshot(snapshotName, JSON.stringify(tools, null, 2))
+                    })
+                })
 
-				for (const { name: contextName, override } of contextVariations) {
-					it(`should generate consistent prompt with ${contextName} context`, async function () {
-						const providerInfo = makeProviderInfo(modelId, providerId)
-						const context: SystemPromptContext = {
-							...baseContext,
-							...override,
-							providerInfo,
-						}
+                for (const { name: contextName, override } of contextVariations) {
+                    it(`should generate consistent prompt with ${contextName} context`, async function () {
+                        const providerInfo = makeProviderInfo(modelId, providerId)
+                        const context: SystemPromptContext = {
+                            ...baseContext,
+                            ...override,
+                            providerInfo,
+                        }
 
-						await runPromptTest(this, context, modelId, async ({ systemPrompt, tools }) => {
-							expect(tools).to.be.an("array").that.is.not.empty
+                        await runPromptTest(this, context, modelId, async ({ systemPrompt, tools }) => {
 
-							expect(systemPrompt).to.be.a("string").with.length.greaterThan(100)
+                            expect(systemPrompt).to.be.a("string").with.length.greaterThan(100)
 
-							const snapshotName = `${providerId}_${modelId.replace(/[^a-zA-Z0-9]/g, "_")}-${contextName}.snap`
-							await assertSnapshot(snapshotName, systemPrompt)
-						})
-					})
-				}
-			})
-		}
-	})
+                            const snapshotName = `${providerId}_${modelId.replace(/[^a-zA-Z0-9]/g, "_")}-${contextName}.snap`
+                            await assertSnapshot(snapshotName, systemPrompt)
+                        })
+                    })
+                }
+            })
+        }
+    })
 
-	describe("Parallel Tool Calling", () => {
-		it(`should include parallel tool-calling guidance when enabled`, async function () {
-			const context: SystemPromptContext = {
-				...baseContext,
-				enableParallelToolCalling: true,
-			}
+    describe("Parallel Tool Calling", () => {
+        it(`should include parallel tool-calling guidance when enabled`, async function () {
+            const context: SystemPromptContext = {
+                ...baseContext,
+                enableParallelToolCalling: true,
+            }
 
-			await runPromptTest(this, context, "default", async ({ systemPrompt }) => {
-				expect(systemPrompt).to.include(
-					"You may use multiple tools in a single response when the operations are independent",
-				)
-			})
-		})
-	})
+            await runPromptTest(this, context, "default", async ({ systemPrompt }) => {
+                expect(systemPrompt).to.include(
+                    "You may use multiple tools in a single response when the operations are independent",
+                )
+            })
+        })
+    })
 
-	describe("Context-Specific Features", () => {
-		const featureTests = [
-			{ name: "user instructions when provided", context: {}, check: "USER'S CUSTOM INSTRUCTIONS" },
-		]
+    describe("Context-Specific Features", () => {
+        const featureTests = [
+            { name: "user instructions when provided", context: {}, check: "USER'S CUSTOM INSTRUCTIONS" },
+        ]
 
-		for (const { name, context, check } of featureTests) {
-			it(`should include ${name}`, async function () {
-				await runPromptTest(this, { ...baseContext, ...context }, "default", async ({ systemPrompt }) => {
-					expect(systemPrompt.toLowerCase()).to.include(check.toLowerCase())
-				})
-			})
-		}
-	})
+        for (const { name, context, check } of featureTests) {
+            it(`should include ${name}`, async function () {
+                await runPromptTest(this, { ...baseContext, ...context }, "default", async ({ systemPrompt }) => {
+                    expect(systemPrompt.toLowerCase()).to.include(check.toLowerCase())
+                })
+            })
+        }
+    })
 
-	describe("Error Handling", () => {
-		it("should handle completely invalid context gracefully", async function () {
-			this.timeout(TEST_TIMEOUT)
-			const { systemPrompt } = await getSystemPrompt({} as SystemPromptContext)
-			expect(systemPrompt).to.be.a("string")
-		})
+    describe("Error Handling", () => {
+        it("should handle completely invalid context gracefully", async function () {
+            this.timeout(TEST_TIMEOUT)
+            const { systemPrompt } = await getSystemPrompt({} as SystemPromptContext, emptyToolSnapshot())
+            expect(systemPrompt).to.be.a("string")
+        })
 
-		it("should handle undefined context properties", async function () {
-			this.timeout(TEST_TIMEOUT)
-			const contextWithNulls: SystemPromptContext = {
-				cwd: undefined,
-				ide: "",
-				supportsBrowserUse: undefined,
-				providerInfo: mockProviderInfo,
-			}
+        it("should handle undefined context properties", async function () {
+            this.timeout(TEST_TIMEOUT)
+            const contextWithNulls: SystemPromptContext = {
+                cwd: undefined,
+                ide: "",
+                supportsBrowserUse: undefined,
+                providerInfo: mockProviderInfo,
+            }
 
-			const { systemPrompt } = await getSystemPrompt(contextWithNulls)
-			expect(systemPrompt).to.be.a("string")
-		})
-	})
+            const { systemPrompt } = await getSystemPrompt(contextWithNulls, emptyToolSnapshot())
+            expect(systemPrompt).to.be.a("string")
+        })
+    })
 })

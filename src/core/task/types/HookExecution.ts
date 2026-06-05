@@ -8,7 +8,8 @@ export interface HookExecution {
 	/** The name of the tool that triggered this hook (for PreToolUse/PostToolUse hooks) */
 	toolName?: string
 	/** The timestamp of the message showing hook execution status */
-	messageTs: number
+	messageId: string
+
 	/** The abort controller used to cancel the hook execution */
 	abortController: AbortController
 }

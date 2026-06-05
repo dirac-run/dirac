@@ -62,7 +62,6 @@ enum DiracSay {
   INFO = 26;
   reserved 27; // was TASK_PROGRESS
   ERROR_RETRY = 28;
-  GENERATE_EXPLANATION = 29;
   HOOK_STATUS = 30;
   HOOK_OUTPUT_STREAM = 31;
   COMMAND_PERMISSION_DENIED = 32;
@@ -70,6 +69,45 @@ enum DiracSay {
   SUBAGENT_STATUS = 34;
   USE_SUBAGENTS_SAY = 35;
   SUBAGENT_USAGE = 36;
+  CARD = 37;
+  PROGRESS = 38;
+}
+
+enum CardStatus {
+  CARD_BUILDING = 0;
+  CARD_PENDING = 1;
+  CARD_RUNNING = 2;
+  CARD_SUCCESS = 3;
+  CARD_ERROR = 4;
+  CARD_SKIPPED = 5;
+  CARD_CANCELLED = 6;
+  CARD_ABANDONED = 7;
+  CARD_WAITING_FOR_INPUT = 8;
+}
+
+message ActionButton {
+  string label = 1;
+  string value = 2;
+  optional bool primary = 3;
+  optional string style = 4;
+}
+
+message Card {
+  string id = 1;
+  string header = 2;
+  CardStatus status = 3;
+  optional string body = 4;
+  optional string permission_requested = 5;
+  optional bool collapsed = 6;
+  optional string icon = 7;
+  optional string render_type = 8;
+  optional bool require_approval = 9;
+  optional bool require_feedback = 10;
+  optional string feedback_placeholder = 11;
+  optional int32 max_height = 12;
+  optional string cleanup_strategy = 13;
+  repeated ActionButton actions = 14;
+  optional bool do_not_auto_collapse = 15;
 }
 
 // Enum for DiracSayTool tool types
@@ -192,33 +230,54 @@ message DiracModelInfo {
   string model_id = 2;
 }
 
+message MarkdownContent {
+  string content = 1;
+  bool is_reasoning = 2;
+  repeated string images = 3;
+  repeated string files = 4;
+  optional string role = 5;
+}
+
 // Main DiracMessage type
+message Checkpoint {
+  string id = 1;
+}
+
 message DiracMessage {
+  string id = 27;
   int64 ts = 1;
-  DiracMessageType type = 2;
-  DiracAsk ask = 3;
-  DiracSay say = 4;
-  optional string text = 5;
-  optional string reasoning = 6;
-  repeated string images = 7;
-  repeated string files = 8;
-  bool partial = 9;
+
+  oneof content {
+    MarkdownContent markdown = 28;
+    Card card = 26;
+    DiracApiReqInfo api_status = 22;
+    Checkpoint checkpoint = 29;
+  }
+
+  bool partial = 9 [deprecated = true];
   string last_checkpoint_hash = 10;
   bool is_checkpoint_checked_out = 11;
   bool is_operation_outside_workspace = 12;
   int32 conversation_history_index = 13;
   ConversationHistoryDeletedRange conversation_history_deleted_range = 14;
 
-  // Additional fields for specific ask/say types
-  DiracSayTool say_tool = 15;
-  DiracSayBrowserAction say_browser_action = 16;
-  BrowserActionResult browser_action_result = 17;
-  DiracPlanModeResponse plan_mode_response = 19;
-  DiracAskQuestion ask_question = 20;
-  DiracAskNewTask ask_new_task = 21;
-  DiracApiReqInfo api_req_info = 22;
   DiracModelInfo model_info = 23;
   MultiCommandState multi_command_state = 25;
+
+  // Legacy fields (deprecated)
+  DiracMessageType type = 2 [deprecated = true];
+  DiracAsk ask = 3 [deprecated = true];
+  DiracSay say = 4 [deprecated = true];
+  optional string text = 5 [deprecated = true];
+  optional string reasoning = 6 [deprecated = true];
+  repeated string images = 7 [deprecated = true];
+  repeated string files = 8 [deprecated = true];
+  DiracSayTool say_tool = 15 [deprecated = true];
+  DiracSayBrowserAction say_browser_action = 16 [deprecated = true];
+  BrowserActionResult browser_action_result = 17 [deprecated = true];
+  DiracPlanModeResponse plan_mode_response = 19 [deprecated = true];
+  DiracAskQuestion ask_question = 20 [deprecated = true];
+  DiracAskNewTask ask_new_task = 21 [deprecated = true];
 }
 
 message ShowWebviewEvent {

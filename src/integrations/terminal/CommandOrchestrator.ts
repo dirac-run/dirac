@@ -18,7 +18,8 @@ import { formatResponse } from "@core/prompts/responses"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { TerminalHangStage, TerminalUserInterventionAction, telemetryService } from "@services/telemetry"
 import { DiracTempManager } from "@services/temp"
-import { COMMAND_CANCEL_TOKEN } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
 import * as fs from "fs"
 import { Logger } from "@/shared/services/Logger"
 import {
@@ -40,22 +41,14 @@ import type {
     TerminalProcessResultPromise,
 } from "./types"
 
-/**
- * Orchestrate command execution with shared logic for buffering, user interaction, and result formatting.
- *
- * @param process The terminal process (implements ITerminalProcess)
- * @param terminalManager The terminal manager (for processOutput)
- * @param callbacks The executor callbacks for UI interaction
- * @param options Orchestration options
- * @returns The orchestration result
- */
 export async function orchestrateCommandExecution(
 	process: TerminalProcessResultPromise,
 	terminalManager: ITerminalManager,
 	callbacks: CommandExecutorCallbacks,
-	options: OrchestrationOptions,
+	options: OrchestrationOptions
 ): Promise<OrchestrationResult> {
 	const {
+		command,
 		timeoutSeconds,
 		onOutputLine,
 		showShellIntegrationSuggestion,
@@ -64,50 +57,18 @@ export async function orchestrateCommandExecution(
 		suppressUserInteraction = false,
 	} = options
 
-	const say = async (
-		type: Parameters<CommandExecutorCallbacks["say"]>[0],
-		text?: Parameters<CommandExecutorCallbacks["say"]>[1],
-		images?: Parameters<CommandExecutorCallbacks["say"]>[2],
-		files?: Parameters<CommandExecutorCallbacks["say"]>[3],
-		partial?: Parameters<CommandExecutorCallbacks["say"]>[4],
-	): Promise<Awaited<ReturnType<CommandExecutorCallbacks["say"]>>> => {
-		if (suppressUserInteraction) {
-			return undefined
-		}
-
-		return callbacks.say(type, text, images, files, partial)
-	}
-
-	const ask = async (
-		type: Parameters<CommandExecutorCallbacks["ask"]>[0],
-		text?: Parameters<CommandExecutorCallbacks["ask"]>[1],
-		partial?: Parameters<CommandExecutorCallbacks["ask"]>[2],
-	): Promise<Awaited<ReturnType<CommandExecutorCallbacks["ask"]>> | undefined> => {
-		if (suppressUserInteraction) {
-			return undefined
-		}
-
-		return callbacks.ask(type, text, partial)
-	}
+	const taskMessenger = callbacks.taskMessenger
 
 	// Track command execution state
 	callbacks.updateBackgroundCommandState(true)
 
 	const clearCommandState = async () => {
 		callbacks.updateBackgroundCommandState(false)
-
-		// Mark the command message as completed
-		const diracMessages = callbacks.getDiracMessages()
-		const lastCommandIndex = findLastIndex(diracMessages, (m) => m.ask === "command" || m.say === "command")
-		if (lastCommandIndex !== -1) {
-			await callbacks.updateDiracMessage(lastCommandIndex, {
-				commandCompleted: true,
-			})
-		}
 	}
 
 	process.once("completed", clearCommandState)
 	process.once("error", clearCommandState)
+	process.once("continue", clearCommandState)
 	process.catch(() => {
 		clearCommandState()
 	})
@@ -126,9 +87,9 @@ export async function orchestrateCommandExecution(
 	let bufferStuckTimer: NodeJS.Timeout | null = null
 
 	/**
-	 * Flush buffered output to the UI using ask() which waits for user response.
+	 * Flush buffered output to the UI using createCard() which waits for user response.
 	 * This is the key mechanism for "Proceed While Running" - when user clicks the button,
-	 * the ask() returns with response "yesButtonClicked".
+	 * the interaction returns with response DiracAskResponse.APPROVE.
 	 */
 	const flushBuffer = async (force = false) => {
 		if (outputBuffer.length === 0 && !force) {
@@ -145,20 +106,34 @@ export async function orchestrateCommandExecution(
 				bufferStuckTimer = null
 			}, BUFFER_STUCK_TIMEOUT_MS)
 
+			if (suppressUserInteraction) {
+				return
+			}
+
+
 			try {
-				// Use ask() to present output and wait for user response
+				// Use createCard to present output and wait for user response
 				// This enables "Proceed While Running" button functionality
-				const interaction = await ask("command_output", chunk)
-				if (!interaction) {
-					return
-				}
+				const cardHandle = await taskMessenger.createCard({
+					header: "Command Output",
+					body: chunk,
+					requireApproval: false,
+					requireFeedback: true,
+					feedbackPlaceholder: "Type a message to the agent...",
+					actions: [
+						{ label: "Proceed While Running", value: DiracAskResponse.APPROVE, primary: true },
+						{ label: "Cancel Command", value: DiracAskResponse.REJECT, style: "danger" },
+					],
+				})
+
+				const interaction = await cardHandle.waitForInteraction()
 				const { response, text, images, files } = interaction
 
-				if (response === "yesButtonClicked") {
+				if (response === DiracAskResponse.APPROVE) {
 					// Track when user clicks "Proceed While Running"
 					telemetryService.captureTerminalUserIntervention(
 						TerminalUserInterventionAction.PROCESS_WHILE_RUNNING,
-						terminalType,
+						terminalType
 					)
 					// Proceed while running - but still capture user feedback if provided
 					if (text || (images && images.length > 0) || (files && files.length > 0)) {
@@ -198,7 +173,7 @@ export async function orchestrateCommandExecution(
 						// Send log file message to UI BEFORE resuming the process
 						// This ensures the message appears before any new output lines
 						if (trackingResult?.logFilePath) {
-							await say("command_output", `\n📋 Output is being logged to: ${trackingResult.logFilePath}`)
+							await taskMessenger.upsertText(`\n📋 Output is being logged to: ${trackingResult.logFilePath}`)
 						}
 
 						// Now resume the process - any new lines will be handled by the background tracker
@@ -207,7 +182,7 @@ export async function orchestrateCommandExecution(
 					}
 
 					process.continue()
-				} else if (response === "noButtonClicked" && text === COMMAND_CANCEL_TOKEN) {
+				} else if (response === DiracAskResponse.REJECT) {
 					telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.CANCELLED, terminalType)
 					// Set flags BEFORE resuming the process to prevent new lines from being processed
 					didCancelViaUi = true
@@ -217,7 +192,7 @@ export async function orchestrateCommandExecution(
 					outputBufferSize = 0
 					// Send cancellation message BEFORE resuming the process
 					// This ensures the message appears before any new output lines
-					await say("command_output", "Command cancelled")
+					await taskMessenger.upsertText("Command cancelled")
 					// Now resume the process
 					process.continue()
 				} else {
@@ -229,8 +204,8 @@ export async function orchestrateCommandExecution(
 						await flushBuffer()
 					}
 				}
-			} catch {
-				Logger.error("Error while asking for command output")
+			} catch (error) {
+				Logger.error("Error while asking for command output", error)
 			} finally {
 				// Clear the stuck timer
 				if (bufferStuckTimer) {
@@ -240,7 +215,7 @@ export async function orchestrateCommandExecution(
 			}
 		} else {
 			// After "Proceed While Running": stream output directly to UI
-			await say("command_output", chunk)
+			await taskMessenger.upsertText(chunk)
 		}
 	}
 
@@ -275,8 +250,8 @@ export async function orchestrateCommandExecution(
 			outputBuffer = []
 			outputBufferSize = 0
 			if (!didContinue) {
-				// Use say() instead of ask() since we're transitioning to file mode
-				await say("command_output", chunk)
+				// Use upsertText instead of ask() since we're transitioning to file mode
+				await taskMessenger.upsertText(chunk)
 			}
 		}
 
@@ -302,9 +277,8 @@ export async function orchestrateCommandExecution(
 		lastLines = outputLines.slice(-SUMMARY_LINES_TO_KEEP)
 
 		// FINALLY: Notify user (now this will appear at the end after all buffered output)
-		await say(
-			"command_output",
-			`\n📋 Output is large (${outputLines.length} lines, ${Math.round(totalOutputBytes / 1024)}KB). Writing to: ${largeOutputLogPath}`,
+		await taskMessenger.upsertText(
+			`\n📋 Output is large (${outputLines.length} lines, ${Math.round(totalOutputBytes / 1024)}KB). Writing to: ${largeOutputLogPath}`
 		)
 	}
 
@@ -377,7 +351,7 @@ export async function orchestrateCommandExecution(
 			// After "Proceed While Running" (without background tracking): stream output directly to UI
 			// But throttle if we're in file mode to avoid flooding UI
 			if (!isWritingToFile) {
-				await say("command_output", line)
+				await taskMessenger.upsertText(line)
 			}
 		}
 	})
@@ -414,9 +388,11 @@ export async function orchestrateCommandExecution(
 
 	process.once("no_shell_integration", async () => {
 		if (showShellIntegrationSuggestion) {
-			await say("shell_integration_warning_with_suggestion")
+			await taskMessenger.upsertText(
+				"Shell integration is not available. Consider using background execution mode for better performance."
+			)
 		} else {
-			await say("shell_integration_warning")
+			await taskMessenger.upsertText("Shell integration is not available.")
 		}
 	})
 
@@ -466,9 +442,8 @@ export async function orchestrateCommandExecution(
 
 						// Send log file message to UI BEFORE resuming the process
 						if (trackingResult?.logFilePath) {
-							await say(
-								"command_output",
-								`\n⏱️ Command timed out. Output is being logged to: ${trackingResult.logFilePath}`,
+							await taskMessenger.upsertText(
+								`\n⏱️ Command timed out. Output is being logged to: ${trackingResult.logFilePath}`
 							)
 						}
 
@@ -489,7 +464,9 @@ export async function orchestrateCommandExecution(
 
 					return {
 						userRejected: false,
-						result: `Command execution timed out after ${timeoutSeconds} seconds. ${result.length > 0 ? `\nOutput so far:\n${result}` : ""}`,
+						result: `Command execution timed out after ${timeoutSeconds} seconds. ${
+							result.length > 0 ? `\nOutput so far:\n${result}` : ""
+						}`,
 						completed: false,
 						outputLines,
 					}
@@ -531,7 +508,11 @@ export async function orchestrateCommandExecution(
 	if (isWritingToFile) {
 		// Build summary from first and last lines
 		const skippedLines = totalLineCount - firstLines.length - lastLines.length
-		const summaryLines = [...firstLines, `\n... (${skippedLines} lines written to ${largeOutputLogPath}) ...\n`, ...lastLines]
+		const summaryLines = [
+			...firstLines,
+			`\n... (${skippedLines} lines written to ${largeOutputLogPath}) ...\n`,
+			...lastLines,
+		]
 		result = terminalManager.processOutput(summaryLines)
 		resultOutputLines = summaryLines
 	} else {
@@ -543,7 +524,7 @@ export async function orchestrateCommandExecution(
 		return {
 			userRejected: true,
 			result: formatResponse.toolResult(
-				`Command cancelled. ${result.length > 0 ? `\nOutput captured before cancellation:\n${result}` : ""}`,
+				`Command cancelled. ${result.length > 0 ? `\nOutput captured before cancellation:\n${result}` : ""}`
 			),
 			completed: false,
 			outputLines: resultOutputLines,
@@ -554,7 +535,7 @@ export async function orchestrateCommandExecution(
 	}
 
 	if (userFeedback) {
-		await say("user_feedback", userFeedback.text, userFeedback.images, userFeedback.files)
+		await taskMessenger.upsertText(userFeedback.text || "", false, userFeedback.images, userFeedback.files)
 
 		let fileContentString = ""
 		if (userFeedback.files && userFeedback.files.length > 0) {
@@ -568,7 +549,7 @@ export async function orchestrateCommandExecution(
 					result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
 				}\n\nThe user provided the following feedback:\n<feedback>\n${userFeedback.text}\n</feedback>`,
 				userFeedback.images,
-				fileContentString,
+				fileContentString
 			),
 			completed: false,
 			outputLines: resultOutputLines,
@@ -588,8 +569,8 @@ export async function orchestrateCommandExecution(
 				? "Command executed successfully (exit code 0)."
 				: `Command failed with exit code ${exitCode}.`
 			: signal
-				? `Command terminated by signal ${signal}.`
-				: "Command executed."
+			? `Command terminated by signal ${signal}.`
+			: "Command executed."
 
 		return {
 			userRejected: false,
@@ -614,6 +595,7 @@ export async function orchestrateCommandExecution(
 		signal: completionDetails?.signal,
 	}
 }
+
 
 /**
  * Helper to find last index matching a predicate

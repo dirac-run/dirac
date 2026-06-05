@@ -63,8 +63,11 @@ interface FileSearchResult {
 
 const MAX_RESULTS = 30
 
-async function execRipgrep(args: string[]): Promise<string> {
+type RipgrepDebugLog = (info: Record<string, any>) => Promise<void>
+
+async function execRipgrep(args: string[], debugLog?: RipgrepDebugLog): Promise<string> {
 	const binPath: string = await getBinaryLocation("rg")
+	await debugLog?.({ info: "execRipgrep start", binPath, args })
 
 	return new Promise((resolve, reject) => {
 		const rgProcess = childProcess.spawn(binPath, args)
@@ -93,6 +96,14 @@ async function execRipgrep(args: string[]): Promise<string> {
 			errorOutput += data.toString()
 		})
 		rl.on("close", () => {
+			const finishDetails = {
+				info: "execRipgrep finished",
+				lineCount,
+				stderrOutput: errorOutput || "(none)",
+				outputLength: output.length,
+				outputPreview: output.substring(0, 300),
+			}
+			void debugLog?.(finishDetails)
 			if (errorOutput) {
 				reject(new Error(`ripgrep process error: ${errorOutput}`))
 			} else {
@@ -100,6 +111,11 @@ async function execRipgrep(args: string[]): Promise<string> {
 			}
 		})
 		rgProcess.on("error", (error) => {
+			void debugLog?.({
+				info: "execRipgrep process error",
+				errorMessage: error.message,
+				stack: error.stack,
+			})
 			reject(new Error(`ripgrep process error: ${error.message}`))
 		})
 	})
@@ -114,6 +130,7 @@ export async function regexSearchFiles(
 	taskId?: string,
 	contextLines?: number,
 	excludeFilePatterns?: string[],
+	debugLog?: RipgrepDebugLog,
 ): Promise<string> {
 	// Limit context lines to 10
 	const cappedContextLines = Math.max(0, Math.min(10, contextLines || 0))
@@ -124,13 +141,35 @@ export async function regexSearchFiles(
 		}
 	}
 	args.push(directoryPath)
+	const argsDetails = {
+		info: "regexSearchFiles args",
+		args,
+		cwd,
+		directoryPath,
+		filePattern,
+		contextLines: cappedContextLines,
+		hasDiracIgnore: !!diracIgnoreController,
+	}
+	await debugLog?.(argsDetails)
 
 	let output: string
 	try {
-		output = await execRipgrep(args)
+		output = await execRipgrep(args, debugLog)
 	} catch (error) {
+		await debugLog?.({
+			info: "regexSearchFiles execRipgrep error",
+			errorMessage: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+		})
 		throw Error("Error calling ripgrep", { cause: error })
 	}
+	const outputDetails = {
+		info: "regexSearchFiles ripgrep output",
+		outputLength: output.length,
+		outputPreview: output.substring(0, 500),
+		totalLines: output.split("\n").length,
+	}
+	await debugLog?.(outputDetails)
 
 	const resultsByFile: Map<string, Map<number, SearchResultLine>> = new Map()
 
@@ -157,22 +196,48 @@ export async function regexSearchFiles(
 				}
 			} catch (error) {
 				Logger.error("Error parsing ripgrep output:", error)
+				void debugLog?.({
+					info: "regexSearchFiles parse line error",
+					linePreview: line.substring(0, 300),
+					errorMessage: error instanceof Error ? error.message : String(error),
+				})
 			}
 		}
 	})
+	const parsedDetails = {
+		info: "regexSearchFiles parsed",
+		totalFilesParsed: resultsByFile.size,
+		files: Array.from(resultsByFile.entries()).map(([file, lines]) => ({
+			file,
+			lineCount: lines.size,
+			matchCount: Array.from(lines.values()).filter((line) => line.isMatch).length,
+		})),
+	}
+	await debugLog?.(parsedDetails)
 
 	const fileResults: FileSearchResult[] = []
 	let finalMatchCount = 0
 	for (const [filePath, lineMap] of resultsByFile.entries()) {
 		// Filter by diracIgnoreController if provided
 		if (diracIgnoreController && !diracIgnoreController.validateAccess(filePath)) {
+			await debugLog?.({
+				info: "regexSearchFiles diracIgnore filtered file",
+				filePath,
+			})
 			continue
 		}
 
 		const sortedLines = Array.from(lineMap.values()).sort((a, b) => a.lineNum - b.lineNum)
 		fileResults.push({ filePath, lines: sortedLines })
-		finalMatchCount += sortedLines.filter((l) => l.isMatch).length
+		finalMatchCount += sortedLines.filter((line) => line.isMatch).length
 	}
+	const finalDetails = {
+		info: "regexSearchFiles final",
+		filesBeforeIgnoreFilter: resultsByFile.size,
+		filesAfterIgnoreFilter: fileResults.length,
+		finalMatchCount,
+	}
+	await debugLog?.(finalDetails)
 
 	return await formatResults(fileResults, finalMatchCount, cwd, taskId)
 }

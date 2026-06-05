@@ -547,12 +547,20 @@ export abstract class DiffViewProvider {
 		userEdits: string | undefined
 	}>
 
+	abstract applyAndSaveBatchSilently(
+		files: { path: string; content: string }[]
+	): Promise<Map<string, {
+		finalContent: string | undefined
+		autoFormattingEdits: string | undefined
+		userEdits: string | undefined
+	}>>
+
 
 	/**
 	 * Shows the review UI for the specified files.
 	 * This is called when user approval is required for a batch of edits.
 	 */
-	async showReview(_files: { absolutePath: string; displayPath: string; content: string }[]): Promise<void> {
+	async showReview(_files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[]): Promise<void> {
 		// Default no-op
 	}
 
@@ -570,5 +578,8 @@ export abstract class DiffViewProvider {
 	async hideReview(): Promise<void> {
 		// Default no-op
 	}
+
+	/** Formats a file and returns the formatted content */
+	abstract format(path: string): Promise<string>
 
 }

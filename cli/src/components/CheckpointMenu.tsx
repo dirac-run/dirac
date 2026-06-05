@@ -3,7 +3,7 @@
  * Displays available checkpoints and allows user to select one to restore
  */
 
-import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import { Box, Text, useInput } from "ink"
 import React, { useState } from "react"
 import { useStdinContext } from "../context/StdinContext"
@@ -44,20 +44,29 @@ function getCheckpointOptions(messages: DiracMessage[]): CheckpointOption[] {
 	return options.sort((a, b) => b.ts - a.ts)
 }
 
-/**
- * Get a human-readable label for a checkpoint
- */
 function getCheckpointLabel(msg: DiracMessage): string {
-	if (msg.say === "completion_result") {
-		return "Task completion"
+	const { content } = msg
+
+	if (content.type === DiracMessageType.CARD) {
+		const { card } = content
+		if (card.status === "success") {
+			return "Task completion"
+		}
+		if (card.header.toLowerCase().includes("checkpoint")) {
+			return "Checkpoint"
+		}
+		return card.header || "Card"
 	}
-	if (msg.say === "checkpoint_created") {
-		return "Checkpoint"
-	}
-	if (msg.say === "api_req_started") {
+
+	if (content.type === DiracMessageType.API_STATUS) {
 		return "API request"
 	}
-	return msg.say || msg.ask || "Message"
+
+	if (content.type === DiracMessageType.MARKDOWN) {
+		return content.content.slice(0, 20) + (content.content.length > 20 ? "..." : "")
+	}
+
+	return "Message"
 }
 
 const RESTORE_TYPE_OPTIONS: { type: RestoreType; label: string; description: string }[] = [

@@ -28,9 +28,59 @@ const SAFE_BASE_COMMANDS = [
 	"cut",
 	"which",
 	"type",
+	"sed",
 ]
 
 const SAFE_GIT_SUBCOMMANDS = ["status", "log", "diff", "branch", "show", "remote"]
+
+/**
+ * Splits a command string by shell operators (|, ||, &&, ;, newline) while
+ * respecting single and double quotes. This prevents characters inside quoted
+ * strings (e.g. regex alternation `\|` in grep patterns) from being treated
+ * as shell pipe operators.
+ */
+function splitByShellOperators(command: string): string[] {
+	const segments: string[] = []
+	let current = ""
+	let inSingleQuote = false
+	let inDoubleQuote = false
+
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i]
+
+		if (ch === "'" && !inDoubleQuote) {
+			inSingleQuote = !inSingleQuote
+			current += ch
+		} else if (ch === '"' && !inSingleQuote) {
+			inDoubleQuote = !inDoubleQuote
+			current += ch
+		} else if (!inSingleQuote && !inDoubleQuote) {
+			// Check multi-char operators first
+			if (ch === "|" && i + 1 < command.length && command[i + 1] === "|") {
+				segments.push(current)
+				current = ""
+				i++ // skip second |
+			} else if (ch === "&" && i + 1 < command.length && command[i + 1] === "&") {
+				segments.push(current)
+				current = ""
+				i++ // skip second &
+			} else if (ch === "|" || ch === ";" || ch === "\n") {
+				segments.push(current)
+				current = ""
+			} else {
+				current += ch
+			}
+		} else {
+			current += ch
+		}
+	}
+
+	if (current) {
+		segments.push(current)
+	}
+
+	return segments
+}
 
 /**
  * Checks if a CLI command is considered "harmless" and safe for auto-approval.
@@ -60,7 +110,7 @@ export function isSafeCommand(command: string): boolean {
 
 	// 3. Split by common shell operators to check each part
 	// Handles |, &&, ||, ;
-	const segments = normalized.split(/\|\||&&|[|;]|\n/)
+	const segments = splitByShellOperators(normalized)
 
 	for (const segment of segments) {
 		const trimmed = segment.trim()
@@ -96,8 +146,17 @@ export function isSafeCommand(command: string): boolean {
 			if (parts.some((part) => dangerousFlags.some((flag) => part.toLowerCase().startsWith(flag)))) {
 				return false
 			}
+		} else if (baseCommand === "sed") {
+			// 6. Special handling for sed to block in-place edit flags
+			if (
+				parts.some((part) => {
+					return /^--in-place/.test(part) || /^-[^-]*i/.test(part)
+				})
+			) {
+				return false
+			}
 		} else if (baseCommand === "sort") {
-			// 6. Special handling for sort to block output flag
+			// 7. Special handling for sort to block output flag
 			if (
 				parts.some((part) => {
 					const lowerPart = part.toLowerCase()
@@ -107,7 +166,7 @@ export function isSafeCommand(command: string): boolean {
 				return false
 			}
 		} else if (!SAFE_BASE_COMMANDS.includes(baseCommand)) {
-			// 7. Check against general safe list
+			// 8. Check against general safe list
 			return false
 		}
 	}

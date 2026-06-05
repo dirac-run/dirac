@@ -1,0 +1,135 @@
+import { CardStatus, ICardHandle as IProtocolCardHandle, RenderType, ActionButton, CleanupStrategy, Card } from "../../../../shared/ExtensionMessage"
+import { ICardHandle, CardParams } from "../interfaces/IToolEnvironment"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
+export class CardHandle implements ICardHandle {
+	public header: string
+	public icon?: string
+	public status: CardStatus = CardStatus.PENDING
+	public renderType: RenderType = "text"
+	public body = ""
+	public requireApproval?: boolean
+	public requireFeedback?: boolean
+	public feedbackPlaceholder?: string
+	public actions?: ActionButton[]
+	public collapsed = true
+	public maxHeight?: number
+	public cleanupStrategy?: CleanupStrategy
+	public do_not_auto_collapse?: boolean
+
+	public readonly id: string
+
+	constructor(
+		private protocolHandle: IProtocolCardHandle,
+		params: CardParams,
+	) {
+		this.id = protocolHandle.id
+		this.header = params.header
+		this.icon = params.icon
+		this.status = params.status || CardStatus.RUNNING
+		this.renderType = params.renderType || "text"
+		this.body = params.body || ""
+		this.requireApproval = params.requireApproval
+		this.requireFeedback = params.requireFeedback
+		this.feedbackPlaceholder = params.feedbackPlaceholder
+		this.actions = params.actions
+		this.collapsed = params.collapsed ?? true
+		this.maxHeight = params.maxHeight
+		this.cleanupStrategy = params.cleanupStrategy
+		this.do_not_auto_collapse = params.do_not_auto_collapse
+	}
+
+	public toData(): import("../../../../shared/ExtensionMessage").Card {
+		return {
+			id: this.id,
+			header: this.header,
+			icon: this.icon,
+			status: this.status,
+			renderType: this.renderType,
+			body: this.body,
+			requireApproval: this.requireApproval,
+			requireFeedback: this.requireFeedback,
+			feedbackPlaceholder: this.feedbackPlaceholder,
+			actions: this.actions,
+			collapsed: this.collapsed,
+			maxHeight: this.maxHeight,
+			cleanupStrategy: this.cleanupStrategy,
+			do_not_auto_collapse: this.do_not_auto_collapse,
+		}
+	}
+
+	public async update(patch: Partial<Omit<Card, "id">>): Promise<void> {
+		if (patch.header !== undefined) this.header = patch.header
+		if (patch.icon !== undefined) this.icon = patch.icon
+		if (patch.status !== undefined) this.status = patch.status
+		if (patch.renderType !== undefined) this.renderType = patch.renderType
+		if (patch.body !== undefined) this.body = patch.body
+		if (patch.requireApproval !== undefined) this.requireApproval = patch.requireApproval
+		if (patch.requireFeedback !== undefined) this.requireFeedback = patch.requireFeedback
+		if (patch.feedbackPlaceholder !== undefined) this.feedbackPlaceholder = patch.feedbackPlaceholder
+		if (patch.actions !== undefined) this.actions = patch.actions
+		if (patch.collapsed !== undefined) this.collapsed = patch.collapsed
+		if (patch.maxHeight !== undefined) this.maxHeight = patch.maxHeight
+		if (patch.cleanupStrategy !== undefined) this.cleanupStrategy = patch.cleanupStrategy
+		if (patch.do_not_auto_collapse !== undefined) this.do_not_auto_collapse = patch.do_not_auto_collapse
+
+		await this.protocolHandle.update(patch as any)
+	}
+
+	public async appendBody(chunk: string): Promise<void> {
+		this.body += chunk
+		await this.protocolHandle.appendBody(chunk)
+	}
+	public async finalize(status: CardStatus, doNotAutoCollapse?: boolean): Promise<void> {
+		this.status = status
+		if (doNotAutoCollapse) {
+			this.do_not_auto_collapse = true
+		}
+		await this.protocolHandle.finalize(status, doNotAutoCollapse)
+	}
+
+
+	public async waitForInteraction(): Promise<{
+		action: string
+		response: DiracAskResponse
+		value?: string
+		text?: string
+		images?: string[]
+		files?: string[]
+		userEdits?: Record<string, string>
+	}> {
+		const result = await this.protocolHandle.waitForInteraction()
+
+		let action = result.action || (result.response as string)
+		let value = result.value
+
+		if (result.text && !value) {
+			const actionValue = result.text
+			const isAction = this.actions?.some((a) => a.value === actionValue)
+			if (isAction) {
+				action = actionValue
+			} else {
+				action = "submit"
+				value = actionValue
+			}
+		}
+
+		return {
+			action,
+			response: result.response,
+			value,
+			text: result.text,
+			images: result.images,
+			files: result.files,
+			userEdits: result.userEdits,
+		}
+	}
+
+	/**
+	 * Internal method to resolve the interaction promise.
+	 * This is called by the SurfaceAdapter when it receives an interaction event.
+	 */
+	public resolveInteraction(action: string, value?: string) {
+		// No longer needed as we wait on the protocol handle directly
+	}
+}

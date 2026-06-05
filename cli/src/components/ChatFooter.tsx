@@ -3,102 +3,108 @@ import { Box, Text } from "ink"
 import { COLORS } from "../constants/colors"
 import { createContextBar } from "../utils/display"
 import type { GitDiffStats } from "../utils/git"
+import type { TaskStatus } from "@shared/ExtensionMessage"
+import { TaskStatusIndicator } from "./modular-ui/TaskStatusIndicator"
 
 interface ChatFooterProps {
-	mode: "act" | "plan"
-	modelId: string
-	lastApiReqTotalTokens: number
-	contextWindowSize: number
-	totalCost: number
-	workspacePath: string
-	gitBranch: string | null
-	gitDiffStats: GitDiffStats | null
-	autoApproveAll: boolean
-	show?: boolean
+    mode: "act" | "plan"
+    modelId: string
+    provider: string
+    lastApiReqTotalTokens: number
+    contextWindowSize: number
+    totalCost: number
+    workspacePath: string
+    gitBranch: string | null
+    gitDiffStats: GitDiffStats | null
+    autoApproveAll: boolean
+    taskStatus?: TaskStatus
+    show?: boolean
 }
 
 export const ChatFooter: React.FC<ChatFooterProps> = ({
-	mode,
-	modelId,
-	lastApiReqTotalTokens,
-	contextWindowSize,
-	totalCost,
-	workspacePath,
-	gitBranch,
-	gitDiffStats,
-	autoApproveAll,
-	show = true,
+    mode,
+    modelId,
+    provider,
+    lastApiReqTotalTokens,
+    contextWindowSize,
+    totalCost,
+    workspacePath,
+    gitBranch,
+    gitDiffStats,
+    autoApproveAll,
+    taskStatus,
+    show = true,
 }) => {
-	if (!show) return null
+    if (!show) return null
 
-	return (
-		<Box flexDirection="column" width="100%">
-			{/* Row 1: Instructions (left, can wrap) | Plan/Act toggle (right, no wrap) */}
-			<Box justifyContent="space-between" paddingLeft={1} paddingRight={1} width="100%">
-				<Box flexShrink={1} flexWrap="wrap">
-					<Text color="gray">/ for commands · @ for files · Press Shift+↓ for a new line</Text>
-				</Box>
-				<Box flexShrink={0} gap={1}>
-					<Box>
-						<Text bold={mode === "plan"} color={mode === "plan" ? "yellow" : undefined}>
-							{mode === "plan" ? "●" : "○"} Plan
-						</Text>
-					</Box>
-					<Box>
-						<Text bold={mode === "act"} color={mode === "act" ? COLORS.primaryBlue : undefined}>
-							{mode === "act" ? "●" : "○"} Act
-						</Text>
-					</Box>
-					<Text color="gray">(Tab)</Text>
-				</Box>
-			</Box>
+    return (
+        <Box flexDirection="column" width="100%">
+            {/* Row 1: Instructions (left, can wrap) | Plan/Act toggle (right, no wrap) */}
+            <Box justifyContent="space-between" paddingLeft={1} paddingRight={1} width="100%">
+                <Box flexShrink={1} flexWrap="wrap">
+                    <Text color="gray">/ for commands · @ for files · Press Shift+↓ for a new line</Text>
+                </Box>
+                <Box flexShrink={0} gap={1}>
+                    <Box>
+                        <Text bold={mode === "plan"} color={mode === "plan" ? "yellow" : undefined}>
+                            {mode === "plan" ? "●" : "○"} Plan
+                        </Text>
+                    </Box>
+                    <Box>
+                        <Text bold={mode === "act"} color={mode === "act" ? COLORS.primaryBlue : undefined}>
+                            {mode === "act" ? "●" : "○"} Act
+                        </Text>
+                    </Box>
+                    <Text color="gray">(Tab)</Text>
+                </Box>
+            </Box>
 
-			{/* Row 2: Model/context/tokens/cost */}
-			<Box paddingLeft={1} paddingRight={1}>
-				<Text>
-					{modelId}{" "}
-					{(() => {
-						const bar = createContextBar(lastApiReqTotalTokens, contextWindowSize)
-						return (
-							<Text>
-								<Text>{bar.filled}</Text>
-								<Text color="gray">{bar.empty}</Text>
-							</Text>
-						)
-					})()}{" "}
-					<Text color="gray">
-						({lastApiReqTotalTokens.toLocaleString()}) | ${totalCost.toFixed(3)}
-					</Text>
-				</Text>
-			</Box>
+            {/* Row 2: Model/context/tokens/cost/status */}
+            <Box paddingLeft={1} paddingRight={1}>
+                <Text>
+                    {provider}:{modelId} {(() => {
+                        const bar = createContextBar(lastApiReqTotalTokens, contextWindowSize)
+                        return (
+                            <Text>
+                                <Text>{bar.filled}</Text>
+                                <Text color="gray">{bar.empty}</Text>
+                            </Text>
+                        )
+                    })()}{" "}
+                    <Text color="gray">
+                        ({lastApiReqTotalTokens.toLocaleString()}) | ${totalCost.toFixed(3)}
+                    </Text>{" "}
+                </Text>
+                <TaskStatusIndicator status={taskStatus} />
+            </Box>
 
-			{/* Row 3: Repo/branch/diff stats */}
-			<Box paddingLeft={1} paddingRight={1}>
-				<Text>
-					{workspacePath.split("/").pop() || workspacePath}
-					{gitBranch && ` (${gitBranch})`}
-					{gitDiffStats && gitDiffStats.files > 0 && (
-						<Text color="gray">
-							{" "}
-							| {gitDiffStats.files} file{gitDiffStats.files !== 1 ? "s" : ""}{" "}
-							<Text color="green">+{gitDiffStats.additions}</Text>{" "}
-							<Text color="red">-{gitDiffStats.deletions}</Text>
-						</Text>
-					)}
-				</Text>
-			</Box>
+            {/* Row 3: Repo/branch/diff stats */}
+            <Box paddingLeft={1} paddingRight={1}>
+                <Text>
+                    {workspacePath.split("/").pop() || workspacePath}
+                    {gitBranch && ` (${gitBranch})`}
+                    {gitDiffStats && gitDiffStats.files > 0 && (
+                        <Text color="gray">
+                            {" "}
+                            | {gitDiffStats.files} file{gitDiffStats.files !== 1 ? "s" : ""}{" "}
+                            <Text color="green">+{gitDiffStats.additions}</Text>{" "}
+                            <Text color="red">-{gitDiffStats.deletions}</Text>
+                        </Text>
+                    )}
+                </Text>
+            </Box>
 
-			{/* Row 4: Auto-approve toggle */}
-			<Box paddingLeft={1} paddingRight={1}>
-				{autoApproveAll ? (
-					<Text>
-						<Text color="green">⏵⏵ Auto-approve all enabled</Text>
-						<Text color="gray"> (Shift+Tab)</Text>
-					</Text>
-				) : (
-					<Text color="gray">Auto-approve all disabled (Shift+Tab)</Text>
-				)}
-			</Box>
-		</Box>
-	)
+            {/* Row 4: Auto-approve toggle */}
+            <Box paddingLeft={1} paddingRight={1}>
+                {autoApproveAll ? (
+                    <Text>
+                        <Text color="green">⏵⏵ Auto-approve all enabled</Text>
+                        <Text color="gray"> (Shift+Tab)</Text>
+                    </Text>
+                ) : (
+                    <Text color="gray">Auto-approve all disabled (Shift+Tab)</Text>
+                )}
+            </Box>
+        </Box>
+    )
 }

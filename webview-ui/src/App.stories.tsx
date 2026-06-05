@@ -1,7 +1,8 @@
 import { HeroUIProvider } from "@heroui/react"
 import { DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import { type ApiConfiguration, bedrockModels } from "@shared/api"
-import type { DiracMessage, DiracSayTool } from "@shared/ExtensionMessage"
+import { DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
+import type { DiracMessage } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useEffect, useMemo, useState } from "react"
@@ -62,7 +63,7 @@ The ChatView component is the main interface for interacting with Dirac. It prov
 - File system operations
 - Web browsing and research
 - Task automation
-- Learning and exploration
+- Overall- Learning and exploration
 
 **Note**: In Storybook, some features like file operations, command execution, and API calls are mocked for demonstration purposes.
 		`,
@@ -138,104 +139,114 @@ const mockTaskHistory: HistoryItem[] = [
 
 const createMessage = (
 	minutesAgo: number,
-	type: DiracMessage["type"],
-	say: DiracMessage["say"],
-	text: string,
+	type: DiracMessageType,
+	content: string,
 	overrides: Partial<DiracMessage> = {},
 ): DiracMessage => ({
+	id: Math.random().toString(36).substring(7),
 	ts: Date.now() - minutesAgo * 60000,
-	type,
-	say,
-	text,
+	content: {
+		type,
+		content,
+	} as any,
 	...overrides,
 })
 
-const createSayToolMessage = (
+const createCardMessage = (
 	minutesAgo: number,
-	sayTool: DiracSayTool,
+	header: string,
+	body: string,
+	status: CardStatus = CardStatus.SUCCESS,
 	overrides: Partial<DiracMessage> = {},
 ): DiracMessage => ({
+	id: Math.random().toString(36).substring(7),
 	ts: Date.now() - minutesAgo * 60000,
-	type: "say",
-	say: "tool",
-	text: JSON.stringify({
-		operationIsLocatedInWorkspace: true,
-		...sayTool,
-	}),
+	content: {
+		type: DiracMessageType.CARD,
+		card: {
+			id: Math.random().toString(36).substring(7),
+			header,
+			body,
+			status,
+			renderType: "markdown",
+		},
+	},
 	...overrides,
 })
 
-const createApiReqMessage = (minutesAgo: number, request: string, metrics: any = {}) =>
-	createMessage(
-		minutesAgo,
-		"say",
-		"api_req_started",
-		JSON.stringify({
+const createApiReqMessage = (minutesAgo: number, request: string, metrics: any = {}): DiracMessage => ({
+	id: Math.random().toString(36).substring(7),
+	ts: Date.now() - minutesAgo * 60000,
+	content: {
+		type: DiracMessageType.API_STATUS,
+		status: {
 			request,
 			tokensIn: 19500,
 			tokensOut: 4220,
 			cacheWrites: 120,
 			cacheReads: 60,
-			size: 12345,
 			cost: 0.025,
 			...metrics,
-		}),
-	)
+		},
+	},
+})
+
+const createAskMessage = (header: string, body: string, status: CardStatus = CardStatus.PENDING): DiracMessage => ({
+	id: Math.random().toString(36).substring(7),
+	ts: Date.now() - 60000,
+	content: {
+		type: DiracMessageType.CARD,
+		card: {
+			id: Math.random().toString(36).substring(7),
+			header,
+			body,
+			status,
+			renderType: "markdown",
+		},
+	},
+})
 
 const mockActiveMessages: DiracMessage[] = [
-	createMessage(5, "say", "task", "Help me create a responsive navigation component for a React application"),
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me create a responsive navigation component for a React application"),
 	createApiReqMessage(4.9, "Initial analysis request"),
 	createMessage(
 		4.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I'll help you create a responsive navigation component for your React application. Let me start by examining your current project structure and then create a modern, accessible navigation component.",
 	),
-	createMessage(4.3, "say", "tool", JSON.stringify({ tool: "listFilesTopLevel", path: "src/components" })),
-	createMessage(
+	createCardMessage(4.3, "listFilesTopLevel", "src/components"),
+	createCardMessage(
 		4.2,
-		"say",
-		"tool",
-		JSON.stringify({
-			tool: "listFilesTopLevel",
-			paths: ["src/components", "src/utils"],
-			content: "Contents of src/components:\n2 out of 2 elements listed below:\nNavigation/\nUserProfile/\n\n====================\n\nContents of src/utils:\n1 out of 1 elements listed below:\nmath.ts",
-		}),
+		"listFilesTopLevel",
+		"Contents of src/components:\n2 out of 2 elements listed below:\nNavigation/\nUserProfile/\n\n====================\n\nContents of src/utils:\n1 out of 1 elements listed below:\nmath.ts",
 	),
 	createApiReqMessage(4.2, "Component creation request", { tokensIn: 12020, tokensOut: 6180, cost: 0.042 }),
 	createMessage(
 		4,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Based on your project structure, I'll create a responsive navigation component with the following features:\n\n- Mobile-first responsive design\n- Accessible keyboard navigation\n- Smooth animations\n- Support for nested menu items\n- Dark/light theme support",
 	),
-	createMessage(
+	createCardMessage(
 		3.7,
-		"say",
-		"tool",
-		JSON.stringify({
-			tool: "newFileCreated",
-			path: "src/components/Navigation/Navigation.tsx",
-			content: "// Navigation component code...",
-		}),
+		"newFileCreated",
+		"src/components/Navigation/Navigation.tsx: // Navigation component code...",
 	),
 	createApiReqMessage(3.5, "Final response request", { tokensIn: 41550, tokensOut: 3320, cost: 0.018 }),
 	createMessage(
 		3.3,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I've created a responsive navigation component with TypeScript support. The component includes:\n\n✅ Mobile-first responsive design\n✅ Accessible ARIA attributes\n✅ Toggle functionality for mobile\n✅ TypeScript interfaces for type safety\n✅ Theme support\n\nWould you like me to also create the CSS styles for this component?",
 	),
 ]
 
+const streamingMsgId = "streaming-msg-id"
 const mockStreamingMessages: DiracMessage[] = [
 	...mockActiveMessages,
 	createMessage(
 		0.17,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Now I'll create the CSS styles for the navigation component. This will include responsive breakpoints, smooth animations, and accessibility features...",
-		{ partial: true },
+		{ id: streamingMsgId },
 	),
 ]
 
@@ -253,6 +264,8 @@ const createMockState = (overrides: any = {}) => ({
 	openRouterModels: bedrockModels,
 	showAnnouncement: false,
 	backgroundEditEnabled: false,
+	activeVoiceStreamId: undefined,
+	isApiRequestActive: false,
 	...overrides,
 })
 
@@ -307,7 +320,7 @@ export const ActiveConversation: Story = {
 }
 
 export const StreamingResponse: Story = {
-	decorators: [createStoryDecorator({ diracMessages: mockStreamingMessages })],
+	decorators: [createStoryDecorator({ diracMessages: mockStreamingMessages, activeVoiceStreamId: streamingMsgId })],
 	parameters: {
 		docs: {
 			description: {
@@ -318,55 +331,47 @@ export const StreamingResponse: Story = {
 }
 
 const createLongMessages = (): DiracMessage[] => [
-	createMessage(30, "say", "task", "Help me build a complete e-commerce application with React, Node.js, and MongoDB"),
+	createMessage(30, DiracMessageType.MARKDOWN, "Help me build a complete e-commerce application with React, Node.js, and MongoDB"),
 	createMessage(
 		29.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I'll help you build a complete e-commerce application. Let's start by setting up the project structure and implementing the core features step by step.",
 	),
-	createMessage(
+	createCardMessage(
 		29.3,
-		"say",
-		"tool",
-		JSON.stringify({ tool: "newFileCreated", path: "package.json", content: "// Package.json content..." }),
+		"newFileCreated",
+		"package.json: // Package.json content...",
 	),
 	createMessage(
 		29,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Great! I've set up the initial package.json. Now let's create the backend server with Express and MongoDB integration.",
 	),
-	createMessage(
+	createCardMessage(
 		28.7,
-		"say",
-		"tool",
-		JSON.stringify({ tool: "newFileCreated", path: "server.js", content: "// Express server code..." }),
+		"newFileCreated",
+		"server.js: // Express server code...",
 	),
 	createMessage(
 		28.3,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Perfect! The backend server is set up. Now let's create the product model and routes for handling product operations.",
 	),
-	createMessage(
+	createCardMessage(
 		28,
-		"say",
-		"tool",
-		JSON.stringify({ tool: "newFileCreated", path: "models/Product.js", content: "// Product model code..." }),
+		"newFileCreated",
+		"models/Product.js: // Product model code...",
 	),
 	createMessage(
 		27.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Excellent! The Product model is ready with all necessary fields. Now let's create the React frontend with a modern component structure.",
 	),
-	createMessage(27.3, "say", "command", "cd client && npx create-react-app . --template typescript"),
-	createMessage(27, "say", "command_output", "Creating a new React app... Success! Created client at /path/to/project/client"),
+	createCardMessage(27.3, "command", "cd client && npx create-react-app . --template typescript"),
+	createCardMessage(27, "command", "Creating a new React app... Success! Created client at /path/to/project/client", CardStatus.SUCCESS),
 	createMessage(
 		26.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Great! The React frontend is set up with TypeScript. Now let's create the main components for our e-commerce application.",
 	),
 ]
@@ -384,38 +389,27 @@ export const LongConversation: Story = {
 
 // Optimized message patterns for common scenarios
 const createErrorMessages = () => [
-	createMessage(5, "say", "task", "Help me fix the build errors in my React application"),
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me fix the build errors in my React application"),
 	createMessage(
 		4.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I'll help you fix the build errors. Let me first examine the current state of your application.",
 	),
-	createMessage(4.3, "say", "command", "npm run build"),
-	createMessage(4, "say", "error", "Build failed with TypeScript errors in UserProfile.tsx and api.ts"),
+	createCardMessage(4.3, "command", "npm run build"),
+	createCardMessage(4, "error", "Build failed with TypeScript errors in UserProfile.tsx and api.ts", CardStatus.ERROR),
 	createMessage(
 		3.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I can see there are TypeScript errors in your code. Let me examine the files and fix these issues.",
 	),
-	createMessage(3.3, "say", "tool", JSON.stringify({ tool: "readFile", path: "src/components/UserProfile_1.tsx" })),
-	createMessage(3.3, "say", "tool", JSON.stringify({ tool: "readFile", path: "src/components/UserProfile_2.tsx" })),
+	createCardMessage(3.3, "readFile", "src/components/UserProfile_1.tsx"),
+	createCardMessage(3.3, "readFile", "src/components/UserProfile_2.tsx"),
 	createMessage(
 		3,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I found the issue. The User type doesn't have a 'username' property. Let me fix this by updating the component to use the correct property name.",
 	),
 ]
-
-const createAskMessage = (type: string, text: string, streamingFailedMessage?: string) => ({
-	ts: Date.now() - 60000,
-	type: "ask" as const,
-	ask: type,
-	text,
-	streamingFailedMessage,
-})
 
 export const ErrorState: Story = {
 	decorators: [createStoryDecorator({ diracMessages: createErrorMessages() })],
@@ -447,12 +441,11 @@ export const AutoApprovalEnabled: Story = {
 }
 
 const createPlanModeMessages = () => [
-	createMessage(5, "say", "task", "Help me refactor my React application to use TypeScript and improve performance"),
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me refactor my React application to use TypeScript and improve performance"),
 	createApiReqMessage(4.9, "Planning analysis request", { tokensIn: 20000, tokensOut: 19500, cost: 0.065 }),
 	createMessage(
 		4.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I'll help you refactor your React application to use TypeScript and improve performance. Let me create a detailed plan for this migration.",
 	),
 	createApiReqMessage(4.5, "Detailed planning request", { tokensIn: 20002, tokensOut: 12500, cost: 0.095 }),
@@ -480,28 +473,25 @@ export const PlanMode: Story = {
 }
 
 const createBrowserMessages = () => [
-	createMessage(5, "say", "task", "Help me test the login functionality on my web application"),
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me test the login functionality on my web application"),
 	createMessage(
 		4.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"I'll help you test the login functionality. Let me launch a browser and navigate to your application.",
 	),
-	createMessage(4.3, "say", "browser_action_launch", JSON.stringify({ action: "launch", url: "http://localhost:3000/login" })),
-	createMessage(
+	createCardMessage(4.3, "browser_action_launch", "launch: http://localhost:3000/login"),
+	createCardMessage(
 		4,
-		"say",
 		"browser_action_result",
-		JSON.stringify({ currentUrl: "http://localhost:3000/login", logs: "Page loaded successfully" }),
+		"currentUrl: http://localhost:3000/login, logs: Page loaded successfully",
 	),
 	createMessage(
 		3.7,
-		"say",
-		"text",
+		DiracMessageType.MARKDOWN,
 		"Great! The browser has launched and navigated to your login page. Now let me test the login functionality.",
 	),
-	createMessage(3.3, "say", "browser_action", JSON.stringify({ action: "click", coordinate: "400,200" })),
-	createMessage(3, "say", "browser_action", JSON.stringify({ action: "type", text: "test@example.com" })),
+	createCardMessage(3.3, "browser_action", "click: 400,200"),
+	createCardMessage(3, "browser_action", "type: test@example.com"),
 ]
 
 export const BrowserAutomation: Story = {
@@ -517,9 +507,9 @@ export const BrowserAutomation: Story = {
 
 // Optimized stories using ask message pattern
 const createToolApprovalMessages = () => [
-	createMessage(5, "say", "task", "Help me read the configuration file"),
-	createMessage(4.7, "say", "text", "I need to read a file to understand your configuration."),
-	createAskMessage("tool", JSON.stringify({ tool: "readFile", path: "config.json" })),
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me read the configuration file"),
+	createMessage(4.7, DiracMessageType.MARKDOWN, "I need to read a file to understand your configuration."),
+	createAskMessage("tool", "readFile: config.json"),
 ]
 
 export const ToolApproval: Story = {
@@ -537,9 +527,9 @@ export const ToolSave: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Update the README file with new instructions"),
-				createMessage(4.7, "say", "text", "I'll update your README file with the new instructions."),
-				createAskMessage("tool", JSON.stringify({ tool: "editedExistingFile", path: "README.md" })),
+				createMessage(5, DiracMessageType.MARKDOWN, "Update the README file with new instructions"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll update your README file with the new instructions."),
+				createAskMessage("tool", "editedExistingFile: README.md"),
 			],
 		}),
 	],
@@ -555,19 +545,18 @@ export const ToolSave: Story = {
 // Quick story generators for common patterns
 const quickStory = (
 	name: string,
-	askType: string,
-	text: string,
+	header: string,
+	body: string,
 	description: string,
-	streamingFailedMessage?: string,
 ): Story => ({
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
 				...createLongMessages(),
-				createMessage(6, "say", "task", `Help with ${name.toLowerCase()}`),
-				createMessage(5, "say", "reasoning", `Thinking about helping user with ${name.toLowerCase()}`),
-				createMessage(4.7, "say", "text", `I'll help you with ${name.toLowerCase()}.`),
-				createAskMessage(askType, text, streamingFailedMessage),
+				createMessage(6, DiracMessageType.MARKDOWN, `Help with ${name.toLowerCase()}`),
+				createMessage(5, DiracMessageType.MARKDOWN, `Thinking about helping user with ${name.toLowerCase()}`, { content: { type: DiracMessageType.MARKDOWN, content: `Thinking about helping user with ${name.toLowerCase()}`, isReasoning: true } as any }),
+				createMessage(4.7, DiracMessageType.MARKDOWN, `I'll help you with ${name.toLowerCase()}.`),
+				createAskMessage(header, body),
 			],
 		}),
 	],
@@ -586,7 +575,7 @@ export const CommandOutput: Story = {
 		createStoryDecorator({
 			diracMessages: [
 				createAskMessage("command", "npm install"),
-				createAskMessage("command_output", "Installing packages... This may take a few minutes."),
+				createAskMessage("command_output", "Installing packages... This may take a few minutes.", CardStatus.RUNNING),
 			],
 		}),
 	],
@@ -606,74 +595,83 @@ export const ApiRequestFailed = quickStory(
 	"API request failed due to network timeout. Would you like to retry?",
 	"Shows error recovery options with Retry/Start New Task buttons when API requests fail.",
 )
+
 export const MistakeLimitReached = quickStory(
 	"Mistake Limit",
 	"mistake_limit_reached",
 	"I've made several attempts to fix this issue but haven't been successful.",
 	"Shows mistake limit reached state with Proceed Anyways/Start New Task options.",
 )
+
 export const CompletionResult = quickStory(
 	"Task Completion",
 	"completion_result",
 	"Task completed successfully! I've implemented all the requested features.\n\nWould you like to start a new task?\n\n- View Changes\n- Start New Task\n- Resume Previous Task HAS_CHANGES",
 	"Shows task completion state with Start New Task button.",
 )
+
 export const BrowserActionLaunch = quickStory(
 	"Browser Launch",
 	"browser_action_launch",
 	"Launch browser to test the website at http://localhost:3000",
 	"Shows browser action approval with Approve/Reject buttons for browser launch.",
 )
+
 export const Followup = quickStory(
 	"Follow-up",
 	"followup",
 	"What would you like me to work on next?",
 	"Shows followup question state where Dirac asks for next steps.",
 )
+
 export const ResumeTask = quickStory(
 	"Resume Task",
 	"resume_task",
 	"Would you like to resume the previous task?",
 	"Shows resume task option for continuing interrupted work.",
 )
+
 export const NewTaskWithContext = quickStory(
 	"New Task",
 	"new_task",
 	"Start a new task with the current conversation context",
 	"Shows new task creation with context preservation option.",
 )
+
 export const ApiRequestActive: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "text", "Processing your request...", { partial: true }),
-				createApiReqMessage(4.7, "Making API request to generate response", { partial: true }),
+				createMessage(5, DiracMessageType.MARKDOWN, "Processing your request...", { id: "api-req-msg-id" }),
+				createApiReqMessage(4.7, "Making API request to generate response"),
 			],
+			isApiRequestActive: true,
 		}),
 	],
 	parameters: { docs: { description: { story: "Shows active API request state with Cancel button available." } } },
 }
+
 export const PlanModeResponse = quickStory(
 	"Plan Mode Response",
 	"plan_mode_respond",
 	"Here's my comprehensive plan for refactoring your React application with TypeScript migration and performance optimization phases.\n\n\n\n\nPhase 1: TypeScript Migration\n1. Set up TypeScript in the project\n2. Rename .js files to .tsx/.ts\n3. Add type definitions for components and props\n4. Fix type errors and ensure type safety\n\nPhase 2: Performance Optimization\n1. Analyze current performance bottlenecks\n2. Implement code-splitting and lazy loading\n3. Optimize rendering with React.memo and useCallback\n4. Minimize bundle size with tree-shaking and minification\n5. Test performance improvements using profiling tools",
 	"Shows plan mode response where Dirac presents a detailed plan for user approval.",
 )
+
 export const CondenseConversation = quickStory(
 	"Condense Conversation",
 	"condense",
 	"Would you like me to condense the conversation to improve performance?",
 	"Shows utility action to condense conversation for better performance.",
 )
+
 export const ReportBug = quickStory(
 	"Report Bug",
 	"report_bug",
-	JSON.stringify({
-		steps_to_reproduce: "1. Open Dirac\n2. Start a new task\n3. Observe the error",
-		what_happened: "Dirac crashes unexpectedly",
-	}),
+	"Steps to reproduce: 1. Open Dirac, 2. Start a new task, 3. Observe the error. What happened: Dirac crashes unexpectedly",
 	"Shows utility action to report bugs to the GitHub repository.",
 )
+
 export const ResumeCompletedTask = quickStory(
 	"Resume Completed Task type",
 	"resume_completed_task",
@@ -685,9 +683,9 @@ export const ShellIntegrationWarningWithSuggestion: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Run a command"),
-				createMessage(4.7, "say", "text", "I'll run the command for you."),
-				createMessage(4.5, "say", "shell_integration_warning_with_suggestion", ""),
+				createMessage(5, DiracMessageType.MARKDOWN, "Run a command"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll run the command for you."),
+				createCardMessage(4.5, "shell_integration_warning_with_suggestion", ""),
 			],
 			vscodeTerminalExecutionMode: "integrated",
 		}),
@@ -705,9 +703,9 @@ export const ShellIntegrationWarningBackgroundEnabled: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Run a command"),
-				createMessage(4.7, "say", "text", "I'll run the command for you."),
-				createMessage(4.5, "say", "shell_integration_warning_with_suggestion", ""),
+				createMessage(5, DiracMessageType.MARKDOWN, "Run a command"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll run the command for you."),
+				createCardMessage(4.5, "shell_integration_warning_with_suggestion", ""),
 			],
 			vscodeTerminalExecutionMode: "backgroundExec",
 		}),
@@ -725,9 +723,9 @@ export const ShellIntegrationWarning: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Run a command"),
-				createMessage(4.7, "say", "text", "I'll run the command for you."),
-				createMessage(4.5, "say", "shell_integration_warning", ""),
+				createMessage(5, DiracMessageType.MARKDOWN, "Run a command"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll run the command for you."),
+				createCardMessage(4.5, "shell_integration_warning", ""),
 			],
 		}),
 	],
@@ -744,13 +742,13 @@ export const ErrorRetryInProgress: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Process a request"),
-				createMessage(4.7, "say", "text", "Attempting to process your request."),
-				createMessage(
+				createMessage(5, DiracMessageType.MARKDOWN, "Process a request"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "Attempting to process your request."),
+				createCardMessage(
 					4.5,
-					"say",
 					"error_retry",
-					JSON.stringify({ attempt: 2, maxAttempts: 5, delaySeconds: 10, failed: false }),
+					"Attempt 2 of 5, delay 10s",
+					CardStatus.RUNNING
 				),
 			],
 		}),
@@ -768,13 +766,13 @@ export const ErrorRetryFailed: Story = {
 	decorators: [
 		createStoryDecorator({
 			diracMessages: [
-				createMessage(5, "say", "task", "Process a request"),
-				createMessage(4.7, "say", "text", "Attempting to process your request."),
-				createMessage(
+				createMessage(5, DiracMessageType.MARKDOWN, "Process a request"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "Attempting to process your request."),
+				createCardMessage(
 					4.5,
-					"say",
 					"error_retry",
-					JSON.stringify({ attempt: 5, maxAttempts: 5, delaySeconds: 0, failed: true }),
+					"Attempt 5 of 5 failed",
+					CardStatus.ERROR
 				),
 			],
 		}),
@@ -788,132 +786,11 @@ export const ErrorRetryFailed: Story = {
 	},
 }
 
-export const GenerateExplanationInProgress: Story = {
-	decorators: [
-		createStoryDecorator({
-			diracMessages: [
-				createMessage(5, "say", "task", "Explain my recent changes"),
-				createMessage(4.7, "say", "text", "I'll generate an explanation of your changes."),
-				createMessage(
-					4.5,
-					"say",
-					"generate_explanation",
-					JSON.stringify({
-						title: "Authentication refactor",
-						fromRef: "abc123def",
-						toRef: "working directory",
-						status: "generating",
-					}),
-				),
-			],
-		}),
-	],
-	parameters: {
-		docs: {
-			description: {
-				story: "Shows explanation generation in progress with spinner.",
-			},
-		},
-	},
-}
-
-export const GenerateExplanationComplete: Story = {
-	decorators: [
-		createStoryDecorator({
-			diracMessages: [
-				createMessage(5, "say", "task", "Explain my recent changes"),
-				createMessage(4.7, "say", "text", "I'll generate an explanation of your changes."),
-				createMessage(
-					4.5,
-					"say",
-					"generate_explanation",
-					JSON.stringify({
-						title: "Authentication refactor",
-						fromRef: "abc123def",
-						toRef: "xyz789ghi",
-						status: "complete",
-					}),
-				),
-			],
-		}),
-	],
-	parameters: {
-		docs: {
-			description: {
-				story: "Shows successfully generated explanation with git refs.",
-			},
-		},
-	},
-}
-
-export const GenerateExplanationError: Story = {
-	decorators: [
-		createStoryDecorator({
-			diracMessages: [
-				createMessage(5, "say", "task", "Explain my recent changes"),
-				createMessage(4.7, "say", "text", "I'll generate an explanation of your changes."),
-				createMessage(
-					4.5,
-					"say",
-					"generate_explanation",
-					JSON.stringify({
-						title: "Authentication refactor",
-						fromRef: "abc123def",
-						toRef: "",
-						status: "error",
-						error: "Failed to generate explanation: Git repository not found",
-					}),
-				),
-			],
-		}),
-	],
-	parameters: {
-		docs: {
-			description: {
-				story: "Shows explanation generation error with error message.",
-			},
-		},
-	},
-}
-
-export const GenerateExplanationCancelled: Story = {
-	decorators: [
-		createStoryDecorator({
-			diracMessages: [
-				createMessage(5, "say", "task", "Explain my recent changes"),
-				createMessage(4.7, "say", "text", "I'll generate an explanation of your changes."),
-				createMessage(
-					4.5,
-					"say",
-					"generate_explanation",
-					JSON.stringify({
-						title: "Authentication refactor",
-						fromRef: "abc123def",
-						toRef: "",
-						status: "generating",
-					}),
-				),
-				createMessage(4.3, "ask", undefined, "Task was cancelled", { ask: "resume_task" }),
-			],
-		}),
-	],
-	parameters: {
-		docs: {
-			description: {
-				story: "Shows explanation generation cancelled state (detected via resume_task message).",
-			},
-		},
-	},
-}
-
 // Diff Edit Stories - New Format
 const createNewFormatMultiFileMessages = () => [
-	createMessage(5, "say", "task", "Help me refactor the authentication module"),
-	createMessage(4.7, "say", "text", "I'll help you refactor the authentication module. Let me make the necessary changes."),
-	createSayToolMessage(4.3, {
-		tool: "editedExistingFile",
-		path: "src/auth/types.ts",
-		content: `*** Begin Patch
+	createMessage(5, DiracMessageType.MARKDOWN, "Help me refactor the authentication module"),
+	createMessage(4.7, DiracMessageType.MARKDOWN, "I'll help you refactor the authentication module. Let me make the necessary changes."),
+	createCardMessage(4.3, "editedExistingFile", `*** Begin Patch
 *** Add File: src/auth/types.ts
 +export interface User {
 +  id: string
@@ -932,7 +809,7 @@ const createNewFormatMultiFileMessages = () => [
 -  return fetch('/api/login', {
 +function login(email: string, password: string): Promise<AuthState> {
 +  return fetch('/api/login', {
-	 method: 'POST',
+ 	 method: 'POST',
 -    body: { email, password }
 +    body: JSON.stringify({ email, password }),
 +    headers: { 'Content-Type': 'application/json' }
@@ -948,9 +825,7 @@ const createNewFormatMultiFileMessages = () => [
 -}
 -
 -module.exports = { deprecatedHelper }
-*** End Patch`,
-	}),
-	{ partial: false },
+*** End Patch`),
 ]
 
 export const DiffEditNewFormat: Story = {
@@ -968,10 +843,10 @@ export const DiffEditNewFormatStreaming: Story = {
 	decorators: [
 		(Story) => {
 			const [messages, setMessages] = useState<DiracMessage[]>([
-				createMessage(5, "say", "task", "Add TypeScript types to the user module"),
-				createMessage(4.7, "say", "text", "I'll add TypeScript types to improve type safety."),
+				createMessage(5, DiracMessageType.MARKDOWN, "Add TypeScript types to the user module"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll add TypeScript types to improve type safety."),
 			])
-			const mockState = useMemo(() => createMockState({ backgroundEditEnabled: true, diracMessages: messages }), [messages])
+			const mockState = useMemo(() => createMockState({ backgroundEditEnabled: true, diracMessages: messages, activeVoiceStreamId: "streaming-patch-id" }), [messages])
 
 			useEffect(() => {
 				// Simulate streaming: progressively add more content
@@ -1000,14 +875,12 @@ export const DiffEditNewFormatStreaming: Story = {
 				const timer1 = setTimeout(() => {
 					setMessages((prev: DiracMessage[]) => [
 						...prev,
-						createSayToolMessage(
+						createCardMessage(
 							4.3,
-							{
-								tool: "editedExistingFile",
-								path: "src/user/profile.ts",
-								content: partialPatch,
-							},
-							{ partial: true },
+							"editedExistingFile",
+							partialPatch,
+							CardStatus.RUNNING,
+							{ id: "streaming-patch-id" },
 						),
 					])
 				}, 500)
@@ -1016,14 +889,12 @@ export const DiffEditNewFormatStreaming: Story = {
 				const timer2 = setTimeout(() => {
 					setMessages((prev: DiracMessage[]) => {
 						const updated = [...prev]
-						updated[updated.length - 1] = createSayToolMessage(
+						updated[updated.length - 1] = createCardMessage(
 							4.3,
-							{
-								tool: "editedExistingFile",
-								path: "src/user/profile.ts",
-								content: morePatch,
-							},
-							{ partial: true },
+							"editedExistingFile",
+							morePatch,
+							CardStatus.RUNNING,
+							{ id: "streaming-patch-id" },
 						)
 						return updated
 					})
@@ -1033,14 +904,12 @@ export const DiffEditNewFormatStreaming: Story = {
 				const timer3 = setTimeout(() => {
 					setMessages((prev: DiracMessage[]) => {
 						const updated = [...prev]
-						updated[updated.length - 1] = createSayToolMessage(
+						updated[updated.length - 1] = createCardMessage(
 							4.3,
-							{
-								tool: "editedExistingFile",
-								path: "src/user/profile.ts",
-								content: completePatch,
-							},
-							{ partial: false },
+							"editedExistingFile",
+							completePatch,
+							CardStatus.SUCCESS,
+							{ id: "streaming-patch-id" },
 						)
 						return updated
 					})
@@ -1075,12 +944,9 @@ export const DiffEditNewFormatStreaming: Story = {
 
 // Diff Edit Stories - Replace Diff Edit Format
 const createReplaceDiffFormatPatchMessages = () => [
-	createMessage(5, "say", "task", "Fix the validation logic in the form"),
-	createMessage(4.7, "say", "text", "I'll fix the validation logic using the updated pattern."),
-	createSayToolMessage(4.3, {
-		tool: "editedExistingFile",
-		path: "src/auth/types.ts",
-		content: `------- SEARCH
+	createMessage(5, DiracMessageType.MARKDOWN, "Fix the validation logic in the form"),
+	createMessage(4.7, DiracMessageType.MARKDOWN, "I'll fix the validation logic using the updated pattern."),
+	createCardMessage(4.3, "editedExistingFile", `------- SEARCH
 function validateEmail(email) {
   return email.includes('@')
 }
@@ -1089,8 +955,7 @@ function validateEmail(email: string): boolean {
   const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/
   return emailRegex.test(email)
 }
-+++++++ REPLACE`,
-	}),
++++++++ REPLACE`),
 ]
 
 export const DiffEditReplaceDiffFormat: Story = {
@@ -1108,10 +973,10 @@ export const DiffEditReplaceDiffFormatStreaming: Story = {
 	decorators: [
 		(Story) => {
 			const [messages, setMessages] = useState<DiracMessage[]>([
-				createMessage(5, "say", "task", "Update error handling"),
-				createMessage(4.7, "say", "text", "I'll improve the error handling in the API client."),
+				createMessage(5, DiracMessageType.MARKDOWN, "Update error handling"),
+				createMessage(4.7, DiracMessageType.MARKDOWN, "I'll improve the error handling in the API client."),
 			])
-			const mockState = useMemo(() => createMockState({ backgroundEditEnabled: true, diracMessages: messages }), [messages])
+			const mockState = useMemo(() => createMockState({ backgroundEditEnabled: true, diracMessages: messages, activeVoiceStreamId: "streaming-replace-id" }), [messages])
 
 			useEffect(() => {
 				const completePatch = `------- SEARCH
@@ -1145,14 +1010,12 @@ try {
 
 					setMessages((prev: DiracMessage[]) => {
 						const updated = [...prev]
-						updated[updated.length - 1] = createSayToolMessage(
+						updated[updated.length - 1] = createCardMessage(
 							4.3,
-							{
-								tool: "editedExistingFile",
-								path: "src/auth/types.ts",
-								content: patchChunks.slice(0, currentIndex + 1).join("\n"),
-							},
-							{ partial: currentIndex !== patchChunks.length - 1 },
+							"editedExistingFile",
+							patchChunks.slice(0, currentIndex + 1).join("\n"),
+							currentIndex !== patchChunks.length - 1 ? CardStatus.RUNNING : CardStatus.SUCCESS,
+							{ id: "streaming-replace-id" },
 						)
 						return updated
 					})
@@ -1185,12 +1048,9 @@ try {
 
 // Combined example showing both formats in one conversation
 const createMixedFormatMessages = () => [
-	createMessage(5, "say", "task", "Refactor the entire authentication system"),
-	createMessage(4.7, "say", "text", "I'll refactor the authentication system. Starting with the login function."),
-	createSayToolMessage(4.5, {
-		tool: "editedExistingFile",
-		path: "src/auth/types.ts",
-		content: `------- SEARCH
+	createMessage(5, DiracMessageType.MARKDOWN, "Refactor the entire authentication system"),
+	createMessage(4.7, DiracMessageType.MARKDOWN, "I'll refactor the authentication system. Starting with the login function."),
+	createCardMessage(4.5, "editedExistingFile", `------- SEARCH
 function login(username, password) {
   return authenticateUser(username, password)
 }
@@ -1198,13 +1058,9 @@ function login(username, password) {
 async function login(username: string, password: string): Promise<AuthResult> {
   return await authenticateUser(username, password)
 }
-+++++++ REPLACE`,
-	}),
-	createMessage(4.3, "say", "text", "Great! Now let me add the type definitions and update the authentication module."),
-	createSayToolMessage(4.0, {
-		tool: "editedExistingFile",
-		path: "src/auth/types.ts",
-		content: `*** Begin Patch
++++++++ REPLACE`),
+	createMessage(4.3, DiracMessageType.MARKDOWN, "Great! Now let me add the type definitions and update the authentication module."),
+	createCardMessage(4.0, "editedExistingFile", `*** Begin Patch
 *** Add File: src/auth/types.ts
 +export interface AuthResult {
 +  success: boolean
@@ -1224,8 +1080,7 @@ async function login(username: string, password: string): Promise<AuthResult> {
    // Authentication logic
 +  return { success: true, token: 'mock-token' }
  }
-*** End Patch`,
-	}),
+*** End Patch`),
 ]
 
 export const DiffEditMixedFormats: Story = {
