@@ -24,6 +24,10 @@ function hasClearSequenceCall(calls: unknown[][]): boolean {
 	return calls.some((call) => call[0] === CLEAR_SEQUENCE)
 }
 
+vi.mock("ink-picture", () => ({
+	TerminalInfoProvider: ({ children }: any) => children,
+}))
+
 vi.mock("./ChatView", () => ({
 	ChatView: ({ controller, initialPrompt, initialImages }: any) => {
 		React.useEffect(() => {

@@ -36,6 +36,10 @@ describe("FireworksHandler", () => {
 			},
 		}
 		sinon.stub(handler as any, "ensureClient").returns(fakeClient as any)
+		sinon.stub(handler, "getModel").returns({
+			id: "accounts/fireworks/models/llama-v3p1-8b-instruct" as any,
+			info: { inputPrice: 0, outputPrice: 0, cacheWritesPrice: 0, cacheReadsPrice: 0 } as any,
+		})
 
 		const chunks: any[] = []
 		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }])) {
@@ -49,6 +53,7 @@ describe("FireworksHandler", () => {
 				outputTokens: 4,
 				cacheReadTokens: 0,
 				cacheWriteTokens: 0,
+				totalCost: 0,
 			},
 		])
 	})

@@ -3,12 +3,25 @@
  *
  * Tests keyboard interactions and callbacks.
  * Rendering tests are limited due to ink-testing-library constraints with nested components.
+ *
+ * NOTE: stdin.write() from ink-testing-library v4 does not reach useInput handlers in ink v7
+ * because ink v7 routes input through an internal_eventEmitter that the testing library does
+ * not populate. Instead, we capture the useInput handler via a vi.mock of ink and invoke it
+ * directly in tests.
  */
 
 import { render } from "ink-testing-library"
 // biome-ignore lint/correctness/noUnusedImports: React must be in scope for JSX in this test file.
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+// Capture the useInput handler so tests can invoke it directly.
+// Must be hoisted before any import that uses ink.
+type InputHandler = (input: string, key: import("ink").Key) => void
+const capturedInput = vi.hoisted(() => ({
+	handler: null as InputHandler | null,
+	options: null as { isActive?: boolean } | null,
+}))
 
 // Mock refreshSkills
 const mockRefreshSkills = vi.fn()
@@ -33,10 +46,47 @@ vi.mock("../context/StdinContext", () => ({
 	useStdinContext: () => ({ isRawModeSupported: true }),
 }))
 
+// Mock ink's useInput to capture the handler instead of relying on stdin plumbing.
+// ink v7 routes input through internal_eventEmitter which ink-testing-library v4 does not feed.
+vi.mock("ink", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("ink")>()
+	return {
+		...actual,
+		useInput: (handler: InputHandler, options?: { isActive?: boolean }) => {
+			capturedInput.handler = handler
+			capturedInput.options = options ?? null
+		},
+	}
+})
+
 import { SkillsPanelContent } from "./SkillsPanelContent"
 
 // Helper to wait for async state updates
 const delay = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Simulate a keypress by invoking the captured useInput handler directly.
+// key names mirror the Key interface in ink.
+function pressKey(input: string, keyOverrides: Partial<import("ink").Key> = {}) {
+	if (!capturedInput.handler) throw new Error("useInput handler not yet registered")
+	const key: import("ink").Key = {
+		upArrow: false,
+		downArrow: false,
+		leftArrow: false,
+		rightArrow: false,
+		pageDown: false,
+		pageUp: false,
+		return: false,
+		escape: false,
+		ctrl: false,
+		shift: false,
+		tab: false,
+		backspace: false,
+		delete: false,
+		meta: false,
+		...keyOverrides,
+	}
+	capturedInput.handler(input, key)
+}
 
 describe("SkillsPanelContent", () => {
 	const mockController = {} as any
@@ -51,6 +101,8 @@ describe("SkillsPanelContent", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		capturedInput.handler = null
+		capturedInput.options = null
 		mockRefreshSkills.mockResolvedValue({
 			globalSkills: [],
 			localSkills: [],
@@ -64,10 +116,10 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
-			stdin.write("\x1B") // Escape
+			pressKey("", { escape: true })
 			await delay()
 
 			expect(mockOnClose).toHaveBeenCalled()
@@ -79,10 +131,10 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
-			stdin.write("\r") // Enter
+			pressKey("", { return: true })
 			await delay()
 
 			expect(mockOnUseSkill).toHaveBeenCalledWith("/test/path/SKILL.md")
@@ -94,10 +146,10 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
-			stdin.write(" ") // Space
+			pressKey(" ")
 			await delay()
 
 			expect(mockToggleSkill).toHaveBeenCalledWith(
@@ -116,14 +168,14 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
 			// Navigate down to marketplace (past the one skill)
-			stdin.write("\x1B[B") // Down arrow
+			pressKey("", { downArrow: true })
 			await delay()
 
-			stdin.write("\r") // Enter
+			pressKey("", { return: true })
 			await delay()
 
 			// Should have called exec with open command
@@ -141,15 +193,15 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
 			// Navigate down
-			stdin.write("\x1B[B") // Down arrow
+			pressKey("", { downArrow: true })
 			await delay()
 
 			// Press Enter - should use second skill
-			stdin.write("\r")
+			pressKey("", { return: true })
 			await delay()
 
 			expect(mockOnUseSkill).toHaveBeenCalledWith("/path2")
@@ -164,15 +216,15 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
 			// Navigate down with j
-			stdin.write("j")
+			pressKey("j")
 			await delay()
 
 			// Press Enter - should use second skill
-			stdin.write("\r")
+			pressKey("", { return: true })
 			await delay()
 
 			expect(mockOnUseSkill).toHaveBeenCalledWith("/path2")
@@ -185,10 +237,10 @@ describe("SkillsPanelContent", () => {
 			})
 			mockToggleSkill.mockRejectedValueOnce(new Error("toggle failed"))
 
-			const { stdin, lastFrame } = render(<SkillsPanelContent {...defaultProps} />)
+			const { lastFrame } = render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
-			stdin.write(" ") // Space to toggle
+			pressKey(" ") // Space to toggle
 			await delay(100)
 
 			// toggleSkill was called with enabled: false (toggled from true)
@@ -204,14 +256,14 @@ describe("SkillsPanelContent", () => {
 				localSkills: [],
 			})
 
-			const { stdin } = render(<SkillsPanelContent {...defaultProps} />)
+			render(<SkillsPanelContent {...defaultProps} />)
 			await delay()
 
 			// Navigate up from first item (should wrap to last - marketplace)
-			stdin.write("\x1B[A") // Up arrow
+			pressKey("", { upArrow: true })
 			await delay()
 
-			stdin.write("\r") // Enter
+			pressKey("", { return: true })
 			await delay()
 
 			// Should have opened marketplace (wrapped to last item)

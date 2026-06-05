@@ -1,5 +1,6 @@
 import { Text } from "ink"
 import { render } from "ink-testing-library"
+// biome-ignore lint/correctness/noUnusedImports: React must be in scope for JSX in this test file.
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StdinProvider } from "./StdinContext"

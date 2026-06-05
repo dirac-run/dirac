@@ -106,6 +106,28 @@ async function assertSnapshot(name: string, content: string): Promise<void> {
 	}
 }
 
+async function assertJsonSnapshot(name: string, actual: unknown): Promise<void> {
+	const snapshotPath = path.join(SNAPSHOTS_DIR, name)
+
+	if (UPDATE_SNAPSHOTS) {
+		await fs.writeFile(snapshotPath, JSON.stringify(actual, null, 2), "utf-8")
+		console.log(`Updated snapshot: ${name}`)
+		return
+	}
+
+	try {
+		const existing = await fs.readFile(snapshotPath, "utf-8")
+		const expected = JSON.parse(existing)
+		expect(actual).to.deep.equal(expected)
+		console.log(`✓ Snapshot matches: ${name}`)
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			throw new Error(formatSnapshotError(name, `Snapshot does not exist. Run with --update-snapshots to create it.`))
+		}
+		throw error
+	}
+}
+
 // ============================================================================
 // Test Context Helpers
 // ============================================================================
@@ -192,7 +214,7 @@ describe("Prompt System Integration Tests", () => {
 					await runPromptTest(this, context, modelId, async ({ tools }) => {
 						expect(tools).to.be.an("array").that.is.not.empty
 						const snapshotName = `${providerId}_${modelId.replace(/[^a-zA-Z0-9]/g, "_")}.tools.snap`
-						await assertSnapshot(snapshotName, JSON.stringify(tools, null, 2))
+						await assertJsonSnapshot(snapshotName, tools)
 					})
 				})
 
