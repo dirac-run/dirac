@@ -33,8 +33,6 @@ function createMocks() {
     }
 
     const callbacks = {
-        onProgress: sinon.stub(),
-        updateCard: sinon.stub(),
         createCard: sinon.stub().resolves(mockCard),
         executeCommand: sinon.stub().resolves([false, "ok"]),
     }

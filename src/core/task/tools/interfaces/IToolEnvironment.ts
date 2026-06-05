@@ -56,7 +56,6 @@ export interface ICardHandle {
     appendBody(chunk: string): Promise<void>
 
     /**
-    /**
      * Transitions the card to a final state and resolves any pending interaction.
      */
     finalize(status: CardStatus, doNotAutoCollapse?: boolean): Promise<void>
@@ -85,14 +84,6 @@ export interface IUITrait {
      */
     createCard(params: CardParams): Promise<ICardHandle>
 
-    /**
-     * Opens a specialized diff view for reviewing changes.
-     */
-    showDiffView(path: string, content: string): Promise<void>
-
-    /**
-     * Generic say for user_feedback, info, error, etc.
-     */
     /**
      * Generic upsert for informational messages.
      */

@@ -1,11 +1,10 @@
-import { Card } from "../../../../shared/ExtensionMessage"
 import { DiracAskResponse } from "../../../../shared/WebviewMessage"
 
 
 import { SkillMetadata } from "../../../../shared/skills"
-import { ICardHandle, IToolCallbacks } from "../interfaces/IToolCallbacks"
 import {
     IToolEnvironment,
+    ICardHandle,
     ILoggingTrait,
     IUITrait,
     IInteractionTrait,
@@ -54,7 +53,7 @@ import { DiracMessage } from "@shared/ExtensionMessage"
  * SurfaceAdapter provides the standard implementation of IToolEnvironment for the Dirac surface.
  * It connects modular tools to the core services and capabilities of the Dirac application.
  */
-export class SurfaceAdapter implements IToolEnvironment, IToolCallbacks {
+export class SurfaceAdapter implements IToolEnvironment {
     public readonly ui: IUITrait
     public readonly interaction: IInteractionTrait
     public readonly system: ISystemTrait
@@ -84,9 +83,6 @@ export class SurfaceAdapter implements IToolEnvironment, IToolCallbacks {
         }
         this.ui = {
             createCard: this.createCard.bind(this),
-            showDiffView: async (path: string, content: string) => {
-                await this.config.services.diffViewProvider.showReview([{ absolutePath: path, displayPath: path, content }])
-            },
             upsertText: async (text: string, isReasoning?: boolean, role?: "user" | "assistant") => {
                 await this.config.taskMessenger.upsertText(text, isReasoning, undefined, undefined, role)
             },
@@ -424,13 +420,6 @@ export class SurfaceAdapter implements IToolEnvironment, IToolCallbacks {
 
     private createdCards: CardHandle[] = []
 
-    /**
-     * Streams progress updates to the UI.
-     * Maps to the legacy 'say' callback with partial=true.
-     */
-    public onProgress(text: string): void {
-        this.config.taskMessenger.upsertText(text)
-    }
 
     public async createCard(params: import("../interfaces/IToolEnvironment").CardParams): Promise<ICardHandle> {
         const handle = await this.config.taskMessenger.createCard(params)
@@ -439,13 +428,6 @@ export class SurfaceAdapter implements IToolEnvironment, IToolCallbacks {
         return adapterHandle
     }
 
-    public async updateCard(card: Card): Promise<void> {
-        // This is now handled by the CardHandle itself via TaskMessenger
-        const handle = this.createdCards.find((h) => h.id === card.id)
-        if (handle) {
-            await handle.update(card)
-        }
-    }
 
 
 
