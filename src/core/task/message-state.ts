@@ -3,8 +3,7 @@ import { EventEmitter } from "events"
 import getFolderSize from "get-folder-size"
 import Mutex from "p-mutex"
 import { findLastIndex } from "@/shared/array"
-import { combineApiRequests } from "@/shared/combineApiRequests"
-import { combineCommandSequences } from "@/shared/combineCommandSequences"
+import { combineCardSequences } from "@/shared/combineCardSequences"
 import { DiracMessage } from "@/shared/ExtensionMessage"
 import { getApiMetrics } from "@/shared/getApiMetrics"
 import { HistoryItem } from "@/shared/HistoryItem"
@@ -144,14 +143,19 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			const messages = [...this.diracMessages]
 			if (messages.length === 0) return
 
-			const apiMetrics = getApiMetrics(combineApiRequests(combineCommandSequences(messages.slice(1))))
+			const apiMetrics = getApiMetrics(combineCardSequences(messages.slice(1)))
 			const taskMessage = messages[0]
 			const lastRelevantMessage =
 				messages[
 					findLastIndex(
 						messages,
-						(message) => !(message.ask === "resume_task" || message.ask === "resume_completed_task"),
+						(message) =>
+							!(
+								message.content.type === "card" &&
+								(message.content.card.header.includes("Resume") || message.content.card.header.includes("Task Resumed"))
+							),
 					)
+
 				] || messages[messages.length - 1]
 
 			const lastModelInfo = [...this.apiConversationHistory].reverse().find((msg) => msg.modelInfo !== undefined)
@@ -172,7 +176,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 				id: this.taskId,
 				ulid: this.ulid,
 				ts: lastRelevantMessage.ts,
-				task: taskMessage.text ?? "",
+				task: taskMessage.content.type === "markdown" ? taskMessage.content.content : "",
 				tokensIn: apiMetrics.totalTokensIn,
 				tokensOut: apiMetrics.totalTokensOut,
 				cacheWrites: apiMetrics.totalCacheWrites,
@@ -262,6 +266,19 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		await this.updateTaskHistoryInternal()
 	}
 
+	/**
+	 * Find the index of a message by its ID
+	 */
+	findMessageIndexById(id: string): number {
+		return this.diracMessages.findIndex((m) => m.id === id)
+	}
+
+	/**
+	 * Find the index of a message containing a card with the specified ID
+	 */
+	findMessageIndexByCardId(cardId: string): number {
+		return this.diracMessages.findIndex((m) => m.content.type === "card" && m.content.card.id === cardId)
+	}
 	/**
 	 * Update a specific message in the diracMessages array
 	 * The entire operation (validate, update, save) is atomic to prevent races (RC-4)

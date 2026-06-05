@@ -45,6 +45,20 @@ describe("CommandSafetyChecker", () => {
 			isSafeCommand("type ls").should.equal(true)
 		})
 
+		it("should allow safe sed commands (read-only)", () => {
+			isSafeCommand("sed -n '1p' file.txt").should.equal(true)
+			isSafeCommand("sed -n '1787,1790p' src/core/task/index.ts").should.equal(true)
+			isSafeCommand("sed -e 's/foo/bar/' file.txt").should.equal(true)
+			isSafeCommand("sed -n '1,5p' file.txt | head -20").should.equal(true)
+		})
+
+		it("should allow grep with BRE alternation (backslash-pipe) in patterns", () => {
+			isSafeCommand("grep -n 'foo\\|bar' file.txt").should.equal(true)
+			isSafeCommand("grep -rn 'partialMessage\\|partial_message' src/ --include='*.ts' | head -30").should.equal(true)
+			isSafeCommand("grep -rn 'a\\|b\\|c' src/ --include='*.ts' --include='*.tsx' | head -30").should.equal(true)
+		})
+
+
 		// Negative cases
 		it("should reject output redirection", () => {
 			isSafeCommand("ls > files.txt").should.equal(false)
@@ -77,6 +91,16 @@ describe("CommandSafetyChecker", () => {
 		it("should reject dangerous sort flags", () => {
 			isSafeCommand("sort -o important.txt file.txt").should.equal(false)
 			isSafeCommand("sort --output=important.txt file.txt").should.equal(false)
+		})
+
+		it("should reject sed with in-place edit flags", () => {
+			isSafeCommand("sed -i 's/foo/bar/' file.txt").should.equal(false)
+			isSafeCommand("sed -i.bak 's/foo/bar/' file.txt").should.equal(false)
+			isSafeCommand("sed -i'' 's/foo/bar/' file.txt").should.equal(false)
+			isSafeCommand("sed -in 's/foo/bar/' file.txt").should.equal(false)
+			isSafeCommand("sed -ni '1p' file.txt").should.equal(false)
+			isSafeCommand("sed --in-place 's/foo/bar/' file.txt").should.equal(false)
+			isSafeCommand("sed --in-place=.bak 's/foo/bar/' file.txt").should.equal(false)
 		})
 
 		it("should reject dangerous git operations", () => {

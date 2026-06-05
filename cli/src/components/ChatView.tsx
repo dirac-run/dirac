@@ -41,7 +41,9 @@
  */
 
 import type { ApiProvider, ModelInfo } from "@shared/api"
-import type { DiracAsk, DiracMessage } from "@shared/ExtensionMessage"
+
+import { DiracMessageType, UIActionButtonType } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import type { SlashCommandInfo } from "@shared/proto/dirac/slash"
@@ -59,17 +61,18 @@ import { COLORS } from "../constants/colors"
 import { useTaskContext, useTaskState } from "../context/TaskContext"
 import { useHomeEndKeys } from "../hooks/useHomeEndKeys"
 import { useRawBackspaceKeys } from "../hooks/useRawBackspaceKeys"
-import { useIsSpinnerActive } from "../hooks/useStateSubscriber"
+import { useIsSpinnerActive, useLastCompletedAskMessage } from "../hooks/useStateSubscriber"
 import { useTextInput } from "../hooks/useTextInput"
 import { setTerminalTitle } from "../utils/display"
 import {
-	checkAndWarnRipgrepMissing,
-	extractMentionQuery,
-	type FileSearchResult, searchWorkspaceFiles
+    checkAndWarnRipgrepMissing,
+    extractMentionQuery,
+    type FileSearchResult, searchWorkspaceFiles
 } from "../utils/file-search"
-import { jsonParseSafe, parseImagesFromInput, processImagePaths } from "../utils/parser"
+import { parseImagesFromInput, processImagePaths } from "../utils/parser"
 import { extractSlashQuery, filterCommands, sortCommandsWorkflowsFirst } from "../utils/slash-commands"
-import { type ButtonActionType, getButtonConfig } from "./ActionButtons"
+import { ActionButtons } from "./ActionButtons"
+
 import { AskPrompt } from "./AskPrompt"
 import { ChatMessage } from "./ChatMessage"
 import { FileMentionMenu } from "./FileMentionMenu"
@@ -87,11 +90,11 @@ import { useChatInputHandler } from "../hooks/useChatInputHandler"
 import { useChatMessages } from "../hooks/useChatMessages"
 import { useChatTask } from "../hooks/useChatTask"
 import {
-	expandPastedTexts,
-	getAskPromptType,
-	getInputStorageKey,
-	isYoloSuppressed,
-	parseAskOptions,
+    expandPastedTexts,
+    getAskPromptType,
+    getInputStorageKey,
+    isYoloSuppressed,
+    parseAskOptions,
 } from "../utils/chat"
 import { getGitBranch, getGitDiffStats, type GitDiffStats } from "../utils/git"
 
@@ -100,23 +103,23 @@ import { getGitBranch, getGitDiffStats, type GitDiffStats } from "../utils/git"
  * Keyed by a stable identifier so each task/session maintains its own input state.
  */
 interface PersistedInputState {
-	text: string
-	cursorPos: number
-	pastedTexts: Map<number, string>
-	pasteCounter: number
+    text: string
+    cursorPos: number
+    pastedTexts: Map<number, string>
+    pasteCounter: number
 }
 
 const inputStateStorage = new Map<string, PersistedInputState>()
 
 
 interface ChatViewProps {
-	controller?: any
-	onExit?: () => void
-	onComplete?: () => void
-	onError?: () => void
-	initialPrompt?: string
-	initialImages?: string[]
-	taskId?: string
+    controller?: any
+    onExit?: () => void
+    onComplete?: () => void
+    onError?: () => void
+    initialPrompt?: string
+    initialImages?: string[]
+    taskId?: string
 }
 
 const SEARCH_DEBOUNCE_MS = 150
@@ -126,821 +129,856 @@ const DEFAULT_CONTEXT_WINDOW = 200000
 const PASTE_COLLAPSE_THRESHOLD = 10000 // Characters before showing placeholder
 const MAX_HISTORY_ITEMS = 20 // Max history items to navigate with up/down arrows
 
-/**
- * Get current git branch name
- */
-
-
-/**
- * Get git diff stats (files changed, additions, deletions)
- */
-
-/**
- * Create a progress bar for context window usage
- * Returns { filled, empty } strings to allow different coloring
- */
-
-
-/**
- * Yolo mode auto-approves tool use, commands, browser actions, etc. so the AI can work
- * uninterrupted. But some ask types genuinely need user input -- you can't auto-approve
- * "task completed, what next?" or a followup question the AI is asking the user.
- *
- * This whitelist defines which ask types should still show buttons and allow text input
- * even when yolo mode is enabled. Everything NOT in this set gets suppressed (buttons
- * hidden, input blocked), which is the correct behavior for tool/browser approvals
- * since core auto-approves those before they even reach the UI.
- *
- * Any new ask types added in the future will be suppressed by default in yolo mode.
- * If a new ask type needs user interaction, add it here explicitly.
- */
-
-
-/**
- * Get the type of prompt needed for an ask message
- */
-
-/**
- * Parse options from an ask message
- */
-
-/**
- * Expand pasted text placeholders back to actual content
- * Replaces [Pasted text #N +X lines] with the stored content
- */
-
 export const ChatView: React.FC<ChatViewProps> = ({
-	controller,
-	onExit,
-	onComplete: _onComplete,
-	onError,
-	initialPrompt,
-	initialImages,
-	taskId,
+    controller,
+    onExit,
+    onComplete: _onComplete,
+    onError,
+    initialPrompt,
+    initialImages,
+    taskId,
 }) => {
-	const quote = useMemo(() => getRandomQuote(), [])
-	const { stdout } = useStdout()
-	const taskState = useTaskState()
-	const { controller: taskController, clearState } = useTaskContext()
-	const { isActive: isSpinnerActive, startTime: spinnerStartTime } = useIsSpinnerActive()
-	const ctrl = useMemo(() => controller || taskController, [controller, taskController])
+    const quote = useMemo(() => getRandomQuote(), [])
+    const { stdout } = useStdout()
+    const taskState = useTaskState()
+    const { controller: taskController, clearState } = useTaskContext()
+    const { isActive: isSpinnerActive, startTime: spinnerStartTime } = useIsSpinnerActive()
+    const ctrl = useMemo(() => controller || taskController, [controller, taskController])
 
-	const {
-		text: textInput,
-		cursorPos,
-		setText: setTextInput,
-		setCursorPos,
-		handleKeyboardSequence,
-		handleCtrlShortcut,
-		deleteCharsBefore,
-		deleteCharsAfter,
-		insertText: insertTextAtCursor,
-		getText,
-		getCursorPos,
-	} = useTextInput()
+    const {
+        text: textInput,
+        cursorPos,
+        setText: setTextInput,
+        setCursorPos,
+        handleKeyboardSequence,
+        handleCtrlShortcut,
+        deleteCharsBefore,
+        deleteCharsAfter,
+        insertText: insertTextAtCursor,
+        getText,
+        getCursorPos,
+    } = useTextInput()
 
-	const storageKey = useMemo(() => getInputStorageKey(ctrl, taskId), [ctrl, taskId])
-	const textInputRef = useMemo(() => ({ get current() { return getText() } }), [getText])
-	const cursorPosRef = useMemo(() => ({ get current() { return getCursorPos() } }), [getCursorPos])
+    const storageKey = useMemo(() => getInputStorageKey(ctrl, taskId), [ctrl, taskId])
+    const textInputRef = useMemo(() => ({ get current() { return getText() } }), [getText])
+    const cursorPosRef = useMemo(() => ({ get current() { return getCursorPos() } }), [getCursorPos])
 
-	const [fileResults, setFileResults] = useState<FileSearchResult[]>([])
-	const [selectedIndex, setSelectedIndex] = useState(0)
-	const [historyIndex, setHistoryIndex] = useState(-1)
-	const [savedInput, setSavedInput] = useState("")
-	const [isSearching, setIsSearching] = useState(false)
-	const [showRipgrepWarning, setShowRipgrepWarning] = useState(false)
-	const [respondedToAsk, setRespondedToAsk] = useState<number | null>(null)
-	const [userScrolled, setUserScrolled] = useState(false)
+    const [fileResults, setFileResults] = useState<FileSearchResult[]>([])
+    const [selectedIndex, setSelectedIndex] = useState(0)
+    const [historyIndex, setHistoryIndex] = useState(-1)
+    const [savedInput, setSavedInput] = useState("")
+    const [isSearching, setIsSearching] = useState(false)
+    const [showRipgrepWarning, setShowRipgrepWarning] = useState(false)
+    const [respondedToAsk, setRespondedToAsk] = useState<number | null>(null)
+    const [userScrolled, setUserScrolled] = useState(false)
+    const [cardExpansions, setCardExpansions] = useState<Map<string, "auto" | "expanded" | "collapsed">>(new Map())
 
-	const [pastedTexts, setPastedTexts] = useState<Map<number, string>>(() => {
-		return inputStateStorage.get(storageKey)?.pastedTexts ?? new Map()
-	})
-	const pasteCounterRef = useRef<number>(inputStateStorage.get(storageKey)?.pasteCounter ?? 0)
-	const lastPasteTimeRef = useRef<number>(0)
-	const activePasteNumRef = useRef<number>(0)
-	const activePasteStartPosRef = useRef<number>(0)
-	const activePasteLinesRef = useRef<number>(0)
-	const pasteUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const toggleCardExpansion = useCallback((cardId: string) => {
+        setCardExpansions((prev) => {
+            const next = new Map(prev)
+            const current = next.get(cardId) ?? "auto"
+            next.set(cardId, current === "expanded" ? "collapsed" : "expanded")
+            return next
+        })
+    }, [])
 
-	const [availableCommands, setAvailableCommands] = useState<SlashCommandInfo[]>([])
-	const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
-	const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
-	const lastSlashIndexRef = useRef<number>(-1)
+    const handleCardCollapse = useCallback((cardId: string) => {
+        setCardExpansions((prev) => {
+            const next = new Map(prev)
+            next.set(cardId, "collapsed")
+            return next
+        })
+    }, [])
 
-	const [activePanel, setActivePanel] = useState<
-		| {
-				type: "settings"
-				initialMode?: "model-picker" | "featured-models" | "provider-picker"
-				initialModelKey?: "actModelId" | "planModelId"
-		  }
-		| { type: "history" }
-		| { type: "help" }
-		| { type: "skills" }
-		| null
-	>(null)
+    const getIsCardExpanded = (card: { id: string; collapsed?: boolean }): boolean => {
+        const expansion = cardExpansions.get(card.id)
+        if (expansion === "expanded") return true
+        if (expansion === "collapsed") return false
+        // "auto" or undefined: respect the tool's `collapsed` preference
+        return card.collapsed === false
+    }
 
-	const [gitBranch, setGitBranch] = useState<string | null>(null)
-	const [gitDiffStats, setGitDiffStats] = useState<GitDiffStats | null>(null)
+    const [pastedTexts, setPastedTexts] = useState<Map<number, string>>(() => {
+        return inputStateStorage.get(storageKey)?.pastedTexts ?? new Map()
+    })
+    const pasteCounterRef = useRef<number>(inputStateStorage.get(storageKey)?.pasteCounter ?? 0)
+    const lastPasteTimeRef = useRef<number>(0)
+    const activePasteNumRef = useRef<number>(0)
+    const activePasteStartPosRef = useRef<number>(0)
+    const activePasteLinesRef = useRef<number>(0)
+    const pasteUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-	const [mode, setMode] = useState<Mode>(() => {
-		const stateManager = StateManager.get()
-		return stateManager.getGlobalSettingsKey("mode") || "act"
-	})
+    const [availableCommands, setAvailableCommands] = useState<SlashCommandInfo[]>([])
+    const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
+    const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
+    const lastSlashIndexRef = useRef<number>(-1)
 
-	const [yolo, setYolo] = useState<boolean>(() => StateManager.get().getGlobalSettingsKey("yoloModeToggled") ?? false)
-	const [autoApproveAll, setAutoApproveAll] = useState<boolean>(
-		() => StateManager.get().getGlobalSettingsKey("autoApproveAllToggled") ?? false,
-	)
+    const [activePanel, setActivePanel] = useState<
+        | {
+            type: "settings"
+            initialMode?: "model-picker" | "featured-models" | "provider-picker"
+            initialModelKey?: "actModelId" | "planModelId"
+        }
+        | { type: "history" }
+        | { type: "help" }
+        | { type: "skills" }
+        | null
+    >(null)
 
-	const { displayMessages, completedMessages, currentMessage, taskSwitchKey, setTaskSwitchKey } = useChatMessages(
-		taskState.diracMessages || [],
-	)
+    const [gitBranch, setGitBranch] = useState<string | null>(null)
+    const [gitDiffStats, setGitDiffStats] = useState<GitDiffStats | null>(null)
 
-	const { isProcessing, setIsProcessing, isExiting, handleCancel, handleExit, clearViewAndResetTask } = useChatTask({
-		ctrl,
-		taskId,
-		initialPrompt,
-		initialImages,
-		storageKey,
-		onExit,
-		onError,
-		clearState,
-		setTextInput,
-		setCursorPos,
-		setTaskSwitchKey,
-	})
+    const [mode, setMode] = useState<Mode>(() => {
+        const stateManager = StateManager.get()
+        return stateManager.getGlobalSettingsKey("mode") || "act"
+    })
 
-	useHomeEndKeys({
-		onHome: useCallback(() => setCursorPos(0), [setCursorPos]),
-		onEnd: useCallback(() => setCursorPos(textInputRef.current.length), [setCursorPos]),
-		isActive: !activePanel,
-	})
+    const [yolo, setYolo] = useState<boolean>(() => StateManager.get().getGlobalSettingsKey("yoloModeToggled") ?? false)
+    const [autoApproveAll, setAutoApproveAll] = useState<boolean>(
+        () => StateManager.get().getGlobalSettingsKey("autoApproveAllToggled") ?? false,
+    )
 
-	useRawBackspaceKeys({
-		onBackspace: deleteCharsBefore,
-		onDelete: deleteCharsAfter,
-		isActive: !activePanel,
-	})
+    const { displayMessages, committedMessages, liveMessages, taskSwitchKey, setTaskSwitchKey } = useChatMessages(
+        taskState.diracMessages || [],
+        taskState.activeVoiceStreamId,
+        taskState.isApiRequestActive
+    )
 
-	useEffect(() => {
-		const stored = inputStateStorage.get(storageKey)
-		if (stored) {
-			setTextInput(stored.text)
-			setCursorPos(stored.cursorPos)
-			setPastedTexts(stored.pastedTexts)
-			pasteCounterRef.current = stored.pasteCounter
-		}
-	}, [storageKey, setTextInput, setCursorPos])
+    const { isProcessing, setIsProcessing, isExiting, handleCancel, handleExit, clearViewAndResetTask } = useChatTask({
+        ctrl,
+        taskId,
+        initialPrompt,
+        initialImages,
+        storageKey,
+        onExit,
+        onError,
+        clearState,
+        setTextInput,
+        setCursorPos,
+        setTaskSwitchKey,
+    })
 
-	useEffect(() => {
-		if (textInput || pastedTexts.size > 0) {
-			inputStateStorage.set(storageKey, {
-				text: textInput,
-				cursorPos,
-				pastedTexts: new Map(pastedTexts),
-				pasteCounter: pasteCounterRef.current,
-			})
-		}
-	}, [storageKey, textInput, cursorPos, pastedTexts])
+    const handleHome = useCallback(() => setCursorPos(0), [setCursorPos])
+    const handleEnd = useCallback(() => setCursorPos(textInputRef.current.length), [setCursorPos])
 
-	useEffect(() => {
-		if (taskState.mode && taskState.mode !== mode) {
-			setMode(taskState.mode as Mode)
-		}
-	}, [taskState.mode, mode])
+    useHomeEndKeys({
+        onHome: handleHome,
+        onEnd: handleEnd,
+        isActive: !activePanel,
+    })
 
-	useEffect(() => {
-		if (taskState.yoloModeToggled !== undefined && taskState.yoloModeToggled !== yolo) {
-			setYolo(taskState.yoloModeToggled)
-		}
-	}, [taskState.yoloModeToggled, yolo])
+    useRawBackspaceKeys({
+        onBackspace: deleteCharsBefore,
+        onDelete: deleteCharsAfter,
+        isActive: !activePanel,
+    })
 
-	useEffect(() => {
-		if (taskState.autoApproveAllToggled !== undefined && taskState.autoApproveAllToggled !== autoApproveAll) {
-			setAutoApproveAll(taskState.autoApproveAllToggled)
-		}
-	}, [taskState.autoApproveAllToggled, autoApproveAll])
+    useEffect(() => {
+        const stored = inputStateStorage.get(storageKey)
+        if (stored) {
+            setTextInput(stored.text)
+            setCursorPos(stored.cursorPos)
+            setPastedTexts(stored.pastedTexts)
+            pasteCounterRef.current = stored.pasteCounter
+        }
+    }, [storageKey, setTextInput, setCursorPos])
 
-	const toggleAutoApproveAll = useCallback(async () => {
-		const newValue = !autoApproveAll
-		setAutoApproveAll(newValue)
-		StateManager.get().setGlobalState("autoApproveAllToggled", newValue)
-		await ctrl?.postStateToWebview()
-	}, [autoApproveAll, ctrl])
+    useEffect(() => {
+        if (textInput || pastedTexts.size > 0) {
+            inputStateStorage.set(storageKey, {
+                text: textInput,
+                cursorPos,
+                pastedTexts: new Map(pastedTexts),
+                pasteCounter: pasteCounterRef.current,
+            })
+        }
+    }, [storageKey, textInput, cursorPos, pastedTexts])
 
-	const provider = useMemo(() => {
-		const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
-		// In CLI, StateManager is the source of truth for settings and is updated synchronously.
-		// We prefer it over taskState.apiConfiguration which might be lagging due to async state updates.
-		const stateManagerValue = StateManager.get().getGlobalSettingsKey(providerKey) as string
-		if (stateManagerValue) {
-			return stateManagerValue
-		}
-		const configValue = (taskState.apiConfiguration as any)?.[providerKey] as string | undefined
-		if (configValue !== undefined) {
-			return configValue
-		}
-		return (StateManager.get().getGlobalSettingsKey(providerKey) as string) || ""
-	}, [mode, taskState.apiConfiguration])
+    useEffect(() => {
+        if (taskState.mode && taskState.mode !== mode) {
+            setMode(taskState.mode as Mode)
+        }
+    }, [taskState.mode, mode])
 
-	const modelId = useMemo(() => {
-		if (!provider) return ""
-		const modelKey = getProviderModelIdKey(provider as ApiProvider, mode)
-		// In CLI, StateManager is the source of truth for settings and is updated synchronously.
-		// We prefer it over taskState.apiConfiguration which might be lagging due to async state updates.
-		const stateManagerValue = StateManager.get().getGlobalSettingsKey(modelKey) as string
-		if (stateManagerValue) {
-			return stateManagerValue
-		}
-		const configValue = (taskState.apiConfiguration as any)?.[modelKey] as string | undefined
-		if (configValue !== undefined) {
-			return configValue
-		}
-		return (
-			(StateManager.get().getGlobalSettingsKey(modelKey) as string) ||
-			getProviderDefaultModelId(provider as ApiProvider) ||
-			""
-		)
-	}, [mode, provider, taskState.apiConfiguration])
+    useEffect(() => {
+        if (taskState.yoloModeToggled !== undefined && taskState.yoloModeToggled !== yolo) {
+            setYolo(taskState.yoloModeToggled)
+        }
+    }, [taskState.yoloModeToggled, yolo])
 
-	const toggleMode = useCallback(async () => {
-		const newMode: Mode = mode === "act" ? "plan" : "act"
-		setMode(newMode)
-		if (newMode === "act" && textInput.trim()) {
-			const expandedText = expandPastedTexts(textInput, pastedTexts)
-			await ctrl.togglePlanActMode(newMode, { message: expandedText.trim() })
-		} else {
-			await ctrl.togglePlanActMode(newMode)
-		}
-	}, [mode, ctrl, textInput, pastedTexts])
+    useEffect(() => {
+        if (taskState.autoApproveAllToggled !== undefined && taskState.autoApproveAllToggled !== autoApproveAll) {
+            setAutoApproveAll(taskState.autoApproveAllToggled)
+        }
+    }, [taskState.autoApproveAllToggled, autoApproveAll])
 
-	const refs = useRef({
-		searchTimeout: null as NodeJS.Timeout | null,
-		lastQuery: "",
-		hasCheckedRipgrep: false,
-	})
+    const toggleAutoApproveAll = useCallback(async () => {
+        const newValue = !autoApproveAll
+        setAutoApproveAll(newValue)
+        StateManager.get().setGlobalState("autoApproveAllToggled", newValue)
+        await ctrl?.postStateToWebview()
+    }, [autoApproveAll, ctrl])
 
-	const { prompt: _prompt, imagePaths } = parseImagesFromInput(textInput)
-	const mentionInfo = useMemo(() => extractMentionQuery(textInput), [textInput])
-	const slashInfo = useMemo(() => extractSlashQuery(textInput, cursorPos), [textInput, cursorPos])
-	const filteredCommands = useMemo(
-		() => filterCommands(availableCommands, slashInfo.query),
-		[availableCommands, slashInfo.query],
-	)
+    const provider = useMemo(() => {
+        const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
+        const stateManagerValue = StateManager.get().getGlobalSettingsKey(providerKey) as string
+        if (stateManagerValue) {
+            return stateManagerValue
+        }
+        const configValue = (taskState.apiConfiguration as any)?.[providerKey] as string | undefined
+        if (configValue !== undefined) {
+            return configValue
+        }
+        return (StateManager.get().getGlobalSettingsKey(providerKey) as string) || ""
+    }, [mode, taskState.apiConfiguration])
 
-	useEffect(() => {
-		if (slashInfo.slashIndex !== lastSlashIndexRef.current) {
-			lastSlashIndexRef.current = slashInfo.slashIndex
-			setSlashMenuDismissed(false)
-			setSelectedSlashIndex(0)
-		}
-	}, [slashInfo.slashIndex])
+    const modelId = useMemo(() => {
+        if (!provider) return ""
+        const modelKey = getProviderModelIdKey(provider as ApiProvider, mode)
+        const stateManagerValue = StateManager.get().getGlobalSettingsKey(modelKey) as string
+        if (stateManagerValue) {
+            return stateManagerValue
+        }
+        const configValue = (taskState.apiConfiguration as any)?.[modelKey] as string | undefined
+        if (configValue !== undefined) {
+            return configValue
+        }
+        return (
+            (StateManager.get().getGlobalSettingsKey(modelKey) as string) ||
+            getProviderDefaultModelId(provider as ApiProvider) ||
+            ""
+        )
+    }, [mode, provider, taskState.apiConfiguration])
 
-	const workspacePath = useMemo(() => {
-		try {
-			const root = ctrl?.getWorkspaceManagerSync?.()?.getPrimaryRoot?.()
-			if (root?.path) return root.path
-		} catch {}
-		return process.cwd()
-	}, [ctrl])
+    const toggleMode = useCallback(async () => {
+        const newMode: Mode = mode === "act" ? "plan" : "act"
+        setMode(newMode)
+        if (newMode === "act" && textInput.trim()) {
+            const expandedText = expandPastedTexts(textInput, pastedTexts)
+            await ctrl.togglePlanActMode(newMode, { message: expandedText.trim() })
+        } else {
+            await ctrl.togglePlanActMode(newMode)
+        }
+    }, [mode, ctrl, textInput, pastedTexts])
 
-	useEffect(() => {
-		setGitBranch(getGitBranch(workspacePath))
-		setGitDiffStats(getGitDiffStats(workspacePath))
-	}, [workspacePath])
+    const refs = useRef({
+        searchTimeout: null as NodeJS.Timeout | null,
+        lastQuery: "",
+        hasCheckedRipgrep: false,
+    })
 
-	useEffect(() => {
-		const loadCommands = async () => {
-			if (!ctrl) return
-			try {
-				const response = await getAvailableSlashCommands(ctrl, EmptyRequest.create())
-				const cliCommands = response.commands.filter((cmd) => cmd.cliCompatible !== false)
-				const cliOnlyCommands: SlashCommandInfo[] = CLI_ONLY_COMMANDS.map((cmd) => ({
-					name: cmd.name,
-					description: cmd.description || "",
-					section: cmd.section || "default",
-					cliCompatible: true,
-				}))
-				setAvailableCommands([...cliOnlyCommands, ...sortCommandsWorkflowsFirst(cliCommands)])
-			} catch {}
-		}
-		loadCommands()
-	}, [ctrl])
+    const { prompt: _prompt, imagePaths } = parseImagesFromInput(textInput)
+    const mentionInfo = useMemo(() => extractMentionQuery(textInput), [textInput])
+    const slashInfo = useMemo(() => extractSlashQuery(textInput, cursorPos), [textInput, cursorPos])
+    const filteredCommands = useMemo(
+        () => filterCommands(availableCommands, slashInfo.query),
+        [availableCommands, slashInfo.query],
+    )
 
-	const getHistoryItems = useCallback(() => {
-		const history = StateManager.get().getGlobalStateKey("taskHistory")
-		if (!history?.length) return []
-		const filtered = [...history]
-			.reverse()
-			.map((item) => item.task)
-			.slice(0, 20)
-			.filter(Boolean) as string[]
-		return [...new Set(filtered)]
-	}, [])
+    useEffect(() => {
+        if (slashInfo.slashIndex !== lastSlashIndexRef.current) {
+            lastSlashIndexRef.current = slashInfo.slashIndex
+            setSlashMenuDismissed(false)
+            setSelectedSlashIndex(0)
+        }
+    }, [slashInfo.slashIndex])
 
-	const lastMsg = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1]
-	useEffect(() => {
-		setGitDiffStats(getGitDiffStats(workspacePath))
-	}, [taskState.diracMessages?.length, lastMsg?.partial, lastMsg?.ts, workspacePath])
+    const workspacePath = useMemo(() => {
+        try {
+            const root = ctrl?.getWorkspaceManagerSync?.()?.getPrimaryRoot?.()
+            if (root?.path) return root.path
+        } catch { }
+        return process.cwd()
+    }, [ctrl])
 
-	const isWelcomeState = displayMessages.length === 0 && !userScrolled
+    useEffect(() => {
+        setGitBranch(getGitBranch(workspacePath))
+        setGitDiffStats(getGitDiffStats(workspacePath))
+    }, [workspacePath])
 
-	const staticItems = useMemo(() => {
-		const items: Array<
-			{ key: string; type: "header" } | { key: string; type: "message"; message: (typeof displayMessages)[0] }
-		> = []
-		if (displayMessages.length > 0 || userScrolled) {
-			items.push({ key: "header", type: "header" })
-		}
-		for (const msg of completedMessages) {
-			items.push({ key: String(msg.ts), type: "message", message: msg })
-		}
-		return items
-	}, [completedMessages, displayMessages.length, userScrolled])
+    useEffect(() => {
+        const loadCommands = async () => {
+            if (!ctrl) return
+            try {
+                const response = await getAvailableSlashCommands(ctrl, EmptyRequest.create())
+                const cliCommands = response.commands.filter((cmd) => cmd.cliCompatible !== false)
+                const cliOnlyCommands: SlashCommandInfo[] = CLI_ONLY_COMMANDS.map((cmd) => ({
+                    name: cmd.name,
+                    description: cmd.description || "",
+                    section: cmd.section || "default",
+                    cliCompatible: true,
+                }))
+                setAvailableCommands([...cliOnlyCommands, ...sortCommandsWorkflowsFirst(cliCommands)])
+            } catch { }
+        }
+        loadCommands()
+    }, [ctrl])
 
-	const lastMessage = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1]
-	const pendingAsk =
-		lastMessage?.type === "ask" && !lastMessage.partial && respondedToAsk !== lastMessage.ts ? lastMessage : null
-	const askType = pendingAsk ? getAskPromptType(pendingAsk.ask as DiracAsk, pendingAsk.text || "") : "none"
-	const askOptions = pendingAsk && askType === "options" ? parseAskOptions(pendingAsk.text || "") : []
+    const getHistoryItems = useCallback(() => {
+        const history = StateManager.get().getGlobalStateKey("taskHistory")
+        if (!history?.length) return []
+        const filtered = [...history]
+            .reverse()
+            .map((item) => item.task)
+            .slice(0, 20)
+            .filter(Boolean) as string[]
+        return [...new Set(filtered)]
+    }, [])
 
-	const sendAskResponse = useCallback(
-		async (responseType: string, text?: string) => {
-			if (!ctrl?.task || !pendingAsk || isProcessing) return
-			setIsProcessing(true)
-			const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
-			setRespondedToAsk(pendingAsk.ts)
-			setTextInput("")
-			setCursorPos(0)
-			setPastedTexts(new Map())
-			pasteCounterRef.current = 0
-			inputStateStorage.delete(storageKey)
-			try {
-				await ctrl.task.handleWebviewAskResponse(responseType, expandedText)
-			} catch (error) {
-			} finally {
-				setIsProcessing(false)
-			}
-		},
-		[ctrl, pendingAsk, pastedTexts, storageKey, isProcessing, setTextInput, setCursorPos],
-	)
+    const lastMsg = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1]
+    useEffect(() => {
+        setGitDiffStats(getGitDiffStats(workspacePath))
+    }, [taskState.diracMessages?.length, taskState.activeVoiceStreamId, lastMsg?.ts, workspacePath])
 
-	const buttonConfig = useMemo(() => {
-		const lastMsg = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1] as
-			| DiracMessage
-			| undefined
-		return getButtonConfig(lastMsg, isSpinnerActive)
-	}, [taskState.diracMessages, isSpinnerActive])
+    const isWelcomeState = displayMessages.length === 0 && !userScrolled
 
-	useEffect(() => {
-		if (isProcessing && (!buttonConfig.enableButtons || isSpinnerActive)) {
-			setIsProcessing(false)
-		}
-	}, [isProcessing, buttonConfig.enableButtons, isSpinnerActive, setIsProcessing])
+    const staticItems = useMemo(() => {
+        const items: Array<
+            { key: string; type: "header" } | { key: string; type: "message"; message: (typeof displayMessages)[0] }
+        > = []
+        if (displayMessages.length > 0 || userScrolled) {
+            items.push({ key: "header", type: "header" })
+        }
+        for (const msg of committedMessages) {
+            items.push({ key: msg.id, type: "message", message: msg })
+        }
+        return items
+    }, [committedMessages, displayMessages.length, userScrolled])
 
-	const handleButtonAction = useCallback(
-		async (action: ButtonActionType | undefined, _isPrimary: boolean = true) => {
-			if (!action || !ctrl || isProcessing) return
-			setIsProcessing(true)
-			try {
-				switch (action) {
-					case "approve":
-					case "retry":
-						await sendAskResponse("yesButtonClicked")
-						break
-					case "reject":
-						if (
-							pendingAsk?.ask === "resume_task" ||
-							pendingAsk?.ask === "resume_completed_task" ||
-							pendingAsk?.ask === "completion_result" ||
-							pendingAsk?.ask === "new_task"
-						) {
-							handleExit()
-						} else {
-							await sendAskResponse("noButtonClicked")
-						}
-						break
-					case "proceed":
-						await sendAskResponse("yesButtonClicked")
-						break
-					case "new_task":
-						if (pendingAsk?.ask === "new_task") {
-							setRespondedToAsk(pendingAsk.ts)
-							setTextInput("")
-							setCursorPos(0)
-							await ctrl.initTask(pendingAsk.text || "")
-						} else {
-							await clearViewAndResetTask()
-						}
-						break
-					case "cancel":
-						await handleCancel()
-						break
-				}
-			} catch (error) {
-			} finally {
-				setIsProcessing(false)
-			}
-		},
-		[
-			ctrl,
-			sendAskResponse,
-			pendingAsk,
-			handleExit,
-			handleCancel,
-			clearViewAndResetTask,
-			isProcessing,
-			setIsProcessing,
-			setTextInput,
-			setCursorPos,
-		],
-	)
+    const lastCompletedAsk = useLastCompletedAskMessage()
+    const pendingAsk = lastCompletedAsk && respondedToAsk !== lastCompletedAsk.ts ? lastCompletedAsk : null
+    const askType = pendingAsk ? getAskPromptType(pendingAsk) : "none"
+    const askOptions = pendingAsk && askType === "options" ? parseAskOptions(pendingAsk) : []
 
-	const handleAskShortcuts = useCallback(
-		(input: string, key: any, currentTextInput: string) => {
-			if (!pendingAsk || currentTextInput !== "" || isSpinnerActive || isProcessing) return false
-			const askType = pendingAsk.ask as DiracAsk
-			if (
-				askType === "command" ||
-				askType === "tool" ||
-				askType === "resume_task" ||
-				askType === "resume_completed_task" ||
-				askType === "browser_action_launch"
-			) {
-				if (input.toLowerCase() === "y") {
-					handleButtonAction("approve", true)
-					return true
-				}
-				if (input.toLowerCase() === "n") {
-					handleButtonAction("reject", false)
-					return true
-				}
-				if (input.toLowerCase() === "a" && askType === "tool") {
-					StateManager.get().setSessionOverride("yoloModeToggled", true)
-					handleButtonAction("approve", true)
-					return true
-				}
-			}
-			if (askType === "followup" || askType === "plan_mode_respond") {
-				const parts = jsonParseSafe(pendingAsk.text || "", { options: [] as string[] })
-				if (parts.options && parts.options.length > 0) {
-					const num = Number.parseInt(input, 10)
-					if (!Number.isNaN(num) && num >= 1 && num <= parts.options.length) {
-						sendAskResponse("messageResponse", parts.options[num - 1])
-						return true
-					}
-				}
-			}
-			if (askType === "completion_result") {
-				if (input.toLowerCase() === "q") {
-					handleExit()
-					return true
-				}
-			}
-			return false
-		},
-		[pendingAsk, isSpinnerActive, isProcessing, handleButtonAction, sendAskResponse, handleExit],
-	)
+    useEffect(() => {
+    }, [isProcessing])
 
-	const handleSubmit = useCallback(
-		async (text: string, images: string[]) => {
-			if (!ctrl || !text.trim() || isProcessing) return
-			if (pendingAsk) {
-				const prompt = text.trim()
-				const normalized = prompt.toLowerCase()
-				const askType = pendingAsk.ask as DiracAsk
-				if (askType === "resume_task" || askType === "resume_completed_task" || askType === "completion_result") {
-					if (normalized === "q" || normalized === "quit" || normalized === "exit") {
-						handleExit()
-						return
-					}
-					if (askType !== "completion_result" && (normalized === "n" || normalized === "no")) {
-						handleExit()
-						return
-					}
-				}
-				if (
-					(askType === "command" ||
-						askType === "tool" ||
-						askType === "resume_task" ||
-						askType === "resume_completed_task" ||
-						askType === "browser_action_launch") &&
-					(normalized === "y" || normalized === "yes")
-				) {
-					await sendAskResponse("yesButtonClicked")
-				} else {
-					await sendAskResponse("messageResponse", prompt)
-				}
-				setTextInput("")
-				setCursorPos(0)
-				return
-			}
-			setIsProcessing(true)
-			const expandedText = expandPastedTexts(text, pastedTexts)
+    useEffect(() => {
+    }, [lastCompletedAsk, respondedToAsk])
 
-			setTextInput("")
-			setCursorPos(0)
-			setPastedTexts(new Map())
-			pasteCounterRef.current = 0
-			inputStateStorage.delete(storageKey)
-			try {
-				const validImages = await processImagePaths(images)
-				setTerminalTitle(expandedText.trim())
-				await ctrl.initTask(expandedText.trim(), validImages.length > 0 ? validImages : undefined)
-			} catch (_error) {
-				onError?.()
-			} finally {
-				setIsProcessing(false)
-			}
-		},
-		[ctrl, onError, pastedTexts, storageKey, isProcessing, setIsProcessing, setTextInput, setCursorPos, pendingAsk, handleExit, sendAskResponse],
-	)
+    useEffect(() => {
+        if (pendingAsk) {
+        } else {
+        }
+    }, [pendingAsk])
 
-	useEffect(() => {
-		const { current: r } = refs
-		if (!mentionInfo.inMentionMode) {
-			setFileResults([])
-			setSelectedIndex(0)
-			if (r.searchTimeout) {
-				clearTimeout(r.searchTimeout)
-				r.searchTimeout = null
-			}
-			return
-		}
-		if (!r.hasCheckedRipgrep) {
-			r.hasCheckedRipgrep = true
-			if (checkAndWarnRipgrepMissing()) {
-				setShowRipgrepWarning(true)
-				setTimeout(() => setShowRipgrepWarning(false), 5000)
-			}
-		}
-		const { query } = mentionInfo
-		if (query === r.lastQuery) return
-		r.lastQuery = query
-		if (r.searchTimeout) clearTimeout(r.searchTimeout)
-		setIsSearching(true)
-		r.searchTimeout = setTimeout(async () => {
-			try {
-				let results: FileSearchResult[]
-				if (query.toLowerCase().startsWith("image")) {
-					let imageQuery = ""
-					if (query.toLowerCase() === "image") {
-						imageQuery = ""
-					} else if (query.toLowerCase().startsWith("image:")) {
-						imageQuery = query.slice(6)
-					} else {
-						imageQuery = query.slice(5)
-					}
-					results = await searchWorkspaceFiles(imageQuery, workspacePath, 15, undefined, ["png", "jpg", "jpeg", "gif", "webp"])
-				} else {
-					results = await searchWorkspaceFiles(query, workspacePath, 15)
-				}
-				setFileResults(results)
-				setSelectedIndex(0)
-			} catch {
-				setFileResults([])
-			} finally {
-				setIsSearching(false)
-			}
-		}, 150)
-		return () => {
-			if (r.searchTimeout) clearTimeout(r.searchTimeout)
-		}
-	}, [mentionInfo.inMentionMode, mentionInfo.query, workspacePath])
+    const sendAskResponse = useCallback(
+        async (responseType: DiracAskResponse | string, text?: string, value?: string) => {
+            if (!ctrl?.task || !pendingAsk) return
+            if (!isProcessing) setIsProcessing(true)
+            const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
+            setRespondedToAsk(pendingAsk.ts)
+            setTextInput("")
+            setCursorPos(0)
+            setPastedTexts(new Map())
+            pasteCounterRef.current = 0
+            inputStateStorage.delete(storageKey)
+            try {
+                await ctrl.task.submitCardResponse(pendingAsk.id, responseType, expandedText, undefined, undefined, value)
+            } catch (error) {
+            } finally {
+                setIsProcessing(false)
+            }
+        },
+        [ctrl, pendingAsk, pastedTexts, storageKey, isProcessing, setTextInput, setCursorPos, setIsProcessing],
+    )
 
-	useChatInputHandler({
-		textInputRef,
-		cursorPosRef,
-		setTextInput,
-		setCursorPos,
-		activePanel,
-		setActivePanel,
-		handleAskShortcuts,
-		handleKeyboardSequence,
-		handleCtrlShortcut,
-		insertTextAtCursor,
-		toggleMode,
-		toggleAutoApproveAll,
-		handleSubmit,
-		handleExit,
-		clearViewAndResetTask,
-		filteredCommands,
-		selectedSlashIndex,
-		setSelectedSlashIndex,
-		slashMenuDismissed,
-		setSlashMenuDismissed,
-		fileResults,
-		selectedIndex,
-		setSelectedIndex,
-		setFileResults,
-		getHistoryItems,
-		historyIndex,
-		setHistoryIndex,
-		savedInput,
-		setSavedInput,
-		buttonConfig,
-		isSpinnerActive,
-		isProcessing,
-		yolo,
-		pendingAsk,
-		handleButtonAction,
-		isYoloSuppressed,
-		lastPasteTimeRef,
-		activePasteNumRef,
-		activePasteLinesRef,
-		activePasteStartPosRef,
-		pasteCounterRef,
-		pasteUpdateTimeoutRef,
-		setPastedTexts,
-		PASTE_COLLAPSE_THRESHOLD: 10000,
-		PASTE_CHUNK_WINDOW_MS: 150,
-		PASTE_UPDATE_DEBOUNCE_MS: 50,
-		mode,
-	})
+    const uiActionState = taskState.uiActionState
+    const sendingDisabled = uiActionState?.sendingDisabled ?? false
 
-	const borderColor = mode === "act" ? COLORS.primaryBlue : "yellow"
-	const metrics = getApiMetrics(taskState.diracMessages || [])
-	const lastApiReqTotalTokens = useMemo(() => getLastApiReqTotalTokens(taskState.diracMessages || []), [taskState.diracMessages])
-	const contextWindowSize = useMemo(() => {
-		const providerData = providerModels[provider]
-		if (providerData && modelId in providerData.models) {
-			const modelInfo = providerData.models[modelId] as ModelInfo
-			if (modelInfo?.contextWindow) return modelInfo.contextWindow
-		}
-		return 200000
-	}, [provider, modelId])
+    useEffect(() => {
+        if (
+            isProcessing &&
+            (!uiActionState ||
+                (uiActionState.globalButtons.length === 0 && uiActionState.cardButtons.length === 0) ||
+                isSpinnerActive)
+        ) {
+            setIsProcessing(false)
+        }
+    }, [isProcessing, uiActionState, isSpinnerActive, setIsProcessing])
 
-	const showSlashMenu = slashInfo.inSlashMode && !slashMenuDismissed
-	const showFileMenu = mentionInfo.inMentionMode && !showSlashMenu
+    const handleButtonAction = useCallback(
+        async (action: UIActionButtonType | string | undefined, _isPrimary: boolean = true) => {
+            if (!action || !ctrl || isProcessing) return
+            setIsProcessing(true)
+            try {
+                switch (action) {
+                    case UIActionButtonType.APPROVE:
+                    case UIActionButtonType.RETRY:
+                        await sendAskResponse(DiracAskResponse.APPROVE)
+                        break
+                    case UIActionButtonType.REJECT:
+                        if (pendingAsk?.content.type === DiracMessageType.CARD) {
+                            const header = pendingAsk.content.card.header.toLowerCase()
+                            if (
+                                header.includes("resume") ||
+                                header.includes("completed") ||
+                                header.includes("result") ||
+                                header.includes("new task")
+                            ) {
+                                handleExit()
+                            } else {
+                                await sendAskResponse(DiracAskResponse.REJECT)
+                            }
+                        } else {
+                            await sendAskResponse(DiracAskResponse.REJECT)
+                        }
+                        break
+                    case UIActionButtonType.PROCEED:
+                        await sendAskResponse(DiracAskResponse.APPROVE)
+                        break
+                    case UIActionButtonType.NEW_TASK:
+                        if (
+                            pendingAsk?.content.type === DiracMessageType.CARD &&
+                            pendingAsk.content.card.header.toLowerCase().includes("new task")
+                        ) {
+                            setRespondedToAsk(pendingAsk.ts)
+                            setTextInput("")
+                            setCursorPos(0)
+                            await ctrl.initTask(pendingAsk.content.card.body || "")
+                        } else {
+                            await clearViewAndResetTask()
+                        }
+                        break
+                    case UIActionButtonType.CANCEL:
+                        await handleCancel()
+                        break
+                    default:
+                        // For custom actions, we send the value as a message response
+                        await sendAskResponse(DiracAskResponse.MESSAGE, undefined, action)
+                        break
+                }
+            } catch (error) {
+            } finally {
+                setIsProcessing(false)
+            }
+        },
+        [
+            ctrl,
+            sendAskResponse,
+            pendingAsk,
+            handleExit,
+            handleCancel,
+            clearViewAndResetTask,
+            isProcessing,
+            setIsProcessing,
+            setTextInput,
+            setCursorPos,
+        ],
+    )
 
-	let inputPrompt = ""
-	if (pendingAsk && !yolo && askType === "options" && askOptions.length > 0) {
-		inputPrompt = `(1-${askOptions.length} or type)`
-	}
+    const handleAskShortcuts = useCallback(
+        (input: string, key: any, currentTextInput: string) => {
+            if (!pendingAsk || currentTextInput !== "" || isProcessing) return false
+            if (pendingAsk.content.type !== DiracMessageType.CARD) return false
+            const { card } = pendingAsk.content
 
-	return (
-		<Box flexDirection="column" key={taskSwitchKey} width="100%">
-			<Static items={staticItems}>
-				{(item) => (
-					<Box key={item.key} paddingX={item.type === "message" ? 1 : 0} width="100%">
-						{item.type === "header" ? (
-							<ChatHeader />
-						) : (
-							<ChatMessage message={item.message} mode={mode} />
-						)}
-					</Box>
-				)}
-			</Static>
+            if (card.requireApproval) {
+                if (input.toLowerCase() === "y") {
+                    handleButtonAction(DiracAskResponse.APPROVE, true)
+                    return true
+                }
+                if (input.toLowerCase() === "n") {
+                    handleButtonAction(DiracAskResponse.REJECT, false)
+                    return true
+                }
+                if (input.toLowerCase() === "a" && !card.header.toLowerCase().includes("command")) {
+                    StateManager.get().setSessionOverride("yoloModeToggled", true)
+                    handleButtonAction(DiracAskResponse.APPROVE, true)
+                    return true
+                }
+            }
 
-			<Box flexDirection="column" width="100%">
-				{isWelcomeState && (
-					<ChatHeader
-						isWelcomeState={isWelcomeState}
-						onInteraction={(_input, key) => {
-							if (!key.tab) {
-								setUserScrolled(true)
-							}
-						}}
-						quote={quote}
-					/>
-				)}
+            if (card.requireFeedback) {
+                const options = card.actions?.map((a) => a.label) || []
+                if (options.length > 0) {
+                    const num = Number.parseInt(input, 10)
+                    if (!Number.isNaN(num) && num >= 1 && num <= options.length) {
+                        sendAskResponse(DiracAskResponse.MESSAGE, options[num - 1])
+                        return true
+                    }
+                }
+            }
 
-				{currentMessage && (
-					<Box paddingX={1} width="100%">
-						<ChatMessage
-							isExecuting={currentMessage.ts === respondedToAsk}
-							isStreaming
-							message={currentMessage}
-							mode={mode}
-						/>
-					</Box>
-				)}
+            const header = card.header.toLowerCase()
+            if (header.includes("completed") || header.includes("result")) {
+                if (input.toLowerCase() === "q") {
+                    handleExit()
+                    return true
+                }
+            }
 
-				{pendingAsk && !isYoloSuppressed(yolo, pendingAsk.ask as DiracAsk) && !isSpinnerActive && (
-					<Box paddingX={1}>
-						<AskPrompt />
-					</Box>
-				)}
+            return false
+        },
+        [pendingAsk, isProcessing, handleButtonAction, sendAskResponse, handleExit],
+    )
 
-				{isSpinnerActive && (
-					<ThinkingIndicator mode={mode} onCancel={handleCancel} startTime={spinnerStartTime} />
-				)}
+    const handleSubmit = useCallback(
+        async (text: string, images: string[]) => {
+            if (!ctrl || !text.trim() || isProcessing) return
+            if (pendingAsk && pendingAsk.content.type === DiracMessageType.CARD) {
+                const prompt = text.trim()
+                const normalized = prompt.toLowerCase()
+                const { card } = pendingAsk.content
+                const header = card.header.toLowerCase()
 
-				{!activePanel && !isExiting && (
-					<ChatInputBar
-						availableCommands={availableCommands.map((c) => c.name)}
-						borderColor={borderColor}
-						cursorPos={cursorPos}
-						inputPrompt={inputPrompt}
-						textInput={textInput}
-					/>
-				)}
+                if (header.includes("resume") || header.includes("completed") || header.includes("result")) {
+                    if (normalized === "q" || normalized === "quit" || normalized === "exit") {
+                        handleExit()
+                        return
+                    }
+                    if (!header.includes("completed") && !header.includes("result") && (normalized === "n" || normalized === "no")) {
+                        handleExit()
+                        return
+                    }
+                }
 
-				{activePanel?.type === "settings" && (
-					<SettingsPanelContent
-						controller={ctrl}
-						initialMode={activePanel.initialMode}
-						initialModelKey={activePanel.initialModelKey}
-						onClose={() => setActivePanel(null)}
-					/>
-				)}
+                if (card.requireApproval && (normalized === "y" || normalized === "yes")) {
+                    await sendAskResponse(DiracAskResponse.APPROVE)
+                } else {
+                    await sendAskResponse(DiracAskResponse.MESSAGE, prompt)
+                }
+                setTextInput("")
+                setCursorPos(0)
+                return
+            }
+            setIsProcessing(true)
+            const expandedText = expandPastedTexts(text, pastedTexts)
 
-				{activePanel?.type === "history" && ctrl && (
-					<HistoryPanelContent
-						controller={ctrl}
-						onClose={() => setActivePanel(null)}
-						onSelectTask={() => setActivePanel(null)}
-					/>
-				)}
+            setTextInput("")
+            setCursorPos(0)
+            setPastedTexts(new Map())
+            pasteCounterRef.current = 0
+            inputStateStorage.delete(storageKey)
+            try {
+                const validImages = await processImagePaths(images)
+                setTerminalTitle(expandedText.trim())
+                await ctrl.initTask(expandedText.trim(), validImages.length > 0 ? validImages : undefined)
+            } catch (_error) {
+                onError?.()
+            } finally {
+                setIsProcessing(false)
+            }
+        },
+        [
+            ctrl,
+            onError,
+            pastedTexts,
+            storageKey,
+            isProcessing,
+            setIsProcessing,
+            setTextInput,
+            setCursorPos,
+            pendingAsk,
+            handleExit,
+            sendAskResponse,
+        ],
+    )
 
-				{activePanel?.type === "help" && <HelpPanelContent onClose={() => setActivePanel(null)} />}
+    useEffect(() => {
+        const { current: r } = refs
+        if (!mentionInfo.inMentionMode) {
+            setFileResults([])
+            setSelectedIndex(0)
+            if (r.searchTimeout) {
+                clearTimeout(r.searchTimeout)
+                r.searchTimeout = null
+            }
+            return
+        }
+        if (!r.hasCheckedRipgrep) {
+            r.hasCheckedRipgrep = true
+            if (checkAndWarnRipgrepMissing()) {
+                setShowRipgrepWarning(true)
+                setTimeout(() => setShowRipgrepWarning(false), 5000)
+            }
+        }
+        const { query } = mentionInfo
+        if (query === r.lastQuery) return
+        r.lastQuery = query
+        if (r.searchTimeout) clearTimeout(r.searchTimeout)
+        setIsSearching(true)
+        r.searchTimeout = setTimeout(async () => {
+            try {
+                let results: FileSearchResult[]
+                if (query.toLowerCase().startsWith("image")) {
+                    let imageQuery = ""
+                    if (query.toLowerCase() === "image") {
+                        imageQuery = ""
+                    } else if (query.toLowerCase().startsWith("image:")) {
+                        imageQuery = query.slice(6)
+                    } else {
+                        imageQuery = query.slice(5)
+                    }
+                    results = await searchWorkspaceFiles(imageQuery, workspacePath, 15, undefined, ["png", "jpg", "jpeg", "gif", "webp"])
+                } else {
+                    results = await searchWorkspaceFiles(query, workspacePath, 15)
+                }
+                setFileResults(results)
+                setSelectedIndex(0)
+            } catch {
+                setFileResults([])
+            } finally {
+                setIsSearching(false)
+            }
+        }, 150)
+        return () => {
+            if (r.searchTimeout) clearTimeout(r.searchTimeout)
+        }
+    }, [mentionInfo.inMentionMode, mentionInfo.query, workspacePath])
 
-				{activePanel?.type === "skills" && ctrl && (
-					<SkillsPanelContent
-						controller={ctrl}
-						onClose={() => setActivePanel(null)}
-						onUseSkill={(skillPath) => {
-							setActivePanel(null)
-							setTextInput(`@${skillPath} `)
-							setCursorPos(skillPath.length + 2)
-						}}
-					/>
-				)}
+    useChatInputHandler({
+        textInputRef,
+        cursorPosRef,
+        setTextInput,
+        setCursorPos,
+        activePanel,
+        setActivePanel,
+        handleAskShortcuts,
+        handleKeyboardSequence,
+        handleCtrlShortcut,
+        insertTextAtCursor,
+        toggleMode,
+        toggleAutoApproveAll,
+        handleSubmit,
+        handleExit,
+        clearViewAndResetTask,
+        filteredCommands,
+        selectedSlashIndex,
+        setSelectedSlashIndex,
+        slashMenuDismissed,
+        setSlashMenuDismissed,
+        fileResults,
+        selectedIndex,
+        setSelectedIndex,
+        setFileResults,
+        getHistoryItems,
+        historyIndex,
+        setHistoryIndex,
+        savedInput,
+        setSavedInput,
+        isSpinnerActive,
+        isProcessing,
+        yolo,
+        pendingAsk,
+        handleButtonAction,
+        isYoloSuppressed,
+        lastPasteTimeRef,
+        activePasteNumRef,
+        activePasteLinesRef,
+        activePasteStartPosRef,
+        pasteCounterRef,
+        pasteUpdateTimeoutRef,
+        setPastedTexts,
+        PASTE_COLLAPSE_THRESHOLD: 10000,
+        PASTE_CHUNK_WINDOW_MS: 150,
+        PASTE_UPDATE_DEBOUNCE_MS: 50,
+        mode,
+        toggleCardExpansion,
+        currentCardId: pendingAsk?.id,
+    })
 
-				{showSlashMenu && !activePanel && (
-					<Box paddingLeft={1} paddingRight={1}>
-						<SlashCommandMenu
-							commands={filteredCommands}
-							query={slashInfo.query}
-							selectedIndex={selectedSlashIndex}
-						/>
-					</Box>
-				)}
+    const borderColor = mode === "act" ? COLORS.primaryBlue : "yellow"
+    const metrics = getApiMetrics(taskState.diracMessages || [])
+    const lastApiReqTotalTokens = useMemo(() => getLastApiReqTotalTokens(taskState.diracMessages || []), [taskState.diracMessages])
+    const contextWindowSize = useMemo(() => {
+        const providerData = providerModels[provider]
+        if (providerData && modelId in providerData.models) {
+            const modelInfo = providerData.models[modelId] as ModelInfo
+            if (modelInfo?.contextWindow) return modelInfo.contextWindow
+        }
+        return 200000
+    }, [provider, modelId])
 
-				{showFileMenu && !activePanel && (
-					<Box paddingLeft={1} paddingRight={1}>
-						<FileMentionMenu
-							isLoading={isSearching}
-							query={mentionInfo.query}
-							results={fileResults}
-							selectedIndex={selectedIndex}
-							showRipgrepWarning={showRipgrepWarning}
-						/>
-					</Box>
-				)}
+    const showSlashMenu = slashInfo.inSlashMode && !slashMenuDismissed
+    const showFileMenu = mentionInfo.inMentionMode && !showSlashMenu
 
-				{imagePaths.length > 0 && !activePanel && (
-					<Box paddingLeft={1} paddingRight={1}>
-						<Text color="magenta">
-							{imagePaths.length} image{imagePaths.length > 1 ? "s" : ""} attached
-						</Text>
-					</Box>
-				)}
+    let inputPrompt = ""
+    if (pendingAsk && !yolo && askType === "options" && askOptions.length > 0) {
+        inputPrompt = `(1-${askOptions.length} or type)`
+    }
 
-				{!showSlashMenu && !showFileMenu && !activePanel && (
-					<ChatFooter
-						autoApproveAll={autoApproveAll}
-						contextWindowSize={contextWindowSize}
-						gitBranch={gitBranch}
-						gitDiffStats={gitDiffStats}
-						lastApiReqTotalTokens={lastApiReqTotalTokens}
-						mode={mode}
-						modelId={modelId}
-						totalCost={metrics.totalCost}
-						workspacePath={workspacePath}
-					/>
-				)}
-			</Box>
+    return (
+        <Box flexDirection="column" key={taskSwitchKey} width="100%">
+            <Static items={staticItems}>
+                {(item) => {
+                    const card = item.type === "message" && item.message.content.type === DiracMessageType.CARD ? item.message.content.card : null
+                    return (
+                        <Box key={item.key} paddingX={item.type === "message" ? 1 : 0} width="100%">
+                            {item.type === "header" ? (
+                                <ChatHeader />
+                            ) : (
+                                <ChatMessage
+                                    message={item.message}
+                                    mode={mode}
+                                    isExpanded={card ? getIsCardExpanded(card) : false}
+                                    onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
+                                    activeVoiceStreamId={taskState.activeVoiceStreamId}
+                                />
+                            )}
+                        </Box>
+                    )
+                }}
+            </Static>
 
-				{imagePaths.length > 0 && !activePanel && (
-					<Box
-						{...({
-							position: "absolute",
-							width: stdout?.columns || 80,
-							height: stdout?.rows || 24,
-							flexDirection: "column",
-							justifyContent: "flex-end",
-							alignItems: "flex-end",
-							paddingRight: 2,
-							paddingBottom: 1,
-						} as any)}>
-						<Box flexDirection="column" alignItems="flex-end">
-							<Box borderStyle="round" borderColor="magenta">
-								<Image
-									key={imagePaths[imagePaths.length - 1]}
-									src={path.resolve(imagePaths[imagePaths.length - 1])}
-									width={30}
-								/>
-							</Box>
-							<Text color="gray" dimColor>
-								{path.basename(imagePaths[imagePaths.length - 1])}
-							</Text>
-						</Box>
-					</Box>
-				)}
+            <Box flexDirection="column" width="100%">
+                {isWelcomeState && (
+                    <ChatHeader
+                        isWelcomeState={isWelcomeState}
+                        onInteraction={(_input, key) => {
+                            if (!key.tab) {
+                                setUserScrolled(true)
+                            }
+                        }}
+                        quote={quote}
+                    />
+                )}
 
+                {liveMessages.map((msg) => {
+                    const card = msg.content.type === DiracMessageType.CARD ? msg.content.card : null
+                    return (
+                        <Box key={msg.id} paddingX={1} width="100%">
+                            <ChatMessage
+                                isExecuting={msg.ts === respondedToAsk}
+                                isStreaming={msg.id === taskState.activeVoiceStreamId}
+                                message={msg}
+                                mode={mode}
+                                isExpanded={card ? getIsCardExpanded(card) : false}
+                                onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
+                                activeVoiceStreamId={taskState.activeVoiceStreamId}
+                            />
+                        </Box>
+                    )
+                })}
 
+                {pendingAsk && !isYoloSuppressed(yolo, pendingAsk) && !isSpinnerActive && (
+                    <Box paddingX={1}>
+                        <AskPrompt />
+                    </Box>
+                )}
 
-		</Box>
-	)
+                {isSpinnerActive && (
+                    <ThinkingIndicator mode={mode} onCancel={handleCancel} startTime={spinnerStartTime} />
+                )}
+
+                {uiActionState && !activePanel && !isExiting && (
+                    <ActionButtons isProcessing={isProcessing} mode={mode} uiActionState={uiActionState} />
+                )}
+
+                {!activePanel && !isExiting && (
+                    <ChatInputBar
+                        availableCommands={availableCommands.map((c) => c.name)}
+                        borderColor={borderColor}
+                        cursorPos={cursorPos}
+                        inputPrompt={inputPrompt}
+                        textInput={textInput}
+                    />
+                )}
+
+                {activePanel?.type === "settings" && (
+                    <SettingsPanelContent
+                        controller={ctrl}
+                        initialMode={activePanel.initialMode}
+                        initialModelKey={activePanel.initialModelKey}
+                        onClose={() => setActivePanel(null)}
+                    />
+                )}
+
+                {activePanel?.type === "history" && ctrl && (
+                    <HistoryPanelContent
+                        controller={ctrl}
+                        onClose={() => setActivePanel(null)}
+                        onSelectTask={() => setActivePanel(null)}
+                    />
+                )}
+
+                {activePanel?.type === "help" && <HelpPanelContent onClose={() => setActivePanel(null)} />}
+
+                {activePanel?.type === "skills" && ctrl && (
+                    <SkillsPanelContent
+                        controller={ctrl}
+                        onClose={() => setActivePanel(null)}
+                        onUseSkill={(skillPath) => {
+                            setActivePanel(null)
+                            setTextInput(`@${skillPath} `)
+                            setCursorPos(skillPath.length + 2)
+                        }}
+                    />
+                )}
+
+                {showSlashMenu && !activePanel && (
+                    <Box paddingLeft={1} paddingRight={1}>
+                        <SlashCommandMenu
+                            commands={filteredCommands}
+                            query={slashInfo.query}
+                            selectedIndex={selectedSlashIndex}
+                        />
+                    </Box>
+                )}
+
+                {showFileMenu && !activePanel && (
+                    <Box paddingLeft={1} paddingRight={1}>
+                        <FileMentionMenu
+                            isLoading={isSearching}
+                            query={mentionInfo.query}
+                            results={fileResults}
+                            selectedIndex={selectedIndex}
+                            showRipgrepWarning={showRipgrepWarning}
+                        />
+                    </Box>
+                )}
+
+                {imagePaths.length > 0 && !activePanel && (
+                    <Box paddingLeft={1} paddingRight={1}>
+                        <Text color="magenta">
+                            {imagePaths.length} image{imagePaths.length > 1 ? "s" : ""} attached
+                        </Text>
+                    </Box>
+                )}
+
+                {!showSlashMenu && !showFileMenu && !activePanel && (
+                    <ChatFooter
+                        autoApproveAll={autoApproveAll}
+                        contextWindowSize={contextWindowSize}
+                        gitBranch={gitBranch}
+                        gitDiffStats={gitDiffStats}
+                        lastApiReqTotalTokens={lastApiReqTotalTokens}
+                        mode={mode}
+                        modelId={modelId}
+                        provider={provider}
+                        totalCost={metrics.totalCost}
+                        taskStatus={taskState.taskStatus}
+                        workspacePath={workspacePath}
+                    />
+                )}
+            </Box>
+
+            {imagePaths.length > 0 && !activePanel && (
+                <Box
+                    {...({
+                        position: "absolute",
+                        width: stdout?.columns || 80,
+                        height: stdout?.rows || 24,
+                        flexDirection: "column",
+                        justifyContent: "flex-end",
+                        alignItems: "flex-end",
+                        paddingRight: 2,
+                        paddingBottom: 1,
+                    } as any)}>
+                    <Box flexDirection="column" alignItems="flex-end">
+                        <Box borderStyle="round" borderColor="magenta">
+                            <Image
+                                key={imagePaths[imagePaths.length - 1]}
+                                src={path.resolve(imagePaths[imagePaths.length - 1])}
+                                width={30}
+                            />
+                        </Box>
+                        <Text color="gray" dimColor>
+                            {path.basename(imagePaths[imagePaths.length - 1])}
+                        </Text>
+                    </Box>
+                </Box>
+            )}
+        </Box>
+    )
 }

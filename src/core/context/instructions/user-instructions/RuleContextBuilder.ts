@@ -1,18 +1,20 @@
 import { HostProvider } from "@/hosts/host-provider"
+import { DiracMessage } from "@shared/ExtensionMessage"
 import { extractPathLikeStrings, RuleEvaluationContext, toWorkspaceRelativePosixPath } from "./rule-conditionals"
 
 type WorkspaceRoot = { path: string }
 type WorkspaceManagerLike = { getRoots(): WorkspaceRoot[] }
 
-type DiracMessageLike = {
-	type: string
-	ask?: string
-	say?: string
-	text?: string
-}
+type DiracMessageLike = DiracMessage
 
 type MessageStateHandlerLike = {
 	getDiracMessages(): DiracMessageLike[]
+	addToDiracMessages(message: DiracMessage): Promise<void>
+	updateDiracMessage(index: number, updates: Partial<DiracMessage>): Promise<void>
+	findMessageIndexById(id: string): number
+	saveDiracMessagesAndUpdateHistory(): Promise<void>
+	overwriteApiConversationHistory(history: any[]): Promise<void>
+	getApiConversationHistory(): any[]
 }
 
 export type RuleContextBuilderDeps = {
@@ -55,9 +57,9 @@ export class RuleContextBuilder {
 		// support first-turn activation on later turns.
 		const lastUserMsg = [...diracMessages]
 			.reverse()
-			.find((m) => m.type === "say" && (m.say === "user_feedback" || m.say === "task") && typeof m.text === "string")
-		if (lastUserMsg?.text) {
-			candidates.push(...extractPathLikeStrings(lastUserMsg.text))
+			.find((m) => m.content.type === "markdown" && typeof m.content.content === "string")
+		if (lastUserMsg && lastUserMsg.content.type === "markdown") {
+			candidates.push(...extractPathLikeStrings(lastUserMsg.content.content))
 		}
 
 		// (2) Visible + open tabs
@@ -77,9 +79,9 @@ export class RuleContextBuilder {
 		// (3) Files edited by Dirac during this task (completed operations):
 		// Parse say="tool" messages for tool results indicating file operations.
 		for (const msg of diracMessages) {
-			if (msg.type !== "say" || msg.say !== "tool" || !msg.text) continue
+			if (msg.content.type !== "card" || !msg.content.card.body) continue
 			try {
-				const tool = JSON.parse(msg.text) as { tool?: string; path?: string }
+				const tool = JSON.parse(msg.content.card.body) as { tool?: string; path?: string }
 				if (
 					(tool.tool === "editedExistingFile" || tool.tool === "newFileCreated" || tool.tool === "fileDeleted") &&
 					tool.path
@@ -98,9 +100,9 @@ export class RuleContextBuilder {
 		// - The tool fails (intent was still expressed)
 		// - Files don't exist yet (new file creation)
 		for (const msg of diracMessages) {
-			if (msg.type !== "ask" || msg.ask !== "tool" || !msg.text) continue
+			if (msg.content.type !== "card" || !msg.content.card.body) continue
 			try {
-				const tool = JSON.parse(msg.text) as {
+				const tool = JSON.parse(msg.content.card.body) as {
 					tool?: string
 					path?: string
 				}

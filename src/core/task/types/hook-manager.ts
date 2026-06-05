@@ -8,11 +8,11 @@ export interface HookManagerDependencies {
 	taskState: TaskState
 	messageStateHandler: MessageStateHandler
 	stateManager: StateManager
-	api: ApiHandler
+	api?: ApiHandler
 	shouldRunBackgroundCheck: () => boolean
 	taskId: string
-	ulid: string
-	say: TaskMessenger["say"]
+	ulid?: string
+	taskMessenger: TaskMessenger
 	postStateToWebview: () => Promise<void>
 	cancelTask: () => Promise<void>
 	withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>

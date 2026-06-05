@@ -56,7 +56,6 @@ export type {
 	DiracAgentCapabilities,
 	DiracAgentInfo,
 	DiracAgentOptions,
-	DiracPermissionOption,
 	DiracSessionEvents,
 	PermissionHandler,
 	SessionUpdatePayload,

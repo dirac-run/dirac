@@ -19,35 +19,46 @@ export async function askResponse(controller: Controller, request: AskResponseRe
 		}
 
 		// Map the string responseType to the DiracAskResponse enum
-		let responseType: DiracAskResponse
+		// Map the string responseType to the DiracAskResponse enum
+		let responseType: DiracAskResponse | string
 		switch (request.responseType) {
+			case DiracAskResponse.APPROVE:
 			case "yesButtonClicked":
-				responseType = "yesButtonClicked"
+				responseType = DiracAskResponse.APPROVE
 				break
+			case DiracAskResponse.REJECT:
 			case "noButtonClicked":
-				responseType = "noButtonClicked"
+				responseType = DiracAskResponse.REJECT
 				break
+			case DiracAskResponse.MESSAGE:
 			case "messageResponse":
-				responseType = "messageResponse"
+				responseType = DiracAskResponse.MESSAGE
 				break
+			case DiracAskResponse.EDIT:
 			case "editButtonClicked":
-				responseType = "editButtonClicked"
+				responseType = DiracAskResponse.EDIT
 				break
+			case DiracAskResponse.VIEW:
 			case "viewButtonClicked":
-				responseType = "viewButtonClicked"
+				responseType = DiracAskResponse.VIEW
+				break
+			case DiracAskResponse.UNDO:
+			case "undoButtonClicked":
+				responseType = DiracAskResponse.UNDO
 				break
 			default:
-				Logger.warn(`askResponse: Unknown response type: ${request.responseType}`)
-				return Empty.create()
+				// Support custom actions
+				responseType = request.responseType
 		}
 
-		// Call the task's handler for webview responses
-		await controller.task.handleWebviewAskResponse(
+		// Call the task's handler for webview responses using the new submitCardResponse primitive
+		await controller.task.submitCardResponse(
+			request.cardId,
 			responseType,
 			request.text,
 			request.images,
 			request.files,
-			request.userEdits,
+			request.value,
 		)
 
 		return Empty.create()

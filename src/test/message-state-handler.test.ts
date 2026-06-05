@@ -1,9 +1,8 @@
+import { expect } from "chai"
 import { describe, it } from "mocha"
-import "should"
-import should from "should"
 import { MessageStateHandler } from "../core/task/message-state"
 import { TaskState } from "../core/task/TaskState"
-import { DiracMessage } from "../shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "../shared/ExtensionMessage"
 
 /**
  * Unit tests for MessageStateHandler's mutex protection (RC-4)
@@ -29,17 +28,19 @@ describe("MessageStateHandler Mutex Protection", () => {
 	 */
 	function createTestMessage(text: string): DiracMessage {
 		return {
+			id: `test-msg-${Date.now()}-${Math.random()}`,
 			ts: Date.now(),
-			type: "say",
-			say: "text",
-			text,
+			content: {
+				type: DiracMessageType.MARKDOWN,
+				content: text,
+			},
 		}
 	}
 
 	it("should initialize with empty message arrays", () => {
 		const handler = createTestHandler()
-		handler.getDiracMessages().length.should.equal(0)
-		handler.getApiConversationHistory().length.should.equal(0)
+		expect(handler.getDiracMessages().length).to.equal(0)
+		expect(handler.getApiConversationHistory().length).to.equal(0)
 	})
 
 	it("should set and get API conversation history", () => {
@@ -47,7 +48,7 @@ describe("MessageStateHandler Mutex Protection", () => {
 		const testHistory = [{ role: "user" as const, content: "test message" }]
 
 		handler.setApiConversationHistory(testHistory)
-		handler.getApiConversationHistory().should.deepEqual(testHistory)
+		expect(handler.getApiConversationHistory()).to.deep.equal(testHistory)
 	})
 
 	it("should set and get dirac messages", () => {
@@ -55,7 +56,7 @@ describe("MessageStateHandler Mutex Protection", () => {
 		const testMessages = [createTestMessage("test1"), createTestMessage("test2")]
 
 		handler.setDiracMessages(testMessages)
-		handler.getDiracMessages().should.deepEqual(testMessages)
+		expect(handler.getDiracMessages()).to.deep.equal(testMessages)
 	})
 
 	/**
@@ -83,8 +84,8 @@ describe("MessageStateHandler Mutex Protection", () => {
 
 		// Verify initial state
 		const messages = handler.getDiracMessages()
-		messages.length.should.equal(1)
-		messages[0].conversationHistoryIndex?.should.equal(2) // length - 1 = 3 - 1 = 2
+		expect(messages.length).to.equal(1)
+		expect(messages[0].conversationHistoryIndex).to.equal(2) // length - 1 = 3 - 1 = 2
 
 		// Now simulate concurrent additions
 		// Without mutex protection, these could race and get the same index
@@ -107,19 +108,18 @@ describe("MessageStateHandler Mutex Protection", () => {
 		])
 
 		// Verify all operations completed
-		results.length.should.equal(3)
+		expect(results.length).to.equal(3)
 
 		// Get final state
 		const finalMessages = handler.getDiracMessages()
-		finalMessages.length.should.equal(4) // initial + 3 concurrent
+		expect(finalMessages.length).to.equal(4) // initial + 3 concurrent
 
 		// CRITICAL ASSERTION: Each message should have a valid conversationHistoryIndex
 		// With proper mutex protection, these indices should be set correctly
 		// even though the operations ran concurrently
-		finalMessages.forEach((msg, _idx) => {
-			should.exist(msg.conversationHistoryIndex)
-			msg.conversationHistoryIndex?.should.be.a.Number()
-			msg.conversationHistoryIndex?.should.be.greaterThanOrEqual(0)
+		finalMessages.forEach((msg) => {
+			expect(msg.conversationHistoryIndex).to.be.a("number")
+			expect(msg.conversationHistoryIndex).to.be.at.least(0)
 		})
 	})
 
@@ -137,15 +137,15 @@ describe("MessageStateHandler Mutex Protection", () => {
 
 		// Perform concurrent updates to different messages
 		await Promise.all([
-			handler.updateDiracMessage(0, { text: "updated1" }),
-			handler.updateDiracMessage(1, { text: "updated2" }),
-			handler.updateDiracMessage(2, { text: "updated3" }),
+			handler.updateDiracMessage(0, { content: { type: DiracMessageType.MARKDOWN, content: "updated1" } }),
+			handler.updateDiracMessage(1, { content: { type: DiracMessageType.MARKDOWN, content: "updated2" } }),
+			handler.updateDiracMessage(2, { content: { type: DiracMessageType.MARKDOWN, content: "updated3" } }),
 		])
 
 		const finalMessages = handler.getDiracMessages()
-		finalMessages[0]?.text?.should.equal("updated1")
-		finalMessages[1]?.text?.should.equal("updated2")
-		finalMessages[2]?.text?.should.equal("updated3")
+		expect((finalMessages[0]?.content as any)?.content).to.equal("updated1")
+		expect((finalMessages[1]?.content as any)?.content).to.equal("updated2")
+		expect((finalMessages[2]?.content as any)?.content).to.equal("updated3")
 	})
 
 	/**
@@ -162,9 +162,9 @@ describe("MessageStateHandler Mutex Protection", () => {
 		await handler.deleteDiracMessage(1)
 
 		const finalMessages = handler.getDiracMessages()
-		finalMessages.length.should.equal(2)
-		finalMessages[0]?.text?.should.equal("msg1")
-		finalMessages[1]?.text?.should.equal("msg3")
+		expect(finalMessages.length).to.equal(2)
+		expect((finalMessages[0]?.content as any)?.content).to.equal("msg1")
+		expect((finalMessages[1]?.content as any)?.content).to.equal("msg3")
 	})
 
 	/**
@@ -175,11 +175,11 @@ describe("MessageStateHandler Mutex Protection", () => {
 		handler.setDiracMessages([createTestMessage("msg1")])
 
 		try {
-			await handler.updateDiracMessage(5, { text: "invalid" })
+			await handler.updateDiracMessage(5, { content: { type: DiracMessageType.MARKDOWN, content: "invalid" } })
 			throw new Error("Should have thrown")
 		} catch (error) {
 			if (error instanceof Error) {
-				error.message.should.match(/Invalid message index/)
+				expect(error.message).to.match(/Invalid message index/)
 			}
 		}
 	})
@@ -196,7 +196,7 @@ describe("MessageStateHandler Mutex Protection", () => {
 			throw new Error("Should have thrown")
 		} catch (error) {
 			if (error instanceof Error) {
-				error.message.should.match(/Invalid message index/)
+				expect(error.message).to.match(/Invalid message index/)
 			}
 		}
 	})
@@ -217,10 +217,10 @@ describe("MessageStateHandler Mutex Protection", () => {
 		])
 
 		const history = handler.getApiConversationHistory()
-		history.length.should.equal(3)
-		history[0].role.should.equal("user")
-		history[1].role.should.equal("assistant")
-		history[2].role.should.equal("user")
+		expect(history.length).to.equal(3)
+		expect(history[0].role).to.equal("user")
+		expect(history[1].role).to.equal("assistant")
+		expect(history[2].role).to.equal("user")
 	})
 
 	/**
@@ -237,10 +237,10 @@ describe("MessageStateHandler Mutex Protection", () => {
 		await handler.overwriteDiracMessages(newMessages)
 
 		const finalMessages = handler.getDiracMessages()
-		finalMessages.length.should.equal(3)
-		finalMessages[0]?.text?.should.equal("new1")
-		finalMessages[1]?.text?.should.equal("new2")
-		finalMessages[2]?.text?.should.equal("new3")
+		expect(finalMessages.length).to.equal(3)
+		expect((finalMessages[0]?.content as any)?.content).to.equal("new1")
+		expect((finalMessages[1]?.content as any)?.content).to.equal("new2")
+		expect((finalMessages[2]?.content as any)?.content).to.equal("new3")
 	})
 
 	/**
@@ -260,8 +260,8 @@ describe("MessageStateHandler Mutex Protection", () => {
 		await handler.overwriteApiConversationHistory(newHistory)
 
 		const finalHistory = handler.getApiConversationHistory()
-		finalHistory.length.should.equal(2)
-		finalHistory[0].content.should.equal("new1")
-		finalHistory[1].content.should.equal("new2")
+		expect(finalHistory.length).to.equal(2)
+		expect(finalHistory[0].content).to.equal("new1")
+		expect(finalHistory[1].content).to.equal("new2")
 	})
 })

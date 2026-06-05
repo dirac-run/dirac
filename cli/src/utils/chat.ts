@@ -1,67 +1,59 @@
-import type { DiracAsk } from "@shared/ExtensionMessage"
-import { jsonParseSafe } from "./parser"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 
 /**
  * Yolo mode auto-approves tool use, commands, browser actions, etc. so the AI can work
  * uninterrupted. But some ask types genuinely need user input -- you can't auto-approve
  * "task completed, what next?" or a followup question the AI is asking the user.
  *
- * This whitelist defines which ask types should still show buttons and allow text input
- * even when yolo mode is enabled. Everything NOT in this set gets suppressed (buttons
- * hidden, input blocked), which is the correct behavior for tool/browser approvals
- * since core auto-approves those before they even reach the UI.
+ * In the new architecture, we check if a Card requires approval or feedback.
  */
-export const YOLO_INTERACTIVE_ASKS = new Set<DiracAsk>([
-	"completion_result",
-	// In yolo mode, ExecuteCommandToolHandler auto-approves commands via say() (not ask()) at line 176,
-	// so command asks never reach the UI for regular tool use. The only command ask that reaches the UI
-	// is from AttemptCompletionHandler (line 135), which uses askApprovalAndPushFeedback("command", ...)
-	// to let the user choose whether to run the suggested verification command after task completion.
-	"command",
-	"followup",
-	"plan_mode_respond",
-	"resume_task",
-	"resume_completed_task",
-	"new_task",
-])
+export function isYoloSuppressed(yolo: boolean, message: DiracMessage | undefined): boolean {
+	if (!yolo || !message) return false
 
-export function isYoloSuppressed(yolo: boolean, ask: DiracAsk | undefined): boolean {
-	return yolo && (!ask || !YOLO_INTERACTIVE_ASKS.has(ask))
+	if (message.content.type === DiracMessageType.CARD) {
+		const { card } = message.content
+		// If it requires approval (tool call) and we are in YOLO, it's suppressed.
+		// If it requires feedback (followup), it's NOT suppressed even in YOLO.
+		if (card.requireApproval) return true
+		if (card.requireFeedback) return false
+	}
+
+	return false
 }
 
 /**
- * Get the type of prompt needed for an ask message
+ * Get the type of prompt needed for a message
  */
-export function getAskPromptType(ask: DiracAsk, text: string): "confirmation" | "text" | "options" | "none" {
-	switch (ask) {
-		case "followup":
-		case "plan_mode_respond": {
-			const parts = jsonParseSafe(text, { options: undefined as string[] | undefined })
-			if (parts.options && parts.options.length > 0) {
+export function getAskPromptType(message: DiracMessage): "confirmation" | "text" | "options" | "none" {
+	if (message.content.type === DiracMessageType.CARD) {
+		const { card } = message.content
+		if (card.requireFeedback) {
+			if (card.actions && card.actions.length > 0) {
 				return "options"
 			}
 			return "text"
 		}
-		case "completion_result":
-			return "text"
-		case "resume_task":
-		case "resume_completed_task":
-		case "command":
-		case "tool":
-		case "browser_action_launch":
-		case "api_req_failed":
+		if (card.requireApproval) {
 			return "confirmation"
-		default:
-			return "none"
+		}
 	}
+
+	// For markdown messages, we usually don't prompt unless it's a specific completion signal
+	// but in the new architecture, completion is usually a Card or a final Markdown.
+	// If it's a partial markdown, it's definitely "none".
+	if (message.content.type === DiracMessageType.MARKDOWN) return "none"
+
+	return "none"
 }
 
 /**
- * Parse options from an ask message
+ * Parse options from a card message
  */
-export function parseAskOptions(text: string): string[] {
-	const parts = jsonParseSafe(text, { options: [] as string[] })
-	return parts.options || []
+export function parseAskOptions(message: DiracMessage): string[] {
+	if (message.content.type === DiracMessageType.CARD && message.content.card.actions) {
+		return message.content.card.actions.map((a) => a.label)
+	}
+	return []
 }
 
 /**

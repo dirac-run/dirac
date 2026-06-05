@@ -2,7 +2,8 @@
  * Terminal display utilities for rendering Dirac messages in the CLI
  */
 
-import type { DiracAsk, DiracMessage, DiracSay, ExtensionState } from "@shared/ExtensionMessage"
+import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import type { DiracMessage, ExtensionState } from "@shared/ExtensionMessage"
 import { originalConsoleError, originalConsoleLog } from "./console"
 
 // ANSI color codes for terminal output
@@ -95,192 +96,127 @@ export function formatTimestamp(ts: number): string {
 	})
 }
 
-/**
- * Get a prefix icon for different message types
- */
 function getMessageIcon(message: DiracMessage): string {
-	if (message.type === "ask") {
-		switch (message.ask) {
-			case "followup":
-				return "❓"
-			case "command":
-				return "⚙️ "
-			case "tool":
-			case "plan_mode_respond":
-			case "act_mode_respond":
-			case "use_subagents":
-				return "🔧"
-			case "completion_result":
-				return "✅"
-			case "api_req_failed":
-				return "❌"
-			case "resume_task":
-			case "resume_completed_task":
-				return "▶️ "
-			case "browser_action_launch":
-				return "🌐"
-			default:
-				return "❔"
-		}
-	}
-	switch (message.say) {
-		case "task":
-			return "📋"
-		case "error":
-			return "❌"
-		case "text":
-			return "💬"
-		case "reasoning":
-			return "🧠"
-		case "completion_result":
-			return "✅"
-		case "user_feedback":
-		case "user_feedback_diff":
-			return "👤"
-		case "command":
-		case "command_output":
+	const { content } = message
+
+	switch (content.type) {
+		case DiracMessageType.MARKDOWN:
+			return content.isReasoning ? "🧠" : "💬"
+		case DiracMessageType.CARD: {
+			const { card } = content
+			if (card.icon) return card.icon
+			if (card.requireApproval) return "🔧"
+			if (card.requireFeedback) return "❓"
+			if (card.status === CardStatus.SUCCESS) return "✅"
+			if (card.status === CardStatus.ERROR) return "❌"
 			return "⚙️ "
-		case "tool":
-			return "🔧"
-		case "browser_action":
-		case "browser_action_launch":
-		case "browser_action_result":
-			return "🌐"
-		case "api_req_started":
-		case "api_req_finished":
-		case "api_req_retried":
+		}
+		case DiracMessageType.API_STATUS:
 			return "🔄"
-		case "checkpoint_created":
-			return "💾"
-		case "info":
-			return "ℹ️ "
 		default:
 			return "  "
 	}
 }
 
-/**
- * Format a DiracMessage for terminal display
- */
 export function formatMessage(message: DiracMessage, verbose = false): string {
 	const timestamp = formatTimestamp(message.ts)
-	const lines: string[] = []
-
-	// Always show reasoning if present
-	if (message.reasoning && message.say !== "reasoning") {
-		lines.push(`${style.dim(timestamp)} 🧠 ${style.dim("Thinking:")} ${style.italic(message.reasoning)}`)
-	}
-
 	const icon = getMessageIcon(message)
 	const prefix = `${style.dim(timestamp)} ${icon}`
 
-	const toolType = getToolType(message)
-	if (toolType) {
-		let label = "Tool Call"
-		if (message.type === "ask") {
-			label = "Use tool?"
-		}
-		lines.push(`${prefix} ${style.tool(label)} ${style.bold(toolType)}: ${message.text || ""}`)
-	} else if (message.type === "ask") {
-		const formatted = formatAskMessage(message, prefix, verbose)
-		if (formatted) {
-			lines.push(formatted)
-		}
-	} else {
-		const formatted = formatSayMessage(message, prefix, verbose)
-		if (formatted) {
-			lines.push(formatted)
-		}
-	}
+	const { content } = message
 
-	return lines.filter(Boolean).join("\n")
-}
-
-function formatAskMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
-	const ask = message.ask as DiracAsk
-
-	switch (ask) {
-		case "followup": {
-			let question = message.text || ""
-			try {
-				const parsed = JSON.parse(message.text || "{}")
-				question = parsed.question || question
-			} catch {
-				// Fallback to raw text
-			}
-			return `${prefix} ${style.info("Question:")} ${question}`
-		}
-		case "completion_result":
-			return `${prefix} ${style.success("Task completed")} ${message.text ? `- ${message.text}` : ""}`
-		case "api_req_failed":
-			return `${prefix} ${style.error("API request failed")} ${message.text || ""}`
-		case "resume_task":
-		case "resume_completed_task":
-			return `${prefix} ${style.info("Resume task?")} ${message.text || ""}`
+	switch (content.type) {
+		case DiracMessageType.MARKDOWN:
+			return formatMarkdownMessage(message, prefix, verbose)
+		case DiracMessageType.CARD:
+			return formatCardMessage(message, prefix, verbose)
+		case DiracMessageType.API_STATUS:
+			return formatApiStatusMessage(message, prefix, verbose)
 		default:
-			return verbose ? `${prefix} [ASK:${ask}] ${message.text || ""}` : ""
+			return ""
 	}
 }
 
-function formatSayMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
-	const say = message.say as DiracSay
+function formatMarkdownMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
+	if (message.content.type !== DiracMessageType.MARKDOWN) return ""
+	const { content, isReasoning } = message.content
 
-	switch (say) {
-		case "task":
-			return `${prefix} ${style.task("Task:")} ${message.text || ""}`
-		case "text":
-			return `${prefix} ${style.assistant(message.text || "")}`
-		case "reasoning":
-			return `${prefix} ${style.dim("Thinking:")} ${style.italic(message.text || "")}`
-		case "error":
-			return `${prefix} ${style.error("Error:")} ${message.text || ""}`
-		case "completion_result":
-			return `${prefix} ${style.success("✓ Completed:")} ${message.text || ""}`
-		case "user_feedback":
-		case "user_feedback_diff":
-			return `${prefix} ${style.user("User:")} ${message.text || ""}`
-		case "command":
-			return `${prefix} ${style.command("Command:")} ${style.code(message.text || "")}`
-		case "command_output": {
-			const output = message.text || ""
-			const truncated = output.length > 500 ? output.substring(0, 500) + "..." : output
-			return `${prefix} ${style.dim("Output:")} ${truncated}`
+	if (isReasoning) {
+		return `${prefix} ${style.dim("Thinking:")} ${style.italic(content)}`
+	}
+
+	return `${prefix} ${style.assistant(content)}`
+}
+
+function formatCardMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
+	if (message.content.type !== DiracMessageType.CARD) return ""
+	const { card } = message.content
+
+	const lines: string[] = []
+	const headerStyle = card.status === CardStatus.ERROR ? style.error : style.tool
+	const statusIndicator = card.status === CardStatus.SUCCESS ? style.success("✓ ") : ""
+	const statusStr =
+		card.status !== CardStatus.RUNNING && card.status !== CardStatus.SUCCESS && card.status !== CardStatus.ERROR
+			? ` (${card.status})`
+			: ""
+
+	lines.push(`${prefix} ${statusIndicator}${headerStyle(card.header)}${statusStr}`)
+
+	if (card.body) {
+		const body = card.body.trim()
+		if (body) {
+			const truncated = body.length > 1000 ? body.substring(0, 1000) + "..." : body
+			lines.push(
+				truncated
+					.split("\n")
+					.map((line) => `${" ".repeat(prefix.length + 1)}${style.dim(line)}`)
+					.join("\n"),
+			)
 		}
-		case "browser_action_result":
-			return `${prefix} ${style.dim("Browser result")} ${message.text ? `- ${message.text.substring(0, 100)}...` : ""}`
-		case "api_req_started":
-		case "api_req_finished":
-			return formatApiReqMessage(message, prefix, verbose)
-		case "checkpoint_created":
-			return `${prefix} ${style.success("Checkpoint created")} ${message.text || ""}`
-		case "info":
-			return `${prefix} ${style.info(message.text || "")}`
-		case "hook_status":
-			return `${prefix} ${style.dim("Hook:")} ${message.text || ""}`
-		default:
-			return verbose ? `${prefix} [SAY:${say}] ${message.text || ""}` : ""
 	}
+
+	if (card.requireApproval) {
+		lines.push(`${" ".repeat(prefix.length + 1)}${style.warning("Approval required")}`)
+	}
+
+	if (card.requireFeedback) {
+		lines.push(`${" ".repeat(prefix.length + 1)}${style.info("Feedback required")}`)
+	}
+
+	return lines.join("\n")
 }
 
-/**
- * Identify if a message is a tool call and return its type/name
- */
+function formatApiStatusMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
+	if (message.content.type !== DiracMessageType.API_STATUS) return ""
+	const { status } = message.content
+
+	if (!verbose && !status.cost && !status.tokensIn) return ""
+
+	const tokensStr =
+		status.tokensIn !== undefined
+			? `Tokens: ${status.tokensIn.toLocaleString()} in, ${status.tokensOut?.toLocaleString()} out${
+					status.reasoningTokens ? ` (+${status.reasoningTokens.toLocaleString()} thinking)` : ""
+				}`
+			: ""
+
+	const costStr = status.cost !== undefined ? `Cost: $${status.cost.toFixed(4)}` : ""
+
+	const cacheStr =
+		status.cacheReads !== undefined || status.cacheWrites !== undefined
+			? ` (Cache: ${(status.cacheReads || 0).toLocaleString()} read, ${(status.cacheWrites || 0).toLocaleString()} write)`
+			: ""
+
+	const contextStr =
+		status.contextWindow !== undefined
+			? ` | Context: ${status.contextUsagePercentage}% of ${(status.contextWindow / 1000).toFixed(0)}K`
+			: ""
+
+	return `${prefix} ${style.api("API Status")} ${style.dim(`[${tokensStr}${cacheStr}${contextStr} | ${costStr}]`)}`
+}
+
 function getToolType(message: DiracMessage): string | null {
-	if (message.type === "say" && message.say === "tool") {
-		return "tool"
-	}
-	if (message.type === "ask") {
-		const toolAsks = [
-			"tool",
-			"command",
-			"browser_action_launch",
-			"plan_mode_respond",
-			"act_mode_respond",
-			"use_subagents",
-		]
-		if (message.ask && toolAsks.includes(message.ask)) {
-			return message.ask
-		}
+	if (message.content.type === DiracMessageType.CARD) {
+		return message.content.card.header
 	}
 	return null
 }
@@ -288,35 +224,6 @@ function getToolType(message: DiracMessage): string | null {
 /**
  * Handle formatting of API request messages
  */
-function formatApiReqMessage(message: DiracMessage, prefix: string, verbose: boolean): string {
-	if (message.say === "api_req_started") {
-		return verbose ? `${prefix} ${style.api("API request started")}` : ""
-	}
-	try {
-		const info = JSON.parse(message.text || "{}")
-		if (info.cost !== undefined || info.tokensIn !== undefined) {
-			const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
-			const tokensStr =
-				info.tokensIn !== undefined
-					? `Tokens: ${info.tokensIn.toLocaleString()} in, ${info.tokensOut.toLocaleString()} out${
-							info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
-						}`
-					: ""
-			const cacheStr =
-				info.cacheReads !== undefined || info.cacheWrites !== undefined
-					? ` (Cache: ${(info.cacheReads || 0).toLocaleString()} read, ${(info.cacheWrites || 0).toLocaleString()} write)`
-					: ""
-			const contextStr =
-				info.contextWindow !== undefined
-					? ` | Context: ${info.contextUsagePercentage}% of ${(info.contextWindow / 1000).toFixed(0)}K`
-					: ""
-			return `${prefix} ${style.api("API request finished")} ${style.dim(`[${tokensStr}${cacheStr}${contextStr} | ${costStr}]`)}`
-		}
-	} catch {
-		// Fallback to raw text
-	}
-	return verbose ? `${prefix} ${style.api("API request finished")}` : ""
-}
 
 /**
  * Display a horizontal separator

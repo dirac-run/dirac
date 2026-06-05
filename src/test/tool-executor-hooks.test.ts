@@ -47,6 +47,14 @@ describe("Tool Executor Hooks", () => {
 		it("should include toolName and pendingToolInfo in hook metadata", async () => {
 			const testHandler = createTestHandler()
 			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const pendingToolInfo = {
 				tool: "write_to_file",
@@ -63,10 +71,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async (type: any, text?: string) => {
-					sayMessages.push({ type, text: text || "" })
-					return Date.now()
-				},
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false, // Disabled so hook doesn't actually run
@@ -80,6 +85,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should handle PreToolUse hook with pendingToolInfo parameter", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 			const pendingToolInfo = {
 				tool: "execute_command",
 				command: "npm test",
@@ -94,7 +108,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false, // Hook doesn't exist, so returns early
@@ -107,6 +121,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should support cancellation for PreToolUse hooks", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			// Test that cancellable hooks can use setActiveHookExecution
 			let setHookCalled = false
@@ -119,7 +142,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				setActiveHookExecution: async () => {
 					setHookCalled = true
 				},
@@ -136,6 +159,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should pass through context modification from PreToolUse", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PreToolUse",
@@ -146,7 +178,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false,
@@ -162,6 +194,14 @@ describe("Tool Executor Hooks", () => {
 		it("should include toolName in hook metadata", async () => {
 			const testHandler = createTestHandler()
 			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -175,10 +215,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async (type: any, text?: string) => {
-					sayMessages.push({ type, text: text || "" })
-					return Date.now()
-				},
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false,
@@ -190,6 +227,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should include execution metrics in PostToolUse hook input", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -203,7 +249,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false,
@@ -215,6 +261,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should handle PostToolUse hook for failed tool execution", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -228,7 +283,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false,
@@ -240,6 +295,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should support cancellation for PostToolUse hooks", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -253,7 +317,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				setActiveHookExecution: async () => {},
 				clearActiveHookExecution: async () => {},
 				messageStateHandler: testHandler,
@@ -269,6 +333,15 @@ describe("Tool Executor Hooks", () => {
 	describe("Tool Hook Edge Cases", () => {
 		it("should handle hook execution when hooks are disabled", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PreToolUse",
@@ -279,7 +352,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false, // Explicitly disabled
@@ -293,6 +366,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should handle hook execution when hook doesn't exist", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -306,7 +388,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: true, // Enabled but hook doesn't exist
@@ -320,6 +402,15 @@ describe("Tool Executor Hooks", () => {
 
 		it("should handle PostToolUse with execution time metrics", async () => {
 			const testHandler = createTestHandler()
+			const sayMessages: Array<{ type: string; text: string }> = []
+			const mockMessenger: any = {
+				upsertText: async (text: string, isReasoning?: boolean) => {
+					sayMessages.push({ type: isReasoning ? "reasoning" : "text", text })
+				},
+				createCard: async (params: any) => {
+					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
+				}
+			}
 
 			const result = await executeHook({
 				hookName: "PostToolUse",
@@ -333,7 +424,7 @@ describe("Tool Executor Hooks", () => {
 					},
 				},
 				isCancellable: true,
-				say: async () => Date.now(),
+				messenger: mockMessenger,
 				messageStateHandler: testHandler,
 				taskId: "test-task",
 				hooksEnabled: false,

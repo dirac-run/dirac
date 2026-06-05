@@ -3,17 +3,18 @@ import CheckpointTracker from "@/integrations/checkpoints/CheckpointTracker"
 import { findLast } from "@/shared/array"
 import { ShowMessageType } from "@/shared/proto/index.host"
 import { Logger } from "@/shared/services/Logger"
+import { DiracMessageType } from "@/shared/ExtensionMessage"
 import { MessageStateHandler } from "./message-state"
 
 export async function showChangedFilesDiff(
 	messageStateHandler: MessageStateHandler,
 	checkpointTracker: CheckpointTracker,
-	messageTs: number,
+	messageId: string,
 	seeNewChangesSinceLastTaskCompletion: boolean,
 ) {
-	Logger.log("presentMultifileDiff", messageTs)
+	Logger.log("presentMultifileDiff", messageId)
 	const diracMessages = messageStateHandler.getDiracMessages()
-	const messageIndex = diracMessages.findIndex((m) => m.ts === messageTs)
+	const messageIndex = messageStateHandler.findMessageIndexById(messageId)
 	const message = diracMessages[messageIndex]
 	if (!message) {
 		Logger.error("Message not found")
@@ -97,13 +98,13 @@ async function getChangesSinceLastTaskCompletion(
 	// Get last task completed
 	const lastTaskCompletedMessageCheckpointHash = findLast(
 		messageStateHandler.getDiracMessages().slice(0, messageIndex),
-		(m) => m.say === "completion_result",
+		(m) => m.content.type === DiracMessageType.CARD && m.content.card.header === "Task Completed",
 	)?.lastCheckpointHash // ask is only used to relinquish control, its the last say we care about
 
 	// This value *should* always exist
 	const firstCheckpointMessageCheckpointHash = messageStateHandler
 		.getDiracMessages()
-		.find((m) => m.say === "checkpoint_created")?.lastCheckpointHash
+		.find((m) => m.content.type === DiracMessageType.CHECKPOINT || (m.content.type === DiracMessageType.MARKDOWN && m.content.content === "Checkpoint created"))?.lastCheckpointHash
 
 	// either use the diff between the first checkpoint and the task completion, or the diff
 	// between the latest two task completions

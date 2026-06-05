@@ -35,13 +35,11 @@ service TaskService {
   // Records task feedback (thumbs up/down)
   rpc taskFeedback(StringRequest) returns (Empty);
   // Shows task completion changes diff in a view
-  rpc taskCompletionViewChanges(Int64Request) returns (Empty);
+  rpc taskCompletionViewChanges(StringRequest) returns (Empty);
   // Executes a quick win task with command and title
   rpc executeQuickWin(ExecuteQuickWinRequest) returns (Empty);
   // Deletes all task history
   rpc deleteAllTaskHistory(EmptyRequest) returns (DeleteAllTaskHistoryCount);
-  // Explains changes with AI and adds inline comments to the diff view
-  rpc explainChanges(ExplainChangesRequest) returns (Empty);
 }
 
 // Request message for creating a new task
@@ -113,6 +111,8 @@ message AskResponseRequest {
   repeated string images = 4;
   repeated string files = 5;
   map<string, string> user_edits = 6;
+  string card_id = 7;
+  string value = 8;
 }
 
 // Request for executing a quick win task
@@ -125,11 +125,4 @@ message ExecuteQuickWinRequest {
 // Results returned when deleting all task history
 message DeleteAllTaskHistoryCount {
   int32 tasks_deleted = 1;
-}
-
-// Request for explaining changes with AI
-message ExplainChangesRequest {
-  Metadata metadata = 1;
-  // Timestamp of the completion message to explain changes for
-  int64 message_ts = 2;
 }

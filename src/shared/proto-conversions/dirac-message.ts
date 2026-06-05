@@ -1,300 +1,225 @@
-import { DiracAsk as AppDiracAsk, DiracMessage as AppDiracMessage, DiracSay as AppDiracSay } from "@shared/ExtensionMessage"
-import { DiracAsk, DiracMessageType, DiracSay, DiracMessage as ProtoDiracMessage } from "@shared/proto/dirac/ui"
+import {
+    Card as AppCard,
+    CardStatus as AppCardStatus,
+    DiracMessage as AppDiracMessage,
+    DiracMessageType as AppDiracMessageType,
+} from "@shared/ExtensionMessage"
 
-// Helper function to convert DiracAsk string to enum
-function convertDiracAskToProtoEnum(ask: AppDiracAsk | undefined): DiracAsk | undefined {
-	if (!ask) {
-		return undefined
-	}
+import {
+    Card,
+    CardStatus as ProtoCardStatus, DiracMessage as ProtoDiracMessage
+} from "@shared/proto/dirac/ui"
 
-	const mapping: Record<AppDiracAsk, DiracAsk> = {
-		followup: DiracAsk.FOLLOWUP,
-		plan_mode_respond: DiracAsk.PLAN_MODE_RESPOND,
-		act_mode_respond: DiracAsk.ACT_MODE_RESPOND,
-		command: DiracAsk.COMMAND,
-		command_output: DiracAsk.COMMAND_OUTPUT,
-		completion_result: DiracAsk.COMPLETION_RESULT,
-		tool: DiracAsk.TOOL,
-		api_req_failed: DiracAsk.API_REQ_FAILED,
-		resume_task: DiracAsk.RESUME_TASK,
-		resume_completed_task: DiracAsk.RESUME_COMPLETED_TASK,
-		storage: DiracAsk.STORAGE,
-		mistake_limit_reached: DiracAsk.MISTAKE_LIMIT_REACHED,
-		browser_action_launch: DiracAsk.BROWSER_ACTION_LAUNCH,
-		new_task: DiracAsk.NEW_TASK,
-		condense: DiracAsk.CONDENSE,
-		summarize_task: DiracAsk.SUMMARIZE_TASK,
-		report_bug: DiracAsk.REPORT_BUG,
-		use_subagents: DiracAsk.USE_SUBAGENTS,
-	}
 
-	const result = mapping[ask]
-	if (result === undefined) {
-	}
-	return result
+function convertCardStatusToProtoEnum(status: AppCardStatus): ProtoCardStatus {
+    const mapping: Record<AppCardStatus, ProtoCardStatus> = {
+        [AppCardStatus.BUILDING]: ProtoCardStatus.CARD_BUILDING,
+        [AppCardStatus.PENDING]: ProtoCardStatus.CARD_PENDING,
+        [AppCardStatus.RUNNING]: ProtoCardStatus.CARD_RUNNING,
+        [AppCardStatus.SUCCESS]: ProtoCardStatus.CARD_SUCCESS,
+        [AppCardStatus.ERROR]: ProtoCardStatus.CARD_ERROR,
+        [AppCardStatus.SKIPPED]: ProtoCardStatus.CARD_SKIPPED,
+        [AppCardStatus.CANCELLED]: ProtoCardStatus.CARD_CANCELLED,
+        [AppCardStatus.ABANDONED]: ProtoCardStatus.CARD_ABANDONED,
+        [AppCardStatus.WAITING_FOR_INPUT]: ProtoCardStatus.CARD_WAITING_FOR_INPUT,
+    }
+    return mapping[status] ?? ProtoCardStatus.CARD_PENDING
 }
 
-// Helper function to convert DiracAsk enum to string
-function convertProtoEnumToDiracAsk(ask: DiracAsk): AppDiracAsk | undefined {
-	if (ask === DiracAsk.UNRECOGNIZED) {
-		return undefined
-	}
+function convertProtoEnumToCardStatus(status: ProtoCardStatus): AppCardStatus {
+    if (status === ProtoCardStatus.UNRECOGNIZED) {
+        return AppCardStatus.PENDING
+    }
 
-	const mapping: Record<Exclude<DiracAsk, DiracAsk.UNRECOGNIZED>, AppDiracAsk> = {
-		[DiracAsk.FOLLOWUP]: "followup",
-		[DiracAsk.PLAN_MODE_RESPOND]: "plan_mode_respond",
-		[DiracAsk.ACT_MODE_RESPOND]: "act_mode_respond",
-		[DiracAsk.COMMAND]: "command",
-		[DiracAsk.COMMAND_OUTPUT]: "command_output",
-		[DiracAsk.COMPLETION_RESULT]: "completion_result",
-		[DiracAsk.TOOL]: "tool",
-		[DiracAsk.API_REQ_FAILED]: "api_req_failed",
-		[DiracAsk.RESUME_TASK]: "resume_task",
-		[DiracAsk.RESUME_COMPLETED_TASK]: "resume_completed_task",
-		[DiracAsk.MISTAKE_LIMIT_REACHED]: "mistake_limit_reached",
-		[DiracAsk.BROWSER_ACTION_LAUNCH]: "browser_action_launch",
-		[DiracAsk.NEW_TASK]: "new_task",
-		[DiracAsk.CONDENSE]: "condense",
-		[DiracAsk.SUMMARIZE_TASK]: "summarize_task",
-		[DiracAsk.REPORT_BUG]: "report_bug",
-		[DiracAsk.USE_SUBAGENTS]: "use_subagents",
-		[DiracAsk.STORAGE]: "storage",
-	}
-
-	return mapping[ask]
+    const mapping: Record<Exclude<ProtoCardStatus, ProtoCardStatus.UNRECOGNIZED>, AppCardStatus> = {
+        [ProtoCardStatus.CARD_BUILDING]: AppCardStatus.BUILDING,
+        [ProtoCardStatus.CARD_PENDING]: AppCardStatus.PENDING,
+        [ProtoCardStatus.CARD_RUNNING]: AppCardStatus.RUNNING,
+        [ProtoCardStatus.CARD_SUCCESS]: AppCardStatus.SUCCESS,
+        [ProtoCardStatus.CARD_ERROR]: AppCardStatus.ERROR,
+        [ProtoCardStatus.CARD_SKIPPED]: AppCardStatus.SKIPPED,
+        [ProtoCardStatus.CARD_CANCELLED]: AppCardStatus.CANCELLED,
+        [ProtoCardStatus.CARD_ABANDONED]: AppCardStatus.ABANDONED,
+        [ProtoCardStatus.CARD_WAITING_FOR_INPUT]: AppCardStatus.WAITING_FOR_INPUT,
+    }
+    return mapping[status] ?? AppCardStatus.PENDING
 }
 
-// Helper function to convert DiracSay string to enum
-function convertDiracSayToProtoEnum(say: AppDiracSay | undefined): DiracSay | undefined {
-	if (!say) {
-		return undefined
-	}
 
-	const mapping: Record<AppDiracSay, DiracSay> = {
-		task: DiracSay.TASK,
-		error: DiracSay.ERROR,
-		api_req_started: DiracSay.API_REQ_STARTED,
-		api_req_finished: DiracSay.API_REQ_FINISHED,
-		text: DiracSay.TEXT,
-		reasoning: DiracSay.REASONING,
-		completion_result: DiracSay.COMPLETION_RESULT_SAY,
-		user_feedback: DiracSay.USER_FEEDBACK,
-		user_feedback_diff: DiracSay.USER_FEEDBACK_DIFF,
-		api_req_retried: DiracSay.API_REQ_RETRIED,
-		command: DiracSay.COMMAND_SAY,
-		command_output: DiracSay.COMMAND_OUTPUT_SAY,
-		tool: DiracSay.TOOL_SAY,
-		shell_integration_warning: DiracSay.SHELL_INTEGRATION_WARNING,
-		shell_integration_warning_with_suggestion: DiracSay.SHELL_INTEGRATION_WARNING,
-		browser_action_launch: DiracSay.BROWSER_ACTION_LAUNCH_SAY,
-		browser_action: DiracSay.BROWSER_ACTION,
-		browser_action_result: DiracSay.BROWSER_ACTION_RESULT,
-		diff_error: DiracSay.DIFF_ERROR,
-		deleted_api_reqs: DiracSay.DELETED_API_REQS,
-		diracignore_error: DiracSay.DIRACIGNORE_ERROR,
-		command_permission_denied: DiracSay.COMMAND_PERMISSION_DENIED,
-		checkpoint_created: DiracSay.CHECKPOINT_CREATED,
-		info: DiracSay.INFO,
-		error_retry: DiracSay.ERROR_RETRY,
-		hook_status: DiracSay.HOOK_STATUS,
-		hook_output_stream: DiracSay.HOOK_OUTPUT_STREAM,
-		conditional_rules_applied: DiracSay.CONDITIONAL_RULES_APPLIED,
-		subagent: DiracSay.SUBAGENT_STATUS,
-		use_subagents: DiracSay.USE_SUBAGENTS_SAY,
-		subagent_usage: DiracSay.SUBAGENT_USAGE,
-		generate_explanation: DiracSay.GENERATE_EXPLANATION,
-	}
-
-	const result = mapping[say]
-
-	return result
+function convertCardToProto(card: AppCard): Card {
+    return {
+        id: card.id,
+        header: card.header,
+        status: convertCardStatusToProtoEnum(card.status),
+        body: card.body ?? undefined,
+        collapsed: card.collapsed ?? undefined,
+        icon: card.icon ?? undefined,
+        renderType: card.renderType ?? undefined,
+        requireApproval: card.requireApproval ?? undefined,
+        doNotAutoCollapse: card.do_not_auto_collapse ?? undefined,
+        requireFeedback: card.requireFeedback ?? undefined,
+        feedbackPlaceholder: card.feedbackPlaceholder ?? undefined,
+        maxHeight: card.maxHeight ?? undefined,
+        cleanupStrategy: card.cleanupStrategy ?? undefined,
+        actions:
+            card.actions?.map((action) => ({
+                label: action.label,
+                value: action.value,
+                primary: action.primary ?? undefined,
+                style: action.style ?? undefined,
+            })) ?? [],
+    }
 }
 
-// Helper function to convert DiracSay enum to string
-function convertProtoEnumToDiracSay(say: DiracSay): AppDiracSay | undefined {
-	if (say === DiracSay.UNRECOGNIZED) {
-		return undefined
-	}
-
-	const mapping: Record<Exclude<DiracSay, DiracSay.UNRECOGNIZED>, AppDiracSay> = {
-		[DiracSay.TASK]: "task",
-		[DiracSay.ERROR]: "error",
-		[DiracSay.API_REQ_STARTED]: "api_req_started",
-		[DiracSay.API_REQ_FINISHED]: "api_req_finished",
-		[DiracSay.TEXT]: "text",
-		[DiracSay.REASONING]: "reasoning",
-		[DiracSay.COMPLETION_RESULT_SAY]: "completion_result",
-		[DiracSay.USER_FEEDBACK]: "user_feedback",
-		[DiracSay.USER_FEEDBACK_DIFF]: "user_feedback_diff",
-		[DiracSay.API_REQ_RETRIED]: "api_req_retried",
-		[DiracSay.COMMAND_SAY]: "command",
-		[DiracSay.COMMAND_OUTPUT_SAY]: "command_output",
-		[DiracSay.TOOL_SAY]: "tool",
-		[DiracSay.SHELL_INTEGRATION_WARNING]: "shell_integration_warning",
-		[DiracSay.BROWSER_ACTION_LAUNCH_SAY]: "browser_action_launch",
-		[DiracSay.BROWSER_ACTION]: "browser_action",
-		[DiracSay.BROWSER_ACTION_RESULT]: "browser_action_result",
-		[DiracSay.DIFF_ERROR]: "diff_error",
-		[DiracSay.DELETED_API_REQS]: "deleted_api_reqs",
-		[DiracSay.DIRACIGNORE_ERROR]: "diracignore_error",
-		[DiracSay.COMMAND_PERMISSION_DENIED]: "command_permission_denied",
-		[DiracSay.CHECKPOINT_CREATED]: "checkpoint_created",
-		[DiracSay.INFO]: "info",
-		[DiracSay.ERROR_RETRY]: "error_retry",
-		[DiracSay.GENERATE_EXPLANATION]: "generate_explanation",
-		[DiracSay.HOOK_STATUS]: "hook_status",
-		[DiracSay.HOOK_OUTPUT_STREAM]: "hook_output_stream",
-		[DiracSay.CONDITIONAL_RULES_APPLIED]: "conditional_rules_applied",
-		[DiracSay.SUBAGENT_STATUS]: "subagent",
-		[DiracSay.USE_SUBAGENTS_SAY]: "use_subagents",
-		[DiracSay.SUBAGENT_USAGE]: "subagent_usage",
-	}
-
-	return mapping[say]
+function convertProtoToCard(protoCard: Card): AppCard {
+    return {
+        id: protoCard.id,
+        header: protoCard.header,
+        status: convertProtoEnumToCardStatus(protoCard.status),
+        body: protoCard.body ?? undefined,
+        collapsed: protoCard.collapsed ?? undefined,
+        icon: protoCard.icon ?? undefined,
+        do_not_auto_collapse: protoCard.doNotAutoCollapse ?? undefined,
+        renderType: (protoCard.renderType as any) ?? "text",
+        requireApproval: protoCard.requireApproval ?? undefined,
+        requireFeedback: protoCard.requireFeedback ?? undefined,
+        feedbackPlaceholder: protoCard.feedbackPlaceholder ?? undefined,
+        maxHeight: protoCard.maxHeight ?? undefined,
+        cleanupStrategy: (protoCard.cleanupStrategy as any) ?? undefined,
+        actions:
+            protoCard.actions?.map((action) => ({
+                label: action.label,
+                value: action.value,
+                primary: action.primary ?? undefined,
+                style: action.style as any,
+            })) ?? undefined,
+    }
 }
+
+
 
 /**
  * Convert application DiracMessage to proto DiracMessage
  */
 export function convertDiracMessageToProto(message: AppDiracMessage): ProtoDiracMessage {
-	// For sending messages, we need to provide values for required proto fields
-	const askEnum = message.ask ? convertDiracAskToProtoEnum(message.ask) : undefined
-	const sayEnum = message.say ? convertDiracSayToProtoEnum(message.say) : undefined
+    const protoMessage: ProtoDiracMessage = {
+        id: message.id,
+        ts: message.ts,
+        partial: false, // partial is deprecated in AppDiracMessage
+        lastCheckpointHash: message.lastCheckpointHash ?? "",
+        isCheckpointCheckedOut: message.isCheckpointCheckedOut ?? false,
+        isOperationOutsideWorkspace: message.isOperationOutsideWorkspace ?? false,
+        conversationHistoryIndex: message.conversationHistoryIndex ?? 0,
+        conversationHistoryDeletedRange: message.conversationHistoryDeletedRange
+            ? {
+                startIndex: message.conversationHistoryDeletedRange[0],
+                endIndex: message.conversationHistoryDeletedRange[1],
+            }
+            : undefined,
+        modelInfo: message.modelInfo ?? undefined,
+        multiCommandState: undefined, // multiCommandState is deprecated or handled elsewhere
 
-	// Determine appropriate enum values based on message type
-	let finalAskEnum: DiracAsk = DiracAsk.FOLLOWUP // Proto default
-	let finalSayEnum: DiracSay = DiracSay.TEXT // Proto default
+        // Legacy fields (deprecated)
+        type: 0, // DiracMessageType.SAY
+        ask: 0,
+        say: 0,
+        text: "",
+        reasoning: "",
+        images: [],
+        files: [],
+        sayTool: undefined,
+        sayBrowserAction: undefined,
+        browserActionResult: undefined,
+        planModeResponse: undefined,
+        askQuestion: undefined,
+        askNewTask: undefined,
+    }
 
-	if (message.type === "ask") {
-		finalAskEnum = askEnum ?? DiracAsk.FOLLOWUP // Use FOLLOWUP as default for ask messages
-	} else if (message.type === "say") {
-		finalSayEnum = sayEnum ?? DiracSay.TEXT // Use TEXT as default for say messages
-	}
+    // Map content union to proto fields
+    switch (message.content.type) {
+        case AppDiracMessageType.MARKDOWN:
+            protoMessage.markdown = {
+                content: message.content.content,
+                isReasoning: message.content.isReasoning ?? false,
+                images: message.content.images ?? [],
+                files: message.content.files ?? [],
+                role: message.content.role,
+            }
+            break
+        case AppDiracMessageType.CARD:
+            protoMessage.card = convertCardToProto(message.content.card)
+            break
+        case AppDiracMessageType.API_STATUS:
+            protoMessage.apiStatus = {
+                ...message.content.status,
+                request: message.content.status.request ?? "",
+            } as any
+            break
+        case AppDiracMessageType.CHECKPOINT:
+            protoMessage.checkpoint = {
+                id: message.id,
+            }
+            break
+    }
 
-	const protoMessage: ProtoDiracMessage = {
-		ts: message.ts,
-		type: message.type === "ask" ? DiracMessageType.ASK : DiracMessageType.SAY,
-		ask: finalAskEnum,
-		say: finalSayEnum,
-		text: message.text ?? "",
-		reasoning: message.reasoning ?? "",
-		images: message.images ?? [],
-		files: message.files ?? [],
-		partial: message.partial ?? false,
-		lastCheckpointHash: message.lastCheckpointHash ?? "",
-		isCheckpointCheckedOut: message.isCheckpointCheckedOut ?? false,
-		isOperationOutsideWorkspace: message.isOperationOutsideWorkspace ?? false,
-		conversationHistoryIndex: message.conversationHistoryIndex ?? 0,
-		conversationHistoryDeletedRange: message.conversationHistoryDeletedRange
-			? {
-					startIndex: message.conversationHistoryDeletedRange[0],
-					endIndex: message.conversationHistoryDeletedRange[1],
-				}
-			: undefined,
-		// Additional optional fields for specific ask/say types
-		sayTool: undefined,
-		sayBrowserAction: undefined,
-		browserActionResult: undefined,
-		planModeResponse: undefined,
-		askQuestion: undefined,
-		askNewTask: undefined,
-		apiReqInfo: undefined,
-		modelInfo: message.modelInfo ?? undefined,
-		multiCommandState: message.multiCommandState
-			? {
-					commands: message.multiCommandState.commands.map((cmd) => ({
-						command: cmd.command,
-						status: cmd.status,
-						output: cmd.output ?? undefined,
-						exitCode: cmd.exitCode ?? undefined,
-						signal: cmd.signal ?? undefined,
-						requiresApproval: cmd.requiresApproval ?? undefined,
-						wasAutoApproved: cmd.wasAutoApproved ?? undefined,
-					})),
-				}
-			: undefined,
-
-	}
-
-	return protoMessage
+    return protoMessage
 }
+
 
 /**
  * Convert proto DiracMessage to application DiracMessage
  */
 export function convertProtoToDiracMessage(protoMessage: ProtoDiracMessage): AppDiracMessage {
-	const message: AppDiracMessage = {
-		ts: protoMessage.ts,
-		type: protoMessage.type === DiracMessageType.ASK ? "ask" : "say",
-	}
+    let content: AppDiracMessage["content"]
 
-	// Convert ask enum to string
-	if (protoMessage.type === DiracMessageType.ASK) {
-		const ask = convertProtoEnumToDiracAsk(protoMessage.ask)
-		if (ask !== undefined) {
-			message.ask = ask
-		}
-	}
+    if (protoMessage.markdown) {
+        content = {
+            type: AppDiracMessageType.MARKDOWN,
+            content: protoMessage.markdown.content,
+            isReasoning: protoMessage.markdown.isReasoning,
+            images: protoMessage.markdown.images,
+            files: protoMessage.markdown.files,
+            role: protoMessage.markdown.role as "user" | "assistant" | undefined,
+        }
+    } else if (protoMessage.card) {
+        content = {
+            type: AppDiracMessageType.CARD,
+            card: convertProtoToCard(protoMessage.card),
+        }
+    } else if (protoMessage.apiStatus) {
+        content = {
+            type: AppDiracMessageType.API_STATUS,
+            status: protoMessage.apiStatus as any,
+        }
+    } else if (protoMessage.checkpoint) {
+        content = {
+            type: AppDiracMessageType.CHECKPOINT,
+        }
+    } else {
+        // Fallback for legacy proto messages
+        content = {
+            type: AppDiracMessageType.MARKDOWN,
+            content: protoMessage.text || protoMessage.reasoning || "",
+            isReasoning: false,
+            images: protoMessage.images || [],
+            files: protoMessage.files || [],
+        }
+    }
 
-	// Convert say enum to string
-	if (protoMessage.type === DiracMessageType.SAY) {
-		const say = convertProtoEnumToDiracSay(protoMessage.say)
-		if (say !== undefined) {
-			message.say = say
-		}
-	}
+    const message: AppDiracMessage = {
+        id: protoMessage.id,
+        ts: protoMessage.ts,
+        content,
+        lastCheckpointHash: protoMessage.lastCheckpointHash,
+        isCheckpointCheckedOut: protoMessage.isCheckpointCheckedOut,
+        isOperationOutsideWorkspace: protoMessage.isOperationOutsideWorkspace,
+        conversationHistoryIndex: protoMessage.conversationHistoryIndex,
+        conversationHistoryDeletedRange: protoMessage.conversationHistoryDeletedRange
+            ? [protoMessage.conversationHistoryDeletedRange.startIndex, protoMessage.conversationHistoryDeletedRange.endIndex]
+            : undefined,
+        modelInfo: protoMessage.modelInfo as any,
+    }
 
-	// Convert other fields - preserve empty strings as they may be intentional
-	if (protoMessage.text !== "") {
-		message.text = protoMessage.text
-	}
-	if (protoMessage.reasoning !== "") {
-		message.reasoning = protoMessage.reasoning
-	}
-	if (protoMessage.images.length > 0) {
-		message.images = protoMessage.images
-	}
-	if (protoMessage.files.length > 0) {
-		message.files = protoMessage.files
-	}
-	if (protoMessage.partial) {
-		message.partial = protoMessage.partial
-	}
-	if (protoMessage.lastCheckpointHash !== "") {
-		message.lastCheckpointHash = protoMessage.lastCheckpointHash
-	}
-	if (protoMessage.isCheckpointCheckedOut) {
-		message.isCheckpointCheckedOut = protoMessage.isCheckpointCheckedOut
-	}
-	if (protoMessage.isOperationOutsideWorkspace) {
-		message.isOperationOutsideWorkspace = protoMessage.isOperationOutsideWorkspace
-	}
-	if (protoMessage.conversationHistoryIndex !== 0) {
-		message.conversationHistoryIndex = protoMessage.conversationHistoryIndex
-	}
-
-	// Convert conversationHistoryDeletedRange from object to tuple
-	if (protoMessage.conversationHistoryDeletedRange) {
-		message.conversationHistoryDeletedRange = [
-			protoMessage.conversationHistoryDeletedRange.startIndex,
-			protoMessage.conversationHistoryDeletedRange.endIndex,
-		]
-	}
-
-	if (protoMessage.multiCommandState) {
-		message.multiCommandState = {
-			commands: protoMessage.multiCommandState.commands.map((cmd) => ({
-				command: cmd.command,
-				status: cmd.status as any,
-				output: cmd.output ?? undefined,
-				exitCode: cmd.exitCode ?? undefined,
-				signal: cmd.signal ?? undefined,
-				requiresApproval: cmd.requiresApproval ?? undefined,
-				wasAutoApproved: cmd.wasAutoApproved ?? undefined,
-			})),
-		}
-	}
-
-
-	return message
+    return message
 }
+

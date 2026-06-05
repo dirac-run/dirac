@@ -8,26 +8,17 @@ import { useCallback, useRef } from "react"
 import { useTaskContext } from "../context/TaskContext"
 
 interface ProcessedState {
-	processedAskMessages: Set<number>
-	processedSayMessages: Set<number>
+	processedMessageIds: Set<string>
 }
 
-/**
- * Hook to track which ask/say messages have been processed
- * This prevents duplicate prompts for the same ask message
- */
 export const useProcessedMessages = () => {
-	const processedRef = useRef<ProcessedState>({
-		processedAskMessages: new Set(),
-		processedSayMessages: new Set(),
+	const processedRef = useRef<{ processedMessageIds: Set<string> }>({
+		processedMessageIds: new Set(),
 	})
 
 	return processedRef.current
 }
 
-/**
- * Detect if a message has just been completed (is asking for user input)
- */
 export const useCompletedAskMessages = () => {
 	const { state } = useTaskContext()
 	const processed = useProcessedMessages()
@@ -39,11 +30,13 @@ export const useCompletedAskMessages = () => {
 			return completedAsks
 		}
 
-		for (let i = 0; i < state.diracMessages.length; i++) {
-			const message = state.diracMessages[i]
-			if (message.type === "ask" && !message.partial && !processed.processedAskMessages.has(i)) {
-				completedAsks.push(message)
-				processed.processedAskMessages.add(i)
+		for (const message of state.diracMessages) {
+			if (message.content.type === "card" && !processed.processedMessageIds.has(message.id)) {
+				const card = message.content.card
+				if (card.requireApproval || card.requireFeedback) {
+					completedAsks.push(message)
+					processed.processedMessageIds.add(message.id)
+				}
 			}
 		}
 
@@ -53,23 +46,22 @@ export const useCompletedAskMessages = () => {
 	return getCompletedAskMessages
 }
 
-/**
- * Get the last completed ask message (for rendering current input prompt)
- */
 export const useLastCompletedAskMessage = () => {
 	const { state } = useTaskContext()
-	const processed = useProcessedMessages()
 
 	const getLastCompletedAskMessage = useCallback((): DiracMessage | null => {
 		if (!state.diracMessages) {
 			return null
 		}
 
-		// Find the last ask message that is complete
+		// Find the last card message that is complete and requires interaction
 		for (let i = state.diracMessages.length - 1; i >= 0; i--) {
 			const message = state.diracMessages[i]
-			if (message.type === "ask" && !message.partial) {
-				return message
+			if (message.content.type === "card") {
+				const card = message.content.card
+				if (card.requireApproval || card.requireFeedback) {
+					return message
+				}
 			}
 		}
 
@@ -79,9 +71,6 @@ export const useLastCompletedAskMessage = () => {
 	return getLastCompletedAskMessage()
 }
 
-/**
- * Get messages that should trigger the completion detection
- */
 export const useCompletionSignals = () => {
 	const { state } = useTaskContext()
 
@@ -91,18 +80,20 @@ export const useCompletionSignals = () => {
 		}
 
 		const lastMessage = state.diracMessages[state.diracMessages.length - 1]
-		if (!lastMessage) {
+		if (!lastMessage || state.isApiRequestActive || state.activeVoiceStreamId) {
 			return false
 		}
 
-		// Check for completion signals
-		if (lastMessage.say === "completion_result" || lastMessage.ask === "completion_result") {
-			return true
-		}
-
-		// Check for error signals
-		if (lastMessage.say === "error" || lastMessage.ask === "api_req_failed") {
-			return true
+		// In the new architecture, completion is often indicated by a Card with a specific header or status
+		if (lastMessage.content.type === "card") {
+			const card = lastMessage.content.card
+			if (card.header.toLowerCase().includes("completed") || card.header.toLowerCase().includes("result")) {
+				return true
+			}
+			if (card.status === "success" || card.status === "error") {
+				// This might be too broad, but usually success/error on a final card means task is done
+				// unless it's just a tool call.
+			}
 		}
 
 		return false
@@ -122,10 +113,6 @@ export const useCompletionSignals = () => {
 	}
 }
 
-/**
- * Check if spinner should be shown (when API is thinking)
- * Returns an object with isActive flag and startTime timestamp
- */
 export const useIsSpinnerActive = (): { isActive: boolean; startTime?: number } => {
 	const { state } = useTaskContext()
 
@@ -133,29 +120,48 @@ export const useIsSpinnerActive = (): { isActive: boolean; startTime?: number } 
 		return { isActive: false }
 	}
 
-	// If the last message is a completed ask message, don't show spinner (waiting for user input)
-	const lastMessage = state.diracMessages[state.diracMessages.length - 1]
-	if (lastMessage?.type === "ask" && !lastMessage.partial) {
-		return { isActive: false }
-	}
-
-	// Look for most recent api_req_started that isn't followed by api_req_finished
+	// Find the last "real" message (not api_status)
+	let lastRealMessage = null
 	for (let i = state.diracMessages.length - 1; i >= 0; i--) {
 		const msg = state.diracMessages[i]
-		if (msg.say === "api_req_started") {
-			// Check if there's an api_req_finished after this
-			let hasFinished = false
-			for (let j = i + 1; j < state.diracMessages.length; j++) {
-				if (state.diracMessages[j].say === "api_req_finished") {
-					hasFinished = true
-					break
-				}
-			}
-			if (!hasFinished) {
-				return { isActive: true, startTime: msg.ts }
-			}
+		if (msg.content.type !== "api_status") {
+			lastRealMessage = msg
+			break
+		}
+	}
+
+	if (!lastRealMessage) {
+		// If we only have api_status messages, check if the most recent one is "active"
+		// In the absence of a 'running' flag, we assume the presence of api_status means activity
+		const lastMsg = state.diracMessages[state.diracMessages.length - 1]
+		return { isActive: true, startTime: lastMsg.ts }
+	}
+
+	// If the last real message is an interaction card, don't show spinner
+	if (lastRealMessage.content.type === "card") {
+		const card = lastRealMessage.content.card
+		if (card.requireApproval || card.requireFeedback) {
 			return { isActive: false }
 		}
+
+		// If it's a tool card that's still running, show spinner
+		if (card.status === "running" || card.status === "building" || card.status === "pending") {
+			return { isActive: true, startTime: lastRealMessage.ts }
+		}
+	}
+
+	// If the last real message is partial, it's streaming
+	if (state.activeVoiceStreamId === lastRealMessage.id) {
+		return { isActive: true, startTime: lastRealMessage.ts }
+	}
+
+	if (state.isApiRequestActive) {
+		return { isActive: true, startTime: Date.now() }
+	}
+	// If we have an api_status message AFTER the last real message, it likely means a new request started
+	const lastMsg = state.diracMessages[state.diracMessages.length - 1]
+	if (lastMsg.content.type === "api_status" && lastMsg.ts > lastRealMessage.ts) {
+		return { isActive: true, startTime: lastMsg.ts }
 	}
 
 	return { isActive: false }

@@ -152,6 +152,15 @@ vscode-dropdown::part(listbox) {
 	}
 }
 
+/* Hide scrollbar while maintaining scroll functionality */
+.scrollbar-none {
+	scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
+
 /* Context mentions */
 
 /* Needs to match the highlightLayerRef in ChatTextArea for proper positioning */
@@ -216,4 +225,40 @@ vscode-dropdown::part(listbox) {
 [data-slot="popover-content"] * {
 	animation: none !important;
 	transition: none !important;
+}
+
+@keyframes slideDown {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/* VS Code editor font utility for input/textarea alignment */
+@utility vscode-editor-font {
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-editor-font-size);
+	line-height: var(--vscode-editor-line-height);
+}
+
+
+@utility chkpt-dotted-line {
+	background-image: linear-gradient(to right, var(--chkpt-color) 50%, transparent 50%);
+	background-size: 4px 1px;
+	background-repeat: repeat-x;
+}
+
+@utility chkpt-dotted-border {
+	background-image:
+		linear-gradient(to right, var(--chkpt-color) 50%, transparent 50%),
+		linear-gradient(to bottom, var(--chkpt-color) 50%, transparent 50%),
+		linear-gradient(to right, var(--chkpt-color) 50%, transparent 50%),
+		linear-gradient(to bottom, var(--chkpt-color) 50%, transparent 50%);
+	background-size: 4px 1px, 1px 4px, 4px 1px, 1px 4px;
+	background-repeat: repeat-x, repeat-y, repeat-x, repeat-y;
+	background-position: 0 0, 100% 0, 0 100%, 0 0;
 }

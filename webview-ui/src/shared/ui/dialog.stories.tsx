@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import DiracLogoWhite from "@/assets/DiracLogoWhite"
+import DiracLogoVariable from "@/assets/DiracLogoVariable"
 import { Button } from "./button"
 import {
     Dialog,
@@ -96,7 +96,7 @@ export const Interactive: StoryObj<StoryProps> = {
 		<div className="w-full h-full flex justify-center items-center overflow-hidden">
 			<div className="flex flex-col justify-center items-center h-[60%] w-[50%] overflow-hidden mt-50">
 				<div className="flex justify-center my-5">
-					<DiracLogoWhite className="size-16" />
+					<DiracLogoVariable className="size-16" />
 				</div>
 				<p>
 					You can customize the dialog using the controls in the "Controls" panel below to change its title,

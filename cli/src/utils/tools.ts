@@ -101,7 +101,6 @@ export const TOOL_DESCRIPTIONS: Record<string, { ask: string; say: string }> = {
 	use_subagents: { ask: "wants to start subagents", say: "started subagents" },
 	use_skill: { ask: "wants to use a skill", say: "used a skill" },
 	list_skills: { ask: "wants to list available skills", say: "listed available skills" },
-	generate_explanation: { ask: "wants to generate an explanation for changes", say: "generated an explanation for changes" },
 	ask_followup_question: { ask: "wants to ask a question", say: "asked a question" },
 	attempt_completion: { ask: "wants to complete the task", say: "completed the task" },
 	new_task: { ask: "wants to create a new task", say: "created a new task" },

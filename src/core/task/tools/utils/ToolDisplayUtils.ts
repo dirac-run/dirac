@@ -6,20 +6,7 @@ import { removeClosingTag } from "./ToolConstants"
  * Utility functions for tool display and formatting
  */
 export class ToolDisplayUtils {
-	/**
-	 * Generate a descriptive string for a tool execution
-	 * @param block - The tool use block
-	 * @param coordinator - Optional tool coordinator to get description from tool handler
-	 */
 	static getToolDescription(block: ToolUse, coordinator?: ToolExecutorCoordinator): string {
-		// Try to get description from the tool handler first
-		if (coordinator) {
-			const handler = coordinator.getHandler(block.name)
-			if (handler) {
-				return handler.getDescription(block)
-			}
-		}
-
 		return `[${block.name}]`
 	}
 

@@ -7,165 +7,151 @@ import { ErrorService } from "../error"
 import { SharedUriHandler } from "./SharedUriHandler"
 
 describe("SharedUriHandler", () => {
-	let sandbox: sinon.SinonSandbox
-	let handleOpenRouterCallbackStub: sinon.SinonStub
-	let handleAuthCallbackStub: sinon.SinonStub
+    let sandbox: sinon.SinonSandbox
+    let handleOpenRouterCallbackStub: sinon.SinonStub
+    let handleAuthCallbackStub: sinon.SinonStub
 
-	beforeEach(async () => {
-		sandbox = sinon.createSandbox()
+    beforeEach(async () => {
+        sandbox = sinon.createSandbox()
 
-		// Mock Logger methods to avoid HostProvider dependency
-		sandbox.stub(Logger, "info").returns()
-		sandbox.stub(Logger, "error").returns()
-		// Mock ErrorService to avoid telemetry dependency
-		const mockErrorService = {
-			logMessage: sandbox.stub(),
-			logException: sandbox.stub(),
-			toDiracError: sandbox.stub(),
-			isEnabled: sandbox.stub().returns(false),
-			getSettings: sandbox.stub().returns({ enabled: false, hostEnabled: false }),
-			getProvider: sandbox.stub(),
-			dispose: sandbox.stub().resolves(),
-		}
-		sandbox.stub(ErrorService, "initialize").resolves(mockErrorService as any)
-		sandbox.stub(ErrorService, "get").returns(mockErrorService as any)
+        // Mock Logger methods to avoid HostProvider dependency
+        sandbox.stub(Logger, "info").returns()
+        sandbox.stub(Logger, "error").returns()
+        // Mock ErrorService to avoid telemetry dependency
+        const mockErrorService = {
+            logMessage: sandbox.stub(),
+            logException: sandbox.stub(),
+            toDiracError: sandbox.stub(),
+            isEnabled: sandbox.stub().returns(false),
+            getSettings: sandbox.stub().returns({ enabled: false, hostEnabled: false }),
+            getProvider: sandbox.stub(),
+            dispose: sandbox.stub().resolves(),
+        }
+        sandbox.stub(ErrorService, "initialize").resolves(mockErrorService as any)
+        sandbox.stub(ErrorService, "get").returns(mockErrorService as any)
 
-		await ErrorService.initialize()
+        await ErrorService.initialize()
 
-		handleOpenRouterCallbackStub = sandbox.stub().resolves()
-		handleAuthCallbackStub = sandbox.stub().resolves()
-		const mockDiracWebviewProvider = {
-			controller: {
-				handleOpenRouterCallback: handleOpenRouterCallbackStub,
-				handleAuthCallback: handleAuthCallbackStub,
-			},
-		} as any
-		sandbox.stub(DiracWebviewProvider, "getVisibleInstance").returns(mockDiracWebviewProvider)
-	})
+        handleOpenRouterCallbackStub = sandbox.stub().resolves()
+        handleAuthCallbackStub = sandbox.stub().resolves()
+        const mockDiracWebviewProvider = {
+            controller: {
+                handleOpenRouterCallback: handleOpenRouterCallbackStub,
+                handleAuthCallback: handleAuthCallbackStub,
+            },
+        } as any
+        sandbox.stub(DiracWebviewProvider, "getVisibleInstance").returns(mockDiracWebviewProvider)
+    })
 
-	afterEach(() => {
-		sandbox.restore()
-	})
+    afterEach(() => {
+        sandbox.restore()
+    })
 
-	describe("handleUri", () => {
-		describe("OpenRouter callback handling", () => {
-			it("should successfully handle OpenRouter callback with code", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
+    describe("handleUri", () => {
+        describe("OpenRouter callback handling", () => {
+            it("should successfully handle OpenRouter callback with code", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
 
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
-			})
+                expect(result).to.be.true
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+            })
 
-			it("should return false when OpenRouter code is missing", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter")
+            it("should return false when OpenRouter code is missing", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter")
 
-				expect(result).to.be.false
-				expect(handleOpenRouterCallbackStub.called).to.be.false
-			})
+                expect(result).to.be.false
+                expect(handleOpenRouterCallbackStub.called).to.be.false
+            })
 
-			it("should handle URL with plus signs in code parameter", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test+123+abc")
+            it("should handle URL with plus signs in code parameter", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test+123+abc")
 
-				expect(result).to.be.true
-				// Plus signs in query params are preserved
-				sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test+123+abc")
-			})
-		})
+                expect(result).to.be.true
+                // Plus signs in query params are preserved
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test+123+abc")
+            })
+        })
 
-		describe("Auth callback handling", () => {
-			it("should successfully handle auth callback with idToken", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/auth?idToken=jwt123&provider=google")
+        describe("Auth callback handling", () => {
+            it("should return false for auth path since handler was removed", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/auth?idToken=jwt123&provider=google")
 
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleAuthCallbackStub, "jwt123", "google")
-			})
+                expect(result).to.be.false
+                expect(handleAuthCallbackStub.called).to.be.false
+            })
+        })
 
-			it("should successfully handle auth callback without provider", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/auth?idToken=jwt123")
+        describe("Unknown path handling", () => {
+            it("should return false for unknown paths", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/unknown?param=value")
 
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleAuthCallbackStub, "jwt123", null)
-			})
+                expect(result).to.be.false
+                expect(handleAuthCallbackStub.called).to.be.false
+                expect(handleOpenRouterCallbackStub.called).to.be.false
+            })
+        })
 
-			it("should return false when idToken is missing", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/auth?provider=google")
+        describe("Error handling", () => {
+            it("should catch and log errors from controller methods", async () => {
+                handleOpenRouterCallbackStub.rejects(new Error("Controller error"))
 
-				expect(result).to.be.false
-				expect(handleAuthCallbackStub.called).to.be.false
-			})
-		})
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
 
-		describe("Unknown path handling", () => {
-			it("should return false for unknown paths", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/unknown?param=value")
+                expect(result).to.be.false
+            })
 
-				expect(result).to.be.false
-				expect(handleAuthCallbackStub.called).to.be.false
-				expect(handleOpenRouterCallbackStub.called).to.be.false
-			})
-		})
+            it("should handle malformed URIs gracefully", async () => {
+                const result = await SharedUriHandler.handleUri("invalid://uri")
 
-		describe("Error handling", () => {
-			it("should catch and log errors from controller methods", async () => {
-				handleOpenRouterCallbackStub.rejects(new Error("Controller error"))
+                expect(result).to.be.false
+                expect(handleAuthCallbackStub.called).to.be.false
+                expect(handleOpenRouterCallbackStub.called).to.be.false
+            })
+        })
 
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
+        describe("Query parameter parsing", () => {
+            it("should correctly parse multiple query parameters", async () => {
+                const result = await SharedUriHandler.handleUri(
+                    "vscode://dirac.dirac/openrouter?code=test123&extra=param",
+                )
 
-				expect(result).to.be.false
-			})
+                expect(result).to.be.true
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+            })
 
-			it("should handle malformed URIs gracefully", async () => {
-				const result = await SharedUriHandler.handleUri("invalid://uri")
+            it("should handle URL-encoded parameters", async () => {
+                const result = await SharedUriHandler.handleUri(
+                    "vscode://dirac.dirac/openrouter?code=test%20123",
+                )
 
-				expect(result).to.be.false
-				expect(handleAuthCallbackStub.called).to.be.false
-				expect(handleOpenRouterCallbackStub.called).to.be.false
-			})
-		})
+                expect(result).to.be.true
+                // URLSearchParams should decode %20 to spaces
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test 123")
+            })
 
-		describe("Query parameter parsing", () => {
-			it("should correctly parse multiple query parameters", async () => {
-				const result = await SharedUriHandler.handleUri(
-					"vscode://dirac.dirac/auth?idToken=jwt123&provider=github&extra=param",
-				)
+            it("should handle empty query string", async () => {
+                const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter")
 
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleAuthCallbackStub, "jwt123", "github")
-			})
+                expect(result).to.be.false
+                expect(handleAuthCallbackStub.called).to.be.false
+                expect(handleOpenRouterCallbackStub.called).to.be.false
+            })
+        })
 
-			it("should handle URL-encoded parameters", async () => {
-				const result = await SharedUriHandler.handleUri(
-					"vscode://dirac.dirac/auth?idToken=jwt%20with%20spaces&provider=google",
-				)
+        describe("Different URI schemes", () => {
+            it("should handle HTTP scheme URIs", async () => {
+                const result = await SharedUriHandler.handleUri("http://localhost:3000/openrouter?code=test123")
 
-				expect(result).to.be.true
-				// URLSearchParams should decode %20 to spaces
-				sinon.assert.calledOnceWithExactly(handleAuthCallbackStub, "jwt with spaces", "google")
-			})
+                expect(result).to.be.true
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+            })
 
-			it("should handle empty query string", async () => {
-				const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter")
+            it("should handle HTTPS scheme URIs", async () => {
+                const result = await SharedUriHandler.handleUri("https://example.com/openrouter?code=test123")
 
-				expect(result).to.be.false
-				expect(handleAuthCallbackStub.called).to.be.false
-				expect(handleOpenRouterCallbackStub.called).to.be.false
-			})
-		})
-
-		describe("Different URI schemes", () => {
-			it("should handle HTTP scheme URIs", async () => {
-				const result = await SharedUriHandler.handleUri("http://localhost:3000/openrouter?code=test123")
-
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
-			})
-
-			it("should handle HTTPS scheme URIs", async () => {
-				const result = await SharedUriHandler.handleUri("https://example.com/auth?idToken=jwt123&provider=github")
-
-				expect(result).to.be.true
-				sinon.assert.calledOnceWithExactly(handleAuthCallbackStub, "jwt123", "github")
-			})
-		})
-	})
+                expect(result).to.be.true
+                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+            })
+        })
+    })
 })

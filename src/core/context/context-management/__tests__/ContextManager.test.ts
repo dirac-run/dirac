@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import { expect } from "chai"
 import { ContextManager } from "../ContextManager"
 
@@ -17,10 +17,12 @@ function createApiReqMessage(tokens: {
 	cacheReads?: number
 }): DiracMessage {
 	return {
+		id: "test-id-" + Math.random(),
 		ts: Date.now(),
-		type: "say",
-		say: "api_req_started",
-		text: JSON.stringify(tokens),
+		content: {
+			type: DiracMessageType.API_STATUS,
+			status: tokens,
+		},
 	}
 }
 

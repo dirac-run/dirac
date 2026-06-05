@@ -11,7 +11,9 @@
 /* eslint-disable no-console */
 // Console output is intentional here for plain text mode
 
-import type { DiracMessage, ExtensionState } from "@shared/ExtensionMessage"
+import { DiracMessage, ExtensionState, DiracMessageType, CardStatus, UIActionButtonType } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
 import { StringRequest } from "@shared/proto/dirac/common"
 import type { Controller } from "@/core/controller"
 import { getRequestRegistry } from "@/core/controller/grpc-handler"
@@ -34,16 +36,6 @@ export interface PlainTextTaskOptions {
 	yolo?: boolean
 }
 
-/**
- * Run a task with plain text output (no Ink, no ANSI codes)
- * Returns true if task completed successfully, false if error
- *
- * Output behavior:
- * - Non-JSON mode: Only writes final completion_result text to stdout
- * - JSON mode: Streams JSON lines to stdout as messages arrive (unchanged)
- * - Verbose mode: Progress info goes to stderr
- * - Errors: Always go to stderr
- */
 export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<boolean> {
 	const { controller, prompt, imageDataUrls, verbose, jsonOutput, yolo } = options
 
@@ -56,25 +48,12 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 
 	let hasError = false
 	let hasEmittedTaskStarted = false
-	// Track which messages have been processed (by timestamp)
-	const processedMessages = new Map<number, string>()
-	const lastProcessedPartialMessages = new Map<number, DiracMessage>()
+	// Track which messages have been processed (by ID)
+	const processedMessages = new Set<string>()
+	const lastPrintedCardState = new Map<string, string>()
+	const autoApprovedCards = new Set<string>()
 
 	const isViewTaskOnly = Boolean(options.taskId) && !prompt
-
-	// When resuming a task, we need to ignore completion_result messages that existed
-	// before we sent our new prompt. This timestamp marks the cutoff - only completion
-	// results AFTER this time should trigger task completion.
-	const completionCutoffTs = Date.now()
-
-	const printPendingPartials = () => {
-		for (const partialMsg of Array.from(lastProcessedPartialMessages.values()).sort(
-			(a, b) => (a.ts || 0) - (b.ts || 0),
-		)) {
-			handleMessageForPipeMode(partialMsg, true, yolo || false)
-		}
-		lastProcessedPartialMessages.clear()
-	}
 
 
 	const emitTaskStarted = () => {
@@ -92,28 +71,26 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 	}
 
 	// Helper to process a message and track completion state
-	const processMessage = (message: DiracMessage) => {
-		const text = message.text || ""
+	const processMessage = (message: DiracMessage, state: ExtensionState) => {
 		const ts = message.ts || 0
+		const content = message.content
 
-		if (message.partial) {
+		const isStreaming = state.activeVoiceStreamId === message.id || (content.type === DiracMessageType.API_STATUS && state.isApiRequestActive)
+		if (isStreaming) {
 			// Special case: allow printing the initial api_req_started message even if it's partial
 			// so the user knows the request has begun. Subsequent updates will be skipped until complete.
-			if (message.say === "api_req_started" && !processedMessages.has(ts)) {
-				handleMessageForPipeMode(message, verbose || false, yolo || false, false)
-				processedMessages.set(ts, text)
+			if (content.type === DiracMessageType.API_STATUS && !processedMessages.has(message.id)) {
+				handleMessageForPipeMode(message, state, verbose || false, yolo || false, false)
+				processedMessages.add(message.id)
 				return
 			}
-			if (!jsonOutput && verbose) {
-				lastProcessedPartialMessages.set(ts, message)
-			}
+
 			return
 		}
 
-		// Message is complete
-		lastProcessedPartialMessages.delete(ts)
-
-		if (processedMessages.has(ts) && processedMessages.get(ts) === text) {
+		// Message is complete (or is a partial interaction card)
+		// Skip if already processed as a complete message
+		if (processedMessages.has(message.id)) {
 			return
 		}
 
@@ -121,39 +98,39 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 		if (jsonOutput) {
 			process.stdout.write(JSON.stringify(message) + "\n")
 		} else {
-			handleMessageForPipeMode(message, verbose || false, yolo || false, processedMessages.has(ts))
+			// For cards, avoid duplicate printing of the same state (interaction cards are never "streaming" in this mode)
+			if (content.type === DiracMessageType.CARD) {
+				const card = content.card
+				const stateKey = `${card.status}-${card.body}`
+				if (lastPrintedCardState.get(message.id) !== stateKey) {
+					handleMessageForPipeMode(message, state, verbose || false, yolo || false, false)
+					lastPrintedCardState.set(message.id, stateKey)
+				}
+			} else {
+				handleMessageForPipeMode(message, state, verbose || false, yolo || false, false)
+			}
 		}
 
-		processedMessages.set(ts, text)
+		// Mark as processed if it's a complete message
+		if (!isStreaming) {
+			processedMessages.add(message.id)
+		}
 
 		// Auto-approve if yolo mode is on and it's an approval request
 		if (
 			yolo &&
-			message.type === "ask" &&
-			(message.ask === "tool" ||
-				message.ask === "command" ||
-				message.ask === "browser_action_launch" ||
-				message.ask === "plan_mode_respond" ||
-				message.ask === "act_mode_respond" ||
-				message.ask === "use_subagents" ||
-				message.ask === "completion_result" ||
-				message.ask === "new_task" ||
-				message.ask === "condense" ||
-				message.ask === "summarize_task" ||
-				message.ask === "report_bug")
+			content.type === DiracMessageType.CARD &&
+			content.card.status === CardStatus.WAITING_FOR_INPUT &&
+			(content.card.requireApproval || content.card.requireFeedback) &&
+			!autoApprovedCards.has(content.card.id)
 		) {
-			controller.task?.handleWebviewAskResponse("yesButtonClicked")
+			controller.task?.submitCardResponse(content.card.id, DiracAskResponse.APPROVE)
+			autoApprovedCards.add(content.card.id)
 		}
 
-		// Check for completion (only on non-partial messages)
-		// When resuming a task, only consider completion_result messages that appeared
-		// AFTER we sent our resume message (ts > completionCutoffTs)
-		if (message.say === "completion_result" || message.ask === "completion_result") {
-			if (isViewTaskOnly || ts > completionCutoffTs) {
-				completionResolve()
-			}
-		} else if (message.say === "error" || message.ask === "api_req_failed") {
-			completionReject(message.text ?? "message.say error || message.ask api_req_failed")
+		// Check for API failure (retries exhausted)
+		if (content.type === DiracMessageType.API_STATUS && content.status.cancelReason === "retries_exhausted") {
+			completionReject("API request failed: retries exhausted")
 		}
 	}
 
@@ -165,7 +142,24 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			try {
 				const state = JSON.parse(stateJson) as ExtensionState
 				for (const message of state.diracMessages ?? []) {
-					processMessage(message)
+					processMessage(message, state)
+				}
+
+				// Check for terminal state via UI projection
+				const globalButtons = state.uiActionState?.globalButtons || []
+				const cardButtons = state.uiActionState?.cardButtons || []
+				const hasNewTask = globalButtons.some((b) => b.action === UIActionButtonType.NEW_TASK)
+				const hasProceed = globalButtons.some((b) => b.action === UIActionButtonType.PROCEED)
+
+				if (hasNewTask) {
+					if (hasProceed) {
+						completionReject("Mistake limit reached. Task halted in YOLO mode.")
+					} else {
+						completionResolve()
+					}
+				} else if (isViewTaskOnly && cardButtons.length > 0) {
+					// Historical task loaded and waiting for interaction (e.g. Resume Task card)
+					completionResolve()
 				}
 			} catch (error) {
 				if (jsonOutput) {
@@ -195,7 +189,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 				await new Promise((resolve) => setTimeout(resolve, 100))
 
 				// Send the prompt as a response to any pending ask, or as a new message
-				await controller.task.handleWebviewAskResponse("messageResponse", prompt)
+				await controller.task.submitCardResponse("", DiracAskResponse.MESSAGE, prompt)
 			}
 		} else if (prompt) {
 			// Start a new task with the prompt
@@ -216,7 +210,6 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			await completionPromise
 		}
 	} catch (error) {
-		printPendingPartials()
 		const errMsg = error instanceof Error ? error.message : String(error)
 		if (jsonOutput) {
 			process.stdout.write(JSON.stringify({ type: "error", message: errMsg }) + "\n")
@@ -229,14 +222,23 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 	}
 
 	// non json mode outputs only the final complete message
-	// (it should be the completion_result message)
 	if (!jsonOutput) {
-		const msg = Array.from(processedMessages.entries())
-			.sort(([aTs], [bTs]) => aTs - bTs)
-			.map(([_, msg]) => msg)
-			.at(-1)
-		if (msg) {
-			process.stdout.write(msg + "\n")
+		const messages = controller.task?.messageStateHandler.getDiracMessages() || []
+		// Prefer the body of the "Task Completed" card
+		const completionCard = [...messages]
+			.reverse()
+			.find((m) => m.content.type === DiracMessageType.CARD && m.content.card.header === "Task Completed")
+
+		if (completionCard && completionCard.content.type === DiracMessageType.CARD) {
+			process.stdout.write(completionCard.content.card.body + "\n")
+		} else {
+			// Fallback to the last markdown message (e.g. if task was interrupted or didn't use attempt_completion)
+			const lastMarkdown = [...messages]
+				.reverse()
+				.find((m) => m.content.type === DiracMessageType.MARKDOWN && !m.content.isReasoning)
+			if (lastMarkdown && lastMarkdown.content.type === DiracMessageType.MARKDOWN) {
+				process.stdout.write(lastMarkdown.content.content + "\n")
+			}
 		}
 	}
 
@@ -248,7 +250,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			process.stderr.write(`\n${"-".repeat(40)}\n`)
 			process.stderr.write(`Task Summary:\n`)
 			process.stderr.write(
-				`Tokens: ${metrics.totalTokensIn.toLocaleString()} in, ${metrics.totalTokensOut.toLocaleString()} out${metrics.totalReasoningTokens ? ` (+${metrics.totalReasoningTokens.toLocaleString()} thinking)` : ""}\n`
+				`Tokens: ${metrics.totalTokensIn.toLocaleString()} in, ${metrics.totalTokensOut.toLocaleString()} out${metrics.totalReasoningTokens ? ` (+${metrics.totalReasoningTokens.toLocaleString()} thinking)` : ""}\n`,
 			)
 			if (metrics.totalCacheReads || metrics.totalCacheWrites) {
 				process.stderr.write(
@@ -274,222 +276,53 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
  */
 function handleMessageForPipeMode(
 	message: DiracMessage,
+	state: ExtensionState,
 	verbose: boolean,
 	yolo: boolean,
 	isUpdate?: boolean,
 ): void {
 	const timestamp = message.ts ? `[${new Date(message.ts).toLocaleTimeString("en-GB", { hour12: false })}] ` : ""
-	const fullText = message.text ?? ""
-	const reasoning = message.reasoning ?? ""
-	const isPartial = message.partial ?? false
+	const content = message.content
+	const isPartial = state.activeVoiceStreamId === message.id || (content.type === DiracMessageType.API_STATUS && state.isApiRequestActive)
 	const statusPrefix = verbose ? (isPartial ? "[partial]  " : (isUpdate ? "[update]   " : "[complete] ")) : ""
 
-	// 1. Handle Errors (always stderr)
-	if (message.say === "error" || message.ask === "api_req_failed") {
-		process.stderr.write(`${timestamp}${statusPrefix}Error: ${fullText || "API request failed"}\n`)
+	// 1. Handle API Status (Vitals)
+	if (content.type === DiracMessageType.API_STATUS) {
+		handleApiReqMessage(message, statusPrefix, isUpdate)
 		return
 	}
 
-	// Print reasoning if present (unless it's already the main content of a reasoning message)
-	if (verbose && reasoning && message.say !== "reasoning") {
-		process.stderr.write(`${timestamp}${statusPrefix}Reasoning: ${reasoning}\n`)
+	// 2. Handle Markdown (Voice/Reasoning)
+	if (content.type === DiracMessageType.MARKDOWN) {
+		const label = content.isReasoning ? "Reasoning" : "Assistant"
+		if (verbose || !content.isReasoning) {
+			if (content.content) {
+				process.stderr.write(`${timestamp}${statusPrefix}${label}: ${content.content}\n`)
+			}
+		}
+		return
 	}
 
-	// 2. Handle Tool Calls (Triggering actions)
-	const toolType = getToolType(message)
-	if (toolType) {
-		// Special handling for API requests to avoid raw JSON dump
-		if (message.say === "api_req_started" || message.say === "api_req_finished" || message.say === "api_req_retried") {
-			handleApiReqMessage(message, statusPrefix, isUpdate)
-			return
-		}
-
-		let label = "Tool Call"
-		let isTool = true
-
-		if (message.type === "say") {
-			switch (message.say) {
-				case "task":
-					label = "Task"
-					isTool = false
-					break
-				case "text":
-					label = "Assistant"
-					isTool = false
-					break
-				case "reasoning":
-					label = "Reasoning"
-					isTool = false
-					break
-				case "subagent":
-					label = "Subagent"
-					isTool = false
-					break
-				case "subagent_usage":
-					label = "Subagent Usage"
-					isTool = false
-					break
-				case "checkpoint_created":
-					label = "Checkpoint"
-					isTool = false
-					break
-			}
-		} else if (message.type === "ask") {
-			switch (message.ask) {
-				case "followup":
-					label = "Question"
-					isTool = false
-					break
-				case "plan_mode_respond":
-					label = "Plan"
-					isTool = false
-					break
-				case "act_mode_respond":
-					label = "Act"
-					isTool = false
-					break
-				case "completion_result":
-					label = "Completion"
-					isTool = false
-					break
-			}
-		}
-
+	// 3. Handle Cards (Work Units)
+	if (content.type === DiracMessageType.CARD) {
+		const card = content.card
 		let extra = ""
-		if (message.type === "ask") {
-			if (yolo) {
-				extra = " [yolo]"
+		if (card.status === CardStatus.WAITING_FOR_INPUT) {
+			if (yolo && card.requireApproval) {
+				extra = " [yolo auto-approved]"
 			} else {
-				extra = " [waiting for approval]"
+				extra = " [waiting for input]"
 			}
 		}
 
-		if (isTool) {
-			process.stderr.write(`${timestamp}${statusPrefix}${label}${extra}: ${toolType}: ${fullText}\n`)
-		} else {
-			process.stderr.write(`${timestamp}${statusPrefix}${label}${extra}: ${fullText}\n`)
+		const statusStr = card.status !== CardStatus.RUNNING ? ` (${card.status})` : ""
+		process.stderr.write(`${timestamp}${statusPrefix}${card.header}${statusStr}${extra}\n`)
+		
+		if (verbose && card.body) {
+			process.stderr.write(`${card.body}\n`)
 		}
 		return
 	}
-
-	// 3. Handle Verbose Output
-
-	if (verbose) {
-
-		if (message.type === "say") {
-			switch (message.say) {
-				case "task":
-				case "text":
-					if (fullText) {
-						process.stderr.write(`${timestamp}${statusPrefix}${fullText}\n`)
-					}
-					break
-				case "api_req_started":
-				case "api_req_finished":
-					handleApiReqMessage(message, statusPrefix, isUpdate)
-					break
-				case "completion_result":
-					process.stderr.write(`${timestamp}${statusPrefix}Completion Result: ${fullText}\n`)
-					break
-				case "reasoning":
-					const content = fullText || reasoning
-					if (content) {
-						process.stderr.write(`${timestamp}${statusPrefix}Reasoning: ${content}\n`)
-					}
-					break
-				case "command":
-					process.stderr.write(`${timestamp}${statusPrefix}Command: ${fullText}\n`)
-					break
-				case "command_output":
-					process.stderr.write(`${timestamp}${statusPrefix}Command Output: ${fullText}\n`)
-					break
-				default:
-					if (fullText) {
-						process.stderr.write(`${timestamp}${statusPrefix}${message.say}: ${fullText}\n`)
-					} else {
-						process.stderr.write(`${timestamp}${statusPrefix}Event: ${message.say}\n`)
-					}
-			}
-		} else if (message.type === "ask") {
-			switch (message.ask) {
-				case "completion_result":
-					process.stderr.write(`${timestamp}${statusPrefix}Task completed\n`)
-					break
-				default:
-					if (fullText) {
-						process.stderr.write(`${timestamp}${statusPrefix}Question: ${fullText}\n`)
-					} else {
-						process.stderr.write(`${timestamp}${statusPrefix}Question Type: ${message.ask}\n`)
-					}
-			}
-		}
-	}
-}
-
-/**
- * Identify if a message is a tool call and return its type/name
- */
-function getToolType(message: DiracMessage): string | null {
-	if (message.type === "say") {
-		const toolSays = [
-			"tool",
-			"command",
-			"browser_action",
-			"browser_action_launch",
-			"use_subagents",
-			"generate_explanation",
-			"task",
-			"text",
-			"reasoning",
-			"api_req_started",
-			"api_req_finished",
-			"api_req_retried",
-			"subagent",
-			"subagent_usage",
-			"checkpoint_created",
-		]
-		if (message.say && toolSays.includes(message.say as any)) {
-			if (message.say === "tool" && message.text) {
-				try {
-					const parsed = JSON.parse(message.text)
-					return parsed.tool || "tool"
-				} catch {
-					return "tool"
-				}
-			}
-			return message.say
-		}
-	}
-	if (message.type === "ask") {
-		const toolAsks = [
-			"tool",
-			"command",
-			"browser_action_launch",
-			"plan_mode_respond",
-			"act_mode_respond",
-			"use_subagents",
-			"completion_result",
-			"followup",
-			"new_task",
-			"condense",
-			"summarize_task",
-			"report_bug",
-			"api_req_failed",
-			"resume_task",
-		]
-		if (message.ask && toolAsks.includes(message.ask as any)) {
-			if (message.ask === "tool" && message.text) {
-				try {
-					const parsed = JSON.parse(message.text)
-					return parsed.tool || "tool"
-				} catch {
-					return "tool"
-				}
-			}
-			return message.ask
-		}
-	}
-	return message.say || message.ask || "unknown"
 }
 
 /**
@@ -497,28 +330,26 @@ function getToolType(message: DiracMessage): string | null {
  */
 function handleApiReqMessage(message: DiracMessage, statusPrefix: string, isUpdate?: boolean): void {
 	const timestamp = message.ts ? `[${new Date(message.ts).toLocaleTimeString("en-GB", { hour12: false })}] ` : ""
-	const fullText = message.text ?? ""
-	let info: any = {}
-	try {
-		info = JSON.parse(fullText || "{}")
-	} catch (e) {}
+	const content = message.content
+	if (content.type !== DiracMessageType.API_STATUS) return
+	const info = content.status
 
 	const hasMetrics = info.cost !== undefined || info.tokensIn !== undefined
 
 	let label = "API request"
-	if (message.say === "api_req_started") {
-		label = hasMetrics ? "API request finished" : "API request started"
-	} else if (message.say === "api_req_finished") {
+	if (hasMetrics) {
 		label = "API request finished"
-	} else if (message.say === "api_req_retried") {
+	} else if (info.retryStatus) {
 		label = "API request retried"
+	} else {
+		label = "API request started"
 	}
 
-	if (hasMetrics || !isUpdate || info.retryStatus) {
+	if (hasMetrics || !isUpdate || info.retryStatus || info.streamingFailedMessage) {
 		const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
 		const tokensStr =
 			info.tokensIn !== undefined
-				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${info.tokensOut.toLocaleString()} out${
+				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${
 						info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
 					}`
 				: ""
@@ -535,7 +366,9 @@ function handleApiReqMessage(message: DiracMessage, statusPrefix: string, isUpda
 			? ` (Retry ${info.retryStatus.attempt}/${info.retryStatus.maxAttempts}${info.retryStatus.delaySec ? ` in ${info.retryStatus.delaySec}s` : ""}${info.retryStatus.errorSnippet ? `: ${info.retryStatus.errorSnippet}` : ""})`
 			: ""
 
-		const metricsStr = hasMetrics || retryStr ? ` [${tokensStr}${cacheStr}${contextStr}${retryStr} | ${costStr}]` : ""
-		process.stderr.write(`${timestamp}${statusPrefix}${label}${metricsStr}\n`)
+		const metricsStr = hasMetrics || retryStr ? ` [${tokensStr}${cacheStr || ""}${contextStr || ""}${retryStr} | ${costStr}]` : ""
+		const errorStr = info.streamingFailedMessage ? `
+Error: ${info.streamingFailedMessage}` : ""
+		process.stderr.write(`${timestamp}${statusPrefix}${label}${metricsStr}${errorStr}\n`)
 	}
 }

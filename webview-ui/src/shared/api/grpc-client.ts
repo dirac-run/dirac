@@ -327,17 +327,14 @@ export class TaskServiceClient extends ProtoBusClient {
     static async taskFeedback(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("taskFeedback", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-    static async taskCompletionViewChanges(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest("taskCompletionViewChanges", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)
+    static async taskCompletionViewChanges(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("taskCompletionViewChanges", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
     static async executeQuickWin(request: proto.dirac.ExecuteQuickWinRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("executeQuickWin", request, proto.dirac.ExecuteQuickWinRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
     static async deleteAllTaskHistory(request: proto.dirac.EmptyRequest): Promise<proto.dirac.DeleteAllTaskHistoryCount> {
 		return this.makeUnaryRequest("deleteAllTaskHistory", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.DeleteAllTaskHistoryCount.fromJSON)
-	}
-    static async explainChanges(request: proto.dirac.ExplainChangesRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest("explainChanges", request, proto.dirac.ExplainChangesRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 }
 export class UiServiceClient extends ProtoBusClient {

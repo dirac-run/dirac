@@ -30,7 +30,6 @@ export type {
 	DiracAgentCapabilities,
 	DiracAgentInfo,
 	DiracAgentOptions,
-	DiracPermissionOption,
 	DiracSessionEvents,
 	ContentBlock,
 	ImageContent,

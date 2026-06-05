@@ -5,6 +5,8 @@
 
 import { Box } from "ink"
 import React, { useEffect, useRef } from "react"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
+
 import { useTaskContext, useTaskState } from "../context/TaskContext"
 import { useCompletionSignals } from "../hooks/useStateSubscriber"
 import { originalConsoleLog } from "../utils/console"
@@ -32,19 +34,19 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 	const hasOutputtedCompletion = useRef(false)
 
 	// Determine the role for a message
-	const getRole = (message: { type: string; ask?: string; say?: string }, index: number): "user" | "assistant" | "system" => {
-		// User feedback messages
-		if (message.say === "user_feedback" || message.say === "user_feedback_diff") {
-			return "user"
-		}
+	const getRole = (message: DiracMessage, index: number): "user" | "assistant" | "system" => {
+		const { content } = message
+
 		// First text message is the user's task
-		if (message.say === "text" && index === 0) {
+		if (content.type === DiracMessageType.MARKDOWN && index === 0) {
 			return "user"
 		}
+
 		// System messages
-		if (message.say === "api_req_started" || message.say === "api_req_finished") {
+		if (content.type === DiracMessageType.API_STATUS) {
 			return "system"
 		}
+
 		// Default: assistant
 		return "assistant"
 	}
@@ -57,7 +59,8 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 			const message = messages[i]
 
 			// Skip partial messages - wait for complete message
-			if (message.partial) {
+			// Skip partial markdown messages - wait for complete message
+			if (state.activeVoiceStreamId === message.id && message.content.type === DiracMessageType.MARKDOWN) {
 				continue
 			}
 
@@ -68,7 +71,7 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 
 			// Filter out noisy messages in non-verbose mode
 			if (!verbose) {
-				if (message.say === "api_req_started" || message.say === "api_req_finished") {
+				if (message.content.type === DiracMessageType.API_STATUS) {
 					outputtedMessages.current.add(message.ts)
 					continue
 				}
@@ -77,18 +80,25 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 			const role = getRole(message, i)
 
 			// Output the message as JSON
-			outputJson({
+			const output: any = {
 				type: "message",
 				timestamp: message.ts,
 				role,
-				messageType: message.type,
-				...(message.ask && { ask: message.ask }),
-				...(message.say && { say: message.say }),
-				...(message.text && { text: message.text }),
-				...(message.reasoning && { reasoning: message.reasoning }),
-				...(message.images && message.images.length > 0 && { images: message.images }),
-				...(message.files && message.files.length > 0 && { files: message.files }),
-			})
+				messageType: message.content.type,
+			}
+
+			if (message.content.type === DiracMessageType.MARKDOWN) {
+				output.text = message.content.content
+				if (message.content.isReasoning) output.reasoning = true
+				if (message.content.images) output.images = message.content.images
+				if (message.content.files) output.files = message.content.files
+			} else if (message.content.type === DiracMessageType.CARD) {
+				output.card = message.content.card
+			} else if (message.content.type === DiracMessageType.API_STATUS) {
+				output.status = message.content.status
+			}
+
+			outputJson(output)
 
 			outputtedMessages.current.add(message.ts)
 		}
@@ -101,7 +111,7 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 			setIsComplete(true)
 
 			const completionMsg = getCompletionMessage()
-			const isError = completionMsg?.say === "error" || completionMsg?.ask === "api_req_failed"
+			const isError = completionMsg?.content.type === DiracMessageType.CARD && completionMsg.content.card.status === "error"
 
 			// Output completion status
 			outputJson({

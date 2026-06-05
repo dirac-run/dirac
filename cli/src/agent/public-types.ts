@@ -181,18 +181,7 @@ export interface DiracAgentInfo {
 	version: string
 }
 
-// ============================================================
-// Permission Options
-// ============================================================
 
-/**
- * Permission option as presented to the ACP client.
- */
-export interface DiracPermissionOption {
-	kind: acp.PermissionOptionKind
-	name: string
-	optionId: string
-}
 
 // ============================================================
 // Message Translation

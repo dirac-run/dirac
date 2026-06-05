@@ -179,6 +179,7 @@
 		}
 	}
 
+
 	/* --- Custom Animations --- */
 	@keyframes glowPulse {
 		0%,
@@ -202,8 +203,22 @@
 		}
 	}
 
+	@keyframes bulbGlow {
+		0%,
+		100% {
+			filter: drop-shadow(0 0 2px rgba(252, 211, 77, 0.3));
+			opacity: 0.75;
+		}
+		50% {
+			filter: drop-shadow(0 0 5px rgba(252, 211, 77, 0.5));
+			opacity: 1;
+		}
+	}
+
 	--animate-glow-pulse: glowPulse 4s ease-in-out infinite;
 	--animate-float: float 6s ease-in-out infinite;
+	--animate-bulb-glow: bulbGlow 2.5s ease-in-out infinite;
+
 }
 
 @theme inline {
@@ -358,11 +373,11 @@
 		}
 
 		pre > code .hljs-deletion {
-			@apply inline-block w-full bg-diff-removed;
+			@apply inline-block w-full;
 		}
 
 		pre > code .hljs-addition {
-			@apply inline-block w-full bg-diff-added;
+			@apply inline-block w-full;
 		}
 
 		code span.line:empty {

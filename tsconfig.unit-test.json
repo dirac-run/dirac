@@ -1,23 +1,26 @@
 {
-	"extends": "./tsconfig.json",
-	"compilerOptions": {
-		"module": "commonjs",
-		"moduleResolution": "Bundler",
-		"typeRoots": [
-			"./node_modules/@types",
-			"./src/types"
-		]
-	},
-	"ts-node": {
-		"require": [
-			"tsconfig-paths/register"
-		]
-	},
-	"include": [
-		"src/**/*.ts",
-		"test/**/*.ts"
-	],
-	"exclude": [
-		"node_modules"
-	]
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "module": "esnext",
+        "moduleResolution": "Bundler",
+        "typeRoots": [
+            "./node_modules/@types",
+            "./src/types"
+        ]
+    },
+    "ts-node": {
+        "compilerOptions": {
+            "module": "commonjs"
+        },
+        "require": [
+            "tsconfig-paths/register"
+        ]
+    },
+    "include": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules"
+    ]
 }

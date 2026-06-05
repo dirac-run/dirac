@@ -248,7 +248,7 @@ console.log(JSON.stringify({
 			})
 
 			// Hook result includes cancel: true and errorMessage
-			// In abortTask(), the errorMessage will be surfaced to the user via this.say("error", ...)
+			// In abortTask(), the errorMessage will be surfaced to the user via this.taskMessenger.upsertText(...)
 			// but cancellation will still proceed (fire-and-forget behavior)
 			result.cancel.should.be.true()
 			result.errorMessage?.should.equal("Hook tried to block cancellation")
@@ -503,7 +503,7 @@ console.log(JSON.stringify({
 
 			result.cancel.should.be.true()
 			result.errorMessage?.should.equal("some error happened")
-			// In abortTask(), the errorMessage WILL be surfaced to user via this.say("error", ...)
+			// In abortTask(), the errorMessage WILL be surfaced to user via this.taskMessenger.upsertText(...)
 			// Cancellation still proceeds (fire-and-forget)
 		})
 
@@ -548,7 +548,7 @@ console.log(JSON.stringify({
 
 			result.cancel.should.be.false()
 			result.errorMessage?.should.equal("some error happened")
-			// In abortTask(), the errorMessage WILL be surfaced to user via this.say("error", ...)
+			// In abortTask(), the errorMessage WILL be surfaced to user via this.taskMessenger.upsertText(...)
 			// This is the scenario that was fixed - error messages are now displayed regardless of shouldContinue value
 			// Cancellation still proceeds (fire-and-forget)
 		})
@@ -573,7 +573,7 @@ console.log(JSON.stringify({
 				throw new Error("Should have thrown")
 			} catch (error: any) {
 				error.message.should.match(/TaskCancel.*exited with code 1/)
-				// In abortTask(), this error WILL be caught and surfaced to user via this.say("error", ...)
+				// In abortTask(), this error WILL be caught and surfaced to user via this.taskMessenger.upsertText(...)
 				// Cancellation still proceeds (fire-and-forget)
 			}
 		})

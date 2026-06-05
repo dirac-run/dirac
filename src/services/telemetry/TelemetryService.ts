@@ -943,11 +943,14 @@ export class TelemetryService {
 		provider: string,
 		autoApproved: boolean,
 		success: boolean,
-		workspaceContext?: {
-			isMultiRootEnabled: boolean
-			usedWorkspaceHint: boolean
-			resolvedToNonPrimary: boolean
-			resolutionMethod: "hint" | "primary_fallback" | "path_detection"
+		metadata?: {
+			isMultiRootEnabled?: boolean
+			usedWorkspaceHint?: boolean
+			resolvedToNonPrimary?: boolean
+			resolutionMethod?: "hint" | "primary_fallback" | "path_detection"
+			durationMs?: number
+			modular?: boolean
+			commandCount?: number
 		},
 		isNativeToolCall = false,
 	) {
@@ -960,12 +963,15 @@ export class TelemetryService {
 				success,
 				modelId,
 				provider,
+				durationMs: metadata?.durationMs,
+				modular: metadata?.modular,
+				commandCount: metadata?.commandCount,
 				// Workspace context (optional)
-				...(workspaceContext && {
-					workspace_multi_root_enabled: workspaceContext.isMultiRootEnabled,
-					workspace_hint_used: workspaceContext.usedWorkspaceHint,
-					workspace_resolved_non_primary: workspaceContext.resolvedToNonPrimary,
-					workspace_resolution_method: workspaceContext.resolutionMethod,
+				...(metadata && {
+					workspace_multi_root_enabled: metadata.isMultiRootEnabled,
+					workspace_hint_used: metadata.usedWorkspaceHint,
+					workspace_resolved_non_primary: metadata.resolvedToNonPrimary,
+					workspace_resolution_method: metadata.resolutionMethod,
 				}),
 				isNativeToolCall,
 			},

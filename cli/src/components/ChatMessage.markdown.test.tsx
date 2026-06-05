@@ -1,4 +1,4 @@
-import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import { render } from "ink-testing-library"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -15,10 +15,12 @@ vi.mock("../hooks/useTerminalSize", () => ({
 describe("ChatMessage markdown rendering", () => {
 	it("renders basic markdown elements correctly with appropriate styling", () => {
 		const message: DiracMessage = {
+			id: "1",
 			ts: Date.now(),
-			type: "say",
-			say: "text",
-			text: "# Heading 1\n\nThis is a **bold** and *italic* text with `inline code`.\n\n- List item 1\n- List item 2\n\n> Blockquote\n\n```javascript\nconst x = 1;\n```",
+			content: {
+				type: DiracMessageType.MARKDOWN,
+				content: "# Heading 1\n\nThis is a **bold** and *italic* text with `inline code`.\n\n- List item 1\n- List item 2\n\n> Blockquote\n\n```javascript\nconst x = 1;\n```",
+			},
 		}
 
 		const { lastFrame } = render(React.createElement(ChatMessage, { message, mode: "act" }))

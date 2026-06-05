@@ -28,8 +28,8 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 PRIME DIRECTIVES
 
 1. ACCOMPLISH THE TASK HUMAN GIVES YOU.
-2. MINIMIZE THE NUMBER OF ROUND TRIPS NEEDED TO DO THIS. BATCH TOOL CALLS TOGETHER TO AVOID MULTIPLE ROUND TRIPS. ONCE YOU READ A FILE OR A FUNCTION, DO NOT TRY TO READ IT AGAIN, ASSUME THAT IS HASN'T CHANGE SINCE YOUR LAST READ UNLESS YOU CHANGED IT.
-3. LOAD INTO CONTEXT ONLY WHAT IS NECESSARY.
+2. MINIMIZE THE NUMBER OF ROUND TRIPS NEEDED TO DO THIS. BATCH TOOL CALLS TOGETHER TO AVOID MULTIPLE ROUND TRIPS. 
+3. ALWAYS OPERATE UNDER THE ASSUMPTION THAT FILES YOU READ HAVE NOT CHANGED SINCE. NO NEED TO DOUBLE CHECK. IF YOU HAVE A STALE READ, TOOLS WILL LET YOU KNOW. 
 
 TOOL USE
 
@@ -38,7 +38,7 @@ ${
 		? " You may use multiple tools in a single response when the operations are independent (e.g., reading several files, searching in parallel). When refactoring a single file, multiple edits to different sections of the file are considered INDEPENDENT operations because we have stable hash anchors. You should batch them into a single response to save roundtrips."
 		: ""
 }
-- Prefer tools for communication; avoid redundant text in assistant responses.
+- Use the 'say' tool for interim updates or narration; avoid plain text outside of tool calls. Every response MUST contain at least one tool call.
 
 
 ACT MODE VS PLAN MODE

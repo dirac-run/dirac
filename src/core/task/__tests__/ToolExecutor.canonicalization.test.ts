@@ -12,7 +12,6 @@ describe("ToolExecutor canonicalization", () => {
 			params: {
 				response: "final answer from response field",
 			},
-			partial: false,
 		}
 
 		const didCanonicalize = canonicalizeAttemptCompletionParams(block)
@@ -30,7 +29,6 @@ describe("ToolExecutor canonicalization", () => {
 				result: "already canonical",
 				response: "extra text",
 			},
-			partial: false,
 		}
 
 		const didCanonicalize = canonicalizeAttemptCompletionParams(block)

@@ -7,7 +7,7 @@ This documentation provides a comprehensive, minute-level detail of how Dirac's 
 Dirac uses a modular, multi-stage pipeline to generate the final system prompt. The core logic resides in the `src/core/prompts/system-prompt/` directory, following a **Registry -> Builder -> Template** flow.
 
 1.  **Orchestration**: `src/core/task/index.ts` calls `src/core/prompts/system-prompt/index.ts`.
-2.  **Registration**: `src/core/prompts/system-prompt/registry/PromptRegistry.ts` manages available tools.
+2.  **Prompt Registry**: `src/core/prompts/system-prompt/registry/PromptRegistry.ts` coordinates prompt assembly from the request-scoped tool snapshot.
 3.  **Assembly**: `src/core/prompts/system-prompt/registry/PromptBuilder.ts` coordinates the building process.
 4.  **Resolution**: `src/core/prompts/system-prompt/templates/TemplateEngine.ts` injects dynamic values into the template.
 5.  **Conversion**: `src/core/prompts/system-prompt/spec.ts` transforms internal specs into provider-native schemas.
@@ -17,16 +17,16 @@ Dirac uses a modular, multi-stage pipeline to generate the final system prompt. 
 ## Detailed File-by-File Analysis
 
 ### 1. Entry Point: `src/core/prompts/system-prompt/index.ts`
-- **Function**: `getSystemPrompt(context: SystemPromptContext)`
-- **Role**: The main orchestrator. It fetches the singleton `PromptRegistry`, generates the `systemPrompt` string, and retrieves the `tools` array (if native tool calling is enabled).
-- **Output**: Returns a `{ systemPrompt: string; tools: DiracTool[] | undefined }` object.
+- **Function**: `getSystemPrompt(context: SystemPromptContext, toolSnapshot: ToolRequestSnapshot)`
+- **Role**: The main orchestrator. It fetches the singleton `PromptRegistry` and generates the `systemPrompt` string using the request-scoped tool snapshot.
+- **Output**: Returns a `{ systemPrompt: string }` object. Native tools remain on `toolSnapshot.nativeTools`.
 
 ### 2. State & Registry: `src/core/prompts/system-prompt/registry/PromptRegistry.ts`
-- **Role**: A singleton class that maintains the state of registered tools.
+- **Role**: A singleton prompt registry that builds prompts from request-scoped tool snapshots; it does not discover or choose enabled tools.
 - **Key Methods**:
     - `getInstance()`: Ensures only one registry exists.
-    - `get(context)`: Creates a `PromptBuilder` and calls its `build()` method.
-    - `nativeTools`: Stores the converted native tool definitions for the current request.
+    - `get(context, toolSnapshot)`: Creates a `PromptBuilder` and calls its `build()` method.
+    - `nativeTools`: Compatibility field populated from `toolSnapshot.nativeTools` for the current request.
 
 ### 3. Build Orchestration: `src/core/prompts/system-prompt/registry/PromptBuilder.ts`
 - **Role**: Handles the high-level logic of assembling the prompt.
@@ -41,11 +41,10 @@ Dirac uses a modular, multi-stage pipeline to generate the final system prompt. 
     - **Diff Protection**: Includes logic to avoid adding extra newlines inside `SEARCH/REPLACE` blocks or diff-like content, preserving the strict formatting required for file editing.
 
 ### 4. Tool Management: `src/core/prompts/system-prompt/registry/DiracToolSet.ts`
-- **Role**: A utility class for tool filtering and conversion.
-- **`getEnabledToolSpecs(context)`**: Filters the registered tool list based on `contextRequirements`. For example:
-    - `browser_action` is only included if `supportsBrowserUse` is true.
+- **Role**: A utility class for provider-native conversion and dynamic subagent wrapper specs.
+- **Snapshot source**: Enabled and context-filtered tool specs come from the task's `ToolRequestSnapshot`, not from `DiracToolSet` reading global registry state.
 - **Dynamic Subagents**: Implements `getDynamicSubagentToolSpecs`, which dynamically generates tool definitions for subagents by loading configs from `src/core/task/tools/subagent/AgentConfigLoader.ts`.
-- **`getNativeTools(context)`**: The core of the native tool system. It selects the correct converter from `src/core/prompts/system-prompt/spec.ts` based on the provider (Anthropic vs. OpenAI vs. Gemini) and maps all enabled tools to that format.
+- **Native conversion**: `convertSpecsToNativeTools(specs, context)` selects the correct converter from `src/core/prompts/system-prompt/spec.ts` based on the provider (Anthropic vs. OpenAI vs. Gemini) and maps snapshot specs to that format.
 
 ### 5. The Template: `src/core/prompts/system-prompt/template.ts`
 - **Function**: `SYSTEM_PROMPT(context: SystemPromptContext)`
@@ -78,9 +77,10 @@ Dirac uses a modular, multi-stage pipeline to generate the final system prompt. 
     - Global rules are loaded from the user's global `.clinerules/` directory.
     - Local project rules are loaded from the workspace (supporting `.clinerules`, `.cursorrules`, etc.) and injected into the `USER'S CUSTOM INSTRUCTIONS` section.
 5.  **Native Tool Generation**:
-    - `src/core/prompts/system-prompt/registry/DiracToolSet.ts` converts all enabled tools into the provider's native format.
+    - `Task.attemptApiRequest()` asks `ToolExecutor` for a request-scoped `ToolRequestSnapshot` after building the real `SystemPromptContext`.
+    - `DiracToolSet.convertSpecsToNativeTools(...)` converts that snapshot's prompt-visible specs into the provider's native format.
     - **Important**: In this mode, the system prompt string itself does **not** contain tool definitions, as the provider receives them as a separate structured parameter.
-6.  **Final Output**: The `systemPrompt` string and `tools` array are returned to the `Task` runner, which then passes them to the API via `src/core/api/index.ts`.
+6.  **Final Output**: The `systemPrompt` string is returned to the `Task` runner, which passes `toolSnapshot.nativeTools` to the API via `src/core/api/index.ts`.
 
 ---
 

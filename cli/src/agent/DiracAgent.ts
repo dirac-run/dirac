@@ -15,14 +15,15 @@ import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { DiracMessageChange } from "@core/task/message-state"
 import type { ApiProvider } from "@shared/api"
-import type { DiracAsk, DiracMessage as DiracMessageType } from "@shared/ExtensionMessage"
-import type { HistoryItem } from "@shared/HistoryItem"
+import { DiracMessageType, CardStatus, DiracMessage } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { DiracEndpoint } from "@/config.js"
 import { Controller } from "@/core/controller"
 import { getAvailableSlashCommands } from "@/core/controller/slash/getAvailableSlashCommands"
-import { getSavedDiracMessages, setRuntimeHooksDir } from "@/core/storage/disk"
+import { setRuntimeHooksDir } from "@/core/storage/disk"
 import { StateManager } from "@/core/storage/StateManager"
 import { AuthHandler } from "@/hosts/external/AuthHandler.js"
 import { ExternalCommentReviewController } from "@/hosts/external/ExternalCommentReviewController.js"
@@ -32,7 +33,6 @@ import { FileEditProvider } from "@/integrations/editor/FileEditProvider"
 import { StandaloneTerminalManager } from "@/integrations/terminal/index.js"
 import { Logger } from "@/shared/services/Logger.js"
 import type { Mode } from "@/shared/storage/types"
-import { arePathsEqual } from "@/utils/path"
 import { version as AGENT_VERSION } from "../../package.json"
 import { ACPDiffViewProvider } from "../acp/ACPDiffViewProvider.js"
 import { ACPHostBridgeClientProvider } from "../acp/ACPHostBridgeClientProvider.js"
@@ -44,7 +44,7 @@ import { fetchOpenRouterModels, usesOpenRouterModels } from "../utils/openrouter
 import { getProviderLabel, getValidCliProviders, isValidCliProvider } from "../utils/providers.js"
 import { CliContextResult, initializeCliContext } from "../vscode-context.js"
 import { DiracSessionEmitter } from "./DiracSessionEmitter.js"
-import { parseWebSearchMarkerText, translateMessage } from "./messageTranslator.js"
+import { translateMessage } from "./messageTranslator.js"
 import { handlePermissionResponse } from "./permissionHandler.js"
 import type { DiracAcpSession, DiracAgentOptions, PermissionHandler } from "./public-types.js"
 import { AcpSessionStatus } from "./public-types.js"
@@ -126,9 +126,6 @@ export class DiracAgent implements acp.Agent {
 	/** Map message timestamps to toolCallIds to avoid creating duplicate tool calls during streaming */
 	private messageToToolCallId: Map<number, string> = new Map()
 
-	/** Track finalized permission-capable ask messages already processed this prompt */
-	private processedPermissionAskMessageKeys: Set<string> = new Set()
-
 	/** Current active session ID for use by DiffViewProvider */
 	private currentActiveSessionId: string | undefined
 
@@ -201,9 +198,6 @@ export class DiracAgent implements acp.Agent {
 			protocolVersion: PROTOCOL_VERSION,
 			agentCapabilities: {
 				loadSession: true,
-				sessionCapabilities: {
-					list: {},
-				},
 				promptCapabilities: {
 					image: true,
 					audio: false,
@@ -323,43 +317,6 @@ export class DiracAgent implements acp.Agent {
 		}
 	}
 
-	private getHistoryItemCwd(historyItem: HistoryItem, fallbackCwd?: string | null): string {
-		return (
-			historyItem.cwdOnTaskInitialization ||
-			historyItem.workspaceRootPath ||
-			historyItem.shadowGitConfigWorkTree ||
-			fallbackCwd ||
-			this.options.cwd ||
-			process.cwd()
-		)
-	}
-
-	private historyItemToSessionInfo(historyItem: HistoryItem, fallbackCwd?: string | null): acp.SessionInfo {
-		return {
-			sessionId: historyItem.id,
-			cwd: this.getHistoryItemCwd(historyItem, fallbackCwd),
-			title: historyItem.task || null,
-			updatedAt: historyItem.ts ? new Date(historyItem.ts).toISOString() : null,
-		}
-	}
-
-	/**
-	 * List historical Dirac tasks as ACP sessions.
-	 */
-	async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
-		const taskHistory = (StateManager.get().getGlobalStateKey("taskHistory") || []) as HistoryItem[]
-		const sessions = [...taskHistory]
-			.filter((item) => item.id && item.task && item.ts)
-			.filter((item) => {
-				if (!params.cwd) return true
-				return arePathsEqual(this.getHistoryItemCwd(item, params.cwd), params.cwd)
-			})
-			.sort((a, b) => (b.ts || 0) - (a.ts || 0))
-			.map((item) => this.historyItemToSessionInfo(item, params.cwd))
-
-		return { sessions }
-	}
-
 	/**
 	 * Load an existing session from task history.
 	 *
@@ -383,7 +340,8 @@ export class DiracAgent implements acp.Agent {
 
 		const controller = new Controller(this.ctx.extensionContext)
 		const history = await controller.getTaskWithId(sessionId)
-		const historyCwd = this.getHistoryItemCwd(history.historyItem, params.cwd)
+		const historyCwd =
+			history.historyItem.cwdOnTaskInitialization || history.historyItem.workspaceRootPath || params.cwd || this.options.cwd
 
 		const session: DiracAcpSession = {
 			sessionId,
@@ -408,38 +366,6 @@ export class DiracAgent implements acp.Agent {
 			modes: this.getSessionModeState(session.mode),
 			models: modelState,
 			configOptions,
-		}
-	}
-
-	/**
-	 * Replay a loaded session's saved Dirac messages to ACP clients.
-	 *
-	 * This is separate from loadSession because the stdio ACP wrapper must first
-	 * subscribe to the session emitter; otherwise replay notifications are lost.
-	 */
-	async replayLoadedSessionHistory(sessionId: string): Promise<void> {
-		const sessionState = this.sessionStates.get(sessionId)
-		if (!sessionState) {
-			throw new Error(`Session not found: ${sessionId}`)
-		}
-
-		const messages = await getSavedDiracMessages(sessionId)
-		for (const message of messages) {
-			const existingToolCallId = this.messageToToolCallId.get(message.ts)
-			const result = translateMessage(message, sessionState, {
-				existingToolCallId,
-				clientCapabilities: this.clientCapabilities,
-			})
-
-			for (const update of result.updates) {
-				await this.emitSessionUpdate(sessionId, update)
-			}
-
-			if (result.toolCallId && message.partial) {
-				this.messageToToolCallId.set(message.ts, result.toolCallId)
-			} else if (result.toolCallId) {
-				this.messageToToolCallId.delete(message.ts)
-			}
 		}
 	}
 
@@ -840,14 +766,13 @@ export class DiracAgent implements acp.Agent {
 		// Clear delta tracking state for new prompt cycle
 		this.partialMessageLastContent.clear()
 		this.messageToToolCallId.clear()
-		this.processedPermissionAskMessageKeys.clear()
 
 		// Track cleanup functions for subscriptions
 		const cleanupFunctions: (() => void)[] = []
 
 		// Promise that resolves when task completes, is cancelled, or needs input
-		let resolvePrompt!: (response: acp.PromptResponse) => void
-		let _rejectPrompt!: (error: Error) => void
+		let resolvePrompt: (response: acp.PromptResponse) => void
+		let _rejectPrompt: (error: Error) => void
 		const promptPromise = new Promise<acp.PromptResponse>((resolve, reject) => {
 			resolvePrompt = resolve
 			_rejectPrompt = reject
@@ -892,102 +817,61 @@ export class DiracAgent implements acp.Agent {
 			const hasActiveTask = controller.task !== undefined
 			const isLoadedSession = session.isLoadedFromHistory === true
 
-				if (isLoadedSession && !hasActiveTask) {
-					// First prompt on a loaded session - resume the task from history
-					Logger.debug("[DiracAgent] Resuming loaded session:", params.sessionId)
+			if (isLoadedSession && !hasActiveTask) {
+				// First prompt on a loaded session - resume the task from history
+				Logger.debug("[DiracAgent] Resuming loaded session:", params.sessionId)
 
 				// Clear the flag so subsequent prompts are handled normally
-					session.isLoadedFromHistory = false
+				session.isLoadedFromHistory = false
 
-					// Resume the task using its history item
-					await controller.reinitExistingTaskFromId(params.sessionId)
-					const initialMessageCount = controller.task?.messageStateHandler.getDiracMessages().length ?? 0
+				// Resume the task using its history item
+				await controller.reinitExistingTaskFromId(params.sessionId)
 
-					// After reinit, the task should be in a waiting state (resume_task ask)
-					// Send the user's prompt as a response to continue
-					if (controller.task) {
-						await controller.task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
-						this.subscribeToTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt,
-							promptResolved,
-							cleanupFunctions,
-						)
-						await this.replayTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt,
-							promptResolved,
-							initialMessageCount,
-						)
-					}
-				} else if (hasActiveTask && controller.task) {
-					// Continue existing task - respond to pending ask
-					Logger.debug("[DiracAgent] Continuing existing task:", controller.task.taskId)
-					const initialMessageCount = controller.task.messageStateHandler.getDiracMessages().length
+				// After reinit, the task should be in a waiting state (resume_task ask)
+				// Send the user's prompt as a response to continue
+				if (controller.task) {
+					await controller.task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
+				}
+			} else if (hasActiveTask && controller.task) {
+				// Continue existing task - respond to pending ask
+				Logger.debug("[DiracAgent] Continuing existing task:", controller.task.taskId)
 
-					// Find the last ask message and respond to it
-					const messages = controller.task.messageStateHandler.getDiracMessages()
-					const lastAskMessage = [...messages].reverse().find((m) => m.type === "ask")
+				// Find the last ask message and respond to it
+				const messages = controller.task.messageStateHandler.getDiracMessages()
+				const lastAskMessage = [...messages].reverse().find((m) => m.content.type === DiracMessageType.CARD && m.content.card.status === CardStatus.WAITING_FOR_INPUT)
 
-					if (lastAskMessage) {
-						await controller.task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
-						this.subscribeToTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt,
-							promptResolved,
-							cleanupFunctions,
-						)
-						await this.replayTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt,
-							promptResolved,
-							initialMessageCount,
-						)
-					} else {
-						// No pending ask - treat as new user message
-						// This shouldn't normally happen but handle gracefully
-						Logger.debug("[DiracAgent] No pending ask found, starting new task")
-						await controller.initTask(textContent, imageContent, fileResources)
-						this.subscribeToTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt,
-							promptResolved,
-							cleanupFunctions,
-						)
-						await this.replayTaskMessages(controller, params.sessionId, sessionState, resolvePrompt, promptResolved)
-					}
+				if (lastAskMessage) {
+					await controller.task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
 				} else {
-					// Start new task
-					Logger.debug("[DiracAgent] Starting new task")
+					// No pending ask - treat as new user message
+					// This shouldn't normally happen but handle gracefully
+					Logger.debug("[DiracAgent] No pending ask found, starting new task")
 					await controller.initTask(textContent, imageContent, fileResources)
-					this.subscribeToTaskMessages(
-						controller,
-						params.sessionId,
-						sessionState,
-						resolvePrompt,
-						promptResolved,
-						cleanupFunctions,
+				}
+			} else {
+				// Start new task
+				Logger.debug("[DiracAgent] Starting new task")
+				await controller.initTask(textContent, imageContent, fileResources)
+			}
+
+			// Subscribe to diracMessages changes after task is created
+			if (controller.task) {
+				const onDiracMessagesChanged = (change: DiracMessageChange) => {
+					this.handleDiracMessagesChanged(params.sessionId, sessionState, change, resolvePrompt, promptResolved).catch(
+						(error) => {
+							Logger.debug("[DiracAgent] Error handling diracMessagesChanged:", error)
+						},
 					)
-					await this.replayTaskMessages(controller, params.sessionId, sessionState, resolvePrompt, promptResolved)
-					await this.emitSessionUpdate(params.sessionId, {
-						sessionUpdate: "session_info_update",
-						title: textContent || null,
-						updatedAt: new Date().toISOString(),
-					})
 				}
 
-				// Return the promise that will resolve when task completes
-				return await promptPromise
+				controller.task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
+				cleanupFunctions.push(() => {
+					controller.task?.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged)
+				})
+			}
+
+			// Return the promise that will resolve when task completes
+			return await promptPromise
 		} catch (error) {
 			if (!promptResolved.value) {
 				promptResolved.value = true
@@ -1069,7 +953,7 @@ export class DiracAgent implements acp.Agent {
 	private async handlePermissionRequest(
 		sessionId: string,
 		sessionState: AcpSessionState,
-		message: DiracMessageType,
+		message: DiracMessage,
 		permissionRequest: Omit<acp.RequestPermissionRequest, "sessionId">,
 	): Promise<void> {
 		const session = this.sessions.get(sessionId)
@@ -1086,17 +970,18 @@ export class DiracAgent implements acp.Agent {
 			return
 		}
 
-		const askType = message.ask as DiracAsk
+		// Card interactions are handled via handleWebviewAskResponse on the controller
+		// which maps to card.resolveInteraction() internally.
 
 		try {
-			// Request permission from the client
+			// Request permission from the client (using the toolCall from the card)
 			const response = await this.requestPermission(sessionId, permissionRequest.toolCall, permissionRequest.options)
 
 			Logger.debug("[DiracAgent] Permission response received:", response.outcome)
 
 			// Handle the response
+			const askType = "tool" as any // Legacy mapping for handlePermissionResponse
 			const result = handlePermissionResponse(response, askType)
-
 			// Update tool call status based on permission result
 			if (sessionState.currentToolCallId) {
 				if (result.cancelled) {
@@ -1106,7 +991,7 @@ export class DiracAgent implements acp.Agent {
 						status: "failed",
 						rawOutput: { reason: "cancelled" },
 					})
-				} else if (result.response === "noButtonClicked") {
+				} else if (result.response === DiracAskResponse.REJECT) {
 					await this.emitSessionUpdate(sessionId, {
 						sessionUpdate: "tool_call_update",
 						toolCallId: sessionState.currentToolCallId,
@@ -1126,10 +1011,10 @@ export class DiracAgent implements acp.Agent {
 			// Respond to Dirac's ask based on the permission result
 			if (result.cancelled) {
 				// Cancellation - reject the operation
-				await controller.task.handleWebviewAskResponse("noButtonClicked")
+				await controller.task.submitCardResponse("", DiracAskResponse.REJECT)
 			} else {
 				// Pass the response to Dirac
-				await controller.task.handleWebviewAskResponse(result.response, result.text)
+				await controller.task.submitCardResponse("", result.response, result.text)
 			}
 		} catch (error) {
 			Logger.debug("[DiracAgent] Error handling permission request:", error)
@@ -1145,22 +1030,7 @@ export class DiracAgent implements acp.Agent {
 			}
 
 			// Reject the operation on error
-			await controller.task.handleWebviewAskResponse("noButtonClicked")
-		}
-	}
-
-	private getPermissionMessageKey(sessionId: string, message: DiracMessageType): string | undefined {
-		if (message.type !== "ask" || message.partial) {
-			return undefined
-		}
-
-		switch (message.ask) {
-			case "command":
-			case "tool":
-			case "browser_action_launch":
-				return `${sessionId}:${message.ts}`
-			default:
-				return undefined
+			await controller.task.submitCardResponse("", DiracAskResponse.REJECT)
 		}
 	}
 
@@ -1168,76 +1038,19 @@ export class DiracAgent implements acp.Agent {
 	 * Check if a message should resolve the prompt (end the turn).
 	 */
 	private checkMessageForPromptResolution(
-		message: DiracMessageType,
+		message: DiracMessage,
 		resolvePrompt: (response: acp.PromptResponse) => void,
 		promptResolved: { value: boolean },
 	): void {
 		if (promptResolved.value) return
 
 		// Don't resolve for partial (still streaming) messages
-		if (message.partial) return
 
-		// Check for ask messages that require user input
-		if (message.type === "ask") {
-			const askType = message.ask as DiracAsk
-			if (
-				askType === "followup" ||
-				askType === "plan_mode_respond" ||
-				askType === "act_mode_respond" ||
-				askType === "completion_result" ||
-				askType === "resume_task" ||
-				askType === "resume_completed_task"
-			) {
+		// Check for cards that require user input
+		if (message.content.type === DiracMessageType.CARD) {
+			if (message.content.card.status === CardStatus.WAITING_FOR_INPUT) {
 				promptResolved.value = true
 				resolvePrompt({ stopReason: "end_turn" })
-				return
-			}
-		}
-
-		// Check for completion_result say message
-		if (message.type === "say" && message.say === "completion_result") {
-			promptResolved.value = true
-			resolvePrompt({ stopReason: "end_turn" })
-		}
-	}
-
-	private subscribeToTaskMessages(
-		controller: Controller,
-		sessionId: string,
-		sessionState: AcpSessionState,
-		resolvePrompt: (response: acp.PromptResponse) => void,
-		promptResolved: { value: boolean },
-		cleanupFunctions: Array<() => void>,
-	): void {
-		if (!controller.task) {
-			return
-		}
-
-		const onDiracMessagesChanged = (change: DiracMessageChange) => {
-			this.handleDiracMessagesChanged(sessionId, sessionState, change, resolvePrompt, promptResolved).catch((error) => {
-				Logger.debug("[DiracAgent] Error handling diracMessagesChanged:", error)
-			})
-		}
-
-		controller.task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
-		cleanupFunctions.push(() => {
-			controller.task?.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged)
-		})
-	}
-
-	private async replayTaskMessages(
-		controller: Controller,
-		sessionId: string,
-		sessionState: AcpSessionState,
-		resolvePrompt: (response: acp.PromptResponse) => void,
-		promptResolved: { value: boolean },
-		startIndex = 0,
-	): Promise<void> {
-		const messages = controller.task?.messageStateHandler.getDiracMessages().slice(startIndex) ?? []
-		for (const message of messages) {
-			await this.processMessageWithDelta(sessionId, sessionState, message)
-			this.checkMessageForPromptResolution(message, resolvePrompt, promptResolved)
-			if (promptResolved.value) {
 				return
 			}
 		}
@@ -1261,39 +1074,18 @@ export class DiracAgent implements acp.Agent {
 	private async processMessageWithDelta(
 		sessionId: string,
 		sessionState: AcpSessionState,
-		message: DiracMessageType,
+		message: DiracMessage,
 	): Promise<void> {
 		const messageKey = message.ts
 		const lastText = this.partialMessageLastContent.get(messageKey) || ""
 
 		// Determine if this is a text-streaming message type that needs delta handling
-		// Note: act_mode_respond is NOT included here because its text content was already
-		// sent via the say: "text" message. Including it would cause duplicate output.
-		const isTextStreamingMessage =
-			(message.type === "say" &&
-				(message.say === "text" || message.say === "reasoning" || message.say === "completion_result")) ||
-			(message.type === "ask" &&
-				(message.ask === "followup" || message.ask === "plan_mode_respond" || message.ask === "completion_result"))
-		const isWebSearchMarkerMessage =
-			message.type === "say" && message.say === "text" && parseWebSearchMarkerText(message.text) !== undefined
+		const isTextStreamingMessage = message.content.type === DiracMessageType.MARKDOWN
 
-		if (isTextStreamingMessage && message.text && !isWebSearchMarkerMessage) {
-			// Extract the actual text content for JSON-wrapped messages
-			// plan_mode_respond uses { response: string, options?: string[] }
-			// followup uses { question: string, options?: string[] }
-			let textContent = message.text
-			if (message.type === "ask" && (message.ask === "plan_mode_respond" || message.ask === "followup")) {
-				try {
-					const parsed = JSON.parse(message.text)
-					if (message.ask === "plan_mode_respond" && parsed.response !== undefined) {
-						textContent = parsed.response
-					} else if (message.ask === "followup" && parsed.question !== undefined) {
-						textContent = parsed.question
-					}
-				} catch {
-					// If parsing fails, use the raw text
-				}
-			}
+		if (isTextStreamingMessage) {
+			const content = message.content as { type: DiracMessageType.MARKDOWN; content: string; isReasoning?: boolean }
+			const textContent = content.content
+
 
 			// For streaming text messages, compute delta to avoid sending duplicates
 			let textDelta: string
@@ -1307,42 +1099,25 @@ export class DiracAgent implements acp.Agent {
 			// Only send if there's new content
 			if (textDelta) {
 				// Determine the correct update type based on message type
-				const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" =
-					message.type === "say" && message.say === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk"
-
-				// For completion_result messages, add a leading newline to separate from previous content
-				// This ensures the completion message appears on a new line after any preceding text
-				const isCompletionResult =
-					(message.type === "say" && message.say === "completion_result") ||
-					(message.type === "ask" && message.ask === "completion_result")
-				const needsNewline = isCompletionResult && lastText === ""
+				const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" = content.isReasoning
+					? "agent_thought_chunk"
+					: "agent_message_chunk"
 
 				await this.emitSessionUpdate(sessionId, {
 					sessionUpdate,
-					content: { type: "text", text: needsNewline ? `\n${textDelta}` : textDelta },
+					content: { type: "text", text: textDelta },
 				})
 			}
 
-			// Track what we've sent (use extracted text, not raw JSON)
+			// Track what we've sent
 			this.partialMessageLastContent.set(messageKey, textContent)
 		} else {
-			const permissionMessageKey = this.getPermissionMessageKey(sessionId, message)
-			if (permissionMessageKey) {
-				if (this.processedPermissionAskMessageKeys.has(permissionMessageKey)) {
-					Logger.debug("[DiracAgent] Skipping duplicate finalized permission ask:", permissionMessageKey)
-					return
-				}
-				this.processedPermissionAskMessageKeys.add(permissionMessageKey)
-			}
-
 			// For non-streaming messages, use the full translator
 			// Check if we already have a toolCallId for this message (from a previous partial update)
 			const existingToolCallId = this.messageToToolCallId.get(messageKey)
 
-			const result = translateMessage(message, sessionState, {
-				existingToolCallId,
-				clientCapabilities: this.clientCapabilities,
-			})
+			const result = translateMessage(message, sessionState)
+
 
 			// Send all updates produced by the translator
 			for (const update of result.updates) {
@@ -1356,19 +1131,14 @@ export class DiracAgent implements acp.Agent {
 
 			// Handle permission requests for ask messages
 			// Only process permissions for non-partial (complete) ask messages
-			if (result.requiresPermission && result.permissionRequest && !message.partial) {
+			if (result.requiresPermission && result.permissionRequest) {
 				// Handle the permission request asynchronously
 				// This will request permission from the client and respond to Dirac
 				await this.handlePermissionRequest(sessionId, sessionState, message, result.permissionRequest)
 			}
 
-			// Track text content for this message (in case of future updates)
-			if (message.text) {
-				this.partialMessageLastContent.set(messageKey, message.text)
-			}
-
 			// Clean up the mapping when the message is complete (not partial)
-			if (!message.partial && result.toolCallId) {
+			if (result.toolCallId) {
 				this.messageToToolCallId.delete(messageKey)
 			}
 		}

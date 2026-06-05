@@ -1,5 +1,5 @@
 import { Controller } from "@core/controller"
-import { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -128,40 +128,49 @@ function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: strin
 
 	// Create a realistic message sequence
 	const messages: DiracMessage[] = [
-		// Initial task message - uses "say" with "text" which is the format used in Dirac.ts
+		// Initial task message
 		{
+			id: `msg-task-${baseTimestamp}`,
 			ts: baseTimestamp,
-			type: "say",
-			say: "text",
-			text: taskPrompt,
+			content: {
+				type: DiracMessageType.MARKDOWN,
+				content: taskPrompt,
+			},
 		},
 
 		// API request started
 		{
-			ts: getNextTimestamp(),
-			type: "say",
-			say: "api_req_started",
-			text: JSON.stringify({
-				request: `<task>\n${taskPrompt}\n</task>`,
-				tokensIn: Math.floor(100 + Math.random() * 200),
-				tokensOut: Math.floor(300 + Math.random() * 500),
-			}),
+			id: `msg-api-${getNextTimestamp()}`,
+			ts: timestamp,
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: {
+					request: `<task>\n${taskPrompt}\n</task>`,
+					tokensIn: Math.floor(100 + Math.random() * 200),
+					tokensOut: Math.floor(300 + Math.random() * 500),
+				},
+			},
 		},
 
 		// Reasoning message
 		{
-			ts: getNextTimestamp(),
-			type: "say",
-			say: "reasoning",
-			text: `I'll approach this task by breaking it down into manageable steps. First, I'll analyze the requirements, then create a plan, and finally implement the solution systematically.`,
+			id: `msg-reasoning-${getNextTimestamp()}`,
+			ts: timestamp,
+			content: {
+				type: DiracMessageType.MARKDOWN,
+				content: `I'll approach this task by breaking it down into manageable steps. First, I'll analyze the requirements, then create a plan, and finally implement the solution systematically.`,
+				isReasoning: true,
+			},
 		},
 
 		// Text response
 		{
-			ts: getNextTimestamp(),
-			type: "say",
-			say: "text",
-			text: `I'll help you with this task. Let me start by creating the necessary files and implementing the core functionality.`,
+			id: `msg-text-${getNextTimestamp()}`,
+			ts: timestamp,
+			content: {
+				type: DiracMessageType.MARKDOWN,
+				content: `I'll help you with this task. Let me start by creating the necessary files and implementing the core functionality.`,
+			},
 		},
 	]
 
@@ -171,14 +180,18 @@ function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: strin
 	if (messageType === 0 || messageType === 2) {
 		// Tool use - file operations
 		messages.push({
-			ts: getNextTimestamp(),
-			type: "say",
-			say: "tool",
-			text: JSON.stringify({
-				tool: "newFileCreated",
-				path: fileName,
-				content: `// Sample code for ${taskPrompt}`,
-			}),
+			id: `msg-tool-${getNextTimestamp()}`,
+			ts: timestamp,
+			content: {
+				type: DiracMessageType.CARD,
+				card: {
+					id: `card-${timestamp}`,
+					header: "Create File",
+					status: CardStatus.SUCCESS,
+					renderType: "markdown",
+					body: `Created file \`${fileName}\` with sample code for ${taskPrompt}`,
+				},
+			},
 		})
 	}
 
@@ -186,64 +199,38 @@ function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: strin
 		// Command execution
 		messages.push(
 			{
-				ts: getNextTimestamp(),
-				type: "ask",
-				ask: "command",
-				text: `ls -la`,
+				id: `msg-cmd-${getNextTimestamp()}`,
+				ts: timestamp,
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: `card-cmd-${timestamp}`,
+						header: "Execute Command",
+						status: CardStatus.SUCCESS,
+						renderType: "text",
+						body: `ls -la`,
+					},
+				},
 			},
 			{
-				ts: getNextTimestamp(),
-				type: "say",
-				say: "command_output",
-				text: `total 24\ndrwxr-xr-x 3 user staff 96 Mar 10 12:34 .\ndrwxr-xr-x 8 user staff 256 Mar 10 12:30 ..\n-rw-r--r-- 1 user staff 158 Mar 10 12:34 ${fileName}`,
+				id: `msg-cmd-out-${getNextTimestamp()}`,
+				ts: timestamp,
+				content: {
+					type: DiracMessageType.MARKDOWN,
+					content: `total 24\ndrwxr-xr-x 3 user staff 96 Mar 10 12:34 .\ndrwxr-xr-x 8 user staff 256 Mar 10 12:30 ..\n-rw-r--r-- 1 user staff 158 Mar 10 12:34 ${fileName}`,
+				},
 			},
 		)
 	}
-
-	if (messageType === 2 || messageType === 4) {
-		// Browser actions
-		messages.push(
-			{
-				ts: getNextTimestamp(),
-				type: "ask",
-				ask: "browser_action_launch",
-				text: `https://example.com`,
-			},
-			{
-				ts: getNextTimestamp(),
-				type: "say",
-				say: "browser_action_result",
-				text: JSON.stringify({
-					logs: "Page loaded successfully",
-					screenshot:
-						"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-				}),
-			},
-			{
-				ts: getNextTimestamp(),
-				type: "say",
-				say: "browser_action",
-				text: JSON.stringify({
-					action: "close",
-				}),
-			},
-		)
-	}
-
-	// Add checkpoint
-	messages.push({
-		ts: getNextTimestamp(),
-		type: "say",
-		say: "checkpoint_created",
-		lastCheckpointHash: commitHash,
-	})
 
 	// Add completion result (all tasks end with this)
 	messages.push({
-		ts: getNextTimestamp(),
-		type: "say",
-		say: "completion_result",
-		text: `I've completed the task to ${taskPrompt.toLowerCase()}. The implementation includes all the required functionality and meets the specifications. ${"x".repeat(1024 * 1024)}`, // 1MB file
+		id: `msg-completion-${getNextTimestamp()}`,
+		ts: timestamp,
+		content: {
+			type: DiracMessageType.MARKDOWN,
+			content: `I've completed the task to ${taskPrompt.toLowerCase()}. The implementation includes all the required functionality and meets the specifications.`,
+		},
 		lastCheckpointHash: commitHash,
 	})
 

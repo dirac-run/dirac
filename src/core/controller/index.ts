@@ -8,7 +8,7 @@ import type { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
 import { cleanupLegacyCheckpoints } from "@integrations/checkpoints/CheckpointMigration"
 import type { ApiProvider, ModelInfo } from "@shared/api"
 import type { ChatContent } from "@shared/ChatContent"
-import type { ExtensionState, Platform } from "@shared/ExtensionMessage"
+import { TaskStatus, type ExtensionState, type Platform } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
 import { type Settings } from "@shared/storage/state-keys"
 import type { Mode } from "@shared/storage/types"
@@ -38,6 +38,10 @@ import { PromptRegistry } from "../prompts/system-prompt"
 import { ensureCacheDirectoryExists, GlobalFileNames } from "../storage/disk"
 import { type PersistenceErrorEvent, StateManager } from "../storage/StateManager"
 import { Task } from "../task"
+import { projectUIActionState } from "../task/utils/ui-projector"
+import { ToolRegistry } from "../task/tools/registry/ToolRegistry"
+import { refreshToolRegistryForWorkspace } from "../task/tools/registry/refreshToolRegistry"
+
 import { getOrDiscoverSkills } from "../context/instructions/user-instructions/skills"
 import { getDiracOnboardingModels } from "./models/getDiracOnboardingModels"
 import { appendDiracStealthModels } from "./models/refreshOpenRouterModels"
@@ -46,11 +50,44 @@ import { sendStateUpdate } from "./state/subscribeToState"
 import { githubCopilotAuthManager } from "@/integrations/github-copilot/auth"
 import { sendChatButtonClickedEvent } from "./ui/subscribeToChatButtonClicked"
 import { SkillMetadata } from "@/shared/skills"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
+async function fingerprintAvailableTools(
+	tools: Array<{ id: string; name: string; source: string; modulePath: string; description?: string }>,
+): Promise<string> {
+	const entries = await Promise.all(
+		tools.map(async (tool) => {
+			let sourceVersion: string | undefined
+			try {
+				const stat = await fs.stat(tool.modulePath)
+				sourceVersion = `${stat.mtimeMs}:${stat.size}`
+			} catch {
+				sourceVersion = undefined
+			}
+
+			return {
+				id: tool.id,
+				name: tool.name,
+				description: tool.description,
+				source: tool.source,
+				modulePath: tool.modulePath,
+				sourceVersion,
+			}
+		}),
+	)
+
+	return JSON.stringify(
+		entries.sort((a, b) =>
+			`${a.source}:${a.id}:${a.name}:${a.modulePath}`.localeCompare(`${b.source}:${b.id}:${b.name}:${b.modulePath}`),
+		),
+	)
+}
 
 export class Controller {
 	public discoveredSkillsCache?: SkillMetadata[]
 	task?: Task
 	readonly stateManager: StateManager
+	private availableToolsFingerprint?: string
 
 	// NEW: Add workspace manager (optional initially)
 	private workspaceManager?: WorkspaceRootManager
@@ -116,10 +153,10 @@ export class Controller {
 	}
 
 	/*
-	VSCode extensions use the disposable pattern to clean up resources when the sidebar/editor tab is closed by the user or system. This applies to event listening, commands, interacting with the UI, etc.
-	- https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
-	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
-	*/
+    VSCode extensions use the disposable pattern to clean up resources when the sidebar/editor tab is closed by the user or system. This applies to event listening, commands, interacting with the UI, etc.
+    - https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
+    - https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
+    */
 	async dispose() {
 		await this.clearTask()
 
@@ -294,12 +331,16 @@ export class Controller {
 			if (this.task.taskState.isAwaitingPlanResponse && didSwitchToActMode) {
 				this.task.taskState.didRespondToPlanAskBySwitchingMode = true
 				// Use chatContent if provided, otherwise use default message
-				await this.task.handleWebviewAskResponse(
-					"messageResponse",
-					chatContent?.message || "PLAN_MODE_TOGGLE_RESPONSE",
-					chatContent?.images || [],
-					chatContent?.files || [],
-				)
+				const cardId = this.task.taskState.lastWaitingCardId
+				if (cardId) {
+					await this.task.submitCardResponse(
+						cardId,
+						DiracAskResponse.APPROVE,
+						chatContent?.message || "PLAN_MODE_TOGGLE_RESPONSE",
+						chatContent?.images || [],
+						chatContent?.files || [],
+					)
+				}
 
 				return true
 			}
@@ -336,7 +377,7 @@ export class Controller {
 			await pWaitFor(
 				() =>
 					this.task === undefined ||
-					this.task.taskState.isStreaming === false ||
+					this.task.taskState.isApiRequestActive === false ||
 					this.task.taskState.didFinishAbortingStream ||
 					this.task.taskState.isWaitingForFirstChunk, // if only first chunk is processed, then there's no need to wait for graceful abort (closes edits, browser, etc)
 				{
@@ -637,7 +678,7 @@ export class Controller {
 		const currentTaskItem = this.task?.taskId ? (taskHistory || []).find((item) => item.id === this.task?.taskId) : undefined
 		// Spread to create new array reference - React needs this to detect changes in useEffect dependencies
 		const diracMessages = [...(this.task?.messageStateHandler.getDiracMessages() || [])]
-		const checkpointManagerErrorMessage = this.task?.taskState.checkpointManagerErrorMessage
+		const checkpointManagerErrorMessage = this.task?.taskState?.checkpointManagerErrorMessage
 
 		const processedTaskHistory = (taskHistory || [])
 			.filter((item) => {
@@ -667,6 +708,28 @@ export class Controller {
 		const githubCopilotIsAuthenticated = await githubCopilotAuthManager.isAuthenticated()
 		const githubCopilotEmail = (await githubCopilotAuthManager.getEmail()) ?? undefined
 		const githubCopilotModels = this.stateManager.getModelsCache("github-copilot") ?? undefined
+
+		const previousAvailableToolsFingerprint = this.availableToolsFingerprint
+
+		await refreshToolRegistryForWorkspace({
+			workspaceRoot: primaryRootPath,
+			includeUserTools: true,
+			toggles: this.stateManager.getGlobalSettingsKey("toolToggles") || {},
+		})
+		const registry = ToolRegistry.getInstance()
+		const toolToggles = this.stateManager.getGlobalSettingsKey("toolToggles") || {}
+		const availableTools = registry.getAllTools().map((t) => ({
+			id: t.id,
+			name: t.name,
+			description: t.spec.description,
+			source: t.source,
+			modulePath: t.modulePath,
+		}))
+		const nextAvailableToolsFingerprint = await fingerprintAvailableTools(availableTools)
+		if (this.task && previousAvailableToolsFingerprint !== nextAvailableToolsFingerprint) {
+			this.task.markToolsDirty("settings_refresh_detected_change")
+		}
+		this.availableToolsFingerprint = nextAvailableToolsFingerprint
 
 		return {
 			version,
@@ -748,6 +811,13 @@ export class Controller {
 			githubCopilotEmail,
 			githubCopilotModels,
 			availableSkills,
+			availableTools,
+			toolToggles,
+			activeVoiceStreamId: this.task?.taskState.activeVoiceStreamId,
+			taskStatus: this.task?.taskState.status || TaskStatus.IDLE,
+
+			isApiRequestActive: this.task?.taskState.isApiRequestActive || false,
+			uiActionState: projectUIActionState(this.task?.taskState || ({} as any), diracMessages, maxConsecutiveMistakes),
 		}
 	}
 

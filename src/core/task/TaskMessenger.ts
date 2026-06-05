@@ -1,373 +1,455 @@
+import { ApiHandler } from "@core/api"
+
 import { sendPartialMessageEvent } from "@core/controller/ui/subscribeToPartialMessage"
 import { executeHook } from "@core/hooks/hook-executor"
+
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
-import { formatResponse } from "@core/prompts/responses"
-import { DiracAsk, DiracSay, MultiCommandState } from "@shared/ExtensionMessage"
+import { Card, CardStatus, DiracApiReqInfo, DiracMessage, ICardHandle, ITextStreamHandle, DiracMessageType, ITaskMessenger, isFinalStatus, TaskStatus } from "@shared/ExtensionMessage"
+
 import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { Logger } from "@shared/services/Logger"
-import { DiracDefaultTool } from "@shared/tools"
-import { TOOL_EXAMPLES } from "../prompts/tool-examples"
-import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import { TaskMessengerDependencies } from "./types/task-messenger"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+import { CardParams } from "./tools/interfaces/IToolEnvironment"
 
-export class TaskMessenger {
-	constructor(private dependencies: TaskMessengerDependencies) {}
+export class TaskMessenger implements ITaskMessenger {
 
-	async ask(
-		type: DiracAsk,
-		text?: string,
-		partial?: boolean,
-		multiCommandState?: MultiCommandState,
-	): Promise<{
-		response: DiracAskResponse
-		text?: string
-		images?: string[]
-		files?: string[]
-		askTs?: number
-		userEdits?: Record<string, string>
-	}> {
-		// Allow resume asks even when aborted to enable resume button after cancellation
-		if (this.dependencies.taskState.abort && type !== "resume_task" && type !== "resume_completed_task") {
-			throw new Error("Dirac instance aborted")
-		}
 
-		let askTs: number
-		if (partial !== undefined) {
-			const diracMessages = this.dependencies.messageStateHandler.getDiracMessages()
-			// Search backwards for the last partial message of the same type and subtype
-			let lastMessageIndex = -1
-			for (let i = diracMessages.length - 1; i >= 0; i--) {
-				const msg = diracMessages[i]
-				if (msg.partial && msg.type === "ask" && msg.ask === type) {
-					lastMessageIndex = i
-					break
-				}
-			}
-			const isUpdatingPreviousPartial = lastMessageIndex !== -1
-			const lastMessage = isUpdatingPreviousPartial ? diracMessages[lastMessageIndex] : undefined
+    private activeVoiceStream?: ITextStreamHandle
+    private lastMessageId = 0
 
-			if (partial) {
-				if (isUpdatingPreviousPartial) {
-					// existing partial message, so update it
-					await this.dependencies.messageStateHandler.updateDiracMessage(lastMessageIndex, {
-						text,
-						multiCommandState,
-						partial,
-						commandCompleted: false,
-					})
-					const protoMessage = convertDiracMessageToProto(lastMessage!)
-					await sendPartialMessageEvent(protoMessage)
-					await this.dependencies.postStateToWebview()
-					return {
-						response: this.dependencies.taskState.askResponse!,
-						text: this.dependencies.taskState.askResponseText,
-						images: this.dependencies.taskState.askResponseImages,
-						files: this.dependencies.taskState.askResponseFiles,
-						askTs: lastMessage!.ts,
-						userEdits: this.dependencies.taskState.askResponseUserEdits,
-					}
-				}
-				// this is a new partial message, so add it with partial state
-				askTs = Date.now()
-				this.dependencies.taskState.lastMessageTs = askTs
-				await this.dependencies.messageStateHandler.addToDiracMessages({
-					ts: askTs,
-					type: "ask",
-					ask: type,
-					text,
-					partial,
-					multiCommandState,
-				})
-				await this.dependencies.postStateToWebview()
-				return {
-					response: this.dependencies.taskState.askResponse!,
-					text: this.dependencies.taskState.askResponseText,
-					images: this.dependencies.taskState.askResponseImages,
-					files: this.dependencies.taskState.askResponseFiles,
-					askTs,
-				}
-			}
-			// partial=false means its a complete version of a previously partial message
-			if (isUpdatingPreviousPartial) {
-				// this is the complete version of a previously partial message, so replace the partial with the complete version
-				this.dependencies.taskState.askResponse = undefined
-				this.dependencies.taskState.askResponseText = undefined
-				this.dependencies.taskState.askResponseImages = undefined
-				this.dependencies.taskState.askResponseFiles = undefined
+    constructor(private dependencies: TaskMessengerDependencies) { }
 
-				askTs = lastMessage!.ts
-				this.dependencies.taskState.lastMessageTs = askTs
-				await this.dependencies.messageStateHandler.updateDiracMessage(lastMessageIndex, {
-					text,
-					partial: false,
-					multiCommandState,
-					commandCompleted: false,
-				})
-				const protoMessage = convertDiracMessageToProto(lastMessage!)
-				await sendPartialMessageEvent(protoMessage)
-				await this.dependencies.postStateToWebview()
-			} else {
-				// this is a new partial=false message, so add it like normal
-				this.dependencies.taskState.askResponse = undefined
-				this.dependencies.taskState.askResponseText = undefined
-				this.dependencies.taskState.askResponseImages = undefined
-				this.dependencies.taskState.askResponseFiles = undefined
-				askTs = Date.now()
-				this.dependencies.taskState.lastMessageTs = askTs
-				await this.dependencies.messageStateHandler.addToDiracMessages({
-					ts: askTs,
-					type: "ask",
-					ask: type,
-					text,
-					multiCommandState,
-				})
-				await this.dependencies.postStateToWebview()
-			}
-		} else {
-			// this is a new non-partial message, so add it like normal
-			this.dependencies.taskState.askResponse = undefined
-			this.dependencies.taskState.askResponseText = undefined
-			this.dependencies.taskState.askResponseImages = undefined
-			this.dependencies.taskState.askResponseFiles = undefined
-			askTs = Date.now()
-			this.dependencies.taskState.lastMessageTs = askTs
-			await this.dependencies.messageStateHandler.addToDiracMessages({
-				ts: askTs,
-				type: "ask",
-				ask: type,
-				text,
-			})
-			await this.dependencies.postStateToWebview()
-		}
+    public setApi(api: ApiHandler) {
+        this.dependencies.api = api
+    }
 
-		// Notification hook marks that Dirac is waiting for user input.
-		await this.runNotificationHook({
-			event: "user_attention",
-			source: type,
-			message: text || "",
-			waitingForUserInput: true,
-		})
+    public generateId(): string {
 
-		await pWaitFor(
-			() => {
-				const response = this.dependencies.taskState.askResponse
-				if (response !== undefined) {
-				}
-				return response !== undefined || this.dependencies.taskState.lastMessageTs !== askTs
-			},
-			{
-				interval: 100,
-			},
-		)
+        return `${Date.now()}-${++this.lastMessageId}`
+    }
 
-		if (this.dependencies.taskState.lastMessageTs !== askTs) {
-			throw new Error("Current ask promise was ignored")
-		}
+    async streamText(type: "markdown" | "reasoning"): Promise<ITextStreamHandle> {
+        // Auto-close any active stream
+        if (this.activeVoiceStream) {
+            await this.activeVoiceStream.close()
+        }
 
-		const result = {
-			response: this.dependencies.taskState.askResponse!,
-			text: this.dependencies.taskState.askResponseText,
-			images: this.dependencies.taskState.askResponseImages,
-			files: this.dependencies.taskState.askResponseFiles,
-			userEdits: this.dependencies.taskState.askResponseUserEdits,
-		}
+        const id = this.generateId()
+        const ts = Date.now()
+        const isReasoning = type === "reasoning"
 
-		this.dependencies.taskState.askResponse = undefined
-		this.dependencies.taskState.askResponseText = undefined
-		this.dependencies.taskState.askResponseImages = undefined
-		this.dependencies.taskState.askResponseFiles = undefined
-		this.dependencies.taskState.askResponseUserEdits = undefined
-		return result
-	}
+        const message: DiracMessage = {
+            id,
+            ts,
+            content: { type: DiracMessageType.MARKDOWN, content: "", isReasoning },
+        }
+        this.dependencies.taskState.activeVoiceStreamId = id
+        await this.dependencies.messageStateHandler.addToDiracMessages(message)
+        await this.dependencies.postStateToWebview()
 
-	async runNotificationHook(notification: {
-		event: string
-		source: string
-		message: string
-		waitingForUserInput: boolean
-	}): Promise<void> {
-		const hooksEnabled = getHooksEnabledSafe(this.dependencies.stateManager.getGlobalSettingsKey("hooksEnabled"))
-		if (!hooksEnabled) {
-			return
-		}
+        const handle: ITextStreamHandle = {
+            id,
+            append: async (chunk: string) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for append`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.MARKDOWN) {
+                    msg.content.content += chunk
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a markdown message`)
+                }
+            },
+            setImages: async (images: string[]) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for setImages`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.MARKDOWN) {
+                    msg.content.images = images
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a markdown message`)
+                }
+            },
+            setFiles: async (files: string[]) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for setFiles`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.MARKDOWN) {
+                    msg.content.files = files
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a markdown message`)
+                }
+            },
+            close: async () => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for close`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                await this.dependencies.postStateToWebview()
 
-		try {
-			await executeHook({
-				hookName: "Notification",
-				hookInput: {
-					notification,
-				},
-				isCancellable: false,
-				say: async () => undefined,
-				messageStateHandler: this.dependencies.messageStateHandler,
-				taskId: this.dependencies.taskId,
-				hooksEnabled,
-				model: getHookModelContext(this.dependencies.api, this.dependencies.stateManager),
-			})
-		} catch (error) {
-			Logger.error("[Notification Hook] Failed (non-fatal):", error)
-		}
-	}
+                if (this.dependencies.taskState.activeVoiceStreamId === id) {
+                    this.dependencies.taskState.activeVoiceStreamId = undefined
+                    await this.dependencies.postStateToWebview()
+                }
 
-	async handleWebviewAskResponse(askResponse: DiracAskResponse, text?: string, images?: string[], files?: string[], userEdits?: Record<string, string>) {
-		this.dependencies.taskState.askResponse = askResponse
-		this.dependencies.taskState.askResponseText = text
-		this.dependencies.taskState.askResponseImages = images
-		this.dependencies.taskState.askResponseFiles = files
-		this.dependencies.taskState.askResponseUserEdits = userEdits
-	}
+                if (this.activeVoiceStream === handle) {
+                    this.activeVoiceStream = undefined
+                }
+            },
+        }
 
-	async say(
-		type: DiracSay,
-		text?: string,
-		images?: string[],
-		files?: string[],
-		partial?: boolean,
-		multiCommandState?: MultiCommandState,
-	): Promise<number | undefined> {
-		// Allow hook messages even when aborted to enable proper cleanup
-		if (this.dependencies.taskState.abort && type !== "hook_status" && type !== "hook_output_stream") {
-			throw new Error("Dirac instance aborted")
-		}
+        this.activeVoiceStream = handle
+        return handle
+    }
 
-		const providerInfo = this.dependencies.getCurrentProviderInfo()
-		const modelInfo = {
-			providerId: providerInfo.providerId,
-			modelId: providerInfo.model.id,
-			mode: providerInfo.mode,
-		}
+    async createCard(params: CardParams): Promise<ICardHandle> {
+        if (this.activeVoiceStream) {
+            await this.activeVoiceStream.close()
+        }
 
-		if (partial !== undefined) {
-			const diracMessages = this.dependencies.messageStateHandler.getDiracMessages()
-			// Search backwards for the last partial message of the same type and subtype
-			let lastIndex = -1
-			for (let i = diracMessages.length - 1; i >= 0; i--) {
-				const msg = diracMessages[i]
-				if (msg.partial && msg.type === "say" && msg.say === type) {
-					lastIndex = i
-					break
-				}
-			}
-			const isUpdatingPreviousPartial = lastIndex !== -1
-			const lastMessage = isUpdatingPreviousPartial ? diracMessages[lastIndex] : undefined
+        const id = this.generateId()
+        const ts = Date.now()
 
-			if (partial) {
-				if (isUpdatingPreviousPartial) {
-					// existing partial message, so update it
-					await this.dependencies.messageStateHandler.updateDiracMessage(lastIndex, {
-						text,
-						multiCommandState,
-						images,
-						files,
-						partial,
-						commandCompleted: false,
-					})
-					const protoMessage = convertDiracMessageToProto(lastMessage!)
-					await sendPartialMessageEvent(protoMessage)
-					await this.dependencies.postStateToWebview()
-					return lastMessage!.ts
-				}
-				// this is a new partial message, so add it with partial state
-				const sayTs = Date.now()
-				this.dependencies.taskState.lastMessageTs = sayTs
-				await this.dependencies.messageStateHandler.addToDiracMessages({
-					ts: sayTs,
-					type: "say",
-					say: type,
-					text,
-					images,
-					files,
-					partial,
-					modelInfo,
-					multiCommandState,
-				})
-				await this.dependencies.postStateToWebview()
-				return sayTs
-			}
-			// partial=false means its a complete version of a previously partial message
-			if (isUpdatingPreviousPartial) {
-				// this is the complete version of a previously partial message, so replace the partial with the complete version
-				this.dependencies.taskState.lastMessageTs = lastMessage!.ts
-				await this.dependencies.messageStateHandler.updateDiracMessage(lastIndex, {
-					text,
-					images,
-					files,
-					partial: false,
-					multiCommandState,
-					commandCompleted: false,
-				})
-				const protoMessage = convertDiracMessageToProto(lastMessage!)
-				await sendPartialMessageEvent(protoMessage)
-				await this.dependencies.postStateToWebview()
-				return undefined
-			}
-			// this is a new partial=false message, so add it like normal
-			const sayTs = Date.now()
-			this.dependencies.taskState.lastMessageTs = sayTs
-			await this.dependencies.messageStateHandler.addToDiracMessages({
-				ts: sayTs,
-				type: "say",
-				say: type,
-				text,
-				images,
-				files,
-				modelInfo,
-				multiCommandState,
-			})
-			await this.dependencies.postStateToWebview()
-			return sayTs
-		}
+        if (params.requireApproval || params.requireFeedback) {
+            this.dependencies.taskState.waitingCardIds.push(id)
+        }
 
-		// this is a new non-partial message, so add it like normal
-		const sayTs = Date.now()
-		this.dependencies.taskState.lastMessageTs = sayTs
-		await this.dependencies.messageStateHandler.addToDiracMessages({
-			ts: sayTs,
-			type: "say",
-			say: type,
-			text,
-			images,
-			files,
-			modelInfo,
-			multiCommandState,
-		})
-		await this.dependencies.postStateToWebview()
-		return sayTs
-	}
+        const card: Card = {
+            id,
+            header: params.header,
+            icon: params.icon,
+            status: params.status || (params.requireApproval || params.requireFeedback ? CardStatus.WAITING_FOR_INPUT : CardStatus.RUNNING),
+            renderType: params.renderType || "text",
+            body: params.body || "",
+            requireApproval: params.requireApproval,
+            requireFeedback: params.requireFeedback,
+            feedbackPlaceholder: params.feedbackPlaceholder,
+            actions: params.actions,
+            collapsed: params.collapsed,
+            maxHeight: params.maxHeight,
+            cleanupStrategy: params.cleanupStrategy,
+            do_not_auto_collapse: params.do_not_auto_collapse,
+        }
 
-	async sayAndCreateMissingParamError(toolName: DiracDefaultTool, paramName: string, relPath?: string) {
-		// Clear any partial UI state for this tool
-		await this.removeLastPartialMessageIfExistsWithType("say", "tool")
-		await this.removeLastPartialMessageIfExistsWithType("ask", "tool")
+        const message: DiracMessage = {
+            id,
+            ts,
+            content: { type: DiracMessageType.CARD, card },
+        }
 
-		await this.say(
-			"error",
-			`Dirac tried to use ${toolName}${relPath ? ` for '${relPath.toPosix()}'` : ""} without providing a value for '${paramName}'. Retrying...`,
-		)
-		const example = TOOL_EXAMPLES[toolName]
-		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName, example))
-	}
+        await this.dependencies.messageStateHandler.addToDiracMessages(message)
+        await this.dependencies.postStateToWebview()
 
-	async removeLastPartialMessageIfExistsWithType(type: "ask" | "say", askOrSay: DiracAsk | DiracSay, onlyPartial: boolean = true) {
-		const diracMessages = this.dependencies.messageStateHandler.getDiracMessages()
-		// Search backwards for the last partial message of the same type and subtype
-		let indexToRemove = -1
-		for (let i = diracMessages.length - 1; i >= 0; i--) {
-			const msg = diracMessages[i]
-			if ((!onlyPartial || msg.partial) && msg.type === type && (msg.ask === askOrSay || msg.say === askOrSay)) {
-				indexToRemove = i
-				break
-			}
-		}
+        const handle: ICardHandle = {
+            id,
+            update: async (patch: Partial<Card>) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for update`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.CARD) {
+                    msg.content.card = { ...msg.content.card, ...patch }
+                    // Cards are never partial in the new architecture
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a card message`)
+                }
+            },
+            appendBody: async (chunk: string) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for appendBody`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.CARD) {
+                    msg.content.card.body = (msg.content.card.body || "") + chunk
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a card message`)
+                }
+            },
+            finalize: async (status: CardStatus, doNotAutoCollapse?: boolean) => {
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Message with id ${id} not found for finalize`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.CARD) {
+                    msg.content.card.status = status
+                    if (doNotAutoCollapse) {
+                        msg.content.card.do_not_auto_collapse = true
+                    }
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                } else {
+                    throw new Error(`Message with id ${id} is not a card message`)
+                }
+            },
+            waitForInteraction: async () => {
 
-		if (indexToRemove !== -1) {
-			const newMessages = [...diracMessages]
-			newMessages.splice(indexToRemove, 1)
-			this.dependencies.messageStateHandler.setDiracMessages(newMessages)
-			await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
-			await this.dependencies.postStateToWebview()
-		}
-	}
+                const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+                if (index === -1) {
+                    throw new Error(`Card with id ${id} not found`)
+                }
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type !== DiracMessageType.CARD) {
+                    throw new Error(`Message with id ${id} is not a card`)
+                }
+
+                const card = msg.content.card
+                const isAsk = !!(card.requireApproval || card.requireFeedback)
+                const isFinal = isFinalStatus(card.status)
+
+                if (isAsk && !isFinal) {
+                    const previousStatus = this.dependencies.taskState.status
+
+                    try {
+                        // Ensure it's in the queue if not already
+                        if (!this.dependencies.taskState.waitingCardIds.includes(id)) {
+                            this.dependencies.taskState.waitingCardIds.push(id)
+                        }
+                        await this.dependencies.postStateToWebview()
+
+                        const messageTs = msg.ts
+                        this.dependencies.taskState.askResponse = undefined
+                        this.dependencies.taskState.askResponseText = undefined
+                        this.dependencies.taskState.askResponseImages = undefined
+                        this.dependencies.taskState.askResponseFiles = undefined
+                        this.dependencies.taskState.askResponseUserEdits = undefined
+                        this.dependencies.taskState.lastMessageTs = messageTs
+
+                        await this.runNotificationHook({
+                            event: "user_attention",
+                            source: "card_interaction",
+                            message: card.header,
+                            waitingForUserInput: true,
+                        })
+
+                        this.dependencies.taskState.status = TaskStatus.AWAITING_USER_INPUT
+
+                        await pWaitFor(
+                            () => {
+                                const response = this.dependencies.taskState.askResponse
+                                return response !== undefined || this.dependencies.taskState.lastMessageTs !== messageTs
+                            },
+                            { interval: 100 }
+                        )
+
+                        if (this.dependencies.taskState.lastMessageTs !== messageTs) {
+                            throw new Error("Current card interaction promise was ignored")
+                        }
+
+                        const result = {
+                            response: this.dependencies.taskState.askResponse!,
+                            action: this.dependencies.taskState.askResponseAction || this.dependencies.taskState.askResponse!,
+                            value: this.dependencies.taskState.askResponseValue,
+
+                            text: this.dependencies.taskState.askResponseText,
+                            images: this.dependencies.taskState.askResponseImages,
+                            files: this.dependencies.taskState.askResponseFiles,
+                            userEdits: this.dependencies.taskState.askResponseUserEdits,
+                            askTs: messageTs,
+                        }
+                        // Clean up ALL response fields to prevent stale data
+                        this.dependencies.taskState.askResponse = undefined
+                        this.dependencies.taskState.askResponseText = undefined
+                        this.dependencies.taskState.askResponseImages = undefined
+                        this.dependencies.taskState.askResponseFiles = undefined
+                        this.dependencies.taskState.askResponseUserEdits = undefined
+                        this.dependencies.taskState.askResponseAction = undefined
+                        this.dependencies.taskState.askResponseValue = undefined
+
+                        // If the user sent a text message instead of responding to the card,
+                        // this signals the tool should be skipped. Throw a typed error so the
+                        // coordinator can handle it cleanly.
+                        if (result.response === DiracAskResponse.MESSAGE && result.text) {
+                            // Echo the user's text message in the chat UI
+                            await this.upsertText(result.text, false, result.images, result.files, "user")
+                            const { ToolSkippedByUserMessage } = await import("./tools/types/ToolSkippedByUserMessage")
+                            throw new ToolSkippedByUserMessage(
+                                result.text,
+                                result.images as string[] | undefined,
+                                result.files as string[] | undefined,
+                            )
+                        }
+
+                        return result
+                    } finally {
+                        this.dependencies.taskState.status = previousStatus
+                        this.dependencies.taskState.waitingCardIds = this.dependencies.taskState.waitingCardIds.filter((cid) => cid !== id)
+                        await this.dependencies.postStateToWebview()
+                    }
+                }
+
+                throw new Error(`Card ${id} is not in a state that requires interaction`)
+            },
+        }
+
+        return handle
+    }
+
+    async createCheckpoint(): Promise<ICardHandle> {
+        if (this.activeVoiceStream) {
+            await this.activeVoiceStream.close()
+        }
+
+        const id = this.generateId()
+        const ts = Date.now()
+
+        const message: DiracMessage = {
+            id,
+            ts,
+            content: { type: DiracMessageType.CHECKPOINT },
+        }
+
+        await this.dependencies.messageStateHandler.addToDiracMessages(message)
+        await this.dependencies.postStateToWebview()
+
+        const handle: ICardHandle = {
+            id,
+            update: async () => {
+                throw new Error("Cannot update a checkpoint message")
+            },
+            appendBody: async () => {
+                throw new Error("Cannot append body to a checkpoint message")
+            },
+            finalize: async () => {
+                throw new Error("Cannot finalize a checkpoint message")
+            },
+            waitForInteraction: async () => {
+                throw new Error("Checkpoint messages do not support interaction")
+            },
+        }
+
+        return handle
+    }
+
+
+    async upsertApiStatus(status: DiracApiReqInfo): Promise<void> {
+        const id = status.id || "api-status"
+        const index = this.dependencies.messageStateHandler.findMessageIndexById(id)
+
+        if (index !== -1) {
+            const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+            if (msg.content.type === DiracMessageType.API_STATUS) {
+                msg.content.status = {
+                    ...msg.content.status,
+                    ...status,
+                }
+                await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
+                await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                await this.dependencies.postStateToWebview()
+            } else {
+                throw new Error(`Message with id ${id} is not an api_status message`)
+            }
+        } else {
+            const message: DiracMessage = {
+                id,
+                ts: Date.now(),
+                content: { type: DiracMessageType.API_STATUS, status },
+            }
+            await this.dependencies.messageStateHandler.addToDiracMessages(message)
+            await this.dependencies.postStateToWebview()
+            await sendPartialMessageEvent(convertDiracMessageToProto(message))
+        }
+    }
+
+    async upsertText(text: string, isReasoning?: boolean, images?: string[], files?: string[], role?: "user" | "assistant"): Promise<void> {
+        if (this.activeVoiceStream) {
+            await this.activeVoiceStream.close()
+        }
+
+        // If this is a reasoning block and we already have an active stream, update it instead of creating a new message
+        const activeVoiceStreamId = this.dependencies.taskState.activeVoiceStreamId
+        if (isReasoning && activeVoiceStreamId) {
+            const index = this.dependencies.messageStateHandler.findMessageIndexById(activeVoiceStreamId)
+            if (index !== -1) {
+                const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
+                if (msg.content.type === DiracMessageType.MARKDOWN && msg.content.isReasoning) {
+                    msg.content.content = text
+                    await this.dependencies.messageStateHandler.updateDiracMessage(index, {
+                        content: msg.content,
+                    })
+                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
+                    await this.dependencies.postStateToWebview()
+                    return
+                }
+            }
+        }
+
+        const id = this.generateId()
+        const message: DiracMessage = {
+            id,
+            ts: Date.now(),
+            content: { type: DiracMessageType.MARKDOWN, content: text, isReasoning, images, files, role },
+        }
+
+        if (isReasoning) {
+            this.dependencies.taskState.activeVoiceStreamId = id
+        }
+
+        await this.dependencies.messageStateHandler.addToDiracMessages(message)
+        await sendPartialMessageEvent(convertDiracMessageToProto(message))
+        await this.dependencies.postStateToWebview()
+    }
+
+
+    async runNotificationHook(notification: {
+        event: string
+        source: string
+        message: string
+        waitingForUserInput: boolean
+    }): Promise<void> {
+        const hooksEnabled = getHooksEnabledSafe(this.dependencies.stateManager.getGlobalSettingsKey("hooksEnabled"))
+        if (!hooksEnabled) {
+            return
+        }
+
+        try {
+            await executeHook({
+                hookName: "Notification",
+                hookInput: {
+                    notification,
+                },
+                isCancellable: false,
+                messenger: this,
+
+                messageStateHandler: this.dependencies.messageStateHandler,
+                taskId: this.dependencies.taskId,
+                hooksEnabled,
+                model: getHookModelContext(this.dependencies.api!, this.dependencies.stateManager),
+            })
+        } catch (error) {
+            Logger.error("[Notification Hook] Failed (non-fatal):", error)
+        }
+    }
+
+
+
 }

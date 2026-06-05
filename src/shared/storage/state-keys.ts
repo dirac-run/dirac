@@ -13,6 +13,7 @@ import { HistoryItem } from "@shared/HistoryItem"
 import { WorkspaceRoot } from "@shared/multi-root/types"
 import { Mode } from "@shared/storage/types"
 import { TelemetrySetting } from "@shared/TelemetrySetting"
+import { UIActionState } from "@shared/ExtensionMessage"
 import { LanguageModelChatSelector } from "vscode"
 
 // ============================================================================
@@ -34,10 +35,10 @@ import { LanguageModelChatSelector } from "vscode"
  * value of that type, not just the default literal.
  */
 type FieldDefinition<T> = {
-	default: T // The default value for the field with proper type casting using as (e.g., `true as boolean | undefined`)
-	isAsync?: boolean
-	isComputed?: boolean
-	transform?: (value: any) => T
+    default: T // The default value for the field with proper type casting using as (e.g., `true as boolean | undefined`)
+    isAsync?: boolean
+    isComputed?: boolean
+    transform?: (value: any) => T
 }
 
 type FieldDefinitions = Record<string, FieldDefinition<any>>
@@ -45,209 +46,211 @@ type FieldDefinitions = Record<string, FieldDefinition<any>>
 export type ConfiguredAPIKeys = Partial<Record<ApiProvider, boolean>>
 
 const GLOBAL_STATE_FIELDS = {
-	diracVersion: { default: undefined as string | undefined },
-	"dirac.generatedMachineId": { default: undefined as string | undefined }, // Note, distinctId reads/writes this directly from/to StorageContext before StateManager is initialized.
-	lastShownAnnouncementId: { default: undefined as string | undefined },
-	taskHistory: { default: [] as HistoryItem[], isAsync: true },
-	favoritedModelIds: { default: [] as string[] },
-	terminalReuseEnabled: { default: true as boolean },
-	vscodeTerminalExecutionMode: {
-		default: "vscodeTerminal" as "vscodeTerminal" | "backgroundExec",
-	},
-	isNewUser: { default: true as boolean },
-	welcomeViewCompleted: { default: undefined as boolean | undefined },
-	workspaceRoots: { default: undefined as WorkspaceRoot[] | undefined },
-	primaryRootIndex: { default: 0 as number },
-	multiRootEnabled: { default: true as boolean },
-	lastDismissedInfoBannerVersion: { default: 0 as number },
-	lastDismissedModelBannerVersion: { default: 0 as number },
-	lastDismissedCliBannerVersion: { default: 0 as number },
-	remoteRulesToggles: { default: {} as DiracRulesToggles },
-	remoteWorkflowToggles: { default: {} as DiracRulesToggles },
-	dismissedBanners: { default: [] as Array<{ bannerId: string; dismissedAt: number }> },
-	// Path to worktree that should auto-open Dirac sidebar when launched
-	worktreeAutoOpenPath: { default: undefined as string | undefined },
+    diracVersion: { default: undefined as string | undefined },
+    "dirac.generatedMachineId": { default: undefined as string | undefined }, // Note, distinctId reads/writes this directly from/to StorageContext before StateManager is initialized.
+    lastShownAnnouncementId: { default: undefined as string | undefined },
+    taskHistory: { default: [] as HistoryItem[], isAsync: true },
+    favoritedModelIds: { default: [] as string[] },
+    terminalReuseEnabled: { default: true as boolean },
+    vscodeTerminalExecutionMode: {
+        default: "vscodeTerminal" as "vscodeTerminal" | "backgroundExec",
+    },
+    isNewUser: { default: true as boolean },
+    welcomeViewCompleted: { default: undefined as boolean | undefined },
+    workspaceRoots: { default: undefined as WorkspaceRoot[] | undefined },
+    primaryRootIndex: { default: 0 as number },
+    multiRootEnabled: { default: true as boolean },
+    lastDismissedInfoBannerVersion: { default: 0 as number },
+    lastDismissedModelBannerVersion: { default: 0 as number },
+    lastDismissedCliBannerVersion: { default: 0 as number },
+    remoteRulesToggles: { default: {} as DiracRulesToggles },
+    remoteWorkflowToggles: { default: {} as DiracRulesToggles },
+    dismissedBanners: { default: [] as Array<{ bannerId: string; dismissedAt: number }> },
+    // Path to worktree that should auto-open Dirac sidebar when launched
+    worktreeAutoOpenPath: { default: undefined as string | undefined },
+    uiActionState: { default: undefined as UIActionState | undefined },
 } satisfies FieldDefinitions
 
 // Fields that map directly to ApiHandlerOptions in @shared/api.ts
 const API_HANDLER_SETTINGS_FIELDS = {
-	// Global configuration (not mode-specific)
-	liteLlmBaseUrl: { default: undefined as string | undefined },
-	liteLlmUsePromptCache: { default: undefined as boolean | undefined },
-	openAiHeaders: { default: {} as Record<string, string> },
-	anthropicBaseUrl: { default: undefined as string | undefined },
-	openRouterProviderSorting: { default: undefined as string | undefined },
-	awsRegion: { default: undefined as string | undefined },
-	awsUseCrossRegionInference: { default: undefined as boolean | undefined },
-	awsUseGlobalInference: { default: undefined as boolean | undefined },
-	awsBedrockUsePromptCache: { default: undefined as boolean | undefined },
-	awsAuthentication: { default: undefined as string | undefined },
-	awsUseProfile: { default: undefined as boolean | undefined },
-	awsProfile: { default: undefined as string | undefined },
-	awsBedrockEndpoint: { default: undefined as string | undefined },
-	claudeCodePath: { default: undefined as string | undefined },
-	vertexProjectId: { default: undefined as string | undefined },
-	vertexRegion: { default: undefined as string | undefined },
-	openAiBaseUrl: { default: undefined as string | undefined },
-	openAiCompatibleProfiles: { default: [] as OpenAiCompatibleProfile[] },
-	planModeOpenAiProfileName: { default: undefined as string | undefined },
-	actModeOpenAiProfileName: { default: undefined as string | undefined },
-	lmStudioBaseUrl: { default: undefined as string | undefined },
-	lmStudioMaxTokens: { default: undefined as string | undefined },
-	geminiBaseUrl: { default: undefined as string | undefined },
-	geminiSearchEnabled: { default: true as boolean },
+    // Global configuration (not mode-specific)
+    liteLlmBaseUrl: { default: undefined as string | undefined },
+    liteLlmUsePromptCache: { default: undefined as boolean | undefined },
+    openAiHeaders: { default: {} as Record<string, string> },
+    anthropicBaseUrl: { default: undefined as string | undefined },
+    openRouterProviderSorting: { default: undefined as string | undefined },
+    awsRegion: { default: undefined as string | undefined },
+    awsUseCrossRegionInference: { default: undefined as boolean | undefined },
+    awsUseGlobalInference: { default: undefined as boolean | undefined },
+    awsBedrockUsePromptCache: { default: undefined as boolean | undefined },
+    awsAuthentication: { default: undefined as string | undefined },
+    awsUseProfile: { default: undefined as boolean | undefined },
+    awsProfile: { default: undefined as string | undefined },
+    awsBedrockEndpoint: { default: undefined as string | undefined },
+    claudeCodePath: { default: undefined as string | undefined },
+    vertexProjectId: { default: undefined as string | undefined },
+    vertexRegion: { default: undefined as string | undefined },
+    openAiBaseUrl: { default: undefined as string | undefined },
+    openAiCompatibleProfiles: { default: [] as OpenAiCompatibleProfile[] },
+    planModeOpenAiProfileName: { default: undefined as string | undefined },
+    actModeOpenAiProfileName: { default: undefined as string | undefined },
+    lmStudioBaseUrl: { default: undefined as string | undefined },
+    lmStudioMaxTokens: { default: undefined as string | undefined },
+    geminiBaseUrl: { default: undefined as string | undefined },
+    geminiSearchEnabled: { default: true as boolean },
 
-	requestyBaseUrl: { default: undefined as string | undefined },
-	fireworksModelMaxCompletionTokens: { default: undefined as number | undefined },
-	fireworksModelMaxTokens: { default: undefined as number | undefined },
-	qwenCodeOauthPath: { default: undefined as string | undefined },
-	azureApiVersion: { default: undefined as string | undefined },
-	qwenApiLine: { default: undefined as string | undefined },
-	moonshotApiLine: { default: undefined as string | undefined },
-	requestTimeoutMs: { default: undefined as number | undefined },
-	difyBaseUrl: { default: undefined as string | undefined },
-	zaiApiLine: { default: undefined as string | undefined },
-	minimaxApiLine: { default: undefined as string | undefined },
-	aihubmixBaseUrl: { default: undefined as string | undefined },
-	aihubmixAppCode: { default: undefined as string | undefined },
-	enableParallelToolCalling: { default: true as boolean },
+    requestyBaseUrl: { default: undefined as string | undefined },
+    fireworksModelMaxCompletionTokens: { default: undefined as number | undefined },
+    fireworksModelMaxTokens: { default: undefined as number | undefined },
+    qwenCodeOauthPath: { default: undefined as string | undefined },
+    azureApiVersion: { default: undefined as string | undefined },
+    qwenApiLine: { default: undefined as string | undefined },
+    moonshotApiLine: { default: undefined as string | undefined },
+    requestTimeoutMs: { default: undefined as number | undefined },
+    difyBaseUrl: { default: undefined as string | undefined },
+    zaiApiLine: { default: undefined as string | undefined },
+    minimaxApiLine: { default: undefined as string | undefined },
+    aihubmixBaseUrl: { default: undefined as string | undefined },
+    aihubmixAppCode: { default: undefined as string | undefined },
+    enableParallelToolCalling: { default: true as boolean },
 
-	// Plan mode configurations
-	planModeApiModelId: { default: undefined as string | undefined },
-	planModeThinkingBudgetTokens: { default: undefined as number | undefined },
-	geminiPlanModeThinkingLevel: { default: undefined as string | undefined },
-	planModeReasoningEffort: { default: undefined as string | undefined },
-	planModeVerbosity: { default: undefined as string | undefined },
-	planModeVsCodeLmModelSelector: { default: undefined as LanguageModelChatSelector | undefined },
-	planModeAwsBedrockCustomSelected: { default: undefined as boolean | undefined },
-	planModeAwsBedrockCustomModelBaseId: { default: undefined as string | undefined },
-	planModeOpenRouterModelId: { default: undefined as string | undefined },
-	planModeOpenRouterModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeDiracModelId: { default: undefined as string | undefined },
-	planModeDiracModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeOpenAiModelId: { default: undefined as string | undefined },
-	planModeOpenAiModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
-	planModeLmStudioModelId: { default: undefined as string | undefined },
-	planModeLiteLlmModelId: { default: undefined as string | undefined },
-	planModeLiteLlmModelInfo: { default: undefined as LiteLLMModelInfo | undefined },
-	planModeRequestyModelId: { default: undefined as string | undefined },
-	planModeRequestyModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeTogetherModelId: { default: undefined as string | undefined },
-	planModeFireworksModelId: { default: undefined as string | undefined },
-	planModeGroqModelId: { default: undefined as string | undefined },
-	planModeGroqModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeBasetenModelId: { default: undefined as string | undefined },
-	planModeBasetenModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeHuggingFaceModelId: { default: undefined as string | undefined },
-	planModeHuggingFaceModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeHuaweiCloudMaasModelId: { default: undefined as string | undefined },
-	planModeHuaweiCloudMaasModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeAihubmixModelId: { default: undefined as string | undefined },
-	planModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
-	planModeGithubCopilotModelId: { default: undefined as string | undefined },
-	planModeGithubCopilotModelInfo: { default: undefined as ModelInfo | undefined },
-	planModeNousResearchModelId: { default: undefined as string | undefined },
-	planModeVercelAiGatewayModelId: { default: undefined as string | undefined },
-	planModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
+    // Plan mode configurations
+    planModeApiModelId: { default: undefined as string | undefined },
+    planModeThinkingBudgetTokens: { default: undefined as number | undefined },
+    geminiPlanModeThinkingLevel: { default: undefined as string | undefined },
+    planModeReasoningEffort: { default: undefined as string | undefined },
+    planModeVerbosity: { default: undefined as string | undefined },
+    planModeVsCodeLmModelSelector: { default: undefined as LanguageModelChatSelector | undefined },
+    planModeAwsBedrockCustomSelected: { default: undefined as boolean | undefined },
+    planModeAwsBedrockCustomModelBaseId: { default: undefined as string | undefined },
+    planModeOpenRouterModelId: { default: undefined as string | undefined },
+    planModeOpenRouterModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeDiracModelId: { default: undefined as string | undefined },
+    planModeDiracModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeOpenAiModelId: { default: undefined as string | undefined },
+    planModeOpenAiModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
+    planModeLmStudioModelId: { default: undefined as string | undefined },
+    planModeLiteLlmModelId: { default: undefined as string | undefined },
+    planModeLiteLlmModelInfo: { default: undefined as LiteLLMModelInfo | undefined },
+    planModeRequestyModelId: { default: undefined as string | undefined },
+    planModeRequestyModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeTogetherModelId: { default: undefined as string | undefined },
+    planModeFireworksModelId: { default: undefined as string | undefined },
+    planModeGroqModelId: { default: undefined as string | undefined },
+    planModeGroqModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeBasetenModelId: { default: undefined as string | undefined },
+    planModeBasetenModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeHuggingFaceModelId: { default: undefined as string | undefined },
+    planModeHuggingFaceModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeHuaweiCloudMaasModelId: { default: undefined as string | undefined },
+    planModeHuaweiCloudMaasModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeAihubmixModelId: { default: undefined as string | undefined },
+    planModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
+    planModeGithubCopilotModelId: { default: undefined as string | undefined },
+    planModeGithubCopilotModelInfo: { default: undefined as ModelInfo | undefined },
+    planModeNousResearchModelId: { default: undefined as string | undefined },
+    planModeVercelAiGatewayModelId: { default: undefined as string | undefined },
+    planModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
 
-	// Act mode configurations
-	actModeApiModelId: { default: undefined as string | undefined },
-	actModeThinkingBudgetTokens: { default: undefined as number | undefined },
-	geminiActModeThinkingLevel: { default: undefined as string | undefined },
-	actModeReasoningEffort: { default: undefined as string | undefined },
-	actModeVerbosity: { default: undefined as string | undefined },
-	actModeVsCodeLmModelSelector: { default: undefined as LanguageModelChatSelector | undefined },
-	actModeAwsBedrockCustomSelected: { default: undefined as boolean | undefined },
-	actModeAwsBedrockCustomModelBaseId: { default: undefined as string | undefined },
-	actModeOpenRouterModelId: { default: undefined as string | undefined },
-	actModeOpenRouterModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeDiracModelId: { default: undefined as string | undefined },
-	actModeDiracModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeOpenAiModelId: { default: undefined as string | undefined },
-	actModeOpenAiModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
-	actModeLmStudioModelId: { default: undefined as string | undefined },
-	actModeLiteLlmModelId: { default: undefined as string | undefined },
-	actModeLiteLlmModelInfo: { default: undefined as LiteLLMModelInfo | undefined },
-	actModeRequestyModelId: { default: undefined as string | undefined },
-	actModeRequestyModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeTogetherModelId: { default: undefined as string | undefined },
-	actModeFireworksModelId: { default: undefined as string | undefined },
-	actModeGroqModelId: { default: undefined as string | undefined },
-	actModeGroqModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeBasetenModelId: { default: undefined as string | undefined },
-	actModeBasetenModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeHuggingFaceModelId: { default: undefined as string | undefined },
-	actModeHuggingFaceModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeHuaweiCloudMaasModelId: { default: undefined as string | undefined },
-	actModeHuaweiCloudMaasModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeAihubmixModelId: { default: undefined as string | undefined },
-	actModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
-	actModeGithubCopilotModelId: { default: undefined as string | undefined },
-	actModeGithubCopilotModelInfo: { default: undefined as ModelInfo | undefined },
-	actModeNousResearchModelId: { default: undefined as string | undefined },
-	actModeVercelAiGatewayModelId: { default: undefined as string | undefined },
-	actModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
+    // Act mode configurations
+    actModeApiModelId: { default: undefined as string | undefined },
+    actModeThinkingBudgetTokens: { default: undefined as number | undefined },
+    geminiActModeThinkingLevel: { default: undefined as string | undefined },
+    actModeReasoningEffort: { default: undefined as string | undefined },
+    actModeVerbosity: { default: undefined as string | undefined },
+    actModeVsCodeLmModelSelector: { default: undefined as LanguageModelChatSelector | undefined },
+    actModeAwsBedrockCustomSelected: { default: undefined as boolean | undefined },
+    actModeAwsBedrockCustomModelBaseId: { default: undefined as string | undefined },
+    actModeOpenRouterModelId: { default: undefined as string | undefined },
+    actModeOpenRouterModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeDiracModelId: { default: undefined as string | undefined },
+    actModeDiracModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeOpenAiModelId: { default: undefined as string | undefined },
+    actModeOpenAiModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
+    actModeLmStudioModelId: { default: undefined as string | undefined },
+    actModeLiteLlmModelId: { default: undefined as string | undefined },
+    actModeLiteLlmModelInfo: { default: undefined as LiteLLMModelInfo | undefined },
+    actModeRequestyModelId: { default: undefined as string | undefined },
+    actModeRequestyModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeTogetherModelId: { default: undefined as string | undefined },
+    actModeFireworksModelId: { default: undefined as string | undefined },
+    actModeGroqModelId: { default: undefined as string | undefined },
+    actModeGroqModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeBasetenModelId: { default: undefined as string | undefined },
+    actModeBasetenModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeHuggingFaceModelId: { default: undefined as string | undefined },
+    actModeHuggingFaceModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeHuaweiCloudMaasModelId: { default: undefined as string | undefined },
+    actModeHuaweiCloudMaasModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeAihubmixModelId: { default: undefined as string | undefined },
+    actModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
+    actModeGithubCopilotModelId: { default: undefined as string | undefined },
+    actModeGithubCopilotModelInfo: { default: undefined as ModelInfo | undefined },
+    actModeNousResearchModelId: { default: undefined as string | undefined },
+    actModeVercelAiGatewayModelId: { default: undefined as string | undefined },
+    actModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
 
-	// Model-specific settings
-	planModeApiProvider: { default: DEFAULT_API_PROVIDER as ApiProvider },
-	actModeApiProvider: { default: DEFAULT_API_PROVIDER as ApiProvider },
+    // Model-specific settings
+    planModeApiProvider: { default: DEFAULT_API_PROVIDER as ApiProvider },
+    actModeApiProvider: { default: DEFAULT_API_PROVIDER as ApiProvider },
 
-	// Deprecated model settings
-	lmStudioModelId: { default: undefined as string | undefined },
+    // Deprecated model settings
+    lmStudioModelId: { default: undefined as string | undefined },
 } satisfies FieldDefinitions
 
 const USER_SETTINGS_FIELDS = {
-	// Settings that are NOT part of ApiHandlerOptions
-	autoApprovalSettings: {
-		default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,
-	},
-	globalDiracRulesToggles: { default: {} as DiracRulesToggles },
-	globalWorkflowToggles: { default: {} as DiracRulesToggles },
-	globalSkillsToggles: { default: {} as Record<string, boolean> },
-	browserSettings: {
-		default: DEFAULT_BROWSER_SETTINGS as BrowserSettings,
-		transform: (v: any) => ({ ...DEFAULT_BROWSER_SETTINGS, ...v }),
-	},
-	telemetrySetting: { default: "unset" as TelemetrySetting },
-	planActSeparateModelsSetting: { default: false as boolean, isComputed: true },
-	enableCheckpointsSetting: { default: true as boolean },
-	shellIntegrationTimeout: { default: 4000 as number },
-	defaultTerminalProfile: { default: "default" as string },
-	terminalOutputLineLimit: { default: 500 as number },
-	maxConsecutiveMistakes: { default: 5 as number },
-	strictPlanModeEnabled: { default: false as boolean },
-	hooksEnabled: { default: true as boolean },
-	yoloModeToggled: { default: false as boolean },
-	autoApproveAllToggled: { default: false as boolean },
-	useAutoCondense: { default: true as boolean },
-	subagentsEnabled: { default: false as boolean },
-	diracWebToolsEnabled: { default: true as boolean },
-	worktreesEnabled: { default: false as boolean },
-	preferredLanguage: { default: "English" as string },
-	mode: { default: "act" as Mode },
-	customPrompt: { default: undefined as "compact" | undefined },
-	backgroundEditEnabled: { default: false as boolean },
-	optOutOfRemoteConfig: { default: false as boolean },
-	doubleCheckCompletionEnabled: { default: false as boolean },
+    // Settings that are NOT part of ApiHandlerOptions
+    autoApprovalSettings: {
+        default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,
+    },
+    globalDiracRulesToggles: { default: {} as DiracRulesToggles },
+    globalWorkflowToggles: { default: {} as DiracRulesToggles },
+    globalSkillsToggles: { default: {} as Record<string, boolean> },
+    toolToggles: { default: {} as Record<string, boolean> },
+    browserSettings: {
+        default: DEFAULT_BROWSER_SETTINGS as BrowserSettings,
+        transform: (v: any) => ({ ...DEFAULT_BROWSER_SETTINGS, ...v }),
+    },
+    telemetrySetting: { default: "unset" as TelemetrySetting },
+    planActSeparateModelsSetting: { default: false as boolean, isComputed: true },
+    enableCheckpointsSetting: { default: true as boolean },
+    shellIntegrationTimeout: { default: 4000 as number },
+    defaultTerminalProfile: { default: "default" as string },
+    terminalOutputLineLimit: { default: 500 as number },
+    maxConsecutiveMistakes: { default: 5 as number },
+    strictPlanModeEnabled: { default: false as boolean },
+    hooksEnabled: { default: true as boolean },
+    yoloModeToggled: { default: false as boolean },
+    autoApproveAllToggled: { default: false as boolean },
+    useAutoCondense: { default: true as boolean },
+    subagentsEnabled: { default: false as boolean },
+    diracWebToolsEnabled: { default: true as boolean },
+    worktreesEnabled: { default: false as boolean },
+    preferredLanguage: { default: "English" as string },
+    mode: { default: "act" as Mode },
+    customPrompt: { default: undefined as "compact" | undefined },
+    backgroundEditEnabled: { default: false as boolean },
+    optOutOfRemoteConfig: { default: false as boolean },
+    doubleCheckCompletionEnabled: { default: false as boolean },
 
-	// OpenTelemetry configuration
-	openTelemetryEnabled: { default: true as boolean },
-	openTelemetryMetricsExporter: { default: undefined as string | undefined },
-	openTelemetryLogsExporter: { default: undefined as string | undefined },
-	openTelemetryOtlpProtocol: { default: "http/json" as string | undefined },
-	openTelemetryOtlpEndpoint: { default: "http://localhost:4318" as string | undefined },
-	openTelemetryOtlpMetricsProtocol: { default: undefined as string | undefined },
-	openTelemetryOtlpMetricsEndpoint: { default: undefined as string | undefined },
-	openTelemetryOtlpLogsProtocol: { default: undefined as string | undefined },
-	openTelemetryOtlpLogsEndpoint: { default: undefined as string | undefined },
-	openTelemetryMetricExportInterval: { default: 60000 as number | undefined },
-	openTelemetryOtlpInsecure: { default: false as boolean | undefined },
-	openTelemetryLogBatchSize: { default: 512 as number | undefined },
-	openTelemetryLogBatchTimeout: { default: 5000 as number | undefined },
-	openTelemetryLogMaxQueueSize: { default: 2048 as number | undefined },
+    // OpenTelemetry configuration
+    openTelemetryEnabled: { default: true as boolean },
+    openTelemetryMetricsExporter: { default: undefined as string | undefined },
+    openTelemetryLogsExporter: { default: undefined as string | undefined },
+    openTelemetryOtlpProtocol: { default: "http/json" as string | undefined },
+    openTelemetryOtlpEndpoint: { default: "http://localhost:4318" as string | undefined },
+    openTelemetryOtlpMetricsProtocol: { default: undefined as string | undefined },
+    openTelemetryOtlpMetricsEndpoint: { default: undefined as string | undefined },
+    openTelemetryOtlpLogsProtocol: { default: undefined as string | undefined },
+    openTelemetryOtlpLogsEndpoint: { default: undefined as string | undefined },
+    openTelemetryMetricExportInterval: { default: 60000 as number | undefined },
+    openTelemetryOtlpInsecure: { default: false as boolean | undefined },
+    openTelemetryLogBatchSize: { default: 512 as number | undefined },
+    openTelemetryLogBatchTimeout: { default: 5000 as number | undefined },
+    openTelemetryLogMaxQueueSize: { default: 2048 as number | undefined },
 
-	writePromptMetadataEnabled: { default: false as boolean },
-	writePromptMetadataDirectory: { default: undefined as string | undefined },
+    writePromptMetadataEnabled: { default: false as boolean },
+    writePromptMetadataDirectory: { default: undefined as string | undefined },
 } satisfies FieldDefinitions
 
 const SETTINGS_FIELDS = { ...API_HANDLER_SETTINGS_FIELDS, ...USER_SETTINGS_FIELDS }
@@ -259,56 +262,56 @@ const GLOBAL_STATE_AND_SETTINGS_FIELDS = { ...GLOBAL_STATE_FIELDS, ...SETTINGS_F
 
 // Secret keys used in Api Configuration
 const SECRETS_KEYS = [
-	"apiKey",
-	"dirac:diracAccountId",
-	"diracApiKey",
-	"openRouterApiKey",
-	"awsAccessKey",
-	"awsSecretKey",
-	"awsSessionToken",
-	"awsBedrockApiKey",
-	"openAiApiKey",
-	"geminiApiKey",
-	"openAiNativeApiKey",
-	"deepSeekApiKey",
-	"requestyApiKey",
-	"togetherApiKey",
-	"fireworksApiKey",
-	"qwenApiKey",
-	"doubaoApiKey",
-	"mistralApiKey",
-	"liteLlmApiKey",
-	"authNonce",
-	"xaiApiKey",
-	"moonshotApiKey",
-	"zaiApiKey",
-	"huggingFaceApiKey",
-	"nebiusApiKey",
-	"sambanovaApiKey",
-	"cerebrasApiKey",
-	"groqApiKey",
-	"huaweiCloudMaasApiKey",
-	"basetenApiKey",
-	"vercelAiGatewayApiKey",
-	"difyApiKey",
-	"openAiCompatibleCustomApiKey",
-	"minimaxApiKey",
-	"aihubmixApiKey",
-	"nousResearchApiKey",
-	"openai-codex-oauth-credentials", // JSON blob containing OAuth tokens for OpenAI Codex (ChatGPT subscription)
-	"wandbApiKey",
-	"github-copilot-oauth-credentials",
+    "apiKey",
+    "dirac:diracAccountId",
+    "diracApiKey",
+    "openRouterApiKey",
+    "awsAccessKey",
+    "awsSecretKey",
+    "awsSessionToken",
+    "awsBedrockApiKey",
+    "openAiApiKey",
+    "geminiApiKey",
+    "openAiNativeApiKey",
+    "deepSeekApiKey",
+    "requestyApiKey",
+    "togetherApiKey",
+    "fireworksApiKey",
+    "qwenApiKey",
+    "doubaoApiKey",
+    "mistralApiKey",
+    "liteLlmApiKey",
+    "authNonce",
+    "xaiApiKey",
+    "moonshotApiKey",
+    "zaiApiKey",
+    "huggingFaceApiKey",
+    "nebiusApiKey",
+    "sambanovaApiKey",
+    "cerebrasApiKey",
+    "groqApiKey",
+    "huaweiCloudMaasApiKey",
+    "basetenApiKey",
+    "vercelAiGatewayApiKey",
+    "difyApiKey",
+    "openAiCompatibleCustomApiKey",
+    "minimaxApiKey",
+    "aihubmixApiKey",
+    "nousResearchApiKey",
+    "openai-codex-oauth-credentials", // JSON blob containing OAuth tokens for OpenAI Codex (ChatGPT subscription)
+    "wandbApiKey",
+    "github-copilot-oauth-credentials",
 ] as const
 
 // WARNING, these are not ALL of the local state keys in practice. For example, FileContextTracker
 // uses dynamic keys like pendingFileContextWarning_${taskId}.
 export const LocalStateKeys = [
-	"localDiracRulesToggles",
-	"localCursorRulesToggles",
-	"localWindsurfRulesToggles",
-	"localAgentsRulesToggles",
-	"localSkillsToggles",
-	"workflowToggles",
+    "localDiracRulesToggles",
+    "localCursorRulesToggles",
+    "localWindsurfRulesToggles",
+    "localAgentsRulesToggles",
+    "localSkillsToggles",
+    "workflowToggles",
 ] as const
 
 // ============================================================================
@@ -377,35 +380,35 @@ export const isAsyncProperty = (key: string): boolean => ASYNC_PROPERTIES.has(ke
 export const isComputedProperty = (key: string): boolean => COMPUTED_PROPERTIES.has(key)
 
 export const getDefaultValue = <K extends GlobalStateAndSettingsKey>(key: K): GlobalStateAndSettings[K] | undefined => {
-	return ((GLOBAL_STATE_DEFAULTS as any)[key] ?? (SETTINGS_DEFAULTS as any)[key]) as GlobalStateAndSettings[K] | undefined
+    return ((GLOBAL_STATE_DEFAULTS as any)[key] ?? (SETTINGS_DEFAULTS as any)[key]) as GlobalStateAndSettings[K] | undefined
 }
 
 export const hasTransform = (key: string): boolean => key in SETTINGS_TRANSFORMS
 export const applyTransform = <T>(key: string, value: T): T => {
-	const transform = SETTINGS_TRANSFORMS[key]
-	return transform ? transform(value) : value
+    const transform = SETTINGS_TRANSFORMS[key]
+    return transform ? transform(value) : value
 }
 
 function extractDefaults<T extends Record<string, any>>(props: T): Partial<BuildInterface<T>> {
-	return Object.fromEntries(
-		Object.entries(props)
-			.map(([key, prop]) => [key, prop.default])
-			.filter(([_, value]) => value !== undefined),
-	) as Partial<BuildInterface<T>>
+    return Object.fromEntries(
+        Object.entries(props)
+            .map(([key, prop]) => [key, prop.default])
+            .filter(([_, value]) => value !== undefined),
+    ) as Partial<BuildInterface<T>>
 }
 
 function extractTransforms<T extends Record<string, any>>(props: T): Record<string, (value: any) => any> {
-	return Object.fromEntries(
-		Object.entries(props)
-			.filter(([_, prop]) => "transform" in prop && prop.transform !== undefined)
-			.map(([key, prop]) => [key, prop.transform]),
-	)
+    return Object.fromEntries(
+        Object.entries(props)
+            .filter(([_, prop]) => "transform" in prop && prop.transform !== undefined)
+            .map(([key, prop]) => [key, prop.transform]),
+    )
 }
 
 function extractMetadata<T extends Record<string, any>>(props: T, field: string): Set<string> {
-	return new Set(
-		Object.entries(props)
-			.filter(([_, prop]) => field in prop && prop[field] === true)
-			.map(([key]) => key),
-	)
+    return new Set(
+        Object.entries(props)
+            .filter(([_, prop]) => field in prop && prop[field] === true)
+            .map(([key]) => key),
+    )
 }

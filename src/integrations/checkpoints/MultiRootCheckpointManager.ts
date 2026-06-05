@@ -139,7 +139,7 @@ export class MultiRootCheckpointManager implements ICheckpointManager {
 				const hash = await tracker.commit()
 				if (hash) {
 					const rootName = this.workspaceManager.getRoots().find((r) => r.path === path)?.name || path
-					Logger.log(`[MultiRootCheckpointManager] Checkpoint created for ${rootName}: ${hash}`)
+					Logger.log(`[MultiRootCheckpointManager] Checkpoint saved for ${rootName}: ${hash}`)
 				}
 				return { path, hash, success: true }
 			} catch (error) {
@@ -268,7 +268,7 @@ export class MultiRootCheckpointManager implements ICheckpointManager {
 	 * Presents a multi-file diff view for the primary workspace root.
 	 * For multi-root v1, this shows diffs for the primary root only.
 	 */
-	async presentMultifileDiff(messageTs: number, seeNewChangesSinceLastTaskCompletion: boolean): Promise<void> {
+	async presentMultifileDiff(messageId: string, seeNewChangesSinceLastTaskCompletion: boolean): Promise<void> {
 		try {
 			if (!this.enableCheckpoints || !this.initialized) {
 				HostProvider.window.showMessage({
@@ -296,7 +296,7 @@ export class MultiRootCheckpointManager implements ICheckpointManager {
 				return
 			}
 
-			await showChangedFilesDiff(this.messageStateHandler, tracker, messageTs, seeNewChangesSinceLastTaskCompletion)
+			await showChangedFilesDiff(this.messageStateHandler, tracker, messageId, seeNewChangesSinceLastTaskCompletion)
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Unknown error"
 			Logger.error("[MultiRootCheckpointManager] Failed to present multifile diff:", errorMessage)

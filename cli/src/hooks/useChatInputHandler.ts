@@ -42,7 +42,6 @@ interface UseChatInputHandlerProps {
 	savedInput: string
 	setSavedInput: (input: string) => void
 	// Button state
-	buttonConfig: any
 	isSpinnerActive: boolean
 	isProcessing: boolean
 	yolo: boolean
@@ -62,6 +61,8 @@ interface UseChatInputHandlerProps {
 	PASTE_UPDATE_DEBOUNCE_MS: number
 	// Other
 	mode: string
+	toggleCardExpansion: (cardId: string) => void
+	currentCardId?: string
 }
 
 export function useChatInputHandler({
@@ -94,7 +95,6 @@ export function useChatInputHandler({
 	setHistoryIndex,
 	savedInput,
 	setSavedInput,
-	buttonConfig,
 	isSpinnerActive,
 	isProcessing,
 	yolo,
@@ -112,6 +112,8 @@ export function useChatInputHandler({
 	PASTE_CHUNK_WINDOW_MS,
 	PASTE_UPDATE_DEBOUNCE_MS,
 	mode,
+	toggleCardExpansion,
+	currentCardId,
 }: UseChatInputHandlerProps) {
 	useInput((input, key) => {
 		if (isMouseEscapeSequence(input) || isTerminalResponseSequence(input, key)) return
@@ -304,22 +306,35 @@ export function useChatInputHandler({
 			}
 		}
 
+		const uiActionState = (StateManager.get().getGlobalStateKey("uiActionState") as any) || {}
+		const buttons = [...(uiActionState.globalButtons || []), ...(uiActionState.cardButtons || [])]
+
 		if (
-			buttonConfig.enableButtons &&
-			!isSpinnerActive &&
+			buttons.length > 0 &&
 			!isProcessing &&
 			currentTextInput === "" &&
-			!isYoloSuppressed(yolo, pendingAsk?.ask)
+			(!pendingAsk || !isYoloSuppressed(yolo, pendingAsk))
 		) {
-			if (input === "1") {
-				if (buttonConfig.primaryAction) {
-					handleButtonAction(buttonConfig.primaryAction, true)
+			const num = Number.parseInt(input, 10)
+			if (!Number.isNaN(num) && num >= 1 && num <= buttons.length) {
+				handleButtonAction(buttons[num - 1].action, true)
+				return
+			}
+		}
+
+		const card = pendingAsk?.content?.type === "card" ? pendingAsk.content.card : null
+		if (currentTextInput === "" && !isProcessing) {
+			if (input === "v" && currentCardId) {
+				toggleCardExpansion(currentCardId)
+				return
+			}
+
+			if (card?.actions && card.actions.length > 0) {
+				const num = Number.parseInt(input, 10)
+				if (!Number.isNaN(num) && num >= 1 && num <= card.actions.length) {
+					handleButtonAction(card.actions[num - 1].value, false)
 					return
 				}
-			}
-			if (input === "2" && buttonConfig.secondaryAction) {
-				handleButtonAction(buttonConfig.secondaryAction, false)
-				return
 			}
 		}
 

@@ -1,7 +1,7 @@
 import { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
 import { useCallback } from "react"
-import { updateAutoApproveSettings } from "@/features/chat/components/auto-approve-menu/AutoApproveSettingsAPI"
-import { ActionMetadata } from "@/features/chat/components/auto-approve-menu/types"
+import { updateAutoApproveSettings } from "@/features/modular-ui/chat/components/AutoApprove/AutoApproveSettingsAPI"
+import { ActionMetadata } from "@/features/modular-ui/chat/components/AutoApprove/types"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 
 export function useAutoApproveActions() {
@@ -18,7 +18,7 @@ export function useAutoApproveActions() {
 				case "enableNotifications":
 					return autoApprovalSettings.enableNotifications
 				default:
-					return autoApprovalSettings.actions[action.id] ?? false
+					return autoApprovalSettings.actions[action.id as keyof AutoApprovalSettings["actions"]] ?? false
 			}
 		},
 		[autoApprovalSettings, autoApproveAllToggled],
@@ -41,7 +41,7 @@ export function useAutoApproveActions() {
 			}
 
 			if (value === false && subActionId) {
-				newActions[subActionId] = false
+					newActions[subActionId as keyof AutoApprovalSettings["actions"]] = false
 			}
 
 			if (value === true && action.parentActionId) {

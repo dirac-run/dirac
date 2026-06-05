@@ -1,5 +1,5 @@
 import { getTaskMetadata, readTaskHistoryFromState, saveTaskMetadata } from "@core/storage/disk"
-import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import chokidar, { FSWatcher } from "chokidar"
 import * as path from "path"
 import { Controller } from "@/core/controller"
@@ -214,9 +214,9 @@ export class FileContextTracker {
 
 		// Also check deleted task messages for file operations
 		for (const message of deletedMessages) {
-			if (message.say === "tool" && message.text) {
+			if (message.content.type === DiracMessageType.CARD && message.content.card.body) {
 				try {
-					const toolData = JSON.parse(message.text)
+					const toolData = JSON.parse(message.content.card.body)
 					if ((toolData.tool === "editedExistingFile" || toolData.tool === "newFileCreated") && toolData.path) {
 						if (!editedFiles.includes(toolData.path)) {
 							editedFiles.push(toolData.path)

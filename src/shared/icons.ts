@@ -1,0 +1,25 @@
+// NOTE: Icon names are straight from lucide, not arbitrary
+// refer to https://lucide.dev/icons/ for more icons
+export enum DiracIcon {
+	FILE_READ = "book-open-check",
+	FILE_EDIT = "file-pen-line",
+	FILE_WRITE = "file-plus-2",
+	COMMAND = "terminal",
+	SYMBOL_REPLACE = "arrow-right-left",
+	SYMBOL_RENAME = "arrow-right-left",
+	SYMBOL_FIND = "component",
+	FUNCTION_EXTRACT = "square-function",
+	SKELETON_EXTRACT = "list-tree",
+	FILE_LIST = "folder-tree",
+	SEARCH = "search",
+	DIAGNOSTICS = "shield-check",
+	SUBAGENTS = "users",
+	SUMMARIZE = "clipboard-list",
+	CHAT = "message-square",
+	FOLLOW_UP = "message-square-quote",
+	COMPLETE = "check-circle-2",
+	BUG = "bug",
+	PLAN = "map",
+	BROWSER = "globe",
+	SKILL = "zap",
+}

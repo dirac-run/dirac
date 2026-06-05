@@ -25,6 +25,5 @@ export const TOOL_EXAMPLES: Partial<Record<DiracDefaultTool, string>> = {
 	[DiracDefaultTool.USE_SUBAGENTS]: '{"prompt_1": "...", "prompt_2": "..."}',
 	[DiracDefaultTool.USE_SKILL]: '{"skill_name": "skill-name"}',
 	[DiracDefaultTool.LIST_SKILLS]: '{}',
-	[DiracDefaultTool.GENERATE_EXPLANATION]: '{"title": "Changes in last commit", "from_ref": "HEAD~1"}',
 	[DiracDefaultTool.FILE_NEW]: '{"path": "src/new-file.ts", "content": "export const x = 1"}',
 }

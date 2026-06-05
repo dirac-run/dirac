@@ -142,6 +142,47 @@ dirac "explain Dirac Delta function" \
 4. Watch Dirac go!
 
 
+## 🛠️ Development
+
+### Setup
+```bash
+npm run install:all
+```
+
+### Protobufs (required before build)
+```bash
+npm run protos
+```
+
+### Build
+```bash
+npm run compile
+```
+
+### Lint
+```bash
+npm run lint
+```
+
+### Running Tests
+
+Unit tests require the `TS_NODE_PROJECT` environment variable set to `./tsconfig.unit-test.json`. This is because VS Code's test runner requires CommonJS modules while the main project uses ESM.
+
+```bash
+# Run all tests (unit + integration)
+npm test
+
+# Run only unit tests
+npm run test:unit
+```
+
+The `test:unit` script already sets `TS_NODE_PROJECT=./tsconfig.unit-test.json` automatically. If you need to run mocha directly, set it manually:
+
+```bash
+TS_NODE_PROJECT=./tsconfig.unit-test.json npx mocha "src/**/__tests__/*.ts" "src/**/*.test.ts"
+```
+
+
 ## 📈 Star History
 
 <a href="https://star-history.com/#dirac-run/dirac&Date">

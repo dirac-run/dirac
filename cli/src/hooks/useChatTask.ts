@@ -3,6 +3,8 @@ import { useApp } from "ink"
 import { Logger } from "@/shared/services/Logger"
 import { telemetryService } from "@/services/telemetry"
 import { Session } from "@/shared/services/Session"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+
 import { shutdownEvent } from "../vscode-shim"
 import { showTaskWithId } from "@/core/controller/task/showTaskWithId"
 import { StringRequest } from "@shared/proto/dirac/common"
@@ -103,7 +105,7 @@ export function useChatTask({
 				if (taskId) {
 					const task = await waitFor(() => ctrl.task, 5000)
 					if (task) {
-						await task.handleWebviewAskResponse("messageResponse", initialPrompt || "")
+						await task.submitCardResponse("", DiracAskResponse.MESSAGE, initialPrompt || "")
 					} else {
 						await ctrl.initTask(initialPrompt || "", initialImages)
 					}

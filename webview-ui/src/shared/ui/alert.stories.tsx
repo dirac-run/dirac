@@ -1,5 +1,5 @@
 import type { Meta } from "@storybook/react-vite"
-import DiracLogoWhite from "@/assets/DiracLogoWhite"
+import DiracLogoVariable from "@/assets/DiracLogoVariable"
 import { Alert, AlertDescription } from "./alert"
 
 const meta: Meta<typeof Alert> = {
@@ -32,7 +32,7 @@ export const Default = () => (
 			<Alert isDismissible={false} title="Non Dismissible" variant="default">
 				<AlertDescription>This alert cannot be dismissed.</AlertDescription>
 			</Alert>
-			<Alert icon={<DiracLogoWhite className="size-2" />} title="Brand" variant="dirac">
+			<Alert icon={<DiracLogoVariable className="size-2" />} title="Brand" variant="dirac">
 				<AlertDescription>
 					<p className="my-1">How can I help you?</p>
 					<ul className="list-inside list-disc text-sm">

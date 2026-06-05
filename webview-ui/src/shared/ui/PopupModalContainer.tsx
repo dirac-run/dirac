@@ -1,5 +1,5 @@
 import styled from "styled-components"
-import { CODE_BLOCK_BG_COLOR } from "./CodeBlock"
+const CODE_BLOCK_BG_COLOR = "var(--vscode-editor-background, --vscode-sideBar-background, rgb(30 30 30))"
 
 interface PopupModalContainerProps {
 	$menuPosition: number

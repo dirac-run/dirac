@@ -19,12 +19,12 @@ import { Logger } from "@/shared/services/Logger"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
 import type {
-	CommandExecutionOptions,
-	CommandExecutorCallbacks,
-	CommandExecutorConfig,
-	ITerminalManager,
-	ShellIntegrationWarningTracker,
-	TerminalProcessResultPromise,
+    CommandExecutionOptions,
+    CommandExecutorCallbacks,
+    CommandExecutorConfig,
+    ITerminalManager,
+    ShellIntegrationWarningTracker,
+    TerminalProcessResultPromise,
 } from "./types"
 
 /**
@@ -185,25 +185,34 @@ export class CommandExecutor {
 		}
 
 		// 3. Update UI state and notify user by modifying existing message
-		// We modify the previous command_output message instead of sending a new say()
-		// to avoid interfering with any pending ask() dialogs (which would cause
-		// "Current ask promise was ignored" errors)
 		if (cancelled) {
 			this.callbacks.updateBackgroundCommandState(false)
 
 			// Wait for terminal buffers to flush before updating the message
-			// This prevents the cancellation notice from appearing in the middle of output
 			await new Promise((resolve) => setTimeout(resolve, 300))
 
 			// Find the last command_output message and update it
 			const messages = this.callbacks.getDiracMessages()
-			const lastCommandOutputIndex = findLastIndex(messages, (m) => m.ask === "command_output")
+			const lastCommandOutputIndex = findLastIndex(
+				messages,
+				(m) => m.content.type === "card" && m.content.card.header === "Command Output"
+			)
 			if (lastCommandOutputIndex !== -1) {
-				const existingText = messages[lastCommandOutputIndex].text || ""
-				const cancellationNotice = "\n\nCommand(s) cancelled by user."
-				await this.callbacks.updateDiracMessage(lastCommandOutputIndex, {
-					text: existingText + cancellationNotice,
-				})
+				const msg = messages[lastCommandOutputIndex]
+				if (msg.content.type === "card") {
+					const existingText = msg.content.card.body || ""
+					const cancellationNotice = "\n\nCommand(s) cancelled by user."
+					await this.callbacks.updateDiracMessage(lastCommandOutputIndex, {
+						content: {
+							...msg.content,
+							card: {
+								...msg.content.card,
+								body: existingText + cancellationNotice,
+								status: (await import("@shared/ExtensionMessage")).CardStatus.CANCELLED,
+							},
+						},
+					})
+				}
 			}
 		}
 
