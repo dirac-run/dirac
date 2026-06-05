@@ -76,6 +76,7 @@ vi.mock("@/core/controller/slash/getAvailableSlashCommands", () => ({
 
 vi.mock("@/core/storage/disk", () => ({
 	setRuntimeHooksDir: mocks.setRuntimeHooksDir,
+	getSavedDiracMessages: vi.fn(async () => []),
 }))
 
 vi.mock("../vscode-context.js", () => ({
