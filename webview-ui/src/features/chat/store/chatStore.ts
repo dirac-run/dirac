@@ -15,7 +15,6 @@ interface ChatState {
 
 	// Actions
 	setDiracMessages: (messages: DiracMessage[]) => void
-	updatePartialMessage: (message: DiracMessage) => void
 
 	// Hydration
 	hydrate: () => () => void
@@ -33,16 +32,6 @@ export const useChatStore = create<ChatState>((set) => ({
 	setDiracMessages: (messages) => set({ diracMessages: messages }),
 
 
-	updatePartialMessage: (message) =>
-		set((state) => {
-			const lastIndex = state.diracMessages.findLastIndex((msg) => msg.ts === message.ts)
-			if (lastIndex !== -1) {
-				const newMessages = [...state.diracMessages]
-				newMessages[lastIndex] = message
-				return { diracMessages: newMessages }
-			}
-			return state
-		}),
 
 	hydrate: () => {
 		const cleanup = StateServiceClient.subscribeToState({} as EmptyRequest, {

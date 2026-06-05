@@ -131,7 +131,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
                         }}
                         initialTopMostItemIndex={renderedMessages.length - 1}
                         itemContent={itemContent}
-                        key={task.ts}
+                        key={task.id}
                         rangeChanged={handleRangeChanged}
                         ref={virtuosoRef}
                         scrollerRef={(ref) => {

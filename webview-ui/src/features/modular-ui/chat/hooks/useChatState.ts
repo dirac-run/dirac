@@ -19,7 +19,7 @@ export function useChatState(messages: DiracMessage[]): ChatState {
 
     // UI state
     const [sendingDisabled, setSendingDisabled] = useState(false)
-    const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
+    const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
 
     // Refs
     const textAreaRef = useRef<HTMLTextAreaElement>(null)
@@ -50,7 +50,7 @@ export function useChatState(messages: DiracMessage[]): ChatState {
     // Auto-expand last message row when task or messages first changed.
     useEffect(() => {
         clearExpandedRows()
-    }, [task?.ts, clearExpandedRows])
+    }, [task?.id, clearExpandedRows])
 
     return {
         // State values

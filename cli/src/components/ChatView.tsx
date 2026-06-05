@@ -169,7 +169,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const [savedInput, setSavedInput] = useState("")
     const [isSearching, setIsSearching] = useState(false)
     const [showRipgrepWarning, setShowRipgrepWarning] = useState(false)
-    const [respondedToAsk, setRespondedToAsk] = useState<number | null>(null)
+    const [respondedToAsk, setRespondedToAsk] = useState<string | null>(null)
     const [userScrolled, setUserScrolled] = useState(false)
     const [cardExpansions, setCardExpansions] = useState<Map<string, "auto" | "expanded" | "collapsed">>(new Map())
 
@@ -241,7 +241,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const { displayMessages, committedMessages, liveMessages, taskSwitchKey, setTaskSwitchKey } = useChatMessages(
         taskState.diracMessages || [],
         taskState.activeVoiceStreamId,
-        taskState.isApiRequestActive
+        taskState.isApiRequestActive,
+        taskState.taskStatus
     )
 
     const { isProcessing, setIsProcessing, isExiting, handleCancel, handleExit, clearViewAndResetTask } = useChatTask({
@@ -428,7 +429,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const lastMsg = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1]
     useEffect(() => {
         setGitDiffStats(getGitDiffStats(workspacePath))
-    }, [taskState.diracMessages?.length, taskState.activeVoiceStreamId, lastMsg?.ts, workspacePath])
+    }, [taskState.diracMessages?.length, taskState.activeVoiceStreamId, lastMsg?.id, workspacePath])
 
     const isWelcomeState = displayMessages.length === 0 && !userScrolled
 
@@ -446,7 +447,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }, [committedMessages, displayMessages.length, userScrolled])
 
     const lastCompletedAsk = useLastCompletedAskMessage()
-    const pendingAsk = lastCompletedAsk && respondedToAsk !== lastCompletedAsk.ts ? lastCompletedAsk : null
+    const pendingAsk = lastCompletedAsk && respondedToAsk !== lastCompletedAsk.id ? lastCompletedAsk : null
     const askType = pendingAsk ? getAskPromptType(pendingAsk) : "none"
     const askOptions = pendingAsk && askType === "options" ? parseAskOptions(pendingAsk) : []
 
@@ -467,7 +468,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             if (!ctrl?.task || !pendingAsk) return
             if (!isProcessing) setIsProcessing(true)
             const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
-            setRespondedToAsk(pendingAsk.ts)
+            setRespondedToAsk(pendingAsk.id)
             setTextInput("")
             setCursorPos(0)
             setPastedTexts(new Map())
@@ -532,7 +533,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             pendingAsk?.content.type === DiracMessageType.CARD &&
                             pendingAsk.content.card.header.toLowerCase().includes("new task")
                         ) {
-                            setRespondedToAsk(pendingAsk.ts)
+                            setRespondedToAsk(pendingAsk.id)
                             setTextInput("")
                             setCursorPos(0)
                             await ctrl.initTask(pendingAsk.content.card.body || "")
@@ -839,7 +840,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     return (
                         <Box key={msg.id} paddingX={1} width="100%">
                             <ChatMessage
-                                isExecuting={msg.ts === respondedToAsk}
+                                isExecuting={msg.id === respondedToAsk}
                                 isStreaming={msg.id === taskState.activeVoiceStreamId}
                                 message={msg}
                                 mode={mode}

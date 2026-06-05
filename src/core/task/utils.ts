@@ -3,8 +3,6 @@ import { execSync } from "child_process"
 import { showSystemNotification } from "@/integrations/notifications"
 import { DiracApiReqCancelReason, DiracApiReqInfo, DiracMessageType } from "@/shared/ExtensionMessage"
 
-import { sendPartialMessageEvent } from "@core/controller/ui/subscribeToPartialMessage"
-import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { calculateApiCostAnthropic } from "@/utils/cost"
 import { calculateApiCostOpenAI, calculateApiCostQwen } from "@/utils/cost"
 import { MessageStateHandler } from "./message-state"
@@ -119,7 +117,6 @@ export const updateApiReqMsg = async (params: UpdateApiReqMsgParams) => {
 
 	// Ensure UI is updated
 	const updatedMsg = params.messageStateHandler.getDiracMessages()[params.lastApiReqIndex]
-	await sendPartialMessageEvent(convertDiracMessageToProto(updatedMsg))
 }
 
 /**

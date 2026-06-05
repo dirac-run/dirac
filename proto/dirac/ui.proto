@@ -313,9 +313,6 @@ service UiService {
   // Subscribe to worktrees button clicked events
   rpc subscribeToWorktreesButtonClicked(EmptyRequest) returns (stream Empty);
 
-  // Subscribe to partial message updates (streaming Dirac messages as they're built)
-  rpc subscribeToPartialMessage(EmptyRequest) returns (stream DiracMessage);
-
   // Initialize webview when it launches
   rpc initializeWebview(EmptyRequest) returns (Empty);
 

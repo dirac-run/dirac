@@ -30,7 +30,7 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 	const { isTaskComplete, getCompletionMessage } = useCompletionSignals()
 	const { setIsComplete } = useTaskContext()
 	// Track outputted messages by timestamp (don't re-output on updates)
-	const outputtedMessages = useRef<Set<number>>(new Set())
+	const outputtedMessages = useRef<Set<string>>(new Set())
 	const hasOutputtedCompletion = useRef(false)
 
 	// Determine the role for a message
@@ -65,14 +65,14 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 			}
 
 			// Skip if we already outputted this timestamp
-			if (outputtedMessages.current.has(message.ts)) {
+			if (outputtedMessages.current.has(message.id)) {
 				continue
 			}
 
 			// Filter out noisy messages in non-verbose mode
 			if (!verbose) {
 				if (message.content.type === DiracMessageType.API_STATUS) {
-					outputtedMessages.current.add(message.ts)
+					outputtedMessages.current.add(message.id)
 					continue
 				}
 			}
@@ -100,7 +100,7 @@ export const TaskJsonView: React.FC<TaskJsonViewProps> = ({ taskId: _taskId, ver
 
 			outputJson(output)
 
-			outputtedMessages.current.add(message.ts)
+			outputtedMessages.current.add(message.id)
 		}
 	}, [state.diracMessages, verbose])
 

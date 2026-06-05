@@ -139,7 +139,6 @@ interface SettingsState {
     // Actions
     setSettings: (settings: Partial<SettingsState>) => void
     setDiracMessages: (messages: DiracMessage[]) => void
-    updatePartialMessage: (message: DiracMessage) => void
     setTaskHistory: (history: any[]) => void
     setExpandTaskHeader: (expand: boolean) => void
     setTotalTasksSize: (size: number) => void
@@ -345,16 +344,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     navigateToWorktrees: () => { },
     onRelinquishControl: () => () => { },
     setDiracMessages: (messages) => set({ diracMessages: messages }),
-    updatePartialMessage: (message) =>
-        set((state) => {
-            const lastIndex = state.diracMessages.findLastIndex((msg) => msg.ts === message.ts)
-            if (lastIndex !== -1) {
-                const newMessages = [...state.diracMessages]
-                newMessages[lastIndex] = message
-                return { diracMessages: newMessages }
-            }
-            return state
-        }),
     setTaskHistory: (history) => set({ taskHistory: history }),
     setExpandTaskHeader: (expand) => set({ expandTaskHeader: expand }),
     setTotalTasksSize: (size) => set({ totalTasksSize: size }),

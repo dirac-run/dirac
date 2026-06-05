@@ -1,13 +1,11 @@
 import { ApiHandler } from "@core/api"
 
-import { sendPartialMessageEvent } from "@core/controller/ui/subscribeToPartialMessage"
 import { executeHook } from "@core/hooks/hook-executor"
 
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { Card, CardStatus, DiracApiReqInfo, DiracMessage, ICardHandle, ITextStreamHandle, DiracMessageType, ITaskMessenger, isFinalStatus, TaskStatus } from "@shared/ExtensionMessage"
 
-import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { Logger } from "@shared/services/Logger"
 import pWaitFor from "p-wait-for"
 import { TaskMessengerDependencies } from "./types/task-messenger"
@@ -61,7 +59,6 @@ export class TaskMessenger implements ITaskMessenger {
                 if (msg.content.type === DiracMessageType.MARKDOWN) {
                     msg.content.content += chunk
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a markdown message`)
@@ -76,7 +73,6 @@ export class TaskMessenger implements ITaskMessenger {
                 if (msg.content.type === DiracMessageType.MARKDOWN) {
                     msg.content.images = images
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a markdown message`)
@@ -91,7 +87,6 @@ export class TaskMessenger implements ITaskMessenger {
                 if (msg.content.type === DiracMessageType.MARKDOWN) {
                     msg.content.files = files
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a markdown message`)
@@ -104,7 +99,6 @@ export class TaskMessenger implements ITaskMessenger {
                 }
                 const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
                 await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                 await this.dependencies.postStateToWebview()
 
                 if (this.dependencies.taskState.activeVoiceStreamId === id) {
@@ -172,7 +166,6 @@ export class TaskMessenger implements ITaskMessenger {
                     msg.content.card = { ...msg.content.card, ...patch }
                     // Cards are never partial in the new architecture
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a card message`)
@@ -187,7 +180,6 @@ export class TaskMessenger implements ITaskMessenger {
                 if (msg.content.type === DiracMessageType.CARD) {
                     msg.content.card.body = (msg.content.card.body || "") + chunk
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a card message`)
@@ -205,7 +197,6 @@ export class TaskMessenger implements ITaskMessenger {
                         msg.content.card.do_not_auto_collapse = true
                     }
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                 } else {
                     throw new Error(`Message with id ${id} is not a card message`)
@@ -363,7 +354,6 @@ export class TaskMessenger implements ITaskMessenger {
                     ...status,
                 }
                 await this.dependencies.messageStateHandler.updateDiracMessage(index, msg)
-                await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                 await this.dependencies.postStateToWebview()
             } else {
                 throw new Error(`Message with id ${id} is not an api_status message`)
@@ -376,7 +366,6 @@ export class TaskMessenger implements ITaskMessenger {
             }
             await this.dependencies.messageStateHandler.addToDiracMessages(message)
             await this.dependencies.postStateToWebview()
-            await sendPartialMessageEvent(convertDiracMessageToProto(message))
         }
     }
 
@@ -396,7 +385,6 @@ export class TaskMessenger implements ITaskMessenger {
                     await this.dependencies.messageStateHandler.updateDiracMessage(index, {
                         content: msg.content,
                     })
-                    await sendPartialMessageEvent(convertDiracMessageToProto(msg))
                     await this.dependencies.postStateToWebview()
                     return
                 }
@@ -415,7 +403,6 @@ export class TaskMessenger implements ITaskMessenger {
         }
 
         await this.dependencies.messageStateHandler.addToDiracMessages(message)
-        await sendPartialMessageEvent(convertDiracMessageToProto(message))
         await this.dependencies.postStateToWebview()
     }
 

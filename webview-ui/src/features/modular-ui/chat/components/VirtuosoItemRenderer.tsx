@@ -11,8 +11,8 @@ interface MessageRendererProps {
     message: DiracMessage
     renderedMessages: DiracMessage[]
     modifiedMessages: DiracMessage[]
-    expandedRows: Record<number, boolean>
-    onToggleExpand: (ts: number) => void
+    expandedRows: Record<string, boolean>
+    onToggleExpand: (id: string) => void
     onSetQuote: (quote: string | null) => void
     inputValue: string
     messageHandlers: MessageHandlers
@@ -51,13 +51,13 @@ export const MessageRenderer = memo(
                 className={cn({
                     "pb-1.5": isLastMessage && !footerActive,
                 })}
-                data-message-ts={message.ts}>
+                data-message-id={message.id}>
                 <ChatRow
                     inputValue={inputValue}
-                    isExpanded={expandedRows[message.ts] || false}
+                    isExpanded={expandedRows[message.id] || false}
                     isLast={isLastMessage}
                     isRequestInProgress={false} // Handled by the new protocol partial flag
-                    key={message.id || message.ts}
+                    key={message.id}
                     lastModifiedMessage={modifiedMessages.at(-1)}
                     message={message}
                     mode={mode}
@@ -84,8 +84,8 @@ export const MessageRenderer = memo(
 export const createMessageRenderer = (
     renderedMessages: DiracMessage[],
     modifiedMessages: DiracMessage[],
-    expandedRows: Record<number, boolean>,
-    onToggleExpand: (ts: number) => void,
+    expandedRows: Record<string, boolean>,
+    onToggleExpand: (id: string) => void,
     onSetQuote: (quote: string | null) => void,
     inputValue: string,
     messageHandlers: MessageHandlers,

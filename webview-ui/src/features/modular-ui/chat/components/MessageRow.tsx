@@ -42,7 +42,7 @@ export const MessageRenderer = memo(
             })
         }, [onRelinquishControl])
 
-        const handleToggle = () => onToggleExpand(message.ts)
+        const handleToggle = () => onToggleExpand(message.id)
 
         // --- New Protocol Dispatcher ---
         if ("content" in message) {
@@ -54,7 +54,7 @@ export const MessageRenderer = memo(
                             isReasoning={message.content.isReasoning}
                             partial={message.id === activeVoiceStreamId}
                             isExpanded={isExpanded}
-                            onToggleExpand={() => onToggleExpand(message.ts)}
+                            onToggleExpand={() => onToggleExpand(message.id)}
                             onAskForUpdate={onAskForUpdate}
                             images={message.content.images}
                             files={message.content.files}

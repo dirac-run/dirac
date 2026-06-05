@@ -3,7 +3,7 @@ import { DiracMessage, Mode } from "@shared/ExtensionMessage"
 export interface ChatRowProps {
     message: DiracMessage
     isExpanded: boolean
-    onToggleExpand: (ts: number) => void
+    onToggleExpand: (id: string) => void
     lastModifiedMessage?: DiracMessage
     isLast: boolean
     inputValue?: string

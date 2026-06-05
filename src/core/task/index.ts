@@ -31,7 +31,6 @@ import { ModelContextTracker } from "@core/context/context-tracking/ModelContext
 import { isMutatingTool } from "@shared/tools"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 
-import { sendPartialMessageEvent } from "@core/controller/ui/subscribeToPartialMessage"
 
 import { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 
@@ -83,7 +82,6 @@ import {
 } from "@shared/messages/content"
 import { DiracMessageModelInfo } from "@shared/messages/metrics"
 import { ShowMessageType } from "@shared/proto/index.host"
-import { convertDiracMessageToProto } from "@shared/proto-conversions/dirac-message"
 import { Logger } from "@shared/services/Logger"
 import { Session } from "@shared/services/Session"
 import { DiracAskResponse } from "@shared/WebviewMessage"
@@ -1746,7 +1744,6 @@ export class Task {
                         })
                         const completedReasoning = this.messageStateHandler.getDiracMessages()[pendingReasoningIndex]
                         if (completedReasoning) {
-                            await sendPartialMessageEvent(convertDiracMessageToProto(completedReasoning))
                             await this.postStateToWebview()
                         }
                         this.taskState.activeVoiceStreamId = undefined

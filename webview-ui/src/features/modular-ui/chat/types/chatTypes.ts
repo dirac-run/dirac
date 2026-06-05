@@ -33,8 +33,8 @@ export interface ChatState {
     setSelectedFiles: React.Dispatch<React.SetStateAction<string[]>>
     sendingDisabled: boolean
     setSendingDisabled: React.Dispatch<React.SetStateAction<boolean>>
-    expandedRows: Record<number, boolean>
-    setExpandedRows: React.Dispatch<React.SetStateAction<Record<number, boolean>>>
+    expandedRows: Record<string, boolean>
+    setExpandedRows: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
 
     // Refs
     textAreaRef: React.RefObject<HTMLTextAreaElement>
@@ -87,7 +87,7 @@ export interface ScrollBehavior {
     scrollToBottomAuto: () => void
     scrollToBottomNow: () => void
     scrollToMessage: (messageIndex: number) => void
-    toggleRowExpansion: (ts: number) => void
+    toggleRowExpansion: (id: string) => void
     programmaticScrollRef: React.MutableRefObject<boolean>
     showScrollToBottom: boolean
     setShowScrollToBottom: React.Dispatch<React.SetStateAction<boolean>>

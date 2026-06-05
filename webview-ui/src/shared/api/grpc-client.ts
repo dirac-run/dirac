@@ -366,9 +366,6 @@ export class UiServiceClient extends ProtoBusClient {
     static subscribeToWorktreesButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
 		return this.makeStreamingRequest("subscribeToWorktreesButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-    static subscribeToPartialMessage(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.DiracMessage>): ()=>void {
-		return this.makeStreamingRequest("subscribeToPartialMessage", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.DiracMessage.fromJSON, callbacks)
-	}
     static async initializeWebview(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("initializeWebview", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}

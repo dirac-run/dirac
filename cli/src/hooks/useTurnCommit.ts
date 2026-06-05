@@ -1,53 +1,61 @@
 /**
  * Tracks conversation turn boundaries and maintains a commit watermark.
  *
- * The backend guarantees that when an API call (conversation turn) completes,
- * all cards from that turn are in terminal status (success, error, skipped, etc).
- * This hook exploits that invariant:
+ * Messages before the watermark are immutable → safe for <Static> (print-once).
+ * Messages after the watermark are live → rendered in Ink's dynamic region,
+ * re-rendering on every state change (card status updates, body streaming, etc).
  *
- *  - Messages before the watermark are immutable → safe for <Static> (print-once).
- *  - Messages after the watermark are live → rendered in Ink's dynamic region,
- *    re-rendering on every state change (card status updates, body streaming, etc).
+ * The watermark advances when a NEW turn starts (inactive → active). At that point,
+ * all previous cards are resolved (user responded, card auto-approved, etc.) and the
+ * new API call has begun. This ensures interactive cards (e.g., plan_mode_respond,
+ * ask_followup_question) remain in the dynamic region while awaiting user input.
  *
- * The watermark advances synchronously when the turn transitions from active to
- * inactive (isApiRequestActive drops to false AND activeVoiceStreamId clears).
+ * For task completion (no next turn), the watermark advances when the task status
+ * is COMPLETED and there is no active turn.
  */
 
 import { useRef } from "react"
 
 export interface TurnCommitResult<T> {
-	/** Messages from completed turns — safe for <Static> */
-	committed: T[]
-	/** Messages from the current (or no) turn — rendered dynamically */
-	live: T[]
+    /** Messages from completed turns — safe for <Static> */
+    committed: T[]
+    /** Messages from the current (or no) turn — rendered dynamically */
+    live: T[]
 }
 
 export function useTurnCommit<T>(
-	messages: T[],
-	isApiRequestActive: boolean,
-	activeVoiceStreamId?: string,
+    messages: T[],
+    isApiRequestActive: boolean,
+    activeVoiceStreamId?: string,
+    taskStatus?: string,
 ): TurnCommitResult<T> {
-	const watermarkRef = useRef(0)
-	const wasActiveRef = useRef(false)
+    const watermarkRef = useRef(0)
+    const wasActiveRef = useRef(false)
 
-	const isActive = isApiRequestActive || !!activeVoiceStreamId
+    const isActive = isApiRequestActive || !!activeVoiceStreamId
 
-	// On initial mount with no active turn, commit all existing messages.
-	// These are from past conversation turns and are already terminal.
-	if (!isActive && !wasActiveRef.current && watermarkRef.current === 0 && messages.length > 0) {
-		watermarkRef.current = messages.length
-	}
+    // On initial mount with no active turn, commit all existing messages.
+    // These are from past conversation turns and are already terminal.
+    if (!isActive && !wasActiveRef.current && watermarkRef.current === 0 && messages.length > 0) {
+        watermarkRef.current = messages.length
+    }
 
-	// When the turn transitions from active → inactive, commit everything.
-	// The backend guarantees all cards from the completed turn are terminal.
-	if (!isActive && wasActiveRef.current) {
-		watermarkRef.current = messages.length
-	}
+    // When a NEW turn starts, commit all messages from the previous turn.
+    // At this point, all previous cards are resolved (user responded or auto-approved)
+    // and the new API call has begun.
+    if (isActive && !wasActiveRef.current && watermarkRef.current < messages.length) {
+        watermarkRef.current = messages.length
+    }
 
-	wasActiveRef.current = isActive
+    // Task finished with no more turns coming — commit remaining messages.
+    if (!isActive && taskStatus === "COMPLETED" && watermarkRef.current < messages.length) {
+        watermarkRef.current = messages.length
+    }
 
-	return {
-		committed: messages.slice(0, watermarkRef.current),
-		live: messages.slice(watermarkRef.current),
-	}
+    wasActiveRef.current = isActive
+
+    return {
+        committed: messages.slice(0, watermarkRef.current),
+        live: messages.slice(watermarkRef.current),
+    }
 }

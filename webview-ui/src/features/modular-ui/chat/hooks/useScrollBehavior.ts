@@ -7,8 +7,8 @@ export function useScrollBehavior(
     messages: DiracMessage[],
     visibleMessages: DiracMessage[],
     renderedMessages: DiracMessage[],
-    expandedRows: Record<number, boolean>,
-    setExpandedRows: React.Dispatch<React.SetStateAction<Record<number, boolean>>>,
+    expandedRows: Record<string, boolean>,
+    setExpandedRows: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
 ): ScrollBehavior & {
     showScrollToBottom: boolean
     setShowScrollToBottom: React.Dispatch<React.SetStateAction<boolean>>
@@ -84,13 +84,13 @@ export function useScrollBehavior(
             }
 
             const visMsgs = visibleMessagesRef.current
-            const visibleIndex = visMsgs.findIndex((msg) => msg.ts === targetMessage.ts)
+            const visibleIndex = visMsgs.findIndex((msg) => msg.id === targetMessage.id)
             if (visibleIndex === -1) {
                 setPendingScrollToMessage(null)
                 return
             }
 
-            const renderedIndex = rendered.findIndex((msg) => msg.ts === targetMessage.ts)
+            const renderedIndex = rendered.findIndex((msg) => msg.id === targetMessage.id)
             if (renderedIndex === -1) {
                 setPendingScrollToMessage(null)
                 return
@@ -113,21 +113,21 @@ export function useScrollBehavior(
 
     // scroll when user toggles certain rows
     const toggleRowExpansion = useCallback(
-        (ts: number) => {
-            const isCollapsing = expandedRows[ts] ?? false
+        (id: string) => {
+            const isCollapsing = expandedRows[id] ?? false
             const lastMessage = renderedMessages.at(-1)
-            const isLast = lastMessage?.ts === ts
+            const isLast = lastMessage?.id === id
             const secondToLastMessage = renderedMessages.at(-2)
-            const isSecondToLast = secondToLastMessage?.ts === ts
+            const isSecondToLast = secondToLastMessage?.id === id
 
             const isLastCollapsedApiReq =
                 isLast &&
                 lastMessage?.content.type === "api_status" &&
-                !expandedRows[lastMessage.ts]
+                !expandedRows[lastMessage.id]
 
             setExpandedRows((prev) => ({
                 ...prev,
-                [ts]: !prev[ts],
+                [id]: !prev[id],
             }))
 
             // disable auto scroll when user expands row
