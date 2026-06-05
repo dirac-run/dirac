@@ -880,7 +880,7 @@ describe("translateMessage - say messages", () => {
 
 			expect(askResult.requiresPermission).toBe(false)
 			expect(toolCall.kind).toBe("execute")
-			expect(toolCall.status).toBe("pending")
+			expect(toolCall.status).toBe("in_progress")
 			expect(sessionState.currentToolCallId).toBe(toolCall.toolCallId)
 
 			const sayMessage = createDiracMessage({
@@ -1269,6 +1269,29 @@ describe("translateMessage - ask messages", () => {
 			// Should track pending tool call
 			expect(sessionState.pendingToolCalls.has(call.toolCallId)).toBe(true)
 		})
+
+		it("should not show auto-approved partial ask:command as waiting for permission", () => {
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "command",
+				text: "npm test",
+				partial: true,
+				multiCommandState: {
+					commands: [{ command: "npm test", status: "pending", wasAutoApproved: true }],
+				},
+			})
+
+			const result = translateMessage(message, sessionState)
+
+			const toolCall = result.updates.find((u) => u.sessionUpdate === "tool_call")
+			expect(toolCall).toBeDefined()
+
+			const call = toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }
+			expect(call.kind).toBe("execute")
+			expect(call.status).toBe("in_progress")
+			expect(result.requiresPermission).toBe(false)
+			expect(result.permissionRequest).toBeUndefined()
+		})
 	})
 
 	describe("tool permissions", () => {
@@ -1301,6 +1324,64 @@ describe("translateMessage - ask messages", () => {
 
 			// Should return toolCallId for tracking
 			expect(result.toolCallId).toBe(call.toolCallId)
+		})
+
+		it("should not request ACP permission for workspace read-only tool asks", () => {
+			const toolInfo = {
+				tool: "readFile",
+				path: "/src/file.ts",
+				operationIsLocatedInWorkspace: true,
+			}
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "tool",
+				text: JSON.stringify(toolInfo),
+			})
+
+			const result = translateMessage(message, sessionState)
+
+			const toolCall = result.updates.find((u) => u.sessionUpdate === "tool_call")
+			expect(toolCall).toBeDefined()
+			expect((toolCall as acp.ToolCall & { sessionUpdate: "tool_call" }).status).toBe("in_progress")
+			expect(result.requiresPermission).toBe(false)
+			expect(result.permissionRequest).toBeUndefined()
+		})
+
+		it("should still request ACP permission when read-only ask is outside workspace", () => {
+			const toolInfo = {
+				tool: "readFile",
+				path: "/etc/hosts",
+				operationIsLocatedInWorkspace: false,
+			}
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "tool",
+				text: JSON.stringify(toolInfo),
+			})
+
+			const result = translateMessage(message, sessionState)
+
+			expect(result.requiresPermission).toBe(true)
+			expect(result.permissionRequest).toBeDefined()
+		})
+
+		it("should honor explicit requiresApproval=true on tool payload", () => {
+			const toolInfo = {
+				tool: "readFile",
+				path: "/src/file.ts",
+				operationIsLocatedInWorkspace: true,
+				requiresApproval: true,
+			}
+			const message = createDiracMessage({
+				type: "ask",
+				ask: "tool",
+				text: JSON.stringify(toolInfo),
+			})
+
+			const result = translateMessage(message, sessionState)
+
+			expect(result.requiresPermission).toBe(true)
+			expect(result.permissionRequest).toBeDefined()
 		})
 
 		it("should not require permission for partial tool messages", () => {

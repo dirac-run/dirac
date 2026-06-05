@@ -182,7 +182,7 @@ export function toolSpecFunctionDefinition(tool: DiracToolSpec, context: SystemP
 				type: "object",
 				properties,
 				required,
-				...(strict ? { additionalProperties: false } : {}),
+				additionalProperties: false,
 			},
 		},
 	}

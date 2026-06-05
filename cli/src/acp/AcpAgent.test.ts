@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => {
 		initialize: vi.fn(),
 		newSession: vi.fn(),
 		loadSession: vi.fn(),
+		replayLoadedSessionHistory: vi.fn(),
+		unstable_listSessions: vi.fn(),
 		publishSessionSetupUpdates: vi.fn(),
 		emitterForSession: vi.fn(),
 		prompt: vi.fn(),
@@ -45,6 +47,8 @@ describe("AcpAgent", () => {
 		vi.useRealTimers()
 		mocks.diracAgentInstance.newSession.mockResolvedValue({ sessionId: "session-1" })
 		mocks.diracAgentInstance.loadSession.mockResolvedValue({})
+		mocks.diracAgentInstance.replayLoadedSessionHistory.mockResolvedValue(undefined)
+		mocks.diracAgentInstance.unstable_listSessions.mockResolvedValue({ sessions: [] })
 		mocks.diracAgentInstance.publishSessionSetupUpdates.mockImplementation(async () => {
 			mocks.callOrder.push("publish")
 		})
@@ -121,6 +125,9 @@ describe("AcpAgent", () => {
 
 	it("publishes setup updates after loadSession", async () => {
 		vi.useFakeTimers()
+		mocks.diracAgentInstance.replayLoadedSessionHistory.mockImplementation(async () => {
+			mocks.callOrder.push("replay")
+		})
 		const agent = new AcpAgent(connection, {})
 
 		await expect(agent.loadSession({ sessionId: "session-1", cwd: "/tmp/workspace", mcpServers: [] })).resolves.toEqual({})
@@ -130,10 +137,24 @@ describe("AcpAgent", () => {
 			cwd: "/tmp/workspace",
 			mcpServers: [],
 		})
-		expect(mocks.callOrder).toEqual(["subscribe"])
+		expect(mocks.callOrder).toEqual(["subscribe", "replay"])
+		expect(mocks.diracAgentInstance.replayLoadedSessionHistory).toHaveBeenCalledWith("session-1")
 
 		await vi.runAllTimersAsync()
-		expect(mocks.callOrder).toEqual(["subscribe", "publish"])
+		expect(mocks.callOrder).toEqual(["subscribe", "replay", "publish"])
 		expect(mocks.diracAgentInstance.publishSessionSetupUpdates).toHaveBeenCalledWith("session-1")
+	})
+
+	it("delegates unstable_listSessions", async () => {
+		mocks.diracAgentInstance.unstable_listSessions.mockResolvedValue({
+			sessions: [{ sessionId: "task-1", cwd: "/tmp/workspace", title: "Task", updatedAt: "2026-05-27T00:00:00.000Z" }],
+		})
+		const agent = new AcpAgent(connection, {})
+
+		await expect(agent.unstable_listSessions({ cwd: "/tmp/workspace" })).resolves.toEqual({
+			sessions: [{ sessionId: "task-1", cwd: "/tmp/workspace", title: "Task", updatedAt: "2026-05-27T00:00:00.000Z" }],
+		})
+
+		expect(mocks.diracAgentInstance.unstable_listSessions).toHaveBeenCalledWith({ cwd: "/tmp/workspace" })
 	})
 })

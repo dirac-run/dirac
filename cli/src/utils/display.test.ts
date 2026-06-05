@@ -142,13 +142,15 @@ describe("display", () => {
 			it("should format tool message", () => {
 				const message = createMessage({ say: "tool", text: "read_file" })
 				const result = formatMessage(message)
-				expect(result).toContain("Tool:")
+				expect(result).toContain("Tool Call")
 			})
 
 			it("should format browser_action message", () => {
 				const message = createMessage({ say: "browser_action", text: "click button" })
-				const result = formatMessage(message)
-				expect(result).toContain("Browser:")
+				const resultNormal = formatMessage(message, false)
+				const resultVerbose = formatMessage(message, true)
+				expect(resultNormal).toBe("")
+				expect(resultVerbose).toContain("[SAY:browser_action]")
 			})
 
 			it("should format api_req_started in verbose mode", () => {
@@ -207,7 +209,7 @@ describe("display", () => {
 					text: "rm -rf /",
 				})
 				const result = formatMessage(message)
-				expect(result).toContain("Execute command?")
+				expect(result).toContain("Use tool?")
 				expect(result).toContain("rm -rf /")
 			})
 
@@ -259,7 +261,7 @@ describe("display", () => {
 					text: "https://example.com",
 				})
 				const result = formatMessage(message)
-				expect(result).toContain("Launch browser?")
+				expect(result).toContain("Use tool?")
 			})
 
 			it("should show unknown ask types in verbose mode", () => {

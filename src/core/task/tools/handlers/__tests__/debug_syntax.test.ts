@@ -59,6 +59,9 @@ function createConfig() {
 		cwd: tmpDir,
 		mode: "act",
 		taskState,
+		messageState: {
+			getApiConversationHistory: sinon.stub().returns([]),
+		},
 		services: {
 			fileContextTracker: {
 				trackFileContext: sinon.stub().resolves(),

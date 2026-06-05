@@ -30,6 +30,10 @@ const shutdownMockState = {
 	},
 }
 
+vi.mock("ink-picture", () => ({
+	TerminalInfoProvider: ({ children }: any) => children,
+}))
+
 // Mock vscode-shim shutdownEvent
 vi.mock("../vscode-shim", () => ({
 	shutdownEvent: {
@@ -150,6 +154,8 @@ vi.mock("../utils/tools", () => ({
 }))
 
 vi.mock("../utils/display", () => ({
+	centerText: vi.fn((text: string) => text),
+	createContextBar: vi.fn(() => ({ filled: "", empty: "" })),
 	setTerminalTitle: vi.fn(),
 }))
 

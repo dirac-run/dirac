@@ -51,7 +51,10 @@ export function createUIHelpers(config: TaskConfig): StronglyTypedUIHelpers {
 		say: config.callbacks.say,
 		ask: config.callbacks.ask,
 		removeClosingTag: (block: ToolUse, tag: ToolParamName, text?: any) => removeClosingTag(block, tag, text),
-		removeLastPartialMessageIfExistsWithType: (type: "ask" | "say", askOrSay: DiracAsk | DiracSay, onlyPartial?: boolean) => config.callbacks.removeLastPartialMessageIfExistsWithType(type, askOrSay, onlyPartial),
+		removeLastPartialMessageIfExistsWithType: (type: "ask" | "say", askOrSay: DiracAsk | DiracSay, onlyPartial?: boolean) =>
+			onlyPartial !== undefined
+				? config.callbacks.removeLastPartialMessageIfExistsWithType(type, askOrSay, onlyPartial)
+				: config.callbacks.removeLastPartialMessageIfExistsWithType(type, askOrSay),
 		shouldAutoApproveTool: (toolName: DiracDefaultTool) => config.autoApprover.shouldAutoApproveTool(toolName),
 		shouldAutoApproveToolWithPath: config.callbacks.shouldAutoApproveToolWithPath,
 		askApproval: async (messageType: DiracAsk, message: string): Promise<boolean> => {

@@ -157,8 +157,13 @@ export class AcpAgent implements acp.Agent {
 	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
 		const response = await this.diracAgent.loadSession(params)
 		this.subscribeToSessionEvents(params.sessionId)
+		await this.diracAgent.replayLoadedSessionHistory(params.sessionId)
 		this.scheduleSessionSetupUpdates(params.sessionId)
 		return response
+	}
+
+	async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+		return this.diracAgent.unstable_listSessions(params)
 	}
 
 	async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {

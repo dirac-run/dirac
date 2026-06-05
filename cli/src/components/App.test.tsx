@@ -4,6 +4,10 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { App } from "./App"
 
+vi.mock("ink-picture", () => ({
+	TerminalInfoProvider: ({ children }: any) => children,
+}))
+
 // Mock the child components to isolate App routing logic
 vi.mock("./ChatView", () => ({
 	ChatView: ({ taskId, controller }: any) =>

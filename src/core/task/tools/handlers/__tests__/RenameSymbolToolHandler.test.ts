@@ -23,8 +23,8 @@ function createConfig() {
 	let lastPath: string | undefined
 	let lastContent: string | undefined
 	const diffViewProvider = {
-		open: sinon.stub().callsFake(async (path: string) => {
-			lastPath = path
+		open: sinon.stub().callsFake(async (p: string) => {
+			lastPath = path.isAbsolute(p) ? p : path.join(tmpDir, p)
 		}),
 		update: sinon.stub().callsFake(async (content: string) => {
 			lastContent = content
@@ -36,6 +36,8 @@ function createConfig() {
 			}
 			return { finalContent: lastContent }
 		}),
+		showReview: sinon.stub().resolves(),
+		hideReview: sinon.stub().resolves(),
 	}
 
 	const callbacks = {
