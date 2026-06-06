@@ -1,10 +1,10 @@
 import { RenderType } from "@shared/ExtensionMessage"
 import { Box, Text, useInput } from "ink"
-import React, { useCallback, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { Diff } from "./Diff"
 import { linkifyPaths } from "../../utils/terminal-link"
 import { Markdown } from "./Markdown"
-
+import { scrollableCardActive } from "./scrollable-card-state"
 export type CardBodyMode = "teaser" | "collapsed" | "expanded"
 
 interface CardBodyProps {
@@ -47,7 +47,7 @@ function extractTeaser(body: string, renderType: RenderType): string {
     return first
 }
 
-const RESERVED_LINES = 14
+const RESERVED_LINES = 22
 
 export const CardBody: React.FC<CardBodyProps> = ({ body, renderType, isExpanded = true, maxHeight, mode = "expanded" }) => {
     if (!body) return null
@@ -117,6 +117,13 @@ function ScrollableCardBody({
     renderType: RenderType
 }) {
     const [scrollTop, setScrollTop] = useState(0)
+
+    // Signal that this scrollable card is active so the input handler
+    // skips arrow-key processing (history, cursor movement)
+    useEffect(() => {
+        scrollableCardActive.current = true
+        return () => { scrollableCardActive.current = false }
+    }, [])
     const maxScrollTop = Math.max(0, lines.length - visibleLines)
 
     const clamp = useCallback(
@@ -126,7 +133,11 @@ function ScrollableCardBody({
 
     useInput(
         (_input, key) => {
-            if (key.pageUp) {
+            if (key.upArrow) {
+                setScrollTop((prev) => clamp(prev - 1))
+            } else if (key.downArrow) {
+                setScrollTop((prev) => clamp(prev + 1))
+            } else if (key.pageUp) {
                 setScrollTop((prev) => clamp(prev - visibleLines))
             } else if (key.pageDown) {
                 setScrollTop((prev) => clamp(prev + visibleLines))
@@ -146,7 +157,7 @@ function ScrollableCardBody({
             {scrollIndicatorTop && (
                 <Box>
                     <Text color="yellow" dimColor>
-                        {scrollIndicatorTop} more above | PgUp/PgDn to scroll
+                        {scrollIndicatorTop} more above | ↑↓/PgUp/PgDn to scroll
                     </Text>
                 </Box>
             )}
@@ -154,7 +165,7 @@ function ScrollableCardBody({
             {scrollIndicatorBottom && (
                 <Box>
                     <Text color="yellow" dimColor>
-                        {scrollIndicatorBottom} more below | PgUp/PgDn to scroll
+                        {scrollIndicatorBottom} more below | ↑↓/PgUp/PgDn to scroll
                     </Text>
                 </Box>
             )}
