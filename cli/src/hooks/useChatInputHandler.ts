@@ -22,6 +22,7 @@ interface UseChatInputHandlerProps {
     insertTextAtCursor: (text: string) => void
     toggleMode: () => void
     toggleAutoApproveAll: () => void
+    toggleVerbose: () => void
     handleSubmit: (text: string, images: string[]) => void
     handleExit: () => void
     clearViewAndResetTask: () => void
@@ -64,6 +65,8 @@ interface UseChatInputHandlerProps {
     mode: string
     toggleCardExpansion: (cardId: string) => void
     currentCardId?: string
+    toggleBatchExpansion: (batchId: string) => void
+    latestBatchId?: string
 }
 
 export function useChatInputHandler({
@@ -79,6 +82,7 @@ export function useChatInputHandler({
     insertTextAtCursor,
     toggleMode,
     toggleAutoApproveAll,
+    toggleVerbose,
     handleSubmit,
     handleExit,
     clearViewAndResetTask,
@@ -115,6 +119,8 @@ export function useChatInputHandler({
     mode,
     toggleCardExpansion,
     currentCardId,
+    toggleBatchExpansion,
+    latestBatchId,
 }: UseChatInputHandlerProps) {
     useInput((input, key) => {
         if (isMouseEscapeSequence(input) || isTerminalResponseSequence(input, key)) return
@@ -325,8 +331,17 @@ export function useChatInputHandler({
 
         const card = pendingAsk?.content?.type === "card" ? pendingAsk.content.card : null
         if (currentTextInput === "" && !isProcessing) {
-            if (input === "v" && currentCardId) {
-                toggleCardExpansion(currentCardId)
+            if (input === "b") {
+                toggleVerbose()
+                return
+            }
+
+            if (input === "v") {
+                if (latestBatchId) {
+                    toggleBatchExpansion(latestBatchId)
+                } else if (currentCardId) {
+                    toggleCardExpansion(currentCardId)
+                }
                 return
             }
 

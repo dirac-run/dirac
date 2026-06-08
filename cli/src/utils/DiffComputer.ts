@@ -6,91 +6,91 @@
 import * as Diff from "diff"
 
 export interface DiffLine {
-	type: "add" | "remove" | "context" | "separator"
-	content: string
-	/** Line number in the old/search block (for remove and context) */
-	oldLineNumber?: number
-	/** Line number in the new/replace block (for add and context) */
-	newLineNumber?: number
+    type: "add" | "remove" | "context" | "separator"
+    content: string
+    /** Line number in the old/search block (for remove and context) */
+    oldLineNumber?: number
+    /** Line number in the new/replace block (for add and context) */
+    newLineNumber?: number
 }
 
 export interface DiffBlock {
-	/** Lines in this diff block */
-	lines: DiffLine[]
-	/** Total additions in this block */
-	additions: number
-	/** Total deletions in this block */
-	deletions: number
+    /** Lines in this diff block */
+    lines: DiffLine[]
+    /** Total additions in this block */
+    additions: number
+    /** Total deletions in this block */
+    deletions: number
 }
 
 export interface ComputedDiff {
-	/** All diff blocks (one per SEARCH/REPLACE pair) */
-	blocks: DiffBlock[]
-	/** Total additions across all blocks */
-	totalAdditions: number
-	/** Total deletions across all blocks */
-	totalDeletions: number
+    /** All diff blocks (one per SEARCH/REPLACE pair) */
+    blocks: DiffBlock[]
+    /** Total additions across all blocks */
+    totalAdditions: number
+    /** Total deletions across all blocks */
+    totalDeletions: number
 }
 
 // Format markers
 const MARKERS = {
-	SEARCH_BLOCK: "<<<<<<< SEARCH",
-	SEARCH_SEPARATOR: "=======",
-	REPLACE_BLOCK: ">>>>>>> REPLACE",
-	NEW_BEGIN: "*** Begin Patch",
-	NEW_END: "*** End Patch",
-	FILE_PATTERN: /^\*\*\* (Add|Update|Delete) File: (.+)$/m,
+    SEARCH_BLOCK: "<<<<<<< SEARCH",
+    SEARCH_SEPARATOR: "=======",
+    REPLACE_BLOCK: ">>>>>>> REPLACE",
+    NEW_BEGIN: "*** Begin Patch",
+    NEW_END: "*** End Patch",
+    FILE_PATTERN: /^\*\*\* (Add|Update|Delete) File: (.+)$/m,
 } as const
 
 /**
  * Parse SEARCH/REPLACE format and extract pairs of search/replace text
  */
 function parseSearchReplacePairs(content: string): Array<{ search: string; replace: string; startLine?: number }> {
-	const pairs: Array<{ search: string; replace: string; startLine?: number }> = []
+    const pairs: Array<{ search: string; replace: string; startLine?: number }> = []
 
-	// Find all SEARCH blocks
-	const searchRegex = /(?:-{7,}|<{7,}) SEARCH(?:[: ](\d+))?/g
-	const searchPositions: Array<{ index: number; startLine?: number }> = []
-	let match: RegExpExecArray | null
-	while ((match = searchRegex.exec(content)) !== null) {
-		searchPositions.push({ index: match.index, startLine: match[1] ? parseInt(match[1], 10) : undefined })
-	}
+    // Find all SEARCH blocks
+    const searchRegex = /(?:-{7,}|<{7,}) SEARCH(?:[: ](\d+))?/g
+    const searchPositions: Array<{ index: number; startLine?: number }> = []
+    let match: RegExpExecArray | null
+    while ((match = searchRegex.exec(content)) !== null) {
+        searchPositions.push({ index: match.index, startLine: match[1] ? parseInt(match[1], 10) : undefined })
+    }
 
-	for (let i = 0; i < searchPositions.length; i++) {
-		const { index: start, startLine } = searchPositions[i]
-		const end = i < searchPositions.length - 1 ? searchPositions[i + 1].index : content.length
-		const blockContent = content.substring(start, end)
+    for (let i = 0; i < searchPositions.length; i++) {
+        const { index: start, startLine } = searchPositions[i]
+        const end = i < searchPositions.length - 1 ? searchPositions[i + 1].index : content.length
+        const blockContent = content.substring(start, end)
 
-		// Extract content after SEARCH marker
-		const searchMarkerMatch = blockContent.match(searchRegex)
-		const searchMarkerLength = searchMarkerMatch ? searchMarkerMatch[0].length : MARKERS.SEARCH_BLOCK.length
-		const afterSearch = blockContent.substring(searchMarkerLength).replace(/^\r?\n/, "")
-		const separatorIndex = afterSearch.indexOf(MARKERS.SEARCH_SEPARATOR)
+        // Extract content after SEARCH marker
+        const searchMarkerMatch = blockContent.match(searchRegex)
+        const searchMarkerLength = searchMarkerMatch ? searchMarkerMatch[0].length : MARKERS.SEARCH_BLOCK.length
+        const afterSearch = blockContent.substring(searchMarkerLength).replace(/^\r?\n/, "")
+        const separatorIndex = afterSearch.indexOf(MARKERS.SEARCH_SEPARATOR)
 
-		if (separatorIndex === -1) {
-			// Still streaming - only SEARCH block available, treat as deletion
-			const searchContent = afterSearch.trimEnd()
-			pairs.push({ search: searchContent, replace: "", startLine })
-		} else {
-			// Extract SEARCH block
-			const searchContent = afterSearch.substring(0, separatorIndex).replace(/\r?\n$/, "")
+        if (separatorIndex === -1) {
+            // Still streaming - only SEARCH block available, treat as deletion
+            const searchContent = afterSearch.trimEnd()
+            pairs.push({ search: searchContent, replace: "", startLine })
+        } else {
+            // Extract SEARCH block
+            const searchContent = afterSearch.substring(0, separatorIndex).replace(/\r?\n$/, "")
 
-			// Extract REPLACE block
-			const afterSeparator = afterSearch.substring(separatorIndex + MARKERS.SEARCH_SEPARATOR.length).replace(/^\r?\n/, "")
-			let replaceEndIndex = afterSeparator.indexOf(MARKERS.REPLACE_BLOCK)
-			if (replaceEndIndex === -1) {
-				replaceEndIndex = afterSeparator.indexOf("+++++++ REPLACE")
-			}
-			const replaceContent =
-				replaceEndIndex !== -1
-					? afterSeparator.substring(0, replaceEndIndex).replace(/\r?\n$/, "")
-					: afterSeparator.trimEnd()
+            // Extract REPLACE block
+            const afterSeparator = afterSearch.substring(separatorIndex + MARKERS.SEARCH_SEPARATOR.length).replace(/^\r?\n/, "")
+            let replaceEndIndex = afterSeparator.indexOf(MARKERS.REPLACE_BLOCK)
+            if (replaceEndIndex === -1) {
+                replaceEndIndex = afterSeparator.indexOf("+++++++ REPLACE")
+            }
+            const replaceContent =
+                replaceEndIndex !== -1
+                    ? afterSeparator.substring(0, replaceEndIndex).replace(/\r?\n$/, "")
+                    : afterSeparator.trimEnd()
 
-			pairs.push({ search: searchContent, replace: replaceContent, startLine })
-		}
-	}
+            pairs.push({ search: searchContent, replace: replaceContent, startLine })
+        }
+    }
 
-	return pairs
+    return pairs
 }
 
 /**
@@ -98,45 +98,45 @@ function parseSearchReplacePairs(content: string): Array<{ search: string; repla
  * This format uses +/- prefixes directly
  */
 function parseApplyPatchPairs(content: string): Array<{ search: string; replace: string }> {
-	const pairs: Array<{ search: string; replace: string }> = []
+    const pairs: Array<{ search: string; replace: string }> = []
 
-	const beginIndex = content.indexOf(MARKERS.NEW_BEGIN)
-	if (beginIndex === -1) return pairs
+    const beginIndex = content.indexOf(MARKERS.NEW_BEGIN)
+    if (beginIndex === -1) return pairs
 
-	const endIndex = content.indexOf(MARKERS.NEW_END)
-	const contentStart = beginIndex + MARKERS.NEW_BEGIN.length
-	const contentEnd = endIndex !== -1 ? endIndex : content.length
-	const patchContent = content.substring(contentStart, contentEnd).trim()
+    const endIndex = content.indexOf(MARKERS.NEW_END)
+    const contentStart = beginIndex + MARKERS.NEW_BEGIN.length
+    const contentEnd = endIndex !== -1 ? endIndex : content.length
+    const patchContent = content.substring(contentStart, contentEnd).trim()
 
-	const searchLines: string[] = []
-	const replaceLines: string[] = []
+    const searchLines: string[] = []
+    const replaceLines: string[] = []
 
-	for (const line of patchContent.split("\n")) {
-		// Skip file header lines
-		if (line.match(/^\*\*\* (Add|Update|Delete) File:/)) continue
-		if (line.trim() === "@@") continue
+    for (const line of patchContent.split("\n")) {
+        // Skip file header lines
+        if (line.match(/^\*\*\* (Add|Update|Delete) File:/)) continue
+        if (line.trim() === "@@") continue
 
-		if (line.startsWith("+")) {
-			const hasSpace = line.startsWith("+ ")
-			replaceLines.push(hasSpace ? line.slice(2) : line.slice(1))
-		} else if (line.startsWith("-")) {
-			const hasSpace = line.startsWith("- ")
-			searchLines.push(hasSpace ? line.slice(2) : line.slice(1))
-		} else if (line.trim()) {
-			// Context line - appears in both
-			searchLines.push(line)
-			replaceLines.push(line)
-		}
-	}
+        if (line.startsWith("+")) {
+            const hasSpace = line.startsWith("+ ")
+            replaceLines.push(hasSpace ? line.slice(2) : line.slice(1))
+        } else if (line.startsWith("-")) {
+            const hasSpace = line.startsWith("- ")
+            searchLines.push(hasSpace ? line.slice(2) : line.slice(1))
+        } else if (line.trim()) {
+            // Context line - appears in both
+            searchLines.push(line)
+            replaceLines.push(line)
+        }
+    }
 
-	if (searchLines.length > 0 || replaceLines.length > 0) {
-		pairs.push({
-			search: searchLines.join("\n"),
-			replace: replaceLines.join("\n"),
-		})
-	}
+    if (searchLines.length > 0 || replaceLines.length > 0) {
+        pairs.push({
+            search: searchLines.join("\n"),
+            replace: replaceLines.join("\n"),
+        })
+    }
 
-	return pairs
+    return pairs
 }
 
 /**
@@ -144,58 +144,58 @@ function parseApplyPatchPairs(content: string): Array<{ search: string; replace:
  * Uses Myers diff algorithm via the diff library
  */
 function computeLineDiff(search: string, replace: string, startLine?: number): DiffBlock {
-	const lines: DiffLine[] = []
-	let additions = 0
-	let deletions = 0
+    const lines: DiffLine[] = []
+    let additions = 0
+    let deletions = 0
 
-	// Handle empty cases
-	if (!search && !replace) {
-		return { lines: [], additions: 0, deletions: 0 }
-	}
+    // Handle empty cases
+    if (!search && !replace) {
+        return { lines: [], additions: 0, deletions: 0 }
+    }
 
-	// Use diffLines for line-level comparison
-	// The newlineIsToken option treats newlines as separate tokens for cleaner diffs
-	const changes = Diff.diffLines(search, replace, { newlineIsToken: false })
+    // Use diffLines for line-level comparison
+    // The newlineIsToken option treats newlines as separate tokens for cleaner diffs
+    const changes = Diff.diffLines(search, replace, { newlineIsToken: false })
 
-	let oldLineNum = startLine ?? 1
-	let newLineNum = startLine ?? 1
+    let oldLineNum = startLine ?? 1
+    let newLineNum = startLine ?? 1
 
-	for (const change of changes) {
-		// Split the value into individual lines, preserving empty lines
-		const changeLines = change.value.replace(/\n$/, "").split("\n")
+    for (const change of changes) {
+        // Split the value into individual lines, preserving empty lines
+        const changeLines = change.value.replace(/\n$/, "").split("\n")
 
-		for (const line of changeLines) {
-			if (change.added) {
-				lines.push({
-					type: "add",
-					content: line,
-					newLineNumber: newLineNum,
-				})
-				newLineNum++
-				additions++
-			} else if (change.removed) {
-				lines.push({
-					type: "remove",
-					content: line,
-					oldLineNumber: oldLineNum,
-				})
-				oldLineNum++
-				deletions++
-			} else {
-				// Context line (unchanged)
-				lines.push({
-					type: "context",
-					content: line,
-					oldLineNumber: oldLineNum,
-					newLineNumber: newLineNum,
-				})
-				oldLineNum++
-				newLineNum++
-			}
-		}
-	}
+        for (const line of changeLines) {
+            if (change.added) {
+                lines.push({
+                    type: "add",
+                    content: line,
+                    newLineNumber: newLineNum,
+                })
+                newLineNum++
+                additions++
+            } else if (change.removed) {
+                lines.push({
+                    type: "remove",
+                    content: line,
+                    oldLineNumber: oldLineNum,
+                })
+                oldLineNum++
+                deletions++
+            } else {
+                // Context line (unchanged)
+                lines.push({
+                    type: "context",
+                    content: line,
+                    oldLineNumber: oldLineNum,
+                    newLineNumber: newLineNum,
+                })
+                oldLineNum++
+                newLineNum++
+            }
+        }
+    }
 
-	return { lines, additions, deletions }
+    return { lines, additions, deletions }
 }
 
 /**
@@ -205,119 +205,200 @@ function computeLineDiff(search: string, replace: string, startLine?: number): D
  * Parse new format patches (*** Add/Update/Delete File: path)
  */
 function parseNewFormat(content: string): Array<{ search: string; replace: string }> {
-	const pairs: Array<{ search: string; replace: string }> = []
-	const lines = content.split("\n")
+    const pairs: Array<{ search: string; replace: string }> = []
+    const lines = content.split("\n")
 
-	let searchLines: string[] = []
-	let replaceLines: string[] = []
+    let searchLines: string[] = []
+    let replaceLines: string[] = []
 
-	for (const line of lines) {
-		if (line.match(MARKERS.FILE_PATTERN)) {
-			if (searchLines.length > 0 || replaceLines.length > 0) {
-				pairs.push({
-					search: searchLines.join("\n"),
-					replace: replaceLines.join("\n"),
-				})
-				searchLines = []
-				replaceLines = []
-			}
-			continue
-		}
-		if (line.trim() === "@@") {
-			if (searchLines.length > 0 || replaceLines.length > 0) {
-				pairs.push({
-					search: searchLines.join("\n"),
-					replace: replaceLines.join("\n"),
-				})
-				searchLines = []
-				replaceLines = []
-			}
-			continue
-		}
+    for (const line of lines) {
+        if (line.match(MARKERS.FILE_PATTERN)) {
+            if (searchLines.length > 0 || replaceLines.length > 0) {
+                pairs.push({
+                    search: searchLines.join("\n"),
+                    replace: replaceLines.join("\n"),
+                })
+                searchLines = []
+                replaceLines = []
+            }
+            continue
+        }
+        if (line.trim() === "@@") {
+            if (searchLines.length > 0 || replaceLines.length > 0) {
+                pairs.push({
+                    search: searchLines.join("\n"),
+                    replace: replaceLines.join("\n"),
+                })
+                searchLines = []
+                replaceLines = []
+            }
+            continue
+        }
 
-		if (line.startsWith("+")) {
-			const hasSpace = line.startsWith("+ ")
-			replaceLines.push(hasSpace ? line.slice(2) : line.slice(1))
-		} else if (line.startsWith("-")) {
-			const hasSpace = line.startsWith("- ")
-			searchLines.push(hasSpace ? line.slice(2) : line.slice(1))
-		} else if (line.trim()) {
-			searchLines.push(line.startsWith(" ") ? line.slice(1) : line)
-			replaceLines.push(line.startsWith(" ") ? line.slice(1) : line)
-		}
-	}
+        if (line.startsWith("+")) {
+            const hasSpace = line.startsWith("+ ")
+            replaceLines.push(hasSpace ? line.slice(2) : line.slice(1))
+        } else if (line.startsWith("-")) {
+            const hasSpace = line.startsWith("- ")
+            searchLines.push(hasSpace ? line.slice(2) : line.slice(1))
+        } else if (line.trim()) {
+            searchLines.push(line.startsWith(" ") ? line.slice(1) : line)
+            replaceLines.push(line.startsWith(" ") ? line.slice(1) : line)
+        }
+    }
 
-	if (searchLines.length > 0 || replaceLines.length > 0) {
-		pairs.push({
-			search: searchLines.join("\n"),
-			replace: replaceLines.join("\n"),
-		})
-	}
+    if (searchLines.length > 0 || replaceLines.length > 0) {
+        pairs.push({
+            search: searchLines.join("\n"),
+            replace: replaceLines.join("\n"),
+        })
+    }
 
-	return pairs
+    return pairs
 }
 
+/**
+ * Parse unified diff format (from diff.createPatch / git-style @@ hunks)
+ * directly into DiffBlock[]. This avoids the fallback that incorrectly
+ * treats every line as an addition.
+ */
+function parseUnifiedDiff(content: string): ComputedDiff {
+    const lines = content.split("\n")
+    const blocks: DiffBlock[] = []
+    let currentLines: DiffLine[] = []
+    let additions = 0
+    let deletions = 0
+    let totalAdditions = 0
+    let totalDeletions = 0
+    let oldLineNum = 0
+    let newLineNum = 0
+    let inHunk = false
+
+    for (const line of lines) {
+        // Detect hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+        const hunkMatch = line.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/)
+        if (hunkMatch) {
+            // Flush previous block
+            if (currentLines.length > 0) {
+                blocks.push({ lines: currentLines, additions, deletions })
+                totalAdditions += additions
+                totalDeletions += deletions
+            }
+            currentLines = []
+            additions = 0
+            deletions = 0
+            oldLineNum = parseInt(hunkMatch[1], 10)
+            newLineNum = parseInt(hunkMatch[2], 10)
+            inHunk = true
+            continue
+        }
+
+        if (!inHunk) continue
+
+        if (line.startsWith("-")) {
+            currentLines.push({
+                type: "remove",
+                content: line.slice(1),
+                oldLineNumber: oldLineNum,
+            })
+            oldLineNum++
+            deletions++
+        } else if (line.startsWith("+")) {
+            currentLines.push({
+                type: "add",
+                content: line.slice(1),
+                newLineNumber: newLineNum,
+            })
+            newLineNum++
+            additions++
+        } else {
+            // Context line (starts with space) or other non-hunk line
+            currentLines.push({
+                type: "context",
+                content: line.startsWith(" ") ? line.slice(1) : line,
+                oldLineNumber: oldLineNum,
+                newLineNumber: newLineNum,
+            })
+            oldLineNum++
+            newLineNum++
+        }
+    }
+
+    // Flush last block
+    if (currentLines.length > 0) {
+        blocks.push({ lines: currentLines, additions, deletions })
+        totalAdditions += additions
+        totalDeletions += deletions
+    }
+
+    return { blocks, totalAdditions, totalDeletions }
+}
+
+
 export function computeDiff(content: string): ComputedDiff {
-	// Detect format and parse pairs
-	let pairs: Array<{ search: string; replace: string; startLine?: number }>
+    // Detect format and parse pairs
+    let pairs: Array<{ search: string; replace: string; startLine?: number }>
 
-	if (content.includes(MARKERS.SEARCH_BLOCK) || content.includes("------- SEARCH") || content.match(/<{7,} SEARCH:\d+/)) {
-		pairs = parseSearchReplacePairs(content)
-	} else if (content.includes(MARKERS.NEW_BEGIN)) {
-		pairs = parseApplyPatchPairs(content)
-	} else if (content.match(MARKERS.FILE_PATTERN)) {
-		pairs = parseNewFormat(content)
-	} else {
-		// Fallback: treat as new file (all additions)
-		const lines = content.split("\n")
-		return {
-			blocks: [
-				{
-					lines: lines.map((line, idx) => ({
-						type: "add" as const,
-						content: line,
-						newLineNumber: idx + 1,
-					})),
-					additions: lines.length,
-					deletions: 0,
-				},
-			],
-			totalAdditions: lines.length,
-			totalDeletions: 0,
-		}
-	}
+    if (content.includes(MARKERS.SEARCH_BLOCK) || content.includes("------- SEARCH") || content.match(/<{7,} SEARCH:\d+/)) {
+        pairs = parseSearchReplacePairs(content)
+    } else if (content.includes(MARKERS.NEW_BEGIN)) {
+        pairs = parseApplyPatchPairs(content)
+    } else if (content.match(MARKERS.FILE_PATTERN)) {
+        pairs = parseNewFormat(content)
+    } else if (/^@@\s+-\d+/m.test(content)) {
+        // Unified diff format (from diff.createPatch) — parse directly
+        return parseUnifiedDiff(content)
+    } else {
+        // Fallback: treat as new file (all additions)
+        const lines = content.split("\n")
+        return {
+            blocks: [
+                {
+                    lines: lines.map((line, idx) => ({
+                        type: "add" as const,
+                        content: line,
+                        newLineNumber: idx + 1,
+                    })),
+                    additions: lines.length,
+                    deletions: 0,
+                },
+            ],
+            totalAdditions: lines.length,
+            totalDeletions: 0,
+        }
+    }
 
-	// Compute diff for each pair
-	const blocks: DiffBlock[] = []
-	let totalAdditions = 0
-	let totalDeletions = 0
+    // Compute diff for each pair
+    const blocks: DiffBlock[] = []
+    let totalAdditions = 0
+    let totalDeletions = 0
 
-	for (const pair of pairs) {
-		const block = computeLineDiff(pair.search, pair.replace, pair.startLine)
-		blocks.push(block)
-		totalAdditions += block.additions
-		totalDeletions += block.deletions
-	}
+    for (const pair of pairs) {
+        const block = computeLineDiff(pair.search, pair.replace, pair.startLine)
+        blocks.push(block)
+        totalAdditions += block.additions
+        totalDeletions += block.deletions
+    }
 
-	return { blocks, totalAdditions, totalDeletions }
+    return { blocks, totalAdditions, totalDeletions }
 }
 
 /**
  * Get the maximum line number width for gutter sizing
  */
 export function getGutterWidth(diff: ComputedDiff): number {
-	let maxLineNum = 0
+    let maxLineNum = 0
 
-	for (const block of diff.blocks) {
-		for (const line of block.lines) {
-			if (line.oldLineNumber !== undefined) {
-				maxLineNum = Math.max(maxLineNum, line.oldLineNumber)
-			}
-			if (line.newLineNumber !== undefined) {
-				maxLineNum = Math.max(maxLineNum, line.newLineNumber)
-			}
-		}
-	}
+    for (const block of diff.blocks) {
+        for (const line of block.lines) {
+            if (line.oldLineNumber !== undefined) {
+                maxLineNum = Math.max(maxLineNum, line.oldLineNumber)
+            }
+            if (line.newLineNumber !== undefined) {
+                maxLineNum = Math.max(maxLineNum, line.newLineNumber)
+            }
+        }
+    }
 
-	return Math.max(1, maxLineNum.toString().length)
+    return Math.max(1, maxLineNum.toString().length)
 }

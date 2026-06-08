@@ -108,6 +108,9 @@ message Card {
   optional string cleanup_strategy = 13;
   repeated ActionButton actions = 14;
   optional bool do_not_auto_collapse = 15;
+  optional int64 start_time_ms = 16;
+  optional int64 end_time_ms = 17;
+  optional string outcome = 18;
 }
 
 // Enum for DiracSayTool tool types

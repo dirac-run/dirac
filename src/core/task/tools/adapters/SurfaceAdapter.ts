@@ -97,6 +97,7 @@ export class SurfaceAdapter implements IToolEnvironment {
                     header: "Permission Request",
                     body: message,
                     requireApproval: true,
+                    collapsed: false,
                 })
                 const result = await card.waitForInteraction()
                 return {

@@ -18,6 +18,168 @@ Dirac is an open-source coding agent built with this in mind. It reduces API cos
 
 Our goal: Optimize for bang-for-the-buck on tooling with bare minimum prompting instead of going blindly minimalistic.
 
+## 🏗️ Architecture
+
+Dirac has two runtime modes, both running the full TypeScript backend in a single Node.js process:
+
+| Mode | Command | Protocol | Client |
+|------|---------|----------|--------|
+| Interactive Ink | `dirac task "prompt"` / `dirac` | Direct function calls + EventEmitter | React/Ink TUI |
+| ACP | `dirac acp` | JSON-RPC / ndjson over stdin/stdout | External IDE client (Zed, etc.) |
+
+### Mode 1: Interactive Ink Mode
+
+Everything runs in a single Node.js process. The CLI directly imports and calls backend modules.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Single Node.js Process                       │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                      CLI Layer (cli/src/)                    │    │
+│  │                                                             │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │    │
+│  │  │ App.tsx  │  │ ChatView │  │ DiffView │  │ Settings │   │    │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │    │
+│  │       │              │              │              │         │    │
+│  │       └──────────────┼──────────────┼──────────────┘         │    │
+│  │                      │ direct imports                        │    │
+│  │                      ▼                                       │    │
+│  │              ┌───────────────┐                                │    │
+│  │              │  Controller   │ ◄── imported from src/core/   │    │
+│  │              └───────┬───────┘                                │    │
+│  │                      │                                       │    │
+│  └──────────────────────┼───────────────────────────────────────┘    │
+│                         │                                            │
+│  ┌──────────────────────┼───────────────────────────────────────┐    │
+│  │                      ▼          Backend (src/)               │    │
+│  │              ┌───────────────┐                                │    │
+│  │              │    Task       │                                │    │
+│  │              │  (task/index) │                                │    │
+│  │              └───┬───────┬───┘                                │    │
+│  │                  │       │                                    │    │
+│  │    ┌─────────────┘       └──────────────┐                    │    │
+│  │    ▼                                    ▼                    │    │
+│  │ ┌──────────────────┐         ┌──────────────────────┐       │    │
+│  │ │ MessageState     │         │  ToolExecutor        │       │    │
+│  │ │ Handler          │         │  Coordinator         │       │    │
+│  │ │                  │         └──────────┬───────────┘       │    │
+│  │ │ emits:           │                    │                   │    │
+│  │ │ "diracMessages   │         ┌──────────┼───────────┐       │    │
+│  │ │  Changed"        │         ▼          ▼           ▼       │    │
+│  │ └────────▲─────────┘   ┌─────────┐┌─────────┐┌─────────┐  │    │
+│  │          │              │EditFile ││Execute  ││Search   │  │    │
+│  │          │              │Tool     ││Cmd Tool ││Files    │  │    │
+│  │          │              └─────────┘└────┬────┘└─────────┘  │    │
+│  │          │                              │                   │    │
+│  │          │              ┌───────────────┘                   │    │
+│  │          │              ▼                                   │    │
+│  │          │    ┌──────────────────────┐                      │    │
+│  │          │    │  IToolEnvironment    │                      │    │
+│  │          │    │  (traits)            │                      │    │
+│  │          │    └──────────┬───────────┘                      │    │
+│  │          │               │                                  │    │
+│  │          │    ┌──────────┼───────────┐                      │    │
+│  │          │    ▼          ▼           ▼                      │    │
+│  │          │ ┌───────┐ ┌───────┐ ┌──────────┐                │    │
+│  │          │ │Host   │ │Host   │ │Host      │                │    │
+│  │          │ │Bridge │ │Window │ │Workspace │                │    │
+│  │          │ │Client │ │Client │ │Client    │                │    │
+│  │          │ └───────┘ └───────┘ └──────────┘                │    │
+│  │          │         CLI stubs in cli/src/controllers/        │    │
+│  └──────────┼──────────────────────────────────────────────────┘    │
+│             │                                                        │
+│  ┌──────────┼──────────────────────────────────────────────────┐    │
+│  │          ▼    Shared Services (src/shared/, src/services/)   │    │
+│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐   │    │
+│  │  │StateManager│ │  Logger   │ │ Telemetry │ │AuthHandler│   │    │
+│  │  └───────────┘ └───────────┘ └───────────┘ └───────────┘   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  Shims & Stubs (cli/src/)                                   │    │
+│  │  ┌────────────────┐  ┌──────────────────┐                   │    │
+│  │  │ vscode-shim.ts │  │ vscode-context.ts│                   │    │
+│  │  │ (VSCode API    │  │ (mock extension  │                   │    │
+│  │  │  stubs)        │  │  context)        │                   │    │
+│  │  └────────────────┘  └──────────────────┘                   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Communication:** Direct function calls and EventEmitter events. No process boundary, no serialization, shared memory.
+
+### Mode 2: ACP Mode
+
+Structured protocol boundary for external IDE clients (Zed, etc.).
+
+```
+┌──────────────────────┐          ┌───────────────────────────────────────────┐
+│                      │          │           Single Node.js Process          │
+│   External Client    │          │                                           │
+│   (Zed, Rust CLI,    │  stdin   │  ┌─────────────────────────────────────┐  │
+│    etc.)             │◄────────►│  │         ACP Layer (cli/src/acp/)     │  │
+│                      │  stdout  │  │                                     │  │
+│                      │  ndjson  │  │  ┌───────────┐    ┌──────────────┐ │  │
+│                      │          │  │  │ AcpAgent  │───►│DiracAgent    │ │  │
+│                      │          │  │  │(protocol  │    │(orchestrator)│ │  │
+│                      │          │  │  │ adapter)  │◄───│              │ │  │
+│                      │          │  │  └───────────┘    └──────┬───────┘ │  │
+│                      │          │  │                          │         │  │
+│                      │          │  │  ┌───────────────────────┘         │  │
+│                      │          │  │  │                                 │  │
+│                      │          │  │  ├─────────────────┐               │  │
+│                      │          │  │  ▼                 ▼               │  │
+│                      │          │  │ ┌─────────────┐ ┌───────────────┐ │  │
+│                      │          │  │ │TaskMessage  │ │  DiracSession │ │  │
+│                      │          │  │ │Bridge       │ │  Emitter      │ │  │
+│                      │          │  │ │             │ │               │ │  │
+│                      │          │  │ │translates:  │ │emits:         │ │  │
+│                      │          │  │ │DiracMessage │ │"tool_call"    │ │  │
+│                      │          │  │ │  → ACP      │ │"agent_message │ │  │
+│                      │          │  │ │SessionUpdate│ │  _chunk"      │ │  │
+│                      │          │  │ └──────┬──────┘ │  ...          │ │  │
+│                      │          │  │        │        └───────┬───────┘ │  │
+│                      │          │  │        │                │         │  │
+│                      │          │  └────────┼────────────────┼─────────┘  │
+│                      │          │           ▼                ▼            │
+│                      │          │  ┌──────────────────────────────────┐   │
+│                      │          │  │     Backend (same as Mode 1)     │   │
+│                      │          │  │  Controller → Task → Tools       │   │
+│                      │          │  │  StateManager, HostProvider,     │   │
+│                      │          │  │  MessageStateHandler, etc.       │   │
+│                      │          │  └──────────────────────────────────┘   │
+│                      │          └───────────────────────────────────────────┘
+```
+
+**Protocol:** [Agent Client Protocol (ACP)](https://agentclientprotocol.io) — JSON-RPC over stdin/stdout using ndjson framing.
+
+### Data Flow Summary
+
+```
+MODE 1 (Interactive Ink):
+  User ↔ React/Ink UI ←→ Controller ←→ Task ←→ Tools
+         [all in-process, direct function calls + EventEmitter]
+
+MODE 2 (ACP):
+  External Client ←→ [ACP JSON-RPC] ←→ AcpAgent ←→ DiracAgent ←→ Controller ←→ Task
+                      stdin/stdout       protocol    orchestrator    backend
+```
+
+### Key Entry Points
+
+| Entry Point | File | Description |
+|-------------|------|-------------|
+| CLI command dispatch | `cli/src/index.ts` | Commander.js CLI setup |
+| Task command | `cli/src/commands/task.ts` | `runTask()` — Ink mode entry |
+| ACP mode | `cli/src/acp/index.ts` | `runAcpMode()` — ACP mode entry |
+| CLI initialization | `cli/src/init.ts` | `initializeCli()` — shared init for Ink mode |
+| ACP protocol adapter | `cli/src/acp/AcpAgent.ts` | ACP ↔ DiracAgent bridge |
+| Business logic orchestrator | `cli/src/agent/DiracAgent.ts` | Session/task lifecycle |
+| Message translation | `cli/src/agent/messageTranslator.ts` | DiracMessage → ACP SessionUpdate |
+| Host service stubs | `cli/src/controllers/index.ts` | CLI implementations of host bridge |
+| VSCode compatibility | `cli/src/vscode-shim.ts` | VSCode API stubs for CLI |
+
 ## 📊 Evals
 
 Dirac is benchmarked against other leading open-source agents on complex, real-world refactoring tasks. Dirac consistently achieves 100% accuracy at a fraction of the cost. These evals are run on public github repos and should be reproducible by anyone. 

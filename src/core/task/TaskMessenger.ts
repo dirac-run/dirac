@@ -128,6 +128,7 @@ export class TaskMessenger implements ITaskMessenger {
             this.dependencies.taskState.waitingCardIds.push(id)
         }
 
+        const creationTime = Date.now()
         const card: Card = {
             id,
             header: params.header,
@@ -143,8 +144,9 @@ export class TaskMessenger implements ITaskMessenger {
             maxHeight: params.maxHeight,
             cleanupStrategy: params.cleanupStrategy,
             do_not_auto_collapse: params.do_not_auto_collapse,
+            startTime: creationTime,
+            outcome: params.outcome,
         }
-
         const message: DiracMessage = {
             id,
             ts,
@@ -193,6 +195,7 @@ export class TaskMessenger implements ITaskMessenger {
                 const msg = this.dependencies.messageStateHandler.getDiracMessages()[index]
                 if (msg.content.type === DiracMessageType.CARD) {
                     msg.content.card.status = status
+                    msg.content.card.endTime = Date.now()
                     if (doNotAutoCollapse) {
                         msg.content.card.do_not_auto_collapse = true
                     }

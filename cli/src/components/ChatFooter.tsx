@@ -17,6 +17,7 @@ interface ChatFooterProps {
     gitBranch: string | null
     gitDiffStats: GitDiffStats | null
     autoApproveAll: boolean
+    verboseBatch: boolean
     taskStatus?: TaskStatus
     show?: boolean
 }
@@ -32,6 +33,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
     gitBranch,
     gitDiffStats,
     autoApproveAll,
+    verboseBatch,
     taskStatus,
     show = true,
 }) => {
@@ -42,7 +44,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
             {/* Row 1: Instructions (left, can wrap) | Plan/Act toggle (right, no wrap) */}
             <Box justifyContent="space-between" paddingLeft={1} paddingRight={1} width="100%">
                 <Box flexShrink={1} flexWrap="wrap">
-                    <Text color="gray">/ for commands · @ for files · Press Shift+↓ for a new line</Text>
+                    <Text color="gray">/ for commands · @ for files · Shift+↓ newline · Tab switch mode</Text>
                 </Box>
                 <Box flexShrink={0} gap={1}>
                     <Box>
@@ -62,17 +64,22 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
             {/* Row 2: Model/context/tokens/cost/status */}
             <Box paddingLeft={1} paddingRight={1}>
                 <Text>
-                    {provider}:{modelId} {(() => {
+                    {provider}:{" "}{modelId} {(() => {
+                        const ratio = contextWindowSize > 0 ? lastApiReqTotalTokens / contextWindowSize : 0
+                        const barColor = ratio > 0.8 ? "red" : ratio > 0.5 ? "yellow" : "green"
                         const bar = createContextBar(lastApiReqTotalTokens, contextWindowSize)
                         return (
                             <Text>
-                                <Text>{bar.filled}</Text>
+                                <Text color={barColor}>{bar.filled}</Text>
                                 <Text color="gray">{bar.empty}</Text>
                             </Text>
                         )
                     })()}{" "}
                     <Text color="gray">
-                        ({lastApiReqTotalTokens.toLocaleString()}) | ${totalCost.toFixed(3)}
+                        ({lastApiReqTotalTokens.toLocaleString()}) · {(() => {
+                            const costColor = totalCost > 5 ? "red" : totalCost > 1 ? "yellow" : "green"
+                            return <Text color={costColor}>${totalCost.toFixed(3)}</Text>
+                        })()}
                     </Text>{" "}
                 </Text>
                 <TaskStatusIndicator status={taskStatus} />
@@ -86,7 +93,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                     {gitDiffStats && gitDiffStats.files > 0 && (
                         <Text color="gray">
                             {" "}
-                            | {gitDiffStats.files} file{gitDiffStats.files !== 1 ? "s" : ""}{" "}
+                            · {gitDiffStats.files} file{gitDiffStats.files !== 1 ? "s" : ""}{" "}
                             <Text color="green">+{gitDiffStats.additions}</Text>{" "}
                             <Text color="red">-{gitDiffStats.deletions}</Text>
                         </Text>
@@ -95,7 +102,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
             </Box>
 
             {/* Row 4: Auto-approve toggle */}
-            <Box paddingLeft={1} paddingRight={1}>
+            <Box paddingLeft={1} paddingRight={1} gap={2}>
                 {autoApproveAll ? (
                     <Text>
                         <Text color="green">⏵⏵ Auto-approve all enabled</Text>
@@ -103,6 +110,15 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                     </Text>
                 ) : (
                     <Text color="gray">Auto-approve all disabled (Shift+Tab)</Text>
+                )}
+                <Text color="gray">·</Text>
+                {verboseBatch ? (
+                    <Text>
+                        <Text color="green">⏵⏵ Verbose batch details on</Text>
+                        <Text color="gray"> (b)</Text>
+                    </Text>
+                ) : (
+                    <Text color="gray">Verbose batch details off (b)</Text>
                 )}
             </Box>
         </Box>

@@ -91,7 +91,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 overflow="hidden"
                 width="100%">
                 <Box>
-                    {inputPrompt && <Text color={borderColor}>{inputPrompt} </Text>}
+                    {inputPrompt && <Text color={borderColor} bold>{inputPrompt} </Text>}
                     <HighlightedInput availableCommands={availableCommands} cursorPos={adjustedCursorPos} text={clippedText} />
                 </Box>
             </Box>

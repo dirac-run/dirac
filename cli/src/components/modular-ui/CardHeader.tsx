@@ -5,7 +5,7 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 
 import React from "react"
-import { getIcon, getStatusColor, getStatusIcon } from "../../utils/icon-mapping"
+import { getIcon, getIconCategoryColor, getStatusColor, getStatusIcon } from "../../utils/icon-mapping"
 import { extractFirstPath, getPathUrl, terminalLink } from "../../utils/terminal-link"
 
 
@@ -48,7 +48,7 @@ export const CardHeader: React.FC<CardHeaderProps> = ({ header, status, icon, is
     if (compact) {
         return (
             <Text bold>
-                {getIcon(icon)} {displayHeader}{" "}
+                <Text color={getIconCategoryColor(icon)}>{getIcon(icon)}</Text> {displayHeader}{" "}
                 <Text color={getStatusColor(status)}>{getStatusIcon(status)}</Text>
             </Text>
         )
@@ -61,7 +61,7 @@ export const CardHeader: React.FC<CardHeaderProps> = ({ header, status, icon, is
             </Box>
             <Box flexGrow={1}>
                 <Text bold>
-                    {getIcon(icon)} {displayHeader}
+                    <Text color={getIconCategoryColor(icon)}>{getIcon(icon)}</Text> {displayHeader}
                     {filePath && (
                         <Text color="blue" dimColor>
                             {"  "}

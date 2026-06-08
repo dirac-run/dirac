@@ -84,7 +84,16 @@ export class BrowserActionTool implements IDiracTool {
             switch (action) {
                 case "launch":
                     if (!url) return this.handleMissingUrl(env, card, example)
-                    const permission_result = await env.interaction.askPermission(`Dirac wants to use a browser and launch ${url}`)
+                    const permission_card = await env.ui.createCard({
+                        header: `Launch browser: ${url}`,
+                        icon: DiracIcon.BROWSER,
+                        status: CardStatus.WAITING_FOR_INPUT,
+                        requireApproval: true,
+                        collapsed: false,
+                        body: `Dirac wants to launch a browser at ${url}`,
+                    })
+                    const permission_interaction = await permission_card.waitForInteraction()
+                    const permission_result = { approved: permission_interaction.action === DiracAskResponse.APPROVE, action: permission_interaction.action, value: permission_interaction.value, text: permission_interaction.text, card: permission_card }
                     const permission = permission_result
                     if (permission.action === DiracAskResponse.MESSAGE) {
                         if (permission.text) {

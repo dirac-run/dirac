@@ -75,6 +75,7 @@ export interface CardParams {
     maxHeight?: number
     cleanupStrategy?: CleanupStrategy
     do_not_auto_collapse?: boolean
+    outcome?: string
 }
 
 export interface IUITrait {

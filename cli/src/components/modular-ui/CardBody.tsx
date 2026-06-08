@@ -12,6 +12,7 @@ interface CardBodyProps {
     renderType: RenderType
     isExpanded?: boolean
     maxHeight?: number
+    status?: import("@shared/ExtensionMessage").CardStatus
     mode?: CardBodyMode
 }
 
@@ -49,7 +50,7 @@ function extractTeaser(body: string, renderType: RenderType): string {
 
 const RESERVED_LINES = 22
 
-export const CardBody: React.FC<CardBodyProps> = ({ body, renderType, isExpanded = true, maxHeight, mode = "expanded" }) => {
+export const CardBody: React.FC<CardBodyProps> = ({ body, renderType, isExpanded = true, maxHeight, mode = "expanded", status }) => {
     if (!body) return null
 
     // Teaser mode: single-line plain text for collapsed chip
@@ -57,7 +58,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ body, renderType, isExpanded
         const teaser = extractTeaser(body, renderType)
         if (!teaser) return null
         return (
-            <Text color="gray" italic>
+            <Text color={status === "error" ? "red" : "gray"} italic>
                 {teaser}
             </Text>
         )
@@ -133,13 +134,13 @@ function ScrollableCardBody({
 
     useInput(
         (_input, key) => {
-            if (key.upArrow) {
+            if (key.upArrow || _input === "k") {
                 setScrollTop((prev) => clamp(prev - 1))
-            } else if (key.downArrow) {
+            } else if (key.downArrow || _input === "j") {
                 setScrollTop((prev) => clamp(prev + 1))
-            } else if (key.pageUp) {
+            } else if (key.pageUp || _input === "g") {
                 setScrollTop((prev) => clamp(prev - visibleLines))
-            } else if (key.pageDown) {
+            } else if (key.pageDown || _input === "G") {
                 setScrollTop((prev) => clamp(prev + visibleLines))
             }
         },
@@ -149,7 +150,7 @@ function ScrollableCardBody({
     const visibleLinesSlice = lines.slice(scrollTop, scrollTop + visibleLines)
     const displayBody = visibleLinesSlice.join("\n")
 
-    const scrollIndicatorTop = scrollTop > 0 ? `↑ ${Math.round((scrollTop / maxScrollTop) * 100)}%` : ""
+    const scrollIndicatorTop = scrollTop > 0 ? `↑ Lines ${scrollTop + 1}-${Math.min(scrollTop + visibleLines, lines.length)} of ${lines.length}` : ""
     const scrollIndicatorBottom = scrollTop < maxScrollTop ? `↓ ${Math.round(((lines.length - scrollTop - visibleLines) / maxScrollTop) * 100)}%` : ""
 
     return (
@@ -157,7 +158,7 @@ function ScrollableCardBody({
             {scrollIndicatorTop && (
                 <Box>
                     <Text color="yellow" dimColor>
-                        {scrollIndicatorTop} more above | ↑↓/PgUp/PgDn to scroll
+                        {scrollIndicatorTop} | ↑↓/jk/PgUp/PgDn/g/G to scroll
                     </Text>
                 </Box>
             )}
@@ -165,7 +166,7 @@ function ScrollableCardBody({
             {scrollIndicatorBottom && (
                 <Box>
                     <Text color="yellow" dimColor>
-                        {scrollIndicatorBottom} more below | ↑↓/PgUp/PgDn to scroll
+                        ↓ {Math.round(((lines.length - scrollTop - visibleLines) / maxScrollTop) * 100)}% more below | ↑↓/jk/PgUp/PgDn/g/G to scroll
                     </Text>
                 </Box>
             )}

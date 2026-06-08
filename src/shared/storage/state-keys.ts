@@ -222,6 +222,7 @@ const USER_SETTINGS_FIELDS = {
     hooksEnabled: { default: true as boolean },
     yoloModeToggled: { default: false as boolean },
     autoApproveAllToggled: { default: false as boolean },
+    verboseBatchToggled: { default: false as boolean },
     useAutoCondense: { default: true as boolean },
     subagentsEnabled: { default: false as boolean },
     diracWebToolsEnabled: { default: true as boolean },

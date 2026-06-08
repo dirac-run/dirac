@@ -57,6 +57,7 @@ import Image from "ink-picture"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getAvailableSlashCommands } from "@/core/controller/slash/getAvailableSlashCommands"
 import { StateManager } from "@/core/storage/StateManager"
+import { arePathsEqual } from "@/utils/path"
 import { COLORS } from "../constants/colors"
 import { useTaskContext, useTaskState } from "../context/TaskContext"
 import { useHomeEndKeys } from "../hooks/useHomeEndKeys"
@@ -98,6 +99,8 @@ import {
     parseAskOptions,
 } from "../utils/chat"
 import { getGitBranch, getGitDiffStats, type GitDiffStats } from "../utils/git"
+import { detectBatches, type MessageBatch } from "./modular-ui/BatchGrouping"
+import { BatchSummaryCard } from "./modular-ui/BatchSummaryCard"
 
 /**
  * Persistent input storage that survives React remounts (e.g., during terminal resize).
@@ -111,7 +114,6 @@ interface PersistedInputState {
 }
 
 const inputStateStorage = new Map<string, PersistedInputState>()
-
 
 interface ChatViewProps {
     controller?: any
@@ -174,6 +176,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const [respondedToAsk, setRespondedToAsk] = useState<string | null>(null)
     const [userScrolled, setUserScrolled] = useState(false)
     const [cardExpansions, setCardExpansions] = useState<Map<string, "auto" | "expanded" | "collapsed">>(new Map())
+    const [batchExpanded, setBatchExpanded] = useState<Set<string>>(new Set())
 
     const toggleCardExpansion = useCallback((cardId: string) => {
         setCardExpansions((prev) => {
@@ -192,6 +195,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
         })
     }, [])
 
+
+    const toggleBatchExpansion = useCallback((batchId: string) => {
+        setBatchExpanded((prev) => {
+            const next = new Set(prev)
+            if (next.has(batchId)) {
+                next.delete(batchId)
+            } else {
+                next.add(batchId)
+            }
+            return next
+        })
+    }, [])
     const getIsCardExpanded = (card: { id: string; collapsed?: boolean }): boolean => {
         const expansion = cardExpansions.get(card.id)
         if (expansion === "expanded") return true
@@ -240,6 +255,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
         () => StateManager.get().getGlobalSettingsKey("autoApproveAllToggled") ?? false,
     )
 
+
+    const [verboseBatch, setVerboseBatch] = useState<boolean>(
+        () => StateManager.get().getGlobalSettingsKey("verboseBatchToggled") ?? false,
+    )
     const { displayMessages, committedMessages, liveMessages, taskSwitchKey, setTaskSwitchKey } = useChatMessages(
         taskState.diracMessages || [],
         taskState.activeVoiceStreamId,
@@ -321,6 +340,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
         StateManager.get().setGlobalState("autoApproveAllToggled", newValue)
         await ctrl?.postStateToWebview()
     }, [autoApproveAll, ctrl])
+
+    const toggleVerbose = useCallback(async () => {
+        const newValue = !verboseBatch
+        setVerboseBatch(newValue)
+        StateManager.get().setGlobalState("verboseBatchToggled", newValue)
+        await ctrl?.postStateToWebview()
+    }, [verboseBatch, ctrl])
 
     const provider = useMemo(() => {
         const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
@@ -421,12 +447,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
         const history = StateManager.get().getGlobalStateKey("taskHistory")
         if (!history?.length) return []
         const filtered = [...history]
+            .filter((item) =>
+                Boolean(
+                    (item.cwdOnTaskInitialization && arePathsEqual(item.cwdOnTaskInitialization, workspacePath)) ||
+                    (item.workspaceRootPath && arePathsEqual(item.workspaceRootPath, workspacePath)) ||
+                    (item.shadowGitConfigWorkTree && arePathsEqual(item.shadowGitConfigWorkTree, workspacePath)),
+                ),
+            )
             .reverse()
             .map((item) => item.task)
             .slice(0, 20)
             .filter(Boolean) as string[]
         return [...new Set(filtered)]
-    }, [])
+    }, [workspacePath])
 
     const lastMsg = (taskState.diracMessages || [])[(taskState.diracMessages || []).length - 1]
     useEffect(() => {
@@ -437,13 +470,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     const staticItems = useMemo(() => {
         const items: Array<
-            { key: string; type: "header" } | { key: string; type: "message"; message: (typeof displayMessages)[0] }
+            | { key: string; type: "header" }
+            | { key: string; type: "message"; message: (typeof displayMessages)[0] }
+            | { key: string; type: "batch"; batch: MessageBatch }
         > = []
         if (displayMessages.length > 0 || userScrolled) {
             items.push({ key: "header", type: "header" })
         }
-        for (const msg of committedMessages) {
-            items.push({ key: msg.id, type: "message", message: msg })
+        const groups = detectBatches(committedMessages)
+        for (const group of groups) {
+            if (group.type === "single") {
+                items.push({ key: group.message.id, type: "message", message: group.message })
+            } else {
+                items.push({ key: group.batchId, type: "batch", batch: group })
+            }
         }
         return items
     }, [committedMessages, displayMessages.length, userScrolled])
@@ -738,6 +778,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         insertTextAtCursor,
         toggleMode,
         toggleAutoApproveAll,
+        toggleVerbose,
         handleSubmit,
         handleExit,
         clearViewAndResetTask,
@@ -774,6 +815,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
         mode,
         toggleCardExpansion,
         currentCardId: pendingAsk?.id,
+        toggleBatchExpansion,
+        latestBatchId: staticItems.filter((i) => i.type === "batch").pop()?.key,
     })
 
     const borderColor = mode === "act" ? COLORS.primaryBlue : "yellow"
@@ -800,20 +843,34 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <Box flexDirection="column" key={taskSwitchKey} width="100%">
             <Static items={staticItems}>
                 {(item) => {
-                    const card = item.type === "message" && item.message.content.type === DiracMessageType.CARD ? item.message.content.card : null
-                    return (
-                        <Box key={item.key} paddingX={item.type === "message" ? 1 : 0} width="100%">
-                            {item.type === "header" ? (
+                    if (item.type === "header") {
+                        return (
+                            <Box key={item.key} paddingX={0} width="100%">
                                 <ChatHeader />
-                            ) : (
-                                <ChatMessage
-                                    message={item.message}
-                                    mode={mode}
-                                    isExpanded={card ? getIsCardExpanded(card) : false}
-                                    onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
-                                    activeVoiceStreamId={taskState.activeVoiceStreamId}
+                            </Box>
+                        )
+                    }
+                    if (item.type === "batch") {
+                        return (
+                            <Box key={item.key} paddingX={1} width="100%">
+                                <BatchSummaryCard
+                                    batch={item.batch}
+                                    isExpanded={batchExpanded.has(item.batch.batchId)}
+                                    verbose={verboseBatch}
                                 />
-                            )}
+                            </Box>
+                        )
+                    }
+                    const card = item.message.content.type === DiracMessageType.CARD ? item.message.content.card : null
+                    return (
+                        <Box key={item.key} paddingX={1} width="100%">
+                            <ChatMessage
+                                message={item.message}
+                                mode={mode}
+                                isExpanded={card ? getIsCardExpanded(card) : false}
+                                onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
+                                activeVoiceStreamId={taskState.activeVoiceStreamId}
+                            />
                         </Box>
                     )
                 }}
@@ -856,7 +913,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 )}
 
                 {isSpinnerActive && (
-                    <ThinkingIndicator mode={mode} onCancel={handleCancel} startTime={spinnerStartTime} />
+                    <ThinkingIndicator mode={mode} onCancel={handleCancel} startTime={spinnerStartTime} lastAction={(() => {
+                        const msgs = taskState.diracMessages ?? []
+                        for (let i = msgs.length - 1; i >= 0; i--) {
+                            const m = msgs[i]
+                            if (m.content.type === "card" && m.content.card.endTime) {
+                                return m.content.card.header
+                            }
+                        }
+                        return undefined
+                    })()} />
                 )}
 
                 {uiActionState && !activePanel && !isExiting && (
@@ -939,6 +1005,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 {!showSlashMenu && !showFileMenu && !activePanel && (
                     <ChatFooter
                         autoApproveAll={autoApproveAll}
+                        verboseBatch={verboseBatch}
                         contextWindowSize={contextWindowSize}
                         gitBranch={gitBranch}
                         gitDiffStats={gitDiffStats}

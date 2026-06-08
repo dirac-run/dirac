@@ -286,7 +286,7 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
         return true
     }
 
-    private async handleApprovalFlow(
+        private async handleApprovalFlow(
         env: IToolEnvironment,
         preparedBatches: PreparedFileBatch[],
         cards: Record<string, any>
@@ -314,13 +314,27 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
                 preparedBatches.length === 1
                     ? `file ${preparedBatches[0].displayPath}`
                     : `${preparedBatches.length} files`
-            const permissionMessage = `Apply ${totalRequestedEdits} edit(s) to ${fileSummary}?`
 
-            const result = await env.interaction.askPermission(permissionMessage)
-            const isRejection = result.action === DiracAskResponse.REJECT
-            await result.card.finalize(isRejection ? CardStatus.CANCELLED : CardStatus.SUCCESS)
+            const aggregatedDiffs = preparedBatches
+                .map((b) => stripHashes(b.prepared!.diff))
+                .filter((d) => d.trim().length > 0)
+                .join("\n\n")
+
+            const card = await env.ui.createCard({
+                header: `Apply ${totalRequestedEdits} edit(s) to ${fileSummary}?`,
+                icon: DiracIcon.FILE_EDIT,
+                status: CardStatus.WAITING_FOR_INPUT,
+                requireApproval: true,
+                collapsed: false,
+                renderType: "diff",
+                body: aggregatedDiffs,
+                maxHeight: 10000,
+            })
+
+            const result = await card.waitForInteraction()
 
             if (result.action === DiracAskResponse.EDIT || result.action === DiracAskResponse.VIEW) {
+                await card.finalize(CardStatus.CANCELLED)
                 await env.editor.showReview(
                     preparedBatches.map((b) => ({
                         absolutePath: b.absolutePath,
@@ -334,6 +348,7 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
             }
 
             if (result.action === DiracAskResponse.UNDO) {
+                await card.finalize(CardStatus.CANCELLED)
                 await env.editor.undoUserEdits()
                 continue
             }
@@ -342,7 +357,8 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
                 if (result.text) {
                     await env.ui.upsertText(result.text, false, "user")
                 }
-                await result.card.finalize(CardStatus.SKIPPED)
+                await card.update({ body: `↩ Skipped by user` })
+                await card.finalize(CardStatus.SKIPPED)
                 for (const batch of preparedBatches) {
                     if (cards[batch.absolutePath]) {
                         await cards[batch.absolutePath].update({
@@ -355,7 +371,9 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
                 return { approved: false, feedback: formatResponse.toolDeniedWithFeedback(result.text || result.value || "") }
             }
 
-            if (!result.approved) {
+            if (result.action !== DiracAskResponse.APPROVE) {
+                await card.update({ body: `- [ ] User denied permission` })
+                await card.finalize(CardStatus.CANCELLED)
                 for (const batch of preparedBatches) {
                     if (cards[batch.absolutePath]) {
                         await cards[batch.absolutePath].finalize(CardStatus.CANCELLED);
@@ -368,6 +386,7 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
                 return { approved: false }
             }
 
+            await card.finalize(CardStatus.SUCCESS)
             return { approved: true, userEdits: result.userEdits }
         }
     }

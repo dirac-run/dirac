@@ -61,6 +61,9 @@ function convertCardToProto(card: AppCard): Card {
         feedbackPlaceholder: card.feedbackPlaceholder ?? undefined,
         maxHeight: card.maxHeight ?? undefined,
         cleanupStrategy: card.cleanupStrategy ?? undefined,
+        startTimeMs: card.startTime ?? undefined,
+        endTimeMs: card.endTime ?? undefined,
+        outcome: card.outcome ?? undefined,
         actions:
             card.actions?.map((action) => ({
                 label: action.label,
@@ -86,6 +89,9 @@ function convertProtoToCard(protoCard: Card): AppCard {
         feedbackPlaceholder: protoCard.feedbackPlaceholder ?? undefined,
         maxHeight: protoCard.maxHeight ?? undefined,
         cleanupStrategy: (protoCard.cleanupStrategy as any) ?? undefined,
+        startTime: protoCard.startTimeMs ?? undefined,
+        endTime: protoCard.endTimeMs ?? undefined,
+        outcome: protoCard.outcome ?? undefined,
         actions:
             protoCard.actions?.map((action) => ({
                 label: action.label,

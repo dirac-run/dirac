@@ -16,6 +16,10 @@ export class CardHandle implements ICardHandle {
     public maxHeight?: number
     public cleanupStrategy?: CleanupStrategy
     public do_not_auto_collapse?: boolean
+    public startTime?: number
+    public endTime?: number
+    public outcome?: string
+
 
     public readonly id: string
 
@@ -37,6 +41,7 @@ export class CardHandle implements ICardHandle {
         this.maxHeight = params.maxHeight
         this.cleanupStrategy = params.cleanupStrategy
         this.do_not_auto_collapse = params.do_not_auto_collapse
+        this.outcome = params.outcome
     }
 
     public toData(): import("../../../../shared/ExtensionMessage").Card {
@@ -55,6 +60,9 @@ export class CardHandle implements ICardHandle {
             maxHeight: this.maxHeight,
             cleanupStrategy: this.cleanupStrategy,
             do_not_auto_collapse: this.do_not_auto_collapse,
+            startTime: this.startTime,
+            endTime: this.endTime,
+            outcome: this.outcome,
         }
     }
 
@@ -72,6 +80,9 @@ export class CardHandle implements ICardHandle {
         if (patch.maxHeight !== undefined) this.maxHeight = patch.maxHeight
         if (patch.cleanupStrategy !== undefined) this.cleanupStrategy = patch.cleanupStrategy
         if (patch.do_not_auto_collapse !== undefined) this.do_not_auto_collapse = patch.do_not_auto_collapse
+        if (patch.outcome !== undefined) this.outcome = patch.outcome
+        if (patch.startTime !== undefined) this.startTime = patch.startTime
+        if (patch.endTime !== undefined) this.endTime = patch.endTime
 
         await this.protocolHandle.update(patch as any)
     }
@@ -82,6 +93,7 @@ export class CardHandle implements ICardHandle {
     }
     public async finalize(status: CardStatus, doNotAutoCollapse?: boolean): Promise<void> {
         this.status = status
+        this.endTime = Date.now()
         if (doNotAutoCollapse) {
             this.do_not_auto_collapse = true
         }

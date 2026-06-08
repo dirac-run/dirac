@@ -1,19 +1,21 @@
 /**
  * Color constants for the CLI
- * Using hex values for consistent rendering across terminals
+ * Re-exports from theme.ts for backward compatibility.
  */
 
-export const COLORS = {
-	// Primary brand color - light purple-blue
-	primaryBlue: "#B1B9F9",
+import { theme } from "./theme"
 
-	// Plan mode color
-	planYellow: "yellow",
+export const COLORS = {
+    // Primary brand color - light purple-blue
+    primaryBlue: theme.primary,
+
+    // Plan mode color
+    planYellow: theme.plan,
 } as const
 
 /**
  * Get the appropriate color for the current mode
  */
 export function getModeColor(mode: "act" | "plan"): string {
-	return mode === "plan" ? COLORS.planYellow : COLORS.primaryBlue
+    return mode === "plan" ? COLORS.planYellow : COLORS.primaryBlue
 }

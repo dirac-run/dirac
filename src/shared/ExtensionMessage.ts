@@ -376,6 +376,9 @@ export interface Card {
     maxHeight?: number
     cleanupStrategy?: CleanupStrategy
     do_not_auto_collapse?: boolean
+    startTime?: number
+    endTime?: number
+    outcome?: string
 }
 export enum CardStatus {
     BUILDING = "building",
@@ -417,6 +420,7 @@ export interface CardParams {
     maxHeight?: number
     cleanupStrategy?: CleanupStrategy
     do_not_auto_collapse?: boolean
+    outcome?: string
 }
 
 export interface ICardHandleBase {
