@@ -104,7 +104,53 @@ export const anthropicModels = {
         description:
             "Anthropic fast mode preview for Claude Opus 4.6 with the 1M context beta enabled. Same model and capabilities with higher output token speed at premium pricing across the full 1M context window. Requires both fast mode and 1M context access on your Anthropic account.",
     },
+    "claude-opus-4-8": {
+        ...MODEL_CAPABILITIES["claude-opus-4-8"],
+        supportsPromptCache: true,
+        inputPrice: 5.0,
+        outputPrice: 25.0,
+        cacheWritesPrice: 6.25,
+        cacheReadsPrice: 0.5,
+    },
+    "claude-opus-4-8:1m": {
+        ...MODEL_CAPABILITIES["claude-opus-4-8:1m"],
+        supportsPromptCache: true,
+        inputPrice: 5.0,
+        outputPrice: 25.0,
+        cacheWritesPrice: 6.25,
+        cacheReadsPrice: 0.5,
+        tiers: CLAUDE_OPUS_1M_TIERS,
+    },
+    "claude-opus-4-8:fast": {
+        ...MODEL_CAPABILITIES["claude-opus-4-8:fast"],
+        supportsPromptCache: true,
+        inputPrice: 30.0,
+        outputPrice: 150.0,
+        cacheWritesPrice: 37.5,
+        cacheReadsPrice: 3.0,
+        description:
+            "Anthropic fast mode preview for Claude Opus 4.8. Same model and capabilities with higher output token speed at premium pricing. Requires fast mode access on your Anthropic account.",
+    },
+    "claude-opus-4-8:1m:fast": {
+        ...MODEL_CAPABILITIES["claude-opus-4-8:1m:fast"],
+        supportsPromptCache: true,
+        inputPrice: 30.0,
+        outputPrice: 150.0,
+        cacheWritesPrice: 37.5,
+        cacheReadsPrice: 3.0,
+        description:
+            "Anthropic fast mode preview for Claude Opus 4.8 with the 1M context beta enabled. Same model and capabilities with higher output token speed at premium pricing across the full 1M context window. Requires both fast mode and 1M context access on your Anthropic account.",
+    },
+    "claude-fable-5": {
+        ...MODEL_CAPABILITIES["claude-fable-5"],
+        supportsPromptCache: true,
+        inputPrice: 10.0,
+        outputPrice: 50.0,
+        cacheWritesPrice: 12.5,
+        cacheReadsPrice: 1.0,
+    },
 } as const satisfies Record<string, ModelInfo>
+
 
 
 /**
