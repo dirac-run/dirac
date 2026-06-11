@@ -16,7 +16,7 @@ import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { DiracMessageChange } from "@core/task/message-state"
 import type { ApiProvider } from "@shared/api"
-import type { DiracAsk, DiracMessage as DiracMessageType } from "@shared/ExtensionMessage"
+import type { DiracMessage as DiracMessageType } from "@shared/ExtensionMessage"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { Controller } from "@/core/controller"
@@ -975,8 +975,8 @@ export class DiracAgent implements acp.Agent {
 						const onChanged = (change: DiracMessageChange) => {
 							if (
 								change.type === "add" &&
-								change.message?.type === "ask" &&
-								(change.message.ask === "resume_task" || change.message.ask === "resume_completed_task")
+								(change.message as any)?.type === "ask" &&
+								((change.message as any).ask === "resume_task" || (change.message as any).ask === "resume_completed_task")
 							) {
 								task.messageStateHandler.off("diracMessagesChanged", onChanged)
 								resolve()
@@ -988,7 +988,7 @@ export class DiracAgent implements acp.Agent {
 						Promise.resolve(task.runPromise).catch(onRunPromiseError)
 						task.messageStateHandler.on("diracMessagesChanged", onChanged)
 					})
-					await task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
+					await (task as any).handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
 				}
 			} else if (hasActiveTask && controller.task) {
 				// Continue existing task - respond to pending ask
@@ -996,7 +996,7 @@ export class DiracAgent implements acp.Agent {
 
 				// Find the last ask message and respond to it
 				const messages = controller.task.messageStateHandler.getDiracMessages()
-				const lastAskMessage = [...messages].reverse().find((m) => m.type === "ask")
+				const lastAskMessage = [...messages].reverse().find((m) => (m as any).type === "ask")
 
 				// `api_req_failed` and `mistake_limit_reached` are terminal failures:
 				// the turn already ended (see checkMessageForPromptResolution). Routing
@@ -1005,12 +1005,12 @@ export class DiracAgent implements acp.Agent {
 				// then misreports the new turn using stale autoRetryAttempts from the
 				// failed turn (e.g. "Failed after 3 retries"). Start a fresh task
 				// instead — Controller.initTask clears the previous one first.
-				const terminalAskTypes = new Set<DiracAsk>(["api_req_failed", "mistake_limit_reached"])
+				const terminalAskTypes = new Set<string>(["api_req_failed", "mistake_limit_reached"])
 				const lastAskIsTerminal =
-					lastAskMessage?.ask !== undefined && terminalAskTypes.has(lastAskMessage.ask as DiracAsk)
+					(lastAskMessage as any)?.ask !== undefined && terminalAskTypes.has((lastAskMessage as any).ask as string)
 
 				if (lastAskMessage && !lastAskIsTerminal) {
-					await controller.task.handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
+					await (controller.task as any).handleWebviewAskResponse("messageResponse", textContent, imageContent, fileResources)
 				} else {
 					Logger.debug("[DiracAgent] Starting new task (no pending ask or last ask was terminal failure)")
 					await controller.initTask(textContent, imageContent, fileResources)
@@ -1197,7 +1197,7 @@ export class DiracAgent implements acp.Agent {
 			return
 		}
 
-		const askType = message.ask as DiracAsk
+		const askType = (message as any).ask as string
 
 		try {
 			// Request permission from the client
@@ -1206,7 +1206,7 @@ export class DiracAgent implements acp.Agent {
 			Logger.debug("[DiracAgent] Permission response received:", response.outcome)
 
 			// Handle the response
-			const result = handlePermissionResponse(response, askType)
+			const result = handlePermissionResponse(response, askType as "tool" | "followup")
 
 			// Update tool call status based on permission result
 			if (sessionState.currentToolCallId) {
@@ -1237,10 +1237,10 @@ export class DiracAgent implements acp.Agent {
 			// Respond to Dirac's ask based on the permission result
 			if (result.cancelled) {
 				// Cancellation - reject the operation
-				await controller.task.handleWebviewAskResponse("noButtonClicked")
+				await (controller.task as any).handleWebviewAskResponse("noButtonClicked")
 			} else {
 				// Pass the response to Dirac
-				await controller.task.handleWebviewAskResponse(result.response, result.text)
+				await (controller.task as any).handleWebviewAskResponse(result.response, result.text)
 			}
 		} catch (error) {
 			Logger.debug("[DiracAgent] Error handling permission request:", error)
@@ -1256,7 +1256,7 @@ export class DiracAgent implements acp.Agent {
 			}
 
 			// Reject the operation on error
-			await controller.task.handleWebviewAskResponse("noButtonClicked")
+			await (controller.task as any).handleWebviewAskResponse("noButtonClicked")
 		}
 	}
 
@@ -1271,11 +1271,11 @@ export class DiracAgent implements acp.Agent {
 		if (promptResolved.value) return
 
 		// Don't resolve for partial (still streaming) messages
-		if (message.partial) return
+		if ((message as any).partial) return
 
 		// Check for ask messages that require user input
-		if (message.type === "ask") {
-			const askType = message.ask as DiracAsk
+		if ((message as any).type === "ask") {
+			const askType = (message as any).ask as string
 			if (
 				askType === "followup" ||
 				askType === "plan_mode_respond" ||
@@ -1295,11 +1295,11 @@ export class DiracAgent implements acp.Agent {
 			}
 		}
 
-		if (message.type === "say") {
+		if ((message as any).type === "say") {
 			// Terminal "the task ended in failure" message. The error text itself
 			// is already emitted to the client by translateMessage; here we just
 			// have to resolve the prompt so the client knows the turn is over.
-			if (message.say === "error") {
+			if ((message as any).say === "error") {
 				promptResolved.value = true
 				resolvePrompt({ stopReason: "end_turn" })
 				return
@@ -1308,9 +1308,9 @@ export class DiracAgent implements acp.Agent {
 			// `failed: true` in its JSON payload — that's the terminal signal for
 			// retry-exhausted requests (e.g. bedrock with bad creds), where no
 			// subsequent `say: "error"` or `ask: "api_req_failed"` is emitted.
-			if (message.say === "error_retry" && message.text) {
+			if ((message as any).say === "error_retry" && (message as any).text) {
 				try {
-					if (JSON.parse(message.text).failed === true) {
+					if (JSON.parse((message as any).text).failed === true) {
 						promptResolved.value = true
 						resolvePrompt({ stopReason: "end_turn" })
 						return
@@ -1319,7 +1319,7 @@ export class DiracAgent implements acp.Agent {
 					// Unparseable payload — fall through and wait for another signal.
 				}
 			}
-			if (message.say === "completion_result") {
+			if ((message as any).say === "completion_result") {
 				promptResolved.value = true
 				resolvePrompt({ stopReason: "end_turn" })
 			}
@@ -1353,28 +1353,28 @@ export class DiracAgent implements acp.Agent {
 		// Note: act_mode_respond is NOT included here because its text content was already
 		// sent via the say: "text" message. Including it would cause duplicate output.
 		const isTextStreamingMessage =
-			(message.type === "say" &&
-				(message.say === "text" || message.say === "reasoning" || message.say === "completion_result")) ||
-			(message.type === "ask" &&
-				(message.ask === "followup" || message.ask === "plan_mode_respond" || message.ask === "completion_result"))
+			((message as any).type === "say" &&
+				((message as any).say === "text" || (message as any).say === "reasoning" || (message as any).say === "completion_result")) ||
+			((message as any).type === "ask" &&
+				((message as any).ask === "followup" || (message as any).ask === "plan_mode_respond" || (message as any).ask === "completion_result"))
 		const isWebSearchMarkerMessage =
-			message.type === "say" && message.say === "text" && parseWebSearchMarkerText(message.text) !== undefined
+			(message as any).type === "say" && (message as any).say === "text" && parseWebSearchMarkerText((message as any).text) !== undefined
 
-		if (isTextStreamingMessage && message.text && !isWebSearchMarkerMessage) {
+		if (isTextStreamingMessage && (message as any).text && !isWebSearchMarkerMessage) {
 			const isCompletionResult =
-				(message.type === "say" && message.say === "completion_result") ||
-				(message.type === "ask" && message.ask === "completion_result")
+				((message as any).type === "say" && (message as any).say === "completion_result") ||
+				((message as any).type === "ask" && (message as any).ask === "completion_result")
 
 			// Extract the actual text content for JSON-wrapped messages
 			// plan_mode_respond uses { response: string, options?: string[] }
 			// followup uses { question: string, options?: string[] }
-			let textContent = message.text
-			if (message.type === "ask" && (message.ask === "plan_mode_respond" || message.ask === "followup")) {
+			let textContent = (message as any).text
+			if ((message as any).type === "ask" && ((message as any).ask === "plan_mode_respond" || (message as any).ask === "followup")) {
 				try {
-					const parsed = JSON.parse(message.text)
-					if (message.ask === "plan_mode_respond" && parsed.response !== undefined) {
+					const parsed = JSON.parse((message as any).text)
+					if ((message as any).ask === "plan_mode_respond" && parsed.response !== undefined) {
 						textContent = parsed.response
-					} else if (message.ask === "followup" && parsed.question !== undefined) {
+					} else if ((message as any).ask === "followup" && parsed.question !== undefined) {
 						textContent = parsed.question
 					}
 				} catch {
@@ -1388,9 +1388,9 @@ export class DiracAgent implements acp.Agent {
 			// the whole text, so for these subtypes we accumulate under a stable key.
 			const stableStreamKey = isCompletionResult
 				? "completion_result"
-				: message.type === "ask" && message.ask === "followup"
+				: (message as any).type === "ask" && (message as any).ask === "followup"
 					? "followup"
-					: message.type === "ask" && message.ask === "plan_mode_respond"
+					: (message as any).type === "ask" && (message as any).ask === "plan_mode_respond"
 						? "plan_mode_respond"
 						: undefined
 			const lastTextForDelta = stableStreamKey
@@ -1408,7 +1408,7 @@ export class DiracAgent implements acp.Agent {
 
 			// Determine the correct update type based on message type
 			const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" =
-				message.type === "say" && message.say === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk"
+				(message as any).type === "say" && (message as any).say === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk"
 
 			// For completion_result messages, add a leading newline to separate from previous content
 			// This ensures the completion message appears on a new line after any preceding text
@@ -1452,15 +1452,15 @@ export class DiracAgent implements acp.Agent {
 
 			// Handle permission requests for ask messages
 			// Only process permissions for non-partial (complete) ask messages
-			if (result.requiresPermission && result.permissionRequest && !message.partial) {
+			if (result.requiresPermission && result.permissionRequest && !(message as any).partial) {
 				// Handle the permission request asynchronously
 				// This will request permission from the client and respond to Dirac
 				await this.handlePermissionRequest(sessionId, sessionState, message, result.permissionRequest)
 			}
 
 			// Track text content for this message (in case of future updates)
-			if (message.text) {
-				this.partialMessageLastContent.set(messageKey, message.text)
+			if ((message as any).text) {
+				this.partialMessageLastContent.set(messageKey, (message as any).text)
 			}
 
 			// NOTE: Do NOT delete messageToToolCallId here. A message can receive multiple
@@ -1651,20 +1651,20 @@ export class DiracAgent implements acp.Agent {
 
 		for (const message of uiMessages) {
 			// Skip partial (mid-stream) messages — they were never complete
-			if (message.partial) continue
+			if ((message as any).partial) continue
 			// Skip internal housekeeping messages
-			if (message.type === "say" && message.say && SKIP_SAY.has(message.say)) continue
+			if ((message as any).type === "say" && (message as any).say && SKIP_SAY.has((message as any).say)) continue
 
 			try {
 				// User-facing input messages that translateMessage skips — emit as user_message_chunk
 				if (
-					message.type === "say" &&
-					(message.say === "task" || message.say === "user_feedback" || message.say === "user_feedback_diff") &&
-					message.text
+					(message as any).type === "say" &&
+					((message as any).say === "task" || (message as any).say === "user_feedback" || (message as any).say === "user_feedback_diff") &&
+					(message as any).text
 				) {
 					await this.emitSessionUpdate(sessionId, {
 						sessionUpdate: "user_message_chunk",
-						content: { type: "text", text: message.text },
+						content: { type: "text", text: (message as any).text },
 					} as acp.SessionUpdate)
 					continue
 				}
@@ -1722,6 +1722,20 @@ export class DiracAgent implements acp.Agent {
 			})
 		} catch (error) {
 			Logger.debug("[DiracAgent] Error sending available commands:", error)
+		}
+	}
+
+	async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+		return this.unstable_listSessions_internal(params)
+	}
+
+	private async unstable_listSessions_internal(_params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+		const sessions = [...this.sessions.values()]
+		return {
+			sessions: sessions.map((session) => ({
+				sessionId: session.sessionId,
+				cwd: session.cwd,
+			})),
 		}
 	}
 }

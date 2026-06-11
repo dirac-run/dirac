@@ -9,7 +9,9 @@
  */
 
 import type * as acp from "@agentclientprotocol/sdk"
-import type { DiracMessage, DiracSayBrowserAction, DiracSayTool, MultiCommandState } from "@shared/ExtensionMessage"
+import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessageType, CardStatus, isFinalStatus } from "@shared/ExtensionMessage"
+import type { DiracSayBrowserAction, DiracSayTool, MultiCommandState } from "@shared/proto/dirac/ui.js"
 import type { AcpSessionState, TranslatedMessage } from "./types.js"
 import { AcpSessionStatus } from "./types.js"
 
@@ -226,16 +228,18 @@ export function translateMessage(
 	let permissionRequest: TranslatedMessage["permissionRequest"]
 	let toolCallId: string | undefined
 
-	if (message.type === "say" && message.say) {
-		const sayResult = translateSayMessage(message, sessionState, options)
+	if (message.content.type === DiracMessageType.MARKDOWN) {
+		const sayResult = translateMarkdownMessage(message, sessionState, options)
 		updates.push(...sayResult.updates)
 		toolCallId = sayResult.toolCallId
-	} else if (message.type === "ask" && message.ask) {
-		const askResult = translateAskMessage(message, sessionState, options)
-		updates.push(...askResult.updates)
-		requiresPermission = askResult.requiresPermission ?? false
-		permissionRequest = askResult.permissionRequest
-		toolCallId = askResult.toolCallId
+	} else if (message.content.type === DiracMessageType.CARD) {
+		const cardResult = translateCardMessage(message, sessionState, options)
+		updates.push(...cardResult.updates)
+		requiresPermission = cardResult.requiresPermission ?? false
+		permissionRequest = cardResult.permissionRequest
+		toolCallId = cardResult.toolCallId
+	} else if (message.content.type === DiracMessageType.API_STATUS || message.content.type === DiracMessageType.CHECKPOINT) {
+		// API status and checkpoint messages produce no ACP updates
 	}
 
 	return {
@@ -249,296 +253,86 @@ export function translateMessage(
 /**
  * Translate a "say" type Dirac message to ACP updates.
  */
-function translateSayMessage(
+function translateMarkdownMessage(
 	message: DiracMessage,
 	sessionState: AcpSessionState,
 	options?: TranslateMessageOptions,
 ): TranslatedMessage {
 	const updates: acp.SessionUpdate[] = []
 	let toolCallId: string | undefined
-	const say = message.say!
+	if (message.content.type !== DiracMessageType.MARKDOWN) {
+		return { updates: [] }
+	}
+	const content = message.content
+	const text = content.content
+	const isReasoning = content.isReasoning
+	const isCompletion = content.isCompletion
+	const role = content.role
 
-	switch (say) {
-		case "text":
-			// Codex web-search markers → ACP search tool lifecycle.
-			if (message.text) {
-				const webSearchQuery = parseWebSearchMarkerText(message.text)
-				if (webSearchQuery) {
-					toolCallId = translateWebSearchMarkerMessage(webSearchQuery, message, sessionState, updates)
-					break
-				}
-			}
+	// Route by content properties
+	if (role === "user") {
+		// User messages — already visible to user, don't echo
+		return { updates: [] }
+	}
 
-			// A retry chain ends successfully when the API actually starts
-			// returning content. Mark the open "Retrying API request" tool_call
-			// as completed so it doesn't linger as in_progress forever.
-			if (sessionState.retryToolCallId && message.text) {
-				updates.push({
-					sessionUpdate: "tool_call_update",
-					toolCallId: sessionState.retryToolCallId,
-					status: "completed",
-				})
-				sessionState.retryToolCallId = undefined
-			}
+	if (isReasoning) {
+		// Reasoning → agent_thought_chunk
+		if (text) {
+			updates.push({
+				sessionUpdate: "agent_thought_chunk",
+				content: { type: "text", text },
+			})
+		}
+		return { updates }
+	}
 
-			// Text messages → agent_message_chunk
-			if (message.text) {
-				updates.push({
-					sessionUpdate: "agent_message_chunk",
-					content: { type: "text", text: message.text },
-				})
-			}
-			break
+	if (isCompletion) {
+		// Completion result → agent_message_chunk with leading newline
+		if (text) {
+			updates.push({
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "\n" + text },
+			})
+		}
+		return { updates }
+	}
 
-		case "user_feedback":
-		case "user_feedback_diff":
-			// User feedback messages - don't echo the user's input back to them
-			// The ACP client already displays what the user typed
-			break
-
-		case "reasoning":
-			// Reasoning/thinking → agent_thought_chunk
-			if (message.reasoning || message.text) {
-				updates.push({
-					sessionUpdate: "agent_thought_chunk",
-					content: { type: "text", text: message.reasoning || message.text || "" },
-				})
-			}
-			break
-
-		case "tool":
-			// Tool execution → tool_call with status updates
-			updates.push(...translateToolMessage(message, sessionState, options?.clientCapabilities))
-			break
-
-		case "command":
-			// Command execution → tool_call (kind: execute)
-			updates.push(...translateCommandMessage(message, sessionState, options?.clientCapabilities))
-			break
-
-		case "command_output":
-			// Command output → tool_call_update with terminal content
-			updates.push(...translateCommandOutputMessage(message, sessionState, options?.clientCapabilities))
-			break
-
-		case "completion_result":
-			// Task completion - no direct update needed, handled by stopReason in prompt response
-			// But we can send a final message chunk with a leading newline to separate from previous content
-			if (message.text) {
-				updates.push({
-					sessionUpdate: "agent_message_chunk",
-					content: { type: "text", text: "\n" + message.text },
-				})
-			}
-			break
-
-		case "error":
-		case "diff_error":
-		case "diracignore_error": {
-			// Surface as a failed tool_call lifecycle so clients render error
-			// styling instead of plain white agent text.
-			if (!message.text) break
-			const title =
-				message.say === "diff_error"
-					? "File edit failed"
-					: message.say === "diracignore_error"
-						? "Access blocked by .diracignore"
-						: "Task error"
-			pushFailureToolCall(updates, sessionState, title, message.text, { error: message.text })
-			break
+	// Regular text → check for web search marker, then agent_message_chunk
+	if (text) {
+		const webSearchQuery = parseWebSearchMarkerText(text)
+		if (webSearchQuery) {
+			toolCallId = translateWebSearchMarkerMessage(webSearchQuery, message, sessionState, updates)
+			return { updates, toolCallId }
 		}
 
-		case "error_retry": {
-			// `error_retry` payload is JSON: {failed, attempt, maxAttempts, errorMessage}.
-			// In-flight retries collapse into a single evolving tool_call so the
-			// client shows one "Retrying API request" item that updates per
-			// attempt rather than three white text lines. The terminal
-			// "retries exhausted" message fails that same tool_call.
-			if (!message.text) break
-			const retry = (() => {
-				try {
-					return JSON.parse(message.text) as {
-						failed?: boolean
-						attempt?: number
-						maxAttempts?: number
-						errorMessage?: string
-					}
-				} catch {
-					return null
-				}
-			})()
-			// errorMessage is sometimes itself a JSON object — unwrap one level.
-			let errMsg = retry?.errorMessage ?? ""
-			if (errMsg) {
-				try {
-					const inner = JSON.parse(errMsg) as { message?: string }
-					errMsg = inner.message ?? errMsg
-				} catch {}
-			}
-			const attemptN = retry?.attempt ?? "?"
-			const maxN = retry?.maxAttempts ?? "?"
-			const reasonText = errMsg || "request failed"
-
-			if (retry?.failed) {
-				const display = `Failed after ${maxN} retries: ${reasonText}`
-				if (sessionState.retryToolCallId) {
-					updates.push({
-						sessionUpdate: "tool_call_update",
-						toolCallId: sessionState.retryToolCallId,
-						status: "failed",
-						content: [{ type: "content", content: { type: "text", text: display } }],
-						rawOutput: { error: message.text },
-					})
-					sessionState.retryToolCallId = undefined
-				} else {
-					pushFailureToolCall(updates, sessionState, "Request failed", display, {
-						error: message.text,
-					})
-				}
-				break
-			}
-
-			const display = retry
-				? `Retrying... (attempt ${attemptN}/${maxN}): ${reasonText}`
-				: `Error: ${message.text}`
-			if (!sessionState.retryToolCallId) {
-				sessionState.retryToolCallId = generateToolCallId()
-				updates.push({
-					sessionUpdate: "tool_call",
-					toolCallId: sessionState.retryToolCallId,
-					title: "Retrying API request",
-					kind: "other",
-					status: "in_progress",
-					content: [{ type: "content", content: { type: "text", text: display } }],
-				})
-			} else {
-				updates.push({
-					sessionUpdate: "tool_call_update",
-					toolCallId: sessionState.retryToolCallId,
-					status: "in_progress",
-					content: [{ type: "content", content: { type: "text", text: display } }],
-				})
-			}
-			break
+		// Clear retry tool call when streaming begins
+		if (sessionState.retryToolCallId) {
+			updates.push({
+				sessionUpdate: "tool_call_update",
+				toolCallId: sessionState.retryToolCallId,
+				status: "completed",
+			})
+			sessionState.retryToolCallId = undefined
 		}
 
-		case "browser_action_launch":
-		case "browser_action":
-			// Browser actions → tool_call (kind: execute)
-			updates.push(...translateBrowserActionMessage(message, sessionState))
-			break
-
-		case "browser_action_result":
-			// Browser action result → tool_call_update
-			if (sessionState.currentToolCallId) {
-				const result = message.text ? JSON.parse(message.text) : {}
-				updates.push({
-					sessionUpdate: "tool_call_update",
-					toolCallId: sessionState.currentToolCallId,
-					status: "completed",
-					rawOutput: result,
-				})
-				sessionState.currentToolCallId = undefined
-			}
-			break
-
-		case "api_req_started":
-			// API request started - could be shown as agent thinking
-			// updates.push({
-			// 	sessionUpdate: "agent_thought_chunk",
-			// 	content: { type: "text", text: "Making API Request" },
-			// })
-			//
-			// Turn boundary: each assistant turn runs at most one tool, and a tool's
-			// result is fed back in the *next* turn's request. execute_command in ACP
-			// never emits a command_output/say:command completion event (the result is
-			// swallowed into this api_req_started payload), so currentToolCallId would
-			// otherwise never clear and every command in the task would collapse onto the
-			// first command's tool call.
-			//
-			// Only release currentToolCallId when a NEW api_req_started begins (different
-			// ts). The same api_req_started keeps streaming partial token/cost updates
-			// across the whole turn — clearing on those would fire *between* a command's
-			// streaming preview and its ask:command, splitting one command into two tool
-			// calls. A new ts means the previous turn (and its command) is done, so the
-			// next command's preview mints a fresh tool call and its permission aligns.
-			if (message.ts !== sessionState.lastApiReqStartedTs) {
-				sessionState.lastApiReqStartedTs = message.ts
-				sessionState.currentToolCallId = undefined
-			}
-			break
-
-		case "api_req_finished":
-			// API request finished - no specific update needed
-			break
-
-		case "subagent_usage":
-			// Hidden aggregate metrics event used for task-level accounting.
-			break
-
-		case "task":
-			// Task started - don't echo the user's prompt back to them
-			// The ACP client already knows what they typed
-			break
-
-
-		case "hook_status":
-			// Format hook status as a human-readable message
-			if (message.text) {
-				try {
-					const hookInfo = JSON.parse(message.text) as { hookName: string; status: string; toolName?: string }
-					const target = hookInfo.toolName ? ` for ${hookInfo.toolName}` : ""
-					let statusText: string
-					switch (hookInfo.status) {
-						case "running":
-							statusText = `Running ${hookInfo.hookName} hook${target}...`
-							break
-						case "completed":
-							statusText = `${hookInfo.hookName} hook completed`
-							break
-						case "cancelled":
-							statusText = `${hookInfo.hookName} hook cancelled`
-							break
-						default:
-							statusText = `${hookInfo.hookName} hook: ${hookInfo.status}`
-					}
-					updates.push({
-						sessionUpdate: "agent_message_chunk",
-						content: { type: "text", text: statusText },
-					})
-				} catch {
-					// If parsing fails, skip the message rather than showing raw JSON
-				}
-			}
-			break
-
-		case "hook_output_stream":
-			// Suppress hook output streams in ACP mode - these are debug details
-			// that clutter the conversation. The hook_status message provides
-			// sufficient user-facing feedback.
-			break
-
-		case "info":
-		case "shell_integration_warning":
-		case "shell_integration_warning_with_suggestion":
-		case "checkpoint_created":
-		case "deleted_api_reqs":
-		case "api_req_retried":
-		case "command_permission_denied":
-		case "generate_explanation":
-		case "conditional_rules_applied":
-			// Informational messages - optionally shown as agent messages
-			if (message.text) {
-				updates.push({
-					sessionUpdate: "agent_message_chunk",
-					content: { type: "text", text: message.text },
-				})
-			}
-			break
+		updates.push({
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text },
+		})
 	}
 
 	return { updates, toolCallId }
+
 }
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _legacyTranslateSayMessage_unused(
+	_message: DiracMessage,
+	_sessionState: AcpSessionState,
+	_options: TranslateMessageOptions | undefined,
+	_updates: acp.SessionUpdate[],
+	_toolCallId: string | undefined,
+): void {}
 
 function translateWebSearchMarkerMessage(
 	query: string,
@@ -560,7 +354,7 @@ function translateWebSearchMarkerMessage(
 			status: "in_progress",
 			rawInput: { query },
 		})
-	} else if (message.partial) {
+	} else if ((message as any).partial) {
 		updates.push({
 			sessionUpdate: "tool_call_update",
 			toolCallId,
@@ -569,7 +363,7 @@ function translateWebSearchMarkerMessage(
 		})
 	}
 
-	if (!message.partial) {
+	if (!(message as any).partial) {
 		updates.push({
 			sessionUpdate: "tool_call_update",
 			toolCallId,
@@ -587,13 +381,106 @@ function translateWebSearchMarkerMessage(
  * Translate a "ask" type Dirac message to ACP updates.
  * Ask messages typically require permission from the client.
  */
+// Alias for backward compat — new code uses translateCardMessage / translateMarkdownMessage
+function translateCardMessage(
+	message: DiracMessage,
+	sessionState: AcpSessionState,
+	options?: TranslateMessageOptions,
+): TranslatedMessage {
+	if (message.content.type !== DiracMessageType.CARD) {
+		return { updates: [], requiresPermission: false }
+	}
+	const card = message.content.card
+	const toolCallId = card.id
+	const updates: acp.SessionUpdate[] = []
+	let requiresPermission = false
+	let permissionRequest: TranslatedMessage["permissionRequest"]
+
+	// Map CardStatus to ACP ToolCallStatus
+	const mapStatus = (s: CardStatus): acp.ToolCallStatus => {
+		switch (s) {
+			case CardStatus.RUNNING:
+			case CardStatus.BUILDING:
+			case CardStatus.PENDING:
+				return "in_progress"
+			case CardStatus.SUCCESS:
+				return "completed"
+			case CardStatus.ERROR:
+			case CardStatus.CANCELLED:
+			case CardStatus.ABANDONED:
+			case CardStatus.SKIPPED:
+				return "failed"
+			case CardStatus.WAITING_FOR_INPUT:
+				return "pending"
+			default:
+				return "in_progress"
+		}
+	}
+
+	const status = mapStatus(card.status)
+	const isExisting = sessionState.pendingToolCalls.has(toolCallId)
+
+	if (isExisting) {
+		const existing = sessionState.pendingToolCalls.get(toolCallId)!
+		existing.status = status
+		updates.push({
+			sessionUpdate: "tool_call_update",
+			toolCallId,
+			status,
+			rawOutput: card.body ? { body: card.body } : undefined,
+		})
+		if (isFinalStatus(card.status)) {
+			sessionState.pendingToolCalls.delete(toolCallId)
+		}
+	} else {
+		const toolCall: acp.ToolCall = {
+			toolCallId,
+			title: card.header,
+			kind: TOOL_KIND_MAP[card.header] || "other",
+			status,
+			rawInput: card.body ? { body: card.body } : undefined,
+		}
+		updates.push({ sessionUpdate: "tool_call", ...toolCall })
+		if (!isFinalStatus(card.status)) {
+			sessionState.pendingToolCalls.set(toolCallId, toolCall)
+		}
+	}
+
+	// Handle interaction requests (approval / feedback)
+	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback)) {
+		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || { toolCallId, title: card.header, kind: "other" as acp.ToolKind, status: "pending" as acp.ToolCallStatus }
+		requiresPermission = true
+		if (card.requireApproval) {
+			permissionRequest = {
+				toolCall: existingToolCall as acp.ToolCall,
+				options: [
+					{ kind: "allow_once", optionId: "allow_once", name: "Approve" },
+					{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+				],
+			}
+		} else {
+			// requireFeedback
+			permissionRequest = {
+				toolCall: existingToolCall as acp.ToolCall,
+				options: [
+					{ kind: "allow_once", optionId: DiracAskResponse_MESSAGE, name: "Submit" },
+				],
+			}
+		}
+	}
+
+	return { updates, requiresPermission, permissionRequest, toolCallId }
+}
+
+const DiracAskResponse_MESSAGE = "messageResponse"
+
 function translateAskMessage(
 	message: DiracMessage,
 	sessionState: AcpSessionState,
 	options?: TranslateMessageOptions,
 ): TranslatedMessage {
 	const updates: acp.SessionUpdate[] = []
-	const ask = message.ask!
+	const ask = (message as any).ask!
 	let requiresPermission = false
 	let permissionRequest: TranslatedMessage["permissionRequest"]
 	let toolCallId: string | undefined
@@ -602,14 +489,14 @@ function translateAskMessage(
 		case "followup":
 		case "plan_mode_respond":
 			// These are questions to the user - send as agent message and await next prompt
-			if (message.text) {
-				let textToSend = message.text
+			if ((message as any).text) {
+				let textToSend = (message as any).text
 
 				// Try to parse JSON and extract the response/question field
 				// plan_mode_respond uses { response: string, options?: string[] }
 				// followup uses { question: string, options?: string[] }
 				try {
-					const parsed = JSON.parse(message.text)
+					const parsed = JSON.parse((message as any).text)
 					if (ask === "plan_mode_respond" && parsed.response !== undefined) {
 						textToSend = parsed.response
 					} else if (ask === "followup" && parsed.question !== undefined) {
@@ -661,7 +548,7 @@ function translateAskMessage(
 					// When coming from streamingPreviewId (first encounter of ask:command after
 					//   ask:tool streaming): → also update title and request permission.
 					const existingToolCall = sessionState.pendingToolCalls.get(toolCallId)
-					const command = extractCommandFromText(message.text)
+					const command = extractCommandFromText((message as any).text)
 					if (existingToolCall) {
 						existingToolCall.title = buildCommandTitle(command)
 						existingToolCall.rawInput = { command }
@@ -678,7 +565,7 @@ function translateAskMessage(
 								rawInput: { command },
 							})
 						}
-						if (!message.partial) {
+						if (!(message as any).partial) {
 							const tc = sessionState.pendingToolCalls.get(toolCallId)
 							if (tc) {
 								requiresPermission = true
@@ -697,10 +584,10 @@ function translateAskMessage(
 				} else {
 					const toolCall: acp.ToolCall = {
 						toolCallId,
-						title: buildCommandTitle(extractCommandFromText(message.text)),
+						title: buildCommandTitle(extractCommandFromText((message as any).text)),
 						kind: "execute",
 						status: "pending",
-						rawInput: { command: extractCommandFromText(message.text) },
+						rawInput: { command: extractCommandFromText((message as any).text) },
 					}
 
 					updates.push({
@@ -711,7 +598,7 @@ function translateAskMessage(
 					sessionState.pendingToolCalls.set(toolCallId, toolCall)
 
 					// Only request permission for non-partial (complete) command messages
-					if (!message.partial) {
+					if (!(message as any).partial) {
 						requiresPermission = true
 						permissionRequest = {
 							toolCall,
@@ -734,14 +621,14 @@ function translateAskMessage(
 				// instead of the tool_call freezing at pending/in_progress. The
 				// permission/preview branches above are left untouched — this is
 				// purely additive.
-				if (toolCallId && message.multiCommandState && message.commandCompleted !== undefined) {
+				if (toolCallId && message.multiCommandState && (message as any).commandCompleted !== undefined) {
 					const existing = sessionState.pendingToolCalls.get(toolCallId)
 					const alreadyTerminal = existing?.status === "completed" || existing?.status === "failed"
 					if (!alreadyTerminal) {
 						const exec = buildCommandExecutionUpdates(
 							toolCallId,
 							message.multiCommandState,
-							message.commandCompleted === true,
+							(message as any).commandCompleted === true,
 							options?.clientCapabilities,
 						)
 						updates.push(...exec.updates)
@@ -754,7 +641,7 @@ function translateAskMessage(
 		case "tool":
 			// Tool permission request → tool_call + request_permission
 			{
-				const toolInfo = message.text ? parseToolInfo(message.text) : null
+				const toolInfo = (message as any).text ? parseToolInfo((message as any).text) : null
 				// Reuse the active command's tool call across the say:tool↔ask:tool flips
 				// that happen as a command streams: each flip re-adds the message under a
 				// fresh ts, so existingToolCallId (keyed by ts) misses and we would otherwise
@@ -789,7 +676,7 @@ function translateAskMessage(
 					})
 					// Don't require permission again for updates - only for final non-partial message
 					// Permission will be requested when partial=false
-					if (!message.partial) {
+					if (!(message as any).partial) {
 						const existingToolCall = sessionState.pendingToolCalls.get(toolCallId)
 						if (existingToolCall) {
 							// Update the existing tool call with latest info
@@ -810,7 +697,7 @@ function translateAskMessage(
 				} else {
 					// For plain command strings (e.g. from handlePartialBlock streaming),
 					// use execute kind so translatePlainCommandToolMessage can update it later.
-					const plainCommand = !toolInfo ? extractCommandFromText(message.text) : undefined
+					const plainCommand = !toolInfo ? extractCommandFromText((message as any).text) : undefined
 					// This is a new tool call
 					const toolCall: acp.ToolCall = {
 						toolCallId,
@@ -829,7 +716,7 @@ function translateAskMessage(
 					sessionState.pendingToolCalls.set(toolCallId, toolCall)
 
 					// Only request permission for non-partial messages (complete tool calls)
-					if (!message.partial) {
+					if (!(message as any).partial) {
 						requiresPermission = true
 						permissionRequest = {
 							toolCall,
@@ -855,7 +742,7 @@ function translateAskMessage(
 					title: "Browser",
 					kind: "execute",
 					status: "pending",
-					rawInput: { url: message.text },
+					rawInput: { url: (message as any).text },
 				}
 
 				updates.push({
@@ -877,10 +764,10 @@ function translateAskMessage(
 
 		case "completion_result":
 			// Completion result needs a leading newline to separate from previous content
-			if (message.text) {
+			if ((message as any).text) {
 				updates.push({
 					sessionUpdate: "agent_message_chunk",
-					content: { type: "text", text: "\n" + message.text },
+					content: { type: "text", text: "\n" + (message as any).text },
 				})
 			}
 			break
@@ -892,10 +779,10 @@ function translateAskMessage(
 		case "report_bug":
 		case "command_output":
 			// These are typically handled internally or shown as messages
-			if (message.text) {
+			if ((message as any).text) {
 				updates.push({
 					sessionUpdate: "agent_message_chunk",
-					content: { type: "text", text: message.text },
+					content: { type: "text", text: (message as any).text },
 				})
 			}
 			break
@@ -904,18 +791,18 @@ function translateAskMessage(
 		case "mistake_limit_reached": {
 			// streamingFailedMessage is a JSON envelope with a `message` field
 			// carrying the human-readable summary; fall back to the raw text.
-			if (!message.text) break
-			let displayText = message.text
+			if (!(message as any).text) break
+			let displayText = (message as any).text
 			try {
-				const parsed = JSON.parse(message.text)
+				const parsed = JSON.parse((message as any).text)
 				if (typeof parsed?.message === "string") {
 					displayText = parsed.message
 				}
 			} catch {
 				// Not a JSON envelope — use raw text.
 			}
-			const title = message.ask === "api_req_failed" ? "API request failed" : "Mistake limit reached"
-			pushFailureToolCall(updates, sessionState, title, displayText, { rawMessage: message.text })
+			const title = (message as any).ask === "api_req_failed" ? "API request failed" : "Mistake limit reached"
+			pushFailureToolCall(updates, sessionState, title, displayText, { rawMessage: (message as any).text })
 			break
 		}
 	}
@@ -933,17 +820,17 @@ function translateToolMessage(
 ): acp.SessionUpdate[] {
 	const updates: acp.SessionUpdate[] = []
 
-	if (!message.text) return updates
+	if (!(message as any).text) return updates
 
 	try {
-		const toolInfo = JSON.parse(message.text) as DiracSayTool
+		const toolInfo = JSON.parse((message as any).text) as DiracSayTool
 		const toolCallId = sessionState.currentToolCallId || generateToolCallId()
 
 		// Determine tool kind
 		const kind = TOOL_KIND_MAP[toolInfo.tool] || "other"
 
 		// Determine status based on message state
-		const status: acp.ToolCallStatus = message.partial ? "in_progress" : "completed"
+		const status: acp.ToolCallStatus = (message as any).partial ? "in_progress" : "completed"
 
 		// Build title
 		const title = buildToolTitle(toolInfo)
@@ -1025,7 +912,7 @@ function translatePlainCommandToolMessage(
 	sessionState: AcpSessionState,
 	clientCapabilities?: acp.ClientCapabilities,
 ): acp.ToolCallUpdate & { sessionUpdate: "tool_call_update" } | undefined {
-	const command = extractCommandFromText(message.text)
+	const command = extractCommandFromText((message as any).text)
 	const toolCallId = sessionState.currentToolCallId
 	if (!command || !toolCallId) return undefined
 
@@ -1070,7 +957,7 @@ function translateCommandMessage(
 ): acp.SessionUpdate[] {
 	const updates: acp.SessionUpdate[] = []
 
-	const command = extractCommandFromText(message.text)
+	const command = extractCommandFromText((message as any).text)
 	const supportsTerminalOutput = clientSupportsTerminalOutput(clientCapabilities)
 
 	// Reuse the existing pending tool call when one was already created by
@@ -1136,29 +1023,29 @@ function translateCommandOutputMessage(
 
 	if (sessionState.currentToolCallId) {
 		const toolCallId = sessionState.currentToolCallId
-		const status: acp.ToolCallStatus = message.commandCompleted ? "completed" : "in_progress"
+		const status: acp.ToolCallStatus = (message as any).commandCompleted ? "completed" : "in_progress"
 		const supportsTerminalOutput = clientSupportsTerminalOutput(clientCapabilities)
 
 		if (supportsTerminalOutput) {
-			if (message.text) {
+			if ((message as any).text) {
 				updates.push({
 					sessionUpdate: "tool_call_update",
 					toolCallId,
 					_meta: {
 						terminal_output: {
 							terminal_id: toolCallId,
-							data: message.text,
+							data: (message as any).text,
 						},
 					},
 				})
 			}
 
-			if (message.commandCompleted) {
+			if ((message as any).commandCompleted) {
 				updates.push({
 					sessionUpdate: "tool_call_update",
 					toolCallId,
 					status,
-					rawOutput: message.text ? { output: message.text } : undefined,
+					rawOutput: (message as any).text ? { output: (message as any).text } : undefined,
 					_meta: {
 						terminal_exit: {
 							terminal_id: toolCallId,
@@ -1178,26 +1065,26 @@ function translateCommandOutputMessage(
 			toolCallId,
 			status,
 			// Store output in rawOutput and optionally as text content
-			rawOutput: message.text ? { output: message.text } : undefined,
-			content: message.text
+			rawOutput: (message as any).text ? { output: (message as any).text } : undefined,
+			content: (message as any).text
 				? [
 						{
 							type: "content",
-							content: { type: "text", text: formatCommandOutputContent(message.text) },
+							content: { type: "text", text: formatCommandOutputContent((message as any).text) },
 						},
 					]
 				: undefined,
 		})
 
-		if (message.commandCompleted) {
+		if ((message as any).commandCompleted) {
 			sessionState.currentToolCallId = undefined
 		}
 	} else {
 		// No active tool call, show as message
-		if (message.text) {
+		if ((message as any).text) {
 			updates.push({
 				sessionUpdate: "agent_message_chunk",
-				content: { type: "text", text: `Output:\n${message.text}` },
+				content: { type: "text", text: `Output:\n${(message as any).text}` },
 			})
 		}
 	}
@@ -1225,7 +1112,7 @@ function formatMultiCommandOutput(multiCommandState: MultiCommandState): string 
 	for (const cmd of multiCommandState.commands) {
 		const out = (cmd.output ?? "").trimEnd()
 		if (many) {
-			parts.push(`$ ${cmd.displayName || cmd.command}`)
+			parts.push(`$ ${(cmd as any).displayName || cmd.command}`)
 			parts.push(out || "(no output)")
 		} else if (out) {
 			parts.push(out)
@@ -1303,7 +1190,7 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
 	const updates: acp.SessionUpdate[] = []
 
 	try {
-		const action = message.text ? (JSON.parse(message.text) as DiracSayBrowserAction) : null
+		const action = (message as any).text ? (JSON.parse((message as any).text) as DiracSayBrowserAction) : null
 		const toolCallId = sessionState.currentToolCallId || generateToolCallId()
 
 		if (!sessionState.currentToolCallId) {
@@ -1323,7 +1210,7 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
 	} catch {
 		updates.push({
 			sessionUpdate: "agent_message_chunk",
-			content: { type: "text", text: message.text || "Browser action" },
+			content: { type: "text", text: (message as any).text || "Browser action" },
 		})
 	}
 
@@ -1343,15 +1230,19 @@ function translateBrowserActionMessage(message: DiracMessage, sessionState: AcpS
  * - Currently working on this
  */
 
-const READ_TOOL_KINDS = new Set([
+const READ_TOOL_KINDS = new Set<string | number>([
 	"readFile", "read_file", "readLineRange", "read_line_range",
 	"getFunction", "get_function", "getFileSkeleton", "get_file_skeleton",
 	"newFileCreated",
+	3, // DiracSayToolType.READ_FILE
+	5, // DiracSayToolType.NEW_FILE_CREATED
 ])
-const LIST_TOOL_KINDS = new Set([
+const LIST_TOOL_KINDS = new Set<string | number>([
 	"listFilesTopLevel", "list_files_top_level",
 	"listFilesRecursive", "list_files_recursive",
 	"listCodeDefinitionNames",
+	4, // DiracSayToolType.LIST_FILES_TOP_LEVEL
+	5, // DiracSayToolType.LIST_FILES_RECURSIVE (index may vary)
 ])
 
 /**
@@ -1442,7 +1333,7 @@ function buildToolTitle(toolInfo: DiracSayTool): string {
 	return suffix ? `${verb} ${suffix}` : verb
 }
 
-function getToolDisplayVerb(toolName: string): string {
+function getToolDisplayVerb(toolName: string | number): string {
 	switch (toolName) {
 		case "editFile":
 		case "editedExistingFile":
@@ -1485,7 +1376,7 @@ function getToolDisplayVerb(toolName: string): string {
 }
 
 function getToolTitleSuffix(toolInfo: DiracSayTool): string {
-	if (toolInfo.tool === "searchFiles") {
+	if ((toolInfo.tool as unknown) === "searchFiles" || (toolInfo.tool as unknown as number) === 7) { // 7 = DiracSayToolType.SEARCH_FILES
 		const searchCandidate = (toolInfo as any).regex || (toolInfo as any).query || (toolInfo as any).pattern
 		return typeof searchCandidate === "string" ? searchCandidate : ""
 	}
