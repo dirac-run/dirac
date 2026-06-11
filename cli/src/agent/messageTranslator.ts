@@ -447,7 +447,7 @@ function translateCardMessage(
 	}
 
 	// Handle interaction requests (approval / feedback)
-	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback)) {
+	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback || card.requireApproval === false)) {
 		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || { toolCallId, title: card.header, kind: "other" as acp.ToolKind, status: "pending" as acp.ToolCallStatus }
 		requiresPermission = true
 		if (card.requireApproval) {
