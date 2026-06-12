@@ -12,9 +12,10 @@ import Spinner from "ink-spinner"
 import React from "react"
 import { Markdown } from "./modular-ui/Markdown"
 import { styles } from "../constants/theme"
+import { getModeColor } from "../constants/colors"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { ModularCard } from "./modular-ui/ModularCard"
-import { clipTextToLastVisualLines, summarizeFirstLine } from "../utils/text-clipping"
+import { clipTextToLastVisualLines, estimateVisualLineCount, summarizeFirstLine } from "../utils/text-clipping"
 
 
 /**
@@ -33,6 +34,8 @@ interface ChatMessageProps {
     showReasoning?: boolean
     compact?: boolean
     maxContentLines?: number
+    scrollOffset?: number
+    suppressCardBody?: boolean
 }
 
 /**
@@ -62,13 +65,17 @@ const DotRow: React.FC<{ children: React.ReactNode; color?: string; flashing?: b
     </Box>
 )
 
-function getReasoningParagraphs(content: string, isStreaming: boolean): string[] {
-    const normalized = content.replace(/\r\n/g, "\n")
-    const chunks = normalized.split(/\n\s*\n+/)
-    const hasOpenParagraph = !/\n\s*\n\s*$/.test(normalized)
-    const visibleChunks = isStreaming && hasOpenParagraph ? chunks.slice(0, -1) : chunks
+const REASONING_VISIBLE_LINES = 3
 
-    return visibleChunks.map((chunk) => chunk.trim()).filter(Boolean)
+function clipReasoningText(content: string, columns: number): string {
+    const visibleText = clipTextToLastVisualLines(content, REASONING_VISIBLE_LINES, columns, "").replace(/^\n/, "")
+    return padTextToVisualLines(visibleText, REASONING_VISIBLE_LINES, columns)
+}
+
+function padTextToVisualLines(text: string, targetLines: number, columns: number): string {
+    const missingLines = targetLines - estimateVisualLineCount(text, columns)
+    if (missingLines <= 0) return text
+    return `${text}${"\n".repeat(missingLines)}`
 }
 
 const ReasoningMessage: React.FC<{
@@ -76,17 +83,24 @@ const ReasoningMessage: React.FC<{
     isStreaming: boolean
     showReasoning: boolean
     compact?: boolean
-    maxContentLines?: number
+    mode?: "act" | "plan"
     columns: number
 }> = ({
     content,
     isStreaming,
     showReasoning,
     compact = false,
-    maxContentLines,
+    mode = "act",
     columns,
 }) => {
         if (!showReasoning) {
+            return null
+        }
+
+        const reasoningColor = isStreaming ? getModeColor(mode) : styles.conversation.reasoning.color
+        const visibleContent = clipReasoningText(content, Math.max(1, columns - 4))
+
+        if (!visibleContent.trim()) {
             return null
         }
 
@@ -94,28 +108,18 @@ const ReasoningMessage: React.FC<{
             return (
                 <Text>
                     <Text color="gray">⎿ </Text>
-                    <Text color={styles.conversation.reasoning.color}>Thinking</Text>
-                    <Text color="gray" dimColor>{summarizeFirstLine(content) ? ` · ${summarizeFirstLine(content)}` : ""}</Text>
+                    <Text color={reasoningColor}>Thinking</Text>
+                    <Text color={reasoningColor} dimColor={!isStreaming}>{summarizeFirstLine(content) ? ` · ${summarizeFirstLine(content)}` : ""}</Text>
                 </Text>
             )
         }
 
-        const visibleContent = maxContentLines
-            ? clipTextToLastVisualLines(content, maxContentLines, Math.max(1, columns - 4))
-            : content
-        const paragraphs = getReasoningParagraphs(visibleContent, isStreaming)
-
         return (
             <React.Fragment>
-                <DotRow color={styles.conversation.reasoning.color} prefix="◇">
+                <DotRow color={reasoningColor} prefix="◇">
                     <Box flexDirection="column">
-                        <Text {...styles.conversation.reasoningTitle}>Thinking</Text>
-                        {paragraphs.map((paragraph, index) => (
-                            <React.Fragment key={index}>
-                                {index > 0 && <Text>{"\n"}</Text>}
-                                <Markdown color={styles.conversation.reasoning.color}>{paragraph}</Markdown>
-                            </React.Fragment>
-                        ))}
+                        <Text color={reasoningColor} dimColor={!isStreaming}>Thinking</Text>
+                        <Text color={reasoningColor}>{visibleContent}</Text>
                     </Box>
                 </DotRow>
                 <Text>{"\n"}</Text>
@@ -133,6 +137,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     showReasoning = true,
     compact = false,
     maxContentLines,
+    scrollOffset,
+    suppressCardBody,
     onCollapse,
     mode,
 }) => {
@@ -148,17 +154,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                             columns={columns}
                             compact={compact}
                             content={message.content.content}
+                            mode={mode}
                             isStreaming={isStreaming}
-                            maxContentLines={maxContentLines}
                             showReasoning={showReasoning}
                         />
                     )
                 }
+                const markdownRole = message.content.role === "user" ? "user" : "assistant"
+                const roleColor = markdownRole === "user" ? styles.conversation.user.color : styles.conversation.assistant.color
+                const contentColor = markdownRole === "assistant" && mode === "plan" ? styles.conversation.planModeTint.color : roleColor
+
                 if (compact) {
                     return (
                         <Text>
                             <Text color="gray">⎿ </Text>
-                            <Text color={message.content.role === "user" ? "green" : undefined}>{message.content.role === "user" ? "User" : "Assistant"}</Text>
+                            <Text color={roleColor}>{markdownRole === "user" ? "User" : "Assistant"}</Text>
                             <Text color="gray" dimColor>{summarizeFirstLine(message.content.content) ? ` · ${summarizeFirstLine(message.content.content)}` : ""}</Text>
                         </Text>
                     )
@@ -168,8 +178,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     : message.content.content
                 return (
                     <React.Fragment>
-                        <DotRow color={message.content.role === "user" ? "green" : undefined} prefix={message.content.role === "user" ? "❯" : undefined}>
-                            <Markdown color={mode === "plan" ? styles.conversation.planModeTint.color : undefined}>{markdownContent}</Markdown>
+                        <DotRow color={roleColor} prefix={markdownRole === "user" ? "❯" : undefined}>
+                            <Markdown color={contentColor}>{markdownContent}</Markdown>
                         </DotRow>
                         <Text>{"\n"}</Text>
                     </React.Fragment>
@@ -183,6 +193,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                         isStreaming={isStreaming}
                         maxBodyLines={maxContentLines}
                         onCollapse={onCollapse}
+                        scrollOffset={scrollOffset}
+                        suppressBody={suppressCardBody}
                     />
                 )
             case "api_status":

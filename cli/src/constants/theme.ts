@@ -117,6 +117,8 @@ export const styles = {
 
     // --- Conversation markers (consumed by ChatMessage.tsx) ---
     conversation: {
+        user: { color: colors.success },
+        assistant: { color: colors.primary },
         planModeTint: { color: "yellow" },
         completion: { color: "green", bold: true },
         divider: { color: "gray", dimColor: true },

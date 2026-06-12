@@ -70,11 +70,15 @@ interface UseComposerProps {
     setActivePanel: React.Dispatch<React.SetStateAction<ActivePanel>>
     isSpinnerActive: boolean
     isProcessing: boolean
+    uiActionState: any
     yolo: boolean
     pendingAsk: any
     actionsRef: React.MutableRefObject<ComposerActions>
     isYoloSuppressed: (yolo: boolean, ask: any) => boolean
-    isWelcomeState: boolean
+    isEmptyConversation: boolean
+    scrollableCardMaxOffset: number
+    cardScrollOffset: number
+    setCardScrollOffset: (offset: number) => void
 }
 
 export function useComposer({
@@ -86,11 +90,17 @@ export function useComposer({
     setActivePanel,
     isSpinnerActive,
     isProcessing,
+    uiActionState,
     yolo,
     pendingAsk,
     actionsRef,
     isYoloSuppressed,
-    isWelcomeState,
+
+    isEmptyConversation,
+    scrollableCardMaxOffset,
+    cardScrollOffset,
+    setCardScrollOffset,
+
 }: UseComposerProps) {
     const {
         text: textInput,
@@ -298,7 +308,7 @@ export function useComposer({
     }, [mentionInfo.inMentionMode, mentionInfo.query, workspacePath])
 
     useChatInputHandler({
-        isWelcomeState,
+        isEmptyConversation,
         textInputRef,
         cursorPosRef,
         setTextInput,
@@ -330,6 +340,7 @@ export function useComposer({
         setSavedInput,
         isSpinnerActive,
         isProcessing,
+        uiActionState,
         yolo,
         pendingAsk,
         handleButtonAction: (action, isPrimary) => actionsRef.current.handleButtonAction(action, isPrimary),
@@ -345,6 +356,10 @@ export function useComposer({
         PASTE_CHUNK_WINDOW_MS,
         PASTE_UPDATE_DEBOUNCE_MS,
         mode,
+        scrollableCardMaxOffset,
+        cardScrollOffset,
+        setCardScrollOffset,
+
         toggleTranscriptVerbosity: () => actionsRef.current.toggleTranscriptVerbosity(),
     })
 

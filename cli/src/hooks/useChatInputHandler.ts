@@ -5,8 +5,8 @@ import { executeLocalSlashCommand, extractSlashQuery, insertSlashCommand } from 
 import { findWordEnd, findWordStart } from "./useTextInput"
 import { moveCursorDown, moveCursorUp } from "../utils/cursor"
 import { parseImagesFromInput } from "../utils/parser"
-import { StateManager } from "@/core/storage/StateManager"
 import { readImageFromClipboard } from "../utils/clipboard-image"
+import { getVisibleGlobalActionButtons } from "../utils/action-buttons"
 
 interface UseChatInputHandlerProps {
     textInputRef: React.MutableRefObject<string>
@@ -45,6 +45,7 @@ interface UseChatInputHandlerProps {
     isSpinnerActive: boolean
     isProcessing: boolean
     yolo: boolean
+    uiActionState: any
     pendingAsk: any
     handleButtonAction: (action: any, isPrimary: boolean) => void
     isYoloSuppressed: (yolo: boolean, ask: any) => boolean
@@ -62,7 +63,11 @@ interface UseChatInputHandlerProps {
     // Other
     mode: string
     toggleTranscriptVerbosity: () => void
-    isWelcomeState: boolean
+    isEmptyConversation: boolean
+    // Card scroll state
+    scrollableCardMaxOffset: number
+    cardScrollOffset: number
+    setCardScrollOffset: (offset: number) => void
 }
 
 export function useChatInputHandler({
@@ -98,6 +103,7 @@ export function useChatInputHandler({
     isSpinnerActive,
     isProcessing,
     yolo,
+    uiActionState,
     pendingAsk,
     handleButtonAction,
     isYoloSuppressed,
@@ -113,7 +119,10 @@ export function useChatInputHandler({
     PASTE_UPDATE_DEBOUNCE_MS,
     mode,
     toggleTranscriptVerbosity,
-    isWelcomeState,
+    isEmptyConversation,
+    scrollableCardMaxOffset,
+    cardScrollOffset,
+    setCardScrollOffset,
 }: UseChatInputHandlerProps) {
     useInput((input, key) => {
         if (isMouseEscapeSequence(input) || isTerminalResponseSequence(input, key)) return
@@ -217,7 +226,16 @@ export function useChatInputHandler({
             return
         }
 
-        if (key.upArrow && !inSlashMenu && !inFileMenu && isWelcomeState) {
+        if (key.upArrow && !inSlashMenu && !inFileMenu && scrollableCardMaxOffset > 0) {
+            setCardScrollOffset(Math.min(cardScrollOffset + 1, scrollableCardMaxOffset))
+            return
+        }
+        if (key.downArrow && !inSlashMenu && !inFileMenu && cardScrollOffset > 0) {
+            setCardScrollOffset(Math.max(cardScrollOffset - 1, 0))
+            return
+        }
+
+        if (key.upArrow && !inSlashMenu && !inFileMenu && isEmptyConversation) {
             const historyItems = getHistoryItems()
             if (historyItems.length > 0) {
                 const canNavigate =
@@ -237,7 +255,7 @@ export function useChatInputHandler({
             }
         }
 
-        if (key.downArrow && !inSlashMenu && !inFileMenu && isWelcomeState) {
+        if (key.downArrow && !inSlashMenu && !inFileMenu && isEmptyConversation) {
             const historyItems = getHistoryItems()
             if (historyIndex >= 0) {
                 const canNavigate = historyIndex < historyItems.length && currentTextInput === historyItems[historyIndex]
@@ -258,8 +276,9 @@ export function useChatInputHandler({
             }
         }
 
-        const uiActionState = (StateManager.get().getGlobalStateKey("uiActionState") as any) || {}
-        const buttons = [...(uiActionState.globalButtons || []), ...(uiActionState.cardButtons || [])]
+        const currentUiActionState = uiActionState || {}
+        const globalButtons = getVisibleGlobalActionButtons(currentUiActionState.globalButtons || [])
+        const buttons = [...globalButtons, ...(currentUiActionState.cardButtons || [])]
 
         if (
             buttons.length > 0 &&
@@ -398,6 +417,8 @@ export function useChatInputHandler({
         }
 
         if (input && !key.ctrl && !key.meta && !key.upArrow && !key.downArrow && !key.tab) {
+            if (cardScrollOffset > 0) setCardScrollOffset(0)
+
             insertTextAtCursor(input)
         }
     })

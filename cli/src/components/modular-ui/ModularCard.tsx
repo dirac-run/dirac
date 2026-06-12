@@ -20,13 +20,16 @@ function formatElapsed(ms: number): string {
 interface ModularCardProps {
     card: CardType
     isStreaming?: boolean
+    scrollOffset?: number
+
     isExpanded?: boolean
     onCollapse?: () => void
     isCompact?: boolean
     maxBodyLines?: number
+    suppressBody?: boolean
 }
 
-export const ModularCard: React.FC<ModularCardProps> = ({ card, isExpanded = false, isCompact = false, maxBodyLines, onCollapse }) => {
+export const ModularCard: React.FC<ModularCardProps> = ({ card, isExpanded = false, isCompact = false, maxBodyLines, onCollapse, scrollOffset, suppressBody = false }) => {
     const {
         header,
         status,
@@ -50,8 +53,8 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, isExpanded = fal
     }, [status, isExpanded, onCollapse])
 
     // Collapsed: single-line chip
-    // Permission/feedback cards must always show their body so the user knows what they're approving
-    const shouldForceExpand = requireApproval || requireFeedback
+    // Permission/feedback cards must show their body while awaiting input so the user knows what they're approving.
+    const shouldForceExpand = (requireApproval || requireFeedback) && !isFinalStatus(status) && !suppressBody
     if ((isCompact || !isExpanded) && !shouldForceExpand) {
         const elapsed = card.startTime && card.endTime
             ? formatElapsed(card.endTime - card.startTime)
@@ -91,9 +94,9 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, isExpanded = fal
                 <Text color={getStatusColor(status)}>  </Text>
                 <CardHeader header={header} icon={icon} isCollapsed={false} status={status} />
             </Text>
-            {body && (
+            {body && !suppressBody && (
                 <Box flexDirection="column" paddingLeft={5}>
-                    <CardBody body={body} maxLines={maxBodyLines} renderType={renderType} />
+                    <CardBody body={body} maxLines={maxBodyLines} renderType={renderType} scrollOffset={scrollOffset} />
                 </Box>
             )}
             <CardInteractions

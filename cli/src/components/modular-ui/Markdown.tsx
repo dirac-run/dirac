@@ -7,8 +7,8 @@ import { styles } from "../../constants/theme"
 /**
  * Render an array of marked tokens as Ink React nodes.
  */
-function renderTokens(tokens: Token[], color?: string): React.ReactNode[] {
-    return tokens.map((token, i) => renderToken(token, i, color))
+function renderTokens(tokens: Token[], color?: string, width?: number): React.ReactNode[] {
+    return tokens.map((token, i) => renderToken(token, i, color, width))
 }
 
 /**
@@ -16,7 +16,7 @@ function renderTokens(tokens: Token[], color?: string): React.ReactNode[] {
  * All block tokens use plain <Text> with explicit \n instead of <Box>
  * to avoid layout overflow issues in Ink's dynamic region.
  */
-function renderToken(token: Token, key: number, color?: string): React.ReactNode {
+function renderToken(token: Token, key: number, color?: string, width?: number): React.ReactNode {
     switch (token.type) {
         // --- Block tokens ---
 
@@ -27,7 +27,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
                 <React.Fragment key={key}>
                     {depth <= 2 && <Text>{"\n"}</Text>}
                     <Text {...headingStyle} {...(depth > 2 && color ? { color } : {})}>
-                        {renderTokens(tokens, color)}
+                        {renderTokens(tokens, color, width)}
                     </Text>
                     <Text>{"\n"}</Text>
                     {depth === 1 && <Text>{"\n"}</Text>}
@@ -38,13 +38,13 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
         case "paragraph":
             return (
                 <React.Fragment key={key}>
-                    <Text color={color}>{renderTokens((token as Tokens.Paragraph).tokens, color)}</Text>
+                    <Text color={color}>{renderTokens((token as Tokens.Paragraph).tokens, color, width)}</Text>
                     <Text>{"\n"}</Text>
                 </React.Fragment>
             )
 
         case "code": {
-            const maxCodeWidth = (process.stdout.columns || 80) - 9 // indent + border + padding
+            const maxCodeWidth = (width ?? process.stdout.columns ?? 80) - 4
             const rawLines = (token as Tokens.Code).text.split("\n")
             const wrappedLines = rawLines.flatMap((line) => {
                 if (line.length <= maxCodeWidth || maxCodeWidth <= 0) return [line]
@@ -78,7 +78,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
                     {items.map((item, i) => (
                         <Text key={i}>
                             <Text color="gray">{ordered ? `${Number(start ?? 1) + i}. ` : "• "}</Text>
-                            {renderTokens(item.tokens, color)}
+                            {renderTokens(item.tokens, color, width)}
                         </Text>
                     ))}
                 </React.Fragment>
@@ -89,7 +89,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
             return (
                 <React.Fragment key={key}>
                     <Text {...styles.markdown.blockquoteBar}>{"│ "}</Text>
-                    {renderTokens((token as Tokens.Blockquote).tokens, color)}
+                    {renderTokens((token as Tokens.Blockquote).tokens, color, width)}
                 </React.Fragment>
             )
 
@@ -101,14 +101,14 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
         case "strong":
             return (
                 <Text {...styles.markdown.strong} {...(color ? { color } : {})} key={key}>
-                    {renderTokens((token as Tokens.Strong).tokens, color)}
+                    {renderTokens((token as Tokens.Strong).tokens, color, width)}
                 </Text>
             )
 
         case "em":
             return (
                 <Text {...styles.markdown.emphasis} {...(color ? { color } : {})} key={key}>
-                    {renderTokens((token as Tokens.Em).tokens, color)}
+                    {renderTokens((token as Tokens.Em).tokens, color, width)}
                 </Text>
             )
 
@@ -133,7 +133,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
             if (tokens?.length) {
                 return (
                     <Text color={color} key={key}>
-                        {renderTokens(tokens, color)}
+                        {renderTokens(tokens, color, width)}
                     </Text>
                 )
             }
@@ -148,7 +148,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
             return (
                 <React.Fragment key={key}>
                     <Text {...styles.markdown.hr}>
-                        {"─".repeat(process.stdout.columns || 80)}
+                        {"─".repeat(width ?? process.stdout.columns ?? 80)}
                     </Text>
                     <Text>{"\n"}</Text>
                 </React.Fragment>
@@ -172,7 +172,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
             })
             // Cap table width to fit within terminal to prevent overflow on Static commit
             const tableIndent = 6 // msg paddingX(1) + card paddingLeft(5)
-            const maxTableWidth = (process.stdout.columns || 80) - tableIndent
+            const maxTableWidth = (width ?? process.stdout.columns ?? 80) - tableIndent
             const borderOverhead = colWidths.length * 3 + 1 // "│" + 2 padding per col + outer borders
             const availableForContent = maxTableWidth - borderOverhead
             if (availableForContent > 0) {
@@ -235,7 +235,7 @@ function renderToken(token: Token, key: number, color?: string): React.ReactNode
  * dynamic rendering region — Box nodes that exceed terminal height cause
  * infinite scroll because Ink's log-update cannot erase-and-replace them.
  */
-export const Markdown: React.FC<{ children: string; color?: string }> = ({ children, color }) => {
+export const Markdown: React.FC<{ children: string; color?: string; width?: number }> = ({ children, color, width }) => {
     const tokens = useMemo(() => lexer(children), [children])
-    return <Text>{renderTokens(tokens, color)}</Text>
+    return <Text>{renderTokens(tokens, color, width)}</Text>
 }

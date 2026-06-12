@@ -23,6 +23,22 @@ export function projectUIActionState(state: TaskState, messages: DiracMessage[],
 
     }
 
+
+    // Active card interactions must take precedence over busy task states.
+    // Tools can create a waiting card before the task status is projected as AWAITING_USER_INPUT.
+    if (state?.waitingCardIds && state.waitingCardIds.length > 0) {
+        const activeCardId = state.waitingCardIds[0]
+        const cardMsg = messages.find((m) => m.id === activeCardId)
+        if (cardMsg?.content.type === DiracMessageType.CARD) {
+            const card = cardMsg.content.card
+            uiState.activeCardId = activeCardId
+            uiState.cardButtons = card.actions?.map(mapCardActionToUIButton) || (card.requireApproval ? [
+                { label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+                { label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+            ] : [])
+            return uiState
+        }
+    }
     // 1. Terminal Success State
     if (state?.didAttemptCompletion) {
         uiState.globalButtons.push({
@@ -65,21 +81,6 @@ export function projectUIActionState(state: TaskState, messages: DiracMessage[],
             { label: "Start New Task", action: UIActionButtonType.NEW_TASK, style: "secondary" }
         )
         return uiState
-    }
-
-    // 4. Blocked on Interaction (Card Queue)
-    if (state?.waitingCardIds && state.waitingCardIds.length > 0) {
-        const activeCardId = state.waitingCardIds[0]
-        const cardMsg = messages.find((m) => m.id === activeCardId)
-        if (cardMsg?.content.type === DiracMessageType.CARD) {
-            const card = cardMsg.content.card
-            uiState.activeCardId = activeCardId
-            uiState.cardButtons = card.actions?.map(mapCardActionToUIButton) || (card.requireApproval ? [
-                { label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-                { label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-            ] : [])
-            // Note: sendingDisabled remains false to allow text feedback
-        }
     }
 
     return uiState

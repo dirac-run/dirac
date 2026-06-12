@@ -41,7 +41,7 @@
  */
 
 
-import { DiracMessageType, TaskStatus, UIActionButtonType } from "@shared/ExtensionMessage"
+import { DiracMessageType, TaskStatus, UIActionButtonType, isFinalStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { getRandomQuote } from "@/shared/quotes"
 import type { Mode } from "@shared/storage/types"
@@ -52,7 +52,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { StateManager } from "@/core/storage/StateManager"
 import { COLORS } from "../constants/colors"
 import { useTaskContext, useTaskState } from "../context/TaskContext"
-import { useIsSpinnerActive, useLastCompletedAskMessage } from "../hooks/useStateSubscriber"
+import { useIsSpinnerActive } from "../hooks/useStateSubscriber"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { setTerminalTitle } from "../utils/display"
 import { processImagePaths } from "../utils/parser"
@@ -65,6 +65,7 @@ import { HelpPanelContent } from "./HelpPanelContent"
 import { HistoryPanelContent } from "./HistoryPanelContent"
 import { SettingsPanelContent } from "./SettingsPanelContent"
 import { SkillsPanelContent } from "./SkillsPanelContent"
+import { PermissionModal } from "./PermissionModal"
 import { SlashCommandMenu } from "./SlashCommandMenu"
 import { ThinkingIndicator } from "./ThinkingIndicator"
 import { ChatFooter } from "./ChatFooter"
@@ -75,6 +76,8 @@ import { useChatTimeline } from "../hooks/useChatTimeline"
 import { useChatFooterStatus } from "../hooks/useChatFooterStatus"
 import { useChatTask } from "../hooks/useChatTask"
 import { expandPastedTexts, getAskPromptType, isYoloSuppressed, parseAskOptions } from "../utils/chat"
+import { calculateChatLayoutRows } from "../utils/chat-layout"
+import { estimateVisualLineCount } from "../utils/text-clipping"
 
 interface ChatViewProps {
     controller?: any
@@ -140,8 +143,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     const [activePanel, setActivePanel] = useState<ActivePanel>(null)
 
-
-    const dynamicTranscriptRows = Math.max(1, terminalRows - 14)
     const [mode, setMode] = useState<Mode>(() => {
         const stateManager = StateManager.get()
         return stateManager.getGlobalSettingsKey("mode") || "act"
@@ -160,7 +161,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
         showHeader:
             (taskState.diracMessages || []).some((message) => message.content?.type !== DiracMessageType.API_STATUS) ||
             userScrolled,
-        dynamicRows: dynamicTranscriptRows,
+        layoutRows: calculateChatLayoutRows({
+            terminalRows,
+            hasConversationContent: true,
+            hasActivity: taskState.isApiRequestActive === true,
+            hasComposer: true,
+            hasFooter: true,
+            hasPanel: false,
+        }),
     })
 
     const { isProcessing, setIsProcessing, isExiting, handleCancel, handleExit, clearViewAndResetTask } = useChatTask({
@@ -206,12 +214,48 @@ export const ChatView: React.FC<ChatViewProps> = ({
         taskState,
     })
 
-    const isWelcomeState = displayMessages.length === 0 && !userScrolled
+    const isEmptyConversation = displayMessages.length === 0
+    const isWelcomeState = isEmptyConversation && !userScrolled
 
-    const lastCompletedAsk = useLastCompletedAskMessage()
-    const pendingAsk = lastCompletedAsk && respondedToAsk !== lastCompletedAsk.id ? lastCompletedAsk : null
+    const activeCardId = taskState.uiActionState?.activeCardId
+    const pendingAsk = useMemo(() => {
+        if (!activeCardId || activeCardId === respondedToAsk) return null
+        return (taskState.diracMessages || []).find(
+            (message) => message.id === activeCardId && message.content.type === DiracMessageType.CARD,
+        ) || null
+    }, [activeCardId, respondedToAsk, taskState.diracMessages])
+    useEffect(() => {
+        if (respondedToAsk && respondedToAsk !== activeCardId) {
+            setRespondedToAsk(null)
+        }
+    }, [activeCardId, respondedToAsk])
     const askType = pendingAsk ? getAskPromptType(pendingAsk) : "none"
     const askOptions = pendingAsk && askType === "options" ? parseAskOptions(pendingAsk) : []
+
+    const permissionCard = pendingAsk?.content.type === DiracMessageType.CARD
+        && !isYoloSuppressed(yolo, pendingAsk)
+        && !isSpinnerActive
+        && !isFinalStatus(pendingAsk.content.card.status)
+        && (pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
+        ? pendingAsk.content.card
+        : null
+    const permissionModalWidth = Math.max(1, Math.min(terminalColumns - 2, Math.floor(terminalColumns * 0.8)))
+    const permissionModalHeight = Math.min(Math.max(12, terminalRows - 4), 32)
+    const permissionModalBodyLines = Math.max(1, permissionModalHeight - 7)
+    const permissionModalBodyColumns = Math.max(1, permissionModalWidth - 6)
+
+    // Permission modal scroll state — offset from the bottom of the pending card body.
+    const [cardScrollOffset, setCardScrollOffset] = useState(0)
+
+    const scrollableCardMaxOffset = useMemo(() => {
+        if (!permissionCard?.body) return 0
+        const totalLines = estimateVisualLineCount(permissionCard.body, permissionModalBodyColumns)
+        return Math.max(0, totalLines - permissionModalBodyLines)
+    }, [permissionCard, permissionModalBodyColumns, permissionModalBodyLines])
+
+
+    // Reset scroll offset when pending ask changes
+    useEffect(() => { setCardScrollOffset(0) }, [pendingAsk?.id])
 
     const {
         textInput,
@@ -241,11 +285,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
         setActivePanel,
         isSpinnerActive,
         isProcessing,
+        uiActionState: taskState.uiActionState,
         yolo,
         pendingAsk,
         actionsRef: composerActionsRef,
         isYoloSuppressed,
-        isWelcomeState,
+        isEmptyConversation,
+        scrollableCardMaxOffset,
+        cardScrollOffset,
+        setCardScrollOffset,
     })
     resetComposerInputRef.current = resetInput
 
@@ -278,6 +326,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
         [ctrl, pendingAsk, pastedTexts, isProcessing, setIsProcessing, resetInput],
     )
 
+    const submitResumeResponse = useCallback(
+        async (responseType: DiracAskResponse, text?: string, images?: string[]) => {
+            if (!ctrl?.task) return
+            const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
+            await ctrl.task.submitCardResponse("", responseType, expandedText, images)
+            resetInput()
+        },
+        [ctrl, pastedTexts, resetInput],
+    )
+
     const uiActionState = taskState.uiActionState
     const sendingDisabled = uiActionState?.sendingDisabled ?? false
 
@@ -287,6 +345,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
     )
     const isCompletionChoiceActive = taskState.taskStatus === TaskStatus.COMPLETED || hasGlobalAction(UIActionButtonType.NEW_TASK)
     const isResumeChoiceActive = taskState.taskStatus === TaskStatus.CANCELLED
+    const submitResumeTextResponse = useCallback(
+        async (text: string, images: string[]) => {
+            if (!isResumeChoiceActive) return false
+            const trimmedText = text.trim()
+            const normalizedText = trimmedText.toLowerCase()
+            if (normalizedText === "q" || normalizedText === "quit" || normalizedText === "exit") {
+                handleExit()
+                return true
+            }
+            await submitResumeResponse(DiracAskResponse.MESSAGE, trimmedText, images)
+            return true
+        },
+        [isResumeChoiceActive, submitResumeResponse, handleExit],
+    )
 
     useEffect(() => {
         if (
@@ -307,7 +379,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 switch (action) {
                     case UIActionButtonType.APPROVE:
                     case UIActionButtonType.RETRY:
-                        await sendAskResponse(DiracAskResponse.APPROVE)
+                        if (isResumeChoiceActive) {
+                            await submitResumeResponse(DiracAskResponse.APPROVE)
+                        } else {
+                            await sendAskResponse(DiracAskResponse.APPROVE)
+                        }
                         break
                     case UIActionButtonType.REJECT:
                         if (isCompletionChoiceActive || isResumeChoiceActive) {
@@ -317,7 +393,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         }
                         break
                     case UIActionButtonType.PROCEED:
-                        await sendAskResponse(DiracAskResponse.APPROVE)
+                        if (isResumeChoiceActive) {
+                            await submitResumeResponse(DiracAskResponse.APPROVE)
+                        } else {
+                            await sendAskResponse(DiracAskResponse.APPROVE)
+                        }
                         break
                     case UIActionButtonType.NEW_TASK:
                         await clearViewAndResetTask()
@@ -338,6 +418,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         [
             ctrl,
             sendAskResponse,
+            submitResumeResponse,
             handleExit,
             handleCancel,
             clearViewAndResetTask,
@@ -389,6 +470,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const handleSubmit = useCallback(
         async (text: string, images: string[]) => {
             if (!ctrl || !text.trim() || isProcessing) return
+            if (await submitResumeTextResponse(text, images)) return
             if (pendingAsk && pendingAsk.content.type === DiracMessageType.CARD) {
                 const prompt = text.trim()
                 const normalized = prompt.toLowerCase()
@@ -427,13 +509,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 setIsProcessing(false)
             }
         },
-        [ctrl, onError, pastedTexts, isProcessing, setIsProcessing, pendingAsk, handleExit, sendAskResponse, resetInput, isCompletionChoiceActive, isResumeChoiceActive],
+        [ctrl, onError, pastedTexts, isProcessing, setIsProcessing, pendingAsk, handleExit, sendAskResponse, submitResumeTextResponse, resetInput, isCompletionChoiceActive, isResumeChoiceActive],
     )
 
     const borderColor = mode === "act" ? COLORS.primaryBlue : "yellow"
     let inputPrompt = ""
     if (pendingAsk && !yolo && askType === "options" && askOptions.length > 0) {
         inputPrompt = `(1-${askOptions.length} or type)`
+    } else if (isResumeChoiceActive) {
+        inputPrompt = "(type to resume)"
     }
 
     composerActionsRef.current = {
@@ -447,6 +531,210 @@ export const ChatView: React.FC<ChatViewProps> = ({
         toggleTranscriptVerbosity: () => setIsVerboseTranscript((verbose) => !verbose),
     }
 
+    const shouldShowAskPrompt = pendingAsk && !permissionCard && !isYoloSuppressed(yolo, pendingAsk) && !isSpinnerActive
+    const shouldShowActionButtons = uiActionState && !permissionCard && !activePanel && !isExiting
+    const shouldShowComposerInput = !activePanel && !isExiting
+    const shouldShowFooter = !showSlashMenu && !showFileMenu && !activePanel
+
+    const renderTurnBoundary = (key: string) => (
+        <Box key={key} paddingX={1}>
+            <Text color="gray" dimColor>{"─".repeat(Math.max(1, Math.min(48, terminalColumns - 4)))}</Text>
+        </Box>
+    )
+
+    const shouldSuppressCardBody = (card: { requireApproval?: boolean; requireFeedback?: boolean } | null): boolean => {
+        return card ? Boolean(card.requireApproval || card.requireFeedback) : false
+    }
+
+
+
+    const renderDynamicItem = (item: (typeof dynamicItems)[number]) => {
+        if (item.type === "notice") {
+            return (
+                <Box key={item.key} paddingX={1}>
+                    <Text color="gray" dimColor>{item.message}</Text>
+                </Box>
+            )
+        }
+        if (item.type === "boundary") {
+            return renderTurnBoundary(item.key)
+        }
+
+
+        const msg = item.message
+        const card = msg.content.type === DiracMessageType.CARD ? msg.content.card : null
+        return (
+            <React.Fragment key={item.key}>
+                <ChatMessage
+                    isExecuting={msg.id === respondedToAsk}
+                    isStreaming={msg.id === taskState.activeVoiceStreamId}
+                    message={msg}
+                    mode={mode}
+                    isExpanded={card ? getIsCardExpanded(card) : false}
+                    onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
+                    activeVoiceStreamId={taskState.activeVoiceStreamId}
+                    showReasoning={true}
+                    compact={item.isCompact}
+                    maxContentLines={item.maxContentLines}
+                    suppressCardBody={shouldSuppressCardBody(card)}
+                />
+            </React.Fragment>
+        )
+    }
+
+    const dynamicItemsContent = (
+        <React.Fragment>
+            {dynamicItems.map(renderDynamicItem)}
+        </React.Fragment>
+    )
+
+    const activityContent = (
+        <React.Fragment>
+            {shouldShowAskPrompt && (
+                <Box paddingX={1}>
+                    <AskPrompt />
+                </Box>
+            )}
+
+            {isSpinnerActive && (
+                <ThinkingIndicator
+                    mode={mode}
+                    onCancel={handleCancel}
+                    startTime={spinnerStartTime}
+                    lastAction={(() => {
+                        const msgs = taskState.diracMessages ?? []
+                        for (let i = msgs.length - 1; i >= 0; i--) {
+                            const m = msgs[i]
+                            if (m.content.type === "card" && m.content.card.endTime) {
+                                return m.content.card.header
+                            }
+                        }
+                        return undefined
+                    })()}
+                />
+            )}
+
+            {shouldShowActionButtons && (
+                <ActionButtons isProcessing={isProcessing} mode={mode} uiActionState={uiActionState} />
+            )}
+        </React.Fragment>
+    )
+
+    const liveViewportContent = (
+        <Box key="live-viewport"
+            flexDirection="column"
+            overflow="hidden"
+            width="100%">
+            {dynamicItemsContent}
+            {activityContent}
+        </Box>
+    )
+
+    const permissionViewportContent = permissionCard ? (
+        <Box key={`permission-${permissionCard.id}`} alignItems="center" flexDirection="column" flexGrow={1} justifyContent="center" width="100%">
+            <PermissionModal
+                bodyColumns={permissionModalBodyColumns}
+                bodyLines={permissionModalBodyLines}
+                card={permissionCard}
+                maxScrollOffset={scrollableCardMaxOffset}
+                scrollOffset={cardScrollOffset}
+            />
+        </Box>
+    ) : liveViewportContent
+
+    const composerFooterContent = (
+        <React.Fragment>
+            {shouldShowComposerInput && (
+                <ChatInputBar
+                    availableCommands={availableCommands.map((c) => c.name)}
+                    borderColor={borderColor}
+                    cursorPos={cursorPos}
+                    inputPrompt={inputPrompt}
+                    textInput={textInput}
+                    terminalColumns={terminalColumns}
+                    terminalRows={terminalRows}
+                />
+            )}
+
+            {activePanel?.type === "settings" && (
+                <SettingsPanelContent
+                    controller={ctrl}
+                    initialMode={activePanel.initialMode}
+                    initialModelKey={activePanel.initialModelKey}
+                    onClose={() => setActivePanel(null)}
+                />
+            )}
+
+            {activePanel?.type === "history" && ctrl && (
+                <HistoryPanelContent
+                    controller={ctrl}
+                    onClose={() => setActivePanel(null)}
+                    onSelectTask={() => setActivePanel(null)}
+                />
+            )}
+
+            {activePanel?.type === "help" && <HelpPanelContent onClose={() => setActivePanel(null)} />}
+
+            {activePanel?.type === "skills" && ctrl && (
+                <SkillsPanelContent
+                    controller={ctrl}
+                    onClose={() => setActivePanel(null)}
+                    onUseSkill={(skillPath) => {
+                        setActivePanel(null)
+                        setTextInput(`@${skillPath} `)
+                        setCursorPos(skillPath.length + 2)
+                    }}
+                />
+            )}
+
+            {showSlashMenu && !activePanel && (
+                <Box paddingLeft={1} paddingRight={1}>
+                    <SlashCommandMenu
+                        commands={filteredCommands}
+                        query={slashInfo.query}
+                        selectedIndex={selectedSlashIndex}
+                    />
+                </Box>
+            )}
+
+            {showFileMenu && !activePanel && (
+                <Box paddingLeft={1} paddingRight={1}>
+                    <FileMentionMenu
+                        isLoading={isSearching}
+                        query={mentionInfo.query}
+                        results={fileResults}
+                        selectedIndex={selectedIndex}
+                        showRipgrepWarning={showRipgrepWarning}
+                    />
+                </Box>
+            )}
+
+            {imagePaths.length > 0 && !activePanel && !permissionCard && (
+                <Box paddingLeft={1} paddingRight={1}>
+                    <Text color="magenta">
+                        {imagePaths.length} image{imagePaths.length > 1 ? "s" : ""} attached
+                    </Text>
+                </Box>
+            )}
+
+            {shouldShowFooter && (
+                <ChatFooter
+                    autoApproveAll={autoApproveAll}
+                    contextWindowSize={footerStatus.contextWindowSize}
+                    gitBranch={footerStatus.gitBranch}
+                    gitDiffStats={footerStatus.gitDiffStats}
+                    lastApiReqTotalTokens={footerStatus.lastApiReqTotalTokens}
+                    mode={mode}
+                    modelId={footerStatus.modelId}
+                    provider={footerStatus.provider}
+                    totalCost={footerStatus.totalCost}
+                    taskStatus={footerStatus.taskStatus}
+                    workspacePath={footerStatus.workspacePath}
+                />
+            )}
+        </React.Fragment>
+    )
+
     return (
         <Box flexDirection="column" key={taskSwitchKey} width="100%">
             <Static items={staticItems}>
@@ -458,6 +746,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             </Box>
                         )
                     }
+                    if (item.type === "boundary") {
+                        return renderTurnBoundary(item.key)
+                    }
+
                     const card = item.message.content.type === DiracMessageType.CARD ? item.message.content.card : null
                     return (
                         <Box key={item.key} paddingX={1} width="100%">
@@ -467,14 +759,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                 isExpanded={card ? getIsCardExpanded(card) : false}
                                 onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
                                 activeVoiceStreamId={taskState.activeVoiceStreamId}
-                                showReasoning={isVerboseTranscript}
+                                showReasoning={true}
+                                suppressCardBody={shouldSuppressCardBody(card)}
                             />
                         </Box>
                     )
                 }}
             </Static>
 
-            <Box flexDirection="column" width="100%" maxHeight={Math.max(1, terminalRows - 6)}>
+            <Box flexDirection="column" width="100%"
+                flexGrow={1}
+                {...(isEmptyConversation
+                    ? { maxHeight: Math.max(1, terminalRows - 6) }
+                    : {})}>
                 {isWelcomeState && (
                     <ChatHeader
                         isWelcomeState={isWelcomeState}
@@ -487,153 +784,28 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     />
                 )}
 
-                {dynamicItems.map((item) => {
-                    if (item.type === "notice") {
-                        return (
-                            <Box key={item.key} paddingX={1}>
-                                <Text color="gray" dimColor>{item.message}</Text>
-                            </Box>
-                        )
-                    }
-                    const msg = item.message
-                    const card = msg.content.type === DiracMessageType.CARD ? msg.content.card : null
-                    return (
-                        <React.Fragment key={item.key}>
-                            <ChatMessage
-                                isExecuting={msg.id === respondedToAsk}
-                                isStreaming={msg.id === taskState.activeVoiceStreamId}
-                                message={msg}
-                                mode={mode}
-                                isExpanded={card ? getIsCardExpanded(card) : false}
-                                onCollapse={card ? () => handleCardCollapse(card.id) : undefined}
-                                activeVoiceStreamId={taskState.activeVoiceStreamId}
-                                showReasoning={isVerboseTranscript}
-                                compact={item.isCompact}
-                                maxContentLines={item.maxContentLines}
-                            />
-                        </React.Fragment>
-                    )
-                })}
-
-                {pendingAsk && !isYoloSuppressed(yolo, pendingAsk) && !isSpinnerActive && (
-                    <Box paddingX={1}>
-                        <AskPrompt />
+                {isEmptyConversation ? (
+                    <Box flexDirection="column">
+                        {permissionCard ? permissionViewportContent : (
+                            <React.Fragment>
+                                {dynamicItemsContent}
+                                <Box flexGrow={1} />
+                                {activityContent}
+                            </React.Fragment>
+                        )}
+                        {composerFooterContent}
+                    </Box>
+                ) : (
+                    <Box flexDirection="column" flexGrow={1}>
+                        <Box flexGrow={1} />
+                        {permissionViewportContent}
+                        {composerFooterContent}
                     </Box>
                 )}
 
-                {isSpinnerActive && (
-                    <ThinkingIndicator
-                        mode={mode}
-                        onCancel={handleCancel}
-                        startTime={spinnerStartTime}
-                        lastAction={(() => {
-                            const msgs = taskState.diracMessages ?? []
-                            for (let i = msgs.length - 1; i >= 0; i--) {
-                                const m = msgs[i]
-                                if (m.content.type === "card" && m.content.card.endTime) {
-                                    return m.content.card.header
-                                }
-                            }
-                            return undefined
-                        })()}
-                    />
-                )}
-
-                {uiActionState && !activePanel && !isExiting && (
-                    <ActionButtons isProcessing={isProcessing} mode={mode} uiActionState={uiActionState} />
-                )}
-
-                {!activePanel && !isExiting && (
-                    <ChatInputBar
-                        availableCommands={availableCommands.map((c) => c.name)}
-                        borderColor={borderColor}
-                        cursorPos={cursorPos}
-                        inputPrompt={inputPrompt}
-                        textInput={textInput}
-                        terminalColumns={terminalColumns}
-                        terminalRows={terminalRows}
-                    />
-                )}
-
-                {activePanel?.type === "settings" && (
-                    <SettingsPanelContent
-                        controller={ctrl}
-                        initialMode={activePanel.initialMode}
-                        initialModelKey={activePanel.initialModelKey}
-                        onClose={() => setActivePanel(null)}
-                    />
-                )}
-
-                {activePanel?.type === "history" && ctrl && (
-                    <HistoryPanelContent
-                        controller={ctrl}
-                        onClose={() => setActivePanel(null)}
-                        onSelectTask={() => setActivePanel(null)}
-                    />
-                )}
-
-                {activePanel?.type === "help" && <HelpPanelContent onClose={() => setActivePanel(null)} />}
-
-                {activePanel?.type === "skills" && ctrl && (
-                    <SkillsPanelContent
-                        controller={ctrl}
-                        onClose={() => setActivePanel(null)}
-                        onUseSkill={(skillPath) => {
-                            setActivePanel(null)
-                            setTextInput(`@${skillPath} `)
-                            setCursorPos(skillPath.length + 2)
-                        }}
-                    />
-                )}
-
-                {showSlashMenu && !activePanel && (
-                    <Box paddingLeft={1} paddingRight={1}>
-                        <SlashCommandMenu
-                            commands={filteredCommands}
-                            query={slashInfo.query}
-                            selectedIndex={selectedSlashIndex}
-                        />
-                    </Box>
-                )}
-
-                {showFileMenu && !activePanel && (
-                    <Box paddingLeft={1} paddingRight={1}>
-                        <FileMentionMenu
-                            isLoading={isSearching}
-                            query={mentionInfo.query}
-                            results={fileResults}
-                            selectedIndex={selectedIndex}
-                            showRipgrepWarning={showRipgrepWarning}
-                        />
-                    </Box>
-                )}
-
-                {imagePaths.length > 0 && !activePanel && (
-                    <Box paddingLeft={1} paddingRight={1}>
-                        <Text color="magenta">
-                            {imagePaths.length} image{imagePaths.length > 1 ? "s" : ""} attached
-                        </Text>
-                    </Box>
-                )}
-
-                {!showSlashMenu && !showFileMenu && !activePanel && (
-                    <ChatFooter
-                        autoApproveAll={autoApproveAll}
-                        contextWindowSize={footerStatus.contextWindowSize}
-                        gitBranch={footerStatus.gitBranch}
-                        gitDiffStats={footerStatus.gitDiffStats}
-                        lastApiReqTotalTokens={footerStatus.lastApiReqTotalTokens}
-                        mode={mode}
-                        modelId={footerStatus.modelId}
-                        provider={footerStatus.provider}
-                        totalCost={footerStatus.totalCost}
-                        taskStatus={footerStatus.taskStatus}
-                        workspacePath={footerStatus.workspacePath}
-                    />
-                )}
             </Box>
 
-            {imagePaths.length > 0 && !activePanel && (
+            {imagePaths.length > 0 && !activePanel && !permissionCard && (
                 <Box
                     {...({
                         position: "absolute",
@@ -659,6 +831,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </Box>
                 </Box>
             )}
+
         </Box>
     )
 }

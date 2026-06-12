@@ -4,9 +4,7 @@ import { combineCardSequences } from "@shared/combineCardSequences"
 import { DiracMessageType, isFinalStatus } from "@shared/ExtensionMessage"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { useTurnCommit } from "./useTurnCommit"
-
-const LIVE_MESSAGE_BODY_LINE_LIMIT = 8
-const EXPANDED_INTERACTIVE_CARD_RESERVED_LINES = 2
+import type { ChatLayoutRows } from "../utils/chat-layout"
 
 export type TimelineMessageKind = "card" | "markdown" | "reasoning" | "checkpoint"
 
@@ -30,8 +28,13 @@ export interface TimelineHeaderItem {
     type: "header"
 }
 
-export type TimelineStaticItem = TimelineHeaderItem | TimelineMessageItem
-export type TimelineDynamicItem = TimelineMessageItem | TimelineNoticeItem
+export interface TimelineBoundaryItem {
+    key: string
+    type: "boundary"
+}
+
+export type TimelineStaticItem = TimelineHeaderItem | TimelineMessageItem | TimelineBoundaryItem
+export type TimelineDynamicItem = TimelineMessageItem | TimelineNoticeItem | TimelineBoundaryItem
 
 export interface ChatTimelineResult {
     displayMessages: DiracMessage[]
@@ -47,7 +50,7 @@ interface ChatTimelineOptions {
     isApiRequestActive?: boolean
     taskStatus?: string
     showHeader: boolean
-    dynamicRows: number
+    layoutRows: ChatLayoutRows
 }
 
 export function useChatTimeline({
@@ -56,9 +59,8 @@ export function useChatTimeline({
     isApiRequestActive,
     taskStatus,
     showHeader,
-    dynamicRows,
+    layoutRows,
 }: ChatTimelineOptions): ChatTimelineResult {
-    const dynamicRowBudget = Math.max(1, dynamicRows)
     const [taskSwitchKey, setTaskSwitchKey] = useState(0)
     const prevFirstMessageId = useRef<string | null>(null)
 
@@ -85,8 +87,8 @@ export function useChatTimeline({
     )
 
     const dynamicItems = useMemo(
-        () => createDynamicTimelineItems(live, activeVoiceStreamId, dynamicRowBudget),
-        [live, activeVoiceStreamId, dynamicRowBudget],
+        () => createDynamicTimelineItems(live, activeVoiceStreamId, layoutRows),
+        [live, activeVoiceStreamId, layoutRows],
     )
 
     return {
@@ -115,15 +117,8 @@ function createStaticTimelineItems(
         items.push({ key: "header", type: "header" })
     }
 
-    for (const message of committedMessages) {
-        items.push(createMessageItem(message))
-    }
-
-    for (const message of liveMessages) {
-        if (canRenderLiveMessageStatically(message, activeVoiceStreamId)) {
-            items.push(createMessageItem(message))
-        }
-    }
+    const staticLiveMessages = liveMessages.filter((message) => canRenderLiveMessageStatically(message, activeVoiceStreamId))
+    items.push(...createTurnSeparatedMessageItems([...committedMessages, ...staticLiveMessages], "static"))
 
     return items
 }
@@ -131,14 +126,14 @@ function createStaticTimelineItems(
 function createDynamicTimelineItems(
     liveMessages: DiracMessage[],
     activeVoiceStreamId: string | undefined,
-    dynamicRows: number,
+    layoutRows: ChatLayoutRows,
 ): TimelineDynamicItem[] {
     const dynamicMessages = liveMessages.filter((message) => !canRenderLiveMessageStatically(message, activeVoiceStreamId))
     if (dynamicMessages.length === 0) return []
 
     const latestMessage = dynamicMessages[dynamicMessages.length - 1]
-    const activeItemLineBudget = getActiveItemLineBudget(latestMessage, dynamicRows)
-    const olderRowBudget = Math.max(0, dynamicRows - activeItemLineBudget)
+    const activeItemLineBudget = layoutRows.activeContentRows
+    const olderRowBudget = layoutRows.compactHistoryRows
     const olderMessages = dynamicMessages.slice(0, -1)
     const keptOlderMessages = olderMessages.slice(-olderRowBudget)
     const omittedCount = olderMessages.length - keptOlderMessages.length
@@ -157,22 +152,6 @@ function createDynamicTimelineItems(
     return items
 }
 
-function getActiveItemLineBudget(message: DiracMessage, dynamicRows: number): number {
-    const availableBodyLines = Math.max(1, dynamicRows - EXPANDED_INTERACTIVE_CARD_RESERVED_LINES)
-    if (isExpandedInteractiveCard(message)) {
-        return availableBodyLines
-    }
-
-    return Math.min(LIVE_MESSAGE_BODY_LINE_LIMIT, availableBodyLines)
-}
-
-function isExpandedInteractiveCard(message: DiracMessage): boolean {
-    if (message.content.type !== DiracMessageType.CARD) return false
-
-    const { card } = message.content
-    return card.collapsed === false || card.requireApproval === true || card.requireFeedback === true
-}
-
 function canRenderLiveMessageStatically(message: DiracMessage, activeVoiceStreamId?: string): boolean {
     if (message.id === activeVoiceStreamId) {
         return false
@@ -187,6 +166,28 @@ function canRenderLiveMessageStatically(message: DiracMessage, activeVoiceStream
 
     return isFinalStatus(message.content.card.status)
 }
+
+function createTurnSeparatedMessageItems(messages: DiracMessage[], keyPrefix: string): Array<TimelineMessageItem | TimelineBoundaryItem> {
+    const items: Array<TimelineMessageItem | TimelineBoundaryItem> = []
+    let hasRenderedMessage = false
+
+    for (const message of messages) {
+        if (hasRenderedMessage && startsNewChatTurn(message)) {
+            items.push({ key: `${keyPrefix}-turn-boundary-${message.id}`, type: "boundary" })
+        }
+
+        items.push(createMessageItem(message))
+        hasRenderedMessage = true
+    }
+
+    return items
+}
+
+function startsNewChatTurn(message: DiracMessage): boolean {
+    if (message.content.type !== DiracMessageType.MARKDOWN) return false
+    return message.content.role === "user" && !message.content.isReasoning
+}
+
 
 function createMessageItem(message: DiracMessage): TimelineMessageItem {
     return {
