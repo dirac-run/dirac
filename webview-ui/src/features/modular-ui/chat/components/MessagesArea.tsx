@@ -117,7 +117,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
                             disableAutoScrollRef.current = !isAtBottom
                             setShowScrollToBottom(!isAtBottom)
                         }}
-                        atBottomThreshold={80}
+                        atBottomThreshold={500}
                         className="grow"
                         components={virtuosoComponents}
                         data={renderedMessages}
