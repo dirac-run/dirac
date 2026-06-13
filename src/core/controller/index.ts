@@ -96,6 +96,9 @@ export class Controller {
 	// Flag to prevent duplicate cancellations from spam clicking
 	private cancelInProgress = false
 
+	// Debounce state broadcast — coalesce multiple per-tick calls into a single push
+	private webviewUpdateScheduled = false
+
 	// Timer for periodic remote config fetching
 
 	// Public getter for workspace manager with lazy initialization - To get workspaces when task isn't initialized (Used by file mentions)
@@ -615,6 +618,10 @@ export class Controller {
 	}
 
 	async postStateToWebview() {
+		if (this.webviewUpdateScheduled) return
+		this.webviewUpdateScheduled = true
+		await Promise.resolve()
+		this.webviewUpdateScheduled = false
 		const state = await this.getStateToPostToWebview()
 		await sendStateUpdate(state)
 	}

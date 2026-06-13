@@ -886,6 +886,9 @@ export class Task {
                 break
             }
         }
+        // Flush task history at the end of the task loop (turn boundary)
+        await this.messageStateHandler.flushTaskHistory()
+
     }
 
     private async shouldRunTaskCancelHook(): Promise<boolean> {
