@@ -1,0 +1,38 @@
+--- sample.zig ---
+|----
+│pub const Point = struct {
+│    # Lines: 14
+│    x: i32,
+│    y: i32,
+|----
+│    pub fn init(x: i32, y: i32) Point {
+│        # Lines: 3
+|----
+│    pub fn distance(self: Point, other: Point) f64 {
+│        # Lines: 5
+|----
+│pub const Direction = enum {
+│    # Lines: 15
+│    north,
+│    south,
+│    east,
+│    west,
+|----
+│    pub fn opposite(self: Direction) Direction {
+│        # Lines: 8
+|----
+│pub const ShapeTag = union(enum) {
+│    # Lines: 11
+│    circle: f64,
+│    rectangle: struct { width: f64, height: f64 },
+|----
+│    pub fn area(self: ShapeTag) f64 {
+│        # Lines: 6
+|----
+│fn helper(x: i32) i32 {
+│    # Lines: 3
+|----
+│pub fn main() !void {
+│    # Lines: 7
+│    # Calls: [helper]
+|----

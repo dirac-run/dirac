@@ -1,0 +1,69 @@
+{
+	"get_function": [
+		{
+			"name": "Point_full",
+			"symbols": [
+				"Point"
+			]
+		},
+		{
+			"name": "init",
+			"symbols": [
+				"init"
+			]
+		},
+		{
+			"name": "main",
+			"symbols": [
+				"main"
+			]
+		},
+		{
+			"name": "helper",
+			"symbols": [
+				"helper"
+			]
+		},
+		{
+			"name": "nonExistentFunction",
+			"symbols": [
+				"nonExistentFunction"
+			]
+		}
+	],
+	"find_symbol_references": [
+		{
+			"name": "Point_both",
+			"symbols": [
+				"Point"
+			],
+			"find_type": "both"
+		},
+		{
+			"name": "main_definition",
+			"symbols": [
+				"main"
+			],
+			"find_type": "definition"
+		},
+		{
+			"name": "nonExistentSymbol_both",
+			"symbols": [
+				"nonExistentSymbol"
+			],
+			"find_type": "both"
+		}
+	],
+	"replace_symbol": [
+		{
+			"name": "helper_full",
+			"symbol": "helper",
+			"text": "fn helper(x: i32) i32 {\n    return x * 3;\n}"
+		},
+		{
+			"name": "nonExistentReplace",
+			"symbol": "nonExistentReplace",
+			"text": "should fail"
+		}
+	]
+}

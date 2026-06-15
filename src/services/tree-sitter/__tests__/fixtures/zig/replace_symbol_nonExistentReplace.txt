@@ -1,0 +1,4 @@
+The tool execution failed with the following error:
+<error>
+Symbol 'nonExistentReplace' not found in sample.zig.
+</error>

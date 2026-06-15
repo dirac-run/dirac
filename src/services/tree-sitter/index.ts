@@ -183,6 +183,5 @@ function isCallNode(node: Parser.SyntaxNode): boolean {
 			return true
 		}
 	}
-
 	return false
 }

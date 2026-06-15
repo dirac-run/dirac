@@ -1,0 +1,1 @@
+Successfully replaced symbols 'helper' in sample.zig. Any existing hash anchors for these symbols are now stale.

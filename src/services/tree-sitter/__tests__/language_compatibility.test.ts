@@ -131,6 +131,7 @@ describe("Language Compatibility Tests (Big Four)", () => {
         { name: "php", ext: "php" },
         { name: "swift", ext: "swift" },
         { name: "kotlin", ext: "kt" },
+        { name: "zig", ext: "zig" },
     ]
 
     const validator = new ToolValidator({ validateAccess: () => true } as any)
