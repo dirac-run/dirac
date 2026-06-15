@@ -3,6 +3,7 @@
 // Import the module and reference it with the alias vscode in your code below
 
 import assert from "node:assert"
+import * as childProcess from "node:child_process"
 import { DIFF_VIEW_URI_SCHEME } from "@hosts/vscode/VscodeDiffViewProvider"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"
@@ -787,6 +788,23 @@ async function getBinaryLocation(name: string): Promise<string> {
                 }
             }
         }
+    }
+
+    // Final fallback: check system PATH. This handles cases where the
+    // bundled binary has the wrong architecture (e.g. x86_64 on arm64 macOS).
+    const whichCommand = process.platform === "win32" ? "where" : "which"
+    try {
+        const result = childProcess.execFileSync(whichCommand, [name], {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+        })
+        const binPath = result.trim().split("\n")[0].trim()
+        if (binPath) {
+            Logger.info(`[Dirac] Resolved ${name} from system PATH: ${binPath}`)
+            return binPath
+        }
+    } catch {
+        // Not on PATH either
     }
 
     throw new Error(`Could not find bundled ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}`)
