@@ -1,4 +1,4 @@
-import { VSCodeCheckbox, VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import PreferredLanguageSetting from "../PreferredLanguageSetting"
@@ -43,22 +43,7 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 					</Tooltip>
 
 					<p className="text-sm mt-[5px] text-description">
-						Help improve Dirac by sending usage data and error reports. No code, prompts, or personal information are
-						ever sent. See our{" "}
-						<VSCodeLink
-							className="text-inherit"
-							href="https://dirac.run/docs/more-info/telemetry"
-							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							telemetry overview
-						</VSCodeLink>{" "}
-						and{" "}
-						<VSCodeLink
-							className="text-inherit"
-							href="https://dirac.run/privacy"
-							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							privacy policy
-						</VSCodeLink>{" "}
-						for more details.
+						Help improve Dirac by sending usage data and error reports. No code, prompts, or personal information are ever sent. 
 					</p>
 				</div>
 

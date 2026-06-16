@@ -20,6 +20,7 @@ export function useScrollBehavior(
 } {
     // Refs
     const virtuosoRef = useRef<VirtuosoHandle>(null)
+    const footerRef = useRef<HTMLDivElement>(null)
     const disableAutoScrollRef = useRef(false)
     const isAtBottomRef = useRef(false)
     const programmaticScrollRef = useRef(false)
@@ -47,20 +48,21 @@ export function useScrollBehavior(
         // Range changed callback - we now use scroll position instead
         // but keep this for potential future use
     }, [])
-    // Instant scroll to bottom, batched via rAF to avoid layout thrashing.
-    // Only for programmatic "keep at bottom" scrolls — not user-initiated.
+    // Instant scroll to bottom using native scrollIntoView on the Footer element.
+    // This is the mechanical "press End" approach — the browser calculates the
+    // exact scroll offset needed, no Virtuoso estimation involved.
     const scrollToBottomNow = useCallback(() => {
         cancelAnimationFrame(scrollRafIdRef.current)
         scrollRafIdRef.current = requestAnimationFrame(() => {
             programmaticScrollRef.current = true
-            virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" })
+            footerRef.current?.scrollIntoView({ block: "end", behavior: "auto" })
         })
     }, [])
 
     // Smooth scroll to bottom — for user-initiated actions (scroll-to-bottom button).
     const scrollToBottomSmooth = useCallback(() => {
         programmaticScrollRef.current = true
-        virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "smooth" })
+        footerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
         setTimeout(() => {
             programmaticScrollRef.current = false
         }, 500)
@@ -183,6 +185,7 @@ export function useScrollBehavior(
 
     return {
         virtuosoRef,
+        footerRef,
         disableAutoScrollRef,
         scrollToBottomSmooth,
         scrollToBottomAuto,

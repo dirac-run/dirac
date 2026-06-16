@@ -165,23 +165,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 					<TerminalOutputLineLimitSlider />
 					<div className="mt-5 p-3 bg-(--vscode-textBlockQuote-background) rounded border border-(--vscode-textBlockQuote-border)">
 						<p className="text-[13px] m-0">
-							<strong>Having terminal issues?</strong> Check our{" "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://dirac.run/docs/troubleshooting/terminal-quick-fixes"
-								rel="noopener noreferrer"
-								target="_blank">
-								Terminal Quick Fixes
-							</a>{" "}
-							or the{" "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://dirac.run/docs/troubleshooting/terminal-integration-guide"
-								rel="noopener noreferrer"
-								target="_blank">
-								Complete Troubleshooting Guide
-							</a>
-							.
+							<strong>Having terminal issues?</strong> Try /askDirac with your question.
 						</p>
 					</div>
 				</div>

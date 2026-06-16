@@ -1,17 +1,17 @@
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import {
-    DiracRulesToggles,
-    RefreshedRules,
-    RuleScope,
-    SkillInfo,
-    ToggleAgentsRuleRequest,
-    ToggleDiracRuleRequest,
-    ToggleCursorRuleRequest,
-    ToggleSkillRequest,
-    ToggleWindsurfRuleRequest,
-    ToggleWorkflowRequest,
+	DiracRulesToggles,
+	RefreshedRules,
+	RuleScope,
+	SkillInfo,
+	ToggleAgentsRuleRequest,
+	ToggleDiracRuleRequest,
+	ToggleCursorRuleRequest,
+	ToggleSkillRequest,
+	ToggleWindsurfRuleRequest,
+	ToggleWorkflowRequest,
 } from "@shared/proto/dirac/file"
-import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import React, { useEffect, useRef, useState } from "react"
 import { useClickAway, useWindowSize } from "react-use"
 import styled from "styled-components"
@@ -499,24 +499,13 @@ const DiracRulesToggleModal: React.FC = () => {
 							{currentView === "rules" ? (
 								<p>
 									Rules allow you to provide Dirac with system-level guidance. Think of them as a persistent way
-									to include context and preferences for your projects or globally for every conversation.{" "}
-									<VSCodeLink
-										className="text-xs"
-										href="https://dirac.run/docs/features/dirac-rules"
-										style={{ display: "inline", fontSize: "inherit" }}>
-										Docs
-									</VSCodeLink>
+									to include context and preferences for your projects or globally for every conversation.
 								</p>
 							) : currentView === "workflows" ? (
 								<p>
 									Workflows allow you to define a series of steps to guide Dirac through a repetitive set of
 									tasks, such as deploying a service or submitting a PR. To invoke a workflow, type{" "}
 									<span className="text-foreground font-bold">/workflow-name</span> in the chat.{" "}
-									<VSCodeLink
-										className="text-xs inline"
-										href="https://dirac.run/docs/features/slash-commands/workflows">
-										Docs
-									</VSCodeLink>
 								</p>
 							) : currentView === "skills" ? (
 								<p>
@@ -682,13 +671,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									<p>
 										{isWindows
 											? "On Windows, hooks execute whenever the hook file exists."
-											: "Toggle to enable/disable (chmod +x/-x)."}{" "}
-										<VSCodeLink
-											className="text-xs"
-											href="https://dirac.run/docs/features/hooks"
-											style={{ display: "inline", fontSize: "inherit" }}>
-											Docs
-										</VSCodeLink>
+											: "Toggle to enable/disable (chmod +x/-x)."}
 									</p>
 								</div>
 								{/* Hooks Tab */}

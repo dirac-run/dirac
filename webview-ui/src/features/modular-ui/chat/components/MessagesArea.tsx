@@ -30,6 +30,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
     const {
         virtuosoRef,
+        footerRef,
         toggleRowExpansion,
         setIsAtBottom,
         setShowScrollToBottom,
@@ -91,7 +92,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
     const virtuosoComponents = useMemo(
         () => ({
-            Footer: () => <div className="min-h-1" />,
+            Footer: () => <div ref={footerRef} className="min-h-1" />,
         }),
         [],
     )
