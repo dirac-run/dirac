@@ -21,6 +21,14 @@ import { convertToOpenAiMessages, sanitizeGeminiMessages } from "./openai-format
 import { addReasoningContent, convertToR1Format } from "./r1-format"
 import { getOpenAIToolParams } from "./tool-call-processor"
 
+function needsExplicitCacheControl(baseModelId: string, info: ModelInfo): boolean {
+	// Honor the capability flag the model registry computes (refreshOpenRouterModels.ts),
+	// so cache-capable models don't silently miss caching just because they're absent from
+	// the id list below. The id checks remain as a fallback for envelope-honoring families
+	// (Anthropic/MiniMax shapes) that may not be flagged in the registry yet.
+	return info.supportsPromptCache || baseModelId.startsWith("anthropic/") || baseModelId.startsWith("minimax/")
+}
+
 export async function createOpenRouterStream(
 	client: OpenAI,
 	systemPrompt: string,
@@ -68,73 +76,38 @@ export async function createOpenRouterStream(
 
 	// prompt caching: https://openrouter.ai/docs/prompt-caching
 	// this was initially specifically for claude models (some models may 'support prompt caching' automatically without this)
-	// handles direct model.id match logic
-	switch (baseModelId) {
-		case "anthropic/claude-opus-4.6":
-		case "anthropic/claude-haiku-4.5":
-		case "anthropic/claude-4.5-haiku":
-		case "anthropic/claude-sonnet-4.6":
-		case "anthropic/claude-4.6-sonnet":
-		case "anthropic/claude-sonnet-4.5":
-		case "anthropic/claude-4.5-sonnet": // OpenRouter accidentally included this in model list for a brief moment, and users may be using this model id. And to support prompt caching, we need to add it here.
-		case "anthropic/claude-sonnet-4":
-		case "anthropic/claude-opus-4.5":
-		case "anthropic/claude-opus-4.1":
-		case "anthropic/claude-opus-4":
-		case "anthropic/claude-3.7-sonnet":
-		case "anthropic/claude-3.7-sonnet:beta":
-		case "anthropic/claude-3.7-sonnet:thinking":
-		case "anthropic/claude-3-7-sonnet":
-		case "anthropic/claude-3-7-sonnet:beta":
-		case "anthropic/claude-3.5-sonnet":
-		case "anthropic/claude-3.5-sonnet:beta":
-		case "anthropic/claude-3.5-sonnet-20240620":
-		case "anthropic/claude-3.5-sonnet-20240620:beta":
-		case "anthropic/claude-3-5-haiku":
-		case "anthropic/claude-3-5-haiku:beta":
-		case "anthropic/claude-3-5-haiku-20241022":
-		case "anthropic/claude-3-5-haiku-20241022:beta":
-		case "anthropic/claude-3-haiku":
-		case "anthropic/claude-3-haiku:beta":
-		case "anthropic/claude-3-opus":
-		case "anthropic/claude-3-opus:beta":
-		case "minimax/minimax-m2":
-		case "minimax/minimax-m2.1":
-		case "minimax/minimax-m2.1-lightning":
-		case "minimax/minimax-m2.5":
-			openAiMessages[0] = {
-				role: "system",
-				content: [
-					{
-						type: "text",
-						text: systemPrompt,
-						// @ts-expect-error-next-line
-						cache_control: { type: "ephemeral" },
-					},
-				],
-			}
-			// Add cache_control to the last two user messages
-			// (note: this works because we only ever add one user message at a time, but if we added multiple we'd need to mark the user message before the last assistant message)
-			const lastTwoUserMessages = openAiMessages.filter((msg) => msg.role === "user").slice(-2)
-			lastTwoUserMessages.forEach((msg) => {
-				if (typeof msg.content === "string") {
-					msg.content = [{ type: "text", text: msg.content }]
-				}
-				if (Array.isArray(msg.content)) {
-					// NOTE: this is fine since env details will always be added at the end. but if it weren't there, and the user added a image_url type message, it would pop a text part before it and then move it after to the end.
-					let lastTextPart = msg.content.filter((part) => part.type === "text").pop()
-
-					if (!lastTextPart) {
-						lastTextPart = { type: "text", text: "..." }
-						msg.content.push(lastTextPart)
-					}
+	// gate the cache_control envelope by the registry capability flag instead of a hardcoded id list
+	if (needsExplicitCacheControl(baseModelId, model.info)) {
+		openAiMessages[0] = {
+			role: "system",
+			content: [
+				{
+					type: "text",
+					text: systemPrompt,
 					// @ts-expect-error-next-line
-					lastTextPart["cache_control"] = { type: "ephemeral" }
+					cache_control: { type: "ephemeral" },
+				},
+			],
+		}
+		// Add cache_control to the last two user messages
+		// (note: this works because we only ever add one user message at a time, but if we added multiple we'd need to mark the user message before the last assistant message)
+		const lastTwoUserMessages = openAiMessages.filter((msg) => msg.role === "user").slice(-2)
+		lastTwoUserMessages.forEach((msg) => {
+			if (typeof msg.content === "string") {
+				msg.content = [{ type: "text", text: msg.content }]
+			}
+			if (Array.isArray(msg.content)) {
+				// NOTE: this is fine since env details will always be added at the end. but if it weren't there, and the user added a image_url type message, it would pop a text part before it and then move it after to the end.
+				let lastTextPart = msg.content.filter((part) => part.type === "text").pop()
+
+				if (!lastTextPart) {
+					lastTextPart = { type: "text", text: "..." }
+					msg.content.push(lastTextPart)
 				}
-			})
-			break
-		default:
-			break
+				// @ts-expect-error-next-line
+				lastTextPart["cache_control"] = { type: "ephemeral" }
+			}
+		})
 	}
 
 	let temperature: number | undefined = model.info.temperature ?? (baseModelId.startsWith("anthropic/") ? undefined : 0)
