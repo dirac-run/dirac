@@ -36,4 +36,14 @@ export const claudeCodeModels = {
         supportsImages: false,
         supportsPromptCache: false,
     },
+    "claude-opus-4-8": {
+        ...anthropicModels["claude-opus-4-8"],
+        supportsImages: false,
+        supportsPromptCache: false,
+    },
+    "claude-opus-4-8[1m]": {
+        ...anthropicModels["claude-opus-4-8:1m"],
+        supportsImages: false,
+        supportsPromptCache: false,
+    },
 } as const satisfies Record<string, ModelInfo>

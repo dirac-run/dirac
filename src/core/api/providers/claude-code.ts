@@ -1,7 +1,13 @@
 import { filterMessagesForClaudeCode } from "@/integrations/claude-code/message-filter"
 import { runClaudeCode } from "@/integrations/claude-code/run"
+import {
+	buildStructuredToolSchema,
+	extractStructuredToolCalls,
+	STRUCTURED_OUTPUT_TOOL_NAME,
+} from "@/integrations/claude-code/structured-output"
 import { ClaudeCodeModelId, claudeCodeDefaultModelId, claudeCodeModels } from "@/shared/api"
 import { DiracStorageMessage } from "@/shared/messages/content"
+import type { DiracTool } from "@/shared/tools"
 import { type ApiHandler, CommonApiHandlerOptions } from ".."
 import { withRetry } from "../retry"
 import { type ApiStream, ApiStreamUsageChunk } from "../transform/stream"
@@ -24,9 +30,14 @@ export class ClaudeCodeHandler implements ApiHandler {
 		baseDelay: 2000,
 		maxDelay: 15000,
 	})
-	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[]): ApiStream {
+	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: DiracTool[]): ApiStream {
 		// Filter out image blocks since Claude Code doesn't support them
 		const filteredMessages = filterMessagesForClaudeCode(messages)
+
+		// The `claude` CLI cannot accept Dirac's tool schemas as a native `tools` payload.
+		// Instead we encode them into a --json-schema structured-output contract, which the
+		// model fulfils by calling the injected StructuredOutput tool (unwrapped below).
+		const jsonSchema = tools && tools.length > 0 ? JSON.stringify(buildStructuredToolSchema(tools)) : undefined
 
 		const claudeProcess = runClaudeCode({
 			systemPrompt,
@@ -34,6 +45,7 @@ export class ClaudeCodeHandler implements ApiHandler {
 			path: this.options.claudeCodePath,
 			modelId: this.getModel().id,
 			thinkingBudgetTokens: this.options.thinkingBudgetTokens,
+			jsonSchema,
 		})
 
 		// Usage is included with assistant messages,
@@ -113,6 +125,29 @@ export class ClaudeCodeHandler implements ApiHandler {
 							}
 							break
 						case "tool_use":
+							// The --json-schema feature surfaces tool choices via an injected
+							// StructuredOutput tool. Unwrap its payload into real tool calls so
+							// they flow through Dirac's native tool pipeline.
+							if (content.name === STRUCTURED_OUTPUT_TOOL_NAME) {
+								const structuredCalls = extractStructuredToolCalls(content.input)
+								for (let idx = 0; idx < structuredCalls.length; idx++) {
+									const structuredCall = structuredCalls[idx]
+									const callId = `${content.id}_${idx}`
+									yield {
+										type: "tool_calls",
+										tool_call: {
+											call_id: callId,
+											function: {
+												id: callId,
+												name: structuredCall.tool,
+												arguments: JSON.stringify(structuredCall.params ?? {}),
+											},
+										},
+									}
+								}
+								break
+							}
+
 							// Yield tool_use blocks to the streaming pipeline for proper tool execution
 							yield {
 								type: "tool_calls",
@@ -141,7 +176,9 @@ export class ClaudeCodeHandler implements ApiHandler {
 				continue
 			}
 
-			if (chunk.type === "result" && "result" in chunk) {
+			if (chunk.type === "result") {
+				// The StructuredOutput tool call is streamed on the assistant turn above; the
+				// result event (success or the expected error_max_turns) only carries final cost.
 				usage.totalCost = isPaidUsage ? chunk.total_cost_usd : 0
 
 				yield usage
