@@ -167,6 +167,11 @@ export interface AcpSessionState {
 	 * currentToolCallId should be released.
 	 */
 	lastApiReqStartedTs?: number
+	// Retry tracking state for ACP auto-retry feature
+	autoRetryAttempts?: number
+	didAutomaticallyRetryFailedApiRequest?: boolean
+	isStreaming?: boolean
+
 }
 
 // ============================================================

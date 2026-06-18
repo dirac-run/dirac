@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { ApiProvider } from "@shared/api"
+import type { Settings } from "@shared/storage/state-keys"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { StateManager } from "@/core/storage/StateManager"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
@@ -10,10 +11,44 @@ import { fetchOpenRouterModels, usesOpenRouterModels } from "../utils/openrouter
 import { getProviderLabel, getValidCliProviders, isValidCliProvider } from "../utils/providers.js"
 import type { DiracAcpSession } from "./public-types.js"
 
-const ACP_MODE_OPTIONS: acp.SessionConfigSelectOption[] = [
+/**
+ * ACP-level mode IDs surfaced to clients.
+ *
+ * The two extra modes beyond Dirac's internal {@link Mode} are derived states:
+ *   - `auto`  → internal `act` mode with auto-approve on
+ *   - `yolo`  → internal `act` mode with auto-approve + yolo on
+ *
+ * Clients see four modes; internally the mode/auto-approve/yolo toggles are
+ * still three separate state keys.
+ */
+export type AcpModeId = "plan" | "act" | "auto" | "yolo"
+
+const ACP_MODE_OPTIONS: { value: AcpModeId; name: string; description: string }[] = [
     { value: "plan", name: "Plan", description: "Gather information and create a detailed plan" },
-    { value: "act", name: "Act", description: "Execute actions to accomplish the task" },
+    { value: "act", name: "Act", description: "Execute actions, asking permission for each tool call" },
+    { value: "auto", name: "Auto-approve", description: "Execute actions, auto-approving all tool calls" },
+    { value: "yolo", name: "YOLO", description: "Execute actions with no safety prompts" },
 ]
+
+export function acpModeToInternalState(acpMode: AcpModeId): { mode: Mode; autoApprove: boolean; yolo: boolean } {
+    switch (acpMode) {
+        case "plan":
+            return { mode: "plan", autoApprove: false, yolo: false }
+        case "act":
+            return { mode: "act", autoApprove: false, yolo: false }
+        case "auto":
+            return { mode: "act", autoApprove: true, yolo: false }
+        case "yolo":
+            return { mode: "act", autoApprove: true, yolo: true }
+    }
+}
+
+export function computeAcpModeId(mode: Mode, autoApprove: boolean, yolo: boolean): AcpModeId {
+    if (mode === "plan") return "plan"
+    if (yolo) return "yolo"
+    if (autoApprove) return "auto"
+    return "act"
+}
 
 const REASONING_EFFORT_OPTIONS: acp.SessionConfigSelectOption[] = [
     { value: "none", name: "None" },
@@ -33,14 +68,35 @@ const THINKING_BUDGET_OPTIONS: acp.SessionConfigSelectOption[] = [
 ]
 
 export class SessionConfigManager {
-    getSessionModeState(mode: Mode): acp.SessionModeState {
+    /**
+     * Compute the effective ACP mode ID for a session, considering per-session overrides.
+     *
+     * When `sessionOverrides` is provided, auto-approve and yolo values are read from
+     * the overrides rather than the global StateManager. This prevents concurrent ACP
+     * sessions from interfering with each other's mode state.
+     */
+    computeCurrentAcpModeId(
+        mode: Mode,
+        sessionOverrides?: Partial<Settings>,
+    ): AcpModeId {
+        const stateManager = StateManager.get()
+        const autoApprove = Boolean(
+            sessionOverrides?.autoApproveAllToggled ?? stateManager.getGlobalSettingsKey("autoApproveAllToggled"),
+        )
+        const yolo = Boolean(
+            sessionOverrides?.yoloModeToggled ?? stateManager.getGlobalSettingsKey("yoloModeToggled"),
+        )
+        return computeAcpModeId(mode, autoApprove, yolo)
+    }
+
+    getSessionModeState(mode: Mode, sessionOverrides?: Partial<Settings>): acp.SessionModeState {
         return {
             availableModes: ACP_MODE_OPTIONS.map(({ value, name, description }) => ({
                 id: value,
                 name,
                 description,
             })),
-            currentModeId: mode,
+            currentModeId: this.computeCurrentAcpModeId(mode, sessionOverrides),
         }
     }
 
@@ -66,7 +122,10 @@ export class SessionConfigManager {
         }
     }
 
-    async getSessionConfigOptions(session: DiracAcpSession): Promise<acp.SessionConfigOption[]> {
+    async getSessionConfigOptions(
+        session: DiracAcpSession,
+        sessionOverrides?: Partial<Settings>,
+    ): Promise<acp.SessionConfigOption[]> {
         const stateManager = StateManager.get()
         const currentProvider = stateManager.getGlobalSettingsKey(
             session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider",
@@ -89,7 +148,7 @@ export class SessionConfigManager {
                 description: "Session operating mode",
                 type: "select",
                 category: "mode",
-                currentValue: session.mode,
+                currentValue: this.computeCurrentAcpModeId(session.mode, sessionOverrides),
                 options: ACP_MODE_OPTIONS,
             },
             {
@@ -200,7 +259,7 @@ export class SessionConfigManager {
         })
     }
 
-    private async getCurrentModeModelId(mode: Mode, provider?: ApiProvider): Promise<string> {
+    async getCurrentModeModelId(mode: Mode, provider?: ApiProvider): Promise<string> {
         if (!provider) return ""
         const modelKey = getProviderModelIdKey(provider, mode)
         return (StateManager.get().getGlobalSettingsKey(modelKey) as string | undefined) || getDefaultModelId(provider)

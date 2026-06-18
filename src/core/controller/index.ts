@@ -96,6 +96,11 @@ export class Controller {
 	// Flag to prevent duplicate cancellations from spam clicking
 	private cancelInProgress = false
 
+	private _taskRunPromise?: Promise<void>
+	get taskRunPromise(): Promise<void> | undefined {
+		return this._taskRunPromise
+	}
+
 	// Debounce state broadcast — coalesce multiple per-tick calls into a single push
 	private webviewUpdateScheduled = false
 
@@ -250,9 +255,9 @@ export class Controller {
 		})
 
 		if (historyItem) {
-			this.task.runPromise = this.task.resumeTaskFromHistory()
+			this._taskRunPromise = this.task.resumeTaskFromHistory()
 		} else if (task || images || files) {
-			this.task.runPromise = this.task.startTask(task, images, files)
+			this._taskRunPromise = this.task.startTask(task, images, files)
 		}
 
 		return this.task.taskId

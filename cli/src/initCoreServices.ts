@@ -26,9 +26,5 @@ export interface CoreServicesInitOptions {
 export async function initCoreServices(opts: CoreServicesInitOptions): Promise<void> {
 	await DiracEndpoint.initialize(opts.extensionDir)
 	await StateManager.initialize(opts.storageContext)
-	try {
-		await ErrorService.initialize()
-	} catch {
-		// already initialized — ignore (idempotent for tests / re-entry)
-	}
+	await ErrorService.initialize()
 }

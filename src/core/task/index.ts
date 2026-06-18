@@ -228,14 +228,6 @@ export class Task {
     // Message and conversation state
     messageStateHandler: MessageStateHandler
 
-	/**
-	 * Resolves/rejects with the task's startTask/resumeTaskFromHistory lifecycle.
-	 *
-	 * Set by Controller.initTask. Exposed so ACP-style hosts can attach a catch
-	 * handler to surface uncaught task throws (otherwise the startTask promise
-	 * is detached and rejections silently disappear, leaving clients spinning).
-	 */
-	runPromise?: Promise<void>
 
     // Workspace manager
     workspaceManager?: WorkspaceRootManager
@@ -1891,16 +1883,13 @@ export class Task {
                 model,
             })
         } catch (error) {
-            // Surface the error so ACP-style hosts (which listen for `say:"error"`
-            // to resolve the turn) see something instead of nothing. Without this
-            // the rejection is swallowed, the lifecycle promise resolves cleanly,
-            // and clients only learn anything went wrong via the 60s idle watchdog.
-            Logger.error("[Task] recursivelyMakeDiracRequests failed:", error)
+            const diracError = ErrorService.get().toDiracError(error)
+            Logger.error("[Task] Fatal error in task loop:", diracError.serialize())
             try {
                 const card = await this.taskMessenger.createCard({
                     status: CardStatus.ERROR,
                     header: "Task Error",
-                    body: `The task encountered an unexpected error: ${error instanceof Error ? error.message : String(error)}`,
+                    body: `The task encountered an unexpected error and had to stop.\n\n${diracError.serialize()}`,
                 })
                 await card.finalize(CardStatus.ERROR)
             } catch (sayError) {
