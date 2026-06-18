@@ -90,6 +90,14 @@ export interface AcpModeOptions {
 export async function runAcpMode(options: AcpModeOptions = {}): Promise<void> {
 	redirectConsoleToStderr()
 
+	// Opt-in debug tap: mirror all Logger output to stderr when DIRAC_ACP_DEBUG is set.
+	// In ACP mode stdout is reserved for JSON-RPC, so internal logs otherwise go to an
+	// in-memory output channel and are invisible. This makes them visible on stderr
+	// (captured by the probe's stderr log) for diagnosing the ACP integration.
+	if (process.env.DIRAC_ACP_DEBUG) {
+		Logger.subscribe((msg) => process.stderr.write(`[LOG] ${msg}\n`))
+	}
+
 	const outputStream = nodeToWebWritable(process.stdout)
 	const inputStream = nodeToWebReadable(process.stdin)
 	const stream = ndJsonStream(outputStream, inputStream)

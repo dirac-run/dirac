@@ -388,7 +388,25 @@ export class StateManager {
 	}
 
 	/**
-
+	 * Atomically replace the entire session-override cache and return the
+	 * previous contents.
+	 *
+	 * Used by the ACP layer to implement per-session override scoping: before
+	 * a session's prompt begins, call this with that session's overrides to
+	 * install them; in the finally block, call it again with the saved snapshot
+	 * to restore the previous state (typically the CLI's global overrides, e.g.
+	 * --auto-approve-all).
+	 *
+	 * Never persisted to disk.
+	 */
+	swapSessionOverrides(overrides: Partial<Settings>): Partial<Settings> {
+		if (!this.isInitialized) {
+			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		}
+		const previous = this.sessionOverrideCache
+		this.sessionOverrideCache = { ...overrides }
+		return previous
+	}
 
 	/**
 	 * Set models cache for a specific provider (in-memory only, not persisted)

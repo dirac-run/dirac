@@ -117,6 +117,10 @@ export interface DiracAcpSession {
 	lastActivityAt: number
 	/** Whether this session was loaded from history (needs resume on first prompt) */
 	isLoadedFromHistory?: boolean
+	/** TaskId reserved for the first initTask call in this session (sessionId itself). Consumed on first use. */
+	reservedTaskId?: string
+	/** Resolved taskId stashed by loadSession for use by the first prompt's resume path. */
+	loadedTaskId?: string
 	/** Model ID override for plan mode (format: "provider/modelId") */
 	planModeModelId?: string
 	/** Model ID override for act mode (format: "provider/modelId") */
@@ -149,8 +153,20 @@ export interface AcpSessionState {
 	status: AcpSessionStatus
 	/** Current tool call ID being executed (if any) */
 	currentToolCallId?: string
+	/** Shared tool_call id for the in-flight auto-retry sequence (if any).
+	 *  Reused across multiple `error_retry` messages so the client sees one
+	 *  evolving item rather than three white text lines. */
+	retryToolCallId?: string
 	/** Accumulated tool calls for permission batching */
 	pendingToolCalls: Map<string, acp.ToolCall>
+	/**
+	 * ts of the most recently seen `api_req_started` message. Used to detect a genuine
+	 * turn boundary: api_req_started keeps streaming partial updates (token/cost) across
+	 * a whole turn under one ts, so only a *new* ts marks the start of the next turn —
+	 * the point at which the previous turn's command tool call is finished and
+	 * currentToolCallId should be released.
+	 */
+	lastApiReqStartedTs?: number
 }
 
 // ============================================================

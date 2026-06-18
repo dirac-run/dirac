@@ -73,6 +73,9 @@ export class TaskState {
     // Retry tracking — separate counters for independent failure modes
     apiErrorRetryAttempts = 0
     emptyResponseRetryAttempts = 0
+    autoRetryAttempts = 0
+    didAutomaticallyRetryFailedApiRequest = false
+    isStreaming = false
 
     // Task Initialization
     isInitialized = false
