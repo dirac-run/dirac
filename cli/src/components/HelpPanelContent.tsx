@@ -91,7 +91,7 @@ export const HelpPanelContent: React.FC<HelpPanelContentProps> = ({ onClose }) =
                 <Text color="gray">{"─".repeat(40)}</Text>
 
                 <Text>
-                    For more help: <Text color={COLORS.primaryBlue}>https://dirac.run/docs/dirac</Text>
+                    For more help use /askDirac or go to <Text color={COLORS.primaryBlue}>https://dirac.run/docs/dirac</Text>
                 </Text>
             </Box>
         </Panel>
