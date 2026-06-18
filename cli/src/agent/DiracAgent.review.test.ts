@@ -61,7 +61,10 @@ const mocks = vi.hoisted(() => {
 			extensionContext: {},
 			storageContext: {},
 			EXTENSION_DIR: "/tmp/dirac-test",
+			DATA_DIR: "/tmp/dirac-test-data",
 		})),
+		initCoreServices: vi.fn(async () => {}),
+		hostProviderInitialize: vi.fn(),
 		setRuntimeHooksDir: vi.fn(),
 	}
 })
@@ -92,6 +95,36 @@ vi.mock("@shared/slashCommands", () => ({
 	VSCODE_ONLY_COMMANDS: [],
 }))
 
+vi.mock("../initCoreServices.js", () => ({
+	initCoreServices: mocks.initCoreServices,
+}))
+
+vi.mock("@/hosts/host-provider.js", () => ({
+	HostProvider: {
+		initialize: mocks.hostProviderInitialize,
+	},
+}))
+
+vi.mock("@/core/storage/StateManager", () => ({
+	StateManager: {
+		initialize: vi.fn(async () => {}),
+		get: vi.fn(() => ({
+			swapSessionOverrides: vi.fn((overrides: unknown) => overrides),
+			getGlobalSettingsKey: vi.fn((key: string) => {
+				if (key === "mode") return "act"
+				return undefined
+			}),
+			getApiConfiguration: vi.fn(() => ({
+				actModeThinkingBudgetTokens: 1024,
+				planModeThinkingBudgetTokens: 1024,
+			})),
+			setGlobalState: vi.fn(),
+			setSessionOverride: vi.fn(),
+			flushPendingState: vi.fn(async () => {}),
+		})),
+	},
+}))
+
 function git(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
@@ -119,6 +152,8 @@ async function createAgentForRepo(repoPath: string): Promise<{ agent: DiracAgent
 	;(agent as any).getSessionModelState = vi.fn(async () => [])
 	;(agent as any).getSessionConfigOptions = vi.fn(async () => [])
 	;(agent as any).getSessionModeState = vi.fn(() => [])
+
+	await agent.initialize({ clientCapabilities: {} } as any)
 
 	const response = await agent.newSession({
 		cwd: repoPath,

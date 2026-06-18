@@ -16,6 +16,7 @@ type ClaudeCodeOptions = {
 	modelId: string
 	thinkingBudgetTokens?: number
 	shouldUseFile?: boolean
+	jsonSchema?: string
 }
 
 type ProcessState = {
@@ -23,6 +24,7 @@ type ProcessState = {
 	error: Error | null
 	stderrLogs: string
 	exitCode: number | null
+	reachedMaxTurns: boolean
 }
 
 // The maximum argument length is longer than this,
@@ -53,6 +55,7 @@ export async function* runClaudeCode(options: ClaudeCodeOptions): AsyncGenerator
 		stderrLogs: "",
 		exitCode: null,
 		partialData: null,
+		reachedMaxTurns: false,
 	}
 
 	try {
@@ -80,6 +83,13 @@ export async function* runClaudeCode(options: ClaudeCodeOptions): AsyncGenerator
 					continue
 				}
 
+				// We cap the run at one turn (see --max-turns below). The CLI reports this with an
+				// error_max_turns result and exits non-zero; record it so the exit is treated as a
+				// normal completion rather than a failure.
+				if (chunk.type === "result" && chunk.subtype === "error_max_turns") {
+					processState.reachedMaxTurns = true
+				}
+
 				yield chunk
 			}
 		}
@@ -98,6 +108,13 @@ export async function* runClaudeCode(options: ClaudeCodeOptions): AsyncGenerator
 			)
 		}
 	} catch (err) {
+		// Hitting the one-turn cap makes the CLI exit non-zero after it has already streamed the
+		// StructuredOutput tool call and a result event. That is the expected end of a run, so we
+		// stop here instead of surfacing it as an error.
+		if (processState.reachedMaxTurns) {
+			return
+		}
+
 		Logger.error(`Error during Claude Code execution:`, err)
 
 		if (processState.stderrLogs.includes("unknown option '--system-prompt-file'")) {
@@ -156,25 +173,6 @@ Anthropic is aware of this issue and is considering a fix: https://github.com/an
 	}
 }
 
-// We want the model to use our custom tool format instead of built-in tools.
-// Disabling built-in tools prevents tool-only responses and ensures text output.
-const claudeCodeTools = [
-	"Task",
-	"Bash",
-	"Glob",
-	"Grep",
-	"LS",
-	"exit_plan_mode",
-	"Read",
-	"Edit",
-	"MultiEdit",
-	"Write",
-	"NotebookRead",
-	"NotebookEdit",
-	"TodoRead",
-	"TodoWrite",
-].join(",")
-
 const CLAUDE_CODE_TIMEOUT = 600000 // 10 minutes
 // https://github.com/sindresorhus/execa/blob/main/docs/api.md#optionsmaxbuffer
 const BUFFER_SIZE = 20_000_000 // 20 MB
@@ -183,7 +181,7 @@ const BUFFER_SIZE = 20_000_000 // 20 MB
 const CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000"
 
 function runProcess(
-	{ systemPrompt, messages, path, modelId, thinkingBudgetTokens, shouldUseFile }: ClaudeCodeOptions,
+	{ systemPrompt, messages, path, modelId, thinkingBudgetTokens, shouldUseFile, jsonSchema }: ClaudeCodeOptions,
 	cwd: string,
 ) {
 	const claudePath = path?.trim() || "claude"
@@ -194,15 +192,35 @@ function runProcess(
 		"--verbose",
 		"--output-format",
 		"stream-json",
-		"--disallowedTools",
-		claudeCodeTools,
-		// Dirac will handle recursive calls
+		// We use the CLI as a stateless, single-shot inference engine, not an interactive agent.
+		// These flags keep the user's environment from bleeding into the call (token cost is
+		// unchanged; the value is determinism and hygiene):
+		//   --strict-mcp-config:      ignore the user's MCP servers (we never pass --mcp-config),
+		//                             so none are spawned as subprocesses on every call.
+		//   --disable-slash-commands: don't load the user's skills into the session.
+		//   --no-session-persistence: don't write a session file to ~/.claude on every -p run.
+		"--strict-mcp-config",
+		"--disable-slash-commands",
+		"--no-session-persistence",
+		// Disable all built-in tools; tool selection is driven by the --json-schema
+		// structured-output contract instead. ("" disables the entire built-in set.)
+		"--tools",
+		"",
+		// The model satisfies the schema by calling the injected StructuredOutput tool on its
+		// first turn, which is all Dirac needs. Capping at one turn stops the CLI from spending
+		// an extra (and disproportionately expensive) turn on a follow-up message we discard.
+		// Hitting this cap is expected and handled as a normal completion above.
 		"--max-turns",
 		"1",
 		"--model",
 		modelId,
-		"-p",
 	]
+
+	if (jsonSchema) {
+		args.push("--json-schema", jsonSchema)
+	}
+
+	args.push("-p")
 
 	/**
 	 * @see {@link https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables}

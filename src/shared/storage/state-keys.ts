@@ -46,29 +46,31 @@ type FieldDefinitions = Record<string, FieldDefinition<any>>
 export type ConfiguredAPIKeys = Partial<Record<ApiProvider, boolean>>
 
 const GLOBAL_STATE_FIELDS = {
-    diracVersion: { default: undefined as string | undefined },
-    "dirac.generatedMachineId": { default: undefined as string | undefined }, // Note, distinctId reads/writes this directly from/to StorageContext before StateManager is initialized.
-    lastShownAnnouncementId: { default: undefined as string | undefined },
-    taskHistory: { default: [] as HistoryItem[], isAsync: true },
-    favoritedModelIds: { default: [] as string[] },
-    terminalReuseEnabled: { default: true as boolean },
-    vscodeTerminalExecutionMode: {
-        default: "vscodeTerminal" as "vscodeTerminal" | "backgroundExec",
-    },
-    isNewUser: { default: true as boolean },
-    welcomeViewCompleted: { default: undefined as boolean | undefined },
-    workspaceRoots: { default: undefined as WorkspaceRoot[] | undefined },
-    primaryRootIndex: { default: 0 as number },
-    multiRootEnabled: { default: true as boolean },
-    lastDismissedInfoBannerVersion: { default: 0 as number },
-    lastDismissedModelBannerVersion: { default: 0 as number },
-    lastDismissedCliBannerVersion: { default: 0 as number },
-    remoteRulesToggles: { default: {} as DiracRulesToggles },
-    remoteWorkflowToggles: { default: {} as DiracRulesToggles },
-    dismissedBanners: { default: [] as Array<{ bannerId: string; dismissedAt: number }> },
-    // Path to worktree that should auto-open Dirac sidebar when launched
-    worktreeAutoOpenPath: { default: undefined as string | undefined },
-    uiActionState: { default: undefined as UIActionState | undefined },
+	diracVersion: { default: undefined as string | undefined },
+	"dirac.generatedMachineId": { default: undefined as string | undefined }, // Note, distinctId reads/writes this directly from/to StorageContext before StateManager is initialized.
+	lastShownAnnouncementId: { default: undefined as string | undefined },
+	taskHistory: { default: [] as HistoryItem[], isAsync: true },
+	favoritedModelIds: { default: [] as string[] },
+	terminalReuseEnabled: { default: true as boolean },
+	vscodeTerminalExecutionMode: {
+		default: "vscodeTerminal" as "vscodeTerminal" | "backgroundExec",
+	},
+	isNewUser: { default: true as boolean },
+	welcomeViewCompleted: { default: undefined as boolean | undefined },
+	workspaceRoots: { default: undefined as WorkspaceRoot[] | undefined },
+	primaryRootIndex: { default: 0 as number },
+	multiRootEnabled: { default: true as boolean },
+	lastDismissedInfoBannerVersion: { default: 0 as number },
+	lastDismissedModelBannerVersion: { default: 0 as number },
+	lastDismissedCliBannerVersion: { default: 0 as number },
+	remoteRulesToggles: { default: {} as DiracRulesToggles },
+	remoteWorkflowToggles: { default: {} as DiracRulesToggles },
+	dismissedBanners: { default: [] as Array<{ bannerId: string; dismissedAt: number }> },
+	// Path to worktree that should auto-open Dirac sidebar when launched
+	worktreeAutoOpenPath: { default: undefined as string | undefined },
+	uiActionState: { default: undefined as UIActionState | undefined },
+	// Maps ACP sessionId → ordered list of replacement taskIds (written only for multi-task sessions)
+	acpSessionTasks: { default: {} as Record<string, string[]> },
 } satisfies FieldDefinitions
 
 // Fields that map directly to ApiHandlerOptions in @shared/api.ts

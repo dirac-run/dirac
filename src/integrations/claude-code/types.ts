@@ -20,13 +20,13 @@ type ErrorMessage = {
 
 type ResultMessage = {
 	type: "result"
-	subtype: "success"
+	subtype: "success" | "error_max_turns"
 	total_cost_usd: number
 	is_error: boolean
 	duration_ms: number
 	duration_api_ms: number
 	num_turns: number
-	result: string
+	result?: string
 	session_id: string
 }
 

@@ -22,8 +22,8 @@ In each user message, the environment_details will specify the current mode. The
 
 SYSTEM INFO
 
-- Operating System: linux
-- Default Shell: /bin/bash
+- Operating System: darwin
+- Default Shell: /bin/zsh
 - Current Working Directory: /test/project (this is where all the tools will be executed from)
 - Available CPU Cores: 1 (Use this value for parallel jobs like 'make -j' instead of 'nproc')
 

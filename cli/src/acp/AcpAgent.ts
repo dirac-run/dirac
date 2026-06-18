@@ -43,18 +43,18 @@ export class AcpAgent implements acp.Agent {
 		this.diracAgent = new DiracAgent(options)
 
 		// Wire up the permission handler to use the connection
-		this.diracAgent.setPermissionHandler(async (request) => {
-			try {
-				Logger.debug("[AcpAgent] Forwarding permission request to connection")
-				return await this.connection.requestPermission({
+		this.diracAgent.setPermissionHandler((request, resolve) => {
+			this.connection
+				.requestPermission({
 					sessionId: request.sessionId,
 					toolCall: request.toolCall,
 					options: request.options,
 				})
-			} catch (error) {
-				Logger.debug("[AcpAgent] Error requesting permission:", error)
-				return { outcome: { outcome: "cancelled" } }
-			}
+				.then(resolve)
+				.catch((error) => {
+					Logger.debug("[AcpAgent] Error requesting permission:", error)
+					resolve({ outcome: { outcome: "cancelled" } })
+				})
 		})
 	}
 
@@ -157,6 +157,7 @@ export class AcpAgent implements acp.Agent {
 	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
 		const response = await this.diracAgent.loadSession(params)
 		this.subscribeToSessionEvents(params.sessionId)
+		// Replay history after subscribing so events reach the client
 		await this.diracAgent.replayLoadedSessionHistory(params.sessionId)
 		this.scheduleSessionSetupUpdates(params.sessionId)
 		return response

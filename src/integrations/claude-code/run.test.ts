@@ -81,6 +81,24 @@ describe("Claude Code Integration", () => {
 		sinon.restore()
 	})
 
+	it("isolates the run from the user's ambient Claude Code environment", async () => {
+		const cProcess = runClaudeCode({
+			systemPrompt: "a",
+			messages: [],
+			modelId: "test",
+			path: scriptPath,
+		})
+
+		for await (const _chunk of cProcess) {
+			// drain the generator so runProcess (and execa) is invoked
+		}
+
+		const params = mockExeca.lastCall.args[1]
+		expect(params).to.include("--strict-mcp-config")
+		expect(params).to.include("--disable-slash-commands")
+		expect(params).to.include("--no-session-persistence")
+	})
+
 	const itCallsTheScriptWithAFile = (systemPrompt: string) => {
 		it("calls the script using with a file", async () => {
 			const cProcess = runClaudeCode({
@@ -159,5 +177,77 @@ describe("Claude Code Integration", () => {
 				expect(params.includes("--system-prompt")).to.be.true
 			})
 		})
+	})
+})
+
+describe("Claude Code Integration - one-turn cap", () => {
+	// The run is capped at one turn, so the CLI streams the StructuredOutput tool call, emits an
+	// error_max_turns result, and exits non-zero. runClaudeCode must treat that as completion.
+	const RESULT_LINE = '{"type":"result","subtype":"error_max_turns","is_error":true,"total_cost_usd":0.01}'
+	const ASSISTANT_LINE =
+		'{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"StructuredOutput","input":{"tool_calls":[{"tool":"read_file","params":{"path":"p"}}]}}],"usage":{"input_tokens":1,"output_tokens":1},"stop_reason":"tool_use"}}'
+
+	const maxTurnsProcess = () => ({
+		stdin: { write: sinon.fake(), end: sinon.fake() },
+		stdout: { on: sinon.fake(), resume: sinon.fake() },
+		stderr: { on: sinon.fake(() => {}) },
+		on: sinon.fake((event: string, callback: (code: number) => void) => {
+			if (event === "close") {
+				setImmediate(() => callback(1))
+			}
+		}),
+		killed: false,
+		kill: sinon.fake(),
+		exitCode: 1,
+		// execa rejects on a non-zero exit; the `await cProcess` in runClaudeCode must therefore throw.
+		then: (_onResolve: (value: any) => void, onReject: (reason: any) => void) => {
+			setImmediate(() => onReject(new Error("Command failed with exit code 1")))
+			return Promise.resolve()
+		},
+		catch: () => Promise.resolve(),
+		finally: (callback: () => void) => {
+			setImmediate(callback)
+			return Promise.resolve()
+		},
+	})
+
+	const maxTurnsReadline = () => ({
+		async *[Symbol.asyncIterator]() {
+			yield ASSISTANT_LINE
+			yield RESULT_LINE
+			return
+		},
+		close: sinon.fake(),
+	})
+
+	const { runClaudeCode: runWithMaxTurns } = proxyquire("./run", {
+		"@/utils/path": { getCwd: () => Promise.resolve(path.resolve("./")) },
+		"node:os": { platform: () => "darwin" },
+		execa: { execa: sinon.fake(() => maxTurnsProcess()) },
+		readline: { createInterface: maxTurnsReadline },
+	})
+
+	afterEach(() => {
+		sinon.restore()
+	})
+
+	it("completes without throwing and still yields the result chunk", async () => {
+		const cProcess = runWithMaxTurns({
+			systemPrompt: "sys",
+			messages: [],
+			modelId: "test",
+			path: "echo",
+			jsonSchema: "{}",
+		})
+
+		const chunks: any[] = []
+		for await (const chunk of cProcess) {
+			chunks.push(chunk)
+		}
+
+		expect(chunks).to.have.length(2)
+		expect(chunks[1].type).to.equal("result")
+		expect(chunks[1].subtype).to.equal("error_max_turns")
+		expect(chunks[1].total_cost_usd).to.equal(0.01)
 	})
 })

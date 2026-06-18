@@ -10,7 +10,6 @@ import * as fs from "fs/promises"
 import { GlobalFileNames, getSavedApiConversationHistory, getTaskHistoryStateFilePath } from "@/core/storage/disk"
 import { Logger } from "@/shared/services/Logger"
 import { syncWorker } from "./sync"
-import { getTaskTimestamp } from "./utils"
 
 /**
  * Result of a backfill operation for a single task.
@@ -48,21 +47,20 @@ export interface BackfillOptions {
 /**
  * List all task IDs in the tasks directory.
  */
-async function listTaskIds(before?: string, after?: string): Promise<string[]> {
+async function listTaskItems(before?: string, after?: string): Promise<Array<{ id: string; ts: number }>> {
 	try {
 		const historyFile = await getTaskHistoryStateFilePath()
 		// Read the history file to get task json names
 		const data = await fs.readFile(historyFile, "utf-8")
-		const history = JSON.parse(data) as { id: string }[]
+		const history = JSON.parse(data) as Array<{ id: string; ts: number }>
 		return (
 			history
-				?.map((item) => item.id)
-				?.filter((id) => typeof id === "string")
-				.filter((id) => {
-					if (before && id >= before) {
+				?.filter((item) => typeof item.id === "string" && typeof item.ts === "number")
+				.filter((item) => {
+					if (before && item.id >= before) {
 						return false
 					}
-					if (after && id <= after) {
+					if (after && item.id <= after) {
 						return false
 					}
 					return true
@@ -129,37 +127,35 @@ export async function backfillTasks(options: BackfillOptions = {}): Promise<Back
 	}
 
 	// Get list of tasks to process
-	let taskIds: string[]
+	let taskItems: Array<{ id: string; ts: number }>
 	if (specificTaskIds && specificTaskIds.length > 0) {
-		taskIds = specificTaskIds
+		// Wrap provided IDs with a sentinel ts so the loop body has a uniform shape;
+		// ts=0 means the sinceTimestamp guard never skips them (0 < any real timestamp).
+		taskItems = specificTaskIds.map((id) => ({ id, ts: 0 }))
 	} else {
-		taskIds = await listTaskIds(currentTime.toString(), sinceTimestamp?.toString())
+		taskItems = await listTaskItems(currentTime.toString(), sinceTimestamp?.toString())
 	}
 
 	const result: BackfillResult = {
-		totalTasks: taskIds.length,
+		totalTasks: taskItems.length,
 		successCount: 0,
 		failCount: 0,
 		skippedCount: 0,
 		results: [],
 	}
 
-	for (let i = 0; i < taskIds.length; i++) {
-		const taskId = taskIds[i]
+	for (let i = 0; i < taskItems.length; i++) {
+		const { id: taskId, ts: taskTs } = taskItems[i]
 
-		// Check timestamp filter using taskId (which is Date.now().toString())
-		if (sinceTimestamp) {
-			const taskTimestamp = getTaskTimestamp(taskId)
-
-			if (taskTimestamp && taskTimestamp < sinceTimestamp) {
-				result.skippedCount++
-				continue
-			}
+		// Filter by historyItem.ts so UUID-shaped taskIds are handled correctly.
+		if (sinceTimestamp && taskTs < sinceTimestamp) {
+			result.skippedCount++
+			continue
 		}
 
 		// Report progress
 		if (onProgress) {
-			onProgress(i + 1, taskIds.length, taskId)
+			onProgress(i + 1, taskItems.length, taskId)
 		}
 
 		// Backfill the task

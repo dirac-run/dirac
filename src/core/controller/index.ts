@@ -173,7 +173,7 @@ export class Controller {
 		files?: string[],
 		historyItem?: HistoryItem,
 		taskSettings?: Partial<Settings>,
-		conversationUlid?: string,
+		taskIdOverride?: string,
 	) {
 		await this.clearTask() // ensures that an existing task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
 
@@ -202,7 +202,7 @@ export class Controller {
 
 		const cwd = this.workspaceManager?.getPrimaryRoot()?.path || (await getCwd(getDesktopDir()))
 
-		const taskId = historyItem?.id || Date.now().toString()
+		const taskId = historyItem?.id || taskIdOverride || Date.now().toString()
 
 		// Acquire task lock
 		let taskLockAcquired = false
@@ -246,14 +246,13 @@ export class Controller {
 			files,
 			historyItem,
 			taskId,
-			conversationUlid,
 			taskLockAcquired,
 		})
 
 		if (historyItem) {
-			this.task.resumeTaskFromHistory()
+			this.task.runPromise = this.task.resumeTaskFromHistory()
 		} else if (task || images || files) {
-			this.task.startTask(task, images, files)
+			this.task.runPromise = this.task.startTask(task, images, files)
 		}
 
 		return this.task.taskId
