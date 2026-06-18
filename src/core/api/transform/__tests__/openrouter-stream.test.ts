@@ -23,11 +23,11 @@ describe("createOpenRouterStream", () => {
 		}
 	}
 
-	const createModelInfo = (maxTokens: number): ModelInfo => ({
+	const createModelInfo = (maxTokens: number, supportsPromptCache = false): ModelInfo => ({
 		maxTokens,
 		contextWindow: 1_048_576,
 		supportsImages: true,
-		supportsPromptCache: false,
+		supportsPromptCache,
 	})
 
 	it("caps Gemini Flash OpenRouter requests to 32768 max_tokens", async () => {
@@ -76,5 +76,42 @@ describe("createOpenRouterStream", () => {
 
 		const payload = create.firstCall.args[0] as Record<string, unknown>
 		payload.should.have.property("max_tokens", 32_768)
+	})
+
+	it("adds cache_control blocks when the model reports supportsPromptCache, regardless of id", async () => {
+		const { client, create } = createClient()
+
+		await createOpenRouterStream(client as any, "system prompt", [{ role: "user", content: "hello" }] as any, {
+			id: "deepseek/deepseek-chat",
+			info: createModelInfo(65_536, true),
+		})
+
+		const payload = create.firstCall.args[0] as any
+		payload.messages[0].content[0].cache_control.should.deepEqual({ type: "ephemeral" })
+		payload.messages[1].content[0].cache_control.should.deepEqual({ type: "ephemeral" })
+	})
+
+	it("adds cache_control blocks for MiniMax models even without the flag", async () => {
+		const { client, create } = createClient()
+
+		await createOpenRouterStream(client as any, "system prompt", [{ role: "user", content: "hello" }] as any, {
+			id: "minimax/minimax-m2",
+			info: createModelInfo(65_536, false),
+		})
+
+		const payload = create.firstCall.args[0] as any
+		payload.messages[0].content[0].cache_control.should.deepEqual({ type: "ephemeral" })
+	})
+
+	it("does not add cache_control blocks for models without prompt cache support", async () => {
+		const { client, create } = createClient()
+
+		await createOpenRouterStream(client as any, "system prompt", [{ role: "user", content: "hello" }] as any, {
+			id: "google/gemini-2.5-pro",
+			info: createModelInfo(65_536, false),
+		})
+
+		const payload = create.firstCall.args[0] as any
+		payload.messages[0].content.should.be.a.String()
 	})
 })
