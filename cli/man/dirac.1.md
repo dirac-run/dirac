@@ -352,7 +352,7 @@ View logs with `dirac dev log`.
 
 Report bugs at: <https://github.com/dirac-run/dirac/issues>
 
-For real-time help, join the Discord community at: <https://discord.gg/mWkzrF4h>
+For real-time help, join the Discord community at: <https://discord.gg/wcYTx9BGea>
 
 # SEE ALSO
 
