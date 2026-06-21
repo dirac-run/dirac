@@ -2,8 +2,8 @@
 class Dirac < Formula
   desc "Autonomous coding agent CLI - capable of creating/editing files, running commands, and more"
   homepage "https://dirac.run"
-  url "https://registry.npmjs.org/dirac-cli/-/dirac-cli-0.4.2.tgz" # GET from https://registry.npmjs.org/dirac-cli/latest tarball URL
-  sha256 "ace940293f9819c9c87182a8bc7245accb27d0324cb5583b034f3d2fec91302a"
+  url "https://registry.npmjs.org/dirac-cli/-/dirac-cli-0.4.3.tgz" # GET from https://registry.npmjs.org/dirac-cli/latest tarball URL
+  sha256 "406b2d3186d4d230812813a5bd1047aa5230ead1e3e69d5e0300d41ed6452ee6"
   license :cannot_represent
 
   depends_on "node@20"
