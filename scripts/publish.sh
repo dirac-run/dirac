@@ -172,7 +172,7 @@ if [ "$DRY_RUN" = true ]; then
     log_info "Changelog written to: $CHANGELOG_FILE"
     # Revert the version bump since we're not actually releasing
     log_step "Reverting version bump..."
-    git checkout -- package.json package-lock.json cli/package.json cli/package-lock.json 2>/dev/null || true
+    git checkout -- package.json package-lock.json cli/package.json 2>/dev/null || true
     # Revert Homebrew formula if it was modified
     git checkout -- cli/dirac.rb 2>/dev/null || true
     log_info "Done. No changes were committed or published."
@@ -182,7 +182,7 @@ fi
 # 8. Commit version bumps (vsce publish requires a clean working tree)
 log_step "Committing version bumps..."
 rm -f dirac-*.vsix  # Clean up .vsix file (don't commit it)
-git add package.json package-lock.json cli/package.json cli/package-lock.json cli/dirac.rb
+git add package.json package-lock.json cli/package.json cli/dirac.rb
 git commit -m "chore: bump version to v${NEW_VERSION}"
 
 # 9. Publish extension to VS Marketplace
