@@ -1,0 +1,78 @@
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*'  # matches v0.4.6 but NOT v0.4.6-cli
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g., v0.4.6)'
+        required: true
+
+jobs:
+  release:
+    name: Create Extension Release
+    runs-on: ubuntu-latest
+    # Skip if the tag is a CLI tag
+    if: "!contains(github.ref_name, '-cli') || github.event_name == 'workflow_dispatch'"
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog generation
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm run protos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile extension
+        run: npm run compile
+
+      - name: Package .vsix
+        run: npx @vscode/vsce package --allow-missing-repository
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG_NAME="${{ github.event.inputs.tag_name || github.ref_name }}"
+          # Find previous extension tag (exclude -cli tags)
+          PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | grep -v '\-cli' | grep -v "^${TAG_NAME}$" | head -1)
+          echo "Previous tag: $PREV_TAG"
+          echo "Current tag: $TAG_NAME"
+
+          {
+            echo "## What's Changed"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..${TAG_NAME}" --pretty=format:"- %s" --no-merges
+            else
+              git log "${TAG_NAME}" --pretty=format:"- %s" --no-merges | head -50
+            fi
+            echo ""
+            echo ""
+            echo "**Full Changelog**: https://github.com/dirac-run/dirac/compare/${PREV_TAG:-v0.0.0}...${TAG_NAME}"
+          } > release_body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          name: Dirac ${{ github.event.inputs.tag_name || github.ref_name }}
+          body_path: release_body.md
+          files: dirac-*.vsix
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
