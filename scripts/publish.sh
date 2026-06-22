@@ -179,7 +179,13 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
-# 8. Publish extension to VS Marketplace
+# 8. Commit version bumps (vsce publish requires a clean working tree)
+log_step "Committing version bumps..."
+rm -f dirac-*.vsix  # Clean up .vsix file (don't commit it)
+git add package.json package-lock.json cli/package.json cli/package-lock.json cli/dirac.rb
+git commit -m "chore: bump version to v${NEW_VERSION}"
+
+# 9. Publish extension to VS Marketplace
 log_step "Publishing to VS Marketplace..."
 if [ -z "$VSCE_PAT" ]; then
     log_error "VSCE_PAT not set. Cannot publish to VS Marketplace."
@@ -188,7 +194,7 @@ fi
 npx @vscode/vsce publish -p "$VSCE_PAT"
 log_info "Published extension to VS Marketplace."
 
-# 9. Publish extension to Open VSX
+# 10. Publish extension to Open VSX
 log_step "Publishing to Open VSX..."
 if [ -z "$OVSX_PAT" ]; then
     log_error "OVSX_PAT not set. Cannot publish to Open VSX."
@@ -197,29 +203,23 @@ fi
 npx ovsx publish -p "$OVSX_PAT"
 log_info "Published extension to Open VSX."
 
-# 10. Publish CLI to npm
+# 11. Publish CLI to npm
 log_step "Publishing CLI to npm..."
 cd dist-standalone
 npm publish
 cd ..
 log_info "Published CLI to npm."
 
-# 11. Update Homebrew formula
+# 12. Homebrew formula
 log_step "Homebrew formula updated at cli/dirac.rb."
 log_warn "Remember to commit the Homebrew formula update to homebrew-core separately."
 
-# 12. Commit and tag
-log_step "Committing version bumps and creating tags..."
-rm -f dirac-*.vsix  # Clean up .vsix file (don't commit it)
-git add package.json package-lock.json cli/package.json cli/package-lock.json cli/dirac.rb
-git commit -m "chore: bump version to v${NEW_VERSION}"
+# 13. Tag and push
+log_step "Creating tags and pushing..."
 git tag "v${NEW_VERSION}"
-
-# 13. Push
-log_step "Pushing commit and tags..."
+git tag "v${NEW_VERSION}-cli"
 git push origin master
 git push origin "v${NEW_VERSION}"
-git tag "v${NEW_VERSION}-cli"
 git push origin "v${NEW_VERSION}-cli"
 
 # Cleanup
