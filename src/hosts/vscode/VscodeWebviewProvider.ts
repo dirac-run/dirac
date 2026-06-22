@@ -36,6 +36,18 @@ export class VscodeDiracWebviewProvider extends DiracWebviewProvider implements 
 		return this.webview.webview.cspSource
 	}
 
+	/**
+	 * Forwards user-configurable VSCode settings to the webview via
+	 * `window.__DIRAC_CONFIG__`. Currently exposes the optional Plan/Act toggle
+	 * shortcut override (see the `dirac.planActToggleShortcut` setting and issue
+	 * #100). When unset, the webview keeps the built-in default.
+	 */
+	protected override getInjectedConfig(): Record<string, unknown> {
+		const config = vscode.workspace.getConfiguration("dirac")
+		const planActToggleShortcut = config.get<string>("planActToggleShortcut")?.trim()
+		return planActToggleShortcut ? { planActToggleShortcut } : {}
+	}
+
 	override isVisible() {
 		return this.webview?.visible || false
 	}
@@ -99,7 +111,21 @@ export class VscodeDiracWebviewProvider extends DiracWebviewProvider implements 
 		)
 
 		// Listen for configuration changes
-		vscode.workspace.onDidChangeConfiguration(async (e) => {}, null, this.disposables)
+		vscode.workspace.onDidChangeConfiguration(
+			async (e) => {
+				// The Plan/Act toggle shortcut is injected into the webview HTML at
+				// render time, so re-render the HTML when it changes to apply the new
+				// binding without requiring a manual reload.
+				if (e.affectsConfiguration("dirac.planActToggleShortcut") && this.webview) {
+					this.webview.webview.html =
+						this.context.extensionMode === vscode.ExtensionMode.Development
+							? await this.getHMRHtmlContent()
+							: this.getHtmlContent()
+				}
+			},
+			null,
+			this.disposables,
+		)
 
 		// if the extension is starting a new session, clear previous task state
 		this.controller.clearTask()
