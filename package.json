@@ -369,7 +369,13 @@
         },
         "configuration": {
             "title": "Dirac",
-            "properties": {}
+            "properties": {
+                "dirac.planActToggleShortcut": {
+                    "type": "string",
+                    "default": "",
+                    "markdownDescription": "Keyboard shortcut for toggling between Plan and Act modes in the chat input, e.g. `Alt+Shift+a` or `Control+Alt+t`. Use the modifier names `Control`, `Alt`, `Meta` (Command), and `Shift` joined with `+`, ending in the key (for example `Meta+Shift+p`). Leave empty to use the built-in default (`Alt+Shift+a`), which avoids clashing with VSCode's `Cmd/Ctrl+Shift+A` Agents command."
+                }
+            }
         }
     },
     "scripts": {

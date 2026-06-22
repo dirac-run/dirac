@@ -65,6 +65,38 @@ export abstract class DiracWebviewProvider {
 	abstract isVisible(): boolean
 
 	/**
+	 * Returns host-specific runtime configuration to inject into the webview.
+	 *
+	 * This is the seam through which a host (e.g. VSCode) can forward user
+	 * settings to the webview without going through the gRPC state pipeline.
+	 * The returned object is serialized into `window.__DIRAC_CONFIG__` inside the
+	 * webview HTML. The base implementation injects nothing.
+	 *
+	 * @returns A JSON-serializable config object (empty by default).
+	 */
+	protected getInjectedConfig(): Record<string, unknown> {
+		return {}
+	}
+
+	/**
+	 * Builds a nonce-guarded inline script that exposes the host-injected runtime
+	 * config on `window.__DIRAC_CONFIG__` before the app bundle runs.
+	 *
+	 * @param nonce - The CSP nonce that authorizes inline scripts in the webview.
+	 * @returns An HTML `<script>` tag, or an empty string when there is no config.
+	 */
+	protected getInjectedConfigScript(nonce: string): string {
+		const config = this.getInjectedConfig()
+		if (!config || Object.keys(config).length === 0) {
+			return ""
+		}
+		// JSON.stringify is safe to embed in a script as long as we guard the
+		// closing-tag sequence, which cannot otherwise appear in JSON output.
+		const serialized = JSON.stringify(config).replace(/</g, "\\u003c")
+		return /*html*/ `<script nonce="${nonce}">window.__DIRAC_CONFIG__ = ${serialized};</script>`
+	}
+
+	/**
 	 * Defines and returns the HTML that should be rendered within the webview panel.
 	 *
 	 * @remarks This is also the place where references to the React webview build files
@@ -131,8 +163,9 @@ export abstract class DiracWebviewProvider {
 			<body>
 				<noscript>You need to enable JavaScript to run this app.</noscript>
 				<div id="root"></div>
+				${this.getInjectedConfigScript(nonce)}
 				<script type="module" nonce="${nonce}" src="${scriptUrl}"></script>
-				<script src="http://localhost:8097"></script> 
+				<script src="http://localhost:8097"></script>
 			</body>
 		</html>
 		`
@@ -240,6 +273,7 @@ export abstract class DiracWebviewProvider {
 				<body>
 					<div id="root"></div>
 					${reactRefresh}
+					${this.getInjectedConfigScript(nonce)}
 					<script type="module" src="${scriptUrl}"></script>
 				</body>
 			</html>
