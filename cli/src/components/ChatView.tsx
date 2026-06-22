@@ -728,6 +728,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     modelId={footerStatus.modelId}
                     provider={footerStatus.provider}
                     totalCost={footerStatus.totalCost}
+                    cacheHitRate={footerStatus.cacheHitRate}
                     taskStatus={footerStatus.taskStatus}
                     workspacePath={footerStatus.workspacePath}
                 />

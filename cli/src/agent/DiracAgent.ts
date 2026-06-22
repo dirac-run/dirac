@@ -50,7 +50,7 @@ import { type AcpSessionState } from "./types.js"
 import { SessionConfigManager, acpModeToInternalState, type AcpModeId } from "./sessionConfig.js"
 import { getHistoryItemCwd } from "./sessionHistory.js"
 import { parsePromptContent } from "./promptContent.js"
-
+import pWaitFor from "p-wait-for"
 
 /**
  * Dirac's implementation of the ACP Agent interface.
@@ -993,6 +993,52 @@ export class DiracAgent implements acp.Agent {
                 sessionId: session.sessionId,
                 cwd: session.cwd,
             })),
+        }
+    }
+
+    /**
+     * Restore a checkpoint in a session.
+     *
+     * Cancels any active task, finds the message matching the checkpoint
+     * ID (DiracMessage.id / toolCallId), and delegates to the controller's
+     */
+    async checkpointRestore(sessionId: string, checkpointId: string, restoreType: string, offset?: number): Promise<void> {
+        const session = this.sessions.get(sessionId)
+        if (!session) {
+            throw new Error(`Session not found: ${sessionId}`)
+        }
+
+        const controller = this.#sessionControllers.get(session)
+        if (!controller) {
+            throw new Error(`Controller not found for session: ${sessionId}`)
+        }
+
+        // Cancel active task — cannot alter message history while task is running
+        await controller.cancelTask()
+
+        // Wait for the task to be fully re-initialized after cancellation.
+        // cancelTask() re-initializes the task asynchronously, and we must
+        // wait for it to be ready before accessing its message handler.
+        await pWaitFor(() => controller.task?.taskState.isInitialized === true, {
+            timeout: 3_000,
+        }).catch((error) => {
+            Logger.error("[DiracAgent.checkpointRestore] Failed to wait for task initialization:", error)
+            throw error
+        })
+
+        // Find the message matching the checkpoint ID (DiracMessage.id / toolCallId)
+        const message = controller.task?.messageStateHandler
+            .getDiracMessages()
+            .find((m) => m.id === checkpointId)
+
+        if (message && controller.task?.checkpointManager) {
+            await controller.task.checkpointManager.restoreCheckpoint(
+                message.id,
+                restoreType as any,
+                offset,
+            )
+        } else {
+            throw new Error(`Checkpoint not found for id: ${checkpointId}`)
         }
     }
 }

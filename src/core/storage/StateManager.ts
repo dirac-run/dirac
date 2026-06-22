@@ -116,8 +116,30 @@ export class StateManager {
 	// Callback to sync external state changes with the UI client
 	onSyncExternalChange?: () => void | Promise<void>
 
+	// State change notification subscribers
+	private stateChangeListeners = new Set<() => void>()
+
+
 	private constructor(storage: StorageContext) {
 		this.storage = storage
+	}
+
+	/**
+	 * Subscribe to global state changes. The listener is called whenever global state
+	 * is modified via setGlobalState or setGlobalStateBatch.
+	 * Returns an unsubscribe function.
+	 */
+	public subscribe(listener: () => void): () => void {
+		this.stateChangeListeners.add(listener)
+		return () => {
+			this.stateChangeListeners.delete(listener)
+		}
+	}
+
+	private notifyStateChange(): void {
+		for (const listener of this.stateChangeListeners) {
+			listener()
+		}
 	}
 
 	/**
@@ -195,6 +217,9 @@ export class StateManager {
 		// Add to pending persistence set and schedule debounced write
 		this.pendingGlobalState.add(key)
 		this.scheduleDebouncedPersistence()
+
+		// Notify state change listeners
+		this.notifyStateChange()
 	}
 
 	/**
@@ -208,6 +233,10 @@ export class StateManager {
 		// Update cache in one go
 		// Using object.assign to because typescript is not able to infer the type of the updates object when using Object.entries
 		Object.assign(this.globalStateCache, updates)
+
+		// Notify state change listeners
+		this.notifyStateChange()
+
 
 		// Then track the keys for persistence
 		Object.keys(updates).forEach((key) => {

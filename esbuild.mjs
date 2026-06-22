@@ -138,6 +138,7 @@ const copyAssets = {
                 "php",
                 "swift",
                 "kotlin",
+                "zig",
             ]
 
             // Copy sql-wasm.wasm

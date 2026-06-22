@@ -10,7 +10,7 @@
 
 import type * as acp from "@agentclientprotocol/sdk"
 import type { DiracMessage } from "@shared/ExtensionMessage"
-import { DiracMessageType, CardStatus, isFinalStatus } from "@shared/ExtensionMessage"
+import { CardStatus, DiracMessageType, isFinalStatus } from "@shared/ExtensionMessage"
 import { getBrowserActionKind } from "./browserActionTranslator.js"
 import type { AcpSessionState, TranslatedMessage } from "./types.js"
 import { AcpSessionStatus } from "./types.js"
@@ -204,11 +204,7 @@ function translateMarkdownMessage(
  * Web search markers are complete text chunks (the regex requires a closing `]`),
  * so they are always emitted with a terminal "completed" status.
  */
-function translateWebSearchMarkerMessage(
-	query: string,
-	sessionState: AcpSessionState,
-	updates: acp.SessionUpdate[],
-): string {
+function translateWebSearchMarkerMessage(query: string, sessionState: AcpSessionState, updates: acp.SessionUpdate[]): string {
 	const toolCallId = sessionState.currentToolCallId || generateToolCallId()
 
 	const isExistingToolCall = !!sessionState.currentToolCallId
@@ -283,9 +279,11 @@ function translateCardMessage(
 	if (isExisting) {
 		const existing = sessionState.pendingToolCalls.get(toolCallId)!
 		existing.status = status
+		existing.title = card.header
 		updates.push({
 			sessionUpdate: "tool_call_update",
 			toolCallId,
+			title: card.header,
 			status,
 			rawOutput: card.body ? { body: card.body } : undefined,
 		})
@@ -307,8 +305,13 @@ function translateCardMessage(
 	}
 
 	// Handle interaction requests (approval / feedback)
-	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback || card.requireApproval === false)) {
-		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || { toolCallId, title: card.header, kind: (getBrowserActionKind(card.header) ?? "other") as acp.ToolKind, status: "pending" as acp.ToolCallStatus }
+	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback)) {
+		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || {
+			toolCallId,
+			title: card.header,
+			kind: (getBrowserActionKind(card.header) ?? "other") as acp.ToolKind,
+			status: "pending" as acp.ToolCallStatus,
+		}
 		requiresPermission = true
 		if (card.requireApproval) {
 			permissionRequest = {
@@ -322,9 +325,7 @@ function translateCardMessage(
 			// requireFeedback
 			permissionRequest = {
 				toolCall: existingToolCall as acp.ToolCall,
-				options: [
-					{ kind: "allow_once", optionId: DiracAskResponse_MESSAGE, name: "Submit" },
-				],
+				options: [{ kind: "allow_once", optionId: DiracAskResponse_MESSAGE, name: "Submit" }],
 			}
 		}
 	}

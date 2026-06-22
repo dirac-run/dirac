@@ -146,7 +146,7 @@ export class ExecuteCommandTool implements IDiracTool {
     ): Promise<{ approved: boolean; message?: string }> {
         const card = !env.config.isSubagentExecution
             ? await env.ui.createCard({
-                header: commands.length === 1 ? `Execute: ${commands[0].displayName.substring(0, 50)}` : `Execute ${commands.length} commands?`,
+                header: commands.length === 1 ? `Execute: ${commands[0].displayName}` : `Execute ${commands.length} commands?`,
                 status: CardStatus.WAITING_FOR_INPUT,
                 icon: DiracIcon.COMMAND,
                 requireApproval: true,
@@ -180,7 +180,7 @@ export class ExecuteCommandTool implements IDiracTool {
             await card.finalize(CardStatus.CANCELLED)
             return { approved: false, message: interaction.text }
         }
-        await card.update({ requireApproval: false, collapsed: true })
+        await card.finalize(CardStatus.SUCCESS)
         return { approved: true }
     }
 
@@ -214,8 +214,7 @@ export class ExecuteCommandTool implements IDiracTool {
         total: number,
         env: IToolEnvironment,
     ): Promise<{ result: string; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
-        const header = `Executing command ${index} of ${total}: ${cmd.displayName.length > 40 ? cmd.displayName.substring(0, 37) + "..." : cmd.displayName
-            }`
+        const header = `Executing command ${index} of ${total}: ${cmd.displayName}`
 
         const activeCard = !env.config.isSubagentExecution
             ? await env.ui.createCard({

@@ -13,6 +13,7 @@ interface ChatFooterProps {
     lastApiReqTotalTokens: number
     contextWindowSize: number
     totalCost: number
+    cacheHitRate: number
     workspacePath: string
     gitBranch: string | null
     gitDiffStats: GitDiffStats | null
@@ -28,6 +29,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
     lastApiReqTotalTokens,
     contextWindowSize,
     totalCost,
+    cacheHitRate,
     workspacePath,
     gitBranch,
     gitDiffStats,
@@ -79,6 +81,12 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                             return <Text color={costColor}>${totalCost.toFixed(3)}</Text>
                         })()}
                     </Text>{" "}
+                    {cacheHitRate > 0 && <React.Fragment><Text color={(() => {
+                        if (cacheHitRate < 0.2) return "#CC5500"
+                        if (cacheHitRate < 0.4) return "yellow"
+                        if (cacheHitRate < 0.6) return "green"
+                        return "#00FF7F"
+                    })()}>{(cacheHitRate * 100).toFixed(0)}% cache</Text>{" "}</React.Fragment>}
                 </Text>
                 <TaskStatusIndicator status={taskStatus} />
             </Box>

@@ -60,6 +60,8 @@ export type DiracSessionEvents = {
 } & {
 	/** Error event for session-level errors (not part of ACP SessionUpdate) */
 	error: (error: Error) => void
+	/** Token usage and cost update (not part of ACP SessionUpdate). */
+	usage_update: (payload: { tokensIn: number; tokensOut: number; totalCost: number }) => void
 }
 
 // ============================================================
@@ -234,6 +236,7 @@ export type {
 	CancelNotification,
 	ClientCapabilities,
 	ContentBlock,
+	Diff,
 	ImageContent,
 	InitializeRequest,
 	InitializeResponse,
@@ -261,6 +264,7 @@ export type {
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 	StopReason,
+	Terminal,
 	TextContent,
 	ToolCall,
 	ToolCallStatus,
