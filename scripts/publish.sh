@@ -117,6 +117,15 @@ log_step "Bumping version ($BUMP_TYPE)..."
 npm version "$BUMP_TYPE" --no-git-tag-version
 NEW_VERSION=$(node -p "require('./package.json').version")
 
+# Rerun safety check — abort if tag already exists
+if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
+    log_error "Tag v${NEW_VERSION} already exists. This version was already released."
+    log_step "Reverting version bump..."
+    git checkout -- package.json package-lock.json cli/package.json 2>/dev/null || true
+    git checkout -- cli/dirac.rb 2>/dev/null || true
+    exit 1
+fi
+
 cd cli
 npm version "$BUMP_TYPE" --no-git-tag-version
 cd ..

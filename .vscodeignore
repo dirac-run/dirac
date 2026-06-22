@@ -43,6 +43,9 @@ buf.yaml
 
 # Unwanted files
 ascratch/
+cli_opentui/
+tmp/
+.scratch-release-changelog.md
 proto/
 scripts/
 biome.jsonc
