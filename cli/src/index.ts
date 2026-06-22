@@ -51,6 +51,7 @@ program
     .option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
     .option("--subagents", "Enable subagents for the task")
     .option("--hooks-dir <path>", "Path to additional hooks directory for runtime hook injection")
+    .option("--no-index", "Disable symbol indexing for the workspace")
     .option("--no-emoji", "Disable emoji icons (use unicode/ascii fallbacks)")
     .option("-T, --taskId <id>", "Resume an existing task by ID")
     .action(async (prompt, options) => {
@@ -157,6 +158,7 @@ program
     .option("--subagents", "Enable subagents for the task")
     .option("--headers <headers>", "Custom headers for OpenAI-compatible provider (key1=value1,key2=value2 or JSON)")
     .option("--hooks-dir <path>", "Path to additional hooks directory for runtime hook injection")
+    .option("--no-index", "Disable symbol indexing for the workspace")
     .option("--no-emoji", "Disable emoji icons (use unicode/ascii fallbacks)")
     .option("--acp", "Run in ACP (Agent Client Protocol) mode for editor integration")
     .option("--kanban", "Run npx kanban --agent dirac")

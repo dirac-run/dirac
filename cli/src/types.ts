@@ -26,6 +26,8 @@ export interface TaskOptions {
     hooksDir?: string
     subagents?: boolean
     headers?: string
+    noIndex?: boolean
+
     noEmoji?: boolean
     format?: "json" | "ansi" | "plain"
 }
@@ -44,4 +46,5 @@ export interface InitOptions {
     hooksDir?: string
     verbose?: boolean
     enableAuth?: boolean
+    noIndex?: boolean
 }
