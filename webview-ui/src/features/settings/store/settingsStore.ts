@@ -21,7 +21,7 @@ import {
 import { fromProtobufModels } from "@shared/proto-conversions/models/typeConversion"
 import { OpenAiModelsRequest } from "@shared/proto/dirac/models"
 import { EmptyRequest } from "@shared/proto/dirac/common"
-import { ModelsServiceClient } from "@/shared/api/grpc-client"
+import { ModelsServiceClient, StateServiceClient } from "@/shared/api/grpc-client"
 import { create } from "zustand"
 
 interface SettingsState {
@@ -30,6 +30,7 @@ interface SettingsState {
     navigateToAccount: () => void
     setShowWelcome: (show: boolean) => void
     availableTerminalProfiles: any[]
+    refreshTerminalProfiles: () => void
     diracModels: any
     refreshDiracModels: () => void
     openRouterModels: any
@@ -228,6 +229,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     navigateToAccount: () => { },
     setShowWelcome: () => { },
     availableTerminalProfiles: [],
+
+    refreshTerminalProfiles: async () => {
+        try {
+            const response = await StateServiceClient.getAvailableTerminalProfiles(EmptyRequest.create())
+            set({
+                availableTerminalProfiles: response.profiles || [],
+            })
+        } catch (error) {
+            console.error("Failed to refresh terminal profiles:", error)
+        }
+    },
     diracModels: {},
     refreshDiracModels: async () => {
         try {
