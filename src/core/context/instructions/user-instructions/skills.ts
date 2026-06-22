@@ -310,6 +310,8 @@ async function loadSkillMetadata(
     skillName: string,
 ): Promise<SkillMetadata | null> {
     const skillMdPath = path.join(skillDir, "SKILL.md")
+    // Resolve symlinks so the same physical skill isn't listed twice
+    const resolvedPath = await fs.realpath(skillMdPath).catch(() => skillMdPath)
     if (!(await fileExistsAtPath(skillMdPath))) return null
 
     try {
@@ -340,7 +342,7 @@ async function loadSkillMetadata(
         return {
             name: skillName,
             description: frontmatter.description,
-            path: skillMdPath,
+            path: resolvedPath,
             source,
         }
     } catch (error) {
