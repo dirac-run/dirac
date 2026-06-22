@@ -115,9 +115,14 @@ CHANGELOG_FILE=".scratch-release-changelog.md"
     echo "## What's Changed in v${NEW_VERSION}"
     echo ""
     if [ -n "$LAST_TAG" ]; then
-        git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges
+        git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges \
+            | grep -iE '^- (feat|fix|perf|docs|revert)[:(]' \
+            || echo "- (no user-facing changes)"
     else
-        git log --pretty=format:"- %s" --no-merges | head -50
+        git log --pretty=format:"- %s" --no-merges \
+            | grep -iE '^- (feat|fix|perf|docs|revert)[:(]' \
+            | head -50 \
+            || echo "- (no user-facing changes)"
     fi
     echo ""
     echo ""
