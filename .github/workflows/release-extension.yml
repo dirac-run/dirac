@@ -1,9 +1,6 @@
 name: Release Extension
 
 on:
-  push:
-    tags:
-      - 'v*'  # matches v0.4.6 but NOT v0.4.6-cli
   workflow_dispatch:
     inputs:
       tag_name:

@@ -225,14 +225,11 @@ log_warn "Remember to commit the Homebrew formula update to homebrew-core separa
 
 # 13. Tag and push
 log_step "Creating tags and pushing..."
-git tag "v${NEW_VERSION}"
-git tag "v${NEW_VERSION}-cli"
+git tag -a "v${NEW_VERSION}" -F "$CHANGELOG_FILE"
 git push origin master
 git push origin "v${NEW_VERSION}"
-git push origin "v${NEW_VERSION}-cli"
 
 # Cleanup
-rm -f "$CHANGELOG_FILE"
 
 echo ""
 echo "--------------------------------------------------"
@@ -246,8 +243,8 @@ echo "  CLI:"
 echo "    • Published to npm (dirac-cli@${NEW_VERSION})"
 echo "    • Homebrew formula updated (cli/dirac.rb)"
 echo ""
-echo "  Tag v${NEW_VERSION} pushed — GitHub Action will create the Release"
+echo "  Tags pushed to GitHub for tracking."
 echo ""
-echo "  Watch for the Release at:"
-echo "  https://github.com/dirac-run/dirac/releases/tag/v${NEW_VERSION}"
+echo "  Changelog saved to: .scratch-release-changelog.md"
+echo "  (copy-paste into GitHub Release manually if needed)"
 echo "--------------------------------------------------"

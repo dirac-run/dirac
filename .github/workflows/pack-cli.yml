@@ -1,9 +1,6 @@
 name: Pack CLI
 
 on:
-  push:
-    tags:
-      - 'v*-cli'
   workflow_dispatch:
     inputs:
       tag_name:
