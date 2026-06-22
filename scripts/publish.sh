@@ -104,6 +104,13 @@ if [ -z "$LAST_TAG" ]; then
     log_warn "No previous release tag found. Changelog will include all commits."
     LAST_TAG=""
 fi
+# Sync CLI version to extension if they differ, so bump produces the same result for both.
+if [ "$OLD_VERSION" != "$OLD_CLI_VERSION" ]; then
+    log_step "Syncing CLI version from $OLD_CLI_VERSION to $OLD_VERSION before bump..."
+    cd cli
+    npm version "$OLD_VERSION" --no-git-tag-version
+    cd ..
+fi
 
 # 4. Bump versions (lockstep)
 log_step "Bumping version ($BUMP_TYPE)..."
