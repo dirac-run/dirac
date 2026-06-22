@@ -1,8 +1,9 @@
+import { isDev } from "@shared/config/environment"
 /**
  * Simple Logger utility for the extension's backend code.
  */
 export class Logger {
-    private static isVerbose = process.env.IS_DEV === "true"
+    private static isVerbose = isDev()
 
     private static subscribers: Set<(msg: string) => void> = new Set()
 

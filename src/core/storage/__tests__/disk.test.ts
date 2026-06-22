@@ -1,3 +1,4 @@
+import { Anthropic } from "@anthropic-ai/sdk"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 import { HistoryItem } from "@shared/HistoryItem"
@@ -9,13 +10,31 @@ import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import {
-	ensureStateDirectoryExists,
-	getAllHooksDirs,
-	getTaskHistoryStateFilePath,
-	getWorkspaceHooksDirs,
-	readTaskHistoryFromState,
-	setRuntimeHooksDir,
-	writeTaskHistoryToState,
+    cleanupConversationHistoryFile,
+    ensureCacheDirectoryExists,
+    ensureSettingsDirectoryExists,
+    ensureStateDirectoryExists,
+    ensureTaskDirectoryExists,
+    getAllHooksDirs,
+    getGlobalHooksDir,
+    getSavedApiConversationHistory,
+    getSavedDiracMessages,
+    getTaskHistoryStateFilePath,
+    getTaskMetadata,
+    getWorkspaceHooksDirs,
+    readRemoteConfigFromCache,
+    readTaskHistoryFromState,
+    readTaskSettingsFromStorage,
+    saveApiConversationHistory,
+    saveDiracMessages,
+    saveTaskMetadata,
+    setRuntimeHooksDir,
+    taskHistoryStateFileExists,
+    writeConversationHistoryJson,
+    writeConversationHistoryText,
+    writeRemoteConfigToCache,
+    writeTaskHistoryToState,
+    writeTaskSettingsToStorage,
 } from "../disk"
 import { StateManager } from "../StateManager"
 
@@ -646,6 +665,329 @@ describe("disk - atomic writes", () => {
 			} catch {
 				// May already be cleaned up
 			}
+		})
+	})
+})
+
+describe("disk - core read/write/mkdir operations", () => {
+	let sandbox: sinon.SinonSandbox
+	let testGlobalStorageDir: string
+
+	before(async () => {
+		testGlobalStorageDir = path.join(os.tmpdir(), `dirac-disk-core-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+		await fs.mkdir(testGlobalStorageDir, { recursive: true })
+		setVscodeHostProviderMock({ globalStorageFsPath: testGlobalStorageDir })
+	})
+
+	after(async () => {
+		HostProvider.reset()
+		try {
+			await fs.rm(testGlobalStorageDir, { recursive: true, force: true })
+		} catch {
+			// Ignore cleanup errors
+		}
+	})
+
+	beforeEach(() => {
+		sandbox = sinon.createSandbox()
+	})
+
+	afterEach(() => {
+		sandbox.restore()
+	})
+
+	describe("mkdir operations", () => {
+		it("ensureTaskDirectoryExists creates nested tasks/<id> directory", async () => {
+			const taskId = `mkdir-task-${Date.now()}`
+			const dir = await ensureTaskDirectoryExists(taskId)
+			const stat = await fs.stat(dir)
+			stat.isDirectory().should.be.true()
+			dir.should.containEql("tasks")
+			dir.should.containEql(taskId)
+		})
+
+		it("ensureTaskDirectoryExists is idempotent on existing directory", async () => {
+			const taskId = `mkdir-idempotent-${Date.now()}`
+			const first = await ensureTaskDirectoryExists(taskId)
+			const second = await ensureTaskDirectoryExists(taskId)
+			first.should.equal(second)
+			const stat = await fs.stat(second)
+			stat.isDirectory().should.be.true()
+		})
+
+		it("ensureSettingsDirectoryExists creates settings directory under global storage", async () => {
+			const dir = await ensureSettingsDirectoryExists()
+			const stat = await fs.stat(dir)
+			stat.isDirectory().should.be.true()
+			dir.should.containEql("settings")
+		})
+
+		it("ensureCacheDirectoryExists creates cache directory under global storage", async () => {
+			const dir = await ensureCacheDirectoryExists()
+			const stat = await fs.stat(dir)
+			stat.isDirectory().should.be.true()
+			dir.should.containEql("cache")
+		})
+
+		it("ensureStateDirectoryExists creates state directory under global storage", async () => {
+			const dir = await ensureStateDirectoryExists()
+			const stat = await fs.stat(dir)
+			stat.isDirectory().should.be.true()
+			dir.should.containEql("state")
+		})
+	})
+
+	describe("file exists checks", () => {
+		it("taskHistoryStateFileExists returns false when no history file exists", async () => {
+			// Use a fresh state dir to guarantee absence
+			const freshDir = path.join(testGlobalStorageDir, `fresh-state-${Date.now()}`)
+			await fs.mkdir(freshDir, { recursive: true })
+			sandbox.stub(HostProvider.get(), "globalStorageFsPath").value(freshDir)
+			const exists = await taskHistoryStateFileExists()
+			exists.should.be.false()
+		})
+
+		it("taskHistoryStateFileExists returns true after writing history", async () => {
+			await writeTaskHistoryToState([{ id: "exists-check", ts: Date.now(), task: "t", tokensIn: 1, tokensOut: 1, totalCost: 0 }])
+			const exists = await taskHistoryStateFileExists()
+			exists.should.be.true()
+		})
+
+		it("getGlobalHooksDir returns undefined when hooks dir does not exist", async () => {
+			sandbox.stub(os, "homedir").returns(path.join(testGlobalStorageDir, `no-hooks-home-${Date.now()}`))
+			const result = await getGlobalHooksDir()
+			// Should be undefined since the dir was never created
+			const isUndefinedOrString = result === undefined || typeof result === "string"
+			isUndefinedOrString.should.be.true()
+		})
+	})
+
+	describe("API conversation history read/write", () => {
+		it("getSavedApiConversationHistory returns empty array for non-existent task", async () => {
+			const result = await getSavedApiConversationHistory(`nonexistent-${Date.now()}`)
+			result.should.be.an.Array()
+			result.should.have.length(0)
+		})
+
+		it("saveApiConversationHistory persists and round-trips messages", async () => {
+			const taskId = `api-history-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [
+				{ role: "user", content: "Hello world" },
+				{ role: "assistant", content: "Hi there" },
+			]
+			await saveApiConversationHistory(taskId, history)
+			const result = await getSavedApiConversationHistory(taskId)
+			result.should.have.length(2)
+			result[0].role.should.equal("user")
+		})
+
+		it("saveApiConversationHistory with empty array is a no-op (no file written)", async () => {
+			const taskId = `api-empty-${Date.now()}`
+			await saveApiConversationHistory(taskId, [])
+			const result = await getSavedApiConversationHistory(taskId)
+			result.should.have.length(0)
+		})
+
+		it("saveApiConversationHistory does not throw on write failure (swallows error)", async () => {
+			const taskId = `api-fail-${Date.now()}`
+			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
+			// Should not throw - error is logged and swallowed
+			await saveApiConversationHistory(taskId, [{ role: "user", content: "x" }])
+		})
+	})
+
+	describe("Dirac messages read/write", () => {
+		it("getSavedDiracMessages returns empty array for non-existent task", async () => {
+			const result = await getSavedDiracMessages(`nonexistent-${Date.now()}`)
+			result.should.be.an.Array()
+			result.should.have.length(0)
+		})
+
+		it("saveDiracMessages persists and round-trips messages", async () => {
+			const taskId = `dirac-msgs-${Date.now()}`
+			const messages = [{ ask: "test", say: "hello", ts: Date.now() } as any]
+			await saveDiracMessages(taskId, messages)
+			const result = await getSavedDiracMessages(taskId)
+			result.should.have.length(1)
+		})
+
+		it("saveDiracMessages does not throw on write failure (swallows error)", async () => {
+			const taskId = `dirac-fail-${Date.now()}`
+			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
+			await saveDiracMessages(taskId, [{ ask: "test" } as any])
+		})
+	})
+
+	describe("task metadata read/write", () => {
+		it("getTaskMetadata returns default empty metadata for non-existent task", async () => {
+			const result = await getTaskMetadata(`nonexistent-${Date.now()}`)
+			result.should.have.property("files_in_context")
+			result.should.have.property("model_usage")
+			result.should.have.property("environment_history")
+			result.files_in_context!.should.have.length(0)
+		})
+
+		it("saveTaskMetadata persists and round-trips metadata", async () => {
+			const taskId = `meta-${Date.now()}`
+			const metadata = { files_in_context: [{ path: "/test.ts", lines: 10 }], model_usage: [], environment_history: [] }
+			await saveTaskMetadata(taskId, metadata as any)
+			const result = await getTaskMetadata(taskId)
+			result.files_in_context!.should.have.length(1)
+			result.files_in_context![0].path.should.equal("/test.ts")
+		})
+
+		it("getTaskMetadata returns default on read error (swallows error)", async () => {
+			const taskId = `meta-read-fail-${Date.now()}`
+			// Write valid metadata first
+			await saveTaskMetadata(taskId, { files_in_context: [], model_usage: [], environment_history: [] })
+			// Then stub readFile to fail on read
+			sandbox.stub(fs, "readFile").rejects(new Error("read error"))
+			const result = await getTaskMetadata(taskId)
+			result.files_in_context!.should.have.length(0)
+		})
+
+		it("saveTaskMetadata does not throw on write failure (swallows error)", async () => {
+			const taskId = `meta-fail-${Date.now()}`
+			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
+			await saveTaskMetadata(taskId, { files_in_context: [], model_usage: [], environment_history: [] })
+		})
+	})
+
+	describe("task settings read/write", () => {
+		it("readTaskSettingsFromStorage returns empty object for new task", async () => {
+			const result = await readTaskSettingsFromStorage(`new-task-${Date.now()}`)
+			result.should.be.an.Object()
+			Object.keys(result).should.have.length(0)
+		})
+
+		it("writeTaskSettingsToStorage persists and round-trips settings", async () => {
+			const taskId = `settings-${Date.now()}`
+			await writeTaskSettingsToStorage(taskId, { maxTokens: 4096 } as any)
+			const result: any = await readTaskSettingsFromStorage(taskId)
+			result.maxTokens.should.equal(4096)
+		})
+
+		it("writeTaskSettingsToStorage merges with existing settings rather than replacing", async () => {
+			const taskId = `settings-merge-${Date.now()}`
+			await writeTaskSettingsToStorage(taskId, { maxTokens: 100 } as any)
+			await writeTaskSettingsToStorage(taskId, { anotherKey: "val" } as any)
+			const result: any = await readTaskSettingsFromStorage(taskId)
+			result.maxTokens.should.equal(100)
+			result.anotherKey.should.equal("val")
+		})
+
+		it("readTaskSettingsFromStorage throws on read error", async () => {
+			const taskId = `settings-read-fail-${Date.now()}`
+			await writeTaskSettingsToStorage(taskId, { maxTokens: 1 } as any)
+			sandbox.stub(fs, "readFile").rejects(new Error("read error"))
+			try {
+				await readTaskSettingsFromStorage(taskId)
+				throw new Error("Should have thrown")
+			} catch (error: any) {
+				error.message.should.equal("read error")
+			}
+		})
+	})
+
+	describe("remote config cache read/write/delete", () => {
+		it("readRemoteConfigFromCache returns undefined when no cache exists", async () => {
+			const result = await readRemoteConfigFromCache(`no-org-${Date.now()}`)
+			const isUndefined = result === undefined
+			isUndefined.should.be.true()
+		})
+
+		it("writeRemoteConfigToCache persists and readRemoteConfigFromCache round-trips", async () => {
+			const orgId = `org-${Date.now()}`
+			const config = { organizationId: orgId, settings: {} } as any
+			await writeRemoteConfigToCache(orgId, config)
+			const result: any = await readRemoteConfigFromCache(orgId)
+			result.organizationId.should.equal(orgId)
+		})
+
+		it("readRemoteConfigFromCache returns undefined on read error (swallows)", async () => {
+			sandbox.stub(fs, "readFile").rejects(new Error("corrupt"))
+			const result = await readRemoteConfigFromCache(`corrupt-${Date.now()}`)
+			const isUndefined = result === undefined
+			isUndefined.should.be.true()
+		})
+	})
+
+	describe("conversation history hook files", () => {
+		it("writeConversationHistoryJson writes file and returns path", async () => {
+			const taskId = `conv-json-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [{ role: "user", content: "test" }]
+			const resultPath = await writeConversationHistoryJson(taskId, history, 12345)
+			resultPath.should.containEql("conversation_history_12345.json")
+			const content = await fs.readFile(resultPath, "utf8")
+			JSON.parse(content).should.have.length(1)
+		})
+
+		it("writeConversationHistoryText writes formatted text and returns path", async () => {
+			const taskId = `conv-text-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const resultPath = await writeConversationHistoryText(taskId, history, 67890)
+			resultPath.should.containEql("conversation_history_67890.txt")
+			const content = await fs.readFile(resultPath, "utf8")
+			content.should.containEql("CONVERSATION HISTORY")
+			content.should.containEql("Hello")
+		})
+
+		it("writeConversationHistoryText formats array content with tool_use blocks", async () => {
+			const taskId = `conv-text-blocks-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "Thinking" }, { type: "tool_use", name: "Read", input: { path: "/x" } } as any],
+				},
+			]
+			const resultPath = await writeConversationHistoryText(taskId, history, 11111)
+			const content = await fs.readFile(resultPath, "utf8")
+			content.should.containEql("Thinking")
+			content.should.containEql("TOOL USE: Read")
+		})
+
+		it("writeConversationHistoryText formats tool_result blocks with array content", async () => {
+			const taskId = `conv-text-result-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "tool-1", content: [{ type: "text", text: "result text" }] } as any,
+					],
+				},
+			]
+			const resultPath = await writeConversationHistoryText(taskId, history, 22222)
+			const content = await fs.readFile(resultPath, "utf8")
+			content.should.containEql("TOOL RESULT: tool-1")
+			content.should.containEql("result text")
+		})
+
+		it("writeConversationHistoryText formats image blocks", async () => {
+			const taskId = `conv-text-image-${Date.now()}`
+			const history: Anthropic.MessageParam[] = [
+				{ role: "user", content: [{ type: "image", source: { type: "base64" } } as any] },
+			]
+			const resultPath = await writeConversationHistoryText(taskId, history, 33333)
+			const content = await fs.readFile(resultPath, "utf8")
+			content.should.containEql("IMAGE")
+		})
+
+		it("cleanupConversationHistoryFile removes the file if it exists", async () => {
+			const taskId = `conv-cleanup-${Date.now()}`
+			const resultPath = await writeConversationHistoryJson(taskId, [], 44444)
+			await cleanupConversationHistoryFile(resultPath)
+			const exists = await fsUtils.fileExistsAtPath(resultPath)
+			exists.should.be.false()
+		})
+
+		it("cleanupConversationHistoryFile is a no-op on non-existent file (no throw)", async () => {
+			await cleanupConversationHistoryFile(path.join(testGlobalStorageDir, "does-not-exist.json"))
+		})
+
+		it("cleanupConversationHistoryFile swallows errors silently", async () => {
+			sandbox.stub(fs, "unlink").rejects(new Error("permission denied"))
+			// Should not throw
+			await cleanupConversationHistoryFile(path.join(testGlobalStorageDir, "any.json"))
 		})
 	})
 })

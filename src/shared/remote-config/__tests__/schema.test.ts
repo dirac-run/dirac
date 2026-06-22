@@ -10,6 +10,7 @@ import {
     RemoteConfigSchema,
     S3AccessKeySettingsSchema,
 } from "../schema"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("Remote Config Schema", () => {
 	describe("EnterpriseTelemetry", () => {
@@ -246,7 +247,7 @@ describe("Remote Config Schema", () => {
 			const validSettings = {
 				models: [
 					{
-						id: "gpt-4",
+						id: TEST_MODEL_IDS.OPENAI,
 						temperature: 0.7,
 						isR1FormatRequired: true,
 						maxTokens: 4096,
@@ -256,7 +257,7 @@ describe("Remote Config Schema", () => {
 						supportsImages: true,
 					},
 					{
-						id: "gpt-3.5-turbo",
+						id: TEST_MODEL_IDS.OPENAI_GPT35,
 						temperature: 0.7,
 						maxTokens: 4096,
 						contextWindow: 16000,
@@ -294,7 +295,7 @@ describe("Remote Config Schema", () => {
 
 		it("should accept models with only id field", () => {
 			const settings = {
-				models: [{ id: "gpt-4" }],
+				models: [{ id: TEST_MODEL_IDS.OPENAI }],
 			}
 			expect(() => OpenAiCompatibleSchema.parse(settings)).to.not.throw()
 		})
@@ -314,7 +315,7 @@ describe("Remote Config Schema", () => {
 	describe("DiracSettingsSchema", () => {
 		it("should accept valid Dirac provider settings", () => {
 			const validSettings = {
-				models: [{ id: "claude-3-5-sonnet-20241022" }, { id: "claude-3-5-haiku-20241022" }],
+				models: [{ id: TEST_MODEL_IDS.ANTHROPIC_FULL }, { id: TEST_MODEL_IDS.ANTHROPIC_HAIKU }],
 			}
 			const result = DiracSettingsSchema.parse(validSettings)
 			expect(result).to.deep.equal(validSettings)
@@ -327,7 +328,7 @@ describe("Remote Config Schema", () => {
 
 		it("should accept models with only id field", () => {
 			const settings = {
-				models: [{ id: "claude-3-5-sonnet-20241022" }],
+				models: [{ id: TEST_MODEL_IDS.ANTHROPIC_FULL }],
 			}
 			expect(() => DiracSettingsSchema.parse(settings)).to.not.throw()
 		})
@@ -431,7 +432,7 @@ describe("Remote Config Schema", () => {
 				yoloModeAllowed: false,
 				providerSettings: {
 					OpenAiCompatible: {
-						models: [{ id: "gpt-4" }],
+						models: [{ id: TEST_MODEL_IDS.OPENAI }],
 						openAiBaseUrl: "https://api.openai.com/v1",
 						openAiHeaders: {},
 					},
@@ -473,7 +474,7 @@ describe("Remote Config Schema", () => {
 				version: "v1",
 				providerSettings: {
 					OpenAiCompatible: {
-						models: [{ id: "gpt-4" }, { id: "gpt-3.5-turbo" }],
+						models: [{ id: TEST_MODEL_IDS.OPENAI }, { id: TEST_MODEL_IDS.OPENAI_GPT35 }],
 						openAiBaseUrl: "https://api.openai.com/v1",
 					},
 				},
@@ -558,7 +559,7 @@ describe("Remote Config Schema", () => {
 					OpenAiCompatible: {
 						models: [
 							{
-								id: "gpt-4",
+								id: TEST_MODEL_IDS.OPENAI,
 								temperature: 0.7,
 								isR1FormatRequired: false,
 								maxTokens: 4096,
@@ -568,7 +569,7 @@ describe("Remote Config Schema", () => {
 								supportsImages: true,
 							},
 							{
-								id: "gpt-3.5-turbo",
+								id: TEST_MODEL_IDS.OPENAI_GPT35,
 								temperature: 0.8,
 								isR1FormatRequired: false,
 								maxTokens: 4096,
@@ -609,7 +610,7 @@ describe("Remote Config Schema", () => {
 						awsBedrockEndpoint: "https://custom-bedrock.endpoint",
 					},
 					Dirac: {
-						models: [{ id: "claude-3-5-sonnet-20241022" }, { id: "claude-3-5-haiku-20241022" }],
+						models: [{ id: TEST_MODEL_IDS.ANTHROPIC_FULL }, { id: TEST_MODEL_IDS.ANTHROPIC_HAIKU }],
 					},
 					Vertex: {
 						models: [
@@ -621,7 +622,7 @@ describe("Remote Config Schema", () => {
 					},
 					Anthropic: {
 						models: [
-							{ id: "claude-3-5-sonnet-20241022" },
+							{ id: TEST_MODEL_IDS.ANTHROPIC_FULL },
 							{ id: "claude-3-5-sonnet-20241024", thinkingBudgetTokens: 1600 },
 						],
 						baseUrl: "https://example.dirac.run",
@@ -663,8 +664,8 @@ describe("Remote Config Schema", () => {
 
 			// Verify Dirac settings
 			expect(result.providerSettings?.Dirac?.models).to.have.lengthOf(2)
-			expect(result.providerSettings?.Dirac?.models?.[0].id).to.equal("claude-3-5-sonnet-20241022")
-			expect(result.providerSettings?.Dirac?.models?.[1].id).to.equal("claude-3-5-haiku-20241022")
+			expect(result.providerSettings?.Dirac?.models?.[0].id).to.equal(TEST_MODEL_IDS.ANTHROPIC_FULL)
+			expect(result.providerSettings?.Dirac?.models?.[1].id).to.equal(TEST_MODEL_IDS.ANTHROPIC_HAIKU)
 
 			// Verify Vertex settings
 			expect(result.providerSettings?.Vertex?.models).to.have.lengthOf(2)
@@ -676,7 +677,7 @@ describe("Remote Config Schema", () => {
 			expect(result.providerSettings?.Vertex?.vertexRegion).to.equal("us-central1")
 
 			expect(result.providerSettings?.Anthropic?.models).to.have.lengthOf(2)
-			expect(result.providerSettings?.Anthropic?.models?.[0].id).to.equal("claude-3-5-sonnet-20241022")
+			expect(result.providerSettings?.Anthropic?.models?.[0].id).to.equal(TEST_MODEL_IDS.ANTHROPIC_FULL)
 			expect(result.providerSettings?.Anthropic?.models?.[0].thinkingBudgetTokens).to.be.undefined
 			expect(result.providerSettings?.Anthropic?.models?.[1].id).to.equal("claude-3-5-sonnet-20241024")
 			expect(result.providerSettings?.Anthropic?.models?.[1].thinkingBudgetTokens).to.equal(1600)

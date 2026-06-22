@@ -9,12 +9,13 @@ import { ConsoleLogRecordExporter, LogRecordExporter } from "@opentelemetry/sdk-
 import { ConsoleMetricExporter, MetricReader, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
 import { Logger } from "@/shared/services/Logger"
 import { wrapLogsExporterWithDiagnostics, wrapMetricsExporterWithDiagnostics } from "./otel-exporter-diagnostics"
+import { isDev } from "@shared/config/environment"
 
 /**
  * Check if debug diagnostics are enabled
  */
 function isDebugEnabled(): boolean {
-	return process.env.TEL_DEBUG_DIAGNOSTICS === "true" || process.env.IS_DEV === "true"
+	return process.env.TEL_DEBUG_DIAGNOSTICS === "true" || isDev()
 }
 
 /**

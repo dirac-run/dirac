@@ -19,6 +19,7 @@ import {
     DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 import { convertToAnthropicMessage, convertToOpenAiMessages } from "../openai-format"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("Tool Call Parsing", () => {
 	describe("convertToOpenAiMessages - Tool Calls", () => {
@@ -222,7 +223,7 @@ describe("Tool Call Parsing", () => {
 				id: "chatcmpl-123",
 				object: "chat.completion",
 				created: Date.now(),
-				model: "gpt-4o",
+				model: TEST_MODEL_IDS.OPENAI_GPT4O,
 				choices: [
 					{
 						index: 0,
@@ -246,7 +247,7 @@ describe("Tool Call Parsing", () => {
 
 			result.id.should.equal("chatcmpl-123")
 			result.role.should.equal("assistant")
-			result.model.should.equal("gpt-4o")
+			result.model.should.equal(TEST_MODEL_IDS.OPENAI_GPT4O)
 			result.stop_reason!.should.equal("end_turn")
 			result.usage.input_tokens.should.equal(10)
 			result.usage.output_tokens.should.equal(5)
@@ -261,7 +262,7 @@ describe("Tool Call Parsing", () => {
 				id: "chatcmpl-456",
 				object: "chat.completion",
 				created: Date.now(),
-				model: "gpt-4o",
+				model: TEST_MODEL_IDS.OPENAI_GPT4O,
 				choices: [
 					{
 						index: 0,
@@ -305,7 +306,7 @@ describe("Tool Call Parsing", () => {
 				id: "chatcmpl-789",
 				object: "chat.completion",
 				created: Date.now(),
-				model: "gpt-4o",
+				model: TEST_MODEL_IDS.OPENAI_GPT4O,
 				choices: [
 					{
 						index: 0,

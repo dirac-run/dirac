@@ -4,6 +4,7 @@ import fs from "fs/promises"
 import path from "path"
 import sinon from "sinon"
 import { setDistinctId } from "@/services/logging/distinctId"
+import { HookRegistry } from "../HookRegistry"
 import { HookFactory } from "../hook-factory"
 import { createHookTestEnv, HookTestEnv, stubHookDirs, withPlatform, writeHookScriptForPlatform } from "./test-utils"
 
@@ -297,7 +298,7 @@ console.log(JSON.stringify({
 			await fs.writeFile(ps1Path, "Write-Output '{\"cancel\":false}'")
 
 			const found = await withPlatform("win32", async () => {
-				return await HookFactory.findHookInHooksDir("PreToolUse", hooksDir)
+				return await HookRegistry.findHookInHooksDir("PreToolUse", hooksDir)
 			})
 
 			should.exist(found)
@@ -315,7 +316,7 @@ console.log(JSON.stringify({
 			await fs.writeFile(ps1Path, "Write-Output '{\"cancel\":false}'")
 
 			const found = await withPlatform("win32", async () => {
-				return await HookFactory.findHookInHooksDir("PreToolUse", hooksDir)
+				return await HookRegistry.findHookInHooksDir("PreToolUse", hooksDir)
 			})
 
 			should.exist(found)
@@ -331,7 +332,7 @@ console.log(JSON.stringify({
 			await fs.writeFile(ps1Path, "Write-Output '{\"cancel\":false}'")
 
 			const found = await withPlatform("linux", async () => {
-				return await HookFactory.findHookInHooksDir("PreToolUse", hooksDir)
+				return await HookRegistry.findHookInHooksDir("PreToolUse", hooksDir)
 			})
 
 			should.not.exist(found)

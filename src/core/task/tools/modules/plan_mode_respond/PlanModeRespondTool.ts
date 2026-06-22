@@ -6,7 +6,7 @@ import { DiracPlanModeResponse } from "@shared/proto/dirac/ui"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import { parsePartialArrayString } from "@shared/array"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { telemetryService } from "@/services/telemetry"
 import { getTaskCompletionTelemetry } from "../../utils"
@@ -67,7 +67,7 @@ export class PlanModeRespondTool implements IDiracTool {
 		const options = parsePartialArrayString(optionsRaw || "[]")
 		const sharedMessage = { response, options, selected: "" } satisfies DiracPlanModeResponse
 
-		const actModeSwitchResult = await this.handleActModeSwitch(sharedMessage, env)
+		const actModeSwitchResult = await this.switchToActMode(sharedMessage, env)
 		if (actModeSwitchResult) return actModeSwitchResult
 
 		env.orchestration.setTaskState("isAwaitingPlanResponse", true)
@@ -86,7 +86,7 @@ export class PlanModeRespondTool implements IDiracTool {
 
 		const userText = text === PLAN_MODE_TOGGLE_SENTINEL ? "" : (text ?? "")
 
-		await this.handleUserResponse(userText, images, planResponseFiles, options, sharedMessage, env)
+		await this.promptUserDecision(userText, images, planResponseFiles, options, sharedMessage, env)
 
 		const fileContentString = planResponseFiles && planResponseFiles.length > 0 ? await processFilesIntoText(planResponseFiles) : ""
 
@@ -118,7 +118,7 @@ export class PlanModeRespondTool implements IDiracTool {
 		return formatResponse.toolResult(`<user_message>\n${userText}\n</user_message>`, images, fileContentString)
 	}
 
-	private async handleActModeSwitch(sharedMessage: DiracPlanModeResponse, env: IToolEnvironment): Promise<any | null> {
+	private async switchToActMode(sharedMessage: DiracPlanModeResponse, env: IToolEnvironment): Promise<any | null> {
 		if (env.config.mode !== "plan" || !env.config.yoloModeToggled) {
 			return null
 		}
@@ -130,7 +130,7 @@ export class PlanModeRespondTool implements IDiracTool {
 		return formatResponse.toolResult(`[The user has switched to ACT MODE, so you may now proceed with the task.]`)
 	}
 
-	private async handleUserResponse(
+	private async promptUserDecision(
 		text: string,
 		images: string[] | undefined,
 		planResponseFiles: string[] | undefined,

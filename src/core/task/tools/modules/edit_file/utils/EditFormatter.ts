@@ -1,6 +1,6 @@
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { formatLineWithHash, getDelimiter } from "@utils/line-hashing"
-import { ToolResponse } from "../../../../index"
+import type { ToolResponse } from "../../../types/ToolResponse"
 import { EditExecutor } from "./EditExecutor"
 import { AppliedEdit, PreparedEdits } from "../types"
 

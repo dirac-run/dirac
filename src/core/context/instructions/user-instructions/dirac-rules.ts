@@ -6,14 +6,13 @@ import {
     RuleLoadResultWithInstructions,
     synchronizeRuleToggles,
 } from "@core/context/instructions/user-instructions/rule-helpers"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { ensureRulesDirectoryExists, GlobalFileNames } from "@core/storage/disk"
 import { StateManager } from "@core/storage/StateManager"
 import { DiracRulesToggles } from "@shared/dirac-rules"
 import { fileExistsAtPath, isDirectory, readDirectory } from "@utils/fs"
 import fs from "fs/promises"
 import path from "path"
-import { Controller } from "@/core/controller"
 import { Logger } from "@/shared/services/Logger"
 import { parseYamlFrontmatter } from "@utils/frontmatter"
 import { evaluateRuleConditionals, type RuleEvaluationContext } from "./rule-conditionals"
@@ -146,27 +145,27 @@ export const getLocalDiracRules = async (
 }
 
 export async function refreshDiracRulesToggles(
-	controller: Controller,
+	stateManager: StateManager,
 	workingDirectory: string,
 ): Promise<{
 	globalToggles: DiracRulesToggles
 	localToggles: DiracRulesToggles
 }> {
 	// Global toggles
-	const globalDiracRulesToggles = controller.stateManager.getGlobalSettingsKey("globalDiracRulesToggles")
+	const globalDiracRulesToggles = stateManager.getGlobalSettingsKey("globalDiracRulesToggles")
 	const globalDiracRulesFilePath = await ensureRulesDirectoryExists()
 	const updatedGlobalToggles = await synchronizeRuleToggles(globalDiracRulesFilePath, globalDiracRulesToggles)
-	controller.stateManager.setGlobalState("globalDiracRulesToggles", updatedGlobalToggles)
+	stateManager.setGlobalState("globalDiracRulesToggles", updatedGlobalToggles)
 
 	// Local toggles
-	const localDiracRulesToggles = controller.stateManager.getWorkspaceStateKey("localDiracRulesToggles")
+	const localDiracRulesToggles = stateManager.getWorkspaceStateKey("localDiracRulesToggles")
 	const localDiracRulesFilePath = path.resolve(workingDirectory, GlobalFileNames.diracRules)
 	const updatedLocalToggles = await synchronizeRuleToggles(localDiracRulesFilePath, localDiracRulesToggles, "", [
 		[".diracrules", "workflows"],
 		[".diracrules", "hooks"],
 		[".diracrules", "skills"],
 	])
-	controller.stateManager.setWorkspaceState("localDiracRulesToggles", updatedLocalToggles)
+	stateManager.setWorkspaceState("localDiracRulesToggles", updatedLocalToggles)
 
 	return {
 		globalToggles: updatedGlobalToggles,

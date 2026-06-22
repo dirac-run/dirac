@@ -1,4 +1,5 @@
 import type { FeatureFlagPayload } from "@/services/feature-flags/providers/IFeatureFlagsProvider"
+import { isDev, isE2E } from "@shared/config/environment"
 
 export enum FeatureFlag {
 	WEBTOOLS = "webtools",
@@ -24,10 +25,10 @@ export enum FeatureFlag {
 export const FeatureFlagDefaultValue: Partial<Record<FeatureFlag, FeatureFlagPayload>> = {
 	[FeatureFlag.WEBTOOLS]: false,
 	[FeatureFlag.WORKTREES]: false,
-	[FeatureFlag.ONBOARDING_MODELS]: process.env.E2E_TEST === "true" ? { models: {} } : undefined,
-	[FeatureFlag.REMOTE_BANNERS]: process.env.E2E_TEST === "true" || process.env.IS_DEV === "true",
+	[FeatureFlag.ONBOARDING_MODELS]: isE2E() ? { models: {} } : undefined,
+	[FeatureFlag.REMOTE_BANNERS]: isE2E() || isDev(),
 	[FeatureFlag.EXTENSION_REMOTE_BANNERS_TTL]: 24 * 60 * 60 * 1000,
-	[FeatureFlag.REMOTE_WELCOME_BANNERS]: process.env.E2E_TEST === "true" || process.env.IS_DEV === "true",
+	[FeatureFlag.REMOTE_WELCOME_BANNERS]: isE2E() || isDev(),
 	[FeatureFlag.DIRAC_RECOMMENDED_MODELS_UPSTREAM]: false,
 	[FeatureFlag.EXTENSION_DIRAC_MODELS_ENDPOINT]: false,
 	[FeatureFlag.OPENAI_RESPONSES_WEBSOCKET_MODE]: false,

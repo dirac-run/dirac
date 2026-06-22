@@ -186,7 +186,7 @@ async function generateVscodeClientFile(hostServices) {
 		clientImplementations.push(generateVscodeClientImplementation(name, serviceDefinition))
 
 		handlerMap.push(`	"host.${serviceName}": {
-		requestHandler: ${name}ServiceRegistry.handleRequest,
+		requestHandler: ${name}ServiceRegistry.dispatchGrpcMethod,
 		streamingHandler: ${name}ServiceRegistry.handleStreamingRequest,
 	},`)
 	}

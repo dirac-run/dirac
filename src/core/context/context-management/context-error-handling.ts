@@ -71,7 +71,7 @@ function checkIsCerebrasContextWindowError(response: any): boolean {
 		const status = response?.status ?? response?.code ?? response?.error?.status ?? response?.response?.status
 		const message: string = String(response?.message || response?.error?.message || "")
 
-		return String(status) === "400" && message.includes("Please reduce the length of the messages or completion")
+		return status === 400 && message.includes("Please reduce the length of the messages or completion")
 	} catch {
 		return false
 	}
@@ -143,7 +143,7 @@ export function checkIsVercelContextWindowError(error: any): boolean {
 		}
 
 		// Must be a 400 error OR have 400 embedded in error_message (Alibaba Qwen case)
-		const hasValidStatus = String(status) === "400"
+		const hasValidStatus = status === 400
 		const errorMessage = error?.error?.value?.error_message
 		const has400InMessage =
 			errorMessage &&

@@ -4,18 +4,6 @@ import type { ApiHandlerSettings } from "./storage/state-keys"
 // All 50+ consumer files import from "@shared/api" — this barrel keeps them working.
 export * from "./api/models"
 
-// Types and interfaces from the models sub-package that need to be re-exported as types
-export type {
-	ModelCapabilities,
-	ModelInfo,
-	PriceTier,
-	OpenAiCompatibleProfile,
-	OpenAiCompatibleModelInfo,
-	OcaModelInfo,
-	LiteLLMModelInfo,
-	BasetenModelInfo,
-} from "./api/models"
-
 /**
  * Strips the OpenRouter preset suffix from a model ID.
  * Example: "anthropic/claude-3.5-sonnet@preset/my-preset" -> "anthropic/claude-3.5-sonnet"
@@ -115,6 +103,7 @@ export const ALL_PROVIDERS: ApiProvider[] = [
 export const DEFAULT_API_PROVIDER = "openrouter" as ApiProvider
 
 export interface ApiHandlerOptions extends Partial<ApiHandlerSettings> {
+	apiProvider?: ApiProvider // Runtime provider selection (not persisted in settings)
 	ulid?: string // Used to identify the task in API requests
 	geminiSearchEnabled?: boolean
 
@@ -129,34 +118,34 @@ export type ApiConfiguration = ApiHandlerOptions
 
 import type { ModelInfo } from "./api/models"
 import {
-	anthropicModels,
-	claudeCodeModels,
-	bedrockModels,
-	vertexModels,
-	geminiModels,
-	openAiNativeModels,
-	openAiCodexModels,
-	deepSeekModels,
-	huggingFaceModels,
-	internationalQwenModels,
-	mainlandQwenModels,
-	doubaoModels,
-	mistralModels,
-	nebiusModels,
-	wandbModels,
-	xaiModels,
-	sambanovaModels,
-	cerebrasModels,
-	groqModels,
-	moonshotModels,
-	huaweiCloudMaasModels,
-	basetenModels,
-	internationalZAiModels,
-	mainlandZAiModels,
-	fireworksModels,
-	qwenCodeModels,
-	minimaxModels,
-	nousResearchModels,
+    anthropicModels,
+    basetenModels,
+    bedrockModels,
+    cerebrasModels,
+    claudeCodeModels,
+    deepSeekModels,
+    doubaoModels,
+    fireworksModels,
+    geminiModels,
+    groqModels,
+    huaweiCloudMaasModels,
+    huggingFaceModels,
+    internationalQwenModels,
+    internationalZAiModels,
+    mainlandQwenModels,
+    mainlandZAiModels,
+    minimaxModels,
+    mistralModels,
+    moonshotModels,
+    nebiusModels,
+    nousResearchModels,
+    openAiCodexModels,
+    openAiNativeModels,
+    qwenCodeModels,
+    sambanovaModels,
+    vertexModels,
+    wandbModels,
+    xaiModels,
 } from "./api/models"
 
 /**

@@ -29,16 +29,13 @@ export async function deleteRuleFile(controller: Controller, request: RuleFileRe
 		throw new Error("Missing or invalid parameters")
 	}
 
-	const result = await deleteRuleFileImpl(controller, request.rulePath, request.isGlobal, request.type)
+	const result = await deleteRuleFileImpl(controller.stateManager, request.rulePath, request.isGlobal, request.type)
 
 	if (!result.success) {
 		throw new Error(result.message || "Failed to delete rule file")
 	}
 
 	// we refresh inside of the deleteRuleFileImpl(..) call
-	//await refreshDiracRulesToggles(controller.context, cwd)
-	//await refreshExternalRulesToggles(controller.context, cwd)
-	//await refreshWorkflowToggles(controller.context, cwd)
 	await controller.postStateToWebview()
 
 	const fileName = getWorkspaceBasename(request.rulePath, "Controller.deleteRuleFile")

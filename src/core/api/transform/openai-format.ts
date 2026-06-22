@@ -2,13 +2,14 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { ApiProvider } from "@/shared/api"
 import {
-	DiracAssistantRedactedThinkingBlock,
-	DiracAssistantThinkingBlock,
-	DiracAssistantToolUseBlock,
-	DiracImageContentBlock,
-	DiracStorageMessage,
-	DiracTextContentBlock,
-	DiracUserToolResultContentBlock,
+    DiracAssistantRedactedThinkingBlock,
+    DiracAssistantThinkingBlock,
+    DiracAssistantToolUseBlock,
+    DiracContent,
+    DiracImageContentBlock,
+    DiracStorageMessage,
+    DiracTextContentBlock,
+    DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
 
@@ -54,6 +55,177 @@ function transformToolCallIdForNativeApi(toolId: string, provider?: ApiProvider)
 	return toolId
 }
 
+// Builds an image_url object from a Dirac image content block.
+function imageBlockToImageUrl(part: DiracImageContentBlock): { type: "image_url"; image_url: { url: string } } {
+	// source is a discriminated union (base64 | url); narrow by type to read the right field.
+	const url = part.source.type === "base64" ? `data:${part.source.media_type};base64,${part.source.data}` : part.source.url
+	return { type: "image_url", image_url: { url } }
+}
+
+// Converts a single tool_result block's content to a string, deferring images to a separate user message.
+function convertToolResultContent(
+	toolMessage: DiracUserToolResultContentBlock,
+	supportsImages: boolean,
+	deferredImages: DiracImageContentBlock[],
+): string {
+	if (typeof toolMessage.content === "string") return toolMessage.content
+	if (!Array.isArray(toolMessage.content)) return ""
+	return (
+		toolMessage.content
+			.map((part) => {
+				if (part.type === "image") {
+					if (supportsImages) deferredImages.push(part as DiracImageContentBlock)
+					return "(see following user message for image)"
+				}
+				return part.type === "text" ? part.text : ""
+			})
+			.join("\n") ?? ""
+	)
+}
+
+// Converts user-role array content: tool_results first, then deferred images, then non-tool blocks.
+function convertUserMessage(
+	content: DiracContent[],
+	provider: ApiProvider | undefined,
+	supportsImages: boolean,
+	openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
+): void {
+	const { nonToolMessages, toolMessages } = content.reduce<{
+		nonToolMessages: (DiracTextContentBlock | DiracImageContentBlock)[]
+		toolMessages: DiracUserToolResultContentBlock[]
+	}>(
+		(acc, part) => {
+			if (part.type === "tool_result") acc.toolMessages.push(part as DiracUserToolResultContentBlock)
+			else if (part.type === "text" || part.type === "image")
+				acc.nonToolMessages.push(part as DiracTextContentBlock | DiracImageContentBlock)
+			return acc
+		},
+		{ nonToolMessages: [], toolMessages: [] },
+	)
+
+	// Tool results must follow the tool use messages
+	const deferredImages: DiracImageContentBlock[] = []
+	for (const toolMessage of toolMessages) {
+		openAiMessages.push({
+			role: "tool",
+			tool_call_id: transformToolCallIdForNativeApi(toolMessage.tool_use_id, provider),
+			content: convertToolResultContent(toolMessage, supportsImages, deferredImages),
+		})
+	}
+
+	if (deferredImages.length > 0) {
+		openAiMessages.push({ role: "user", content: deferredImages.map(imageBlockToImageUrl) })
+	}
+
+	if (nonToolMessages.length > 0) {
+		openAiMessages.push({
+			role: "user",
+			content: nonToolMessages.map((part) => {
+				if (part.type === "image") return supportsImages ? imageBlockToImageUrl(part) : { type: "text", text: "[Image]" }
+				return { type: "text", text: part.text || "" }
+			}),
+		})
+	}
+}
+
+// Collects reasoning_details from text blocks and tool_use blocks matching a tool ID.
+function collectReasoningDetails(
+	nonToolMessages: DiracContent[],
+	toolMessages: DiracAssistantToolUseBlock[],
+): any[] {
+	const reasoningDetails: any[] = []
+	const isTextBlock = (part: any): part is DiracTextContentBlock => part.type === "text"
+	const isThinkingBlock = (part: any): part is DiracAssistantThinkingBlock => part.type === "thinking"
+
+	for (const part of nonToolMessages) {
+		if (isTextBlock(part) && part.reasoning_details) {
+			if (Array.isArray(part.reasoning_details)) reasoningDetails.push(...part.reasoning_details)
+			else reasoningDetails.push(part.reasoning_details)
+		}
+	}
+
+	for (const toolMessage of toolMessages) {
+		const toolDetails = toolMessage.reasoning_details
+		const toolId = toolMessage.id
+		if (!toolDetails) continue
+		if (Array.isArray(toolDetails)) {
+			const validDetails = toolDetails.filter((detail: any) => detail?.id === toolId)
+			if (validDetails.length > 0) reasoningDetails.push(...validDetails)
+		} else if ((toolDetails as ReasoningDetail | undefined)?.id === toolId) {
+			reasoningDetails.push(toolDetails)
+		}
+	}
+
+	return reasoningDetails
+}
+
+// Converts assistant-role array content: text, thinking, tool_use, and reasoning_details.
+function convertAssistantMessage(
+	content: DiracContent[],
+	provider: ApiProvider | undefined,
+	openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
+): void {
+	const { nonToolMessages, toolMessages } = content.reduce<{
+		nonToolMessages: (
+			| DiracTextContentBlock
+			| DiracImageContentBlock
+			| DiracAssistantThinkingBlock
+			| DiracAssistantRedactedThinkingBlock
+		)[]
+		toolMessages: DiracAssistantToolUseBlock[]
+	}>(
+		(acc, part) => {
+			if (part.type === "tool_use") acc.toolMessages.push(part as DiracAssistantToolUseBlock)
+			else if (
+				part.type === "text" ||
+				part.type === "image" ||
+				part.type === "thinking" ||
+				part.type === "redacted_thinking"
+			) {
+				acc.nonToolMessages.push(
+					part as
+						| DiracTextContentBlock
+						| DiracImageContentBlock
+						| DiracAssistantThinkingBlock
+						| DiracAssistantRedactedThinkingBlock,
+				)
+			}
+			return acc
+		},
+		{ nonToolMessages: [], toolMessages: [] },
+	)
+
+	const contentText =
+		nonToolMessages.length > 0
+			? nonToolMessages
+					.map((part) =>
+						part.type === "text" && (part as DiracTextContentBlock).text ? (part as DiracTextContentBlock).text : "",
+					)
+					.join("\n")
+			: undefined
+
+	const tool_calls: OpenAI.Chat.ChatCompletionMessageToolCall[] = toolMessages.map((toolMessage) => ({
+		id: transformToolCallIdForNativeApi(toolMessage.id, provider),
+		type: "function" as const,
+		function: { name: toolMessage.name, arguments: JSON.stringify(toolMessage.input) },
+	}))
+
+	const hasToolCalls = tool_calls.length > 0
+	const hasMeaningfulContent = contentText !== undefined && contentText.trim() !== ""
+	const finalContent = hasMeaningfulContent ? contentText : hasToolCalls ? null : ""
+
+	const reasoningDetails = collectReasoningDetails(nonToolMessages, toolMessages)
+	const consolidatedReasoningDetails = reasoningDetails.length > 0 ? consolidateReasoningDetails(reasoningDetails) : []
+
+	openAiMessages.push({
+		role: "assistant",
+		content: finalContent,
+		tool_calls: tool_calls.length > 0 ? tool_calls : undefined,
+		// @ts-expect-error
+		reasoning_details: consolidatedReasoningDetails.length > 0 ? consolidatedReasoningDetails : undefined,
+	})
+}
+
 /**
  * Converts an array of DiracStorageMessage objects to OpenAI's Completions API format.
  *
@@ -68,210 +240,19 @@ function transformToolCallIdForNativeApi(toolId: string, provider?: ApiProvider)
 export function convertToOpenAiMessages(
 	anthropicMessages: Omit<DiracStorageMessage, "modelInfo">[],
 	provider?: ApiProvider,
-	supportsImages: boolean = true,
+	supportsImages = true,
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
 	const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = []
 
 	for (const anthropicMessage of anthropicMessages) {
 		if (typeof anthropicMessage.content === "string") {
-			openAiMessages.push({
-				role: anthropicMessage.role,
-				content: anthropicMessage.content,
-			})
-		} else {
-			// image_url.url is base64 encoded image data
-			// ensure it contains the content-type of the image: data:image/png;base64,
-			if (anthropicMessage.role === "user") {
-				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
-					nonToolMessages: (DiracTextContentBlock | DiracImageContentBlock)[]
-					toolMessages: DiracUserToolResultContentBlock[]
-				}>(
-					(acc, part) => {
-						if (part.type === "tool_result") {
-							acc.toolMessages.push(part as DiracUserToolResultContentBlock)
-						} else if (part.type === "text" || part.type === "image") {
-							acc.nonToolMessages.push(part as DiracTextContentBlock | DiracImageContentBlock)
-						}
-						return acc
-					},
-					{ nonToolMessages: [], toolMessages: [] },
-				)
-
-				// Process tool result messages FIRST since they must follow the tool use messages
-				const toolResultImages: DiracImageContentBlock[] = []
-				toolMessages.forEach((toolMessage) => {
-					let content: string
-
-					if (typeof toolMessage.content === "string") {
-						content = toolMessage.content
-					} else if (Array.isArray(toolMessage.content)) {
-						content =
-							toolMessage.content
-								?.map((part) => {
-									if (part.type === "image") {
-										if (supportsImages) {
-											toolResultImages.push(part as DiracImageContentBlock)
-										}
-										return "(see following user message for image)"
-									}
-									return part.type === "text" ? part.text : ""
-								})
-								.join("\n") ?? ""
-					} else {
-						content = ""
-					}
-					openAiMessages.push({
-						role: "tool",
-						tool_call_id: transformToolCallIdForNativeApi(toolMessage.tool_use_id, provider),
-						content: content,
-					})
-				})
-
-				if (toolResultImages.length > 0) {
-					openAiMessages.push({
-						role: "user",
-						content: toolResultImages.map((part) => ({
-							type: "image_url",
-							image_url: {
-								url:
-									part.source.type === "base64"
-										? `data:${part.source.media_type};base64,${part.source.data}`
-										: (part.source as any).url,
-							},
-						})),
-					})
-				}
-
-				// Process non-tool messages
-				if (nonToolMessages.length > 0) {
-					openAiMessages.push({
-						role: "user",
-						content: nonToolMessages.map((part) => {
-							if (part.type === "image") {
-								if (supportsImages) {
-									return {
-										type: "image_url",
-										image_url: {
-											url:
-												part.source.type === "base64"
-													? `data:${part.source.media_type};base64,${part.source.data}`
-													: (part.source as any).url,
-										},
-									}
-								} else {
-									return { type: "text", text: "[Image]" }
-								}
-							}
-							return { type: "text", text: part.text || "" }
-						}),
-					})
-				}
-			} else if (anthropicMessage.role === "assistant") {
-				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
-					nonToolMessages: (
-						| DiracTextContentBlock
-						| DiracImageContentBlock
-						| DiracAssistantThinkingBlock
-						| DiracAssistantRedactedThinkingBlock
-					)[]
-					toolMessages: DiracAssistantToolUseBlock[]
-				}>(
-					(acc, part) => {
-						if (part.type === "tool_use") {
-							acc.toolMessages.push(part as DiracAssistantToolUseBlock)
-						} else if (
-							part.type === "text" ||
-							part.type === "image" ||
-							part.type === "thinking" ||
-							part.type === "redacted_thinking"
-						) {
-							acc.nonToolMessages.push(
-								part as
-									| DiracTextContentBlock
-									| DiracImageContentBlock
-									| DiracAssistantThinkingBlock
-									| DiracAssistantRedactedThinkingBlock,
-							)
-						}
-						return acc
-					},
-					{ nonToolMessages: [], toolMessages: [] },
-				)
-
-				// Process non-tool messages
-				let content: string | undefined
-				const reasoningDetails: any[] = []
-				const thinkingBlock: DiracAssistantThinkingBlock[] = []
-
-				const isTextBlock = (part: any): part is DiracTextContentBlock => part.type === "text"
-				const isThinkingBlock = (part: any): part is DiracAssistantThinkingBlock => part.type === "thinking"
-
-				if (nonToolMessages.length > 0) {
-					nonToolMessages.forEach((part) => {
-						if (isTextBlock(part) && part.reasoning_details) {
-							if (Array.isArray(part.reasoning_details)) {
-								reasoningDetails.push(...part.reasoning_details)
-							} else {
-								reasoningDetails.push(part.reasoning_details)
-							}
-						}
-						if (isThinkingBlock(part) && part.thinking) {
-							thinkingBlock.push(part)
-						}
-					})
-					content = nonToolMessages
-						.map((part) => {
-							if (part.type === "text" && part.text) {
-								return part.text
-							}
-							return ""
-						})
-						.join("\n")
-				}
-
-				// Process tool use messages
-				const tool_calls: OpenAI.Chat.ChatCompletionMessageToolCall[] = toolMessages.map((toolMessage) => {
-					const toolDetails = toolMessage.reasoning_details
-					const toolId = toolMessage.id
-					if (toolDetails) {
-						if (Array.isArray(toolDetails)) {
-							const validDetails = toolDetails.filter((detail: any) => detail?.id === toolId)
-							if (validDetails.length > 0) {
-								reasoningDetails.push(...validDetails)
-							}
-						} else {
-							const detail = toolDetails as any
-							if (detail?.id === toolId) {
-								reasoningDetails.push(toolDetails)
-							}
-						}
-					}
-
-					return {
-						id: transformToolCallIdForNativeApi(toolId, provider),
-						type: "function",
-						function: {
-							name: toolMessage.name,
-							arguments: JSON.stringify(toolMessage.input),
-						},
-					}
-				})
-
-				const hasToolCalls = tool_calls.length > 0
-				const hasMeaningfulContent = content !== undefined && content.trim() !== ""
-				const finalContent = hasMeaningfulContent ? content : hasToolCalls ? null : ""
-
-				const consolidatedReasoningDetails =
-					reasoningDetails.length > 0 ? consolidateReasoningDetails(reasoningDetails as any) : []
-
-				openAiMessages.push({
-					role: "assistant",
-					content: finalContent,
-					tool_calls: tool_calls?.length > 0 ? tool_calls : undefined,
-					// @ts-expect-error
-					reasoning_details: consolidatedReasoningDetails.length > 0 ? consolidatedReasoningDetails : undefined,
-				})
-			}
+			openAiMessages.push({ role: anthropicMessage.role, content: anthropicMessage.content })
+			continue
+		}
+		if (anthropicMessage.role === "user") {
+			convertUserMessage(anthropicMessage.content, provider, supportsImages, openAiMessages)
+		} else if (anthropicMessage.role === "assistant") {
+			convertAssistantMessage(anthropicMessage.content, provider, openAiMessages)
 		}
 	}
 
@@ -402,14 +383,13 @@ export function convertToAnthropicMessage(completion: OpenAI.Chat.Completions.Ch
 		usage: {
 			input_tokens: completion.usage?.prompt_tokens || 0,
 			output_tokens: completion.usage?.completion_tokens || 0,
-			cache_creation_input_tokens: undefined,
-			cache_read_input_tokens: undefined,
-			cache_creation: undefined,
-			cache_read: undefined,
-			inference_geo: undefined,
-			server_tool_use: undefined,
-			service_tier: undefined,
-		} as any,
+			cache_creation_input_tokens: null,
+			cache_read_input_tokens: null,
+			cache_creation: null,
+			inference_geo: null,
+			server_tool_use: null,
+			service_tier: null,
+		},
 	}
 	try {
 		if (openAiMessage?.tool_calls?.length) {
@@ -428,7 +408,7 @@ export function convertToAnthropicMessage(completion: OpenAI.Chat.Completions.Ch
 							id: toolCall.id,
 							name: toolCall.function?.name || UNIQUE_ERROR_TOOL_NAME,
 							input: parsedInput,
-							caller: null as any,
+							caller: { type: "direct" },
 						}
 					}),
 				)
@@ -449,15 +429,20 @@ export function sanitizeGeminiMessages(
 		return messages
 	}
 
+	// OpenRouter adds a non-standard reasoning_details field to assistant messages.
+	type AssistantMessageWithReasoning = OpenAI.Chat.ChatCompletionAssistantMessageParam & {
+		reasoning_details?: unknown[]
+	}
+
 	const droppedToolCallIds = new Set<string>()
 	const sanitized: OpenAI.Chat.ChatCompletionMessageParam[] = []
 
 	for (const msg of messages) {
 		if (msg.role === "assistant") {
-			const anyMsg = msg as any
-			const toolCalls = anyMsg.tool_calls
+			const assistantMsg = msg as AssistantMessageWithReasoning
+			const toolCalls = assistantMsg.tool_calls
 			if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-				const reasoningDetails = anyMsg.reasoning_details
+				const reasoningDetails = assistantMsg.reasoning_details
 				const hasReasoningDetails = Array.isArray(reasoningDetails) && reasoningDetails.length > 0
 				if (!hasReasoningDetails) {
 					for (const tc of toolCalls) {
@@ -465,8 +450,8 @@ export function sanitizeGeminiMessages(
 							droppedToolCallIds.add(tc.id)
 						}
 					}
-					if (anyMsg.content) {
-						sanitized.push({ role: "assistant", content: anyMsg.content } as any)
+					if (assistantMsg.content) {
+						sanitized.push({ role: "assistant", content: assistantMsg.content })
 					}
 					continue
 				}
@@ -474,8 +459,7 @@ export function sanitizeGeminiMessages(
 		}
 
 		if (msg.role === "tool") {
-			const anyMsg = msg as any
-			if (anyMsg.tool_call_id && droppedToolCallIds.has(anyMsg.tool_call_id)) {
+			if (msg.tool_call_id && droppedToolCallIds.has(msg.tool_call_id)) {
 				continue
 			}
 		}

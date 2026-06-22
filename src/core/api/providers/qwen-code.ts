@@ -212,62 +212,35 @@ export class QwenCodeHandler implements ApiHandler {
 			const delta = apiChunk.choices[0]?.delta ?? {}
 
 			if (delta.content) {
-				let newText = delta.content
-				if (newText.startsWith(fullContent)) {
-					newText = newText.substring(fullContent.length)
-				}
+				const newText = delta.content.startsWith(fullContent) ? delta.content.substring(fullContent.length) : delta.content
 				fullContent = delta.content
-
-				if (newText) {
-					// Check for thinking blocks
-					if (newText.includes("<think>") || newText.includes("</think>")) {
-						// Simple parsing for thinking blocks
-						const parts = newText.split(/<\/?think>/g)
-						for (let i = 0; i < parts.length; i++) {
-							if (parts[i]) {
-								if (i % 2 === 0) {
-									// Outside thinking block
-									yield {
-										type: "text",
-										text: parts[i],
-									}
-								} else {
-									// Inside thinking block
-									yield {
-										type: "reasoning",
-										reasoning: parts[i],
-									}
-								}
-							}
-						}
-					} else {
-						yield {
-							type: "text",
-							text: newText,
-						}
-					}
-				}
+				yield* this.parseQwenContent(newText)
 			}
 
-			if (delta?.tool_calls) {
-				yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
-			}
+			if (delta?.tool_calls) yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
 
-			// Handle reasoning content (o1-style)
 			if ("reasoning_content" in delta && delta.reasoning_content) {
-				yield {
-					type: "reasoning",
-					reasoning: (delta.reasoning_content as string | undefined) || "",
-				}
+				yield { type: "reasoning", reasoning: (delta.reasoning_content as string | undefined) || "" }
 			}
 
 			if (apiChunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
-				}
+				yield { type: "usage", inputTokens: apiChunk.usage.prompt_tokens || 0, outputTokens: apiChunk.usage.completion_tokens || 0 }
 			}
+		}
+	}
+
+	// Parses Qwen content that may contain <think> blocks. Even-indexed parts are text,
+	// odd-indexed parts are reasoning. Falls back to plain text if no think tags present.
+	private *parseQwenContent(newText: string): Generator<any> {
+		if (!newText) return
+		if (!newText.includes("<think>") && !newText.includes("</think>")) {
+			yield { type: "text", text: newText }
+			return
+		}
+		const parts = newText.split(/<\/?think>/g)
+		for (let i = 0; i < parts.length; i++) {
+			if (!parts[i]) continue
+			yield i % 2 === 0 ? { type: "text", text: parts[i] } : { type: "reasoning", reasoning: parts[i] }
 		}
 	}
 

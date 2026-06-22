@@ -86,11 +86,6 @@ export class DifyHandler implements ApiHandler {
 		this.apiKey = options.difyApiKey || ""
 		this.baseUrl = options.difyBaseUrl || ""
 
-		Logger.log("[DIFY DEBUG] Constructor called with:", {
-			hasApiKey: !!this.apiKey,
-			baseUrl: this.baseUrl,
-		})
-
 		if (!this.apiKey) {
 			throw new Error("Dify API key is required")
 		}
@@ -100,13 +95,9 @@ export class DifyHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[]): ApiStream {
-		Logger.log("[DIFY DEBUG] createMessage called with:", {
-			systemPromptLength: systemPrompt?.length || 0,
-			messagesCount: messages?.length || 0,
-		})
-
 		// Convert messages to Dify format
 		const query = this.convertMessagesToQuery(systemPrompt, messages)
+		this.abortController = new AbortController()
 		const requestBody = {
 			inputs: {},
 			query: query,
@@ -117,8 +108,6 @@ export class DifyHandler implements ApiHandler {
 		}
 
 		const fullUrl = `${this.baseUrl}/chat-messages`
-		Logger.log("[DIFY DEBUG] Making request to:", fullUrl)
-		Logger.log("[DIFY DEBUG] Request body:", JSON.stringify(requestBody, null, 2))
 
 		let response: Response
 		try {
@@ -126,23 +115,20 @@ export class DifyHandler implements ApiHandler {
 				method: "POST",
 				headers: this.jsonHeaders(),
 				body: JSON.stringify(requestBody),
+				signal: this.abortController?.signal,
 			})
 		} catch (error: any) {
-			Logger.error("[DIFY DEBUG] Network error during fetch:", error)
 			const cause = error.cause ? ` | Cause: ${error.cause}` : ""
 			throw new Error(`Dify API network error: ${error.message}${cause}`)
 		}
 
-		Logger.log("[DIFY DEBUG] Response status:", response.status)
 		const headersObj: Record<string, string> = {}
 		response.headers.forEach((value, key) => {
 			headersObj[key] = value
 		})
-		Logger.log("[DIFY DEBUG] Response headers:", headersObj)
 
 		if (!response.ok) {
 			const errorText = await response.text()
-			Logger.error("[DIFY DEBUG] Error response:", errorText)
 			throw new Error(`Dify API error: ${response.status} ${response.statusText} - ${errorText}`)
 		}
 
@@ -156,219 +142,51 @@ export class DifyHandler implements ApiHandler {
 		let fullText = ""
 		let hasYieldedContent = false
 		const processedEvents: string[] = []
-		let lastEventTime = Date.now()
-
-		Logger.log("[DIFY DEBUG] Starting to read streaming response...")
+		const lastEventTime = Date.now()
 
 		try {
 			while (true) {
 				const { done, value } = await reader.read()
-				if (done) {
-					Logger.log("[DIFY DEBUG] Stream ended naturally")
-					Logger.log(
-						"[DIFY DEBUG] Final state - hasYieldedContent:",
-						hasYieldedContent,
-						"fullText length:",
-						fullText.length,
-						"processedEvents:",
-						processedEvents,
-					)
-					break
-				}
+				if (done) break
 
-				const chunk = decoder.decode(value, { stream: true })
-				Logger.log("[DIFY DEBUG] Raw chunk received:", JSON.stringify(chunk))
-
-				buffer += chunk
+				buffer += decoder.decode(value, { stream: true })
 				const lines = buffer.split("\n")
-
-				// Keep the last incomplete line in the buffer
 				buffer = lines.pop() || ""
 
 				for (const line of lines) {
-					Logger.log("[DIFY DEBUG] Processing line:", JSON.stringify(line))
-
+					const ctx = { fullText, hasYieldedContent }
 					if (line.startsWith("data: ")) {
 						const data = line.slice(6).trim()
-						Logger.log("[DIFY DEBUG] Extracted data:", JSON.stringify(data))
-
-						if (data === "[DONE]") {
-							Logger.log("[DIFY DEBUG] Received [DONE] signal")
-							break
-						}
-
-						if (data === "") {
-							Logger.log("[DIFY DEBUG] Empty data line, skipping")
-							continue
-						}
-
+						if (data === "[DONE]") break
+						if (data === "") continue
 						try {
-							const parsed = JSON.parse(data)
-							Logger.log("[DIFY DEBUG] Parsed JSON:", parsed)
-							processedEvents.push(parsed.event || "unknown")
-							lastEventTime = Date.now()
-
-							// Capture conversation_id as soon as it's available
-							if (parsed.conversation_id && !this.conversationId) {
-								this.conversationId = parsed.conversation_id
-								Logger.log("[DIFY DEBUG] Captured conversation_id:", this.conversationId)
-							}
-
-							// Handle different Dify event types based on actual Dify API
-							if (parsed.event === "message") {
-								Logger.log("[DIFY DEBUG] Message event, answer:", parsed.answer)
-								// Dify sends the full text in each "answer" chunk, so we replace.
-								if (typeof parsed.answer === "string") {
-									fullText = parsed.answer
-									Logger.log("[DIFY DEBUG] Updated fullText length:", fullText.length)
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								}
-							} else if (parsed.event === "message_replace") {
-								Logger.log("[DIFY DEBUG] Replace message event:", parsed)
-								if (parsed.answer) {
-									fullText = parsed.answer // Replace instead of append
-									Logger.log("[DIFY DEBUG] Replaced fullText length:", fullText.length)
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								}
-							} else if (parsed.event === "message_end") {
-								Logger.log("[DIFY DEBUG] Message end event", parsed)
-								// Message completed. Yield final text if we have any.
-								if (fullText) {
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								}
-								// Yield usage data if available
-								if (parsed.usage) {
-									yield {
-										type: "usage",
-										inputTokens: parsed.usage.prompt_tokens || 0,
-										outputTokens: parsed.usage.completion_tokens || parsed.usage.total_tokens || 0,
-										totalCost: parsed.usage.total_price || 0,
-									}
-								}
-								return // End of stream
-							} else if (parsed.event === "error") {
-								Logger.error("[DIFY DEBUG] Error event:", parsed)
-								throw new Error(`Dify API error: ${parsed.message || "Unknown error"}`)
-							} else if (parsed.event === "workflow_started" || parsed.event === "workflow_finished") {
-								Logger.log("[DIFY DEBUG] Workflow event:", parsed.event)
-								// These are informational events, continue processing
-							} else if (parsed.event === "node_started" || parsed.event === "node_finished") {
-								Logger.log("[DIFY DEBUG] Node event:", parsed.event, parsed.data)
-								// These are informational events, continue processing
-							} else if (parsed.event === "ping") {
-								Logger.log("[DIFY DEBUG] Ping event received, keeping connection alive.")
-								// Ping event, do nothing
-							} else {
-								Logger.log("[DIFY DEBUG] Unknown event type:", parsed.event, "Full object:", parsed)
-								// Try to extract text from other possible fields
-								if (parsed.text) {
-									fullText += parsed.text
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								} else if (parsed.content) {
-									fullText += parsed.content
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								} else if (parsed.answer) {
-									// Fallback: some events might have answer field even if not "message" type
-									fullText += parsed.answer
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								}
-							}
+							const result = this.parseDifySseEvent(JSON.parse(data), ctx, processedEvents, fullUrl)
+							fullText = result.fullText
+							hasYieldedContent = result.hasYieldedContent
+							yield* result.chunks
+							if (result.done) return
 						} catch (e) {
-							Logger.warn("[DIFY DEBUG] Failed to parse JSON:", data, "Error:", e)
+							Logger.warn("Dify: failed to parse SSE JSON:", data, e)
 						}
 					} else if (line.trim() !== "") {
-						Logger.log(
-							"[DIFY DEBUG] Non-data line (not starting with 'data:'), trying to parse as direct JSON:",
-							JSON.stringify(line),
-						)
-						// Try to parse as direct JSON (fallback for non-SSE responses, though Dify uses SSE)
 						try {
-							const parsed = JSON.parse(line.trim())
-							Logger.log("[DIFY DEBUG] Parsed direct JSON:", parsed)
-							processedEvents.push(parsed.event || "direct-json")
-
-							// Handle the same event types as above
-							if (parsed.event === "message" && parsed.answer) {
-								fullText += parsed.answer
-								yield {
-									type: "text",
-									text: fullText,
-								}
-								hasYieldedContent = true
-							} else if (parsed.event === "message_end") {
-								if (fullText) {
-									yield {
-										type: "text",
-										text: fullText,
-									}
-									hasYieldedContent = true
-								}
-								return
-							} else if (parsed.event === "error") {
-								Logger.error("[DIFY DEBUG] Direct JSON Error event:", parsed)
-								throw new Error(`Dify API error: ${parsed.message || "Unknown error"}`)
-							} else if (parsed.answer || parsed.text || parsed.content) {
-								// Fallback for any content in direct JSON
-								const content = parsed.answer || parsed.text || parsed.content
-								fullText += content
-								yield {
-									type: "text",
-									text: fullText,
-								}
-								hasYieldedContent = true
-							}
+							const result = this.parseDifyDirectJson(JSON.parse(line.trim()), ctx, processedEvents)
+							fullText = result.fullText
+							hasYieldedContent = result.hasYieldedContent
+							yield* result.chunks
+							if (result.done) return
 						} catch (e) {
-							// Not JSON, continue
-							Logger.log("[DIFY DEBUG] Line is not direct JSON, continuing")
+							// Non-JSON lines (comments, heartbeats) are expected in SSE streams
+							Logger.debug("Dify: non-JSON SSE line:", line.trim(), e)
 						}
 					}
 				}
 			}
 
-			// Final check - if we haven't yielded any content, provide diagnostic information
 			if (!hasYieldedContent) {
-				const diagnosticInfo = {
-					processedEvents,
-					finalFullTextLength: fullText.length,
-					finalFullText: fullText,
-					streamDuration: Date.now() - lastEventTime,
-					conversationId: this.conversationId,
-				}
-				Logger.error("[DIFY DEBUG] No content was yielded! Diagnostic info:", diagnosticInfo)
-
-				// If we have any accumulated text at all, yield it as a fallback
 				if (fullText.trim()) {
-					Logger.log("[DIFY DEBUG] Yielding accumulated text as fallback:", fullText)
-					yield {
-						type: "text",
-						text: fullText,
-					}
+					yield { type: "text", text: fullText }
 				} else {
-					// Provide a more informative error
 					throw new Error(
 						`Dify API did not provide any assistant messages. ` +
 							`Events processed: [${processedEvents.join(", ")}]. ` +
@@ -379,8 +197,89 @@ export class DifyHandler implements ApiHandler {
 			}
 		} finally {
 			reader.releaseLock()
-			Logger.log("[DIFY DEBUG] Stream reader released")
 		}
+	}
+
+	// Parses a Dify SSE event JSON into chunks. Returns updated state and whether the stream is done.
+	private parseDifySseEvent(
+		parsed: any,
+		ctx: { fullText: string; hasYieldedContent: boolean },
+		processedEvents: string[],
+		_fullUrl: string,
+	): { chunks: any[]; fullText: string; hasYieldedContent: boolean; done: boolean } {
+		processedEvents.push(parsed.event || "unknown")
+		if (parsed.conversation_id && !this.conversationId) this.conversationId = parsed.conversation_id
+		const chunks: any[] = []
+		let { fullText, hasYieldedContent } = ctx
+
+		if (parsed.event === "message") {
+			if (typeof parsed.answer === "string") {
+				fullText = parsed.answer
+				chunks.push({ type: "text", text: fullText })
+				hasYieldedContent = true
+			}
+		} else if (parsed.event === "message_replace") {
+			if (parsed.answer) {
+				fullText = parsed.answer
+				chunks.push({ type: "text", text: fullText })
+				hasYieldedContent = true
+			}
+		} else if (parsed.event === "message_end") {
+			if (fullText) {
+				chunks.push({ type: "text", text: fullText })
+				hasYieldedContent = true
+			}
+			if (parsed.usage)
+				chunks.push({
+					type: "usage",
+					inputTokens: parsed.usage.prompt_tokens || 0,
+					outputTokens: parsed.usage.completion_tokens || parsed.usage.total_tokens || 0,
+					totalCost: parsed.usage.total_price || 0,
+				})
+			return { chunks, fullText, hasYieldedContent, done: true }
+		} else if (parsed.event === "error") {
+			throw new Error(`Dify API error: ${parsed.message || "Unknown error"}`)
+		} else if (["workflow_started", "workflow_finished", "node_started", "node_finished", "ping"].includes(parsed.event)) {
+			// Informational events — no action needed
+		} else {
+			const content = parsed.text || parsed.content || parsed.answer
+			if (content) {
+				fullText += content
+				chunks.push({ type: "text", text: fullText })
+				hasYieldedContent = true
+			}
+		}
+		return { chunks, fullText, hasYieldedContent, done: false }
+	}
+
+	// Parses a direct (non-SSE) JSON line into chunks. Fallback for non-standard Dify responses.
+	private parseDifyDirectJson(
+		parsed: any,
+		ctx: { fullText: string; hasYieldedContent: boolean },
+		processedEvents: string[],
+	): { chunks: any[]; fullText: string; hasYieldedContent: boolean; done: boolean } {
+		processedEvents.push(parsed.event || "direct-json")
+		const chunks: any[] = []
+		let { fullText, hasYieldedContent } = ctx
+
+		if (parsed.event === "message" && parsed.answer) {
+			fullText += parsed.answer
+			chunks.push({ type: "text", text: fullText })
+			hasYieldedContent = true
+		} else if (parsed.event === "message_end") {
+			if (fullText) {
+				chunks.push({ type: "text", text: fullText })
+				hasYieldedContent = true
+			}
+			return { chunks, fullText, hasYieldedContent, done: true }
+		} else if (parsed.event === "error") {
+			throw new Error(`Dify API error: ${parsed.message || "Unknown error"}`)
+		} else if (parsed.answer || parsed.text || parsed.content) {
+			fullText += parsed.answer || parsed.text || parsed.content
+			chunks.push({ type: "text", text: fullText })
+			hasYieldedContent = true
+		}
+		return { chunks, fullText, hasYieldedContent, done: false }
 	}
 
 	private convertMessagesToQuery(systemPrompt: string, messages: DiracStorageMessage[]): string {
@@ -398,7 +297,6 @@ export class DifyHandler implements ApiHandler {
 
 		// Only prepend the system prompt if it's the very first message of a new conversation.
 		if (!this.conversationId && systemPrompt) {
-			Logger.log("[DIFY DEBUG] Prepending system prompt for new conversation.")
 			return `${systemPrompt}\n\n---\n\n${userQuery}`
 		}
 
@@ -638,6 +536,11 @@ export class DifyHandler implements ApiHandler {
 	resetConversation(): void {
 		this.conversationId = null
 		this.currentTaskId = null
+	}
+
+	abort(): void {
+		this.abortController?.abort()
+		this.abortController = null
 	}
 
 	private jsonHeaders() {

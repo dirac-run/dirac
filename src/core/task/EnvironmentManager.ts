@@ -1,6 +1,6 @@
 import { ApiHandler } from "@core/api"
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { getEditingFilesInstructions } from "@core/prompts/system-prompt/sections/editing-files"
 import { StateManager } from "@core/storage/StateManager"
 import { isMultiRootEnabled } from "@core/workspace/multi-root-utils"

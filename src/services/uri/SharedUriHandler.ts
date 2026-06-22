@@ -42,7 +42,7 @@ export class SharedUriHandler {
 				case "/openrouter": {
 					const code = query.get("code")
 					if (code) {
-						await visibleWebview.controller.handleOpenRouterCallback(code)
+						await visibleWebview.controller.completeOpenRouterAuth(code)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing code parameter for OpenRouter callback")
@@ -51,7 +51,7 @@ export class SharedUriHandler {
 				case "/requesty": {
 					const code = query.get("code")
 					if (code) {
-						await visibleWebview.controller.handleRequestyCallback(code)
+						await visibleWebview.controller.completeRequestyAuth(code)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing code parameter for Requesty callback")
@@ -60,7 +60,7 @@ export class SharedUriHandler {
 				case TASK_URI_PATH: {
 					const prompt = query.get("prompt")
 					if (prompt) {
-						await visibleWebview.controller.handleTaskCreation(prompt)
+						await visibleWebview.controller.createTask(prompt)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing prompt parameter for task creation")

@@ -12,7 +12,33 @@ import { main as generateHostBridgeClient } from "./generate-host-bridge-client.
 import { main as generateProtoBusSetup } from "./generate-protobus-setup.mjs"
 
 const require = createRequire(import.meta.url)
-const PROTOC = path.join(require.resolve("grpc-tools"), "../bin/protoc")
+
+function findProtoc() {
+	// Try grpc-tools bundled protoc via npm (works on x86_64 and arm64 with Rosetta)
+	const grpcToolsPath = path.join(require.resolve("grpc-tools"), "../bin/protoc.js")
+	try {
+		execSync(`node "${grpcToolsPath}" --version`, { stdio: "ignore" })
+		return `node "${grpcToolsPath}"`
+	}
+	catch {}
+
+	// Fall back to system protoc in PATH (homebrew, nix, etc.) — works on Apple Silicon without Rosetta
+	try {
+		execSync("protoc --version", { stdio: "ignore" })
+		return "protoc"
+	}
+	catch {}
+
+	console.error(chalk.red("Could not find a working protoc."))
+	console.error(chalk.yellow("  grpc-tools bundled binary failed or is missing."))
+	console.error(chalk.yellow("  System protoc was not found in PATH."))
+	console.error(chalk.yellow("\n  Install one of:"))
+	console.error(chalk.yellow("    - brew install protobuf          (system protoc)"))
+	console.error(chalk.yellow("    - softwareupdate --install-rosetta (if using grpc-tools on Apple Silicon)"))
+	process.exit(1)
+}
+
+const PROTOC = findProtoc()
 
 const PROTO_DIR = path.resolve("proto")
 const TS_OUT_DIR = path.resolve("src/shared/proto")

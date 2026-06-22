@@ -1,4 +1,5 @@
 import { BUILD_CONSTANTS } from "../../constants"
+import { isTest, isDevelopmentMode } from "@shared/config/environment"
 
 export interface DiracTelemetryClientConfig {
 	/**
@@ -28,7 +29,7 @@ export interface DiracTelemetryClientValidConfig extends DiracTelemetryClientCon
  * process.env.CI will always be true in the CI environment, during both testing and publishing step,
  * so it is not a reliable indicator of the environment.
  */
-const useDevEnv = process.env.IS_DEV === "true" || process.env.DIRAC_ENVIRONMENT === "local"
+const useDevEnv = isDevelopmentMode()
 
 /**
  * Dirac telemetry configuration.
@@ -44,7 +45,7 @@ export const diracTelemetryConfig: DiracTelemetryClientConfig = {
 	enableErrorAutocapture: BUILD_CONSTANTS.ENABLE_ERROR_AUTOCAPTURE === "true",
 }
 
-const isTestEnv = process.env.E2E_TEST === "true" || process.env.IS_TEST === "true"
+const isTestEnv = isTest()
 
 export function isDiracTelemetryConfigValid(config: DiracTelemetryClientConfig): config is DiracTelemetryClientValidConfig {
 	// Allow invalid config in test environment to enable mocking and stubbing

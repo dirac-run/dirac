@@ -4,21 +4,21 @@ import {
     readDirectoryRecursive,
     synchronizeRuleToggles,
 } from "@core/context/instructions/user-instructions/rule-helpers"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { GlobalFileNames } from "@core/storage/disk"
+import { StateManager } from "@core/storage/StateManager"
 import { listFiles } from "@services/glob/list-files"
 import { DiracRulesToggles } from "@shared/dirac-rules"
 import { fileExistsAtPath, isDirectory } from "@utils/fs"
 import fs from "fs/promises"
 import path from "path"
-import { Controller } from "@/core/controller"
 import { Logger } from "@/shared/services/Logger"
 
 /**
  * Refreshes the toggles for windsurf, cursor, and agents rules
  */
 export async function refreshExternalRulesToggles(
-	controller: Controller,
+	stateManager: StateManager,
 	workingDirectory: string,
 ): Promise<{
 	windsurfLocalToggles: DiracRulesToggles
@@ -26,13 +26,13 @@ export async function refreshExternalRulesToggles(
 	agentsLocalToggles: DiracRulesToggles
 }> {
 	// local windsurf toggles
-	const localWindsurfRulesToggles = controller.stateManager.getWorkspaceStateKey("localWindsurfRulesToggles")
+	const localWindsurfRulesToggles = stateManager.getWorkspaceStateKey("localWindsurfRulesToggles")
 	const localWindsurfRulesFilePath = path.resolve(workingDirectory, GlobalFileNames.windsurfRules)
 	const updatedLocalWindsurfToggles = await synchronizeRuleToggles(localWindsurfRulesFilePath, localWindsurfRulesToggles)
-	controller.stateManager.setWorkspaceState("localWindsurfRulesToggles", updatedLocalWindsurfToggles)
+	stateManager.setWorkspaceState("localWindsurfRulesToggles", updatedLocalWindsurfToggles)
 
 	// local cursor toggles
-	const localCursorRulesToggles = controller.stateManager.getWorkspaceStateKey("localCursorRulesToggles")
+	const localCursorRulesToggles = stateManager.getWorkspaceStateKey("localCursorRulesToggles")
 
 	// cursor has two valid locations for rules files, so we need to check both and combine
 	// synchronizeRuleToggles will drop whichever rules files are not in each given path, but combining the results will result in no data loss
@@ -43,13 +43,13 @@ export async function refreshExternalRulesToggles(
 	const updatedLocalCursorToggles2 = await synchronizeRuleToggles(localCursorRulesFilePath, localCursorRulesToggles)
 
 	const updatedLocalCursorToggles = combineRuleToggles(updatedLocalCursorToggles1, updatedLocalCursorToggles2)
-	controller.stateManager.setWorkspaceState("localCursorRulesToggles", updatedLocalCursorToggles)
+	stateManager.setWorkspaceState("localCursorRulesToggles", updatedLocalCursorToggles)
 
 	// local agents toggles
-	const localAgentsRulesToggles = controller.stateManager.getWorkspaceStateKey("localAgentsRulesToggles")
+	const localAgentsRulesToggles = stateManager.getWorkspaceStateKey("localAgentsRulesToggles")
 	const localAgentsRulesFilePath = path.resolve(workingDirectory, GlobalFileNames.agentsRulesFile)
 	const updatedLocalAgentsToggles = await synchronizeRuleToggles(localAgentsRulesFilePath, localAgentsRulesToggles)
-	controller.stateManager.setWorkspaceState("localAgentsRulesToggles", updatedLocalAgentsToggles)
+	stateManager.setWorkspaceState("localAgentsRulesToggles", updatedLocalAgentsToggles)
 
 	return {
 		windsurfLocalToggles: updatedLocalWindsurfToggles,

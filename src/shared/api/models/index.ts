@@ -5,7 +5,7 @@ export { MODEL_CAPABILITIES } from "./capabilities"
 export { CLAUDE_SONNET_1M_TIERS, CLAUDE_OPUS_1M_TIERS, GPT_5_5_TIERS, GPT_5_4_TIERS, GPT_5_4_PRO_TIERS } from "./shared-tiers"
 
 // Anthropic
-export { type AnthropicModelId, anthropicDefaultModelId, anthropicModels, CLAUDE_SONNET_1M_SUFFIX, ANTHROPIC_FAST_MODE_SUFFIX, ANTHROPIC_MIN_THINKING_BUDGET, ANTHROPIC_MAX_THINKING_BUDGET, isAnthropicAdaptiveThinkingSupported } from "./anthropic"
+export { type AnthropicModelId, anthropicDefaultModelId, anthropicModels, CLAUDE_SONNET_1M_SUFFIX, ANTHROPIC_FAST_MODE_SUFFIX, ANTHROPIC_MIN_THINKING_BUDGET, ANTHROPIC_MAX_THINKING_BUDGET, ANTHROPIC_BETAS, isAnthropicAdaptiveThinkingSupported } from "./anthropic"
 export { type ClaudeCodeModelId, claudeCodeDefaultModelId, claudeCodeModels } from "./claude-code"
 
 // AWS Bedrock

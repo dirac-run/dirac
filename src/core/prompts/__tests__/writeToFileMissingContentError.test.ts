@@ -1,6 +1,6 @@
 import { describe, it } from "mocha"
 import "should"
-import { formatResponse } from "../responses"
+import { formatResponse } from "@core/formatResponse"
 
 describe("formatResponse.writeToFileMissingContentError", () => {
 	describe("first failure (tier 1)", () => {

@@ -52,9 +52,9 @@ export async function createRuleFile(controller: Controller, request: RuleFileRe
 		await openFile(controller, { value: filePath })
 	} else {
 		if (request.type === "workflow") {
-			await refreshWorkflowToggles(controller, cwd)
+			await refreshWorkflowToggles(controller.stateManager, cwd)
 		} else {
-			await refreshDiracRulesToggles(controller, cwd)
+			await refreshDiracRulesToggles(controller.stateManager, cwd)
 		}
 		await controller.postStateToWebview()
 

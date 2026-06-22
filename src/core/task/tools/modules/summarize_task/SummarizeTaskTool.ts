@@ -5,7 +5,7 @@ import { StateManager } from "@core/storage/StateManager"
 import { telemetryService } from "@/services/telemetry"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { continuationPrompt } from "@core/prompts/contextManagement"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@/shared/icons"
@@ -209,7 +209,7 @@ export class SummarizeTaskTool implements IDiracTool {
             )
         }
     }
-    async handlePartialBlock(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
+    async bufferPartialToolUse(block: ToolUse, uiHelpers: StronglyTypedUIHelpers): Promise<void> {
         const context = block.params.context || ""
 
         if (!context) {

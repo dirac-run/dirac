@@ -107,13 +107,23 @@ export interface TerminalInfo {
 }
 
 /**
+ * Result of changing the default terminal profile.
+ */
+export interface TerminalProfileChangeResult {
+	/** Number of idle terminals closed due to profile mismatch */
+	closedCount: number
+	/** Busy terminals still using a different profile */
+	busyTerminals: TerminalInfo[]
+}
+
+/**
  * Minimal terminal interface that both VSCode terminals and standalone terminals implement.
  */
 export interface ITerminal {
 	/** Terminal name */
 	name: string
-	/** Promise that resolves to the process ID */
-	processId: Promise<number | undefined>
+	/** Promise-like that resolves to the process ID (Promise in standalone, Thenable in VSCode) */
+	processId: PromiseLike<number | undefined>
 	/** Shell integration information (if available) */
 	shellIntegration?: {
 		cwd?: { fsPath: string }
@@ -129,6 +139,12 @@ export interface ITerminal {
 	hide(): void
 	/** Dispose of the terminal */
 	dispose(): void
+	/** Current working directory (standalone terminals only) */
+	_cwd?: string
+	/** Environment variables (standalone terminals only) */
+	_env?: { [key: string]: string | undefined }
+	/** Shell path (standalone terminals only) */
+	_shellPath?: string
 }
 
 /**
@@ -226,8 +242,9 @@ export interface ITerminalManager {
 	/**
 	 * Set the default terminal profile.
 	 * @param profile The profile identifier
+	 * @returns Info about closed idle terminals and remaining busy terminals with a different profile
 	 */
-	setDefaultTerminalProfile(profile: string): void
+	setDefaultTerminalProfile(profile: string): TerminalProfileChangeResult
 
 	/**
 	 * Process output lines, potentially truncating if over limit.
