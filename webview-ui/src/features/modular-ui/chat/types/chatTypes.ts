@@ -136,6 +136,7 @@ export interface TaskSectionProps {
         totalCacheWrites?: number
         totalCacheReads?: number
         totalCost: number
+        cacheHitRate: number
     }
     lastApiReqTotalTokens?: number
     selectedModelInfo: {
