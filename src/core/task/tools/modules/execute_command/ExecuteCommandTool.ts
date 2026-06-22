@@ -13,6 +13,8 @@ import { WorkspacePathAdapter } from "../../../../workspace/WorkspacePathAdapter
 import { truncateHeadTail } from "../../../../../shared/content-limits"
 import { resolveCommandTimeoutSeconds } from "../../utils/CommandTimeoutUtils"
 
+import { shortenCommandForDisplay } from "./path-display"
+
 const MAX_PATH_LENGTH = 255
 const MAX_COMMAND_OUTPUT_SIZE = 10 * 1024
 
@@ -146,7 +148,7 @@ export class ExecuteCommandTool implements IDiracTool {
     ): Promise<{ approved: boolean; message?: string }> {
         const card = !env.config.isSubagentExecution
             ? await env.ui.createCard({
-                header: commands.length === 1 ? `Execute: ${commands[0].displayName}` : `Execute ${commands.length} commands?`,
+                header: commands.length === 1 ? `Execute: ${shortenCommandForDisplay(commands[0].displayName, env.config.cwd)}` : `Execute ${commands.length} commands?`,
                 status: CardStatus.WAITING_FOR_INPUT,
                 icon: DiracIcon.COMMAND,
                 requireApproval: true,
@@ -156,7 +158,7 @@ export class ExecuteCommandTool implements IDiracTool {
                     .map((c) => {
                         const lang = c.language || "bash"
                         const header = c.displayName !== c.command ? `**${c.displayName}**\n` : ""
-                        return `${header}\`\`\`${lang}\n${c.command}\n\`\`\``
+                        return `${header}\`\`\`${lang}\n${shortenCommandForDisplay(c.command, env.config.cwd)}\n\`\`\``
                     })
                     .join("\n"),
                 collapsed: false,
@@ -214,7 +216,7 @@ export class ExecuteCommandTool implements IDiracTool {
         total: number,
         env: IToolEnvironment,
     ): Promise<{ result: string; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
-        const header = `Executing command ${index} of ${total}: ${cmd.displayName}`
+        const header = `Executing command ${index} of ${total}: ${shortenCommandForDisplay(cmd.displayName, env.config.cwd)}`
 
         const activeCard = !env.config.isSubagentExecution
             ? await env.ui.createCard({
