@@ -55,9 +55,14 @@ jobs:
             echo "## What's Changed"
             echo ""
             if [ -n "$PREV_TAG" ]; then
-              git log "${PREV_TAG}..${TAG_NAME}" --pretty=format:"- %s" --no-merges
+              git log "${PREV_TAG}..${TAG_NAME}" --pretty=format:"- %s" --no-merges \
+                | grep -iE '^- (feat|fix|perf|docs|revert)[:(]' \
+                || echo "- (no user-facing changes)"
             else
-              git log "${TAG_NAME}" --pretty=format:"- %s" --no-merges | head -50
+              git log "${TAG_NAME}" --pretty=format:"- %s" --no-merges \
+                | grep -iE '^- (feat|fix|perf|docs|revert)[:(]' \
+                | head -50 \
+                || echo "- (no user-facing changes)"
             fi
             echo ""
             echo ""

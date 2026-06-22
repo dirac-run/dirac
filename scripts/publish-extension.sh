@@ -173,7 +173,7 @@ git tag "v${NEW_VERSION}"
 
 # 10. Push
 log_step "Pushing commit and tag..."
-git push origin main
+git push origin master
 git push origin "v${NEW_VERSION}"
 
 # Cleanup
