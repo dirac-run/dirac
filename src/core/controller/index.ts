@@ -813,6 +813,8 @@ export class Controller {
 			backgroundEditEnabled: this.stateManager.getGlobalSettingsKey("backgroundEditEnabled"),
 			optOutOfRemoteConfig: this.stateManager.getGlobalSettingsKey("optOutOfRemoteConfig"),
 			doubleCheckCompletionEnabled,
+			writePromptMetadataEnabled: this.stateManager.getGlobalSettingsKey("writePromptMetadataEnabled"),
+			writePromptMetadataDirectory: this.stateManager.getGlobalSettingsKey("writePromptMetadataDirectory"),
 			banners,
 			welcomeBanners,
 			openAiCodexIsAuthenticated,
