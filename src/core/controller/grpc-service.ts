@@ -85,7 +85,7 @@ export class ServiceRegistry {
 	 * @param message The request message
 	 * @returns The response message
 	 */
-	async handleRequest(controller: Controller, method: string, message: any): Promise<any> {
+	async dispatchGrpcMethod(controller: Controller, method: string, message: any): Promise<any> {
 		const handler = this.methodRegistry[method]
 
 		if (!handler) {
@@ -117,7 +117,7 @@ export class ServiceRegistry {
 
 		if (!handler) {
 			if (this.methodRegistry[method]) {
-				throw new Error(`Method ${method} is not a streaming method and should be handled with handleRequest`)
+				throw new Error(`Method ${method} is not a streaming method and should be handled with dispatchGrpcMethod`)
 			}
 			throw new Error(`Unknown ${this.serviceName} streaming method: ${method}`)
 		}
@@ -138,8 +138,8 @@ export function createServiceRegistry(serviceName: string) {
 		registerMethod: (methodName: string, handler: ServiceMethodHandler | StreamingMethodHandler, metadata?: MethodMetadata) =>
 			registry.registerMethod(methodName, handler, metadata),
 
-		handleRequest: (controller: Controller, method: string, message: any) =>
-			registry.handleRequest(controller, method, message),
+		dispatchGrpcMethod: (controller: Controller, method: string, message: any) =>
+			registry.dispatchGrpcMethod(controller, method, message),
 
 		handleStreamingRequest: (
 			controller: Controller,
