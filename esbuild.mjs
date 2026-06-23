@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { execSync } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { copySourceCode } from "./scripts/copy-source.mjs"
@@ -165,6 +166,29 @@ const copyAssets = {
                 }
             }
 
+            // Remove the platform-specific build dir from copied better-sqlite3
+            // (we use prebuilds/ instead)
+            const bsLocalBuild = path.join(targetDir, "node_modules", "better-sqlite3", "build")
+            if (fs.existsSync(bsLocalBuild)) {
+                fs.rmSync(bsLocalBuild, { recursive: true, force: true })
+            }
+
+            // Download platform-specific prebuilds for better-sqlite3
+            const betterSqlite3Version = JSON.parse(fs.readFileSync(path.join(__dirname, "node_modules", "better-sqlite3", "package.json"), "utf8")).version
+            const platforms = ["linux-x64", "darwin-arm64", "win32-x64"]
+            const prebuildsDir = path.join(targetDir, "node_modules", "better-sqlite3", "prebuilds")
+            for (const platform of platforms) {
+                const dest = path.join(prebuildsDir, platform, "build", "Release", "better_sqlite3.node")
+                if (fs.existsSync(dest)) continue
+                fs.mkdirSync(path.join(prebuildsDir, platform), { recursive: true })
+                const abi = process.versions.modules
+                const url = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${betterSqlite3Version}/better-sqlite3-v${betterSqlite3Version}-node-v${abi}-${platform}.tar.gz`
+                console.log(`[build] Downloading better-sqlite3 prebuild for ${platform}...`)
+                execSync(`curl -sfL "${url}" | tar -xzf - -C "${path.join(prebuildsDir, platform)}"`)
+                if (!fs.existsSync(dest)) {
+                    throw new Error(`[build] Failed to extract better-sqlite3 prebuild for ${platform}: ${dest} not found after download`)
+                }
+            }
         })
     },
 }
