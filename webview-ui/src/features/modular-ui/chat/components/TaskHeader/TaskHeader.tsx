@@ -32,12 +32,9 @@ const getUsageColor = (percentage: number) => {
 
 }
 
-const getCacheHitColor = (rate: number) => {
-    if (rate < 0.2) return "text-orange-800/90"
-    if (rate < 0.4) return "text-amber-600/90"
-    if (rate < 0.6) return "text-emerald-500/90"
-    if (rate < 0.8) return "text-emerald-400/90"
-    return "text-emerald-300/90"
+const getCacheHitColor = (rate: number): string => {
+    const hue = 30 + rate * 120 // 30 (amber) → 150 (green)
+    return `hsla(${hue}, 75%, 45%, 0.9)`
 }
 
 const BUTTON_CLASS = "max-h-3 border-0 font-bold bg-transparent hover:opacity-100 text-foreground"
@@ -199,7 +196,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
                         )}
 
                         {cacheHitRate > 0 && (
-                            <div className={`px-2 py-1 rounded-md bg-foreground/5 text-xs font-mono border border-foreground/5 font-bold ${getCacheHitColor(cacheHitRate)}`}>
+                            <div className="px-2 py-1 rounded-md bg-foreground/5 text-xs font-mono border border-foreground/5 font-bold" style={{ color: getCacheHitColor(cacheHitRate) }}>
                                 {(cacheHitRate * 100).toFixed(0)}% cache
                             </div>
                         )}

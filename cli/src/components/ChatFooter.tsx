@@ -1,6 +1,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 import { COLORS } from "../constants/colors"
+import { hslToHex } from "../utils/color"
 import { createContextBar } from "../utils/display"
 import type { GitDiffStats } from "../utils/git"
 import type { TaskStatus } from "@shared/ExtensionMessage"
@@ -82,10 +83,8 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                         })()}
                     </Text>{" "}
                     {cacheHitRate > 0 && <React.Fragment><Text color={(() => {
-                        if (cacheHitRate < 0.2) return "#CC5500"
-                        if (cacheHitRate < 0.4) return "yellow"
-                        if (cacheHitRate < 0.6) return "green"
-                        return "#00FF7F"
+                        const hue = 30 + cacheHitRate * 120 // 30 (amber) → 150 (green)
+                        return hslToHex(hue, 75, 45)
                     })()}>{(cacheHitRate * 100).toFixed(0)}% cache</Text>{" "}</React.Fragment>}
                 </Text>
                 <TaskStatusIndicator status={taskStatus} />
