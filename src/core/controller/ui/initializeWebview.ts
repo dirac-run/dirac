@@ -1,3 +1,4 @@
+import type { ModelInfo } from "@shared/api"
 import { Empty, EmptyRequest } from "@shared/proto/dirac/common"
 import { OpenRouterCompatibleModelInfo } from "@shared/proto/dirac/models"
 import { telemetryService } from "@/services/telemetry"
@@ -5,210 +6,112 @@ import { Logger } from "@/shared/services/Logger"
 import { GlobalStateAndSettings } from "@/shared/storage/state-keys"
 import type { Controller } from "../index"
 import { refreshBasetenModels } from "../models/refreshBasetenModels"
+import { refreshGithubCopilotModels } from "../models/refreshGithubCopilotModels"
 import { refreshGroqModels } from "../models/refreshGroqModels"
 import { refreshLiteLlmModels } from "../models/refreshLiteLlmModels"
 import { refreshOpenRouterModels } from "../models/refreshOpenRouterModels"
-import { refreshGithubCopilotModels } from "../models/refreshGithubCopilotModels"
 import { sendOpenRouterModelsEvent } from "../models/subscribeToOpenRouterModels"
 
-/**
- * Initialize webview when it launches
- * @param controller The controller instance
- * @param request The empty request
- * @returns Empty response
- */
+// Field names for synchronizing a provider's model info into global state
+type ProviderModelFields = {
+	planId: string
+	planInfo: keyof GlobalStateAndSettings
+	actId: string
+	actInfo: keyof GlobalStateAndSettings
+}
+const openRouterFields: ProviderModelFields = {
+	planId: "planModeOpenRouterModelId",
+	planInfo: "planModeOpenRouterModelInfo",
+	actId: "actModeOpenRouterModelId",
+	actInfo: "actModeOpenRouterModelInfo",
+}
+const groqFields: ProviderModelFields = {
+	planId: "planModeGroqModelId",
+	planInfo: "planModeGroqModelInfo",
+	actId: "actModeGroqModelId",
+	actInfo: "actModeGroqModelInfo",
+}
+const basetenFields: ProviderModelFields = {
+	planId: "planModeBasetenModelId",
+	planInfo: "planModeBasetenModelInfo",
+	actId: "actModeBasetenModelId",
+	actInfo: "actModeBasetenModelInfo",
+}
+const githubCopilotFields: ProviderModelFields = {
+	planId: "planModeGithubCopilotModelId",
+	planInfo: "planModeGithubCopilotModelInfo",
+	actId: "actModeGithubCopilotModelId",
+	actInfo: "actModeGithubCopilotModelInfo",
+}
+
+/** Initialize webview when it launches */
 export async function initializeWebview(controller: Controller, _request: EmptyRequest): Promise<Empty> {
 	try {
-		// Post last cached models as soon as possible for immediate availability in the UI
-		const lastCachedModels = await controller.readOpenRouterModels()
-		if (lastCachedModels) {
-			sendOpenRouterModelsEvent(OpenRouterCompatibleModelInfo.create({ models: lastCachedModels }))
-		}
-
-		// Refresh OpenRouter models from API
-		refreshOpenRouterModels(controller).then(async (models) => {
-			if (models && Object.keys(models).length > 0) {
-				// Update model info in state (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
-				const apiConfiguration = controller.stateManager.getApiConfiguration()
-				const planActSeparateModelsSetting = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
-				const currentMode = controller.stateManager.getGlobalSettingsKey("mode")
-
-				if (planActSeparateModelsSetting) {
-					// Separate models: update only current mode
-					const modelIdField = currentMode === "plan" ? "planModeOpenRouterModelId" : "actModeOpenRouterModelId"
-					const modelInfoField = currentMode === "plan" ? "planModeOpenRouterModelInfo" : "actModeOpenRouterModelInfo"
-					const modelId = apiConfiguration[modelIdField]
-
-					if (modelId && models[modelId]) {
-						controller.stateManager.setGlobalState(modelInfoField, models[modelId])
-						await controller.postStateToWebview()
-					}
-				} else {
-					// Shared models: update both plan and act modes
-					const planModelId = apiConfiguration.planModeOpenRouterModelId
-					const actModelId = apiConfiguration.actModeOpenRouterModelId
-					const updates: Partial<GlobalStateAndSettings> = {}
-
-					// Update plan mode model info if we have a model ID
-					if (planModelId && models[planModelId]) {
-						updates.planModeOpenRouterModelInfo = models[planModelId]
-					}
-
-					// Update act mode model info if we have a model ID
-					if (actModelId && models[actModelId]) {
-						updates.actModeOpenRouterModelInfo = models[actModelId]
-					}
-
-					// Post state update if we updated any model info
-					if (Object.keys(updates).length > 0) {
-						controller.stateManager.setGlobalStateBatch(updates)
-						await controller.postStateToWebview()
-					}
-				}
-			}
-		})
-
-		refreshGroqModels(controller).then(async (models) => {
-			if (models && Object.keys(models).length > 0) {
-				// Update model info in state for Groq (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
-				const apiConfiguration = controller.stateManager.getApiConfiguration()
-				const planActSeparateModelsSetting = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
-				const currentMode = controller.stateManager.getGlobalSettingsKey("mode")
-
-				if (planActSeparateModelsSetting) {
-					// Separate models: update only current mode
-					const modelIdField = currentMode === "plan" ? "planModeGroqModelId" : "actModeGroqModelId"
-					const modelInfoField = currentMode === "plan" ? "planModeGroqModelInfo" : "actModeGroqModelInfo"
-					const modelId = apiConfiguration[modelIdField]
-
-					if (modelId && models[modelId]) {
-						controller.stateManager.setGlobalState(modelInfoField, models[modelId])
-						await controller.postStateToWebview()
-					}
-				} else {
-					// Shared models: update both plan and act modes
-					const planModelId = apiConfiguration.planModeGroqModelId
-					const actModelId = apiConfiguration.actModeGroqModelId
-					const updates: Partial<GlobalStateAndSettings> = {}
-
-					// Update plan mode model info if we have a model ID
-					if (planModelId && models[planModelId]) {
-						updates.planModeGroqModelInfo = models[planModelId]
-					}
-
-					// Update act mode model info if we have a model ID
-					if (actModelId && models[actModelId]) {
-						updates.actModeGroqModelInfo = models[actModelId]
-					}
-
-					// Post state update if we updated any model info
-					if (Object.keys(updates).length > 0) {
-						controller.stateManager.setGlobalStateBatch(updates)
-						await controller.postStateToWebview()
-					}
-				}
-			}
-		})
-
-		refreshBasetenModels(controller).then(async (models) => {
-			if (models && Object.keys(models).length > 0) {
-				// Update model info in state for Baseten (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
-				const apiConfiguration = controller.stateManager.getApiConfiguration()
-				const planActSeparateModelsSetting = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
-
-				const currentMode = controller.stateManager.getGlobalSettingsKey("mode")
-
-				if (planActSeparateModelsSetting) {
-					// Separate models: update only current mode
-					const modelIdField = currentMode === "plan" ? "planModeBasetenModelId" : "actModeBasetenModelId"
-					const modelInfoField = currentMode === "plan" ? "planModeBasetenModelInfo" : "actModeBasetenModelInfo"
-					const modelId = apiConfiguration[modelIdField]
-
-					if (modelId && models[modelId]) {
-						controller.stateManager.setGlobalState(modelInfoField, models[modelId])
-						await controller.postStateToWebview()
-					}
-				} else {
-					// Shared models: update both plan and act modes
-					const planModelId = apiConfiguration.planModeBasetenModelId
-					const actModelId = apiConfiguration.actModeBasetenModelId
-
-					// Update plan mode model info if we have a model ID
-					if (planModelId && models[planModelId]) {
-						controller.stateManager.setGlobalState("planModeBasetenModelInfo", models[planModelId])
-					}
-
-					// Update act mode model info if we have a model ID
-					if (actModelId && models[actModelId]) {
-						controller.stateManager.setGlobalState("actModeBasetenModelInfo", models[actModelId])
-					}
-
-					// Post state update if we updated any model info
-					if ((planModelId && models[planModelId]) || (actModelId && models[actModelId])) {
-						await controller.postStateToWebview()
-					}
-				}
-			}
-		})
-
-		refreshGithubCopilotModels().then(async (models) => {
-			if (models && Object.keys(models).length > 0) {
-				const apiConfiguration = controller.stateManager.getApiConfiguration()
-				const planActSeparateModelsSetting = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
-				const currentMode = controller.stateManager.getGlobalSettingsKey("mode")
-
-				if (planActSeparateModelsSetting) {
-					const modelIdField = currentMode === "plan" ? "planModeGithubCopilotModelId" : "actModeGithubCopilotModelId"
-					const modelInfoField =
-						currentMode === "plan" ? "planModeGithubCopilotModelInfo" : "actModeGithubCopilotModelInfo"
-					const modelId = apiConfiguration[modelIdField]
-
-					if (modelId && models[modelId]) {
-						controller.stateManager.setGlobalState(modelInfoField, models[modelId])
-						await controller.postStateToWebview()
-					}
-				} else {
-					const planModelId = apiConfiguration.planModeGithubCopilotModelId
-					const actModelId = apiConfiguration.actModeGithubCopilotModelId
-					const updates: Partial<GlobalStateAndSettings> = {}
-
-					if (planModelId && models[planModelId]) {
-						updates.planModeGithubCopilotModelInfo = models[planModelId]
-					}
-					if (actModelId && models[actModelId]) {
-						updates.actModeGithubCopilotModelInfo = models[actModelId]
-					}
-
-					if (Object.keys(updates).length > 0) {
-						controller.stateManager.setGlobalStateBatch(updates)
-						await controller.postStateToWebview()
-					}
-				}
-			}
-		})
-
-		const liteLlmBaseUrl = controller.stateManager.getGlobalSettingsKey("liteLlmBaseUrl")
-		const liteLlmApiKey = controller.stateManager.getSecretKey("liteLlmApiKey")
-		if (liteLlmBaseUrl && liteLlmApiKey) {
-			await refreshLiteLlmModels()
-		}
-
-		// GUI relies on model info to be up-to-date to provide the most accurate pricing, so we need to fetch the latest details on launch.
-		// We do this for all users since many users switch between api providers and if they were to switch back to openrouter it would be showing outdated model info if we hadn't retrieved the latest at this point
-		// (see normalizeApiConfiguration > openrouter)
-		// Prefetch marketplace and OpenRouter models
-
-		// Initialize telemetry service with user's current setting
-		controller.getStateToPostToWebview().then((state) => {
-			const { telemetrySetting } = state
-			const isOptedIn = telemetrySetting !== "disabled"
-			telemetryService.updateTelemetryState(isOptedIn)
-		})
-
+		await postCachedOpenRouterModels(controller)
+		// Fire-and-forget: refresh each provider's models and sync model info into state
+		refreshOpenRouterModels(controller).then((m) => syncProviderModelInfo(controller, m, openRouterFields))
+		refreshGroqModels(controller).then((m) => syncProviderModelInfo(controller, m, groqFields))
+		refreshBasetenModels(controller).then((m) => syncProviderModelInfo(controller, m, basetenFields))
+		refreshGithubCopilotModels().then((m) => syncProviderModelInfo(controller, m, githubCopilotFields))
+		await refreshLiteLlmIfConfigured(controller)
+		syncTelemetrySetting(controller)
 		return Empty.create({})
 	} catch (error) {
 		Logger.error("Failed to initialize webview:", error)
-		// Return empty response even on error to not break the frontend
 		return Empty.create({})
 	}
+}
+
+// Post last cached OpenRouter models for immediate UI availability
+async function postCachedOpenRouterModels(controller: Controller): Promise<void> {
+	const cached = await controller.readOpenRouterModels()
+	if (cached) sendOpenRouterModelsEvent(OpenRouterCompatibleModelInfo.create({ models: cached }))
+}
+
+// Refresh LiteLLM models only when both base URL and API key are configured
+async function refreshLiteLlmIfConfigured(controller: Controller): Promise<void> {
+	const baseUrl = controller.stateManager.getGlobalSettingsKey("liteLlmBaseUrl")
+	const apiKey = controller.stateManager.getSecretKey("liteLlmApiKey")
+	if (baseUrl && apiKey) await refreshLiteLlmModels()
+}
+// Update telemetry service based on the user's current telemetry setting
+function syncTelemetrySetting(controller: Controller): void {
+	controller
+		.getStateToPostToWebview()
+		.then((state) => telemetryService.updateTelemetryState(state.telemetrySetting !== "disabled"))
+}
+
+// Update model info for a provider after refresh, respecting plan/act mode separation
+async function syncProviderModelInfo(
+	controller: Controller,
+	models: Record<string, ModelInfo>,
+	f: ProviderModelFields,
+): Promise<void> {
+	if (!models || Object.keys(models).length === 0) return
+	const apiConfig = controller.stateManager.getApiConfiguration() as Record<string, any>
+	const separate = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
+	const mode = controller.stateManager.getGlobalSettingsKey("mode")
+	if (separate) return updateCurrentModeModel(controller, models, apiConfig, mode, f)
+	const updates: Partial<GlobalStateAndSettings> = {}
+	if (apiConfig[f.planId] && models[apiConfig[f.planId]])
+		(updates as Record<string, any>)[f.planInfo] = models[apiConfig[f.planId]]
+	if (apiConfig[f.actId] && models[apiConfig[f.actId]]) (updates as Record<string, any>)[f.actInfo] = models[apiConfig[f.actId]]
+	if (Object.keys(updates).length === 0) return
+	controller.stateManager.setGlobalStateBatch(updates)
+	await controller.postStateToWebview()
+}
+// Separate mode: update only the current mode's model info
+async function updateCurrentModeModel(
+	controller: Controller,
+	models: Record<string, ModelInfo>,
+	apiConfig: any,
+	mode: string,
+	f: ProviderModelFields,
+): Promise<void> {
+	const idField = mode === "plan" ? f.planId : f.actId
+	const infoField = mode === "plan" ? f.planInfo : f.actInfo
+	const modelId = apiConfig[idField]
+	if (!modelId || !models[modelId]) return
+	controller.stateManager.setGlobalState(infoField, models[modelId])
+	await controller.postStateToWebview()
 }
