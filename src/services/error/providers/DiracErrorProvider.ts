@@ -9,8 +9,10 @@ import { diracTelemetryConfig, DiracTelemetryClientValidConfig } from "../../../
 import { getErrorLevelFromString } from ".."
 import { DiracError } from "../DiracError"
 import type { ErrorSettings, IErrorProvider } from "./IErrorProvider"
+import { isDev } from "@shared/config/environment"
+import { jsonHeaders } from "@shared/net"
 
-const isDev = process.env.IS_DEV === "true"
+
 
 type DiracErrorClientConfig = DiracTelemetryClientValidConfig & {
 	enableExceptionAutocapture: boolean
@@ -64,7 +66,7 @@ export class DiracErrorProvider implements IErrorProvider {
 			message: error.message,
 			stack: error.stack,
 			extension_version: pkg.version,
-			is_dev: isDev,
+			is_dev: isDev(),
 			...properties,
 		}
 
@@ -81,7 +83,7 @@ export class DiracErrorProvider implements IErrorProvider {
 			stack: error.stack,
 			name: error.name,
 			extension_version: pkg.version,
-			is_dev: isDev,
+			is_dev: isDev(),
 			...properties,
 		}
 
@@ -119,7 +121,7 @@ export class DiracErrorProvider implements IErrorProvider {
 			message: message.substring(0, 500), // Truncate long messages
 			level,
 			extension_version: pkg.version,
-			is_dev: isDev,
+			is_dev: isDev(),
 			...properties,
 		})
 	}
@@ -133,7 +135,7 @@ export class DiracErrorProvider implements IErrorProvider {
 			await fetch(diracTelemetryConfig.host, {
 				method: "POST",
 				headers: {
-					"Content-Type": "application/json",
+					...jsonHeaders(),
 					"X-Dirac-API-Key": diracTelemetryConfig.apiKey,
 				},
 				body: JSON.stringify({

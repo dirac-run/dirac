@@ -1,37 +1,18 @@
 /**
  * CommandOrchestrator - Shared command execution orchestration logic.
  *
- * This module contains the common orchestration logic for command execution
- * that is shared between VSCode and Standalone terminal modes. It handles:
- * - Output buffering and chunking
- * - User interaction (ask/say callbacks)
- * - "Proceed While Running" behavior
- * - Timeout handling
- * - Result formatting
- *
- * The actual process spawning/management is handled by the TerminalProcess
- * implementations (VscodeTerminalProcess, StandaloneTerminalProcess).
+ * Strategy 5: Functional composition with direct params.
+ * Process EventEmitter passed directly as function parameter, never via context object wrapper.
  */
 
 import { setTimeout as setTimeoutPromise } from "node:timers/promises"
-import { formatResponse } from "@core/prompts/responses"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
-import { TerminalHangStage, TerminalUserInterventionAction, telemetryService } from "@services/telemetry"
-import { DiracTempManager } from "@services/temp"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-
-import * as fs from "fs"
 import { Logger } from "@/shared/services/Logger"
-import {
-    BUFFER_STUCK_TIMEOUT_MS,
-    CHUNK_BYTE_SIZE,
-    CHUNK_DEBOUNCE_MS,
-    CHUNK_LINE_COUNT,
-    COMPLETION_TIMEOUT_MS,
-    MAX_BYTES_BEFORE_FILE,
-    MAX_LINES_BEFORE_FILE,
-    SUMMARY_LINES_TO_KEEP,
-} from "./constants"
+import { type BuildResultInput, buildResult } from "./buildResult"
+import { BUFFER_STUCK_TIMEOUT_MS, CHUNK_BYTE_SIZE, CHUNK_DEBOUNCE_MS, CHUNK_LINE_COUNT } from "./constants"
+import { buildFileSummary, cleanupFileLog, createFileLog, createFileLogState, shouldSwitchToFile, updateFirstLines, writeLineToFile } from "./file-logging"
+import { attachProcessListeners } from "./process-listeners"
 import type {
     CommandExecutorCallbacks,
     ITerminalManager,
@@ -45,7 +26,7 @@ export async function orchestrateCommandExecution(
 	process: TerminalProcessResultPromise,
 	terminalManager: ITerminalManager,
 	callbacks: CommandExecutorCallbacks,
-	options: OrchestrationOptions
+	options: OrchestrationOptions,
 ): Promise<OrchestrationResult> {
 	const {
 		command,
@@ -58,62 +39,48 @@ export async function orchestrateCommandExecution(
 	} = options
 
 	const taskMessenger = callbacks.taskMessenger
-
-	// Track command execution state
 	callbacks.updateBackgroundCommandState(true)
 
-	const clearCommandState = async () => {
-		callbacks.updateBackgroundCommandState(false)
-	}
-
+	const clearCommandState = async () => callbacks.updateBackgroundCommandState(false)
 	process.once("completed", clearCommandState)
 	process.once("error", clearCommandState)
 	process.once("continue", clearCommandState)
-	process.catch(() => {
-		clearCommandState()
-	})
+	process.catch(() => clearCommandState())
 
+	// Mutable state tracked locally (not in a context object wrapper)
 	let userFeedback: { text?: string; images?: string[]; files?: string[] } | undefined
 	let didContinue = false
 	let didCancelViaUi = false
-	let backgroundTrackingResult: OrchestrationResult | null = null // Set when background tracking returns early
+	let backgroundTrackingResult: OrchestrationResult | null = null
 
-	// Chunked terminal output buffering
+	const chunkTimerRef: { current: NodeJS.Timeout | null } = { current: null }
+	const bufferStuckTimerRef: { current: NodeJS.Timeout | null } = { current: null }
+
+	// outputLines = all captured lines (for final result)
+	const outputLines: string[] = []
+	// outputBuffer = chunked subset for UI flushing
 	let outputBuffer: string[] = []
 	let outputBufferSize = 0
-	let chunkTimer: NodeJS.Timeout | null = null
 
-	// Track if buffer gets stuck
-	let bufferStuckTimer: NodeJS.Timeout | null = null
+	// File logging state
+	let fileState = createFileLogState()
 
-	/**
-	 * Flush buffered output to the UI using createCard() which waits for user response.
-	 * This is the key mechanism for "Proceed While Running" - when user clicks the button,
-	 * the interaction returns with response DiracAskResponse.APPROVE.
-	 */
-	const flushBuffer = async (force = false) => {
-		if (outputBuffer.length === 0 && !force) {
-			return
-		}
+	// ---- Flush function (defined before line listener so it can be referenced) ----
+	const flushBufferFn = async (force = false): Promise<OrchestrationResult | null> => {
+		if (outputBuffer.length === 0 && !force) return null
+
 		const chunk = outputBuffer.join("\n")
 		outputBuffer = []
 		outputBufferSize = 0
 
 		if (!didContinue) {
-			// Start timer to detect if buffer gets stuck
-			bufferStuckTimer = setTimeout(() => {
-				telemetryService.captureTerminalHang(TerminalHangStage.BUFFER_STUCK, terminalType)
-				bufferStuckTimer = null
+			bufferStuckTimerRef.current = setTimeout(() => {
+				bufferStuckTimerRef.current = null
 			}, BUFFER_STUCK_TIMEOUT_MS)
 
-			if (suppressUserInteraction) {
-				return
-			}
-
+			if (suppressUserInteraction) return null
 
 			try {
-				// Use createCard to present output and wait for user response
-				// This enables "Proceed While Running" button functionality
 				const cardHandle = await taskMessenger.createCard({
 					header: "Command Output",
 					body: chunk,
@@ -130,35 +97,14 @@ export async function orchestrateCommandExecution(
 				const { response, text, images, files } = interaction
 
 				if (response === DiracAskResponse.APPROVE) {
-					// Track when user clicks "Proceed While Running"
-					telemetryService.captureTerminalUserIntervention(
-						TerminalUserInterventionAction.PROCESS_WHILE_RUNNING,
-						terminalType
-					)
-					// Proceed while running - but still capture user feedback if provided
 					if (text || (images && images.length > 0) || (files && files.length > 0)) {
 						userFeedback = { text, images, files }
 					}
 					didContinue = true
 
-					// Notify caller to start background command tracking
-					// Pass existing output lines so they can be written to the log file
-					// and send log file path to UI if tracking was started
 					if (onProceedWhileRunning) {
 						const trackingResult = onProceedWhileRunning(outputLines)
-
-						// Clear timers first
-						if (chunkTimer) {
-							clearTimeout(chunkTimer)
-							chunkTimer = null
-						}
-						if (completionTimer) {
-							clearTimeout(completionTimer)
-							completionTimer = null
-						}
-
-						// Set early return result BEFORE resuming the process
-						// This prevents the orchestrator's listener from processing new lines
+						clearChunkTimer(chunkTimerRef)
 						const result = terminalManager.processOutput(outputLines)
 						const logMsg = trackingResult?.logFilePath ? `Log file: ${trackingResult.logFilePath}\n` : ""
 						const outputMsg = result.length > 0 ? `Output so far:\n${result}` : ""
@@ -170,441 +116,212 @@ export async function orchestrateCommandExecution(
 							outputLines,
 						}
 
-						// Send log file message to UI BEFORE resuming the process
-						// This ensures the message appears before any new output lines
 						if (trackingResult?.logFilePath) {
 							await taskMessenger.upsertText(`\n📋 Output is being logged to: ${trackingResult.logFilePath}`)
 						}
-
-						// Now resume the process - any new lines will be handled by the background tracker
 						process.continue()
-						return
+						return backgroundTrackingResult
 					}
-
 					process.continue()
 				} else if (response === DiracAskResponse.REJECT) {
-					telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.CANCELLED, terminalType)
-					// Set flags BEFORE resuming the process to prevent new lines from being processed
 					didCancelViaUi = true
 					userFeedback = undefined
 					didContinue = true
-					outputBuffer = []
-					outputBufferSize = 0
-					// Send cancellation message BEFORE resuming the process
-					// This ensures the message appears before any new output lines
 					await taskMessenger.upsertText("Command cancelled")
-					// Now resume the process
 					process.continue()
 				} else {
 					userFeedback = { text, images, files }
 					didContinue = true
 					process.continue()
-					// If more output accumulated, flush again
-					if (outputBuffer.length > 0) {
-						await flushBuffer()
-					}
 				}
 			} catch (error) {
 				Logger.error("Error while asking for command output", error)
 			} finally {
-				// Clear the stuck timer
-				if (bufferStuckTimer) {
-					clearTimeout(bufferStuckTimer)
-					bufferStuckTimer = null
+				if (bufferStuckTimerRef.current) {
+					clearTimeout(bufferStuckTimerRef.current)
+					bufferStuckTimerRef.current = null
 				}
 			}
 		} else {
-			// After "Proceed While Running": stream output directly to UI
 			await taskMessenger.upsertText(chunk)
 		}
+		return null
 	}
 
 	const scheduleFlush = () => {
-		if (chunkTimer) {
-			clearTimeout(chunkTimer)
-		}
-		chunkTimer = setTimeout(async () => await flushBuffer(), CHUNK_DEBOUNCE_MS)
+		if (chunkTimerRef.current) clearTimeout(chunkTimerRef.current)
+		chunkTimerRef.current = setTimeout(async () => await flushBufferFn(), CHUNK_DEBOUNCE_MS)
 	}
 
-	// Large output file-based logging state
-	let isWritingToFile = false
-	let largeOutputLogPath: string | null = null
-	let largeOutputLogStream: fs.WriteStream | null = null
-	let totalOutputBytes = 0
-	let totalLineCount = 0
-	let firstLines: string[] = [] // Keep first N lines for summary
-	let lastLines: string[] = [] // Keep last N lines for summary (circular buffer)
-
-	/**
-	 * Switch to file-based logging when output is too large.
-	 * This protects against memory exhaustion from commands with huge output.
-	 */
-	const switchToFileBased = async () => {
-		if (isWritingToFile) return
-
-		isWritingToFile = true
-
-		// FIRST: Flush any pending buffer to UI so the "writing to file" message appears at the end
-		if (outputBuffer.length > 0) {
-			const chunk = outputBuffer.join("\n")
-			outputBuffer = []
-			outputBufferSize = 0
-			if (!didContinue) {
-				// Use upsertText instead of ask() since we're transitioning to file mode
-				await taskMessenger.upsertText(chunk)
-			}
-		}
-
-		// Clear any pending flush timer
-		if (chunkTimer) {
-			clearTimeout(chunkTimer)
-			chunkTimer = null
-		}
-
-		// Set up file logging using DiracTempManager for proper cleanup
-		largeOutputLogPath = DiracTempManager.createTempFilePath("large-output")
-		largeOutputLogStream = fs.createWriteStream(largeOutputLogPath, { flags: "a" })
-
-		// Write all existing lines to file in a single batch to reduce I/O overhead
-		if (outputLines.length > 0) {
-			largeOutputLogStream.write(outputLines.join("\n") + "\n")
-		}
-
-		// Keep first N lines for summary
-		firstLines = outputLines.slice(0, SUMMARY_LINES_TO_KEEP)
-
-		// Keep last N lines for summary (will be updated as more lines come in)
-		lastLines = outputLines.slice(-SUMMARY_LINES_TO_KEEP)
-
-		// FINALLY: Notify user (now this will appear at the end after all buffered output)
-		await taskMessenger.upsertText(
-			`\n📋 Output is large (${outputLines.length} lines, ${Math.round(totalOutputBytes / 1024)}KB). Writing to: ${largeOutputLogPath}`
-		)
-	}
-
-	/**
-	 * Clean up file-based logging resources.
-	 */
-	const cleanupFileBased = () => {
-		if (largeOutputLogStream) {
-			largeOutputLogStream.end()
-			largeOutputLogStream = null
+	const clearChunkTimer = (ref: typeof chunkTimerRef) => {
+		if (ref.current) {
+			clearTimeout(ref.current)
+			ref.current = null
 		}
 	}
 
-	const outputLines: string[] = []
+	// ---- Line listener ----
 	process.on("line", async (line: string) => {
-		if (didCancelViaUi) {
-			return
-		}
-
-		// If background tracking is active, don't process lines here
-		// The background tracker's listener will handle them
-		if (backgroundTrackingResult) {
-			return
-		}
+		if (didCancelViaUi || backgroundTrackingResult) return
 
 		const lineBytes = Buffer.byteLength(line, "utf8")
-		totalOutputBytes += lineBytes
-		totalLineCount++
+		fileState.totalOutputBytes += lineBytes
+		fileState.totalLineCount++
 
-		// Check if we should switch to file-based logging
-		if (!isWritingToFile && (outputLines.length >= MAX_LINES_BEFORE_FILE || totalOutputBytes >= MAX_BYTES_BEFORE_FILE)) {
-			await switchToFileBased()
+		// Check if we should switch to file-based logging for large outputs
+		if (!fileState.isWritingToFile && shouldSwitchToFile(outputLines.length, fileState.totalOutputBytes)) {
+			const fileLog = createFileLog()
+			fileState = { ...fileLog, totalOutputBytes: fileState.totalOutputBytes, totalLineCount: fileState.totalLineCount }
+			// Write all existing lines to file in a single batch
+			if (outputLines.length > 0 && fileState.largeOutputLogStream) {
+				fileState.largeOutputLogStream.write(outputLines.join("\n") + "\n")
+			}
+			fileState = updateFirstLines(fileState, outputLines)
+			await taskMessenger.upsertText(
+				`\n📋 Output is large (${outputLines.length} lines, ${Math.round(fileState.totalOutputBytes / 1024)}KB). Writing to: ${fileState.largeOutputLogPath}`,
+			)
 		}
 
-		if (isWritingToFile) {
-			// Write to file instead of keeping in memory
-			if (largeOutputLogStream) {
-				largeOutputLogStream.write(line + "\n")
-			}
-
-			// Update last lines circular buffer for summary
-			lastLines.push(line)
-			if (lastLines.length > SUMMARY_LINES_TO_KEEP) {
-				lastLines.shift()
-			}
+		if (fileState.isWritingToFile) {
+			fileState = writeLineToFile(fileState, line)
 		} else {
-			// Normal behavior - keep in memory
 			outputLines.push(line)
 		}
 
-		// Notify caller about output line (for background command tracking)
-		if (onOutputLine) {
-			onOutputLine(line)
-		}
+		if (onOutputLine) onOutputLine(line)
 
-		// Apply buffered streaming (only if not in file mode or still showing initial output)
-		if (!didContinue) {
-			if (!isWritingToFile) {
-				outputBuffer.push(line)
-				outputBufferSize += lineBytes
-				// Flush if buffer is large enough
-				if (outputBuffer.length >= CHUNK_LINE_COUNT || outputBufferSize >= CHUNK_BYTE_SIZE) {
-					await flushBuffer()
-				} else {
-					scheduleFlush()
-				}
+		if (!didContinue && !fileState.isWritingToFile) {
+			outputBuffer.push(line)
+			outputBufferSize += lineBytes
+
+			if (outputBuffer.length >= CHUNK_LINE_COUNT || outputBufferSize >= CHUNK_BYTE_SIZE) {
+				await flushBufferFn()
+			} else {
+				scheduleFlush()
 			}
-			// When in file mode, we've already notified the user, so don't keep buffering
-		} else {
-			// After "Proceed While Running" (without background tracking): stream output directly to UI
-			// But throttle if we're in file mode to avoid flooding UI
-			if (!isWritingToFile) {
-				await taskMessenger.upsertText(line)
-			}
+		} else if (!fileState.isWritingToFile && didContinue) {
+			await taskMessenger.upsertText(line)
 		}
 	})
 
-	let completed = false
-	let completionDetails: TerminalCompletionDetails | undefined
-	let completionTimer: NodeJS.Timeout | null = null
-
-	// Start timer to detect if waiting for completion takes too long
-	completionTimer = setTimeout(() => {
-		if (!completed) {
-			telemetryService.captureTerminalHang(TerminalHangStage.WAITING_FOR_COMPLETION, terminalType)
-			completionTimer = null
-		}
-	}, COMPLETION_TIMEOUT_MS)
-
-	process.once("completed", async (details?: TerminalCompletionDetails) => {
-		completed = true
-		completionDetails = details
-		// Clear the completion timer
-		if (completionTimer) {
-			clearTimeout(completionTimer)
-			completionTimer = null
-		}
-		// Flush any remaining buffered output
-		if (!didContinue && outputBuffer.length > 0) {
-			if (chunkTimer) {
-				clearTimeout(chunkTimer)
-				chunkTimer = null
+	// ---- Completion listener ----
+	const completionState = { completed: false, details: undefined as TerminalCompletionDetails | undefined }
+	const { cleanup: cleanupListeners } = attachProcessListeners(
+		{ process, taskMessenger, terminalType, showShellIntegrationSuggestion },
+		async (details?: TerminalCompletionDetails) => {
+			completionState.completed = true
+			completionState.details = details
+			if (!didContinue && outputBuffer.length > 0) {
+				clearChunkTimer(chunkTimerRef)
+				await flushBufferFn(true)
 			}
-			await flushBuffer(true)
-		}
-	})
+		},
+	)
 
-	process.once("no_shell_integration", async () => {
-		if (showShellIntegrationSuggestion) {
-			await taskMessenger.upsertText(
-				"Shell integration is not available. Consider using background execution mode for better performance."
-			)
-		} else {
-			await taskMessenger.upsertText("Shell integration is not available.")
-		}
-	})
+	// ---- Timeout handling ----
+	const timeoutResult: OrchestrationResult | null = null
+	if (timeoutSeconds) {
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(() => reject(new Error("COMMAND_TIMEOUT")), timeoutSeconds * 1000)
+		})
 
-	// Handle timeout if specified, or wait for process to complete
-	if (!didCancelViaUi) {
-		if (timeoutSeconds) {
-			const timeoutPromise = new Promise<never>((_, reject) => {
-				setTimeout(() => {
-					reject(new Error("COMMAND_TIMEOUT"))
-				}, timeoutSeconds * 1000)
-			})
+		try {
+			await Promise.race([process, timeoutPromise])
+		} catch (error: any) {
+			if (error.message === "COMMAND_TIMEOUT") {
+				didContinue = true
+				clearChunkTimer(chunkTimerRef)
 
-			try {
-				await Promise.race([process, timeoutPromise])
-			} catch (error: any) {
-				if (error.message === "COMMAND_TIMEOUT") {
-					// Timeout triggers "Proceed While Running" behavior
-					didContinue = true
-
-					// Clear all our timers first
-					if (chunkTimer) {
-						clearTimeout(chunkTimer)
-						chunkTimer = null
-					}
-					if (completionTimer) {
-						clearTimeout(completionTimer)
-						completionTimer = null
-					}
-
-					// If background tracking is available (standalone mode only), use it
-					// This writes output to a log file and detaches the command
-					if (onProceedWhileRunning) {
-						const trackingResult = onProceedWhileRunning(outputLines)
-
-						// Set early return result BEFORE resuming the process
-						// This prevents the orchestrator's listener from processing new lines
-						const result = terminalManager.processOutput(outputLines)
-						const logMsg = trackingResult?.logFilePath ? `Log file: ${trackingResult.logFilePath}\n` : ""
-						const outputMsg = result.length > 0 ? `Output so far:\n${result}` : ""
-
-						backgroundTrackingResult = {
-							userRejected: false,
-							result: `Command timed out after ${timeoutSeconds} seconds. Running in background.\n${logMsg}${outputMsg}`,
-							completed: false,
-							outputLines,
-						}
-
-						// Send log file message to UI BEFORE resuming the process
-						if (trackingResult?.logFilePath) {
-							await taskMessenger.upsertText(
-								`\n⏱️ Command timed out. Output is being logged to: ${trackingResult.logFilePath}`
-							)
-						}
-
-						// Now resume the process - any new lines will be handled by the background tracker
-						process.continue()
-						// Clean up file-based logging if active before returning
-						cleanupFileBased()
-						return backgroundTrackingResult
-					}
-
-					// VSCode terminal mode: no background tracking available
-					// Just continue the process and return timeout result
-					process.continue()
-
-					// Process any output we captured before timeout
-					await setTimeoutPromise(50)
+				if (onProceedWhileRunning) {
+					const trackingResult = onProceedWhileRunning(outputLines)
 					const result = terminalManager.processOutput(outputLines)
-
-					return {
+					const logMsg = trackingResult?.logFilePath ? `Log file: ${trackingResult.logFilePath}\n` : ""
+					backgroundTrackingResult = {
 						userRejected: false,
-						result: `Command execution timed out after ${timeoutSeconds} seconds. ${
-							result.length > 0 ? `\nOutput so far:\n${result}` : ""
-						}`,
+						result: `Command timed out after ${timeoutSeconds} seconds. Running in background.\n${logMsg}${result.length > 0 ? `\nOutput so far:\n${result}` : ""}`,
 						completed: false,
 						outputLines,
 					}
+					if (trackingResult?.logFilePath) {
+						await taskMessenger.upsertText(
+							`\n⏱️ Command timed out. Output is being logged to: ${trackingResult.logFilePath}`,
+						)
+					}
+					process.continue()
+					cleanupFileLog(fileState)
+					return backgroundTrackingResult
 				}
 
-				// Re-throw other errors
-				throw error
+				process.continue()
+				await setTimeoutPromise(50)
+				const result = terminalManager.processOutput(outputLines)
+				return {
+					userRejected: false,
+					result: `Command execution timed out after ${timeoutSeconds} seconds. ${result.length > 0 ? `\nOutput so far:\n${result}` : ""}`,
+					completed: false,
+					outputLines,
+				}
 			}
-		} else {
-			// No timeout - wait for process to complete
-			await process
+			throw error
 		}
+	} else {
+		await process
 	}
 
-	// Check if we returned early due to background tracking
-	// This happens when user clicks "Proceed While Running" with background tracking enabled
+	// ---- Final result building ----
 	if (backgroundTrackingResult) {
-		// Clean up file-based logging if active before returning
-		cleanupFileBased()
+		cleanupFileLog(fileState)
 		return backgroundTrackingResult
 	}
 
-	// Clear timer if process completes normally
-	if (completionTimer) {
-		clearTimeout(completionTimer)
-		completionTimer = null
-	}
-
-	// Wait for a short delay to ensure all messages are sent to the webview
+	cleanupListeners()
+	clearChunkTimer(chunkTimerRef)
 	await setTimeoutPromise(50)
+	cleanupFileLog(fileState)
 
-	// Clean up file-based logging if active
-	cleanupFileBased()
-
-	// Build result based on whether we used file-based logging
 	let result: string
-	let resultOutputLines: string[]
+	const resultOutputLines =
+		fileState.isWritingToFile && fileState.largeOutputLogPath
+			? buildFileSummary(fileState, terminalManager.processOutput.bind(terminalManager)).summaryLines
+			: outputLines
 
-	if (isWritingToFile) {
-		// Build summary from first and last lines
-		const skippedLines = totalLineCount - firstLines.length - lastLines.length
-		const summaryLines = [
-			...firstLines,
-			`\n... (${skippedLines} lines written to ${largeOutputLogPath}) ...\n`,
-			...lastLines,
-		]
-		result = terminalManager.processOutput(summaryLines)
-		resultOutputLines = summaryLines
+	if (fileState.isWritingToFile && fileState.largeOutputLogPath) {
+		result = buildFileSummary(fileState, terminalManager.processOutput.bind(terminalManager)).result
 	} else {
 		result = terminalManager.processOutput(outputLines)
-		resultOutputLines = outputLines
 	}
 
-	if (didCancelViaUi) {
-		return {
-			userRejected: true,
-			result: formatResponse.toolResult(
-				`Command cancelled. ${result.length > 0 ? `\nOutput captured before cancellation:\n${result}` : ""}`
-			),
-			completed: false,
-			outputLines: resultOutputLines,
-			logFilePath: largeOutputLogPath || undefined,
-			exitCode: completionDetails?.exitCode,
-			signal: completionDetails?.signal,
-		}
+	const input: BuildResultInput = {
+		userRejected: didCancelViaUi,
+		result,
+		completed: completionState.completed,
+		outputLines: resultOutputLines as string[],
+		logFilePath: fileState.largeOutputLogPath || undefined,
+		exitCode: completionState.details?.exitCode,
+		signal: completionState.details?.signal,
 	}
 
 	if (userFeedback) {
 		await taskMessenger.upsertText(userFeedback.text || "", false, userFeedback.images, userFeedback.files)
-
 		let fileContentString = ""
 		if (userFeedback.files && userFeedback.files.length > 0) {
 			fileContentString = await processFilesIntoText(userFeedback.files)
 		}
-
-		return {
+		return buildResult({
+			...input,
 			userRejected: true,
-			result: formatResponse.toolResult(
-				`Command is still running in the user's terminal.${
-					result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
-				}\n\nThe user provided the following feedback:\n<feedback>\n${userFeedback.text}\n</feedback>`,
-				userFeedback.images,
-				fileContentString
-			),
-			completed: false,
-			outputLines: resultOutputLines,
-			logFilePath: largeOutputLogPath || undefined,
-			exitCode: completionDetails?.exitCode,
-			signal: completionDetails?.signal,
-		}
+			userFeedbackText: userFeedback.text,
+			userFeedbackImages: userFeedback.images,
+			userFeedbackFiles: userFeedback.files,
+		})
 	}
 
-	if (completed) {
-		const exitCode = completionDetails?.exitCode
-		const signal = completionDetails?.signal
-		const hasExitCode = typeof exitCode === "number"
-		const logFileMsg = largeOutputLogPath ? `\nFull output saved to: ${largeOutputLogPath}` : ""
-		const statusMessage = hasExitCode
-			? exitCode === 0
-				? "Command executed successfully (exit code 0)."
-				: `Command failed with exit code ${exitCode}.`
-			: signal
-			? `Command terminated by signal ${signal}.`
-			: "Command executed."
-
-		return {
-			userRejected: false,
-			result: `${statusMessage}${result.length > 0 ? `\nOutput:\n${result}` : ""}${logFileMsg}`,
-			completed: true,
-			outputLines: resultOutputLines,
-			logFilePath: largeOutputLogPath || undefined,
-			exitCode,
-			signal,
-		}
-	}
-	const logFileMsg = largeOutputLogPath ? `\nFull output saved to: ${largeOutputLogPath}` : ""
-	return {
-		userRejected: false,
-		result: `Command is still running in the user's terminal.${
-			result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
-		}${logFileMsg}\n\nYou will be updated on the terminal status and new output in the future.`,
-		completed: false,
-		outputLines: resultOutputLines,
-		logFilePath: largeOutputLogPath || undefined,
-		exitCode: completionDetails?.exitCode,
-		signal: completionDetails?.signal,
-	}
+	return buildResult(input)
 }
 
-
-/**
- * Helper to find last index matching a predicate
- */
 export function findLastIndex<T>(array: T[], predicate: (item: T) => boolean): number {
 	for (let i = array.length - 1; i >= 0; i--) {
-		if (predicate(array[i])) {
-			return i
-		}
+		if (predicate(array[i])) return i
 	}
 	return -1
 }
