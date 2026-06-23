@@ -1,13 +1,14 @@
 import {
-	ApiError,
-	FunctionCallingConfigMode,
-	type GenerateContentConfig,
-	type GenerateContentResponseUsageMetadata,
-	GoogleGenAI,
-	FunctionDeclaration as GoogleTool,
-	ThinkingLevel,
+    ApiError,
+    FunctionCallingConfigMode,
+    type GenerateContentConfig,
+    type GenerateContentResponseUsageMetadata,
+    GoogleGenAI,
+    FunctionDeclaration as GoogleTool,
+    ThinkingLevel,
 } from "@google/genai"
 import { GeminiModelId, geminiDefaultModelId, geminiModels, ModelInfo } from "@shared/api"
+import { isRateLimited } from "@shared/net"
 import { GEMINI_MAX_OUTPUT_TOKENS } from "@utils/model-utils"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { telemetryService } from "@/services/telemetry"
@@ -219,7 +220,7 @@ export class GeminiHandler implements ApiHandler {
 				requestConfig.tools.push({ functionDeclarations: tools })
 			}
 			if (isSearchEnabled) {
-				requestConfig.tools.push({ googleSearch: {} } as any)
+				requestConfig.tools.push({ googleSearch: {} })
 			}
 
 			requestConfig.toolConfig = {}
@@ -229,19 +230,17 @@ export class GeminiHandler implements ApiHandler {
 				}
 			}
 			if (isSearchEnabled) {
-				;(requestConfig.toolConfig as any).includeServerSideToolInvocations = true
+				requestConfig.toolConfig.includeServerSideToolInvocations = true
 			}
 		}
-
 
 		Logger.info(`Gemini: generating content with model ${modelId}`, {
 			temperature: requestConfig.temperature,
 			topP: requestConfig.topP,
-			maxOutputTokens: (requestConfig as any).maxOutputTokens,
+			maxOutputTokens: requestConfig.maxOutputTokens,
 			thinkingConfig: requestConfig.thinkingConfig,
 			tools: requestConfig.tools?.map((t: any) => (t.functionDeclarations ? "tools" : Object.keys(t)[0])),
 		})
-
 
 		try {
 			const result = await client.models.generateContentStream({
@@ -262,62 +261,15 @@ export class GeminiHandler implements ApiHandler {
 					isFirstSdkChunk = false
 				}
 
-				// Handle thinking content from Gemini's response
 				const parts = chunk?.candidates?.[0]?.content?.parts || []
 				for (const part of parts) {
-					if (part.thoughtSignature) {
-						currentThoughtSignature = part.thoughtSignature
-					}
+					if (part.thoughtSignature) currentThoughtSignature = part.thoughtSignature
 					const signature = part.thoughtSignature || currentThoughtSignature
-
-					if (part.thought && part.text) {
-						yield {
-							type: "reasoning",
-							id: chunk.responseId,
-							reasoning: part.text || "",
-							signature: signature,
-						}
-
-					} else if (part.text) {
-						yield {
-							type: "text",
-							text: part.text,
-							id: chunk.responseId,
-							signature: signature,
-						}
-
-					}
-					if (part.functionCall) {
-						const functionCall = part.functionCall
-						const existingId = functionCall.id?.trim()
-						const toolCallId =
-							existingId ??
-							(() => {
-								const sequenceNumber = responseToolCallCount.get(responseKey) ?? 0
-								responseToolCallCount.set(responseKey, sequenceNumber + 1)
-								return `${responseKey}-tool-${sequenceNumber}`
-							})()
-						yield {
-							type: "tool_calls",
-							id: chunk.responseId,
-							tool_call: {
-								call_id: toolCallId,
-								function: {
-									id: toolCallId,
-									name: functionCall.name,
-									arguments: JSON.stringify(functionCall.args || {}),
-								},
-							},
-							signature: signature,
-						}
-					}
+					yield* this.parseGeminiPart(part, chunk.responseId, signature, responseKey, responseToolCallCount)
 				}
 
 				const candidate = chunk.candidates?.[0]
-				if (candidate?.groundingMetadata) {
-					lastGroundingMetadata = candidate.groundingMetadata
-				}
-
+				if (candidate?.groundingMetadata) lastGroundingMetadata = candidate.groundingMetadata
 
 				if (chunk.usageMetadata) {
 					responseId = chunk.responseId
@@ -351,21 +303,20 @@ export class GeminiHandler implements ApiHandler {
 					stopReason,
 				}
 
-			if (lastGroundingMetadata && lastGroundingMetadata.groundingChunks?.length > 0) {
-				let sourcesMarkdown = "\n\n**Sources:**\n"
+				if (lastGroundingMetadata && lastGroundingMetadata.groundingChunks?.length > 0) {
+					let sourcesMarkdown = "\n\n**Sources:**\n"
 
-				lastGroundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
-					if (chunk.web) {
-						sourcesMarkdown += `${index + 1}. [${chunk.web.title || chunk.web.uri}](${chunk.web.uri})\n`
+					lastGroundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
+						if (chunk.web) {
+							sourcesMarkdown += `${index + 1}. [${chunk.web.title || chunk.web.uri}](${chunk.web.uri})\n`
+						}
+					})
+					yield {
+						type: "text",
+						text: sourcesMarkdown,
+						id: responseId,
 					}
-				})
-				yield {
-					type: "text",
-					text: sourcesMarkdown,
-					id: responseId,
 				}
-			}
-
 			}
 		} catch (error) {
 			apiSuccess = false
@@ -375,7 +326,7 @@ export class GeminiHandler implements ApiHandler {
 				apiError = error.message
 
 				if (error instanceof ApiError) {
-					if (error.status === 429) {
+					if (isRateLimited(error.status)) {
 						// The API includes more details in the message
 						// https://github.com/googleapis/js-genai/blob/v1.11.0/src/_api_client.ts#L758
 						const response = this.attemptParse(error.message)
@@ -439,6 +390,38 @@ export class GeminiHandler implements ApiHandler {
 				Logger.warn("GeminiHandler: ulid not available for telemetry in createMessage.")
 			}
 		}
+	}
+
+	// Parses a single Gemini response part (text, thought, or function call) into Dirac chunk(s).
+	private *parseGeminiPart(
+		part: any,
+		responseId: string | undefined,
+		signature: string | undefined,
+		responseKey: string,
+		responseToolCallCount: Map<string, number>,
+	): Generator<any> {
+		if (part.thought && part.text) {
+			yield { type: "reasoning", id: responseId, reasoning: part.text || "", signature }
+		} else if (part.text) {
+			yield { type: "text", text: part.text, id: responseId, signature }
+		}
+		if (part.functionCall) {
+			const existingId = part.functionCall.id?.trim()
+			const toolCallId = existingId ?? this.nextToolCallId(responseKey, responseToolCallCount)
+			yield {
+				type: "tool_calls",
+				id: responseId,
+				tool_call: { call_id: toolCallId, function: { id: toolCallId, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) } },
+				signature,
+			}
+		}
+	}
+
+	// Generates a sequential tool call ID for the given response key.
+	private nextToolCallId(responseKey: string, counts: Map<string, number>): string {
+		const seq = counts.get(responseKey) ?? 0
+		counts.set(responseKey, seq + 1)
+		return `${responseKey}-tool-${seq}`
 	}
 
 	/**

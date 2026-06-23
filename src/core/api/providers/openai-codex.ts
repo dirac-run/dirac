@@ -1,11 +1,8 @@
 import { ModelInfo, OpenAiCodexModelId, openAiCodexDefaultModelId, openAiCodexModels } from "@shared/api"
+import { jsonHeaders } from "@shared/net"
 import { normalizeOpenaiReasoningEffort } from "@shared/storage/types"
 import OpenAI from "openai"
 import type { ChatCompletionTool } from "openai/resources/chat/completions"
-import {
-	processResponsesEvents,
-	ResponsesWebsocketManager, parseSseResponse
-} from "./openai-responses-utils"
 import * as os from "os"
 // Removed unused undici imports
 import { v7 as uuidv7 } from "uuid"
@@ -20,6 +17,7 @@ import { Logger } from "@/shared/services/Logger"
 import { ApiHandler, CommonApiHandlerOptions } from "../"
 import { convertToOpenAIResponsesInput } from "../transform/openai-response-format"
 import { ApiStream } from "../transform/stream"
+import { parseSseResponse, processResponsesEvents, ResponsesWebsocketManager } from "./openai-responses-utils"
 
 /**
  * OpenAI Codex base URL for API requests
@@ -27,6 +25,15 @@ import { ApiStream } from "../transform/stream"
  */
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const CODEX_RESPONSES_WEBSOCKET_URL = "wss://chatgpt.com/backend-api/codex/responses"
+
+// ChatCompletionTool doesn't include web_search; use the Responses API WebSearchTool shape
+// external_web_access is not in the SDK type yet
+type CodexWebSearchTool = OpenAI.Responses.WebSearchTool & { external_web_access?: boolean }
+type CodexTool = ChatCompletionTool | CodexWebSearchTool
+
+function isWebSearchTool(tool: CodexTool): tool is CodexWebSearchTool {
+	return tool.type === "web_search" || tool.type === "web_search_2025_08_26"
+}
 
 interface OpenAiCodexHandlerOptions extends CommonApiHandlerOptions {
 	reasoningEffort?: string
@@ -61,11 +68,9 @@ export class OpenAiCodexHandler implements ApiHandler {
 		this.sessionId = uuidv7()
 	}
 
-
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
 		// Add web_search tool for OpenAI
-		const finalTools = [...(tools || [])]
-		finalTools.push({ type: "web_search" } as any)
+		const finalTools: CodexTool[] = [...(tools || []), { type: "web_search" }]
 		const model = this.getModel()
 
 		// Reset state for this request
@@ -119,7 +124,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 		model: { id: string; info: ModelInfo },
 		formattedInput: any,
 		systemPrompt: string,
-		tools?: ChatCompletionTool[],
+		tools?: CodexTool[],
 	): any {
 		// Determine reasoning effort
 		const reasoningEffort = normalizeOpenaiReasoningEffort(this.options.reasoningEffort)
@@ -149,7 +154,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 		// Pass through strict value from tool (custom tools have strict: false, built-in tools default to true)
 		if (tools && tools.length > 0) {
 			body.tools = tools
-				.map((tool: any) => {
+				.map((tool) => {
 					if (tool.type === "function") {
 						return {
 							type: "function",
@@ -159,15 +164,13 @@ export class OpenAiCodexHandler implements ApiHandler {
 							strict: tool.function.strict ?? true,
 						}
 					}
-					if (tool.type === "web_search") {
+					if (isWebSearchTool(tool)) {
 						return {
 							type: "web_search",
 							...(tool.search_context_size ? { search_context_size: tool.search_context_size } : {}),
 							...(tool.filters ? { filters: tool.filters } : {}),
 							...(tool.user_location ? { user_location: tool.user_location } : {}),
-							...(tool.external_web_access !== undefined
-								? { external_web_access: tool.external_web_access }
-								: {}),
+							...(tool.external_web_access !== undefined ? { external_web_access: tool.external_web_access } : {}),
 						}
 					}
 					return undefined
@@ -234,12 +237,12 @@ export class OpenAiCodexHandler implements ApiHandler {
 					fetch, // Use shared fetch for proxy support
 				})
 
-			const stream = (await (client as any).responses.create(requestBody, {
+			const stream = await client.responses.create(requestBody as OpenAI.Responses.ResponseCreateParamsStreaming, {
 				signal: this.abortController?.signal,
 				headers: codexHeaders,
-			})) as AsyncIterable<any>
+			})
 
-			if (typeof (stream as any)?.[Symbol.asyncIterator] !== "function") {
+			if (typeof stream?.[Symbol.asyncIterator] !== "function") {
 				throw new Error("OpenAI SDK did not return an AsyncIterable")
 			}
 
@@ -270,7 +273,6 @@ export class OpenAiCodexHandler implements ApiHandler {
 		}
 	}
 
-
 	private closeResponsesWebsocket() {
 		this.responsesWsManager?.close()
 	}
@@ -278,7 +280,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 		const url = `${CODEX_API_BASE_URL}/responses`
 		const accountId = await openAiCodexOAuthManager.getAccountId()
 		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
+			...jsonHeaders(),
 			Authorization: `Bearer ${accessToken}`,
 			originator: "dirac",
 			session_id: this.sessionId,

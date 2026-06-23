@@ -14,6 +14,7 @@ import "should"
 import { DiracAssistantThinkingBlock, DiracStorageMessage, DiracTextContentBlock } from "@/shared/messages/content"
 import { sanitizeAnthropicMessages } from "../anthropic-format"
 import { convertToOpenAiMessages, sanitizeGeminiMessages } from "../openai-format"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("Thinking Trace Preservation", () => {
 	describe("convertToOpenAiMessages", () => {
@@ -168,7 +169,7 @@ describe("Thinking Trace Preservation", () => {
 				},
 			]
 
-			const result = sanitizeGeminiMessages(messages, "gemini-2.5-pro")
+			const result = sanitizeGeminiMessages(messages, TEST_MODEL_IDS.GEMINI)
 
 			// Tool call should be dropped, but content preserved
 			result.should.have.length(1)
@@ -200,7 +201,7 @@ describe("Thinking Trace Preservation", () => {
 				},
 			]
 
-			const result = sanitizeGeminiMessages(messages, "gemini-2.5-pro")
+			const result = sanitizeGeminiMessages(messages, TEST_MODEL_IDS.GEMINI)
 
 			result.should.have.length(2)
 			;(result[0] as any).tool_calls.should.have.length(1)
@@ -216,7 +217,7 @@ describe("Thinking Trace Preservation", () => {
 				},
 			]
 
-			const result = sanitizeGeminiMessages(messages, "gpt-4o")
+			const result = sanitizeGeminiMessages(messages, TEST_MODEL_IDS.OPENAI_GPT4O)
 
 			result.should.have.length(1)
 			;(result[0] as any).tool_calls.should.have.length(1)

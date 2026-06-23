@@ -1,18 +1,19 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { LiteLLMModelInfo, liteLlmDefaultModelId, liteLlmModelInfoSaneDefaults } from "@shared/api"
 import OpenAI from "openai"
+import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
 import { StateManager } from "@/core/storage/StateManager"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { createOpenAIClient, fetch } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
+import { DiracTool } from "@/shared/tools"
 import { isAnthropicModelId } from "@/utils/model-utils"
 import { ApiHandler, CommonApiHandlerOptions } from ".."
 import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
-import { DiracTool } from "@/shared/tools"
 import { ApiStream } from "../transform/stream"
+import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
 
 interface LiteLlmHandlerOptions extends CommonApiHandlerOptions {
 	liteLlmApiKey?: string
@@ -259,7 +260,7 @@ export class LiteLlmHandler implements ApiHandler {
 
 		// Apply cache_control to the last two user messages if enabled
 		// https://docs.litellm.ai/docs/providers/anthropic#caching---large-context-caching
-		const enhancedMessages: OpenAI.Chat.ChatCompletionMessageParam[] = formattedMessages.map(
+		const enhancedMessages = formattedMessages.map(
 			(message, index): OpenAI.Chat.ChatCompletionMessageParam => {
 				if ((index === lastUserMsgIndex || index === secondLastUserMsgIndex) && cacheControl) {
 					// Handle both string and array content types
@@ -272,8 +273,8 @@ export class LiteLlmHandler implements ApiHandler {
 									text: message.content,
 									...cacheControl,
 								},
-							] as any,
-						}
+							],
+						} as OpenAI.Chat.ChatCompletionMessageParam
 					}
 					if (Array.isArray(message.content)) {
 						// Apply cache control to the last content item in the array
@@ -286,8 +287,8 @@ export class LiteLlmHandler implements ApiHandler {
 											...cacheControl,
 										}
 									: item,
-							) as any,
-						}
+							),
+						} as OpenAI.Chat.ChatCompletionMessageParam
 					}
 
 					return {
@@ -299,7 +300,7 @@ export class LiteLlmHandler implements ApiHandler {
 			},
 		)
 
-		const toolParams = getOpenAIToolParams(tools as any)
+		const toolParams = getOpenAIToolParams(tools as OpenAITool[])
 
 		const stream = await client.chat.completions.create({
 			model: this.options.liteLlmModelId || liteLlmDefaultModelId,
@@ -316,68 +317,54 @@ export class LiteLlmHandler implements ApiHandler {
 		const toolCallProcessor = new ToolCallProcessor()
 
 		for await (const chunk of stream) {
-			const delta = chunk.choices?.[0]?.delta
+			yield* this.parseLiteLlmChunk(chunk, toolCallProcessor)
+		}
+	}
 
-			// Handle normal text content
-			if (delta?.content) {
-			// Handle tool calls
+	// Parses a single LiteLLM stream chunk into Dirac ApiStreamChunk(s).
+	// NOTE: tool_calls are only processed when delta.content is also truthy —
+	// this is the existing behavior (characterized in tests).
+	private async *parseLiteLlmChunk(chunk: any, toolCallProcessor: ToolCallProcessor): ApiStream {
+		const delta = chunk.choices?.[0]?.delta
+
+		// Handle normal text content (and tool calls nested within — existing behavior)
+		if (delta?.content) {
 			if (delta?.tool_calls) {
 				yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
 			}
+			yield { type: "text", text: delta.content }
+		}
 
-				yield {
-					type: "text",
-					text: delta.content,
-				}
-			}
+		// Handle reasoning events (not in standard types but may be in the response)
+		if (delta?.reasoning_content) {
+			yield { type: "reasoning", reasoning: delta.reasoning_content || "" }
+		}
 
-			// Handle reasoning events
-			// This is not in the standard types but may be in the response
-			interface ThinkingDelta {
-				reasoning_content?: string
-			}
+		// Handle token usage information
+		if (chunk.usage) {
+			yield* this.parseLiteLlmUsage(chunk.usage)
+		}
+	}
 
-			if ((delta as ThinkingDelta)?.reasoning_content) {
-				yield {
-					type: "reasoning",
-					reasoning: (delta as ThinkingDelta).reasoning_content || "",
-				}
-			}
+	// Builds a usage chunk from LiteLLM usage data, including cache token handling.
+	private async *parseLiteLlmUsage(usage: any): ApiStream {
+		const cacheWriteTokens = usage.cache_creation_input_tokens || usage.prompt_cache_miss_tokens || 0
+		const cacheReadTokens = usage.cache_read_input_tokens || usage.prompt_cache_hit_tokens || 0
+		const totalCost =
+			(await this.calculateCost(
+				usage.prompt_tokens || 0,
+				usage.completion_tokens || 0,
+				cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
+				cacheReadTokens > 0 ? cacheReadTokens : undefined,
+			)) || 0
 
-			// Handle token usage information
-			if (chunk.usage) {
-				// Extract cache-related information if available
-				// Need to use type assertion since these properties are not in the standard OpenAI types
-				const usage = chunk.usage as {
-					prompt_tokens: number
-					completion_tokens: number
-					cache_creation_input_tokens?: number
-					prompt_cache_miss_tokens?: number
-					cache_read_input_tokens?: number
-					prompt_cache_hit_tokens?: number
-				}
-
-				const cacheWriteTokens = usage.cache_creation_input_tokens || usage.prompt_cache_miss_tokens || 0
-				const cacheReadTokens = usage.cache_read_input_tokens || usage.prompt_cache_hit_tokens || 0
-
-				// Calculate cost using the actual token usage including cache tokens
-				const totalCost =
-					(await this.calculateCost(
-						usage.prompt_tokens || 0,
-						usage.completion_tokens || 0,
-						cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
-						cacheReadTokens > 0 ? cacheReadTokens : undefined,
-					)) || 0
-
-				yield {
-					type: "usage",
-					inputTokens: usage.prompt_tokens || 0,
-					outputTokens: usage.completion_tokens || 0,
-					cacheWriteTokens: cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
-					cacheReadTokens: cacheReadTokens > 0 ? cacheReadTokens : undefined,
-					totalCost,
-				}
-			}
+		yield {
+			type: "usage",
+			inputTokens: usage.prompt_tokens || 0,
+			outputTokens: usage.completion_tokens || 0,
+			cacheWriteTokens: cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
+			cacheReadTokens: cacheReadTokens > 0 ? cacheReadTokens : undefined,
+			totalCost,
 		}
 	}
 
