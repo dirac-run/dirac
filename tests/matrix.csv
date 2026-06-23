@@ -1,0 +1,161 @@
+id,file,test_name,layer,component,phase,status
+CTRL-001,src/core/controller/__tests__/Controller.test.ts,creates a Controller instance,unit,Controller,1,0
+CTRL-002,src/core/controller/__tests__/Controller.test.ts,has a stateManager property,unit,Controller,1,0
+CTRL-003,src/core/controller/__tests__/Controller.test.ts,has no task initially,unit,Controller,1,0
+CTRL-004,src/core/controller/__tests__/Controller.test.ts,initTask returns a string taskId,unit,Controller,1,0
+CTRL-005,src/core/controller/__tests__/Controller.test.ts,initTask creates a Task on controller.task,unit,Controller,1,0
+CTRL-006,src/core/controller/__tests__/Controller.test.ts,dispose clears task,unit,Controller,1,0
+CTRL-007,src/core/controller/__tests__/Controller.test.ts,clearTask nullifies controller.task,unit,Controller,1,0
+CTRL-008,src/core/controller/__tests__/Controller.test.ts,cancelTask resolves,unit,Controller,1,0
+CTRL-009,src/core/controller/__tests__/Controller.test.ts,toggleActModeForYoloMode returns boolean,unit,Controller,1,0
+CTRL-010,src/core/controller/__tests__/Controller.test.ts,togglePlanActMode returns boolean,unit,Controller,1,0
+CTRL-011,src/core/controller/__tests__/Controller.test.ts,cancelBackgroundCommand resolves,unit,Controller,1,0
+CTRL-012,src/core/controller/__tests__/Controller.test.ts,getTaskWithId returns task details,unit,Controller,1,0
+CTRL-013,src/core/controller/__tests__/Controller.test.ts,deleteTaskFromState removes task,unit,Controller,1,0
+CTRL-014,src/core/controller/__tests__/Controller.test.ts,handleTaskCreation creates task,unit,Controller,1,0
+CTRL-015,src/core/controller/__tests__/Controller.test.ts,readOpenRouterModels returns undefined,unit,Controller,1,0
+TASK-001,src/core/task/__tests__/Task.test.ts,creates a Task with taskId,unit,Task,1,0
+TASK-002,src/core/task/__tests__/Task.test.ts,has cwd set from params,unit,Task,1,0
+TASK-003,src/core/task/__tests__/Task.test.ts,initializes taskState,unit,Task,1,0
+TASK-004,src/core/task/__tests__/Task.test.ts,abortTask transitions status,unit,Task,1,0
+TASK-005,src/core/task/__tests__/Task.test.ts,cancelBackgroundCommand returns boolean,unit,Task,1,0
+TASK-006,src/core/task/__tests__/Task.test.ts,markToolsDirty does not throw,unit,Task,1,0
+TASK-007,src/core/task/__tests__/Task.test.ts,resetTransientState resolves,unit,Task,1,0
+API-DISPATCH-001,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for anthropic provider,unit,Provider Dispatch,1,0
+API-DISPATCH-002,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for openrouter provider,unit,Provider Dispatch,1,0
+API-DISPATCH-003,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for bedrock provider,unit,Provider Dispatch,1,0
+API-DISPATCH-004,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for openai provider,unit,Provider Dispatch,1,0
+API-DISPATCH-005,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for gemini provider,unit,Provider Dispatch,1,0
+API-DISPATCH-006,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for vertex provider,unit,Provider Dispatch,1,0
+API-DISPATCH-007,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for deepseek provider,unit,Provider Dispatch,1,0
+API-DISPATCH-008,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for requesty provider,unit,Provider Dispatch,1,0
+API-DISPATCH-009,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for fireworks provider,unit,Provider Dispatch,1,0
+API-DISPATCH-010,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for together provider,unit,Provider Dispatch,1,0
+API-DISPATCH-011,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for qwen provider,unit,Provider Dispatch,1,0
+API-DISPATCH-012,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for mistral provider,unit,Provider Dispatch,1,0
+API-DISPATCH-013,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for github-copilot provider,unit,Provider Dispatch,1,0
+API-DISPATCH-014,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for litellm provider,unit,Provider Dispatch,1,0
+API-DISPATCH-015,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for moonshot provider,unit,Provider Dispatch,1,0
+API-DISPATCH-016,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for huggingface provider,unit,Provider Dispatch,1,0
+API-DISPATCH-017,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for nebius provider,unit,Provider Dispatch,1,0
+API-DISPATCH-018,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for xai provider,unit,Provider Dispatch,1,0
+API-DISPATCH-019,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for sambanova provider,unit,Provider Dispatch,1,0
+API-DISPATCH-020,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for cerebras provider,unit,Provider Dispatch,1,0
+API-DISPATCH-021,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for groq provider,unit,Provider Dispatch,1,0
+API-DISPATCH-022,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for baseten provider,unit,Provider Dispatch,1,0
+API-DISPATCH-023,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for claude-code provider,unit,Provider Dispatch,1,0
+API-DISPATCH-024,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for huawei-cloud-maas provider,unit,Provider Dispatch,1,0
+API-DISPATCH-025,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for dify provider,unit,Provider Dispatch,1,0
+API-DISPATCH-026,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for vercel-ai-gateway provider,unit,Provider Dispatch,1,0
+API-DISPATCH-027,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for zai provider,unit,Provider Dispatch,1,0
+API-DISPATCH-028,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for aihubmix provider,unit,Provider Dispatch,1,0
+API-DISPATCH-029,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for minimax provider,unit,Provider Dispatch,1,0
+API-DISPATCH-030,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for nousResearch provider,unit,Provider Dispatch,1,0
+API-DISPATCH-031,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for wandb provider,unit,Provider Dispatch,1,0
+API-DISPATCH-032,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for lmstudio provider,unit,Provider Dispatch,1,0
+API-DISPATCH-033,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for qwen-code provider,unit,Provider Dispatch,1,0
+API-DISPATCH-034,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for doubao provider,unit,Provider Dispatch,1,0
+API-DISPATCH-035,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for vscode-lm provider,unit,Provider Dispatch,1,0
+API-DISPATCH-036,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for openai-native provider,unit,Provider Dispatch,1,0
+API-DISPATCH-037,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for openai-codex provider,unit,Provider Dispatch,1,0
+API-DISPATCH-038,src/core/api/__tests__/provider-dispatch.test.ts,selects plan mode model IDs when mode is plan,unit,Provider Dispatch,1,0
+API-DISPATCH-039,src/core/api/__tests__/provider-dispatch.test.ts,selects act mode model IDs when mode is act,unit,Provider Dispatch,1,0
+API-DISPATCH-040,src/core/api/__tests__/provider-dispatch.test.ts,handles undefined apiProvider gracefully,unit,Provider Dispatch,1,0
+MODE-CONFIG-001,src/core/api/__tests__/mode-config.test.ts,selects plan mode model ID when mode is plan,unit,Mode Config,1,0
+MODE-CONFIG-002,src/core/api/__tests__/mode-config.test.ts,selects act mode model ID when mode is act,unit,Mode Config,1,0
+MODE-CONFIG-003,src/core/api/__tests__/mode-config.test.ts,selects plan mode thinking budget when mode is plan,unit,Mode Config,1,0
+MODE-CONFIG-004,src/core/api/__tests__/mode-config.test.ts,selects act mode thinking budget when mode is act,unit,Mode Config,1,0
+MODE-CONFIG-005,src/core/api/__tests__/mode-config.test.ts,selects plan mode reasoning effort when mode is plan,unit,Mode Config,1,0
+MODE-CONFIG-006,src/core/api/__tests__/mode-config.test.ts,selects act mode reasoning effort when mode is act,unit,Mode Config,1,0
+MODE-CONFIG-007,src/core/api/__tests__/mode-config.test.ts,handles undefined plan mode config by falling back to act mode,unit,Mode Config,1,0
+ERROR-HANDLING-001,src/core/api/__tests__/error-handling.test.ts,handles missing apiKey gracefully for anthropic,unit,Error Handling,1,0
+ERROR-HANDLING-002,src/core/api/__tests__/error-handling.test.ts,handles missing apiKey gracefully for openai,unit,Error Handling,1,0
+ERROR-HANDLING-003,src/core/api/__tests__/error-handling.test.ts,handles missing apiKey gracefully for gemini,unit,Error Handling,1,0
+ERROR-HANDLING-004,src/core/api/__tests__/error-handling.test.ts,handles missing apiKey gracefully for bedrock,unit,Error Handling,1,0
+ERROR-HANDLING-005,src/core/api/__tests__/error-handling.test.ts,handles missing apiProvider gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-006,src/core/api/__tests__/error-handling.test.ts,handles invalid mode by defaulting to plan,unit,Error Handling,1,0
+ERROR-HANDLING-007,src/core/api/__tests__/error-handling.test.ts,handles missing model ID gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-008,src/core/api/__tests__/error-handling.test.ts,handles empty model ID gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-009,src/core/api/__tests__/error-handling.test.ts,handles negative thinking budget gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-010,src/core/api/__tests__/error-handling.test.ts,handles missing reasoning effort gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-011,src/core/api/__tests__/error-handling.test.ts,handles invalid reasoning effort gracefully,unit,Error Handling,1,0
+ERROR-HANDLING-012,src/core/api/__tests__/error-handling.test.ts,handles missing ulid gracefully,unit,Error Handling,1,0
+DIFY-001,src/core/api/__tests__/dify.test.ts,returns a handler for dify provider,unit,Dify Provider,1,0
+DIFY-002,src/core/api/__tests__/dify.test.ts,handles missing difyApiKey gracefully,unit,Dify Provider,1,0
+BEDROCK-001,src/core/api/__tests__/bedrock-config.test.ts,handles plan mode bedrock configuration,integration,Bedrock Config,1,1
+BEDROCK-002,src/core/api/__tests__/bedrock-config.test.ts,handles plan mode bedrock custom model base ID,integration,Bedrock Config,1,1
+BEDROCK-003,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock profile configurations,integration,Bedrock Config,1,1
+BEDROCK-004,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock endpoint configuration,integration,Bedrock Config,1,1
+BEDROCK-005,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock awsProfile configuration,integration,Bedrock Config,1,1
+BEDROCK-006,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock thinking budget tokens,integration,Bedrock Config,1,1
+BEDROCK-007,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock region configuration,integration,Bedrock Config,1,1
+BEDROCK-008,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock startConversation configuration,integration,Bedrock Config,1,1
+BEDROCK-009,src/core/api/__tests__/bedrock-config.test.ts,handles bedrock updateConversation configuration,integration,Bedrock Config,1,1
+HOST-DIFFVIEW-001,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,creates diff view provider instance (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-002,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,tracks active diff editor (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-003,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,sets activeDiffEditor when opening a diff (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-004,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,maintains Map of reviewing files (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-005,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,adds files to reviewingFiles when under review (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-006,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,throws if no active diff editor in replaceText (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-007,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,updates decorations after replacing text (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-008,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,closes all diff views (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-009,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,saves the document (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-010,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,creates fadedOverlay controller (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-011,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,creates activeLine controller (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-012,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,updates context keys based on active editor (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+HOST-DIFFVIEW-013,src/hosts/vscode/__tests__/VscodeDiffViewProvider.test.ts,counts trailing newlines (SKIPPED - VS Code API mocks),unit,VscodeDiffView Provider,1,-1
+CHECKPOINT-001,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,returns empty array when no files in diff summary,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-002,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,excludes files matching exclusion patterns (node_modules),diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-003,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,includes files with actual content differences,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-004,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,handles deleted files gracefully (empty after content),diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-005,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,returns diff entries with relativePath absolutePath before after,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-006,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,returns 0 when no files in diff summary (count),diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-007,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,returns count of files in diff summary,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-008,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,counts only non-excluded files,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-009,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,clean commit hashes before computing diff range,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-010,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,handles rhsHash for commit-to-commit comparison,diff_content_provider,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-011,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,strips HEAD prefix from commit hash,clean_commit_hash,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-012,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,returns hash unchanged if no HEAD prefix,clean_commit_hash,CheckpointTracker DiffContentProvider,1,0
+CHECKPOINT-013,src/integrations/checkpoints/__tests__/DiffContentProvider.test.ts,handles empty string for cleanCommitHash,clean_commit_hash,CheckpointTracker DiffContentProvider,1,0
+VIEWPROVIDER-001,src/integrations/editor/__tests__/FileOperationManager.test.ts,creates directories for new file,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-002,src/integrations/editor/__tests__/FileOperationManager.test.ts,reads existing file content for modify type,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-003,src/integrations/editor/__tests__/FileOperationManager.test.ts,writes file content,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-004,src/integrations/editor/__tests__/FileOperationManager.test.ts,deletes file,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-005,src/integrations/editor/__tests__/FileOperationManager.test.ts,deletes created directories in reverse order,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-006,src/integrations/editor/__tests__/FileOperationManager.test.ts,resets state,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-007,src/integrations/editor/__tests__/FileOperationManager.test.ts,returns original content for LLM,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-008,src/integrations/editor/__tests__/FileOperationManager.test.ts,returns undefined for originalContent when not set,file_operation_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-009,src/integrations/editor/__tests__/DiffContentManager.test.ts,skips empty content during streaming,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-010,src/integrations/editor/__tests__/DiffContentManager.test.ts,skips unchanged content length,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-011,src/integrations/editor/__tests__/DiffContentManager.test.ts,strips BOM from content,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-012,src/integrations/editor/__tests__/DiffContentManager.test.ts,tracks line count correctly,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-013,src/integrations/editor/__tests__/DiffContentManager.test.ts,normalizes EOL to CRLF when input has CRLF,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-014,src/integrations/editor/__tests__/DiffContentManager.test.ts,normalizes EOL to LF when input has no CRLF,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-015,src/integrations/editor/__tests__/DiffContentManager.test.ts,detects user edits when content differs,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-016,src/integrations/editor/__tests__/DiffContentManager.test.ts,returns undefined when no user edits,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-017,src/integrations/editor/__tests__/DiffContentManager.test.ts,detects auto-formatting edits,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-018,src/integrations/editor/__tests__/DiffContentManager.test.ts,returns undefined when no auto-formatting,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-019,src/integrations/editor/__tests__/DiffContentManager.test.ts,resets state,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-020,src/integrations/editor/__tests__/DiffContentManager.test.ts,finalizes by truncating to accumulated lines length,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-021,src/integrations/editor/__tests__/DiffContentManager.test.ts,gets final content without notebook sanitization for non-notebook,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-022,src/integrations/editor/__tests__/DiffContentManager.test.ts,sets relPath,diff_content_manager,DiffViewProvider decomposition,1,0
+VIEWPROVIDER-023,src/hosts/vscode/VscodeDiffViewProvider.ts,reduces from 507 to ~167 lines via composition,diff_view_provider_decomposition,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-024,src/hosts/vscode/TabManager.ts,manages diff editor tab lifecycle,tab_manager,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-025,src/hosts/vscode/DecorationControllerManager.ts,manages decoration controllers for streaming overlay,decoration_manager,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-026,src/hosts/vscode/StreamingTextUpdater.ts,handles replaceText, scrollAnimation, truncateDocument,text_updater,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-027,src/hosts/vscode/NotebookDiffManager.ts,manages Jupyter notebook diff view integration,notebook_manager,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-028,src/hosts/vscode/DocumentOperationManager.ts,handles saveDocument, applyAndSaveSilently, format operations,document_operations,VscodeDiffViewProvider decomposition,1,0
+VIEWPROVIDER-029,src/hosts/vscode/ReviewContextManager.ts,manages review mode context keys and state,review_context,VscodeDiffViewProvider decomposition,1,0
+COMMENTREVIEW-001,src/hosts/vscode/review/VscodeCommentReviewController.ts,reduces from 473 to ~139 lines via composition,comment_review_decomposition,VscodeCommentReviewController decomposition,1,0
+COMMENTREVIEW-002,src/hosts/vscode/review/VscodeCommentThreadManager.ts,manages comment thread lifecycle and CRUD operations,thread_manager,VscodeCommentReviewController decomposition,1,0
+COMMENTREVIEW-003,src/hosts/vscode/review/VscodeStreamingCommentHandler.ts,handles start/append/end streaming comment flow,streaming_handler,VscodeCommentReviewController decomposition,1,0
+COMMENTREVIEW-004,src/hosts/vscode/review/VscodeCommentReplyHandler.ts,handles user replies with AI response streaming,reply_handler,VscodeCommentReviewController decomposition,1,0
+TERMINAL-001,src/hosts/vscode/terminal/VscodeTerminalManager.ts,reduces from 485 to ~138 lines via composition,terminal_manager,VscodeTerminalManager decomposition,1,0
+TERMINAL-002,src/hosts/vscode/terminal/VscodeShellIntegrationManager.ts,manages shell integration setup and listeners,shell_integration,VscodeTerminalManager decomposition,1,0
+TERMINAL-003,src/hosts/vscode/terminal/VscodeTerminalLifecycleManager.ts,handles terminal creation/reuse/find logic,lifecycle_manager,VscodeTerminalManager decomposition,1,0
+TERMINAL-004,src/hosts/vscode/terminal/VscodeCommandExecutor.ts,manages command execution with shell integration waiting,command_executor,VscodeTerminalManager decomposition,1,0
+TERMINAL-005,src/hosts/vscode/terminal/VscodeTerminalProfileManager.ts,handles terminal profile switching and cleanup,profile_manager,VscodeTerminalManager decomposition,1,0
+ORCHESTRATOR-001,src/integrations/terminal/buildResult.ts,pure function for building orchestration results from input state,result_builder,CommandOrchestrator decomposition (Strategy 5),1,0
+ORCHESTRATOR-002,src/integrations/terminal/file-logging.ts,handles file-based logging for large command outputs,file_logging,CommandOrchestrator decomposition (Strategy 5),1,0
+ORCHESTRATOR-003,src/integrations/terminal/process-listeners.ts,attaches EventEmitter listeners to process with direct param passing,process_listeners,CommandOrchestrator decomposition (Strategy 5),1,0
+ORCHESTRATOR-004,src/integrations/terminal/CommandOrchestrator.ts,reduced from 610 to ~275 lines via Strategy 5 functional composition,orchestrator,CommandOrchestrator decomposition (Strategy 5),1,0
