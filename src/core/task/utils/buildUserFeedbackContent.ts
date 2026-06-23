@@ -1,4 +1,4 @@
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import type { DiracContent } from "@shared/messages/content"
 

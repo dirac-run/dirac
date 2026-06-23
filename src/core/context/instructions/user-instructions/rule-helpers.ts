@@ -1,10 +1,10 @@
 import { ensureRulesDirectoryExists, ensureWorkflowsDirectoryExists, GlobalFileNames } from "@core/storage/disk"
+import { StateManager } from "@core/storage/StateManager"
 import { DiracRulesToggles } from "@shared/dirac-rules"
 import { GlobalInstructionsFile } from "@shared/remote-config/schema"
 import { fileExistsAtPath, isDirectory, readDirectory } from "@utils/fs"
 import fs from "fs/promises"
 import * as path from "path"
-import { Controller } from "@/core/controller"
 import { Logger } from "@/shared/services/Logger"
 import { parseYamlFrontmatter } from "@utils/frontmatter"
 import { evaluateRuleConditionals, RuleEvaluationContext } from "./rule-conditionals"
@@ -292,15 +292,17 @@ export async function ensureLocalDiracDirExists(diracrulePath: string, defaultRu
 			try {
 				await fs.mkdir(diracrulePath, { recursive: true })
 				await fs.writeFile(path.join(diracrulePath, defaultRuleFilename), content, "utf8")
-				await fs.unlink(tempPath).catch(() => {}) // delete backup
+				await fs.unlink(tempPath).catch((err) => Logger.warn("Failed to delete backup file during rule conversion", { path: tempPath, error: err })) // delete backup
 
 				return false // conversion successful with no errors
 			} catch (_conversionError) {
 				// attempt to restore backup on conversion failure
 				try {
-					await fs.rm(diracrulePath, { recursive: true, force: true }).catch(() => {})
+					await fs.rm(diracrulePath, { recursive: true, force: true }).catch((err) => Logger.warn("Failed to remove directory during rule conversion rollback", { path: diracrulePath, error: err }))
 					await fs.rename(tempPath, diracrulePath) // restore backup
-				} catch (_restoreError) {}
+				} catch (restoreError) {
+					Logger.error("Failed to restore rule backup after conversion failure — rules file may be corrupted", { path: diracrulePath, backupPath: tempPath, error: restoreError })
+				}
 				return true // in either case here we consider this an error
 			}
 		}
@@ -370,7 +372,7 @@ export const createRuleFile = async (isGlobal: boolean, filename: string, cwd: s
  * Delete a rule file or workflow file
  */
 export async function deleteRuleFile(
-	controller: Controller,
+	stateManager: StateManager,
 	rulePath: string,
 	isGlobal: boolean,
 	type: string,
@@ -394,35 +396,35 @@ export async function deleteRuleFile(
 		// Update the appropriate toggles
 		if (isGlobal) {
 			if (type === "workflow") {
-				const toggles = controller.stateManager.getGlobalSettingsKey("globalWorkflowToggles")
+				const toggles = stateManager.getGlobalSettingsKey("globalWorkflowToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setGlobalState("globalWorkflowToggles", toggles)
+				stateManager.setGlobalState("globalWorkflowToggles", toggles)
 			} else {
-				const toggles = controller.stateManager.getGlobalSettingsKey("globalDiracRulesToggles")
+				const toggles = stateManager.getGlobalSettingsKey("globalDiracRulesToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setGlobalState("globalDiracRulesToggles", toggles)
+				stateManager.setGlobalState("globalDiracRulesToggles", toggles)
 			}
 		} else {
 			if (type === "workflow") {
-				const toggles = controller.stateManager.getWorkspaceStateKey("workflowToggles")
+				const toggles = stateManager.getWorkspaceStateKey("workflowToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setWorkspaceState("workflowToggles", toggles)
+				stateManager.setWorkspaceState("workflowToggles", toggles)
 			} else if (type === "cursor") {
-				const toggles = controller.stateManager.getWorkspaceStateKey("localCursorRulesToggles")
+				const toggles = stateManager.getWorkspaceStateKey("localCursorRulesToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setWorkspaceState("localCursorRulesToggles", toggles)
+				stateManager.setWorkspaceState("localCursorRulesToggles", toggles)
 			} else if (type === "windsurf") {
-				const toggles = controller.stateManager.getWorkspaceStateKey("localWindsurfRulesToggles")
+				const toggles = stateManager.getWorkspaceStateKey("localWindsurfRulesToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setWorkspaceState("localWindsurfRulesToggles", toggles)
+				stateManager.setWorkspaceState("localWindsurfRulesToggles", toggles)
 			} else if (type === "agents") {
-				const toggles = controller.stateManager.getWorkspaceStateKey("localAgentsRulesToggles")
+				const toggles = stateManager.getWorkspaceStateKey("localAgentsRulesToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setWorkspaceState("localAgentsRulesToggles", toggles)
+				stateManager.setWorkspaceState("localAgentsRulesToggles", toggles)
 			} else {
-				const toggles = controller.stateManager.getWorkspaceStateKey("localDiracRulesToggles")
+				const toggles = stateManager.getWorkspaceStateKey("localDiracRulesToggles")
 				delete toggles[rulePath]
-				controller.stateManager.setWorkspaceState("localDiracRulesToggles", toggles)
+				stateManager.setWorkspaceState("localDiracRulesToggles", toggles)
 			}
 		}
 

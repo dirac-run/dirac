@@ -1,5 +1,5 @@
 import { ToolUse } from "@core/assistant-message"
-import { ToolResponse } from "../../../index"
+import type { ToolResponse } from "../../types/ToolResponse"
 
 export interface Edit {
 	anchor: string
