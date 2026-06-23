@@ -156,7 +156,7 @@ const copyAssets = {
             copySourceCode(__dirname, path.join(__dirname, destDir))
 
             // Copy runtime modules that are externalized or need files/binaries available on disk
-            const modulesToCopy = ["better-sqlite3", "bindings", "@vscode/ripgrep"]
+            const modulesToCopy = ["better-sqlite3", "bindings", "file-uri-to-path", "@vscode/ripgrep"]
             for (const mod of modulesToCopy) {
                 const sourceModuleDir = path.join(__dirname, "node_modules", mod)
                 const targetModuleDir = path.join(targetDir, "node_modules", mod)
