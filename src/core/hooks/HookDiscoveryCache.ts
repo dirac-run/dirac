@@ -1,7 +1,8 @@
 import { Logger } from "@/shared/services/Logger"
 import { telemetryService } from "../../services/telemetry"
 import { getAllHooksDirs } from "../storage/disk"
-import { HookFactory, Hooks } from "./hook-factory"
+import { HookRegistry } from "./HookRegistry"
+import { Hooks } from "./hook-factory"
 
 type HookName = keyof Hooks
 
@@ -168,7 +169,7 @@ export class HookDiscoveryCache {
 				}
 
 				// Scan each directory for this hook
-				const scriptPromises = hooksDirs.map((dir) => HookFactory.findHookInHooksDir(hookName, dir))
+				const scriptPromises = hooksDirs.map((dir) => HookRegistry.findHookInHooksDir(hookName, dir))
 
 				const results = await Promise.all(scriptPromises)
 				const scripts = results.filter((path): path is string => path !== undefined)
