@@ -26,7 +26,7 @@ export class GrpcHandler {
 	 * @param streamingCallbacks Optional callbacks for streaming responses
 	 * @returns For unary requests: the response message or error. For streaming requests: a cancel function.
 	 */
-	async handleRequest<T = any>(
+	async dispatchGrpcMethod<T = any>(
 		service: string,
 		method: string,
 		request: any,
@@ -55,6 +55,8 @@ export class GrpcHandler {
 				// If there's an error in the callback, call the onError callback
 				if (streamingCallbacks.onError) {
 					streamingCallbacks.onError(error instanceof Error ? error : new Error(String(error)))
+				} else {
+					Logger.error(`[gRPC] Streaming callback error (no onError handler) for ${service}.${method}:`, error)
 				}
 			}
 		}

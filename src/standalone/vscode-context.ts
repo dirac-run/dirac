@@ -7,6 +7,7 @@ import { URI } from "vscode-uri"
 import { ExtensionRegistryInfo } from "@/registry"
 import { log } from "./utils"
 import { EnvironmentVariableCollection, MementoStore, readJson, SecretStore } from "./vscode-context-utils"
+import { isDev } from "@shared/config/environment"
 
 log("Running standalone dirac", ExtensionRegistryInfo.version)
 log(`DIRAC_ENVIRONMENT: ${process.env.DIRAC_ENVIRONMENT}`)
@@ -25,7 +26,7 @@ export function initializeContext(diracDir?: string) {
 	log("Using settings dir:", DATA_DIR)
 
 	const EXTENSION_DIR = path.join(INSTALL_DIR, "extension")
-	const EXTENSION_MODE = process.env.IS_DEV === "true" ? ExtensionMode.Development : ExtensionMode.Production
+	const EXTENSION_MODE = isDev() ? ExtensionMode.Development : ExtensionMode.Production
 
 	const extension: Extension<void> = {
 		id: ExtensionRegistryInfo.id,
