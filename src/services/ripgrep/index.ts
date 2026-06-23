@@ -70,7 +70,7 @@ async function execRipgrep(args: string[], debugLog?: RipgrepDebugLog): Promise<
     await debugLog?.({ info: "execRipgrep start", binPath, args })
 
     return new Promise((resolve, reject) => {
-        const rgProcess = childProcess.spawn(binPath, args)
+        const rgProcess = childProcess.spawn(binPath, args, { stdio: ["ignore", "pipe", "pipe"] })
         // cross-platform alternative to head, which is ripgrep author's recommendation for limiting output.
         const rl = readline.createInterface({
             input: rgProcess.stdout,
@@ -79,53 +79,89 @@ async function execRipgrep(args: string[], debugLog?: RipgrepDebugLog): Promise<
 
         let output = ""
         let lineCount = 0
+        let errorOutput = ""
+        let settled = false
+        let killedAfterOutputLimit = false
         const maxLines = MAX_RESULTS * 5 // limiting ripgrep output with max lines since there's no other way to limit results. it's okay that we're outputting as json, since we're parsing it line by line and ignore anything that's not part of a match. This assumes each result is at most 5 lines.
+
+        const finish = (error: Error | undefined, value?: string) => {
+            if (settled) return
+            settled = true
+            if (error) {
+                reject(error)
+                return
+            }
+            resolve(value || "")
+        }
+
+        const buildFailureMessage = (reason: string) => {
+            const stderr = errorOutput.trim()
+            return [
+                reason,
+                `binary: ${binPath}`,
+                `args: ${args.join(" ")}`,
+                stderr ? `stderr: ${stderr}` : undefined,
+            ]
+                .filter(Boolean)
+                .join("\n")
+        }
 
         rl.on("line", (line) => {
             if (lineCount < maxLines) {
                 output += line + "\n"
                 lineCount++
-            } else {
-                rl.close()
-                rgProcess.kill()
+                return
             }
+
+            killedAfterOutputLimit = true
+            rl.close()
+            rgProcess.kill()
         })
 
-        let errorOutput = ""
-        let exitCode: number | null = null
         rgProcess.stderr.on("data", (data) => {
             errorOutput += data.toString()
         })
-        rgProcess.on("exit", (code) => {
-            exitCode = code
+
+        rgProcess.on("error", (error) => {
+            void debugLog?.({
+                info: "execRipgrep process error",
+                binPath,
+                args,
+                errorMessage: error.message,
+                stack: error.stack,
+            })
+            finish(new Error(buildFailureMessage(`ripgrep spawn failed: ${error.message}`)))
         })
-        rl.on("close", () => {
+
+        rgProcess.on("close", (code, signal) => {
             const finishDetails = {
                 info: "execRipgrep finished",
+                binPath,
+                args,
                 lineCount,
                 stderrOutput: errorOutput || "(none)",
-                exitCode,
+                exitCode: code,
+                signal,
+                killedAfterOutputLimit,
                 outputLength: output.length,
                 outputPreview: output.substring(0, 300),
             }
             void debugLog?.(finishDetails)
-            // exit code null means process was killed externally
-            if (exitCode !== null && exitCode !== 0 && exitCode !== 1) {
-                reject(new Error(`ripgrep process error (exit ${exitCode}): ${errorOutput}`))
-            } else {
-                if (errorOutput) {
-                    void debugLog?.({ info: "execRipgrep stderr (non-fatal)", stderr: errorOutput })
-                }
-                resolve(output)
+
+            if (killedAfterOutputLimit) {
+                finish(undefined, output)
+                return
             }
-        })
-        rgProcess.on("error", (error) => {
-            void debugLog?.({
-                info: "execRipgrep process error",
-                errorMessage: error.message,
-                stack: error.stack,
-            })
-            reject(new Error(`ripgrep process error: ${error.message}`))
+
+            if (code !== 0 && code !== 1) {
+                finish(new Error(buildFailureMessage(`ripgrep exited with code ${code}${signal ? ` and signal ${signal}` : ""}`)))
+                return
+            }
+
+            if (errorOutput) {
+                void debugLog?.({ info: "execRipgrep stderr (non-fatal)", stderr: errorOutput })
+            }
+            finish(undefined, output)
         })
     })
 }
@@ -171,7 +207,8 @@ export async function regexSearchFiles(
             errorMessage: error instanceof Error ? error.message : String(error),
             stack: error instanceof Error ? error.stack : undefined,
         })
-        throw Error("Error calling ripgrep", { cause: error })
+        const causeMessage = error instanceof Error ? error.message : String(error)
+        throw new Error(`Error calling ripgrep: ${causeMessage}`, { cause: error })
     }
     const outputDetails = {
         info: "regexSearchFiles ripgrep output",

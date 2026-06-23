@@ -4,6 +4,7 @@
 
 import assert from "node:assert"
 import * as childProcess from "node:child_process"
+import * as fs from "node:fs"
 import { DIFF_VIEW_URI_SCHEME } from "@hosts/vscode/VscodeDiffViewProvider"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"
@@ -55,7 +56,6 @@ import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
 import { telemetryService } from "./services/telemetry"
 import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
 import { ShowMessageType } from "./shared/proto/host/window"
-import { fileExistsAtPath } from "./utils/fs"
 
 let extensionRootForBinaryResolution: string | undefined
 // This method is called when the VS Code extension is activated.
@@ -735,16 +735,14 @@ async function openDiracSidebarForTaskUri(): Promise<void> {
 }
 
 async function getBinaryLocation(name: string): Promise<string> {
-    // The only binary currently supported is ripgrep. Prefer the extension-bundled
-    // @vscode/ripgrep package, then fall back to VS Code's bundled copy for older
-    // installs / dev layouts. PATH is intentionally not used: this should be a
-    // packaged runtime dependency, not a machine-local prerequisite.
     if (!name.startsWith("rg")) {
         throw new Error(`Binary '${name}' is not supported`)
     }
 
     const checkedPaths: string[] = []
-    const binaryNames = process.platform === "win32" && !name.endsWith(".exe") ? [name, `${name}.exe`] : [name]
+    const isWindows = process.platform === "win32"
+    const accessMode = isWindows ? fs.constants.F_OK : fs.constants.X_OK
+    const binaryNames = isWindows && !name.endsWith(".exe") ? [name, `${name}.exe`] : [name]
     const universalPlatformDir = `${process.platform}-${process.env.npm_config_arch || process.arch}`
     const packageRelativeDirs = [
         "dist/node_modules/@vscode/ripgrep/bin",
@@ -760,6 +758,16 @@ async function getBinaryLocation(name: string): Promise<string> {
         path.join("node_modules.asar.unpacked/@vscode/ripgrep-universal/bin", universalPlatformDir),
     ]
 
+    const isExecutable = async (candidatePath: string) => {
+        checkedPaths.push(candidatePath)
+        try {
+            await fs.promises.access(candidatePath, accessMode)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     const checkPath = async (root: string, relativePath: string) => {
         const fullPathResult = workspaceResolver.resolveWorkspacePath(
             root,
@@ -767,8 +775,7 @@ async function getBinaryLocation(name: string): Promise<string> {
             "Services.ripgrep.getBinPath",
         )
         const fullPath = typeof fullPathResult === "string" ? fullPathResult : fullPathResult.absolutePath
-        checkedPaths.push(fullPath)
-        return (await fileExistsAtPath(fullPath)) ? fullPath : undefined
+        return (await isExecutable(fullPath)) ? fullPath : undefined
     }
 
     const roots = [
@@ -790,24 +797,25 @@ async function getBinaryLocation(name: string): Promise<string> {
         }
     }
 
-    // Final fallback: check system PATH. This handles cases where the
-    // bundled binary has the wrong architecture (e.g. x86_64 on arm64 macOS).
-    const whichCommand = process.platform === "win32" ? "where" : "which"
-    try {
-        const result = childProcess.execFileSync(whichCommand, [name], {
-            encoding: "utf-8",
-            stdio: ["pipe", "pipe", "pipe"],
-        })
-        const binPath = result.trim().split("\n")[0].trim()
-        if (binPath) {
-            Logger.info(`[Dirac] Resolved ${name} from system PATH: ${binPath}`)
-            return binPath
+    const whichCommand = isWindows ? "where" : "which"
+    for (const binaryName of binaryNames) {
+        try {
+            const result = childProcess.execFileSync(whichCommand, [binaryName], {
+                encoding: "utf-8",
+                stdio: ["pipe", "pipe", "pipe"],
+            })
+            const binPath = result.trim().split("\n")[0].trim()
+            if (binPath && (await isExecutable(binPath))) {
+                Logger.info(`[Dirac] Resolved ${name} from system PATH: ${binPath}`)
+                return binPath
+            }
+        } catch {
+            // Not on PATH.
         }
-    } catch {
-        // Not on PATH either
     }
 
-    throw new Error(`Could not find bundled ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}`)
+    const installHint = process.platform === "darwin" ? " Install ripgrep with: brew install ripgrep." : ""
+    throw new Error(`Could not find an executable ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}.${installHint}`)
 }
 
 // This method is called when your extension is deactivated
