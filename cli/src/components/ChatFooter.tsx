@@ -83,7 +83,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                         })()}
                     </Text>{" "}
                     {cacheHitRate > 0 && <React.Fragment><Text color={(() => {
-                        const hue = 30 + cacheHitRate * 120 // 30 (amber) → 150 (green)
+                        const hue = cacheHitRate * 150 // 0 (red) → 150 (green)
                         return hslToHex(hue, 75, 45)
                     })()}>{(cacheHitRate * 100).toFixed(0)}% cache</Text>{" "}</React.Fragment>}
                 </Text>

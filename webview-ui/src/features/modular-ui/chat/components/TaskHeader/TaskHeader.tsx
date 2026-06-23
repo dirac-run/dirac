@@ -33,7 +33,7 @@ const getUsageColor = (percentage: number) => {
 }
 
 const getCacheHitColor = (rate: number): string => {
-    const hue = 30 + rate * 120 // 30 (amber) → 150 (green)
+    const hue = rate * 150 // 0 (red) → 150 (green)
     return `hsla(${hue}, 75%, 45%, 0.9)`
 }
 
