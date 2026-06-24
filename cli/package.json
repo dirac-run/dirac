@@ -88,7 +88,6 @@
 		"vitest": "^4.0.17"
 	},
 	"dependencies": {
-		"better-sqlite3": "^12.4.1",
 		"@agentclientprotocol/sdk": "^0.13.1",
 		"@vscode/ripgrep": "^1.15.9",
 		"aws4fetch": "^1.0.20",

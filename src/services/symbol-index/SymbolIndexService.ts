@@ -368,7 +368,7 @@ export class SymbolIndexService {
 						)
 						const previousIndexed = filesIndexed
 						filesIndexed += validResults.length
-						// No need to schedule save with better-sqlite3 as it handles persistence automatically
+						// Database persists automatically via SymbolIndexDatabase
 						Logger.info(`[SymbolIndexService] Indexed ${validResults.length} files in this batch`)
 					}
 				} catch (error) {

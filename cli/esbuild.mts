@@ -268,7 +268,6 @@ const sharedOptions: Partial<esbuild.BuildOptions> = {
 		"web-tree-sitter",
 		"@grpc/reflection",
 		"grpc-health-check",
-		"better-sqlite3",
 		"ink",
 		"ink-spinner",
 		"ink-picture",
