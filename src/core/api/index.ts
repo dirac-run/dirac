@@ -172,8 +172,11 @@ function createHandlerForProvider(
 				)
 			}
 
-			if (openAiBaseUrl?.replace(/\/+$/, "").endsWith("/responses")) {
-				const normalizedBaseUrl = openAiBaseUrl.replace(/\/responses\/?$/, "")
+			const normalizedOpenAiBaseUrl = openAiBaseUrl?.replace(/\/+$/, "")
+			const usesResponsesWireApi =
+				normalizedOpenAiBaseUrl?.endsWith("/responses") || normalizedOpenAiBaseUrl?.endsWith("/openai/v1")
+			if (usesResponsesWireApi) {
+				const normalizedBaseUrl = openAiBaseUrl!.replace(/\/responses\/?$/, "")
 				return new OpenAiResponsesCompatibleHandler({
 					onRetryAttempt: options.onRetryAttempt,
 					openAiApiKey: apiKey,

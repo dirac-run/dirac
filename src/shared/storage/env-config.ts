@@ -51,6 +51,15 @@ export const ENV_VAR_TO_SETTINGS_KEY: Record<string, keyof Settings> = {
 	AWS_BEDROCK_MODEL_PLAN: "planModeApiModelId",
 	AWS_REGION: "awsRegion",
 	OPENAI_API_BASE: "openAiBaseUrl",
+	AZURE_OPENAI_BASE_URL: "openAiBaseUrl",
+}
+
+function normalizeAzureOpenAiBaseUrl(baseUrl: string): string {
+	const trimmed = baseUrl.trim().replace(/\/+$/, "")
+	if (trimmed.includes("/openai/")) {
+		return trimmed
+	}
+	return `${trimmed}/openai/v1`
 }
 
 /**
@@ -91,7 +100,8 @@ export function getSettingsFromEnv(): Partial<Settings> {
 	for (const [envVar, settingsKey] of Object.entries(ENV_VAR_TO_SETTINGS_KEY)) {
 		const value = process.env[envVar]
 		if (value) {
-			settings[settingsKey] = value as any
+			settings[settingsKey] =
+				envVar === "AZURE_OPENAI_BASE_URL" ? (normalizeAzureOpenAiBaseUrl(value) as any) : (value as any)
 		}
 	}
 
@@ -137,7 +147,13 @@ export function getProviderFromEnv(): ApiProvider | undefined {
 	if (process.env.TOGETHER_API_KEY) return "together"
 	if (process.env.FIREWORKS_API_KEY) return "fireworks"
 	if (process.env.NEBIUS_API_KEY) return "nebius"
-	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY || process.env.OPENAI_API_BASE) return "openai"
+	if (
+		process.env.OPENAI_COMPATIBLE_CUSTOM_KEY ||
+		process.env.OPENAI_API_BASE ||
+		process.env.AZURE_OPENAI_API_KEY ||
+		process.env.AZURE_OPENAI_BASE_URL
+	) {
+		return "openai"
+	}
 	return undefined
 }
-

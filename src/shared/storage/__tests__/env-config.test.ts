@@ -129,6 +129,18 @@ describe("getSettingsFromEnv - OpenAI settings", () => {
 		const settings = getSettingsFromEnv()
 		expect(settings.openAiBaseUrl).to.equal("https://api.custom.com/v1")
 	})
+
+	it("maps AZURE_OPENAI_BASE_URL to Azure OpenAI v1 base URL", () => {
+		process.env.AZURE_OPENAI_BASE_URL = "https://example.openai.azure.com"
+		const settings = getSettingsFromEnv()
+		expect(settings.openAiBaseUrl).to.equal("https://example.openai.azure.com/openai/v1")
+	})
+
+	it("does not duplicate the Azure OpenAI v1 path", () => {
+		process.env.AZURE_OPENAI_BASE_URL = "https://example.openai.azure.com/openai/v1/"
+		const settings = getSettingsFromEnv()
+		expect(settings.openAiBaseUrl).to.equal("https://example.openai.azure.com/openai/v1")
+	})
 })
 
 describe("getSecretsFromEnv - OpenAI secrets", () => {
@@ -167,6 +179,12 @@ describe("getProviderFromEnv - OpenAI detection", () => {
 
 	it("returns openai when OPENAI_COMPATIBLE_CUSTOM_KEY is set", () => {
 		process.env.OPENAI_COMPATIBLE_CUSTOM_KEY = "sk-custom-key"
+		expect(getProviderFromEnv()).to.equal("openai")
+	})
+
+	it("returns openai when Azure OpenAI env vars are set", () => {
+		process.env.AZURE_OPENAI_API_KEY = "azure-key"
+		process.env.AZURE_OPENAI_BASE_URL = "https://example.openai.azure.com"
 		expect(getProviderFromEnv()).to.equal("openai")
 	})
 })
