@@ -13,149 +13,149 @@ import { ApiStream } from "../transform/stream"
 import { ToolCallProcessor } from "../transform/tool-call-processor"
 
 interface MistralHandlerOptions extends CommonApiHandlerOptions {
-	mistralApiKey?: string
-	apiModelId?: string
+    mistralApiKey?: string
+    apiModelId?: string
 }
 
 export class MistralHandler implements ApiHandler {
-	private options: MistralHandlerOptions
-	private client: Mistral | undefined
+    private options: MistralHandlerOptions
+    private client: Mistral | undefined
 
-	constructor(options: MistralHandlerOptions) {
-		this.options = options
-	}
+    constructor(options: MistralHandlerOptions) {
+        this.options = options
+    }
 
-	private ensureClient(): Mistral {
-		if (!this.client) {
-			if (!this.options.mistralApiKey) {
-				throw new Error("Mistral API key is required")
-			}
-			try {
-				const externalHeaders = buildExternalBasicHeaders()
-				// Create HTTP client with custom fetch for proxy support
-				// The Mistral SDK's HTTPClient passes a Request object to the fetcher,
-				// but we need to extract the URL and init options to pass to our fetch wrapper
-				// which properly handles proxy configuration in standalone mode (JetBrains/CLI)
-				const httpClient = new HTTPClient({
-					fetcher: async (input: RequestInfo | URL, init?: RequestInit) => {
-						// Handle both string/URL and Request object inputs
-						if (input instanceof Request) {
-							Object.keys(externalHeaders).forEach((key) => {
-								if (!input.headers.has(key)) {
-									input.headers.set(key, externalHeaders[key])
-								}
-							})
-							return fetch(input.url, {
-								method: input.method,
-								headers: input.headers,
-								body: input.body,
-								redirect: input.redirect,
-								signal: input.signal,
-								// duplex is required when sending a body stream in Node.js/undici
-								duplex: input.body ? "half" : undefined,
-								...init,
-							} as RequestInit)
-						}
+    private ensureClient(): Mistral {
+        if (!this.client) {
+            if (!this.options.mistralApiKey) {
+                throw new Error("Mistral API key is required")
+            }
+            try {
+                const externalHeaders = buildExternalBasicHeaders()
+                // Create HTTP client with custom fetch for proxy support
+                // The Mistral SDK's HTTPClient passes a Request object to the fetcher,
+                // but we need to extract the URL and init options to pass to our fetch wrapper
+                // which properly handles proxy configuration in standalone mode (JetBrains/CLI)
+                const httpClient = new HTTPClient({
+                    fetcher: async (input: RequestInfo | URL, init?: RequestInit) => {
+                        // Handle both string/URL and Request object inputs
+                        if (input instanceof Request) {
+                            Object.keys(externalHeaders).forEach((key) => {
+                                if (!input.headers.has(key)) {
+                                    input.headers.set(key, externalHeaders[key])
+                                }
+                            })
+                            return fetch(input.url, {
+                                method: input.method,
+                                headers: input.headers,
+                                body: input.body,
+                                redirect: input.redirect,
+                                signal: input.signal,
+                                // duplex is required when sending a body stream in Node.js/undici
+                                duplex: input.body ? "half" : undefined,
+                                ...init,
+                            } as RequestInit)
+                        }
 
-						// Merge external headers with existing headers
-						const mergedInit = {
-							...init,
-							headers: {
-								...externalHeaders,
-								...(init?.headers || {}),
-							},
-						}
-						return fetch(input, mergedInit)
-					},
-				})
+                        // Merge external headers with existing headers
+                        const mergedInit = {
+                            ...init,
+                            headers: {
+                                ...externalHeaders,
+                                ...(init?.headers || {}),
+                            },
+                        }
+                        return fetch(input, mergedInit)
+                    },
+                })
 
-				this.client = new Mistral({
-					apiKey: this.options.mistralApiKey,
-					httpClient,
-				})
-			} catch (error) {
-				throw new Error(`Error creating Mistral client: ${error.message}`)
-			}
-		}
-		return this.client
-	}
+                this.client = new Mistral({
+                    apiKey: this.options.mistralApiKey,
+                    httpClient,
+                })
+            } catch (error) {
+                throw new Error(`Error creating Mistral client: ${error.message}`)
+            }
+        }
+        return this.client
+    }
 
-	@withRetry()
-	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: OpenAITool[]): ApiStream {
-		const client = this.ensureClient()
-		const toolCallProcessor = new ToolCallProcessor()
-		const stream = await client.chat
-			.stream({
-				model: this.getModel().id,
-				// max_completion_tokens: this.getModel().info.maxTokens,
-				temperature: 0,
-				messages: [
-					{ role: "system", content: systemPrompt },
-					...convertToMistralMessages(messages, this.getModel().info.supportsImages !== false),
-				],
-				stream: true,
-				tools: tools?.length ? (tools as MistralTool[]) : undefined,
-				toolChoice: tools?.length ? "any" : undefined,
-			})
-			.catch((err) => {
-				// The Mistal SDK uses statusCode instead of status
-				// However, if they introduce status for something, I don't want to override it
-				if ("statusCode" in err && !("status" in err)) {
-					err.status = err.statusCode
-				}
+    @withRetry()
+    async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: OpenAITool[]): ApiStream {
+        const client = this.ensureClient()
+        const toolCallProcessor = new ToolCallProcessor()
+        const stream = await client.chat
+            .stream({
+                model: this.getModel().id,
+                // max_completion_tokens: this.getModel().info.maxTokens,
+                temperature: 0,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    ...convertToMistralMessages(messages, this.getModel().info.supportsImages !== false),
+                ],
+                stream: true,
+                tools: tools?.length ? (tools as (MistralTool & { type: "function" })[]) : undefined,
+                toolChoice: tools?.length ? "any" : undefined,
+            })
+            .catch((err) => {
+                // The Mistal SDK uses statusCode instead of status
+                // However, if they introduce status for something, I don't want to override it
+                if ("statusCode" in err && !("status" in err)) {
+                    err.status = err.statusCode
+                }
 
-				throw err
-			})
+                throw err
+            })
 
-		for await (const chunk of stream) {
-			const delta = chunk.data.choices[0]?.delta
-			if (delta.toolCalls) {
-				yield* toolCallProcessor.processToolCallDeltas(
-					delta.toolCalls.map((toolCall, index) => ({
-						index,
-						id: toolCall.id,
-						type: "function",
-						function: {
-							name: toolCall.function.name,
-							arguments:
-								typeof toolCall.function.arguments === "string"
-									? toolCall.function.arguments
-									: JSON.stringify(toolCall.function.arguments),
-						},
-					})),
-				)
-			} else if (delta?.content) {
-				let content = ""
-				if (typeof delta.content === "string") {
-					content = delta.content
-				} else if (Array.isArray(delta.content)) {
-					content = delta.content.map((c) => (c.type === "text" ? c.text : "")).join("")
-				}
-				yield {
-					type: "text",
-					text: content,
-				}
-			}
+        for await (const chunk of stream) {
+            const delta = chunk.data.choices[0]?.delta
+            if (delta.toolCalls) {
+                yield* toolCallProcessor.processToolCallDeltas(
+                    delta.toolCalls.map((toolCall, index) => ({
+                        index,
+                        id: toolCall.id,
+                        type: "function",
+                        function: {
+                            name: toolCall.function.name,
+                            arguments:
+                                typeof toolCall.function.arguments === "string"
+                                    ? toolCall.function.arguments
+                                    : JSON.stringify(toolCall.function.arguments),
+                        },
+                    })),
+                )
+            } else if (delta?.content) {
+                let content = ""
+                if (typeof delta.content === "string") {
+                    content = delta.content
+                } else if (Array.isArray(delta.content)) {
+                    content = delta.content.map((c) => (c.type === "text" ? c.text : "")).join("")
+                }
+                yield {
+                    type: "text",
+                    text: content,
+                }
+            }
 
-			if (chunk.data.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.data.usage.promptTokens || 0,
-					outputTokens: chunk.data.usage.completionTokens || 0,
-				}
-			}
-		}
-	}
+            if (chunk.data.usage) {
+                yield {
+                    type: "usage",
+                    inputTokens: chunk.data.usage.promptTokens || 0,
+                    outputTokens: chunk.data.usage.completionTokens || 0,
+                }
+            }
+        }
+    }
 
-	getModel(): { id: MistralModelId; info: ModelInfo } {
-		const modelId = this.options.apiModelId
-		if (modelId && modelId in mistralModels) {
-			const id = modelId as MistralModelId
-			return { id, info: mistralModels[id] }
-		}
-		return {
-			id: mistralDefaultModelId,
-			info: mistralModels[mistralDefaultModelId],
-		}
-	}
+    getModel(): { id: MistralModelId; info: ModelInfo } {
+        const modelId = this.options.apiModelId
+        if (modelId && modelId in mistralModels) {
+            const id = modelId as MistralModelId
+            return { id, info: mistralModels[id] }
+        }
+        return {
+            id: mistralDefaultModelId,
+            info: mistralModels[mistralDefaultModelId],
+        }
+    }
 }
