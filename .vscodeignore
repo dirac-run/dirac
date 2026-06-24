@@ -77,7 +77,6 @@ old_docs/**
 
 # Include native modules copied to dist
 !dist/node_modules/**
-!dist-standalone/node_modules/**
 
 # Ignore E2E build files
 e2e-build.mjs
