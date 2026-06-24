@@ -1,6 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
-import Parser from "web-tree-sitter"
+import { Parser, Language, Query } from "web-tree-sitter"
 import {
     cppQuery,
     cQuery,
@@ -21,7 +21,7 @@ import {
 export interface LanguageParser {
     [key: string]: {
         parser: Parser
-        query: Parser.Query
+        query: Query
     }
 }
 
@@ -37,7 +37,7 @@ async function loadLanguage(langName: string) {
 
     for (const wasmPath of searchPaths) {
         try {
-            return await Parser.Language.load(wasmPath)
+            return await Language.load(wasmPath)
         } catch { }
     }
     throw new Error(`Could not find WASM for language: ${langName}`)
@@ -45,8 +45,8 @@ async function loadLanguage(langName: string) {
 
 let isParserInitialized = false
 let initializationPromise: Promise<void> | null = null
-const languageCache = new Map<string, Parser.Language>()
-const queryCache = new Map<string, Parser.Query>() // keyed by langName:queryText
+const languageCache = new Map<string, Language>()
+const queryCache = new Map<string, Query>() // keyed by langName:queryText
 
 async function initializeParser() {
     if (isParserInitialized) return
@@ -60,7 +60,7 @@ async function initializeParser() {
                 // Fallback for dev/test environment where tree-sitter.wasm is in node_modules
                 return path.join(process.cwd(), "node_modules", "web-tree-sitter", scriptName)
             },
-        }).then(() => {
+        } as any).then(() => { // Partial EmscriptenModule — only locateFile needed at runtime
             isParserInitialized = true
         })
     }

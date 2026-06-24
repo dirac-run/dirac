@@ -592,7 +592,7 @@
         "undici": "^7.16.0",
         "uuid": "^11.1.0",
         "vscode-uri": "^3.1.0",
-        "web-tree-sitter": "^0.22.6",
+        "web-tree-sitter": "0.25.10",
         "zod": "^3.24.2"
     },
     "overrides": {

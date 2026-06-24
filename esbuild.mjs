@@ -111,7 +111,7 @@ const copyAssets = {
             fs.mkdirSync(webTreeSitterTarget, { recursive: true })
             fs.copyFileSync(path.join(sourceDir, "tree-sitter.js"), path.join(webTreeSitterTarget, "tree-sitter.js"))
             fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(webTreeSitterTarget, "tree-sitter.wasm"))
-            fs.copyFileSync(path.join(sourceDir, "tree-sitter-web.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
+            fs.copyFileSync(path.join(sourceDir, "web-tree-sitter.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
             // Write a minimal package.json so require('web-tree-sitter') resolves correctly
             fs.writeFileSync(
                 path.join(webTreeSitterTarget, "package.json"),

@@ -1,5 +1,5 @@
 import { formatLineWithHash } from "@utils/line-hashing"
-import Parser, { QueryCapture, SyntaxNode } from "web-tree-sitter"
+import { Parser, Node as SyntaxNode, QueryCapture } from "web-tree-sitter"
 import { Logger } from "@/shared/services/Logger"
 
 export interface SymbolContextResolverOptions {
@@ -29,14 +29,17 @@ export class SymbolContextResolver {
             rootNode: providedRootNode,
         } = options
 
-        const language = parser.getLanguage()
+        const language = parser.language
+        if (!language) return ""
         const queryStrings = SymbolContextResolver.getQueryStrings(ext)
         if (!queryStrings) {
             return ""
         }
 
         try {
-            const rootNode = providedRootNode || parser.parse(fileContent).rootNode
+            const tree = parser.parse(fileContent)
+            const rootNode = providedRootNode || tree?.rootNode
+            if (!rootNode) return ""
             const query = language.query(queryStrings.contextQuery)
             const captures = query.captures(rootNode)
             // 1. Identify all identifiers used within the target node
