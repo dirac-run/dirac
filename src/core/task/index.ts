@@ -6,15 +6,15 @@ import { EnvironmentContextTracker } from "@core/context/context-tracking/Enviro
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { ModelContextTracker } from "@core/context/context-tracking/ModelContextTracker"
 import {
-	getGlobalDiracRules,
-	getLocalDiracRules,
-	refreshDiracRulesToggles,
+    getGlobalDiracRules,
+    getLocalDiracRules,
+    refreshDiracRulesToggles,
 } from "@core/context/instructions/user-instructions/dirac-rules"
 import {
-	getLocalAgentsRules,
-	getLocalCursorRules,
-	getLocalWindsurfRules,
-	refreshExternalRulesToggles,
+    getLocalAgentsRules,
+    getLocalCursorRules,
+    getLocalWindsurfRules,
+    refreshExternalRulesToggles,
 } from "@core/context/instructions/user-instructions/external-rules"
 import { formatResponse } from "@core/formatResponse"
 import { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
@@ -32,11 +32,11 @@ import { FileEditProvider } from "@integrations/editor/FileEditProvider"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { showSystemNotification } from "@integrations/notifications"
 import {
-	type CommandExecutionOptions,
-	CommandExecutor,
-	CommandExecutorCallbacks,
-	FullCommandExecutorConfig,
-	StandaloneTerminalManager,
+    type CommandExecutionOptions,
+    CommandExecutor,
+    CommandExecutorCallbacks,
+    FullCommandExecutorConfig,
+    StandaloneTerminalManager,
 } from "@integrations/terminal"
 import { ITerminalManager } from "@integrations/terminal/types"
 import { BrowserSession } from "@services/browser/BrowserSession"
@@ -923,19 +923,44 @@ export class Task {
 		}
 
 		try {
-			const configuredDir =
-				process.env.DIRAC_PROMPT_ARTIFACT_DIR?.trim() ||
-				this.stateManager.getGlobalSettingsKey("writePromptMetadataDirectory")?.trim()
+			// Env var is OS-level (user-controlled, safe to allow absolute); workspace setting is the exfiltration vector.
+			const envDir = process.env.DIRAC_PROMPT_ARTIFACT_DIR?.trim()
+			const settingDir = this.stateManager.getGlobalSettingsKey("writePromptMetadataDirectory")?.trim()
+			const cwdResolved = path.resolve(this.cwd)
+			// Setting-configured dirs must resolve under cwd to prevent workspace settings from exfiltrating prompts.
+			// Only validate the setting when no env var is provided — env takes precedence and is trusted.
+			if (!envDir && settingDir) {
+				const resolved = path.isAbsolute(settingDir) ? path.resolve(settingDir) : path.resolve(this.cwd, settingDir)
+				if (resolved !== cwdResolved && !resolved.startsWith(cwdResolved + path.sep)) {
+					Logger.warn(`[Task ${this.taskId}] writePromptMetadataDirectory outside cwd rejected: ${resolved}`)
+					return
+				}
+			}
+			const configuredDir = envDir || settingDir
 			const artifactDir = configuredDir
 				? path.isAbsolute(configuredDir)
-					? configuredDir
+					? path.resolve(configuredDir)
 					: path.resolve(this.cwd, configuredDir)
 				: path.resolve(this.cwd, ".dirac-prompt-artifacts")
 
 			await fs.mkdir(artifactDir, { recursive: true })
+			// Defense-in-depth: re-check the boundary after mkdir resolves any symlinks in the path,
+			// so a workspace-planted symlink can't exfiltrate prompts outside cwd.
+			// Only enforced for setting-derived paths — env vars are OS-level and may legitimately point anywhere.
+			let writeDir = artifactDir
+			if (!envDir) {
+				const realArtifactDir = await fs.realpath(artifactDir)
+				if (realArtifactDir !== cwdResolved && !realArtifactDir.startsWith(cwdResolved + path.sep)) {
+					Logger.warn(`[Task ${this.taskId}] artifact dir resolves outside cwd (symlink?), rejected: ${realArtifactDir}`)
+					return
+				}
+				writeDir = realArtifactDir
+			}
+			// Ensure the artifact dir is git-ignored so debug dumps don't get committed.
+			const gitignorePath = path.join(writeDir, ".gitignore")
+			await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => {})
 
-			const ts = new Date().toISOString()
-			const debugPath = path.join(artifactDir, `task-${this.taskId}-debug.md`)
+			const debugPath = path.join(writeDir, `task-${this.taskId}-debug.md`)
 
 			let markdown = `## System Prompt\n\n${params.systemPrompt}\n\n`
 

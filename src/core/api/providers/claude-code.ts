@@ -1,9 +1,9 @@
 import { filterMessagesForClaudeCode } from "@/integrations/claude-code/message-filter"
 import { runClaudeCode } from "@/integrations/claude-code/run"
 import {
-    buildStructuredToolSchema,
-    extractStructuredToolCalls,
-    STRUCTURED_OUTPUT_TOOL_NAME,
+	buildStructuredToolSchema,
+	extractStructuredToolCalls,
+	STRUCTURED_OUTPUT_TOOL_NAME,
 } from "@/integrations/claude-code/structured-output"
 import { ClaudeCodeModelId, claudeCodeDefaultModelId, claudeCodeModels } from "@/shared/api"
 import { DiracStorageMessage } from "@/shared/messages/content"
