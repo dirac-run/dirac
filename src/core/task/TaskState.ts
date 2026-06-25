@@ -69,7 +69,6 @@ export class TaskState {
     didAttemptCompletion = false
     checkpointManagerErrorMessage?: string
 
-    // Retry tracking for auto-retry feature
     // Retry tracking — separate counters for independent failure modes
     apiErrorRetryAttempts = 0
     emptyResponseRetryAttempts = 0

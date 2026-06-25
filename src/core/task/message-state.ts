@@ -17,327 +17,367 @@ import { TaskState } from "./TaskState"
 export type DiracMessageChangeType = "add" | "update" | "delete" | "set"
 
 export interface DiracMessageChange {
-	type: DiracMessageChangeType
-	/** The full array after the change */
-	messages: DiracMessage[]
-	/** The affected index (for add/update/delete) */
-	index?: number
-	/** The new/updated message (for add/update) */
-	message?: DiracMessage
-	/** The old message before change (for update/delete) */
-	previousMessage?: DiracMessage
-	/** The entire previous array (for set) */
-	previousMessages?: DiracMessage[]
+    type: DiracMessageChangeType
+    /** The full array after the change */
+    messages: DiracMessage[]
+    /** The affected index (for add/update/delete) */
+    index?: number
+    /** The new/updated message (for add/update) */
+    message?: DiracMessage
+    /** The old message before change (for update/delete) */
+    previousMessage?: DiracMessage
+    /** The entire previous array (for set) */
+    previousMessages?: DiracMessage[]
 }
 
 // Strongly-typed event emitter interface
 export interface MessageStateHandlerEvents {
-	diracMessagesChanged: [change: DiracMessageChange]
+    diracMessagesChanged: [change: DiracMessageChange]
 }
 
 interface MessageStateHandlerParams {
-	taskId: string
-	ulid: string
-	taskIsFavorited?: boolean
-	workspaceRootPath?: string
-	updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
-	taskState: TaskState
-	checkpointManagerErrorMessage?: string
+    taskId: string
+    ulid: string
+    taskIsFavorited?: boolean
+    workspaceRootPath?: string
+    updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
+    taskState: TaskState
+    checkpointManagerErrorMessage?: string
 }
 
 export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents> {
-	private workspaceRootPath?: string
-	private apiConversationHistory: DiracStorageMessage[] = []
-	private diracMessages: DiracMessage[] = []
-	private taskIsFavorited: boolean
-	private checkpointTracker: CheckpointTracker | undefined
-	private updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
-	private taskId: string
-	private ulid: string
-	private taskState: TaskState
+    private workspaceRootPath?: string
+    private apiConversationHistory: DiracStorageMessage[] = []
+    private diracMessages: DiracMessage[] = []
+    private taskIsFavorited: boolean
+    private checkpointTracker: CheckpointTracker | undefined
+    private updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
+    private taskId: string
+    private ulid: string
+    private taskState: TaskState
 
-	// Mutex to prevent concurrent state modifications (RC-4)
-	// Protects against data loss from race conditions when multiple
-	// operations try to modify message state simultaneously
-	// This follows the same pattern as Task.stateMutex for consistency
-	private stateMutex = new Mutex()
+    // Mutex to prevent concurrent state modifications (RC-4)
+    // Protects against data loss from race conditions when multiple
+    // operations try to modify message state simultaneously
+    // This follows the same pattern as Task.stateMutex for consistency
+    private stateMutex = new Mutex()
 
-	constructor(params: MessageStateHandlerParams) {
-		super()
-		this.taskId = params.taskId
-		this.ulid = params.ulid
-		this.taskState = params.taskState
-		this.taskIsFavorited = params.taskIsFavorited ?? false
-		this.workspaceRootPath = params.workspaceRootPath
-		this.updateTaskHistory = params.updateTaskHistory
-	}
+    // Dirty flags for deferred writes — coalesce per-tick mutations into a single disk write
+    private diracMessagesDirty = false
+    private apiHistoryDirty = false
+    private flushScheduled = false
 
-	/**
-	 * Emit a diracMessagesChanged event with the change details
-	 */
-	private emitDiracMessagesChanged(change: DiracMessageChange): void {
-		this.emit("diracMessagesChanged", change)
-	}
+    constructor(params: MessageStateHandlerParams) {
+        super()
+        this.taskId = params.taskId
+        this.ulid = params.ulid
+        this.taskState = params.taskState
+        this.taskIsFavorited = params.taskIsFavorited ?? false
+        this.workspaceRootPath = params.workspaceRootPath
+        this.updateTaskHistory = params.updateTaskHistory
+    }
 
-	setCheckpointTracker(tracker: CheckpointTracker | undefined) {
-		this.checkpointTracker = tracker
-	}
+    /**
+     * Emit a diracMessagesChanged event with the change details
+     */
+    private emitDiracMessagesChanged(change: DiracMessageChange): void {
+        this.emit("diracMessagesChanged", change)
+    }
 
-	/**
-	 * Execute function with exclusive lock on message state
-	 * Use this for ANY state modification to prevent race conditions
-	 * This follows the same pattern as Task.withStateLock for consistency
-	 */
-	private async withStateLock<T>(fn: () => T | Promise<T>): Promise<T> {
-		return await this.stateMutex.withLock(fn)
-	}
+    setCheckpointTracker(tracker: CheckpointTracker | undefined) {
+        this.checkpointTracker = tracker
+    }
 
-	getApiConversationHistory(): DiracStorageMessage[] {
-		return this.apiConversationHistory
-	}
+    /**
+     * Execute function with exclusive lock on message state
+     * Use this for ANY state modification to prevent race conditions
+     * This follows the same pattern as Task.withStateLock for consistency
+     */
+    private async withStateLock<T>(fn: () => T | Promise<T>): Promise<T> {
+        return await this.stateMutex.withLock(fn)
+    }
 
-	setApiConversationHistory(newHistory: DiracStorageMessage[]): void {
-		this.apiConversationHistory = newHistory
-	}
 
-	getDiracMessages(): DiracMessage[] {
-		return this.diracMessages
-	}
+    /**
+     * Schedule a microtask to flush dirty state to disk.
+     * All mutations in the same tick are coalesced into a single write.
+     */
+    private scheduleFlush(): void {
+        if (this.flushScheduled) return
+        this.flushScheduled = true
+        queueMicrotask(async () => {
+            this.flushScheduled = false
+            try {
+                await this.flushPendingWrites()
+            } catch (error) {
+                Logger.error("Failed to flush pending writes:", error)
+            }
+        })
+    }
 
-	setDiracMessages(newMessages: DiracMessage[]) {
-		const previousMessages = this.diracMessages
-		this.diracMessages = newMessages
-		this.emitDiracMessagesChanged({
-			type: "set",
-			messages: this.diracMessages,
-			previousMessages,
-		})
-	}
+    /**
+     * Flush dirty state to disk. Must be called with stateLock held.
+     */
+    private async flushDirty(): Promise<void> {
+        if (this.diracMessagesDirty) {
+            await saveDiracMessages(this.taskId, this.diracMessages)
+            this.diracMessagesDirty = false
+        }
+        if (this.apiHistoryDirty) {
+            await saveApiConversationHistory(this.taskId, this.apiConversationHistory)
+            this.apiHistoryDirty = false
+        }
+    }
 
-	/**
-	 * Internal method to save messages and update history (without mutex protection)
-	 * This is used by methods that already hold the stateMutex lock
-	 * Should NOT be called directly - use saveDiracMessagesAndUpdateHistory() instead
-	 */
-	/**
-	 * Internal method to save messages (without mutex protection)
-	 */
-	private async saveDiracMessagesInternal(): Promise<void> {
-		try {
-			await saveDiracMessages(this.taskId, this.diracMessages)
-		} catch (error) {
-			Logger.error("Failed to save dirac messages:", error)
-		}
-	}
+    /**
+     * Flush any pending dirty writes to disk with proper locking.
+     * Safe to call at any time — no-op if nothing is dirty.
+     */
+    async flushPendingWrites(): Promise<void> {
+        await this.withStateLock(async () => {
+            await this.flushDirty()
+        })
+    }
 
-	/**
-	 * Update task history with current state.
-	 * This can be slow due to folder size calculation, so it should be called
-	 * outside of the stateMutex lock when possible.
-	 */
-	private async updateTaskHistoryInternal(): Promise<void> {
-		try {
-			// Capture state needed for history update
-			// Note: we don't hold the lock here, but these are mostly immutable or
-			// fine to have slight inconsistencies in the history summary.
-			const messages = [...this.diracMessages]
-			if (messages.length === 0) return
+    /**
+     * Flush task history to disk. Should be called at turn boundaries
+     * (end of API request cycle, after resume, after restore).
+     */
+    async flushTaskHistory(): Promise<void> {
+        await this.updateTaskHistoryInternal()
+    }
 
-			const apiMetrics = getApiMetrics(combineCardSequences(messages.slice(1)))
-			const taskMessage = messages[0]
-			const lastRelevantMessage =
-				messages[
-					findLastIndex(
-						messages,
-						(message) =>
-							!(
-								message.content.type === "card" &&
-								(message.content.card.header.includes("Resume") || message.content.card.header.includes("Task Resumed"))
-							),
-					)
+    getApiConversationHistory(): DiracStorageMessage[] {
+        return this.apiConversationHistory
+    }
 
-				] || messages[messages.length - 1]
+    setApiConversationHistory(newHistory: DiracStorageMessage[]): void {
+        this.apiConversationHistory = newHistory
+    }
 
-			const lastModelInfo = [...this.apiConversationHistory].reverse().find((msg) => msg.modelInfo !== undefined)
-			const taskDir = await ensureTaskDirectoryExists(this.taskId)
-			
-			// Slow operation: get folder size
-			let taskDirSize = 0
-			try {
-				taskDirSize = await getFolderSize.loose(taskDir)
-			} catch (error) {
-				Logger.error("Failed to get task directory size:", taskDir, error)
-			}
+    getDiracMessages(): DiracMessage[] {
+        return this.diracMessages
+    }
 
-			const cwd = await getCwd(getDesktopDir())
-			const shadowGitConfigWorkTree = await this.checkpointTracker?.getShadowGitConfigWorkTree()
+    setDiracMessages(newMessages: DiracMessage[]) {
+        const previousMessages = this.diracMessages
+        this.diracMessages = newMessages
+        this.emitDiracMessagesChanged({
+            type: "set",
+            messages: this.diracMessages,
+            previousMessages,
+        })
+    }
 
-			await this.updateTaskHistory({
-				id: this.taskId,
-				ulid: this.ulid,
-				ts: lastRelevantMessage.ts,
-				task: taskMessage.content.type === "markdown" ? taskMessage.content.content : "",
-				tokensIn: apiMetrics.totalTokensIn,
-				tokensOut: apiMetrics.totalTokensOut,
-				cacheWrites: apiMetrics.totalCacheWrites,
-				cacheReads: apiMetrics.totalCacheReads,
-				totalCost: apiMetrics.totalCost,
-				size: taskDirSize,
-				shadowGitConfigWorkTree,
-				cwdOnTaskInitialization: cwd,
-				conversationHistoryDeletedRange: this.taskState.conversationHistoryDeletedRange,
-				isFavorited: this.taskIsFavorited,
-				workspaceRootPath: this.workspaceRootPath,
-				checkpointManagerErrorMessage: this.taskState.checkpointManagerErrorMessage,
-				modelId: lastModelInfo?.modelInfo?.modelId,
-			})
-		} catch (error) {
-			Logger.error("Failed to update task history:", error)
-		}
-	}
+    /**
+     * Internal method to save messages and update history (without mutex protection)
+     * This is used by methods that already hold the stateMutex lock
+     * Should NOT be called directly - use saveDiracMessagesAndUpdateHistory() instead
+     */
+    /**
+     * Internal method to save messages (without mutex protection)
+     */
+    private async saveDiracMessagesInternal(): Promise<void> {
+        try {
+            await saveDiracMessages(this.taskId, this.diracMessages)
+        } catch (error) {
+            Logger.error("Failed to save dirac messages:", error)
+        }
+    }
 
-	/**
-	 * Save dirac messages and update task history (public API with mutex protection)
-	 * This is the main entry point for saving message state from external callers
-	 */
-	async saveDiracMessagesAndUpdateHistory(): Promise<void> {
-		await this.withStateLock(async () => {
-			await this.saveDiracMessagesInternal()
-		})
-		await this.updateTaskHistoryInternal()
-	}
+    /**
+     * Update task history with current state.
+     * This can be slow due to folder size calculation, so it should be called
+     * outside of the stateMutex lock when possible.
+     */
+    private async updateTaskHistoryInternal(): Promise<void> {
+        try {
+            // Capture state needed for history update
+            // Note: we don't hold the lock here, but these are mostly immutable or
+            // fine to have slight inconsistencies in the history summary.
+            const messages = [...this.diracMessages]
+            if (messages.length === 0) return
 
-	async addToApiConversationHistory(message: DiracStorageMessage) {
-		// Protect with mutex to prevent concurrent modifications from corrupting data (RC-4)
-		return await this.withStateLock(async () => {
-			this.apiConversationHistory.push(message)
-			await saveApiConversationHistory(this.taskId, this.apiConversationHistory)
-		})
-	}
+            const apiMetrics = getApiMetrics(combineCardSequences(messages.slice(1)))
+            const taskMessage = messages[0]
+            const lastRelevantMessage =
+                messages[
+                findLastIndex(
+                    messages,
+                    (message) =>
+                        !(
+                            message.content.type === "card" &&
+                            (message.content.card.header.includes("Resume") || message.content.card.header.includes("Task Resumed"))
+                        ),
+                )
 
-	async overwriteApiConversationHistory(newHistory: DiracStorageMessage[]): Promise<void> {
-		// Protect with mutex to prevent concurrent modifications from corrupting data (RC-4)
-		return await this.withStateLock(async () => {
-			this.apiConversationHistory = newHistory
-			await saveApiConversationHistory(this.taskId, this.apiConversationHistory)
-		})
-	}
+                ] || messages[messages.length - 1]
 
-	/**
-	 * Add a new message to diracMessages array with proper index tracking
-	 * CRITICAL: This entire operation must be atomic to prevent race conditions (RC-4)
-	 * The conversationHistoryIndex must be set correctly based on the current state,
-	 * and the message must be added and saved without any interleaving operations
-	 */
-	async addToDiracMessages(message: DiracMessage) {
-		await this.withStateLock(async () => {
-			// these values allow us to reconstruct the conversation history at the time this dirac message was created
-			// it's important that apiConversationHistory is initialized before we add dirac messages
-			message.conversationHistoryIndex = this.apiConversationHistory.length - 1
-			message.conversationHistoryDeletedRange = this.taskState.conversationHistoryDeletedRange
-			const index = this.diracMessages.length
-			this.diracMessages.push(message)
-			this.emitDiracMessagesChanged({
-				type: "add",
-				messages: this.diracMessages,
-				index,
-				message,
-			})
-			await this.saveDiracMessagesInternal()
-		})
-		await this.updateTaskHistoryInternal()
-	}
+            const lastModelInfo = [...this.apiConversationHistory].reverse().find((msg) => msg.modelInfo !== undefined)
+            const taskDir = await ensureTaskDirectoryExists(this.taskId)
 
-	/**
-	 * Replace the entire diracMessages array with new messages
-	 * Protected by mutex to prevent concurrent modifications (RC-4)
-	 */
-	async overwriteDiracMessages(newMessages: DiracMessage[]) {
-		await this.withStateLock(async () => {
-			const previousMessages = this.diracMessages
-			this.diracMessages = newMessages
-			this.emitDiracMessagesChanged({
-				type: "set",
-				messages: this.diracMessages,
-				previousMessages,
-			})
-			await this.saveDiracMessagesInternal()
-		})
-		await this.updateTaskHistoryInternal()
-	}
+            // Slow operation: get folder size
+            let taskDirSize = 0
+            try {
+                taskDirSize = await getFolderSize.loose(taskDir)
+            } catch (error) {
+                Logger.error("Failed to get task directory size:", taskDir, error)
+            }
 
-	/**
-	 * Find the index of a message by its ID
-	 */
-	findMessageIndexById(id: string): number {
-		return this.diracMessages.findIndex((m) => m.id === id)
-	}
+            const cwd = await getCwd(getDesktopDir())
+            const shadowGitConfigWorkTree = await this.checkpointTracker?.getShadowGitConfigWorkTree()
 
-	/**
-	 * Find the index of a message containing a card with the specified ID
-	 */
-	findMessageIndexByCardId(cardId: string): number {
-		return this.diracMessages.findIndex((m) => m.content.type === "card" && m.content.card.id === cardId)
-	}
-	/**
-	 * Update a specific message in the diracMessages array
-	 * The entire operation (validate, update, save) is atomic to prevent races (RC-4)
-	 */
-	async updateDiracMessage(index: number, updates: Partial<DiracMessage>): Promise<void> {
-		await this.withStateLock(async () => {
-			if (index < 0 || index >= this.diracMessages.length) {
-				throw new Error(`Invalid message index: ${index}`)
-			}
+            await this.updateTaskHistory({
+                id: this.taskId,
+                ulid: this.ulid,
+                ts: lastRelevantMessage.ts,
+                task: taskMessage.content.type === "markdown" ? taskMessage.content.content : "",
+                tokensIn: apiMetrics.totalTokensIn,
+                tokensOut: apiMetrics.totalTokensOut,
+                cacheWrites: apiMetrics.totalCacheWrites,
+                cacheReads: apiMetrics.totalCacheReads,
+                totalCost: apiMetrics.totalCost,
+                size: taskDirSize,
+                shadowGitConfigWorkTree,
+                cwdOnTaskInitialization: cwd,
+                conversationHistoryDeletedRange: this.taskState.conversationHistoryDeletedRange,
+                isFavorited: this.taskIsFavorited,
+                workspaceRootPath: this.workspaceRootPath,
+                checkpointManagerErrorMessage: this.taskState.checkpointManagerErrorMessage,
+                modelId: lastModelInfo?.modelInfo?.modelId,
+            })
+        } catch (error) {
+            Logger.error("Failed to update task history:", error)
+        }
+    }
 
-			// Capture previous state before mutation
-			const previousMessage = { ...this.diracMessages[index] }
+    /**
+     * Save dirac messages and update task history (public API with mutex protection)
+     * This is the main entry point for saving message state from external callers
+     */
+    async saveDiracMessagesAndUpdateHistory(): Promise<void> {
+        await this.flushPendingWrites()
+        await this.updateTaskHistoryInternal()
+    }
 
-			// Apply updates to the message
-			Object.assign(this.diracMessages[index], updates)
+    async addToApiConversationHistory(message: DiracStorageMessage) {
+        await this.withStateLock(async () => {
+            this.apiConversationHistory.push(message)
+            this.apiHistoryDirty = true
+        })
+        this.scheduleFlush()
+    }
 
-			this.emitDiracMessagesChanged({
-				type: "update",
-				messages: this.diracMessages,
-				index,
-				previousMessage,
-				message: this.diracMessages[index],
-			})
+    async overwriteApiConversationHistory(newHistory: DiracStorageMessage[]): Promise<void> {
+        await this.flushPendingWrites()
+        return await this.withStateLock(async () => {
+            this.apiConversationHistory = newHistory
+            await saveApiConversationHistory(this.taskId, this.apiConversationHistory)
+        })
+    }
 
-			// Save changes
-			await this.saveDiracMessagesInternal()
-		})
-		// History update can happen outside the lock and doesn't need to be awaited
-		// if we want maximum performance, but for now we await it to be safe.
-		// The key is that getFolderSize is now outside the stateMutex lock.
-		await this.updateTaskHistoryInternal()
-	}
+    /**
+     * Add a new message to diracMessages array with proper index tracking
+     * CRITICAL: This entire operation must be atomic to prevent race conditions (RC-4)
+     * The conversationHistoryIndex must be set correctly based on the current state,
+     * and the message must be added and saved without any interleaving operations
+     */
+    async addToDiracMessages(message: DiracMessage) {
+        await this.withStateLock(async () => {
+            message.conversationHistoryIndex = this.apiConversationHistory.length - 1
+            message.conversationHistoryDeletedRange = this.taskState.conversationHistoryDeletedRange
+            const index = this.diracMessages.length
+            this.diracMessages.push(message)
+            this.emitDiracMessagesChanged({
+                type: "add",
+                messages: this.diracMessages,
+                index,
+                message,
+            })
+            this.diracMessagesDirty = true
+        })
+        this.scheduleFlush()
+    }
 
-	/**
-	 * Delete a specific message from the diracMessages array
-	 * The entire operation (validate, delete, save) is atomic to prevent races (RC-4)
-	 */
-	async deleteDiracMessage(index: number): Promise<void> {
-		await this.withStateLock(async () => {
-			if (index < 0 || index >= this.diracMessages.length) {
-				throw new Error(`Invalid message index: ${index}`)
-			}
+    /**
+     * Replace the entire diracMessages array with new messages
+     * Protected by mutex to prevent concurrent modifications (RC-4)
+     */
+    async overwriteDiracMessages(newMessages: DiracMessage[]) {
+        await this.flushPendingWrites()
+        await this.withStateLock(async () => {
+            const previousMessages = this.diracMessages
+            this.diracMessages = newMessages
+            this.emitDiracMessagesChanged({
+                type: "set",
+                messages: this.diracMessages,
+                previousMessages,
+            })
+            await this.saveDiracMessagesInternal()
+        })
+    }
 
-			// Capture the message before deletion
-			const previousMessage = this.diracMessages[index]
+    /**
+     * Find the index of a message by its ID
+     */
+    findMessageIndexById(id: string): number {
+        return this.diracMessages.findIndex((m) => m.id === id)
+    }
 
-			// Remove the message at the specified index
-			this.diracMessages.splice(index, 1)
+    /**
+     * Find the index of a message containing a card with the specified ID
+     */
+    findMessageIndexByCardId(cardId: string): number {
+        return this.diracMessages.findIndex((m) => m.content.type === "card" && m.content.card.id === cardId)
+    }
+    /**
+     * Update a specific message in the diracMessages array
+     * The entire operation (validate, update, save) is atomic to prevent races (RC-4)
+     */
+    async updateDiracMessage(index: number, updates: Partial<DiracMessage>): Promise<void> {
+        await this.withStateLock(async () => {
+            if (index < 0 || index >= this.diracMessages.length) {
+                throw new Error(`Invalid message index: ${index}`)
+            }
 
-			this.emitDiracMessagesChanged({
-				type: "delete",
-				messages: this.diracMessages,
-				index,
-				previousMessage,
-			})
+            const previousMessage = { ...this.diracMessages[index] }
+            Object.assign(this.diracMessages[index], updates)
 
-			// Save changes
-			await this.saveDiracMessagesInternal()
-		})
-		await this.updateTaskHistoryInternal()
-	}
+            this.emitDiracMessagesChanged({
+                type: "update",
+                messages: this.diracMessages,
+                index,
+                previousMessage,
+                message: this.diracMessages[index],
+            })
+
+            this.diracMessagesDirty = true
+        })
+        this.scheduleFlush()
+    }
+
+    /**
+     * Delete a specific message from the diracMessages array
+     * The entire operation (validate, delete, save) is atomic to prevent races (RC-4)
+     */
+    async deleteDiracMessage(index: number): Promise<void> {
+        await this.withStateLock(async () => {
+            if (index < 0 || index >= this.diracMessages.length) {
+                throw new Error(`Invalid message index: ${index}`)
+            }
+
+            const previousMessage = this.diracMessages[index]
+            this.diracMessages.splice(index, 1)
+
+            this.emitDiracMessagesChanged({
+                type: "delete",
+                messages: this.diracMessages,
+                index,
+                previousMessage,
+            })
+
+            this.diracMessagesDirty = true
+        })
+        this.scheduleFlush()
+    }
 }

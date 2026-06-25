@@ -1,9 +1,9 @@
 import { getShellForProfile } from "@utils/shell"
 import {
-	TerminalInfo as ITerminalInfo,
-	ITerminalManager,
-	TerminalProcessResultPromise as ITerminalProcessResultPromise,
-	TerminalProfileChangeResult,
+    TerminalInfo as ITerminalInfo,
+    ITerminalManager,
+    TerminalProcessResultPromise as ITerminalProcessResultPromise,
+    TerminalProfileChangeResult,
 } from "@/integrations/terminal/types"
 import { Logger } from "@/shared/services/Logger"
 import { CommandExecutor } from "./VscodeCommandExecutor"
@@ -33,9 +33,10 @@ export class VscodeTerminalManager implements ITerminalManager {
 		this.shellIntegrationManager.setupListeners()
 	}
 
-	runCommand(terminalInfo: ITerminalInfo): ITerminalProcessResultPromise {
+	runCommand(terminalInfo: ITerminalInfo, command: string): ITerminalProcessResultPromise {
 		const info = terminalInfo as unknown as TerminalInfo
-		Logger.log(`[TerminalManager] Running command on terminal ${info.id}: "${info.lastCommand}"`)
+		info.lastCommand = command // record the actual command being run
+		Logger.log(`[TerminalManager] Running command on terminal ${info.id}: "${command}"`)
 		Logger.log(`[TerminalManager] Terminal ${info.id} busy state before: ${info.busy}`)
 
 		info.busy = true
@@ -45,7 +46,7 @@ export class VscodeTerminalManager implements ITerminalManager {
 		const result = this.commandExecutor.runCommand(
 			info.id,
 			info.terminal,
-			info.lastCommand ?? "",
+			command,
 			() => {
 				Logger.log(`[TerminalManager] Terminal ${info.id} completed, setting busy to false`)
 				info.busy = false

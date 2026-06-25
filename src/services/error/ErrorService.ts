@@ -18,7 +18,7 @@ export class ErrorService {
 	 */
 	public static async initialize(): Promise<ErrorService> {
 		if (ErrorService.instance) {
-			throw new Error("ErrorService has already been initialized.")
+			return ErrorService.instance
 		}
 
 		const provider = await ErrorProviderFactory.createProvider(ErrorProviderFactory.getDefaultConfig())

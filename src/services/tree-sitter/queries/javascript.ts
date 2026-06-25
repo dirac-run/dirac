@@ -6,11 +6,13 @@
 - doc comments
 */
 export default `
+;; NOTE: Patterns are split per value type (arrow_function vs function_expression) because
+;; the v0.25 JavaScript grammar disallows alternation in certain positions.
 (
   (comment)* @doc
   .
   (method_definition
-    name: [(property_identifier) (identifier)] @name.definition.method) @definition.method
+    name: (property_identifier) @name.definition.method) @definition.method
   (#not-eq? @name.definition.method "constructor")
   (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
   (#select-adjacent! @doc @definition.method)
@@ -47,21 +49,43 @@ export default `
   (comment)* @doc
   .
   (pair
-    key: [(property_identifier) (identifier)] @name.definition.method
-    value: [(arrow_function) (function_expression)]) @definition.method
+    key: (property_identifier) @name.definition.method
+    value: (arrow_function)) @definition.method
   (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
   (#select-adjacent! @doc @definition.method)
 )
-;; Class properties with arrow functions
+
+(
+  (comment)* @doc
+  .
+  (pair
+    key: (property_identifier) @name.definition.method
+    value: (function_expression)) @definition.method
+  (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
+  (#select-adjacent! @doc @definition.method)
+)
+
+;; Class properties with arrow functions (field_definition has no 'name' field in JS grammar)
 (
   (comment)* @doc
   .
   (field_definition
-    name: [(property_identifier) (identifier)] @name.definition.method
-    value: [(arrow_function) (function_expression)]) @definition.method
+    (property_identifier) @name.definition.method
+    value: (arrow_function)) @definition.method
   (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
   (#select-adjacent! @doc @definition.method)
 )
+
+(
+  (comment)* @doc
+  .
+  (field_definition
+    (property_identifier) @name.definition.method
+    value: (function_expression)) @definition.method
+  (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
+  (#select-adjacent! @doc @definition.method)
+)
+
 ;; Variable declarations with arrow functions
 (
   (comment)* @doc
@@ -70,11 +94,28 @@ export default `
     (lexical_declaration
       (variable_declarator
         name: (identifier) @name.definition.function
-        value: [(arrow_function) (function_expression)]))
+        value: (arrow_function)))
     (variable_declaration
       (variable_declarator
         name: (identifier) @name.definition.function
-        value: [(arrow_function) (function_expression)]))
+        value: (arrow_function)))
+  ] @definition.function
+  (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
+  (#select-adjacent! @doc @definition.function)
+)
+
+(
+  (comment)* @doc
+  .
+  [
+    (lexical_declaration
+      (variable_declarator
+        name: (identifier) @name.definition.function
+        value: (function_expression)))
+    (variable_declaration
+      (variable_declarator
+        name: (identifier) @name.definition.function
+        value: (function_expression)))
   ] @definition.function
   (#strip! @doc "^[\\\\s\\\\*/]+|[\\\\s\\\\*/]+$")
   (#select-adjacent! @doc @definition.function)

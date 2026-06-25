@@ -89,7 +89,6 @@ describe("Task (original)", () => {
     it("creates a Task with taskId", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -113,7 +112,6 @@ describe("Task (original)", () => {
     it("has cwd set from params", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -136,7 +134,6 @@ describe("Task (original)", () => {
     it("initializes taskState", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -159,7 +156,6 @@ describe("Task (original)", () => {
     it("abortTask transitions status to CANCELLING", async () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -184,7 +180,6 @@ describe("Task (original)", () => {
     it("cancelBackgroundCommand returns boolean", async () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -208,7 +203,6 @@ describe("Task (original)", () => {
     it("markToolsDirty does not throw", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -231,7 +225,6 @@ describe("Task (original)", () => {
     it("resetTransientState resolves", async () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -254,7 +247,6 @@ describe("Task (original)", () => {
     it("executeCommandTool does not throw for valid command", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -278,7 +270,6 @@ describe("Task (original)", () => {
     it("cancelHookExecution does not throw", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),
@@ -301,7 +292,6 @@ describe("Task (original)", () => {
     it("has ulid property", () => {
         const mockCtx = createMockContext()
         const t = new Task({
-            context: mockCtx as any,
             controller: createMockController(),
             updateTaskHistory: sandbox.stub().resolves([]),
             postStateToWebview: sandbox.stub().resolves(),

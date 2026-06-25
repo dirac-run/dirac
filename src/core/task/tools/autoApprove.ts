@@ -158,25 +158,27 @@ export class AutoApprove {
             isLocalRead = false
         }
 
-        // 2. SAFETY POLICY: Always require manual approval for writes outside the workspace, even in YOLO mode
-        const isWriteOperation = WRITE_TOOLS.includes(blockname)
-        if (!isLocalRead && isWriteOperation) {
-            return false
-        }
-
+        // 2. Unrestricted modes: YOLO and auto-approve-all bypass all safety checks
         if (this.stateManager.getGlobalSettingsKey("yoloModeToggled")) {
             return true
         }
         if (this.stateManager.getGlobalSettingsKey("autoApproveAllToggled")) {
             return true
         }
-        // Get auto-approve settings for local and external edits
+
+        // 3. SAFETY POLICY: Require manual approval for writes outside the workspace
+        const isWriteOperation = WRITE_TOOLS.includes(blockname)
+        if (!isLocalRead && isWriteOperation) {
+            return false
+        }
+
+        // 4. Get auto-approve settings for local and external edits
         const autoApproveResult = this.shouldAutoApproveTool(blockname)
         const [autoApproveLocal, autoApproveExternal] = Array.isArray(autoApproveResult)
             ? autoApproveResult
             : [autoApproveResult, false]
 
-        // 3. Check permission rules
+        // 5. Check permission rules
         if (this.shouldAutoApproveWithRules(blockname, autoApproveActionpath)) {
             return true
         }

@@ -227,11 +227,88 @@ describe("ClaudeCodeHandler", () => {
 		})
 	})
 
-	describe("getModel", () => {
-		it("should return the correct model when specified", () => {
-			const handler = new ClaudeCodeHandler({
-				apiModelId: "claude-sonnet-4-6",
-			})
+    describe("structured output tool calls", () => {
+        async function collectToolCalls(toolUseContent: any) {
+            const runClaudeCodeModule = await import("@/integrations/claude-code/run")
+            const runClaudeCodeStub = sandbox.stub(runClaudeCodeModule, "runClaudeCode")
+
+            async function* mockGenerator() {
+                yield { type: "system", subtype: "init", apiKeySource: "none" }
+                yield {
+                    type: "assistant",
+                    message: {
+                        content: [toolUseContent],
+                        usage: { input_tokens: 10, output_tokens: 5 },
+                        stop_reason: "end_turn",
+                    },
+                }
+                // The CLI echoes a tool_result for the StructuredOutput call; it must be ignored.
+                yield {
+                    type: "user",
+                    message: {
+                        content: [
+                            { type: "tool_result", tool_use_id: "toolu_1", content: "Structured output provided successfully" },
+                        ],
+                    },
+                }
+                // Capping at one turn ends the run with an error_max_turns result (no `result` field),
+                // which still carries final cost and must be processed for usage.
+                yield { type: "result", subtype: "error_max_turns", is_error: true, total_cost_usd: 0 }
+            }
+
+            runClaudeCodeStub.returns(mockGenerator() as any)
+
+            const messages: DiracStorageMessage[] = [{ role: "user", content: "Hi" }]
+            const toolCalls: any[] = []
+            for await (const chunk of handler.createMessage("sys", messages)) {
+                if (chunk.type === "tool_calls") {
+                    toolCalls.push(chunk.tool_call)
+                }
+            }
+            return toolCalls
+        }
+
+        it("unwraps the StructuredOutput array form into native tool_calls", async () => {
+            const toolCalls = await collectToolCalls({
+                type: "tool_use",
+                id: "toolu_1",
+                name: "StructuredOutput",
+                input: {
+                    tool_calls: [
+                        { tool: "read_file", params: { path: "a.ts" } },
+                        { tool: "execute_command", params: { command: "ls" } },
+                    ],
+                },
+            })
+
+            toolCalls.should.have.length(2)
+            toolCalls[0].function.name.should.equal("read_file")
+            JSON.parse(toolCalls[0].function.arguments).should.deepEqual({ path: "a.ts" })
+            toolCalls[1].function.name.should.equal("execute_command")
+            JSON.parse(toolCalls[1].function.arguments).should.deepEqual({ command: "ls" })
+            // Must not surface the raw StructuredOutput wrapper.
+            toolCalls.some((c) => c.function.name === "StructuredOutput").should.equal(false)
+        })
+
+        it("unwraps the StructuredOutput single-object form", async () => {
+            const toolCalls = await collectToolCalls({
+                type: "tool_use",
+                id: "toolu_1",
+                name: "StructuredOutput",
+                input: { tool: "attempt_completion", params: { result: "done" } },
+            })
+
+            toolCalls.should.have.length(1)
+            toolCalls[0].function.name.should.equal("attempt_completion")
+            JSON.parse(toolCalls[0].function.arguments).should.deepEqual({ result: "done" })
+        })
+    })
+
+    describe("getModel", () => {
+        it("should return the correct model when specified", () => {
+            const handler = new ClaudeCodeHandler({
+                apiModelId: "claude-sonnet-4-6",
+            })
 
 			const model = handler.getModel()
 			model.id.should.equal("claude-sonnet-4-6")

@@ -1,0 +1,9 @@
+sample.zig::main
+[Function Hash: dcac5a33]
+pub fn main() !void {
+    const p = Point.init(3, 4);
+    const d = helper(p.x);
+    const dir = Direction.north;
+    _ = dir.opposite();
+    _ = d;
+}

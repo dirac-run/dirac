@@ -28,6 +28,8 @@ async function scanSkillsDirectory(dirPath: string): Promise<SkillInfo[]> {
 			if (!stats?.isDirectory()) continue
 
 			const skillMdPath = path.join(entryPath, "SKILL.md")
+			// Resolve symlinks so the same physical skill isn't listed twice
+			const resolvedPath = await fs.realpath(skillMdPath).catch(() => skillMdPath)
 
 			try {
 				const fileContent = await fs.readFile(skillMdPath, "utf-8")
@@ -58,7 +60,7 @@ async function scanSkillsDirectory(dirPath: string): Promise<SkillInfo[]> {
 					SkillInfo.create({
 						name: entryName,
 						description: frontmatter.description,
-						path: skillMdPath,
+						path: resolvedPath,
 						enabled: true, // Will be updated with toggle state
 					}),
 				)

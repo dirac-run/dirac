@@ -1,0 +1,5 @@
+sample.zig::helper
+[Function Hash: c6d11763]
+fn helper(x: i32) i32 {
+    return x * 2;
+}

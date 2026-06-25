@@ -170,6 +170,12 @@ export class CheckpointRestoreHandler {
 							})
 							didWorkspaceRestoreFail = true
 						}
+					} else {
+						// No valid checkpoint hash found anywhere — surface the failure
+						const errorMessage = "Failed to restore checkpoint: No valid checkpoint hash found"
+						Logger.error(`[CheckpointRestoreHandler] ${errorMessage} for task ${this.config.taskId}`)
+						HostProvider.window.showMessage({ type: ShowMessageType.ERROR, message: errorMessage })
+						didWorkspaceRestoreFail = true
 					}
 					break
 			}

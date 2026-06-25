@@ -40,6 +40,15 @@ type PlatformConfigJson = {
 
 type PlatformConfigs = Record<string, PlatformConfigJson>
 
+// Runtime configuration injected into the webview HTML by the host (see
+// DiracWebviewProvider.getHtmlContent). This lets host-specific user settings
+// (e.g. a custom Plan/Act toggle shortcut from VSCode `dirac.*` settings)
+// override the compile-time defaults baked into platform-configs.json without
+// going through the gRPC state pipeline.
+export interface DiracRuntimeConfig {
+	planActToggleShortcut?: string
+}
+
 // Global type declarations for postMessage and vscode API
 declare global {
 	interface Window {
@@ -47,8 +56,35 @@ declare global {
 		// !! Do not change the name of the handler without updating it on
 		// the JetBrains side as well. !!
 		standalonePostMessage?: (message: string) => void
+		// Host-injected runtime config. Optional: absent in builds/hosts that
+		// do not inject it, in which case compile-time defaults are used.
+		__DIRAC_CONFIG__?: DiracRuntimeConfig
 	}
 	function acquireVsCodeApi(): any
+}
+
+/**
+ * Resolve the effective Plan/Act toggle shortcut.
+ *
+ * Pure function so the resolution rule (user override wins, otherwise the
+ * platform default) is independently testable. A blank/whitespace-only or
+ * non-string override is treated as "unset" and falls back to the default.
+ *
+ * @param override - The user-provided shortcut (e.g. from a VSCode setting), if any.
+ * @param fallback - The platform default shortcut.
+ */
+export function resolveTogglePlanActKeys(override: string | undefined, fallback: string): string {
+	if (typeof override === "string" && override.trim().length > 0) {
+		return override.trim()
+	}
+	return fallback
+}
+
+/**
+ * Reads the host-injected runtime override for the Plan/Act toggle shortcut, if present.
+ */
+function getInjectedTogglePlanActKeys(): string | undefined {
+	return typeof window !== "undefined" ? window.__DIRAC_CONFIG__?.planActToggleShortcut : undefined
 }
 
 // Initialize the vscode API if available
@@ -103,7 +139,10 @@ export const PLATFORM_CONFIG: PlatformConfig = {
 	postMessage: postMessageStrategies[selectedConfig.postMessageHandler],
 	encodeMessage: messageEncoders[selectedConfig.messageEncoding],
 	decodeMessage: messageDecoders[selectedConfig.messageEncoding],
-	togglePlanActKeys: selectedConfig.togglePlanActKeys,
+	// User override (host-injected) wins over the platform default. The default
+	// itself lives in platform-configs.json and is chosen to avoid clashing with
+	// VSCode's Cmd/Ctrl+Shift+A "Agents" command (see issue #100).
+	togglePlanActKeys: resolveTogglePlanActKeys(getInjectedTogglePlanActKeys(), selectedConfig.togglePlanActKeys),
 	supportsTerminalMentions: selectedConfig.supportsTerminalMentions,
 }
 

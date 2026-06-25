@@ -44,9 +44,9 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({ card, isCo
                 )}
             </div>
 
-            <div className="font-medium flex-grow truncate" title={header}>
-                <div className="flex items-center gap-1 min-w-0">
-                    <span className="truncate">{header}</span>
+            <div className={cn("font-medium flex-grow", isCollapsed ? "truncate" : "min-w-0")} title={header}>
+                <div className={cn("flex items-center gap-1 min-w-0", !isCollapsed && "flex-wrap")}>
+                    <span className={cn(isCollapsed ? "truncate" : "break-all whitespace-normal")}>{header}</span>
                     {filePath && !decorators.some((d) => d.renderHeaderActions) && (
                         <button
                             className={cn(

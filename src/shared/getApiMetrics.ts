@@ -7,6 +7,8 @@ interface ApiMetrics {
     totalCacheReads?: number
     totalCost: number
     totalReasoningTokens: number
+    /** Weighted-average cache hit rate: totalCacheReads / total prompt tokens */
+    cacheHitRate: number
 }
 
 /**
@@ -37,6 +39,7 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
         totalCacheReads: undefined,
         totalCost: 0,
         totalReasoningTokens: 0,
+        cacheHitRate: 0,
     }
 
     messages.forEach((message) => {
@@ -84,8 +87,13 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
         }
     })
 
+    // Compute weighted-average cache hit rate from aggregated totals
+    const totalPromptTokens = result.totalTokensIn + (result.totalCacheWrites ?? 0) + (result.totalCacheReads ?? 0)
+    result.cacheHitRate = totalPromptTokens > 0 ? (result.totalCacheReads ?? 0) / totalPromptTokens : 0
+
     return result
 }
+
 
 /**
  * Gets the total token count from the last API request.

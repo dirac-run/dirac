@@ -58,5 +58,7 @@ export function assembleModelState(stateManager: StateManager) {
 		enableParallelToolCalling: stateManager.getGlobalSettingsKey("enableParallelToolCalling"),
 		backgroundEditEnabled: stateManager.getGlobalSettingsKey("backgroundEditEnabled"),
 		optOutOfRemoteConfig: stateManager.getGlobalSettingsKey("optOutOfRemoteConfig"),
+		writePromptMetadataEnabled: stateManager.getGlobalSettingsKey("writePromptMetadataEnabled"),
+		writePromptMetadataDirectory: stateManager.getGlobalSettingsKey("writePromptMetadataDirectory"),
 	}
 }

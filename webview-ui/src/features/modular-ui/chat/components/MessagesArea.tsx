@@ -30,6 +30,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
     const {
         virtuosoRef,
+        footerRef,
         toggleRowExpansion,
         setIsAtBottom,
         setShowScrollToBottom,
@@ -91,7 +92,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
     const virtuosoComponents = useMemo(
         () => ({
-            Footer: () => <div className="min-h-1" />,
+            Footer: () => <div ref={footerRef} className="min-h-1" />,
         }),
         [],
     )
@@ -117,7 +118,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
                             disableAutoScrollRef.current = !isAtBottom
                             setShowScrollToBottom(!isAtBottom)
                         }}
-                        atBottomThreshold={80}
+                        atBottomThreshold={500}
                         className="grow"
                         components={virtuosoComponents}
                         data={renderedMessages}

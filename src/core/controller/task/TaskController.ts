@@ -1,17 +1,17 @@
+import { cleanupLegacyCheckpoints } from "@integrations/checkpoints/CheckpointMigration"
+import type { HistoryItem } from "@shared/HistoryItem"
+import { type Settings } from "@shared/storage/state-keys"
+import pWaitFor from "p-wait-for"
+import type { FolderLockWithRetryResult } from "@/core/locks/types"
+import { Logger } from "@/shared/services/Logger"
+import { getCwd, getDesktopDir } from "@/utils/path"
+import type { StateManager } from "../../storage/StateManager"
+import { Task } from "../../task"
 import { tryAcquireTaskLockWithRetry } from "../../task/TaskLockUtils"
 import { detectWorkspaceRoots } from "../../workspace/detection"
 import { setupWorkspaceManager } from "../../workspace/setup"
 import type { WorkspaceRootManager } from "../../workspace/WorkspaceRootManager"
 import type { Controller } from ".."
-import { cleanupLegacyCheckpoints } from "@integrations/checkpoints/CheckpointMigration"
-import type { HistoryItem } from "@shared/HistoryItem"
-import { type Settings } from "@shared/storage/state-keys"
-import type { StateManager } from "../../storage/StateManager"
-import { Task } from "../../task"
-import { Logger } from "@/shared/services/Logger"
-import pWaitFor from "p-wait-for"
-import type { FolderLockWithRetryResult } from "@/core/locks/types"
-import { getCwd, getDesktopDir } from "@/utils/path"
 
 export interface ITaskControllerDependencies {
 	task?: Task
@@ -43,6 +43,12 @@ export class TaskController {
 	private _backgroundCommandRunning = false
 	private _backgroundCommandTaskId?: string
 	private cancelInProgress = false
+	private _taskRunPromise?: Promise<void>
+
+	// Promise for the in-flight task run; consumed via Controller.taskRunPromise (from main).
+	get taskRunPromise(): Promise<void> | undefined {
+		return this._taskRunPromise
+	}
 
 	constructor(
 		private readonly deps: ITaskControllerDependencies,
@@ -141,12 +147,7 @@ export class TaskController {
 		}
 
 		this._task = new Task({
-			context: {
-				updateBackgroundCommandState: (running, taskId) => this.updateBackgroundCommandState(running, taskId),
-				toggleActModeForYoloMode: () => this.deps.toggleActModeForYoloMode(),
-				postStateToWebview: () => this.deps.postStateToWebview(),
-			},
-			controller: this.deps.controller,
+			controller: this.deps.controller!,
 			updateTaskHistory: (historyItem) => this.deps.updateTaskHistory(historyItem),
 			postStateToWebview: () => this.deps.postStateToWebview(),
 			reinitExistingTaskFromId: (taskId) => this.reinitExistingTaskFromId(taskId),
@@ -166,13 +167,12 @@ export class TaskController {
 			taskId,
 			conversationUlid,
 			taskLockAcquired,
-			watcherFactory: _watcherFactory,
 		})
 
 		if (historyItem) {
-			this._task.resumeTaskFromHistory()
+			this._taskRunPromise = this._task.resumeTaskFromHistory()
 		} else if (task || images || files) {
-			this._task.startTask(task, images, files)
+			this._taskRunPromise = this._task.startTask(task, images, files)
 		}
 
 		return this._task.taskId

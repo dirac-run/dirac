@@ -111,7 +111,7 @@ const copyAssets = {
             fs.mkdirSync(webTreeSitterTarget, { recursive: true })
             fs.copyFileSync(path.join(sourceDir, "tree-sitter.js"), path.join(webTreeSitterTarget, "tree-sitter.js"))
             fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(webTreeSitterTarget, "tree-sitter.wasm"))
-            fs.copyFileSync(path.join(sourceDir, "tree-sitter-web.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
+            fs.copyFileSync(path.join(sourceDir, "web-tree-sitter.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
             // Write a minimal package.json so require('web-tree-sitter') resolves correctly
             fs.writeFileSync(
                 path.join(webTreeSitterTarget, "package.json"),
@@ -138,6 +138,7 @@ const copyAssets = {
                 "php",
                 "swift",
                 "kotlin",
+                "zig",
             ]
 
             // Copy sql-wasm.wasm
@@ -155,7 +156,7 @@ const copyAssets = {
             copySourceCode(__dirname, path.join(__dirname, destDir))
 
             // Copy runtime modules that are externalized or need files/binaries available on disk
-            const modulesToCopy = ["better-sqlite3", "bindings", "@vscode/ripgrep"]
+            const modulesToCopy = ["@vscode/ripgrep"]
             for (const mod of modulesToCopy) {
                 const sourceModuleDir = path.join(__dirname, "node_modules", mod)
                 const targetModuleDir = path.join(targetDir, "node_modules", mod)
@@ -239,7 +240,7 @@ const extensionConfig = {
     ...baseConfig,
     entryPoints: ["src/extension.ts"],
     outfile: `${destDir}/extension.js`,
-    external: ["vscode", "web-tree-sitter", "better-sqlite3"],
+    external: ["vscode", "web-tree-sitter"],
 }
 
 // Standalone-specific configuration
@@ -249,7 +250,7 @@ const standaloneConfig = {
     outfile: `${destDir}/dirac-core.js`,
     // These modules need to load files from the module directory at runtime,
     // so they cannot be bundled.
-    external: ["vscode", "web-tree-sitter", "@grpc/reflection", "grpc-health-check", "better-sqlite3"],
+    external: ["vscode", "web-tree-sitter", "@grpc/reflection", "grpc-health-check"],
 }
 
 // E2E build script configuration

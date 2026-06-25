@@ -22,6 +22,7 @@ interface ChatFooterStatus {
     lastApiReqTotalTokens: number
     contextWindowSize: number
     totalCost: number
+    cacheHitRate: number
     workspacePath: string
     gitBranch: string | null
     gitDiffStats: GitDiffStats | null
@@ -98,6 +99,7 @@ export function useChatFooterStatus({ ctrl, mode, taskState }: UseChatFooterStat
         lastApiReqTotalTokens,
         contextWindowSize,
         totalCost: metrics.totalCost,
+        cacheHitRate: metrics.cacheHitRate,
         workspacePath,
         gitBranch,
         gitDiffStats,

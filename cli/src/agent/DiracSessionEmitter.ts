@@ -4,6 +4,11 @@
  * This class provides a type-safe wrapper around Node's EventEmitter
  * for emitting and subscribing to session-specific ACP events.
  *
+ * Includes replay-on-subscribe: if a payload has already been emitted
+ * for an event, new subscribers immediately receive the latest payload.
+ * This solves the race condition where bootstrap emits config_option_update
+ * before React components mount and subscribe.
+ *
  * @module acp
  */
 
@@ -33,6 +38,12 @@ import type { DiracSessionEvents } from "./public-types.js"
  */
 export class DiracSessionEmitter {
 	private readonly emitter: EventEmitter
+	/**
+	 * Last emitted payload per event, used to replay to late-joining subscribers.
+	 * This solves the race condition where bootstrap emits config_option_update
+	 * before React components mount and subscribe.
+	 */
+	private readonly lastPayload = new Map<string, unknown[]>()
 
 	constructor() {
 		this.emitter = new EventEmitter()
@@ -43,24 +54,33 @@ export class DiracSessionEmitter {
 	/**
 	 * Subscribe to a session event.
 	 *
+	 * If a payload has already been emitted for this event, the listener is
+	 * immediately called with that payload (replay-on-subscribe).
+	 *
 	 * @param event - The event name to subscribe to
 	 * @param listener - The callback function to invoke when the event is emitted
 	 * @returns This emitter instance for chaining
 	 */
 	on<K extends keyof DiracSessionEvents>(event: K, listener: DiracSessionEvents[K]): this {
 		this.emitter.on(event, listener as (...args: unknown[]) => void)
+
+		// Replay last emitted payload so late subscribers get the latest state
+		const last = this.lastPayload.get(event as string)
+		if (last) {
+			;((listener as (...args: unknown[]) => void).bind(null) as (...args: unknown[]) => void)(...last)
+		}
+
 		return this
 	}
 
-	/**
-	 * Subscribe to a session event for a single invocation.
-	 *
-	 * @param event - The event name to subscribe to
-	 * @param listener - The callback function to invoke when the event is emitted
-	 * @returns This emitter instance for chaining
-	 */
-	once<K extends keyof DiracSessionEvents>(event: K, listener: DiracSessionEvents[K]): this {
-		this.emitter.once(event, listener as (...args: unknown[]) => void)
+		once<K extends keyof DiracSessionEvents>(event: K, listener: DiracSessionEvents[K]): this {
+		// For once: if we have a last payload, fire immediately and don't register
+		const last = this.lastPayload.get(event as string)
+		if (last) {
+			;((listener as (...args: unknown[]) => void).bind(null) as (...args: unknown[]) => void)(...last)
+		} else {
+			this.emitter.once(event, listener as (...args: unknown[]) => void)
+		}
 		return this
 	}
 
@@ -77,18 +97,23 @@ export class DiracSessionEmitter {
 	}
 
 	/**
-	 * Emit a session event.
+	 * Emit a session event and cache the payload for replay.
 	 *
 	 * @param event - The event name to emit
 	 * @param args - The arguments to pass to the event listeners
 	 * @returns True if the event had listeners, false otherwise
 	 */
 	emit<K extends keyof DiracSessionEvents>(event: K, ...args: Parameters<DiracSessionEvents[K]>): boolean {
+		// Cache last payload for replay-on-subscribe
+		this.lastPayload.set(event as string, args)
 		return this.emitter.emit(event, ...args)
 	}
 
 	/**
 	 * Remove all listeners for a specific event or all events.
+	 *
+	 * Does NOT clear the replay cache so that new subscribers still get the
+	 * latest payload even after previous subscribers have been removed.
 	 *
 	 * @param event - Optional event name to remove listeners for
 	 * @returns This emitter instance for chaining

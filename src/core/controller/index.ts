@@ -47,6 +47,14 @@ export class Controller {
 		this.taskController!.task = value
 	}
 
+	// Promise for the in-flight task run; created inside TaskController.initTask (from main).
+	get taskRunPromise(): Promise<void> | undefined {
+		return this.taskController?.taskRunPromise
+	}
+
+	// Debounce state broadcast — coalesce multiple per-tick calls into a single push (from main)
+	private webviewUpdateScheduled = false
+
 	// Public getter for workspace manager with lazy initialization - To get workspaces when task isn't initialized (Used by file mentions)
 	async ensureWorkspaceManager(): Promise<WorkspaceRootManager | undefined> {
 		const manager = await this.workspaceController.ensureWorkspaceManager()
@@ -192,13 +200,11 @@ export class Controller {
 	}
 
 	async postStateToWebview(): Promise<void> {
-		const state = await getUiState({
-			stateManager: this.stateManager,
-			task: this.task,
-			workspaceManager: this.workspaceManager,
-			backgroundCommandRunning: this.backgroundCommandRunning,
-			backgroundCommandTaskId: this.backgroundCommandTaskId,
-		})
+		if (this.webviewUpdateScheduled) return
+		this.webviewUpdateScheduled = true
+		await Promise.resolve()
+		this.webviewUpdateScheduled = false
+		const state = await this.getStateToPostToWebview()
 		await sendStateUpdate(state)
 	}
 

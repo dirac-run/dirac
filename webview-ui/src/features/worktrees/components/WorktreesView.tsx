@@ -2,10 +2,10 @@ import { EmptyRequest } from "@shared/proto/dirac/common"
 import { NewTaskRequest } from "@shared/proto/dirac/task"
 import type { MergeWorktreeResult, Worktree as WorktreeProto } from "@shared/proto/dirac/worktree"
 import {
-    CreateWorktreeIncludeRequest,
-    DeleteWorktreeRequest,
-    MergeWorktreeRequest,
-    SwitchWorktreeRequest,
+	CreateWorktreeIncludeRequest,
+	DeleteWorktreeRequest,
+	MergeWorktreeRequest,
+	SwitchWorktreeRequest,
 } from "@shared/proto/dirac/worktree"
 import { VSCodeButton, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { AlertCircle, Check, ExternalLink, FolderOpen, GitBranch, GitMerge, Loader2, Plus, Trash2, X } from "lucide-react"
@@ -251,15 +251,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 				{/* Description */}
 				<p className="text-sm text-[var(--vscode-descriptionForeground)] m-0 mb-4">
 					Git worktrees let you work on multiple branches at the same time, each in its own folder. Open worktrees in
-					their own windows so Dirac can work on multiple tasks in parallel.{" "}
-					<a
-						className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-						href="https://dirac.run/docs/features/worktrees"
-						rel="noopener noreferrer"
-						style={{ fontSize: "inherit" }}
-						target="_blank">
-						Learn more
-					</a>
+					their own windows so Dirac can work on multiple tasks in parallel.
 				</p>
 
 				{/* .worktreeinclude status */}
@@ -273,15 +265,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 						{hasWorktreeInclude ? (
 							<p className="text-sm text-[var(--vscode-testing-iconPassed)] m-0">
 								<Check className="w-4 h-4 inline-block align-text-bottom mr-1" />
-								.worktreeinclude detected.{" "}
-								<a
-									className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-									href="https://dirac.run/docs/features/worktrees#worktreeinclude"
-									rel="noopener noreferrer"
-									style={{ fontSize: "inherit" }}
-									target="_blank">
-									Learn more
-								</a>
+								.worktreeinclude detected.
 							</p>
 						) : (
 							<div className="flex flex-col gap-2">
@@ -294,15 +278,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 									<code className="bg-[var(--vscode-textCodeBlock-background)] px-1 rounded">
 										node_modules/
 									</code>{" "}
-									to new worktrees, so you don't have to reinstall dependencies.{" "}
-									<a
-										className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-										href="https://dirac.run/docs/features/worktrees#worktreeinclude"
-										rel="noopener noreferrer"
-										style={{ fontSize: "inherit" }}
-										target="_blank">
-										Learn more
-									</a>
+									to new worktrees, so you don't have to reinstall dependencies.
 								</p>
 								{hasGitignore && (
 									<VSCodeButton

@@ -11,19 +11,19 @@
  * @module acp
  */
 
+import * as fs from "node:fs/promises"
 import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
-import { ulid } from "ulid"
+import type { DiracMessageChange } from "@core/task/message-state"
 import type { ApiProvider } from "@shared/api"
-import { DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-
+import type { DiracMessage } from "@shared/ExtensionMessage"
+import { DiracMessageType } from "@shared/ExtensionMessage"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
-import { DiracEndpoint } from "@/config.js"
 import { Controller } from "@/core/controller"
 import { getAvailableSlashCommands } from "@/core/controller/slash/getAvailableSlashCommands"
-import { getSavedDiracMessages, setRuntimeHooksDir } from "@/core/storage/disk"
+import { setRuntimeHooksDir } from "@/core/storage/disk"
 import { StateManager } from "@/core/storage/StateManager"
+import { swapSessionOverrides } from "../acp/sessionOverrides.js"
 import { AuthHandler } from "@/hosts/external/AuthHandler.js"
 import { ExternalCommentReviewController } from "@/hosts/external/ExternalCommentReviewController.js"
 import { ExternalDiracWebviewProvider } from "@/hosts/external/ExternalWebviewProvider.js"
@@ -31,22 +31,26 @@ import { HostProvider } from "@/hosts/host-provider.js"
 import { FileEditProvider } from "@/integrations/editor/FileEditProvider"
 import { StandaloneTerminalManager } from "@/integrations/terminal/index.js"
 import { Logger } from "@/shared/services/Logger.js"
-import type { Mode } from "@/shared/storage/types"
+import type { Settings } from "@/shared/storage/state-keys"
 import { version as AGENT_VERSION } from "../../package.json"
+import { getLatestTaskIdForSession, recordTaskForSession } from "../acp/acp-session-tasks.js"
 import { ACPDiffViewProvider } from "../acp/ACPDiffViewProvider.js"
 import { ACPHostBridgeClientProvider } from "../acp/ACPHostBridgeClientProvider.js"
 import { AcpTerminalManager } from "../acp/AcpTerminalManager.js"
+import { initCoreServices } from "../initCoreServices.js"
 import { CliContextResult, initializeCliContext } from "../vscode-context.js"
 import { DiracSessionEmitter } from "./DiracSessionEmitter.js"
-import { getHistoryItemCwd, historyItemToSessionInfo, listLatestConversationHistoryItems, resolveHistorySession } from "./sessionHistory.js"
-import { SessionConfigManager } from "./sessionConfig.js"
-import { parsePromptContent } from "./promptContent.js"
-import { TaskMessageBridge } from "./taskMessageBridge.js"
 import { translateMessage } from "./messageTranslator.js"
+import { TaskMessageBridge } from "./taskMessageBridge.js"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { DiracAcpSession, DiracAgentOptions, PermissionHandler } from "./public-types.js"
 import { AcpSessionStatus } from "./public-types.js"
 import { ACP_REVIEW_COMMANDS, handleAcpReviewCommand } from "./review.js"
 import { type AcpSessionState } from "./types.js"
+import { SessionConfigManager, acpModeToInternalState, type AcpModeId } from "./sessionConfig.js"
+import { getHistoryItemCwd } from "./sessionHistory.js"
+import { parsePromptContent } from "./promptContent.js"
+import pWaitFor from "p-wait-for"
 
 /**
  * Dirac's implementation of the ACP Agent interface.
@@ -73,16 +77,10 @@ export class DiracAgent implements acp.Agent {
         this.sessions.clear()
         this.sessionStates.clear()
         this.sessionEmitters.clear()
+        this.acpSessionOverrides.clear()
     }
     private readonly options: DiracAgentOptions
-    private readonly ctx: CliContextResult
-    private readonly sessionConfig = new SessionConfigManager()
-    private readonly taskMessageBridge = new TaskMessageBridge({
-        getSession: (sessionId) => this.sessions.get(sessionId),
-        getController: (session) => this.#sessionControllers.get(session),
-        requestPermission: this.requestPermission.bind(this),
-        emitSessionUpdate: this.emitSessionUpdate.bind(this),
-    })
+    private ctx!: CliContextResult
 
     /** Map of active sessions by session ID */
     public readonly sessions: Map<string, DiracAcpSession> = new Map()
@@ -102,16 +100,54 @@ export class DiracAgent implements acp.Agent {
     /** Client capabilities received during initialization */
     private clientCapabilities?: acp.ClientCapabilities
 
+    /** Bridge for translating DiracMessages to ACP SessionUpdates */
+    private readonly bridge = new TaskMessageBridge({
+        getSession: (sessionId: string) => this.sessions.get(sessionId),
+        getController: (session: DiracAcpSession) => this.#sessionControllers.get(session),
+        requestPermission: (sessionId, toolCall, options) => this.requestPermission(sessionId, toolCall, options),
+        emitSessionUpdate: (sessionId, update) => this.emitSessionUpdate(sessionId, update),
+        getClientCapabilities: () => this.clientCapabilities,
+    })
+
+    /** Session config manager for mode, model, provider, reasoning effort, and thinking budget */
+    private readonly sessionConfig = new SessionConfigManager()
+
     /** Current active session ID for use by DiffViewProvider */
     private currentActiveSessionId: string | undefined
 
-    /** Shared WebviewProvider instance for auth and other operations */
-    private webviewProvider: ReturnType<typeof HostProvider.get.prototype.createWebviewProvider> | undefined
+    /**
+     * Per-session override map for security-relevant settings (auto-approve, yolo, mode).
+     *
+     * The global StateManager.sessionOverrideCache is process-wide — writing to it from
+     * one ACP session would bleed into every other concurrent session. Instead we keep
+     * the authoritative per-session values here, and swap them into StateManager only for
+     * the duration of each session's prompt() call (see applySessionOverrides /
+     * restoreSessionOverrides). This ensures the Task-level auto-approve reads that go
+     * through StateManager.getGlobalSettingsKey() see the correct session's values.
+     */
+    private readonly acpSessionOverrides: Map<string, Partial<Settings>> = new Map()
+
+    /**
+     * In-flight prompt resolvers, keyed by session id. {@link cancel} uses these
+     * to resolve the current `session/prompt` request with `stopReason: "cancelled"`
+     * as required by the ACP spec
+     * (agent-client-protocol/docs/protocol/prompt-turn.mdx — "After all ongoing
+     * operations have been successfully aborted ... the Agent MUST respond to
+     * the original session/prompt request with the cancelled stop reason").
+     */
+    private readonly pendingPromptResolvers: Map<
+        string,
+        { resolve: (response: acp.PromptResponse) => void; resolved: { value: boolean } }
+    > = new Map()
+
 
     constructor(options: DiracAgentOptions) {
         this.options = options
         setRuntimeHooksDir(options.hooksDir)
-        this.ctx = initializeCliContext({ diracDir: options.diracDir, workspaceDir: options.cwd })
+        // ctx is initialized lazily in initialize() so that IO failures (e.g. an
+        // unwritable --config path) surface as a JSON-RPC error response on
+        // `initialize` rather than killing the process before the client can
+        // observe anything.
     }
 
     /**
@@ -165,18 +201,17 @@ export class DiracAgent implements acp.Agent {
      * the connection. The agent returns its protocol version and capabilities.
      */
     async initialize(params: acp.InitializeRequest, connection?: acp.AgentSideConnection): Promise<acp.InitializeResponse> {
+        this.ctx = initializeCliContext({ diracDir: this.options.diracDir, workspaceDir: this.options.cwd })
         this.clientCapabilities = params.clientCapabilities
         this.initializeHostProvider(this.clientCapabilities, connection)
-        await DiracEndpoint.initialize(this.ctx.EXTENSION_DIR)
-        await StateManager.initialize(this.ctx.storageContext)
+        // Shared with initializeCli — see initCoreServices for why both modes
+        // must route through it.
+        await initCoreServices({ extensionDir: this.ctx.EXTENSION_DIR, storageContext: this.ctx.storageContext })
 
         return {
             protocolVersion: PROTOCOL_VERSION,
             agentCapabilities: {
                 loadSession: true,
-                sessionCapabilities: {
-                    list: {},
-                },
                 promptCapabilities: {
                     image: true,
                     audio: false,
@@ -241,7 +276,7 @@ export class DiracAgent implements acp.Agent {
             async () => "", // get binary location not needed in ACP mode
             this.ctx.EXTENSION_DIR,
             this.ctx.DATA_DIR,
-            async (_cwd: string) => undefined,
+            async (_cwd: string) => undefined
         )
     }
 
@@ -252,7 +287,7 @@ export class DiracAgent implements acp.Agent {
      * provides the working directory.
      */
     async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
-        const sessionId = ulid()
+        const sessionId = crypto.randomUUID()
 
         Logger.debug("[DiracAgent] newSession called:", {
             sessionId,
@@ -269,6 +304,7 @@ export class DiracAgent implements acp.Agent {
             mode: (await controller.getStateToPostToWebview()).mode,
             createdAt: Date.now(),
             lastActivityAt: Date.now(),
+            reservedTaskId: sessionId,
         }
 
         this.#sessionControllers.set(session, controller)
@@ -286,38 +322,30 @@ export class DiracAgent implements acp.Agent {
 
         // Get current model configuration for the response
         const modelState = await this.sessionConfig.getSessionModelState(session.mode)
-        const configOptions = await this.sessionConfig.getSessionConfigOptions(session)
+        const configOptions = await this.sessionConfig.getSessionConfigOptions(session, this.acpSessionOverrides.get(session.sessionId))
 
         return {
             sessionId,
-            modes: this.sessionConfig.getSessionModeState(session.mode),
+            modes: this.sessionConfig.getSessionModeState(session.mode, this.acpSessionOverrides.get(sessionId)),
             models: modelState,
             configOptions,
-        }
-    }
-
-    async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
-        return {
-            sessions: listLatestConversationHistoryItems(params.cwd, this.options.cwd).map((item) =>
-                historyItemToSessionInfo(item, params.cwd, this.options.cwd),
-            ),
         }
     }
 
     /**
      * Load an existing session from task history.
      *
-     * ACP session IDs are stable conversation IDs (HistoryItem.ulid when available).
-     * The concrete backing task ID is resolved from history and used only for persisted task files.
+     * The ACP LoadSessionRequest sessionId is treated as the historical task ID.
+     * The task is rehydrated lazily on first prompt to align with the ACP flow.
      */
     async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
         const sessionId = params.sessionId
         const existingSession = this.sessions.get(sessionId)
         if (existingSession) {
             const modelState = await this.sessionConfig.getSessionModelState(existingSession.mode)
-            const configOptions = await this.sessionConfig.getSessionConfigOptions(existingSession)
+            const configOptions = await this.sessionConfig.getSessionConfigOptions(existingSession, this.acpSessionOverrides.get(sessionId))
             return {
-                modes: this.sessionConfig.getSessionModeState(existingSession.mode),
+                modes: this.sessionConfig.getSessionModeState(existingSession.mode, this.acpSessionOverrides.get(sessionId)),
                 models: modelState,
                 configOptions,
             }
@@ -325,19 +353,22 @@ export class DiracAgent implements acp.Agent {
 
         Logger.debug("[DiracAgent] loadSession called:", { sessionId })
 
-        const resolvedSession = resolveHistorySession(sessionId)
+        // Resolve the actual taskId: check the replacement-task map first (multi-task session),
+        // then fall back to sessionId itself (the common single-task case where taskId === sessionId).
+        const resolvedTaskId = getLatestTaskIdForSession(sessionId) ?? sessionId
+
         const controller = new Controller(this.ctx.extensionContext)
-        const history = await controller.getTaskWithId(resolvedSession.taskId)
+        const history = await controller.getTaskWithId(resolvedTaskId)
         const historyCwd = getHistoryItemCwd(history.historyItem, params.cwd, this.options.cwd)
 
         const session: DiracAcpSession = {
             sessionId,
-            taskId: resolvedSession.taskId,
-            cwd: historyCwd,
+            cwd: historyCwd || process.cwd(),
             mode: (await controller.getStateToPostToWebview()).mode,
             createdAt: Date.now(),
             lastActivityAt: Date.now(),
             isLoadedFromHistory: true,
+            loadedTaskId: resolvedTaskId,
         }
 
         this.#sessionControllers.set(session, controller)
@@ -349,27 +380,11 @@ export class DiracAgent implements acp.Agent {
         })
 
         const modelState = await this.sessionConfig.getSessionModelState(session.mode)
-        const configOptions = await this.sessionConfig.getSessionConfigOptions(session)
+        const configOptions = await this.sessionConfig.getSessionConfigOptions(session, this.acpSessionOverrides.get(session.sessionId))
         return {
-            modes: this.sessionConfig.getSessionModeState(session.mode),
+            modes: this.sessionConfig.getSessionModeState(session.mode, this.acpSessionOverrides.get(sessionId)),
             models: modelState,
             configOptions,
-        }
-    }
-
-    async replayLoadedSessionHistory(sessionId: string): Promise<void> {
-        const session = this.sessions.get(sessionId)
-        const sessionState = this.sessionStates.get(sessionId)
-        if (!session || !sessionState) {
-            throw new Error(`Session not found: ${sessionId}`)
-        }
-
-        const messages = await getSavedDiracMessages(session.taskId || sessionId)
-        for (const message of messages) {
-            const result = translateMessage(message, sessionState)
-            for (const update of result.updates) {
-                await this.emitSessionUpdate(sessionId, update)
-            }
         }
     }
 
@@ -412,6 +427,7 @@ export class DiracAgent implements acp.Agent {
             modelId: params.modelId,
         })
 
+        // Parse the modelId format: "provider/modelId"
         const slashIndex = params.modelId.indexOf("/")
         if (slashIndex === -1) {
             throw new Error(`Invalid modelId format: ${params.modelId}. Expected "provider/modelId".`)
@@ -467,7 +483,7 @@ export class DiracAgent implements acp.Agent {
 
         session.lastActivityAt = Date.now()
         await StateManager.get().flushPendingState()
-        const configOptions = await this.sessionConfig.getSessionConfigOptions(session)
+        const configOptions = await this.sessionConfig.getSessionConfigOptions(session, this.acpSessionOverrides.get(session.sessionId))
         if (!emittedConfigUpdate) {
             await this.emitSessionUpdate(params.sessionId, {
                 sessionUpdate: "config_option_update",
@@ -519,24 +535,42 @@ export class DiracAgent implements acp.Agent {
         session.lastActivityAt = Date.now()
         this.currentActiveSessionId = params.sessionId
 
+        // Install this session's per-session overrides (auto-approve, yolo, mode) into
+        // the StateManager so that Task-level reads (AutoApprove, ToolExecutor, etc.) see
+        // the correct values for THIS session. The previous overrides (e.g. from a CLI
+        // --auto-approve-all flag) are saved and will be restored in the finally block.
+        //
+        // Residual race note: if two ACP sessions are simultaneously mid-prompt, the swap
+        // means each session's Task may briefly see the other session's overrides between
+        // JS await points. In practice, each session has its own Controller/Task and the
+        // auto-approve decision is made synchronously within the event-loop turn, making
+        // the window extremely narrow. A fully lock-free fix would require plumbing sessionId
+        // into StateManager.getGlobalSettingsKey() all the way to AutoApprove — left for
+        // a later refactor if concurrent-session auto-approve skew is observed in practice.
+        const sessionOverridesToApply = this.acpSessionOverrides.get(params.sessionId) ?? {}
+        const savedStateManagerOverrides = swapSessionOverrides(sessionOverridesToApply)
+
         // Clear delta tracking state for new prompt cycle
-        this.taskMessageBridge.clearPromptState()
+        this.bridge.clearPromptState()
 
         // Track cleanup functions for subscriptions
         const cleanupFunctions: (() => void)[] = []
 
         // Promise that resolves when task completes, is cancelled, or needs input
-        let resolvePrompt!: (response: acp.PromptResponse) => void
-        let _rejectPrompt!: (error: Error) => void
-        const promptPromise = new Promise<acp.PromptResponse>((resolve, reject) => {
+        let resolvePrompt: (response: acp.PromptResponse) => void
+        const promptPromise = new Promise<acp.PromptResponse>((resolve) => {
             resolvePrompt = resolve
-            _rejectPrompt = reject
         })
 
         // Track if we've already resolved/rejected (object for pass-by-reference)
         const promptResolved = { value: false }
 
+        // Register the resolver so cancel() can resolve the in-flight prompt with
+        // `stopReason: "cancelled"`. Cleared in the finally block.
+        this.pendingPromptResolvers.set(params.sessionId, { resolve: resolvePrompt!, resolved: promptResolved })
+
         try {
+            // Extract text content from prompt
             const { textContent, imageContent, fileResources } = parsePromptContent(params.prompt)
 
             const interceptedReviewResponse =
@@ -559,115 +593,106 @@ export class DiracAgent implements acp.Agent {
             const isLoadedSession = session.isLoadedFromHistory === true
 
             if (isLoadedSession && !hasActiveTask) {
+                // First prompt on a loaded session - resume the task from history
                 Logger.debug("[DiracAgent] Resuming loaded session:", params.sessionId)
+
+                // Clear the flag so subsequent prompts are handled normally
                 session.isLoadedFromHistory = false
 
-                await controller.reinitExistingTaskFromId(session.taskId || params.sessionId)
-                const initialMessageCount = controller.task?.messageStateHandler.getDiracMessages().length ?? 0
+                // Use loadedTaskId if set (multi-task session resolved in loadSession),
+                // otherwise fall back to sessionId (common case where taskId === sessionId).
+                const taskIdToResume = session.loadedTaskId ?? params.sessionId
+                session.loadedTaskId = undefined
 
+                // Resume the task using its history item
+                await controller.reinitExistingTaskFromId(taskIdToResume)
+
+                // After reinit, resumeTaskFromHistory() is running asynchronously. We must
+                // NOT call handleWebviewAskResponse yet — TaskMessenger.ask() clears
+                // taskState.askResponse at its start (to reset stale state), so any
+                // response set before ask() runs gets wiped, leaving pWaitFor spinning
+                // forever and the idle watchdog firing after 60 s.
+                //
+                // Instead, wait for the task to actually issue ask("resume_task" |
+                // "resume_completed_task") — signalled by a diracMessagesChanged "add"
+                // event — and only then deliver the user's prompt as the response.
                 if (controller.task) {
-                    await controller.task.submitCardResponse(
-                        "",
-                        DiracAskResponse.MESSAGE,
-                        textContent,
-                        imageContent,
-                        fileResources,
-                    )
-                    this.taskMessageBridge.subscribeToTaskMessages(
-                        controller,
-                        params.sessionId,
-                        sessionState,
-                        resolvePrompt,
-                        promptResolved,
-                        cleanupFunctions,
-                    )
-                    await this.taskMessageBridge.replayTaskMessages(
-                        controller,
-                        params.sessionId,
-                        sessionState,
-                        resolvePrompt,
-                        promptResolved,
-                        initialMessageCount,
-                    )
+                    const task = controller.task
+                    await new Promise<void>((resolve, reject) => {
+                        // Guard: if runPromise rejects before ask() fires (e.g. task init
+                        // error), bail out so we don't leak a listener that would never fire.
+                        const onRunPromiseError = (err: unknown) => {
+                            task.messageStateHandler.off("diracMessagesChanged", onChanged)
+                            reject(err instanceof Error ? err : new Error(String(err)))
+                        }
+                        const onChanged = (change: DiracMessageChange) => {
+                            if (
+                                change.type === "add" &&
+                                change.message?.content.type === DiracMessageType.CARD &&
+                                (change.message.content.card.header === "Resume Task" || change.message.content.card.header === "Resume Completed Task")
+                            ) {
+                                task.messageStateHandler.off("diracMessagesChanged", onChanged)
+                                resolve()
+                            }
+                        }
+                        // runPromise may not be set yet if resumeTaskFromHistory was started
+                        // in the same tick; use Promise.resolve() so we only see rejections,
+                        // not an absent value. Calling reject() after resolve() is a no-op.
+                        Promise.resolve(controller.taskRunPromise).catch(onRunPromiseError)
+                        task.messageStateHandler.on("diracMessagesChanged", onChanged)
+                    })
+                    await task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
                 }
             } else if (hasActiveTask && controller.task) {
+                // Continue existing task - respond to pending ask
                 Logger.debug("[DiracAgent] Continuing existing task:", controller.task.taskId)
-                const initialMessageCount = controller.task.messageStateHandler.getDiracMessages().length
-                const messages = controller.task.messageStateHandler.getDiracMessages()
-                const lastAskMessage = [...messages]
-                    .reverse()
-                    .find(
-                        (m) => m.content.type === DiracMessageType.CARD && m.content.card.status === CardStatus.WAITING_FOR_INPUT,
-                    )
 
-                if (lastAskMessage) {
-                    await controller.task.submitCardResponse(
-                        "",
-                        DiracAskResponse.MESSAGE,
-                        textContent,
-                        imageContent,
-                        fileResources,
-                    )
-                    this.taskMessageBridge.subscribeToTaskMessages(
-                        controller,
-                        params.sessionId,
-                        sessionState,
-                        resolvePrompt,
-                        promptResolved,
-                        cleanupFunctions,
-                    )
-                    await this.taskMessageBridge.replayTaskMessages(
-                        controller,
-                        params.sessionId,
-                        sessionState,
-                        resolvePrompt,
-                        promptResolved,
-                        initialMessageCount,
-                    )
+                // Find the last ask message and respond to it
+                const messages = controller.task.messageStateHandler.getDiracMessages()
+                const lastAskMessage = [...messages].reverse().find((m) =>
+                    m.content.type === DiracMessageType.CARD &&
+                    (m.content.card.requireApproval || m.content.card.requireFeedback)
+                )
+
+                const terminalCardHeaders = new Set(["API Request Failed", "Mistake Limit Reached"])
+                const lastAskIsTerminal =
+                    lastAskMessage?.content.type === DiracMessageType.CARD &&
+                    terminalCardHeaders.has(lastAskMessage.content.card.header)
+
+                if (lastAskMessage && !lastAskIsTerminal) {
+                    await controller.task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
                 } else {
-                    Logger.debug("[DiracAgent] No pending ask found, starting new task")
-                    session.taskId = await controller.initTask(
-                        textContent,
-                        imageContent,
-                        fileResources,
-                        undefined,
-                        undefined,
-                        session.sessionId,
-                    )
-                    this.taskMessageBridge.subscribeToTaskMessages(
-                        controller,
-                        params.sessionId,
-                        sessionState,
-                        resolvePrompt,
-                        promptResolved,
-                        cleanupFunctions,
-                    )
-                    await this.taskMessageBridge.replayTaskMessages(controller, params.sessionId, sessionState, resolvePrompt, promptResolved)
+                    Logger.debug("[DiracAgent] Starting new task (no pending ask or last ask was terminal failure)")
+                    await controller.initTask(textContent, imageContent, fileResources)
+                    // reservedTaskId was already consumed on first prompt; record the
+                    // replacement task so loadSession can recover it after a restart.
+                    if (controller.task) {
+                        await recordTaskForSession(params.sessionId, controller.task.taskId)
+                    }
                 }
             } else {
+                // Start new task — consume reservedTaskId (sessionId) so the task's taskId
+                // equals the sessionId, enabling loadSession to find it without a map lookup.
+                const taskIdOverride = session.reservedTaskId
+                session.reservedTaskId = undefined
                 Logger.debug("[DiracAgent] Starting new task")
-                session.taskId = await controller.initTask(
-                    textContent,
-                    imageContent,
-                    fileResources,
-                    undefined,
-                    undefined,
-                    session.sessionId,
-                )
-                this.taskMessageBridge.subscribeToTaskMessages(
+                await controller.initTask(textContent, imageContent, fileResources, undefined, undefined, taskIdOverride)
+            }
+
+            // Subscribe to diracMessages changes after task is created.
+            // The bridge handles all message translation, delta tracking, permission
+            // requests, prompt resolution, and error surfacing.
+            const task = controller.task
+            if (task) {
+                this.bridge.subscribeToTaskMessages(
                     controller,
                     params.sessionId,
                     sessionState,
-                    resolvePrompt,
+                    resolvePrompt!,
                     promptResolved,
                     cleanupFunctions,
+                    controller.taskRunPromise,
                 )
-                await this.taskMessageBridge.replayTaskMessages(controller, params.sessionId, sessionState, resolvePrompt, promptResolved)
-                await this.emitSessionUpdate(params.sessionId, {
-                    sessionUpdate: "session_info_update",
-                    title: textContent || null,
-                    updatedAt: new Date().toISOString(),
-                })
             }
 
             // Return the promise that will resolve when task completes
@@ -683,10 +708,16 @@ export class DiracAgent implements acp.Agent {
                         text: `Error: ${error instanceof Error ? error.message : String(error)}`,
                     },
                 })
-                return { stopReason: "error" as acp.StopReason }
+                return { stopReason: "end_turn" }
             }
             throw error
         } finally {
+            // Restore whatever session overrides were in StateManager before this
+            // prompt started (e.g. CLI --auto-approve-all global override), so that
+            // other code paths running outside of a session's prompt turn continue
+            // to see the correct values.
+            swapSessionOverrides(savedStateManagerOverrides)
+
             // Clean up subscriptions
             for (const cleanup of cleanupFunctions) {
                 try {
@@ -695,6 +726,7 @@ export class DiracAgent implements acp.Agent {
                     Logger.debug("[DiracAgent] Error during cleanup:", error)
                 }
             }
+            this.pendingPromptResolvers.delete(params.sessionId)
             sessionState.status = AcpSessionStatus.Idle
         }
     }
@@ -721,6 +753,21 @@ export class DiracAgent implements acp.Agent {
         if (sessionState) {
             sessionState.status = AcpSessionStatus.Cancelled
 
+            // Claim the prompt-resolver slot BEFORE any await so the idle watchdog
+            // cannot steal it while we're awaiting cancelTask(). The ACP spec
+            // (prompt-turn.mdx) requires the agent to respond with stopReason:
+            // "cancelled" once the task is aborted; claiming here ensures that even
+            // if the watchdog timer fires and its callback runs during the cancelTask()
+            // await, the watchdog sees the flag and returns without emitting a phantom
+            // "Agent stalled" tool_call or resolving with "end_turn".
+            const pending = this.pendingPromptResolvers.get(params.sessionId)
+            const cancelClaimed = pending != null && !pending.resolved.value
+            if (cancelClaimed) {
+                pending!.resolved.value = true
+                // Actual resolve() call is deferred until after cancelTask() so the
+                // response goes out once the task is truly stopped (see below).
+            }
+
             // If we have an active controller task, cancel it
             const controller = this.#sessionControllers.get(session)
             if (controller?.task) {
@@ -730,15 +777,28 @@ export class DiracAgent implements acp.Agent {
                     Logger.debug("[DiracAgent] Error cancelling task:", error)
                 }
             }
+
+            // Per ACP spec (prompt-turn.mdx): "After all ongoing operations have
+            // been successfully aborted ... the Agent MUST respond to the original
+            // session/prompt request with the cancelled stop reason."
+            if (cancelClaimed) {
+                pending!.resolve({ stopReason: "cancelled" })
+            }
         }
     }
 
     /**
-     * Set the session mode (plan/act).
+     * Set the session mode.
      *
-     * Dirac supports two modes:
-     * - "plan": Gather information and create a detailed plan
-     * - "act": Execute actions to accomplish the task
+     * The ACP-level modes are:
+     *   - "plan": gather information and create a detailed plan
+     *   - "act":  execute actions, asking permission per tool call
+     *   - "auto": "act" with auto-approve on
+     *   - "yolo": "act" with auto-approve + yolo on (no safety prompts)
+     *
+     * Internally only `mode` ("plan" | "act") plus the global
+     * `autoApproveAllToggled` and `yoloModeToggled` flags exist; this method
+     * translates between the two.
      */
     async setSessionMode(params: acp.SetSessionModeRequest): Promise<acp.SetSessionModeResponse> {
         const session = this.sessions.get(params.sessionId)
@@ -752,31 +812,40 @@ export class DiracAgent implements acp.Agent {
             modeId: params.modeId,
         })
 
-        // Validate mode
-        const validModes = ["plan", "act"]
-        if (!validModes.includes(params.modeId)) {
+        const validModes: AcpModeId[] = ["plan", "act", "auto", "yolo"]
+        if (!validModes.includes(params.modeId as AcpModeId)) {
             throw new Error(`Invalid mode: ${params.modeId}. Valid modes are: ${validModes.join(", ")}`)
         }
 
-        // Update session mode
-        session.mode = params.modeId as Mode
+        const acpMode = params.modeId as AcpModeId
+        const { mode, autoApprove, yolo } = acpModeToInternalState(acpMode)
+
+        // Write to the per-session override map rather than the global StateManager
+        // sessionOverrideCache. This prevents one ACP session's mode switch from
+        // bleeding into every other concurrent session in the same process.
+        const existing = this.acpSessionOverrides.get(params.sessionId) ?? {}
+        this.acpSessionOverrides.set(params.sessionId, {
+            ...existing,
+            autoApproveAllToggled: autoApprove,
+            yoloModeToggled: yolo,
+            mode,
+        })
+
+        session.mode = mode
         session.lastActivityAt = Date.now()
 
-        // Update Controller mode if active
+        const stateManager = StateManager.get()
         const controller = this.#sessionControllers.get(session)
         if (controller) {
-            controller.stateManager.setGlobalState("mode", session.mode)
-
-            // If there's an active task, switch its mode
             if (controller.task) {
                 await controller.togglePlanActMode(session.mode)
             }
         }
 
-        await StateManager.get().flushPendingState()
+        await stateManager.flushPendingState()
         await this.emitSessionUpdate(params.sessionId, {
             sessionUpdate: "current_mode_update",
-            currentModeId: session.mode,
+            currentModeId: acpMode,
         })
         await this.emitConfigOptionsUpdate(params.sessionId)
 
@@ -804,8 +873,69 @@ export class DiracAgent implements acp.Agent {
 
         await this.emitSessionUpdate(sessionId, {
             sessionUpdate: "config_option_update",
-            configOptions: await this.sessionConfig.getSessionConfigOptions(session),
+            configOptions: await this.sessionConfig.getSessionConfigOptions(session, this.acpSessionOverrides.get(session.sessionId)),
         })
+    }
+
+    /**
+     * Replay the historical messages for a loaded session as ACP sessionUpdate events.
+     * Called by AcpAgent after subscribing to session events, so the events reach the client.
+     */
+    async replayLoadedSessionHistory(sessionId: string): Promise<void> {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+
+        const controller = this.#sessionControllers.get(session)
+        if (!controller) return
+
+        const taskId = session.loadedTaskId ?? sessionId
+        let uiMessages: DiracMessage[]
+        try {
+            const { uiMessagesFilePath } = await controller.getTaskWithId(taskId)
+            const raw = await fs.readFile(uiMessagesFilePath, "utf8")
+            uiMessages = JSON.parse(raw)
+        } catch (error) {
+            Logger.debug("[DiracAgent] replayLoadedSessionHistory: could not read ui_messages:", error)
+            return
+        }
+
+        // Use a fresh session state for replay — don't pollute the live session's tool call tracking
+        const replayState: AcpSessionState = {
+            sessionId,
+            status: AcpSessionStatus.Idle,
+            pendingToolCalls: new Map(),
+        }
+
+        // Message types that are internal Dirac housekeeping and should not be replayed
+
+        for (const message of uiMessages) {
+            // Skip internal housekeeping: API_STATUS and CHECKPOINT messages
+            if (message.content.type === DiracMessageType.API_STATUS || message.content.type === DiracMessageType.CHECKPOINT) continue
+
+            try {
+                // User-facing input messages that translateMessage skips — emit as user_message_chunk
+                if (
+                    message.content.type === DiracMessageType.MARKDOWN &&
+                    message.content.role === "user" &&
+                    message.content.content
+                ) {
+                    await this.emitSessionUpdate(sessionId, {
+                        sessionUpdate: "user_message_chunk",
+                        content: { type: "text", text: message.content.content },
+                    } as acp.SessionUpdate)
+                    continue
+                }
+
+                const result = translateMessage(message, replayState, {
+                    clientCapabilities: this.clientCapabilities,
+                })
+                for (const update of result.updates) {
+                    await this.emitSessionUpdate(sessionId, update)
+                }
+            } catch (error) {
+                Logger.debug("[DiracAgent] replayLoadedSessionHistory: error translating message:", error)
+            }
+        }
     }
 
     private async sendAvailableCommands(sessionId: string, controller: Controller): Promise<void> {
@@ -849,6 +979,66 @@ export class DiracAgent implements acp.Agent {
             })
         } catch (error) {
             Logger.debug("[DiracAgent] Error sending available commands:", error)
+        }
+    }
+
+    async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        return this.unstable_listSessions_internal(params)
+    }
+
+    private async unstable_listSessions_internal(_params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        const sessions = [...this.sessions.values()]
+        return {
+            sessions: sessions.map((session) => ({
+                sessionId: session.sessionId,
+                cwd: session.cwd,
+            })),
+        }
+    }
+
+    /**
+     * Restore a checkpoint in a session.
+     *
+     * Cancels any active task, finds the message matching the checkpoint
+     * ID (DiracMessage.id / toolCallId), and delegates to the controller's
+     */
+    async checkpointRestore(sessionId: string, checkpointId: string, restoreType: string, offset?: number): Promise<void> {
+        const session = this.sessions.get(sessionId)
+        if (!session) {
+            throw new Error(`Session not found: ${sessionId}`)
+        }
+
+        const controller = this.#sessionControllers.get(session)
+        if (!controller) {
+            throw new Error(`Controller not found for session: ${sessionId}`)
+        }
+
+        // Cancel active task — cannot alter message history while task is running
+        await controller.cancelTask()
+
+        // Wait for the task to be fully re-initialized after cancellation.
+        // cancelTask() re-initializes the task asynchronously, and we must
+        // wait for it to be ready before accessing its message handler.
+        await pWaitFor(() => controller.task?.taskState.isInitialized === true, {
+            timeout: 3_000,
+        }).catch((error) => {
+            Logger.error("[DiracAgent.checkpointRestore] Failed to wait for task initialization:", error)
+            throw error
+        })
+
+        // Find the message matching the checkpoint ID (DiracMessage.id / toolCallId)
+        const message = controller.task?.messageStateHandler
+            .getDiracMessages()
+            .find((m) => m.id === checkpointId)
+
+        if (message && controller.task?.checkpointManager) {
+            await controller.task.checkpointManager.restoreCheckpoint(
+                message.id,
+                restoreType as any,
+                offset,
+            )
+        } else {
+            throw new Error(`Checkpoint not found for id: ${checkpointId}`)
         }
     }
 }

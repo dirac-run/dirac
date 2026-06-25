@@ -1,54 +1,53 @@
-import Database from "better-sqlite3"
+import { ensureSqlModule, type SqlJsDatabase } from "../../shared/sqlJsModule"
 import * as fs from "fs"
 import * as path from "path"
 import { Logger } from "../../shared/services/Logger"
 import { SymbolLocation } from "./SymbolIndexService"
 
 export interface FileMetadata {
-	mtime: number
-	size: number
+    mtime: number
+    size: number
 }
 
 export class SymbolIndexDatabase {
-	private db: Database.Database
-	private dbPath: string
+    private db: SqlJsDatabase
+    private dbPath: string
 
-	private constructor(db: Database.Database, dbPath: string) {
-		this.db = db
-		this.dbPath = dbPath
-	}
+    private constructor(db: SqlJsDatabase, dbPath: string) {
+        this.db = db
+        this.dbPath = dbPath
+    }
 
-	public static async create(dbPath: string): Promise<SymbolIndexDatabase> {
-		Logger.info(`[SymbolIndexDatabase] Initializing database at ${dbPath}`)
-		const dbDir = path.dirname(dbPath)
-		if (!fs.existsSync(dbDir)) {
-			Logger.info(`[SymbolIndexDatabase] Creating database directory: ${dbDir}`)
-			fs.mkdirSync(dbDir, { recursive: true })
-		}
+    public static async create(dbPath: string): Promise<SymbolIndexDatabase> {
+        Logger.info(`[SymbolIndexDatabase] Initializing database at ${dbPath}`)
+        const dbDir = path.dirname(dbPath)
+        if (!fs.existsSync(dbDir)) {
+            Logger.info(`[SymbolIndexDatabase] Creating database directory: ${dbDir}`)
+            fs.mkdirSync(dbDir, { recursive: true })
+        }
 
-		try {
-			const db = new Database(dbPath)
-			// Use WAL mode for better performance and concurrency
-			db.pragma("journal_mode = WAL")
-			db.pragma("synchronous = NORMAL")
-			const instance = new SymbolIndexDatabase(db, dbPath)
-			instance.initialize()
-			return instance
-		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Failed to open database at ${dbPath}: ${error}`)
-			// Fallback to in-memory database if file-based fails
-			const db = new Database(":memory:")
-			const instance = new SymbolIndexDatabase(db, dbPath)
-			instance.initialize()
-			return instance
-		}
-	}
+        const SQL = await ensureSqlModule()
 
-	private initialize(): void {
-		Logger.info("[SymbolIndexDatabase] Running schema initialization")
-		this.db.pragma("foreign_keys = ON")
+        try {
+            const fileBuffer = fs.existsSync(dbPath) ? fs.readFileSync(dbPath) : undefined
+            const db = new SQL.Database(fileBuffer)
+            const instance = new SymbolIndexDatabase(db, dbPath)
+            instance.initializeSchema()
+            return instance
+        } catch (error) {
+            Logger.error(`[SymbolIndexDatabase] Failed to open database at ${dbPath}: ${error}`)
+            // Fallback to fresh in-memory database
+            const db = new SQL.Database()
+            const instance = new SymbolIndexDatabase(db, dbPath)
+            instance.initializeSchema()
+            return instance
+        }
+    }
 
-		this.db.exec(`
+    private initializeSchema(): void {
+        Logger.info("[SymbolIndexDatabase] Running schema initialization")
+
+        this.db.exec(`
 			CREATE TABLE IF NOT EXISTS files (
 				path TEXT PRIMARY KEY,
 				mtime INTEGER NOT NULL,
@@ -71,176 +70,208 @@ export class SymbolIndexDatabase {
 			CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
 			CREATE INDEX IF NOT EXISTS idx_symbols_file_path ON symbols(file_path);
 		`)
-		Logger.info("[SymbolIndexDatabase] Schema initialization complete")
-	}
+        Logger.info("[SymbolIndexDatabase] Schema initialization complete")
+    }
 
-	/**
-	 * No-op for better-sqlite3 as it handles persistence automatically.
-	 * Kept for backward compatibility with SymbolIndexService.
-	 */
-	public save(): void {
-		// better-sqlite3 handles persistence automatically
-	}
+    /**
+     * Persist the in-memory database to disk.
+     */
+    public persist(): void {
+        try {
+            const data = this.db.export()
+            fs.writeFileSync(this.dbPath, Buffer.from(data))
+        } catch (error) {
+            Logger.error(`[SymbolIndexDatabase] Error persisting database: ${error}`)
+        }
+    }
 
-	public getFileMetadata(relPath: string): FileMetadata | null {
-		try {
-			const row = this.db.prepare("SELECT mtime, size FROM files WHERE path = ?").get(relPath) as any
-			if (row) {
-				return { mtime: row.mtime, size: row.size }
-			}
-		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Error getting file metadata for ${relPath}:`, error)
-		}
-		return null
-	}
+    /**
+     * Persist the database to disk. Kept for backward compatibility.
+     */
+    public save(): void {
+        this.persist()
+    }
 
-	public getAllFilesMetadata(): Map<string, FileMetadata> {
-		const map = new Map<string, FileMetadata>()
-		try {
-			const rows = this.db.prepare("SELECT path, mtime, size FROM files").all() as any[]
-			for (const row of rows) {
-				map.set(row.path, { mtime: row.mtime, size: row.size })
-			}
-		} catch (error) {
-			Logger.error("[SymbolIndexDatabase] Error getting all files metadata:", error)
-		}
-		return map
-	}
+    public getFileMetadata(relPath: string): FileMetadata | null {
+        try {
+            const stmt = this.db.prepare("SELECT mtime, size FROM files WHERE path = ?")
+            try {
+                stmt.bind([relPath])
+                if (stmt.step()) {
+                    const row = stmt.getAsObject() as { mtime: number; size: number }
+                    return { mtime: row.mtime, size: row.size }
+                }
+            } finally {
+                stmt.free()
+            }
+        } catch (error) {
+            Logger.error(`[SymbolIndexDatabase] Error getting file metadata for ${relPath}:`, error)
+        }
+        return null
+    }
 
-	public updateFileSymbols(
-		relPath: string,
-		mtime: number,
-		size: number,
-		symbols: Array<{
-			n: string
-			t: "d" | "r"
-			k?: string
-			r: [number, number, number, number]
-		}>,
-	): void {
-		const deleteSymbols = this.db.prepare("DELETE FROM symbols WHERE file_path = ?")
-		const insertFile = this.db.prepare("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)")
-		const insertSymbol = this.db.prepare(`
-			INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`)
+    public getAllFilesMetadata(): Map<string, FileMetadata> {
+        const map = new Map<string, FileMetadata>()
+        try {
+            const stmt = this.db.prepare("SELECT path, mtime, size FROM files")
+            try {
+                while (stmt.step()) {
+                    const row = stmt.getAsObject() as { path: string; mtime: number; size: number }
+                    map.set(row.path, { mtime: row.mtime, size: row.size })
+                }
+            } finally {
+                stmt.free()
+            }
+        } catch (error) {
+            Logger.error("[SymbolIndexDatabase] Error getting all files metadata:", error)
+        }
+        return map
+    }
 
-		const transaction = this.db.transaction(() => {
-			deleteSymbols.run(relPath)
-			insertFile.run(relPath, mtime, size)
+    public updateFileSymbols(
+        relPath: string,
+        mtime: number,
+        size: number,
+        symbols: Array<{
+            n: string
+            t: "d" | "r"
+            k?: string
+            r: [number, number, number, number]
+        }>,
+    ): void {
+        try {
+            this.db.run("BEGIN TRANSACTION")
+            this.db.run("DELETE FROM symbols WHERE file_path = ?", [relPath])
+            this.db.run("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)", [relPath, mtime, size])
 
-			for (const sym of symbols) {
-				insertSymbol.run(
-					relPath,
-					sym.n,
-					sym.t === "d" ? "definition" : "reference",
-					sym.k || null,
-					sym.r[0],
-					sym.r[1],
-					sym.r[2],
-					sym.r[3],
-				)
-			}
-		})
+            for (const sym of symbols) {
+                this.db.run(
+                    `INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        relPath,
+                        sym.n,
+                        sym.t === "d" ? "definition" : "reference",
+                        sym.k || null,
+                        sym.r[0],
+                        sym.r[1],
+                        sym.r[2],
+                        sym.r[3],
+                    ],
+                )
+            }
+            this.db.run("COMMIT")
+            this.persist()
+        } catch (error) {
+            try { this.db.run("ROLLBACK") } catch { /* ignore rollback error */ }
+            Logger.error(`[SymbolIndexDatabase] Error updating symbols for ${relPath}:`, error)
+        }
+    }
 
-		try {
-			transaction()
-		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Error updating symbols for ${relPath}:`, error)
-		}
-	}
+    public updateFilesSymbolsBatch(
+        updates: Array<{
+            relPath: string
+            mtime: number
+            size: number
+            symbols: Array<{
+                n: string
+                t: "d" | "r"
+                k?: string
+                r: [number, number, number, number]
+            }>
+        }>,
+    ): void {
+        try {
+            this.db.run("BEGIN TRANSACTION")
+            for (const update of updates) {
+                this.db.run("DELETE FROM symbols WHERE file_path = ?", [update.relPath])
+                this.db.run("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)", [
+                    update.relPath,
+                    update.mtime,
+                    update.size,
+                ])
 
-	public updateFilesSymbolsBatch(
-		updates: Array<{
-			relPath: string
-			mtime: number
-			size: number
-			symbols: Array<{
-				n: string
-				t: "d" | "r"
-				k?: string
-				r: [number, number, number, number]
-			}>
-		}>,
-	): void {
-		const deleteSymbols = this.db.prepare("DELETE FROM symbols WHERE file_path = ?")
-		const insertFile = this.db.prepare("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)")
-		const insertSymbol = this.db.prepare(`
-			INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`)
+                for (const sym of update.symbols) {
+                    this.db.run(
+                        `INSERT INTO symbols (file_path, name, type, kind, start_line, start_column, end_line, end_column)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                            update.relPath,
+                            sym.n,
+                            sym.t === "d" ? "definition" : "reference",
+                            sym.k || null,
+                            sym.r[0],
+                            sym.r[1],
+                            sym.r[2],
+                            sym.r[3],
+                        ],
+                    )
+                }
+            }
+            this.db.run("COMMIT")
+            this.persist()
+        } catch (error) {
+            try { this.db.run("ROLLBACK") } catch { /* ignore rollback error */ }
+            Logger.error("[SymbolIndexDatabase] Error updating symbols batch:", error)
+        }
+    }
 
-		const transaction = this.db.transaction((batch) => {
-			for (const update of batch) {
-				deleteSymbols.run(update.relPath)
-				insertFile.run(update.relPath, update.mtime, update.size)
+    public removeFile(relPath: string): void {
+        try {
+            this.db.run("DELETE FROM files WHERE path = ?", [relPath])
+            this.persist()
+        } catch (error) {
+            Logger.error(`[SymbolIndexDatabase] Error removing file ${relPath}:`, error)
+        }
+    }
 
-				for (const sym of update.symbols) {
-					insertSymbol.run(
-						update.relPath,
-						sym.n,
-						sym.t === "d" ? "definition" : "reference",
-						sym.k || null,
-						sym.r[0],
-						sym.r[1],
-						sym.r[2],
-						sym.r[3],
-					)
-				}
-			}
-		})
+    public getSymbolsByName(name: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
+        let query = "SELECT file_path, name, type, kind, start_line, start_column, end_line, end_column FROM symbols WHERE name = ?"
+        const params: any[] = [name]
 
-		try {
-			transaction(updates)
-		} catch (error) {
-			Logger.error("[SymbolIndexDatabase] Error updating symbols batch:", error)
-		}
-	}
+        if (type) {
+            query += " AND type = ?"
+            params.push(type === "definition" ? "definition" : "reference")
+        }
 
-	public removeFile(relPath: string): void {
-		try {
-			this.db.prepare("DELETE FROM files WHERE path = ?").run(relPath)
-		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Error removing file ${relPath}:`, error)
-		}
-	}
+        if (limit !== undefined) {
+            query += " LIMIT ?"
+            params.push(limit)
+        }
 
-	public getSymbolsByName(name: string, type?: "definition" | "reference", limit?: number): SymbolLocation[] {
-		let query = "SELECT file_path, name, type, kind, start_line, start_column, end_line, end_column FROM symbols WHERE name = ?"
-		const params: any[] = [name]
+        try {
+            const stmt = this.db.prepare(query)
+            try {
+                stmt.bind(params)
+                const rows: SymbolLocation[] = []
+                while (stmt.step()) {
+                    const row = stmt.getAsObject() as any
+                    rows.push({
+                        path: row.file_path,
+                        startLine: row.start_line,
+                        startColumn: row.start_column,
+                        endLine: row.end_line,
+                        endColumn: row.end_column,
+                        type: row.type as "definition" | "reference",
+                        kind: row.kind || undefined,
+                    })
+                }
+                return rows
+            } finally {
+                stmt.free()
+            }
+        } catch (error) {
+            Logger.error(`[SymbolIndexDatabase] Error getting symbols by name ${name}:`, error)
+            return []
+        }
+    }
 
-		if (type) {
-			query += " AND type = ?"
-			params.push(type === "definition" ? "definition" : "reference")
-		}
-
-		if (limit !== undefined) {
-			query += " LIMIT ?"
-			params.push(limit)
-		}
-
-		try {
-			const rows = this.db.prepare(query).all(...params) as any[]
-			return rows.map((row) => ({
-				path: row.file_path,
-				startLine: row.start_line,
-				startColumn: row.start_column,
-				endLine: row.end_line,
-				endColumn: row.end_column,
-				type: row.type as "definition" | "reference",
-				kind: row.kind || undefined,
-			}))
-		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Error getting symbols by name ${name}:`, error)
-			return []
-		}
-	}
-
-	public close(): void {
-		try {
-			this.db.close()
-		} catch (error) {
-			Logger.error("[SymbolIndexDatabase] Error closing database:", error)
-		}
-	}
+    public close(): void {
+        try {
+            this.persist()
+            this.db.close()
+        } catch (error) {
+            Logger.error("[SymbolIndexDatabase] Error closing database:", error)
+        }
+    }
 }

@@ -58,7 +58,9 @@ export class BrowserSession {
 	}
 
 	async closeBrowser(): Promise<BrowserActionResult> {
-		return this.connection.closeBrowser()
+		const result = await this.connection.closeBrowser()
+		this.currentMousePosition = undefined // reset mouse state on close
+		return result
 	}
 
 	async dispose() {

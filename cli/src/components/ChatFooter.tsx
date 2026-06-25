@@ -1,6 +1,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 import { COLORS } from "../constants/colors"
+import { hslToHex } from "../utils/color"
 import { createContextBar } from "../utils/display"
 import type { GitDiffStats } from "../utils/git"
 import type { TaskStatus } from "@shared/ExtensionMessage"
@@ -13,6 +14,7 @@ interface ChatFooterProps {
     lastApiReqTotalTokens: number
     contextWindowSize: number
     totalCost: number
+    cacheHitRate: number
     workspacePath: string
     gitBranch: string | null
     gitDiffStats: GitDiffStats | null
@@ -28,6 +30,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
     lastApiReqTotalTokens,
     contextWindowSize,
     totalCost,
+    cacheHitRate,
     workspacePath,
     gitBranch,
     gitDiffStats,
@@ -79,6 +82,10 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
                             return <Text color={costColor}>${totalCost.toFixed(3)}</Text>
                         })()}
                     </Text>{" "}
+                    {cacheHitRate > 0 && <React.Fragment><Text color={(() => {
+                        const hue = cacheHitRate * 150 // 0 (red) → 150 (green)
+                        return hslToHex(hue, 75, 45)
+                    })()}>{(cacheHitRate * 100).toFixed(0)}% cache</Text>{" "}</React.Fragment>}
                 </Text>
                 <TaskStatusIndicator status={taskStatus} />
             </Box>

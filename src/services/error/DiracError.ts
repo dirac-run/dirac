@@ -9,7 +9,6 @@ export enum DiracErrorType {
 	RateLimit = "rateLimit",
 	Balance = "balance",
 	ContextWindowExceeded = "contextWindowExceeded",
-
 }
 
 interface ErrorDetails {
@@ -105,6 +104,25 @@ export class DiracError extends Error {
 	}
 
 	/**
+	 * Returns a clean, human-readable error string for user-facing display.
+	 * Unlike serialize(), this omits internal fields and avoids JSON output.
+	 *
+	 * Provider-specific details (providerId, modelId, request_id) are deliberately
+	 * excluded — they leak implementation details and confuse end users.
+	 */
+	toDisplayMessage(): string {
+		const errorType = DiracError.getErrorType(this)
+
+		// For auth errors, provide a generic actionable message
+		if (errorType === DiracErrorType.Auth) {
+			return "Authentication failed. Please verify your API key configuration."
+		}
+
+		// For other errors, return the message without internal fields
+		return this.message
+	}
+
+	/**
 	 * Parses a stringified error into a DiracError instance.
 	 */
 	static parse(errorStr?: string, modelId?: string): DiracError | undefined {
@@ -169,7 +187,6 @@ export class DiracError extends Error {
 			if (checkContextWindowExceededError(err._error)) {
 				return DiracErrorType.ContextWindowExceeded
 			}
-
 		}
 
 		return undefined

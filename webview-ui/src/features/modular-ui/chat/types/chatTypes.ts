@@ -82,6 +82,7 @@ export interface MessageHandlers {
  */
 export interface ScrollBehavior {
     virtuosoRef: React.RefObject<VirtuosoHandle>
+    footerRef: React.RefObject<HTMLDivElement>
     disableAutoScrollRef: React.MutableRefObject<boolean>
     scrollToBottomSmooth: () => void
     scrollToBottomAuto: () => void
@@ -135,6 +136,7 @@ export interface TaskSectionProps {
         totalCacheWrites?: number
         totalCacheReads?: number
         totalCost: number
+        cacheHitRate: number
     }
     lastApiReqTotalTokens?: number
     selectedModelInfo: {

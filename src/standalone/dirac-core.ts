@@ -73,7 +73,7 @@ async function main() {
 
 		// Initialize SQLite lock manager for instance registration
 		const dbPath = `${DATA_DIR}/locks.db`
-		globalLockManager = new SqliteLockManager({
+		globalLockManager = await SqliteLockManager.create({
 			dbPath,
 			instanceAddress: protobusAddress,
 		})

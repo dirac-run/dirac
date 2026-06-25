@@ -77,6 +77,9 @@ export class StateManager {
 		this.persistence.onPersistenceError = cb
 	}
 
+	// State change notification subscribers (from main)
+	private stateChangeListeners = new Set<() => void>()
+
 	private constructor(storage: StorageContext) {
 		this.storage = storage
 		this.persistence = new StatePersistenceManager(storage, {
@@ -152,16 +155,35 @@ export class StateManager {
 		}
 	}
 
+	/**
+	 * Subscribe to global state changes. The listener is called whenever global state
+	 * is modified via setGlobalState or setGlobalStateBatch. Returns an unsubscribe function.
+	 */
+	public subscribe(listener: () => void): () => void {
+		this.stateChangeListeners.add(listener)
+		return () => {
+			this.stateChangeListeners.delete(listener)
+		}
+	}
+
+	private notifyStateChange(): void {
+		for (const listener of this.stateChangeListeners) {
+			listener()
+		}
+	}
+
 	setGlobalState<K extends keyof GlobalStateAndSettings>(key: K, value: GlobalStateAndSettings[K]): void {
 		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.globalStateCache[key] = value
 		this.persistence.addPendingGlobalState(key)
+		this.notifyStateChange()
 	}
 
 	setGlobalStateBatch(updates: Partial<GlobalStateAndSettings>): void {
 		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		Object.assign(this.globalStateCache, updates)
 		this.persistence.addPendingGlobalStateBatch(Object.keys(updates) as GlobalStateAndSettingsKey[])
+		this.notifyStateChange()
 	}
 
 	setTaskSettings<K extends keyof Settings>(taskId: string, key: K, value: Settings[K]): void {
@@ -230,6 +252,16 @@ export class StateManager {
 	setSessionOverride<K extends keyof Settings>(key: K, value: Settings[K]): void {
 		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.sessionOverrideCache[key] = value
+	}
+
+	/** Return the current session-override cache (in-memory only). (from main) */
+	getSessionOverrideCache(): Partial<Settings> {
+		return this.sessionOverrideCache
+	}
+
+	/** Replace the session-override cache wholesale. In-memory only, never persisted. (from main) */
+	setSessionOverrideCache(overrides: Partial<Settings>): void {
+		this.sessionOverrideCache = { ...overrides }
 	}
 
 	setModelsCache(provider: string, models: Record<string, ModelInfo>): void {

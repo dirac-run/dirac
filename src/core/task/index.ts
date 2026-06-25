@@ -1,12 +1,27 @@
+import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import { ApiHandler, ApiProviderInfo, buildApiHandler } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
 import { EnvironmentContextTracker } from "@core/context/context-tracking/EnvironmentContextTracker"
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { ModelContextTracker } from "@core/context/context-tracking/ModelContextTracker"
+import {
+    getGlobalDiracRules,
+    getLocalDiracRules,
+    refreshDiracRulesToggles,
+} from "@core/context/instructions/user-instructions/dirac-rules"
+import {
+    getLocalAgentsRules,
+    getLocalCursorRules,
+    getLocalWindsurfRules,
+    refreshExternalRulesToggles,
+} from "@core/context/instructions/user-instructions/external-rules"
 import { formatResponse } from "@core/formatResponse"
-import { DiracIgnoreController, type WatcherFactory } from "@core/ignore/DiracIgnoreController"
+import { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 import { CommandPermissionController } from "@core/permissions"
+import type { SystemPromptContext } from "@core/prompts/system-prompt"
+import { getSystemPrompt } from "@core/prompts/system-prompt"
+import { ensureRulesDirectoryExists, ensureTaskDirectoryExists } from "@core/storage/disk"
 import { isMultiRootEnabled } from "@core/workspace/multi-root-utils"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
 import { HostProvider } from "@hosts/host-provider"
@@ -26,21 +41,23 @@ import {
 import { ITerminalManager } from "@integrations/terminal/types"
 import { BrowserSession } from "@services/browser/BrowserSession"
 import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
-import { ErrorService } from "@services/error"
+import { DiracError, DiracErrorType, ErrorService } from "@services/error"
+import { featureFlagsService } from "@services/feature-flags"
 import { telemetryService } from "@services/telemetry"
 import { ApiConfiguration } from "@shared/api"
 import { findLastIndex } from "@shared/array"
-import { isDev } from "@shared/config/environment"
+import { DiracClient } from "@shared/dirac"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
 import { CardStatus, DiracApiReqCancelReason, DiracMessageContent, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
-import { DiracStorageMessage } from "@shared/messages"
+import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay } from "@shared/Languages"
 import { DiracContent, DiracTextContentBlock, DiracToolResponseContent, DiracUserContent } from "@shared/messages/content"
 import { DiracMessageModelInfo } from "@shared/messages/metrics"
 import { ShowMessageType } from "@shared/proto/index.host"
 import { Logger } from "@shared/services/Logger"
 import { Session } from "@shared/services/Session"
-import type { Mode } from "@shared/storage/types"
+import { type Mode } from "@shared/storage/types"
+import { isMutatingTool } from "@shared/tools"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { isLocalModel, isParallelToolCallingEnabled } from "@utils/model-utils"
@@ -50,6 +67,10 @@ import pWaitFor from "p-wait-for"
 import * as path from "path"
 import { ulid } from "ulid"
 import { SkillMetadata } from "@/shared/skills"
+import { getAvailableCores } from "@/utils/os"
+import { detectBestShell } from "@/utils/shell-detection"
+import { RuleContextBuilder } from "../context/instructions/user-instructions/RuleContextBuilder"
+import { getOrDiscoverSkills } from "../context/instructions/user-instructions/skills"
 import { Controller } from "../controller"
 import { StateManager } from "../storage/StateManager"
 import { ApiConversationManager } from "./ApiConversationManager"
@@ -57,29 +78,24 @@ import { AssistantStreamManager } from "./AssistantStreamManager"
 import { ContextLoader } from "./ContextLoader"
 import { EnvironmentManager } from "./EnvironmentManager"
 import { HookManager } from "./HookManager"
-import type { ITaskContext } from "./ITaskContext"
 import { LifecycleManager } from "./LifecycleManager"
 import { MessageStateHandler } from "./message-state"
 import { ResponseProcessor } from "./ResponseProcessor"
 import { StreamChunkCoordinator } from "./StreamChunkCoordinator"
 import { StreamingMetricsManager } from "./StreamingMetricsManager"
 import { StreamResponseHandler } from "./StreamResponseHandler"
-import { TaskApiErrorHandler } from "./TaskApiErrorHandler"
 import { TaskMessenger } from "./TaskMessenger"
-import { TaskRequestBuilder } from "./TaskRequestBuilder"
 import { TaskState } from "./TaskState"
-import { TaskStreamAccumulator } from "./TaskStreamAccumulator"
 import { ToolExecutor } from "./ToolExecutor"
 import { DiracContext } from "./tools/context/DiracContext"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { ToolSkippedByUserMessage } from "./tools/types/ToolSkippedByUserMessage"
-import { extractProviderDomainFromUrl } from "./utils"
+import { extractProviderDomainFromUrl, updateApiReqMsg } from "./utils"
 
 export type ToolResponse = DiracToolResponseContent
 
 type TaskParams = {
-	context: ITaskContext
-	controller?: Controller
+	controller: Controller
 	updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
 	postStateToWebview: () => Promise<void>
 	reinitExistingTaskFromId: (taskId: string) => Promise<void>
@@ -98,7 +114,6 @@ type TaskParams = {
 	historyItem?: HistoryItem
 	taskId: string
 	conversationUlid?: string
-	watcherFactory?: WatcherFactory
 	taskLockAcquired: boolean
 }
 
@@ -137,8 +152,7 @@ export class Task {
 	}
 
 	// Core dependencies
-	private context: ITaskContext
-	private controller?: Controller
+	private controller: Controller
 
 	// Service handlers
 	api: ApiHandler
@@ -148,6 +162,7 @@ export class Task {
 	contextManager: ContextManager
 	private diffViewProvider: DiffViewProvider
 	public checkpointManager?: ICheckpointManager
+	private initialCheckpointCommitPromise?: Promise<string | undefined>
 	private diracIgnoreController: DiracIgnoreController
 	private commandPermissionController: CommandPermissionController
 	private toolExecutor: ToolExecutor
@@ -161,7 +176,6 @@ export class Task {
 	private streamHandler: StreamResponseHandler
 
 	private terminalExecutionMode: "vscodeTerminal" | "backgroundExec"
-	private taskLockAcquired: boolean
 
 	// Metadata tracking
 	private fileContextTracker: FileContextTracker
@@ -176,9 +190,6 @@ export class Task {
 	private assistantStreamManager: AssistantStreamManager
 
 	private responseProcessor: ResponseProcessor
-	private requestBuilder!: TaskRequestBuilder
-	private apiErrorHandler!: TaskApiErrorHandler
-	private streamAccumulator!: TaskStreamAccumulator
 
 	// Callbacks
 	private updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
@@ -195,12 +206,14 @@ export class Task {
 	// Workspace manager
 	workspaceManager?: WorkspaceRootManager
 
+	// Task Locking (Sqlite)
+	private taskLockAcquired: boolean
+
 	// Command executor for running shell commands (extracted from executeCommandTool)
 	private commandExecutor!: CommandExecutor
 
 	constructor(params: TaskParams) {
 		const {
-			context,
 			controller,
 			updateTaskHistory,
 			postStateToWebview,
@@ -220,13 +233,12 @@ export class Task {
 			historyItem,
 			taskId,
 			conversationUlid,
-			watcherFactory,
 			taskLockAcquired,
 		} = params
 
 		this.taskInitializationStartTime = performance.now()
 		this.taskState = new TaskState()
-		this.context = context
+		this.controller = controller
 		this.updateTaskHistory = updateTaskHistory
 		this.postStateToWebview = postStateToWebview
 		this.reinitExistingTaskFromId = reinitExistingTaskFromId
@@ -288,7 +300,7 @@ export class Task {
 			shouldRunBackgroundCheck: () => this.commandExecutor.hasActiveBackgroundCommand(),
 		})
 
-		this.diracIgnoreController = new DiracIgnoreController(cwd, watcherFactory)
+		this.diracIgnoreController = new DiracIgnoreController(cwd)
 		this.diracIgnoreController.yoloMode = !!stateManager.getGlobalSettingsKey("yoloModeToggled")
 
 		this.commandPermissionController = new CommandPermissionController()
@@ -324,11 +336,7 @@ export class Task {
 		AnchorStateManager.reset(this.ulid)
 
 		// Initialize context trackers
-		if (controller) {
-			this.fileContextTracker = new FileContextTracker(controller, this.taskId)
-		} else {
-			throw new Error("Controller is required for FileContextTracker")
-		}
+		this.fileContextTracker = new FileContextTracker(controller, this.taskId)
 		this.modelContextTracker = new ModelContextTracker(this.taskId)
 		this.environmentContextTracker = new EnvironmentContextTracker(this.taskId)
 
@@ -444,7 +452,7 @@ export class Task {
 		const commandExecutorCallbacks: CommandExecutorCallbacks = {
 			taskMessenger: this.taskMessenger,
 			updateBackgroundCommandState: (isRunning: boolean) =>
-				this.context.updateBackgroundCommandState(isRunning, this.taskId),
+				this.controller.updateBackgroundCommandState(isRunning, this.taskId),
 			updateDiracMessage: async (index: number, updates: Partial<import("@shared/ExtensionMessage").DiracMessage>) => {
 				await this.messageStateHandler.updateDiracMessage(index, updates)
 				await this.postStateToWebview()
@@ -503,9 +511,6 @@ export class Task {
 			workspaceManager: this.workspaceManager,
 		})
 
-		if (!controller) {
-			throw new Error("Controller is required for ContextLoader")
-		}
 		this.contextLoader = new ContextLoader({
 			ulid: this.ulid,
 			stateManager: this.stateManager,
@@ -518,10 +523,9 @@ export class Task {
 			getCurrentProviderInfo: this.getCurrentProviderInfo.bind(this),
 			extensionPath: HostProvider.get().extensionFsPath,
 			sourceDir: getExtensionSourceDir(),
-
 			getEnvironmentDetails: this.getEnvironmentDetails.bind(this),
 			commandPermissionController: this.commandPermissionController,
-			postStateToWebview: this.postStateToWebview,
+			postStateToWebview: () => this.postStateToWebview(),
 		})
 
 		this.lifecycleManager = new LifecycleManager({
@@ -595,40 +599,6 @@ export class Task {
 			toolExecutor: this.toolExecutor,
 			assistantStreamManager: this.assistantStreamManager,
 		})
-
-		// Initialize extracted helpers
-		this.requestBuilder = new TaskRequestBuilder(
-			this.stateManager,
-			this.cwd,
-			this.taskState,
-			this.messageStateHandler,
-			this.api,
-			this.contextManager,
-			this.workspaceManager,
-			this.diracIgnoreController,
-			this.toolExecutor,
-			this.getCurrentProviderInfo.bind(this),
-			this.writePromptMetadataArtifacts.bind(this),
-			this.taskId,
-			this.isParallelToolCallingEnabled.bind(this),
-			this.taskMessenger.upsertText.bind(this.taskMessenger),
-		)
-		this.apiErrorHandler = new TaskApiErrorHandler(
-			this.taskState,
-			this.messageStateHandler,
-			this.api,
-			this.taskMessenger,
-			this.stateManager,
-			this.postStateToWebview,
-			this.handleContextWindowExceededError.bind(this),
-		)
-		this.streamAccumulator = new TaskStreamAccumulator(
-			this.taskState,
-			this.checkpointManager,
-			this.postStateToWebview,
-			this.recursivelyMakeDiracRequests.bind(this),
-			this.handleEmptyAssistantResponse.bind(this),
-		)
 	}
 
 	async getEnvironmentDetails(includeFileDetails = false): Promise<string> {
@@ -839,7 +809,7 @@ export class Task {
 	}
 
 	private async switchToActModeCallback(): Promise<boolean> {
-		return await (this.controller?.toggleActModeForYoloMode() ?? false)
+		return await this.controller.toggleActModeForYoloMode()
 	}
 
 	private async runUserPromptSubmitHook(
@@ -889,6 +859,8 @@ export class Task {
 				break
 			}
 		}
+		// Flush task history at the end of the task loop (turn boundary)
+		await this.messageStateHandler.flushTaskHistory()
 	}
 
 	private async shouldRunTaskCancelHook(): Promise<boolean> {
@@ -940,7 +912,12 @@ export class Task {
 	}): Promise<void> {
 		const enabledSetting = this.stateManager.getGlobalSettingsKey("writePromptMetadataEnabled")
 		const enabledFlag = process.env.DIRAC_WRITE_PROMPT_ARTIFACTS?.toLowerCase()
-		const enabled = enabledSetting || enabledFlag === "1" || enabledFlag === "true" || enabledFlag === "yes" || isDev()
+		const enabled =
+			enabledSetting ||
+			enabledFlag === "1" ||
+			enabledFlag === "true" ||
+			enabledFlag === "yes" ||
+			process.env.IS_DEV === "true"
 		if (!enabled) {
 			return
 		}
@@ -957,7 +934,7 @@ export class Task {
 
 			await fs.mkdir(artifactDir, { recursive: true })
 
-			const _ts = new Date().toISOString()
+			const ts = new Date().toISOString()
 			const debugPath = path.join(artifactDir, `task-${this.taskId}-debug.md`)
 
 			let markdown = `## System Prompt\n\n${params.systemPrompt}\n\n`
@@ -1029,8 +1006,174 @@ export class Task {
 		return this.apiConversationManager.handleContextWindowExceededError()
 	}
 
+	/**
+	 * Build the system prompt, tool snapshot, and context management metadata
+	 * for an API request. Extracted from attemptApiRequest for single-responsibility.
+	 */
 	private async buildApiRequestParams(params: { previousApiReqIndex: number; shouldCompact?: boolean }) {
-		return this.requestBuilder.buildApiRequestParams(params)
+		const providerInfo = this.getCurrentProviderInfo()
+		const host = await HostProvider.env.getHostVersion({})
+		const ide = host?.platform || "Unknown"
+		const isCliEnvironment = host.diracType === DiracClient.Cli
+		const browserSettings = this.stateManager.getGlobalSettingsKey("browserSettings")
+		const disableBrowserTool = browserSettings.disableToolUse ?? false
+		// dirac browser tool uses image recognition for navigation (requires model image support).
+		const modelSupportsBrowserUse = providerInfo.model.info.supportsImages ?? false
+
+		const supportsBrowserUse = modelSupportsBrowserUse && !disableBrowserTool // only enable browser use if the model supports it and the user hasn't disabled it
+		const preferredLanguageRaw = this.stateManager.getGlobalSettingsKey("preferredLanguage")
+		const preferredLanguage = getLanguageKey(preferredLanguageRaw as LanguageDisplay)
+		const preferredLanguageInstructions =
+			preferredLanguage && preferredLanguage !== DEFAULT_LANGUAGE_SETTINGS
+				? `# Preferred Language\n\nSpeak in ${preferredLanguage}.`
+				: ""
+
+		const { globalToggles, localToggles } = await refreshDiracRulesToggles(this.stateManager, this.cwd)
+		const { windsurfLocalToggles, cursorLocalToggles, agentsLocalToggles } = await refreshExternalRulesToggles(
+			this.stateManager,
+			this.cwd,
+		)
+
+		const evaluationContext = await RuleContextBuilder.buildEvaluationContext({
+			cwd: this.cwd,
+			messageStateHandler: this.messageStateHandler,
+			workspaceManager: this.workspaceManager,
+		})
+
+		const globalDiracRulesFilePath = await ensureRulesDirectoryExists()
+		const globalRules = await getGlobalDiracRules(globalDiracRulesFilePath, globalToggles, { evaluationContext })
+		const globalDiracRulesFileInstructions = globalRules.instructions
+		const localRules = await getLocalDiracRules(this.cwd, localToggles, { evaluationContext })
+		const localDiracRulesFileInstructions = localRules.instructions
+		const [localCursorRulesFileInstructions, localCursorRulesDirInstructions] = await getLocalCursorRules(
+			this.cwd,
+			cursorLocalToggles,
+		)
+		const localWindsurfRulesFileInstructions = await getLocalWindsurfRules(this.cwd, windsurfLocalToggles)
+		const localAgentsRulesFileInstructions = await getLocalAgentsRules(this.cwd, agentsLocalToggles)
+		this.diracIgnoreController.yoloMode = !!this.stateManager.getGlobalSettingsKey("yoloModeToggled")
+		const isYolo = !!this.stateManager.getGlobalSettingsKey("yoloModeToggled")
+		const diracIgnoreContent = this.diracIgnoreController.diracIgnoreContent
+		let diracIgnoreInstructions: string | undefined
+		if (diracIgnoreContent && !isYolo) {
+			diracIgnoreInstructions = formatResponse.diracIgnoreInstructions(diracIgnoreContent)
+		}
+		// Prepare multi-root workspace information if enabled
+		let workspaceRoots: Array<{ path: string; name: string; vcs?: string }> | undefined
+		const multiRootEnabled = isMultiRootEnabled(this.stateManager)
+		if (multiRootEnabled && this.workspaceManager) {
+			workspaceRoots = this.workspaceManager.getRoots().map((root) => ({
+				path: root.path,
+				name: root.name || path.basename(root.path), // Fallback to basename if name is undefined
+				vcs: root.vcs as string | undefined, // Cast VcsType to string
+			}))
+		}
+		// Discover and filter available skills
+		const resolvedSkills = await getOrDiscoverSkills(this.cwd, this.taskState)
+		// Filter skills by toggle state (enabled by default)
+		const globalSkillsToggles = this.stateManager.getGlobalSettingsKey("globalSkillsToggles") ?? {}
+		const localSkillsToggles = this.stateManager.getWorkspaceStateKey("localSkillsToggles") ?? {}
+		const availableSkills = resolvedSkills.filter((skill) => {
+			const toggles = skill.source === "global" ? globalSkillsToggles : localSkillsToggles
+			// If toggle exists, use it; otherwise default to enabled (true)
+			return toggles[skill.path] !== false
+		})
+		this.taskState.availableSkills = availableSkills
+		// Snapshot editor tabs so prompt tools can decide whether to include
+		// filetype-specific instructions (e.g. notebooks) without adding bespoke flags.
+		const openTabPaths = (await HostProvider.window.getOpenTabs({})).paths || []
+		const visibleTabPaths = (await HostProvider.window.getVisibleTabs({})).paths || []
+		const cap = 50
+		const editorTabs = {
+			open: openTabPaths.slice(0, cap),
+			visible: visibleTabPaths.slice(0, cap),
+		}
+		const shellInfo = detectBestShell()
+		const promptContext: SystemPromptContext = {
+			cwd: this.cwd,
+			ide,
+			providerInfo,
+			editorTabs,
+			supportsBrowserUse,
+			skills: availableSkills,
+			globalDiracRulesFileInstructions,
+			localDiracRulesFileInstructions,
+			localCursorRulesFileInstructions,
+			localCursorRulesDirInstructions,
+			localWindsurfRulesFileInstructions,
+			localAgentsRulesFileInstructions,
+			diracIgnoreInstructions,
+			preferredLanguageInstructions,
+			browserSettings: this.stateManager.getGlobalSettingsKey("browserSettings"),
+			yoloModeToggled: this.stateManager.getGlobalSettingsKey("yoloModeToggled"),
+			subagentsEnabled: this.stateManager.getGlobalSettingsKey("subagentsEnabled"),
+			diracWebToolsEnabled:
+				this.stateManager.getGlobalSettingsKey("diracWebToolsEnabled") && featureFlagsService.getWebtoolsEnabled(),
+			isMultiRootEnabled: multiRootEnabled,
+			workspaceRoots,
+			isSubagentRun: false,
+			isCliEnvironment,
+			enableParallelToolCalling: this.isParallelToolCallingEnabled(),
+			terminalExecutionMode: this.terminalExecutionMode,
+			activeShellType: shellInfo.type,
+			activeShellPath: shellInfo.path,
+			activeShellIsPosix: shellInfo.isPosix,
+			availableCores: getAvailableCores(),
+			shouldCompact: params.shouldCompact,
+		}
+		// Notify user if any conditional rules were applied for this request
+		const activatedConditionalRules = [...globalRules.activatedConditionalRules, ...localRules.activatedConditionalRules]
+		if (activatedConditionalRules.length > 0) {
+			await this.taskMessenger.upsertText(JSON.stringify({ rules: activatedConditionalRules }))
+		}
+		const toolSnapshot = await this.toolExecutor.getSnapshotForRequest(promptContext)
+		const { systemPrompt } = await getSystemPrompt(promptContext, toolSnapshot)
+		this.toolExecutor.activateSnapshot(toolSnapshot)
+		this.taskState.useNativeToolCalls = toolSnapshot.nativeTools.length > 0
+		const contextManagementMetadata = await this.contextManager.getNewContextMessagesAndMetadata(
+			this.messageStateHandler.getApiConversationHistory(),
+			this.messageStateHandler.getDiracMessages(),
+			this.api,
+			this.taskState.conversationHistoryDeletedRange,
+			params.previousApiReqIndex,
+			await ensureTaskDirectoryExists(this.taskId),
+			this.stateManager.getGlobalSettingsKey("useAutoCondense"),
+		)
+
+		await this.writePromptMetadataArtifacts({
+			systemPrompt,
+			providerInfo,
+			tools: toolSnapshot.nativeTools,
+			fullHistory: this.messageStateHandler.getApiConversationHistory(),
+			deletedRange: this.taskState.conversationHistoryDeletedRange,
+		})
+
+		if (contextManagementMetadata.updatedConversationHistoryDeletedRange) {
+			this.taskState.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
+			await this.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+		}
+
+		// If we're not using auto-condense, we should explicitly notify the model that history was truncated
+		const useAutoCondense = this.stateManager.getGlobalSettingsKey("useAutoCondense")
+		if (!useAutoCondense) {
+			const lastMessage =
+				contextManagementMetadata.truncatedConversationHistory[
+					contextManagementMetadata.truncatedConversationHistory.length - 1
+				]
+			if (lastMessage && lastMessage.role === "user") {
+				const notice = formatResponse.contextTruncationNotice()
+				if (typeof lastMessage.content === "string") {
+					lastMessage.content += `\n\n${notice}`
+				} else if (Array.isArray(lastMessage.content)) {
+					lastMessage.content.push({
+						type: "text",
+						text: notice,
+					})
+				}
+			}
+		}
+
+		return { systemPrompt, toolSnapshot, contextManagementMetadata, providerInfo }
 	}
 
 	private async handleApiRequestError(params: {
@@ -1042,7 +1185,189 @@ export class Task {
 		providerId: string
 		metricsManager: StreamingMetricsManager
 	}): Promise<boolean> {
-		return this.apiErrorHandler.handleApiRequestError(params)
+		const { error, model, providerId } = params
+		const diracError = DiracError.transform(error, model.id, providerId)
+
+		if (diracError.isErrorType(DiracErrorType.ContextWindowExceeded)) {
+			await this.handleContextWindowExceededError()
+			const truncatedConversationHistory = this.messageStateHandler.getDiracMessages()
+			if (truncatedConversationHistory.length > 3) {
+				diracError.message = "Context window exceeded. Click retry to truncate the conversation and try again."
+			}
+		}
+
+		const streamingFailedMessage = diracError.serialize()
+
+		const lastApiReqStartedIndex = findLastIndex(
+			this.messageStateHandler.getDiracMessages(),
+			(m) => m.content.type === DiracMessageType.API_STATUS,
+		)
+		if (lastApiReqStartedIndex !== -1) {
+			const diracMessages = this.messageStateHandler.getDiracMessages()
+			const msg = diracMessages[lastApiReqStartedIndex]
+			if (msg.content.type === DiracMessageType.API_STATUS) {
+				const currentApiReqInfo = { ...msg.content.status }
+				delete currentApiReqInfo.retryStatus
+
+				await this.messageStateHandler.updateDiracMessage(lastApiReqStartedIndex, {
+					content: {
+						type: DiracMessageType.API_STATUS,
+						status: {
+							...currentApiReqInfo,
+							streamingFailedMessage,
+						},
+					},
+				})
+			}
+		}
+
+		const isAuthError = diracError.isErrorType(DiracErrorType.Auth)
+
+		const isDiracProviderInsufficientCredits = (() => {
+			if (providerId !== "dirac") {
+				return false
+			}
+			try {
+				const parsedError = DiracError.transform(error, model.id, providerId)
+				return parsedError.isErrorType(DiracErrorType.Balance)
+			} catch {
+				return false
+			}
+		})()
+
+		let response: DiracAskResponse
+		if (!isDiracProviderInsufficientCredits && !isAuthError && this.taskState.apiErrorRetryAttempts < 3) {
+			this.taskState.apiErrorRetryAttempts++
+			const delay = 2000 * 2 ** (this.taskState.apiErrorRetryAttempts - 1)
+
+			await updateApiReqMsg({
+				messageStateHandler: this.messageStateHandler,
+				lastApiReqIndex: lastApiReqStartedIndex,
+				inputTokens: 0,
+				reasoningTokens: 0,
+				outputTokens: 0,
+				cacheWriteTokens: 0,
+				cacheReadTokens: 0,
+				totalCost: undefined,
+				api: this.api,
+				cancelReason: "streaming_failed",
+				streamingFailedMessage,
+			})
+			await this.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+			await this.postStateToWebview()
+
+			response = DiracAskResponse.APPROVE
+			const autoRetryCard = await this.taskMessenger.createCard({
+				status: CardStatus.PENDING,
+				header: "API Error (Retrying)",
+				body: `API Error (attempt ${this.taskState.apiErrorRetryAttempts}/3). Retrying in ${delay / 1000}s...`,
+			})
+
+			const autoRetryApiReqIndex = findLastIndex(
+				this.messageStateHandler.getDiracMessages(),
+				(m) => m.content.type === DiracMessageType.API_STATUS,
+			)
+			if (autoRetryApiReqIndex !== -1) {
+				const diracMessages = this.messageStateHandler.getDiracMessages()
+				const msg = diracMessages[autoRetryApiReqIndex]
+				if (msg.content.type === DiracMessageType.API_STATUS) {
+					const currentApiReqInfo = { ...msg.content.status }
+					delete currentApiReqInfo.streamingFailedMessage
+					await this.messageStateHandler.updateDiracMessage(autoRetryApiReqIndex, {
+						content: {
+							type: DiracMessageType.API_STATUS,
+							status: currentApiReqInfo,
+						},
+					})
+				}
+			}
+
+			const deadline = Date.now() + delay
+			while (Date.now() < deadline && !this.taskState.abort) {
+				await setTimeoutPromise(Math.min(200, deadline - Date.now()))
+			}
+			// If the user aborted during the retry delay, stop retrying
+			if (this.taskState.abort) {
+				await autoRetryCard.update({
+					header: "API Error (Cancelled)",
+					body: `API Error (attempt ${this.taskState.apiErrorRetryAttempts}/3). Cancelled.`,
+				})
+				await autoRetryCard.finalize(CardStatus.CANCELLED)
+				throw new Error("Task instance aborted")
+			}
+			await autoRetryCard.update({ body: `API Error (attempt ${this.taskState.apiErrorRetryAttempts}/3). Retrying...` })
+			await autoRetryCard.finalize(CardStatus.ERROR)
+		} else {
+			if (!isDiracProviderInsufficientCredits && !isAuthError) {
+				await this.taskMessenger.createCard({
+					status: CardStatus.ERROR,
+					header: "API Error (Retries Exhausted)",
+					body: `The API request failed after 3 attempts. ${diracError.toDisplayMessage()}`,
+				})
+			}
+			if (isAuthError) {
+				await this.taskMessenger.createCard({
+					status: CardStatus.ERROR,
+					header: "API Error (Authentication)",
+					body: diracError.toDisplayMessage(),
+				})
+			}
+			this.taskState.status = TaskStatus.AWAITING_USER_INPUT
+
+			const cardHandle = await this.taskMessenger.createCard({
+				requireApproval: true,
+				header: "API Request Failed",
+				body: diracError.toDisplayMessage(),
+				actions: [
+					{ label: "Retry", value: DiracAskResponse.APPROVE, primary: true },
+					{ label: "Cancel", value: DiracAskResponse.REJECT },
+				],
+			})
+			try {
+				const askResult = await cardHandle.waitForInteraction()
+				response = askResult.response
+			} catch (error) {
+				if (error instanceof ToolSkippedByUserMessage) {
+					await cardHandle.finalize(CardStatus.CANCELLED)
+					this.taskState.pendingUserMessage = error.userMessage
+					this.taskState.pendingUserImages = error.userImages
+					this.taskState.pendingUserFiles = error.userFiles
+					response = DiracAskResponse.APPROVE
+				} else {
+					throw error
+				}
+			}
+			if (response === DiracAskResponse.APPROVE) {
+				this.taskState.apiErrorRetryAttempts = 0
+			}
+		}
+
+		if (response !== DiracAskResponse.APPROVE) {
+			throw new Error("API request failed")
+		}
+
+		const manualRetryApiReqIndex = findLastIndex(
+			this.messageStateHandler.getDiracMessages(),
+			(m) => m.content.type === DiracMessageType.API_STATUS,
+		)
+		if (manualRetryApiReqIndex !== -1) {
+			const diracMessages = this.messageStateHandler.getDiracMessages()
+			const msg = diracMessages[manualRetryApiReqIndex]
+			if (msg.content.type === DiracMessageType.API_STATUS) {
+				const currentApiReqInfo = { ...msg.content.status }
+				delete currentApiReqInfo.streamingFailedMessage
+				await this.messageStateHandler.updateDiracMessage(manualRetryApiReqIndex, {
+					content: {
+						type: DiracMessageType.API_STATUS,
+						status: currentApiReqInfo,
+					},
+				})
+			}
+		}
+
+		await this.taskMessenger.upsertText("Retrying API request...")
+
+		return true
 	}
 
 	private async resetStreamingState(): Promise<void> {
@@ -1059,7 +1384,7 @@ export class Task {
 		this.taskState.activeVoiceStreamId = undefined
 	}
 
-	private async accumulateStreamChunks(params: {
+	private async processStreamResult(params: {
 		assistantHasContent: boolean
 		stopReason?: string
 		userContent: DiracContent[]
@@ -1068,7 +1393,72 @@ export class Task {
 		providerId: string
 		model: { id: string }
 	}): Promise<boolean> {
-		return this.streamAccumulator.accumulateStreamChunks(params)
+		if (params.assistantHasContent) {
+			this.taskState.status = TaskStatus.AWAITING_USER_INPUT
+
+			await pWaitFor(() => this.taskState.userMessageContentReady)
+			const hasMutatingTools = this.taskState.assistantMessageContent.some(
+				(block) => block.type === "tool_use" && isMutatingTool(block.name),
+			)
+			if (hasMutatingTools) {
+				await this.checkpointManager?.saveCheckpoint()
+			}
+
+			const didToolUse = this.taskState.assistantMessageContent.some((block) => block.type === "tool_use")
+			if (this.taskState.didAttemptCompletion) {
+				this.taskState.status = TaskStatus.COMPLETED
+				await this.postStateToWebview()
+				return true
+			}
+			const hitTokenLimit =
+				params.stopReason === "MAX_TOKENS" || params.stopReason === "max_tokens" || params.stopReason === "length"
+
+			if (!didToolUse) {
+				this.taskState.userMessageContent.push({
+					type: "text",
+					text: hitTokenLimit
+						? "You have reached the output token limit. Please continue your response from where you left off. If you were in the middle of a tool call, start over with that tool call. If you were finished, call attempt_completion."
+						: formatResponse.noToolsUsed(this.taskState.useNativeToolCalls),
+				})
+				this.taskState.consecutiveMistakeCount++
+			}
+
+			this.taskState.apiErrorRetryAttempts = 0
+			this.taskState.emptyResponseRetryAttempts = 0
+
+			if (this.taskState.pendingUserMessage) {
+				this.taskState.userMessageContent.push({
+					type: "text",
+					text: this.taskState.pendingUserMessage,
+				})
+				if (this.taskState.pendingUserImages?.length) {
+					this.taskState.userMessageContent.push(...formatResponse.imageBlocks(this.taskState.pendingUserImages))
+				}
+				if (this.taskState.pendingUserFiles?.length) {
+					const fileContent = await processFilesIntoText(this.taskState.pendingUserFiles)
+					if (fileContent) {
+						this.taskState.userMessageContent.push({ type: "text", text: fileContent })
+					}
+				}
+				this.taskState.pendingUserMessage = undefined
+				this.taskState.pendingUserImages = undefined
+				this.taskState.pendingUserFiles = undefined
+			}
+
+			return await this.recursivelyMakeDiracRequests(this.taskState.userMessageContent)
+		}
+		const taskMetrics = params.metricsManager.getMetrics()
+		const shouldRetry = await this.handleEmptyAssistantResponse({
+			modelInfo: params.modelInfo,
+			taskMetrics,
+			providerId: params.providerId,
+			model: params.model,
+		})
+		if (shouldRetry === false) {
+			this.taskState.consecutiveMistakeCount = 0
+			return await this.recursivelyMakeDiracRequests(params.userContent)
+		}
+		return true
 	}
 
 	async *attemptApiRequest(previousApiReqIndex: number, lastApiReqIndex: number, shouldCompact?: boolean): ApiStream {
@@ -1096,7 +1486,7 @@ export class Task {
 
 		const stream = this.api.createMessage(
 			systemPrompt,
-			contextManagementMetadata.truncatedConversationHistory as DiracStorageMessage[],
+			contextManagementMetadata.truncatedConversationHistory as any,
 			toolSnapshot.nativeTools,
 		)
 		const iterator = stream[Symbol.asyncIterator]()
@@ -1459,7 +1849,7 @@ export class Task {
 				throw new Error("Dirac instance aborted")
 			}
 
-			const assistantHasContent = await this.routeAssistantResponse({
+			const assistantHasContent = await this.processAssistantResponse({
 				assistantMessage,
 				assistantTextOnly,
 				assistantTextSignature,
@@ -1472,7 +1862,7 @@ export class Task {
 				toolUseHandler,
 			})
 
-			return await this.accumulateStreamChunks({
+			return await this.processStreamResult({
 				assistantHasContent,
 				stopReason,
 				userContent,
@@ -1482,17 +1872,21 @@ export class Task {
 				model,
 			})
 		} catch (error) {
+			if (this.taskState.abort) {
+				// User-initiated abort — not a fatal error, no card needed
+				return true
+			}
 			const diracError = ErrorService.get().toDiracError(error)
 			Logger.error("[Task] Fatal error in task loop:", diracError.serialize())
 			try {
 				const card = await this.taskMessenger.createCard({
 					status: CardStatus.ERROR,
 					header: "Task Error",
-					body: `The task encountered an unexpected error and had to stop.\n\n${diracError.serialize()}`,
+					body: `The task encountered an unexpected error and had to stop.\n\n${diracError.toDisplayMessage()}`,
 				})
 				await card.finalize(CardStatus.ERROR)
-			} catch {
-				Logger.error("[Task] Failed to show error card")
+			} catch (sayError) {
+				Logger.error("[Task] Failed to emit error message:", sayError)
 			}
 			return true
 		}
@@ -1505,7 +1899,7 @@ export class Task {
 		return this.apiConversationManager.determineContextCompaction(previousApiReqIndex)
 	}
 
-	private async routeAssistantResponse(params: {
+	private async processAssistantResponse(params: {
 		assistantMessage: string
 		assistantTextOnly: string
 		assistantTextSignature?: string

@@ -43,6 +43,9 @@ buf.yaml
 
 # Unwanted files
 ascratch/
+cli_opentui/
+tmp/
+.scratch-release-changelog.md
 proto/
 scripts/
 biome.jsonc
@@ -74,7 +77,6 @@ old_docs/**
 
 # Include native modules copied to dist
 !dist/node_modules/**
-!dist-standalone/node_modules/**
 
 # Ignore E2E build files
 e2e-build.mjs
@@ -90,3 +92,4 @@ storybook-static
 .claude/
 locales/**
 dist/node_modules/**/*.d.ts
+cli_opentui/*
