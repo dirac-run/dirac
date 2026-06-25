@@ -98,6 +98,7 @@ export interface ScrollBehavior {
     pendingScrollToMessage: number | null
     setPendingScrollToMessage: React.Dispatch<React.SetStateAction<number | null>>
     handleRangeChanged: (range: ListRange) => void
+    atBottomDebounceRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
 }
 
 /**

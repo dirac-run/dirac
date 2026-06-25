@@ -114,9 +114,15 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
                                 programmaticScrollRef.current = false
                                 return
                             }
-                            setIsAtBottom(isAtBottom)
-                            disableAutoScrollRef.current = !isAtBottom
-                            setShowScrollToBottom(!isAtBottom)
+                            // Debounce to absorb scroll jitter during streaming
+                            if (scrollBehavior.atBottomDebounceRef.current) {
+                                clearTimeout(scrollBehavior.atBottomDebounceRef.current)
+                            }
+                            scrollBehavior.atBottomDebounceRef.current = setTimeout(() => {
+                                setIsAtBottom(isAtBottom)
+                                disableAutoScrollRef.current = !isAtBottom
+                                setShowScrollToBottom(!isAtBottom)
+                            }, 150)
                         }}
                         atBottomThreshold={500}
                         className="grow"
@@ -128,7 +134,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
                         }}
                         followOutput={(isAtBottom) => {
                             if (disableAutoScrollRef.current) return false
-                            return "auto"
+                            return "smooth"
                         }}
                         initialTopMostItemIndex={renderedMessages.length - 1}
                         itemContent={itemContent}

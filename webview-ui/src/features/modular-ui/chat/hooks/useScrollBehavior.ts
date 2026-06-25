@@ -26,6 +26,9 @@ export function useScrollBehavior(
     const programmaticScrollRef = useRef(false)
     const scrollRafIdRef = useRef(0)
 
+
+    // Debounce timer for at-bottom state changes to absorb scroll jitter
+    const atBottomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     // Keep refs for scrollToMessage to avoid stale closures
     const messagesRef = useRef(messages)
     messagesRef.current = messages
@@ -48,21 +51,37 @@ export function useScrollBehavior(
         // Range changed callback - we now use scroll position instead
         // but keep this for potential future use
     }, [])
-    // Instant scroll to bottom using native scrollIntoView on the Footer element.
-    // This is the mechanical "press End" approach — the browser calculates the
-    // exact scroll offset needed, no Virtuoso estimation involved.
+    // Instant scroll to bottom using Virtuoso's scrollToIndex for precise positioning.
     const scrollToBottomNow = useCallback(() => {
         cancelAnimationFrame(scrollRafIdRef.current)
         scrollRafIdRef.current = requestAnimationFrame(() => {
             programmaticScrollRef.current = true
-            footerRef.current?.scrollIntoView({ block: "end", behavior: "auto" })
+            const count = renderedMessagesRef.current.length
+            if (count > 0) {
+                virtuosoRef.current?.scrollToIndex({
+                    index: count - 1,
+                    align: "end",
+                    behavior: "auto",
+                })
+            } else {
+                footerRef.current?.scrollIntoView({ block: "end", behavior: "auto" })
+            }
         })
     }, [])
 
     // Smooth scroll to bottom — for user-initiated actions (scroll-to-bottom button).
     const scrollToBottomSmooth = useCallback(() => {
         programmaticScrollRef.current = true
-        footerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+        const count = renderedMessagesRef.current.length
+        if (count > 0) {
+            virtuosoRef.current?.scrollToIndex({
+                index: count - 1,
+                align: "end",
+                behavior: "smooth",
+            })
+        } else {
+            footerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+        }
         setTimeout(() => {
             programmaticScrollRef.current = false
         }, 500)
@@ -201,5 +220,6 @@ export function useScrollBehavior(
         pendingScrollToMessage,
         setPendingScrollToMessage,
         handleRangeChanged,
+        atBottomDebounceRef,
     }
 }
