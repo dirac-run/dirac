@@ -12,14 +12,15 @@ import { isBusyTaskStatus } from "@shared/taskStatusProjection"
 import { TaskState } from "../TaskState"
 
 export function projectUIActionState(state: TaskState, messages: DiracMessage[], maxConsecutiveMistakes: number): UIActionState {
+    const taskStatus = state?.status ?? TaskStatus.IDLE
     const uiState: UIActionState = {
         globalButtons: [],
         cardButtons: [],
         sendingDisabled:
-            state?.status !== TaskStatus.IDLE &&
-            state?.status !== TaskStatus.COMPLETED &&
-            state?.status !== TaskStatus.AWAITING_USER_INPUT &&
-            state?.status !== TaskStatus.CANCELLED,
+            taskStatus !== TaskStatus.IDLE &&
+            taskStatus !== TaskStatus.COMPLETED &&
+            taskStatus !== TaskStatus.AWAITING_USER_INPUT &&
+            taskStatus !== TaskStatus.CANCELLED,
 
     }
 
