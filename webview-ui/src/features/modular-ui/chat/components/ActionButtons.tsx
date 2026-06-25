@@ -115,7 +115,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const canInteract = !isStreaming && !isProcessing
 
     // Early return for scroll button to avoid unnecessary computation
-    if (showScrollToBottom || !hasButtons) {
+    if (!hasButtons) {
         const handleScrollToBottom = () => {
             scrollToBottomSmooth()
             disableAutoScrollRef.current = false
