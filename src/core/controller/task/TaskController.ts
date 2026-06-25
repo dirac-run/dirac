@@ -259,7 +259,8 @@ export class TaskController {
 	}
 
 	async cancelBackgroundCommand(): Promise<void> {
-		const didCancel = await this.cancelBackgroundCommandFn()
+		// Prefer the live task's executor; the injected fn is an init-time no-op placeholder.
+		const didCancel = (await this._task?.cancelBackgroundCommand()) ?? (await this.cancelBackgroundCommandFn())
 		if (!didCancel) {
 			this.updateBackgroundCommandState(false)
 		}

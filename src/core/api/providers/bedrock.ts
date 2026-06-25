@@ -1221,7 +1221,6 @@ export class AwsBedrockHandler implements ApiHandler {
 	// Chunks text into 1000-char segments and yields as the given chunk type.
 	private *chunkText(text: string, type: "text" | "reasoning"): Generator<any> {
 		if (!text) return
-		if (!text) return
 		const chunkSize = 1000
 		for (let i = 0; i < text.length; i += chunkSize) {
 			const chunk = text.slice(i, Math.min(i + chunkSize, text.length))
