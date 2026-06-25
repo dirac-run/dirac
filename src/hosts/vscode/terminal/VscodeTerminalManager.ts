@@ -1,9 +1,9 @@
 import { getShellForProfile } from "@utils/shell"
 import {
-    TerminalInfo as ITerminalInfo,
-    ITerminalManager,
-    TerminalProcessResultPromise as ITerminalProcessResultPromise,
-    TerminalProfileChangeResult,
+	TerminalInfo as ITerminalInfo,
+	ITerminalManager,
+	TerminalProcessResultPromise as ITerminalProcessResultPromise,
+	TerminalProfileChangeResult,
 } from "@/integrations/terminal/types"
 import { Logger } from "@/shared/services/Logger"
 import { CommandExecutor } from "./VscodeCommandExecutor"

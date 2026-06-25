@@ -136,7 +136,7 @@ export class CheckpointRestoreHandler {
 							})
 							didWorkspaceRestoreFail = true
 						}
-					} else if (offset && lastMessageWithHash.lastCheckpointHash && this.storage.getTracker()) {
+					} else if (offset && lastMessageWithHash?.lastCheckpointHash && this.storage.getTracker()) {
 						try {
 							await this.storage.getTracker()?.resetHead(lastMessageWithHash.lastCheckpointHash)
 						} catch (error) {
@@ -151,7 +151,7 @@ export class CheckpointRestoreHandler {
 							})
 							didWorkspaceRestoreFail = true
 						}
-					} else if (!offset && lastMessageWithHash.lastCheckpointHash && this.storage.getTracker()) {
+					} else if (!offset && lastMessageWithHash?.lastCheckpointHash && this.storage.getTracker()) {
 						// Fallback: restore to most recent checkpoint when target message has no checkpoint hash
 						Logger.warn(
 							`[CheckpointRestoreHandler] Message ${messageId} has no checkpoint hash, falling back to previous checkpoint for task ${this.config.taskId}`,
@@ -171,8 +171,11 @@ export class CheckpointRestoreHandler {
 							didWorkspaceRestoreFail = true
 						}
 					} else {
-						// No valid checkpoint hash found anywhere — surface the failure
-						const errorMessage = "Failed to restore checkpoint: No valid checkpoint hash found"
+						// Distinguish missing hash from missing tracker so users chase the right cause
+						const hasHash = !!(message.lastCheckpointHash || lastMessageWithHash?.lastCheckpointHash)
+						const errorMessage = hasHash
+							? "Failed to restore checkpoint: checkpoint tracker not available"
+							: "Failed to restore checkpoint: No valid checkpoint hash found"
 						Logger.error(`[CheckpointRestoreHandler] ${errorMessage} for task ${this.config.taskId}`)
 						HostProvider.window.showMessage({ type: ShowMessageType.ERROR, message: errorMessage })
 						didWorkspaceRestoreFail = true

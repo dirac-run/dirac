@@ -97,6 +97,11 @@ export class TaskController {
 		conversationUlid?: string,
 		_watcherFactory?: any,
 	): Promise<string> {
+		// Controller is required to construct a Task; fail fast with a clear error if missing
+		if (!this.deps.controller) {
+			throw new Error("TaskController.initTask requires a Controller instance")
+		}
+		const controller = this.deps.controller
 		await this.clearTask()
 
 		const autoApprovalSettings = this.deps.stateManager.getGlobalSettingsKey("autoApprovalSettings")
@@ -147,7 +152,7 @@ export class TaskController {
 		}
 
 		this._task = new Task({
-			controller: this.deps.controller!,
+			controller,
 			updateTaskHistory: (historyItem) => this.deps.updateTaskHistory(historyItem),
 			postStateToWebview: () => this.deps.postStateToWebview(),
 			reinitExistingTaskFromId: (taskId) => this.reinitExistingTaskFromId(taskId),
