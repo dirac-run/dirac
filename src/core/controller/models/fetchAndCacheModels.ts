@@ -81,23 +81,24 @@ async function doFetchAndCacheModels(config: FetchAndCacheModelsConfig): Promise
 	let models: Record<string, ModelInfo> = {}
 
 	try {
-		// Skip fetch if auth is required but no API key
-		if (requiresAuth && !apiKey) throw new Error(`No ${label} API key set`)
-
-		// Validate API key format if a key is provided
-		if (apiKey && validateApiKey) validateApiKey(apiKey)
-
-		const response = await axios.get(fetchUrl, {
-			...(headers ? { headers } : {}),
-			timeout: 10000,
-			...getAxiosSettings(),
-		})
-
-		if (response.data?.data) {
-			models = parseResponse(response.data.data)
-			await fs.writeFile(cacheFilePath, JSON.stringify(models))
+		if (requiresAuth && !apiKey) {
+			// No API key — user hasn't configured this provider. Skip silently.
 		} else {
-			throw new Error(`Invalid response from ${label} API`)
+			// Validate API key format if a key is provided
+			if (apiKey && validateApiKey) validateApiKey(apiKey)
+
+			const response = await axios.get(fetchUrl, {
+				...(headers ? { headers } : {}),
+				timeout: 10000,
+				...getAxiosSettings(),
+			})
+
+			if (response.data?.data) {
+				models = parseResponse(response.data.data)
+				await fs.writeFile(cacheFilePath, JSON.stringify(models))
+			} else {
+				throw new Error(`Invalid response from ${label} API`)
+			}
 		}
 	} catch (error) {
 		Logger.error(`Error fetching ${label} models:`, error)

@@ -49,9 +49,7 @@ export class ToolRegistry {
         }
 
         if (existing.source === tool.source) {
-            Logger.warn(
-                `[ToolRegistry] Duplicate ${tool.source} user tool '${tool.id}' conflicts with '${existing.id}'. Skipping duplicate.`,
-            )
+            // return if duplicate. this produces unnecessary log spam if printed, becuase of repeated scans
             return
         }
 

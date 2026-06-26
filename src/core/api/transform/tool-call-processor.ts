@@ -1,8 +1,7 @@
 import type {
-    ChatCompletionToolChoiceOption,
-    ChatCompletionTool as OpenAITool
+	ChatCompletionToolChoiceOption,
+	ChatCompletionTool as OpenAITool
 } from "openai/resources/chat/completions";
-import { Logger } from "@/shared/services/Logger";
 import type { ApiStreamToolCallsChunk } from "./stream";
 
 // Generalized tool call delta that accepts null for id/index (Cerebras SDK returns null)
@@ -55,7 +54,6 @@ export class ToolCallProcessor {
 
 			// Accumulate the function name if present
 			if (toolCallDelta.function?.name) {
-				Logger.debug(`[ToolCallProcessor] Native Tool Called: ${toolCallDelta.function.name}`)
 				toolCallState.name = toolCallDelta.function.name
 			}
 

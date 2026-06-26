@@ -32,19 +32,19 @@ import { sendAddToInputEvent } from "./core/controller/ui/subscribeToAddToInput"
 import { sendShowWebviewEvent } from "./core/controller/ui/subscribeToShowWebview"
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
 import {
-    cleanupOldApiKey,
-    migrateCustomInstructionsToGlobalRules,
-    migrateTaskHistoryToFile,
-    migrateWelcomeViewCompleted,
-    migrateWorkspaceToGlobalStorage,
+	cleanupOldApiKey,
+	migrateCustomInstructionsToGlobalRules,
+	migrateTaskHistoryToFile,
+	migrateWelcomeViewCompleted,
+	migrateWorkspaceToGlobalStorage,
 } from "./core/storage/state-migrations"
 import { workspaceResolver } from "./core/workspace"
 import { findMatchingNotebookCell, getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
 import { abortCommitGeneration, generateCommitMsg } from "./hosts/vscode/commit-message-generator"
 import { registerDiracOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
 import {
-    disposeVscodeCommentReviewController,
-    getVscodeCommentReviewController,
+	disposeVscodeCommentReviewController,
+	getVscodeCommentReviewController,
 } from "./hosts/vscode/review/VscodeCommentReviewController"
 import { VscodeTerminalManager } from "./hosts/vscode/terminal/VscodeTerminalManager"
 import { VscodeDiffViewProvider } from "./hosts/vscode/VscodeDiffViewProvider"
@@ -662,16 +662,7 @@ function setupHostProvider(context: ExtensionContext, globalStorageFsPath: strin
 	const createTerminalManager = () => new VscodeTerminalManager()
 	const getEnvironmentVariables = async (cwd: string) => {
 		const { getPythonEnvironmentVariables } = await import("@utils/python")
-		const env = await getPythonEnvironmentVariables(vscode.Uri.file(cwd))
-		if (env) {
-			Logger.info(`[Extension] Python environment variables for ${cwd}: ${JSON.stringify(env)}`)
-			if (env.VIRTUAL_ENV) {
-				Logger.info(`[Extension] Detected virtual environment: ${env.VIRTUAL_ENV}`)
-			}
-		} else {
-			Logger.info(`[Extension] No Python environment variables found for ${cwd}`)
-		}
-		return env
+		return await getPythonEnvironmentVariables(vscode.Uri.file(cwd))
 	}
 
 	const getCallbackUrl = async (path: string, _preferredPort?: number) => {
