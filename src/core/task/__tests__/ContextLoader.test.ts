@@ -33,7 +33,7 @@ describe("ContextLoader (characterization)", () => {
 	let tempDir: string
 	let originalMentions: any, originalSlash: any, originalExtractSymbol: any, originalSkills: any
 	let originalWorkflows: any, originalEnsureDir: any, originalListFiles: any
-	let originalResolveWorkspace: any, originalMultiRoot: any, originalRefreshToolRegistry: any
+	let originalResolveWorkspace: any, originalMultiRoot: any, originalRefreshToolRegistry: any, originalGetFileSkeleton: any
 
 	beforeEach(async () => {
 		sandbox = sinon.createSandbox()
@@ -50,6 +50,7 @@ describe("ContextLoader (characterization)", () => {
 		originalResolveWorkspace = workspaceResolverModule.resolveWorkspacePath
 		originalMultiRoot = multiRootModule.isMultiRootEnabled
 		originalRefreshToolRegistry = refreshToolRegistryModule.refreshToolRegistryForWorkspace
+		originalGetFileSkeleton = astAnchorModule.ASTAnchorBridge.getFileSkeleton
 	})
 
 	afterEach(async () => {
@@ -64,6 +65,7 @@ describe("ContextLoader (characterization)", () => {
 		workspaceResolverModule.resolveWorkspacePath = originalResolveWorkspace
 		multiRootModule.isMultiRootEnabled = originalMultiRoot
 		refreshToolRegistryModule.refreshToolRegistryForWorkspace = originalRefreshToolRegistry
+		astAnchorModule.ASTAnchorBridge.getFileSkeleton = originalGetFileSkeleton
 		sandbox.restore()
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
