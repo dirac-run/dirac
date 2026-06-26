@@ -1,3 +1,5 @@
+import { Logger } from "@/shared/services/Logger"
+
 import type { ChatCompletionToolChoiceOption, ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
 import type { ApiStreamToolCallsChunk } from "./stream"
 
@@ -50,6 +52,7 @@ export class ToolCallProcessor {
 			// Accumulate the function name if present
 			if (toolCallDelta.function?.name) {
 				toolCallState.name = toolCallDelta.function.name
+				Logger.debug(`ToolCallProcessor: received function name "${toolCallDelta.function.name}"`)
 			}
 
 			// Only yield when we have all required fields: id, name, and arguments (or web_search query)
@@ -62,24 +65,24 @@ export class ToolCallProcessor {
 					tool_call:
 						toolCallState.name === "web_search"
 							? {
-									call_id: toolCallState.id,
-									type: "web_search",
-									web_search: toolCallDelta.web_search || { query: "" },
-									function: {
-										id: toolCallState.id,
-										name: "web_search",
-										arguments: toolCallDelta.web_search?.query || "",
-									},
-								}
-							: {
-									...toolCallDelta,
-									call_id: toolCallState.id,
-									function: {
-										...toolCallDelta.function,
-										id: toolCallState.id,
-										name: toolCallState.name,
-									},
+								call_id: toolCallState.id,
+								type: "web_search",
+								web_search: toolCallDelta.web_search || { query: "" },
+								function: {
+									id: toolCallState.id,
+									name: "web_search",
+									arguments: toolCallDelta.web_search?.query || "",
 								},
+							}
+							: {
+								...toolCallDelta,
+								call_id: toolCallState.id,
+								function: {
+									...toolCallDelta.function,
+									id: toolCallState.id,
+									name: toolCallState.name,
+								},
+							},
 				}
 			}
 		}

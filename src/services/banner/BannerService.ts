@@ -47,8 +47,8 @@ export class BannerService {
 	public static reset(): void {
 		const instance = BannerService.instance
 		if (instance) {
-			if (instance.remote.debounceTimer) clearTimeout(instance.remote.debounceTimer)
-			instance.remote.abortController?.abort()
+			if (instance.remote?.debounceTimer) clearTimeout(instance.remote.debounceTimer)
+			instance.remote?.abortController?.abort()
 		}
 		BannerService.instance = null
 	}

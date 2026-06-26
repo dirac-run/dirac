@@ -20,7 +20,15 @@ describe("File Search", () => {
 		const spawnWrapper: typeof childProcess.spawn = (command, options) => spawnStub(command, options)
 
 		sandbox.stub(fileSearch, "getSpawnFunction").returns(spawnWrapper)
-		sandbox.stub(fs.promises, "lstat").resolves({ isDirectory: () => false } as fs.Stats)
+		sandbox.stub(fs.promises, "lstat").resolves({
+			isDirectory: () => false,
+			isFile: () => true,
+			isSocket: () => false,
+			isSymbolicLink: () => false,
+			isBlockDevice: () => false,
+			isCharacterDevice: () => false,
+			isFIFO: () => false,
+		} as fs.Stats)
 
 		// Mock fs.access to return true for both Unix and Windows ripgrep binary paths
 		const accessStub = sandbox.stub(fs.promises, "access")

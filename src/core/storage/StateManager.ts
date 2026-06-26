@@ -133,6 +133,11 @@ export class StateManager {
 		return StateManager.instance
 	}
 
+	public static isInitialized(): boolean {
+		return StateManager.instance != null
+	}
+
+
 	public static get(): StateManager {
 		if (!StateManager.instance) {
 			throw new Error("StateManager has not been initialized")
@@ -235,7 +240,7 @@ export class StateManager {
 	setWorkspaceState(key: string, value: unknown): void
 	setWorkspaceState(key: string, value: unknown): void {
 		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		;(this.workspaceStateCache as Record<string, unknown>)[key] = value
+			;(this.workspaceStateCache as Record<string, unknown>)[key] = value
 		this.persistence.addPendingWorkspaceState(key as LocalStateKey)
 	}
 

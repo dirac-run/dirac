@@ -110,6 +110,9 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 	}
 
 	public isEnabled(): boolean {
+		if (!StateManager.isInitialized()) {
+			return false
+		}
 		const isOptedIn = StateManager.get().getGlobalSettingsKey("telemetrySetting") !== "disabled"
 		this.optInCache = isOptedIn
 		return isOptedIn && this.telemetrySettings.hostEnabled

@@ -3,7 +3,7 @@ import type { MessageStateHandler } from "@core/task/message-state"
 import type { TaskState } from "@core/task/TaskState"
 import { isMultiRootEnabled } from "@core/workspace/multi-root-utils"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
-import { createTaskCheckpointManager } from "@integrations/checkpoints"
+// lazy import to break circular dependency: task/index → factory → checkpoints/index → task/message-state
 import { MultiRootCheckpointManager } from "@integrations/checkpoints/MultiRootCheckpointManager"
 import type { ICheckpointManager } from "@integrations/checkpoints/types"
 import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
@@ -83,6 +83,9 @@ export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 	}
 
 	// Single-root manager
+	// TODO: Restructure module boundaries to eliminate the circular dependency and use a static import
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const { createTaskCheckpointManager } = require("./index")
 	return createTaskCheckpointManager(
 		{ taskId },
 		{ enableCheckpoints },

@@ -20,6 +20,7 @@ import * as BannerServiceModule from "@/services/banner/BannerService"
 import * as featureFlagsIndex from "@/services/feature-flags"
 import * as distinctIdModule from "@/services/logging/distinctId"
 import * as announcementsModule from "@/utils/announcements"
+import { StateManager } from "@core/storage/StateManager"
 import { getStateToPostToWebview } from "../UiController"
 
 type StateManagerLike = any
@@ -125,6 +126,10 @@ function makeFakeWorkspaceManager(roots: string[] = ["/test/workspace"]): any {
 
 describe("getStateToPostToWebview", () => {
 	let sandbox: sinon.SinonSandbox
+	let codexIsAuthStub: sinon.SinonStub
+	let codexEmailStub: sinon.SinonStub
+	let copilotIsAuthStub: sinon.SinonStub
+	let copilotEmailStub: sinon.SinonStub
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
@@ -146,14 +151,17 @@ describe("getStateToPostToWebview", () => {
 		} as any)
 		sandbox.stub(distinctIdModule, "getDistinctId").returns("test-distinct-id")
 		sandbox.stub(configModule.DiracEnv, "config").returns({ environment: "development" } as any)
-		sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "isAuthenticated").resolves(false)
-		sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "getEmail").resolves(null)
+		sandbox.stub(StateManager, "isInitialized").returns(true)
+		copilotIsAuthStub = sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "isAuthenticated").resolves(false)
+		copilotEmailStub = sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "getEmail").resolves(null)
 
 		// Dynamic-import stubs (require returns the cached module object)
 		sandbox.stub(announcementsModule, "getLatestAnnouncementId").returns("ann-2")
+		codexIsAuthStub = sandbox.stub().resolves(false)
+		codexEmailStub = sandbox.stub().resolves(null)
 		sandbox.stub(openaiCodexOauth, "openAiCodexOAuthManager").value({
-			isAuthenticated: sandbox.stub().resolves(false),
-			getEmail: sandbox.stub().resolves(null),
+			isAuthenticated: codexIsAuthStub,
+			getEmail: codexEmailStub,
 		})
 	})
 
@@ -197,29 +205,8 @@ describe("getStateToPostToWebview", () => {
 
 	describe("auth state assembly", () => {
 		it("surfaces openAiCodex authentication status and email", async () => {
-			sandbox.restore()
-			sandbox = sinon.createSandbox()
-			sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager())
-			sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
-			sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => [] } as any)
-			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
-				getActiveBanners: () => [],
-				getWelcomeBanners: () => [],
-			} as any)
-			sandbox.stub(featureFlagsIndex, "featureFlagsService").value({
-				getWebtoolsEnabled: () => true,
-				getWorktreesEnabled: () => false,
-			} as any)
-			sandbox.stub(distinctIdModule, "getDistinctId").returns("test-distinct-id")
-			sandbox.stub(configModule.DiracEnv, "config").returns({ environment: "development" } as any)
-			sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "isAuthenticated").resolves(false)
-			sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "getEmail").resolves(null)
-			sandbox.stub(announcementsModule, "getLatestAnnouncementId").returns("ann-2")
-			sandbox.stub(openaiCodexOauth, "openAiCodexOAuthManager").value({
-				isAuthenticated: sandbox.stub().resolves(true),
-				getEmail: sandbox.stub().resolves("codex@user.com"),
-			})
+			codexIsAuthStub.resolves(true)
+			codexEmailStub.resolves("codex@user.com")
 
 			const stateManager = makeFakeStateManager()
 			const state = await getStateToPostToWebview({ stateManager, backgroundCommandRunning: false })
@@ -228,29 +215,10 @@ describe("getStateToPostToWebview", () => {
 		})
 
 		it("surfaces githubCopilot authentication status, email, and cached models", async () => {
-			sandbox.restore()
-			sandbox = sinon.createSandbox()
-			sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager())
-			sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
-			sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => [] } as any)
-			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
-				getActiveBanners: () => [],
-				getWelcomeBanners: () => [],
-			} as any)
-			sandbox.stub(featureFlagsIndex, "featureFlagsService").value({
-				getWebtoolsEnabled: () => true,
-				getWorktreesEnabled: () => false,
-			} as any)
-			sandbox.stub(distinctIdModule, "getDistinctId").returns("test-distinct-id")
-			sandbox.stub(configModule.DiracEnv, "config").returns({ environment: "development" } as any)
-			sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "isAuthenticated").resolves(true)
-			sandbox.stub(githubCopilotAuth.githubCopilotAuthManager, "getEmail").resolves("copilot@user.com")
-			sandbox.stub(announcementsModule, "getLatestAnnouncementId").returns("ann-2")
-			sandbox.stub(openaiCodexOauth, "openAiCodexOAuthManager").value({
-				isAuthenticated: sandbox.stub().resolves(false),
-				getEmail: sandbox.stub().resolves(null),
-			})
+			copilotIsAuthStub.resolves(true)
+			copilotEmailStub.resolves("copilot@user.com")
+			codexIsAuthStub.resolves(false)
+			codexEmailStub.resolves(null)
 
 			const cachedModels = { "gpt-4": { name: "GPT-4" } }
 			const stateManager = makeFakeStateManager({ modelsCache: cachedModels })

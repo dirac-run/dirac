@@ -70,16 +70,23 @@ describe("StateManager", () => {
 			workspaceStoragePath: tempDir,
 		}
 
+		if ((StateManager as any).instance?.persistence) {
+			await (StateManager as any).instance.persistence.dispose()
+		}
 		// Reset singleton
-		;(StateManager as any).instance = null
+		;(StateManager as any).instance = undefined
 	})
 
 	afterEach(async () => {
+		// Cancel any pending debounced persistence timers before teardown
+		if ((StateManager as any).instance?.persistence) {
+			await (StateManager as any).instance.persistence.dispose()
+		}
 		sandbox.restore()
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
-		} catch {}
-		;(StateManager as any).instance = null
+		} catch { }
+		;(StateManager as any).instance = undefined
 	})
 
 	// ---------------------------------------------------------------
@@ -132,7 +139,7 @@ describe("StateManager", () => {
 
 		it("getGlobalSettingsKey returns undefined for unknown key", () => {
 			const v = sm.getGlobalSettingsKey("nonexistent" as any)
-			;(v === undefined).should.be.true()
+				;(v === undefined).should.be.true()
 		})
 	})
 
@@ -185,7 +192,7 @@ describe("StateManager", () => {
 
 		it("getSecretKey returns undefined for unknown key", () => {
 			const v = sm.getSecretKey("nonexistent" as any)
-			;(v === undefined).should.be.true()
+				;(v === undefined).should.be.true()
 		})
 	})
 
@@ -311,7 +318,7 @@ describe("StateManager", () => {
 			sm.setGlobalState("mode", "act")
 			await sm.reInitialize()
 			const v = sm.getGlobalSettingsKey("mode")
-			;(v === undefined).should.be.true()
+				;(v === undefined).should.be.true()
 		})
 	})
 })

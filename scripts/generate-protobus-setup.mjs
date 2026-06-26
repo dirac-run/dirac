@@ -39,13 +39,13 @@ async function generateWebviewProtobusClients(protobusServices) {
 				throw new Error("Request streaming is not supported")
 			}
 			if (!rpc.responseStream) {
-				rpcs.push(`    static async ${rpcName}(request: ${requestType}): Promise<${responseType}> {
-		return this.makeUnaryRequest("${rpcName}", request, ${requestType}.toJSON, ${responseType}.fromJSON)
-	}`)
+				rpcs.push(`\tstatic async ${rpcName}(request: ${requestType}): Promise<${responseType}> {
+\t\treturn this.makeUnaryRequest("${rpcName}", request, ${requestType}.toJSON, ${responseType}.fromJSON)
+\t}`)
 			} else {
-				rpcs.push(`    static ${rpcName}(request: ${requestType}, callbacks: Callbacks<${responseType}>): ()=>void {
-		return this.makeStreamingRequest("${rpcName}", request, ${requestType}.toJSON, ${responseType}.fromJSON, callbacks)
-	}`)
+				rpcs.push(`\tstatic ${rpcName}(request: ${requestType}, callbacks: Callbacks<${responseType}>): ()=>void {
+\t\treturn this.makeStreamingRequest("${rpcName}", request, ${requestType}.toJSON, ${responseType}.fromJSON, callbacks)
+\t}`)
 			}
 		}
 		clients.push(`export class ${serviceName}Client extends ProtoBusClient {

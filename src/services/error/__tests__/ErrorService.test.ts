@@ -31,8 +31,8 @@ describe("ErrorService", () => {
 		sandbox.stub(ErrorProviderFactory, "createProvider").resolves(mockProvider)
 		sandbox.stub(ErrorProviderFactory, "getDefaultConfig").returns({ type: "no-op", config: {} as any })
 		service = new ErrorService(mockProvider)
-		// Reset singleton for static tests
-		;(ErrorService as any).instance = null
+			// Reset singleton for static tests
+			;(ErrorService as any).instance = null
 	})
 
 	afterEach(() => {
@@ -46,9 +46,11 @@ describe("ErrorService", () => {
 			inst.should.be.instanceOf(ErrorService)
 		})
 
-		it("throws if already initialized", async () => {
-			;(ErrorService as any).instance = {}
-			await ErrorService.initialize().should.be.rejected()
+		it("returns existing instance if already initialized", async () => {
+			const fake = {} as any
+				;(ErrorService as any).instance = fake
+			const result = await ErrorService.initialize()
+			result.should.equal(fake)
 		})
 	})
 
@@ -61,7 +63,7 @@ describe("ErrorService", () => {
 
 		it("throws if not initialized", () => {
 			;(ErrorService as any).instance = null
-			;(() => ErrorService.get()).should.throw()
+				;(() => ErrorService.get()).should.throw()
 		})
 	})
 
