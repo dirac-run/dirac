@@ -3,6 +3,7 @@ import { DiracWebviewProvider } from "@core/webview"
 import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import { ApiProvider } from "@shared/api"
 import { HistoryItem } from "@shared/HistoryItem"
+import { jsonHeaders } from "@shared/net"
 import { execa } from "execa"
 import * as http from "http"
 import * as path from "path"
@@ -375,7 +376,7 @@ export async function createTestServer(controller: Controller): Promise<http.Ser
 						const taskDuration = Date.now() - taskStartTime
 
 						// Return comprehensive response with all metrics and data
-						res.writeHead(200, { "Content-Type": "application/json" })
+						res.writeHead(200, jsonHeaders())
 						res.end(
 							JSON.stringify({
 								success: true,
@@ -395,7 +396,7 @@ export async function createTestServer(controller: Controller): Promise<http.Ser
 						)
 					} catch (_timeoutError) {
 						// Task didn't complete within the timeout period
-						res.writeHead(200, { "Content-Type": "application/json" })
+						res.writeHead(200, jsonHeaders())
 						res.end(
 							JSON.stringify({
 								success: true,

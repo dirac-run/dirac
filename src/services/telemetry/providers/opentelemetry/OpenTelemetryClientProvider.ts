@@ -7,6 +7,7 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic
 import { ExtensionRegistryInfo } from "@/registry"
 import { OpenTelemetryClientValidConfig } from "@/shared/services/config/otel-config"
 import { Logger } from "@/shared/services/Logger"
+import { isDev } from "@shared/config/environment"
 import {
 	createConsoleLogExporter,
 	createConsoleMetricReader,
@@ -28,7 +29,7 @@ export class OpenTelemetryClientProvider {
 	 * Only log sensitive information (endpoints, headers) when in debug mode.
 	 */
 	private isDebugEnabled(): boolean {
-		return process.env.TEL_DEBUG_DIAGNOSTICS === "true" || process.env.IS_DEV === "true"
+		return process.env.TEL_DEBUG_DIAGNOSTICS === "true" || isDev()
 	}
 
 	constructor(config: OpenTelemetryClientValidConfig) {

@@ -1,4 +1,5 @@
 import type { ApiConfiguration, ModelInfo } from "@shared/api"
+import { getSecretsFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
 import {
     ApiHandlerSettingsKeys,
     type GlobalState,
@@ -14,24 +15,15 @@ import {
     type Settings,
     type SettingsKey,
 } from "@shared/storage/state-keys"
-import { getSecretsFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
 import type { StorageContext } from "@shared/storage/storage-context"
-import chokidar, { FSWatcher } from "chokidar"
 import { initializeDistinctId } from "@/services/logging/distinctId"
 import { Logger } from "@/shared/services/Logger"
 import { AgentConfigLoader } from "../task/tools/subagent/AgentConfigLoader"
-import {
-    getTaskHistoryStateFilePath,
-    readTaskHistoryFromState,
-    readTaskSettingsFromStorage,
-    writeTaskHistoryToState,
-    writeTaskSettingsToStorage,
-} from "./disk"
 import { STATE_MANAGER_NOT_INITIALIZED } from "./error-messages"
-import { readGlobalStateFromStorage, readSecretsFromStorage, readWorkspaceStateFromStorage } from "./utils/state-helpers"
-export interface PersistenceErrorEvent {
-	error: Error
-}
+import { type PersistenceErrorEvent, StatePersistenceManager } from "./StatePersistenceManager"
+
+// Re-export for backward compatibility — consumers import PersistenceErrorEvent from StateManager
+export type { PersistenceErrorEvent }
 
 /**
  * In-memory state manager for fast state access.
@@ -54,6 +46,7 @@ export interface PersistenceErrorEvent {
  * isolation between concurrent instances. Task-specific state is independent anyway since
  * each window typically runs different tasks.
  */
+
 export class StateManager {
 	private static instance: StateManager | null = null
 
@@ -63,83 +56,41 @@ export class StateManager {
 	private secretsCache: Secrets = {} as Secrets
 	private workspaceStateCache: LocalState = {} as LocalState
 
-	/**
-	 * File-backed storage context. All reads/writes to persistent state go through here.
-	 * Do NOT access VSCode's ExtensionContext for storage — use this instead.
-	 */
 	private storage: StorageContext
+	private persistence: StatePersistenceManager
 	private isInitialized = false
 
 	// Cache TTL: 1 hour - long enough to prevent duplicate fetches, short enough to see new models
 	private readonly MODEL_CACHE_TTL_MS = 60 * 60 * 1000
 
-	// In-memory model info cache (not persisted to disk)
-	// These are for dynamic providers that fetch models from APIs
-	private modelInfoCache: {
-		diracModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		openRouterModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		groqModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		basetenModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		huggingFaceModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		requestyModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		huaweiCloudMaasModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		aihubmixModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		liteLlmModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		vercelModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-		githubCopilotModels: { data: Record<string, ModelInfo>; timestamp: number } | null
-	} = {
-		diracModels: null,
-		openRouterModels: null,
-		groqModels: null,
-		basetenModels: null,
-		huggingFaceModels: null,
-		requestyModels: null,
-		huaweiCloudMaasModels: null,
-		aihubmixModels: null,
-		liteLlmModels: null,
-		githubCopilotModels: null,
-		vercelModels: null,
-	}
-
-	// Debounced persistence state
-	private pendingGlobalState = new Set<GlobalStateAndSettingsKey>()
-	private pendingTaskState = new Map<string, Set<SettingsKey>>()
-	private pendingSecrets = new Set<SecretKey>()
-	private pendingWorkspaceState = new Set<LocalStateKey>()
-	private persistenceTimeout: NodeJS.Timeout | null = null
-	private readonly PERSISTENCE_DELAY_MS = 500
-	private taskHistoryWatcher: FSWatcher | null = null
-
-	// Callback for persistence errors
-	onPersistenceError?: (event: PersistenceErrorEvent) => void
+	// In-memory model info cache (not persisted to disk) — keyed by `${provider}Models`
+	private modelInfoCache: Record<string, { data: Record<string, ModelInfo>; timestamp: number } | null> = {}
 
 	// Callback to sync external state changes with the UI client
 	onSyncExternalChange?: () => void | Promise<void>
 
-	// State change notification subscribers
-	private stateChangeListeners = new Set<() => void>()
+	// Delegate persistence-error callback to the persistence manager
+	get onPersistenceError(): ((event: PersistenceErrorEvent) => void) | undefined {
+		return this.persistence.onPersistenceError
+	}
+	set onPersistenceError(cb: ((event: PersistenceErrorEvent) => void) | undefined) {
+		this.persistence.onPersistenceError = cb
+	}
 
+	// State change notification subscribers (from main)
+	private stateChangeListeners = new Set<() => void>()
 
 	private constructor(storage: StorageContext) {
 		this.storage = storage
-	}
-
-	/**
-	 * Subscribe to global state changes. The listener is called whenever global state
-	 * is modified via setGlobalState or setGlobalStateBatch.
-	 * Returns an unsubscribe function.
-	 */
-	public subscribe(listener: () => void): () => void {
-		this.stateChangeListeners.add(listener)
-		return () => {
-			this.stateChangeListeners.delete(listener)
-		}
-	}
-
-	private notifyStateChange(): void {
-		for (const listener of this.stateChangeListeners) {
-			listener()
-		}
+		this.persistence = new StatePersistenceManager(storage, {
+			getGlobalStateValue: (key) => this.globalStateCache[key],
+			getTaskStateValue: (key) => this.taskStateCache[key],
+			getSecretValue: (key) => this.secretsCache[key],
+			getWorkspaceStateValue: (key) => this.workspaceStateCache[key],
+			setTaskHistoryInCache: (value) => {
+				this.globalStateCache.taskHistory = value
+			},
+		})
 	}
 
 	/**
@@ -158,19 +109,20 @@ export class StateManager {
 			await initializeDistinctId(storage)
 
 			// Load all extension state from file-backed stores
-			const globalState = await readGlobalStateFromStorage(storage.globalState)
-			const secrets = readSecretsFromStorage(storage.secrets)
-			const workspaceState = readWorkspaceStateFromStorage(storage.workspaceState)
+			const { globalState, secrets, workspaceState } = await StateManager.instance.persistence.readAllFromDisk()
 
 			// Populate the cache with all extension state and secrets fields
-			// Use populate method to avoid triggering persistence during initialization
 			StateManager.instance.populateCache(globalState, secrets, workspaceState)
 
 			// Start watcher for taskHistory.json so external edits update cache (no persist loop)
-			await StateManager.instance.setupTaskHistoryWatcher()
+			await StateManager.instance.persistence.setupTaskHistoryWatcher(
+				() => StateManager.instance?.isInitialized ?? false,
+				async () => {
+					await StateManager.instance?.onSyncExternalChange?.()
+				},
+			)
 
 			StateManager.instance.isInitialized = true
-
 
 			await AgentConfigLoader.getInstance().ready()
 		} catch (error) {
@@ -196,7 +148,7 @@ export class StateManager {
 		onSyncExternalChange?: () => void | Promise<void>
 	}): void {
 		if (callbacks.onPersistenceError) {
-			this.onPersistenceError = callbacks.onPersistenceError
+			this.persistence.onPersistenceError = callbacks.onPersistenceError as (event: PersistenceErrorEvent) => void
 		}
 		if (callbacks.onSyncExternalChange) {
 			this.onSyncExternalChange = callbacks.onSyncExternalChange
@@ -204,672 +156,241 @@ export class StateManager {
 	}
 
 	/**
-	 * Set method for global state keys - updates cache immediately and schedules debounced persistence
+	 * Subscribe to global state changes. The listener is called whenever global state
+	 * is modified via setGlobalState or setGlobalStateBatch. Returns an unsubscribe function.
 	 */
+	public subscribe(listener: () => void): () => void {
+		this.stateChangeListeners.add(listener)
+		return () => {
+			this.stateChangeListeners.delete(listener)
+		}
+	}
+
+	private notifyStateChange(): void {
+		for (const listener of this.stateChangeListeners) {
+			listener()
+		}
+	}
+
 	setGlobalState<K extends keyof GlobalStateAndSettings>(key: K, value: GlobalStateAndSettings[K]): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for instant access
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.globalStateCache[key] = value
-
-		// Add to pending persistence set and schedule debounced write
-		this.pendingGlobalState.add(key)
-		this.scheduleDebouncedPersistence()
-
-		// Notify state change listeners
+		this.persistence.addPendingGlobalState(key)
 		this.notifyStateChange()
 	}
 
-	/**
-	 * Batch set method for global state keys - updates cache immediately and schedules debounced persistence
-	 */
 	setGlobalStateBatch(updates: Partial<GlobalStateAndSettings>): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache in one go
-		// Using object.assign to because typescript is not able to infer the type of the updates object when using Object.entries
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		Object.assign(this.globalStateCache, updates)
-
-		// Notify state change listeners
+		this.persistence.addPendingGlobalStateBatch(Object.keys(updates) as GlobalStateAndSettingsKey[])
 		this.notifyStateChange()
-
-
-		// Then track the keys for persistence
-		Object.keys(updates).forEach((key) => {
-			this.pendingGlobalState.add(key as GlobalStateAndSettingsKey)
-		})
-
-		// Schedule debounced persistence
-		this.scheduleDebouncedPersistence()
 	}
 
-	/**
-	 * Set method for task settings keys - updates cache immediately and schedules debounced persistence
-	 */
 	setTaskSettings<K extends keyof Settings>(taskId: string, key: K, value: Settings[K]): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for instant access
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.taskStateCache[key] = value
-
-		// Add to pending persistence set and schedule debounced write
-		if (!this.pendingTaskState.has(taskId)) {
-			this.pendingTaskState.set(taskId, new Set())
-		}
-		this.pendingTaskState.get(taskId)!.add(key)
-		this.scheduleDebouncedPersistence()
+		this.persistence.addPendingTaskState(taskId, key)
 	}
 
-	/**
-	 * Batch set method for task settings keys - updates cache immediately and schedules debounced persistence
-	 */
 	setTaskSettingsBatch(taskId: string, updates: Partial<Settings>): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache in one go
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		Object.assign(this.taskStateCache, updates)
-
-		// Then track the keys for persistence
-		if (!this.pendingTaskState.has(taskId)) {
-			this.pendingTaskState.set(taskId, new Set())
-		}
-		Object.keys(updates).forEach((key) => {
-			this.pendingTaskState.get(taskId)!.add(key as SettingsKey)
-		})
-
-		// Schedule debounced persistence
-		this.scheduleDebouncedPersistence()
+		this.persistence.addPendingTaskStateBatch(taskId, Object.keys(updates) as SettingsKey[])
 	}
 
-	/**
-	 * Load task settings from disk into cache
-	 */
 	async loadTaskSettings(taskId: string): Promise<void> {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		try {
-			const taskSettings = await readTaskSettingsFromStorage(taskId)
-			// Populate task cache with loaded settings
-			Object.assign(this.taskStateCache, taskSettings)
-		} catch (error) {
-			// If reading fails, just use empty cache
-			Logger.error("[StateManager] Failed to load task settings, defaulting to globally selected settings.", error)
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		const taskSettings = await this.persistence.loadTaskSettingsFromDisk(taskId)
+		Object.assign(this.taskStateCache, taskSettings)
 	}
 
-	/**
-	 * Clear task settings cache - ensures pending changes are persisted first
-	 */
 	async clearTaskSettings(): Promise<void> {
-		// If there are pending task settings, persist them first
-		if (this.pendingTaskState.size > 0) {
-			try {
-				// Persist pending task state immediately
-				await this.persistTaskStateBatch(this.pendingTaskState)
-				// Clear pending set after successful persistence
-				this.pendingTaskState.clear()
-			} catch (error) {
-				Logger.error("[StateManager] Failed to persist task settings before clearing:", error)
-			}
+		if (this.persistence.hasPendingTaskState()) {
+			await this.persistence.persistAndClearPendingTaskState()
 		}
-
 		this.taskStateCache = {}
-		this.pendingTaskState.clear()
+		this.persistence.clearPendingTaskState()
 	}
 
-	/**
-	 * Set method for secret keys - updates cache immediately and schedules debounced persistence
-	 */
 	setSecret<K extends keyof Secrets>(key: K, value: Secrets[K]): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for instant access
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.secretsCache[key] = value
-
-		// Add to pending persistence set and schedule debounced write
-		this.pendingSecrets.add(key)
-		this.scheduleDebouncedPersistence()
+		this.persistence.addPendingSecret(key)
 	}
 
-	/**
-	 * Batch set method for secret keys - updates cache immediately and schedules debounced persistence
-	 */
 	setSecretsBatch(updates: Partial<Secrets>): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for all keys
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		const changedKeys: SecretKey[] = []
 		Object.entries(updates).forEach(([key, value]) => {
-			// Skip unchanged values as we don't want to trigger unnecessary
-			// writes & incorrectly fire an onDidChange events.
+			// Skip unchanged values to avoid unnecessary writes & onDidChange events
 			const current = this.secretsCache[key as keyof Secrets]
-			if (current === value) {
-				return
-			}
+			if (current === value) return
 			this.secretsCache[key as keyof Secrets] = value
-			this.pendingSecrets.add(key as SecretKey)
+			changedKeys.push(key as SecretKey)
 		})
-
-		// Schedule debounced persistence
-		this.scheduleDebouncedPersistence()
+		this.persistence.addPendingSecretBatch(changedKeys)
 	}
 
-	/**
-	 * Set method for workspace state keys - updates cache immediately and schedules debounced persistence
-	 */
-	setWorkspaceState<K extends keyof LocalState>(key: K, value: LocalState[K]): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for instant access
-		this.workspaceStateCache[key] = value
-
-		// Add to pending persistence set and schedule debounced write
-		this.pendingWorkspaceState.add(key)
-		this.scheduleDebouncedPersistence()
+	setWorkspaceState<K extends keyof LocalState>(key: K, value: LocalState[K]): void
+	setWorkspaceState(key: string, value: unknown): void
+	setWorkspaceState(key: string, value: unknown): void {
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		;(this.workspaceStateCache as Record<string, unknown>)[key] = value
+		this.persistence.addPendingWorkspaceState(key as LocalStateKey)
 	}
 
-	/**
-	 * Batch set method for workspace state keys - updates cache immediately and schedules debounced persistence
-	 */
 	setWorkspaceStateBatch(updates: Partial<LocalState>): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Update cache immediately for all keys
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		const changedKeys: LocalStateKey[] = []
 		Object.entries(updates).forEach(([key, value]) => {
 			this.workspaceStateCache[key as keyof LocalState] = value
-			this.pendingWorkspaceState.add(key as LocalStateKey)
+			changedKeys.push(key as LocalStateKey)
 		})
-
-		// Schedule debounced persistence
-		this.scheduleDebouncedPersistence()
+		this.persistence.addPendingWorkspaceStateBatch(changedKeys)
 	}
 
-	/**
-	 * Set a session-scoped override for a settings key.
-	 * Session overrides are in-memory only and are NEVER persisted to disk.
-	 * They take precedence after remote config but before task-specific and global settings.
-	 *
-	 * Use this for CLI flags like --yolo that should apply for the current
-	 * process lifetime only, without modifying the user's saved settings.
-	 */
 	setSessionOverride<K extends keyof Settings>(key: K, value: Settings[K]): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		this.sessionOverrideCache[key] = value
 	}
 
-	/**
-	 * Return the current session-override cache (in-memory only).
-	 */
+	/** Return the current session-override cache (in-memory only). (from main) */
 	getSessionOverrideCache(): Partial<Settings> {
 		return this.sessionOverrideCache
 	}
 
-	/**
-	 * Replace the session-override cache wholesale.
-	 * In-memory only, never persisted to disk.
-	 */
+	/** Replace the session-override cache wholesale. In-memory only, never persisted. (from main) */
 	setSessionOverrideCache(overrides: Partial<Settings>): void {
 		this.sessionOverrideCache = { ...overrides }
 	}
 
-	/**
-	 * Set models cache for a specific provider (in-memory only, not persisted)
-	 */
-	setModelsCache(
-		provider:
-			| "dirac"
-			| "openRouter"
-			| "groq"
-			| "baseten"
-			| "huggingFace"
-			| "requesty"
-			| "huaweiCloudMaas"
-			| "aihubmix"
-			| "liteLlm"
-			| "vercel"
-			| "github-copilot",
-		models: Record<string, ModelInfo>,
-	): void {
-		const cacheKey = `${provider}Models` as keyof typeof this.modelInfoCache
+	setModelsCache(provider: string, models: Record<string, ModelInfo>): void {
+		const cacheKey = `${provider}Models`
 		this.modelInfoCache[cacheKey] = { data: models, timestamp: Date.now() }
 	}
 
-	getModelsCache(
-		provider:
-			| "dirac"
-			| "openRouter"
-			| "groq"
-			| "baseten"
-			| "huggingFace"
-			| "requesty"
-			| "huaweiCloudMaas"
-			| "aihubmix"
-			| "liteLlm"
-			| "vercel"
-			| "github-copilot",
-	): Record<string, ModelInfo> | null {
-		const cacheKey = `${provider}Models` as keyof typeof this.modelInfoCache
+	getModelsCache(provider: string): Record<string, ModelInfo> | null {
+		const cacheKey = `${provider}Models`
 		const cached = this.modelInfoCache[cacheKey]
-
-		if (!cached) {
-			return null
-		}
-
-		// Check if cache has expired
+		if (!cached) return null
 		if (Date.now() - cached.timestamp > this.MODEL_CACHE_TTL_MS) {
 			this.modelInfoCache[cacheKey] = null
 			return null
 		}
-
 		return cached.data
 	}
 
-	/**
-	 * Get model info by provider and model ID (from in-memory cache)
-	 */
 	getModelInfo(
-		provider:
-			| "openRouter"
-			| "groq"
-			| "baseten"
-			| "huggingFace"
-			| "requesty"
-			| "huaweiCloudMaas"
-			| "aihubmix"
-			| "liteLlm",
+		provider: "openRouter" | "groq" | "baseten" | "huggingFace" | "requesty" | "huaweiCloudMaas" | "aihubmix" | "liteLlm",
 		modelId: string,
 	): ModelInfo | undefined {
-		const cacheKey = `${provider}Models` as keyof typeof this.modelInfoCache
+		const cacheKey = `${provider}Models`
 		const cached = this.modelInfoCache[cacheKey]
-
-		if (!cached) {
-			return undefined
-		}
-
-		// Check if cache has expired
+		if (!cached) return undefined
 		if (Date.now() - cached.timestamp > this.MODEL_CACHE_TTL_MS) {
 			this.modelInfoCache[cacheKey] = null
 			return undefined
 		}
-
 		return cached.data[modelId]
 	}
 
-	/**
-	 * Initialize chokidar watcher for the taskHistory.json file
-	 * Updates in-memory cache on external changes without writing back to disk.
-	 */
-	private async setupTaskHistoryWatcher(): Promise<void> {
-		try {
-			const historyFile = await getTaskHistoryStateFilePath()
-
-			// Close any existing watcher before creating a new one
-			if (this.taskHistoryWatcher) {
-				await this.taskHistoryWatcher.close()
-				this.taskHistoryWatcher = null
-			}
-
-			this.taskHistoryWatcher = chokidar.watch(historyFile, {
-				persistent: true,
-				ignoreInitial: true,
-				atomic: true,
-				awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
-			})
-
-			const syncTaskHistoryFromDisk = async () => {
-				try {
-					if (!this.isInitialized) {
-						return
-					}
-					const onDisk = await readTaskHistoryFromState()
-					const cached = this.globalStateCache["taskHistory"]
-					if (JSON.stringify(onDisk) !== JSON.stringify(cached)) {
-						this.globalStateCache["taskHistory"] = onDisk
-						await this.onSyncExternalChange?.()
-					}
-				} catch (err) {
-					Logger.error("[StateManager] Failed to reload task history on change:", err)
-				}
-			}
-
-			this.taskHistoryWatcher
-				.on("add", () => syncTaskHistoryFromDisk())
-				.on("change", () => syncTaskHistoryFromDisk())
-				.on("unlink", async () => {
-					this.globalStateCache["taskHistory"] = []
-					await this.onSyncExternalChange?.()
-				})
-				.on("error", (error) => Logger.error("[StateManager] TaskHistory watcher error:", error))
-		} catch (err) {
-			Logger.error("[StateManager] Failed to set up taskHistory watcher:", err)
-		}
-	}
-
-	/**
-	 * Convenience method for getting API configuration
-	 * Ensures cache is initialized if not already done
-	 */
 	getApiConfiguration(): ApiConfiguration {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-
-		// Construct API configuration from cached component keys
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		return this.constructApiConfigurationFromCache()
 	}
 
-	/**
-	 * Convenience method for setting API configuration
-	 * Automatically categorizes keys based on STATE_DEFINITION and SecretKeys
-	 */
 	setApiConfiguration(apiConfiguration: ApiConfiguration): void {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 
-		// Automatically categorize the API configuration keys
 		const { settingsUpdates, secretsUpdates } = Object.entries(apiConfiguration).reduce(
 			(acc, [key, value]) => {
-				if (key === undefined) {
-					return acc
-				}
-
+				if (key === undefined) return acc
 				if (isSecretKey(key)) {
-					// This is a secret key
-					acc.secretsUpdates[key as keyof Secrets] = value as any
+					(acc.secretsUpdates as Record<string, string | undefined>)[key] = value as string | undefined
 				} else if (isSettingsKey(key)) {
-					// This is a settings key
-					acc.settingsUpdates[key as keyof Settings] = value as any
+					(acc.settingsUpdates as Record<string, unknown>)[key] = value
 				}
-
 				return acc
 			},
 			{ settingsUpdates: {} as Partial<Settings>, secretsUpdates: {} as Partial<Secrets> },
 		)
 
-		// Batch update settings (stored in global state)
-		if (Object.keys(settingsUpdates).length > 0) {
-			this.setGlobalStateBatch(settingsUpdates)
-		}
-
-		// Batch update secrets
-		if (Object.keys(secretsUpdates).length > 0) {
-			this.setSecretsBatch(secretsUpdates)
-		}
+		if (Object.keys(settingsUpdates).length > 0) this.setGlobalStateBatch(settingsUpdates)
+		if (Object.keys(secretsUpdates).length > 0) this.setSecretsBatch(secretsUpdates)
 	}
 
-	/**
-	 * Get method for global settings keys - reads from in-memory cache
-	 * Precedence: session override > task settings > global settings
-	 */
 	getGlobalSettingsKey<K extends keyof Settings>(key: K): Settings[K] {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-		if (this.sessionOverrideCache[key] !== undefined) {
-			return this.sessionOverrideCache[key] as Settings[K]
-		}
-		if (this.taskStateCache[key] !== undefined) {
-			return this.taskStateCache[key]
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		// Precedence: session override > task settings > global settings
+		if (this.sessionOverrideCache[key] !== undefined) return this.sessionOverrideCache[key] as Settings[K]
+		if (this.taskStateCache[key] !== undefined) return this.taskStateCache[key]
 		return this.globalStateCache[key]
 	}
 
-	/**
-	 * Get method for global state keys - reads from in-memory cache
-	 */
 	getGlobalStateKey<K extends keyof GlobalState>(key: K): GlobalState[K] {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		return this.globalStateCache[key]
 	}
 
-	/**
-	 * Get method for secret keys - reads from in-memory cache
-	 */
 	getSecretKey<K extends keyof Secrets>(key: K): Secrets[K] {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
 		return this.secretsCache[key]
 	}
 
-	/**
-	 * Get method for workspace state keys - reads from in-memory cache
-	 */
-	getWorkspaceStateKey<K extends keyof LocalState>(key: K): LocalState[K] {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-		return this.workspaceStateCache[key]
+	getWorkspaceStateKey<K extends keyof LocalState>(key: K): LocalState[K]
+	getWorkspaceStateKey(key: string): unknown
+	getWorkspaceStateKey(key: string): unknown {
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		return (this.workspaceStateCache as Record<string, unknown>)[key]
 	}
 
-	/**
-	 * Reinitialize the state manager by clearing all state and reloading from disk
-	 * Used for error recovery when write operations fail
-	 */
 	async reInitialize(currentTaskId?: string): Promise<void> {
-		if (this.persistenceTimeout) {
-			await this.persistPendingState()
+		if (this.persistence.hasPendingTimeout()) {
+			await this.persistence.persistPendingState()
 		}
-		// Clear all cached data and pending state
-		this.dispose()
-
-		// Reinitialize from the same storage context
+		await this.dispose()
 		await StateManager.initialize(this.storage)
-
-		// If there's an active task, reload its settings
-		if (currentTaskId) {
-			await this.loadTaskSettings(currentTaskId)
-		}
+		if (currentTaskId) await this.loadTaskSettings(currentTaskId)
 	}
 
-	/**
-	 * Dispose of the state manager
-	 */
-	private dispose(): void {
+	private async dispose(): Promise<void> {
 		this.sessionOverrideCache = {}
-
 		this.isInitialized = false
+		await this.persistence.dispose()
 	}
 
-	/**
-	 * Private method to persist all pending state changes
-	 * Returns early if nothing is pending
-	 */
-	private async persistPendingState(): Promise<void> {
-		// Early return if nothing to persist
-		if (
-			this.pendingGlobalState.size === 0 &&
-			this.pendingSecrets.size === 0 &&
-			this.pendingWorkspaceState.size === 0 &&
-			this.pendingTaskState.size === 0
-		) {
-			return
-		}
-
-		// Execute all persistence operations in parallel
-		await Promise.all([
-			this.persistGlobalStateBatch(this.pendingGlobalState),
-			this.persistSecretsBatch(this.pendingSecrets),
-			this.persistWorkspaceStateBatch(this.pendingWorkspaceState),
-			this.persistTaskStateBatch(this.pendingTaskState),
-		])
-
-		// Clear pending sets after successful persistence
-		this.pendingGlobalState.clear()
-		this.pendingSecrets.clear()
-		this.pendingWorkspaceState.clear()
-		this.pendingTaskState.clear()
+	async flushPendingState(): Promise<void> {
+		await this.persistence.flushPendingState()
 	}
 
-	/**
-	 * Flush all pending state changes immediately to disk
-	 * Bypasses the debounced persistence and forces immediate writes
-	 */
-	public async flushPendingState(): Promise<void> {
-		// Cancel any pending timeout
-		if (this.persistenceTimeout) {
-			clearTimeout(this.persistenceTimeout)
-			this.persistenceTimeout = null
-		}
-
-		// Execute persistence immediately
-		await this.persistPendingState()
+	getAllGlobalStateEntries(): Record<string, unknown> {
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		return { ...this.globalStateCache }
 	}
 
-	/**
-	 * Schedule debounced persistence - simple timeout-based persistence
-	 */
-	private scheduleDebouncedPersistence(): void {
-		// Clear existing timeout if one is pending
-		if (this.persistenceTimeout) {
-			clearTimeout(this.persistenceTimeout)
-		}
-
-		// Schedule a new timeout to persist pending changes
-		this.persistenceTimeout = setTimeout(async () => {
-			try {
-				await this.persistPendingState()
-				this.persistenceTimeout = null
-			} catch (error) {
-				Logger.error("[StateManager] Failed to persist pending changes:", error)
-				this.persistenceTimeout = null
-
-				// Call persistence error callback for error recovery
-				this.onPersistenceError?.({ error: error })
-			}
-		}, this.PERSISTENCE_DELAY_MS)
+	getAllWorkspaceStateEntries(): Record<string, unknown> {
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+		return { ...this.workspaceStateCache }
 	}
 
-	/**
-	 * Persist global state keys to the file-backed store.
-	 * Uses setBatch for efficiency (single disk write).
-	 */
-	private async persistGlobalStateBatch(keys: Set<GlobalStateAndSettingsKey>): Promise<void> {
-		// Separate taskHistory (goes to its own file) from regular global state
-		const regularEntries: Record<string, any> = {}
-
-		for (const key of keys) {
-			if (key === "taskHistory") {
-				// Route task history persistence to its own file
-				await writeTaskHistoryToState(this.globalStateCache[key])
-			} else {
-				regularEntries[key] = this.globalStateCache[key]
-			}
-		}
-
-		// Batch write all regular keys in a single disk operation
-		if (Object.keys(regularEntries).length > 0) {
-			this.storage.globalStateBackingStore.setBatch(regularEntries)
-		}
-	}
-
-	/**
-	 * Private method to batch persist task state keys with a single write operation
-	 */
-	private async persistTaskStateBatch(pendingTaskStates: Map<string, Set<SettingsKey>>): Promise<void> {
-		if (pendingTaskStates.size === 0) {
-			return
-		}
-		// Persist each task's settings
-		await Promise.all(
-			Array.from(pendingTaskStates.entries()).map(([taskId, keys]) => {
-				if (keys.size === 0) {
-					return Promise.resolve()
-				}
-				const settingsToWrite: Record<string, any> = {}
-				for (const key of keys) {
-					const value = this.taskStateCache[key]
-					if (value !== undefined) {
-						settingsToWrite[key] = value
-					}
-				}
-				return writeTaskSettingsToStorage(taskId, settingsToWrite)
-			}),
-		)
-	}
-
-	/**
-	 * Persist secrets to the file-backed store.
-	 * Uses setBatch for efficiency (single disk write).
-	 */
-	private async persistSecretsBatch(keys: Set<SecretKey>): Promise<void> {
-		const entries: Record<string, string | undefined> = {}
-		for (const key of keys) {
-			const value = this.secretsCache[key]
-			entries[key] = value || undefined // Convert empty strings to undefined (delete)
-		}
-		this.storage.secrets.setBatch(entries)
-	}
-
-	/**
-	 * Persist workspace state to the file-backed store.
-	 * Uses setBatch for efficiency (single disk write).
-	 */
-	private async persistWorkspaceStateBatch(keys: Set<LocalStateKey>): Promise<void> {
-		const entries: Record<string, any> = {}
-		for (const key of keys) {
-			entries[key] = this.workspaceStateCache[key]
-		}
-		this.storage.workspaceState.setBatch(entries)
-	}
-
-	/**
-	 * Private method to populate cache with all extension state without triggering persistence
-	 * Used during initialization
-	 */
 	private populateCache(globalState: GlobalState, secrets: Secrets, workspaceState: LocalState): void {
 		Object.assign(this.globalStateCache, globalState)
 		Object.assign(this.secretsCache, secrets)
 		Object.assign(this.workspaceStateCache, workspaceState)
 	}
 
-	/**
-	 * Helper to get a setting value with override support
-	 * Precedence: remote config > session override > task settings > global settings
-	 */
 	private getSettingWithOverride<K extends keyof Settings>(key: K): Settings[K] {
-		if (this.sessionOverrideCache[key] !== undefined) {
-			return this.sessionOverrideCache[key]
-		}
+		// Precedence: session override > task settings > global settings
+		if (this.sessionOverrideCache[key] !== undefined) return this.sessionOverrideCache[key]
 		const taskValue = this.taskStateCache[key]
-		if (taskValue !== undefined) {
-			return taskValue
-		}
+		if (taskValue !== undefined) return taskValue
 		return this.globalStateCache[key]
 	}
 
-	/**
-	 * Helper to get a secret value
-	 */
 	private getSecret<K extends keyof Secrets>(key: K): Secrets[K] {
 		return this.secretsCache[key]
 	}
 
-	/**
-	 * Construct API configuration from cached component keys
-	 */
 	private constructApiConfigurationFromCache(): ApiConfiguration {
 		// Build secrets object from persistent storage
 		const secrets = Object.fromEntries(SecretKeys.map((key) => [key, this.getSecret(key)])) as Secrets
@@ -883,40 +404,16 @@ export class StateManager {
 		}
 
 		// Build API handler settings object with task override support
-		const settings = Object.fromEntries(ApiHandlerSettingsKeys.map((key) => [key, this.getSettingWithOverride(key)]))
+		const settings: Partial<Settings> = Object.fromEntries(ApiHandlerSettingsKeys.map((key) => [key, this.getSettingWithOverride(key)]))
 
 		// Merge environment variables as fallback for settings (only fills undefined values)
 		const envSettings = getSettingsFromEnv()
 		for (const [key, value] of Object.entries(envSettings)) {
-			if (value && (key in settings) && settings[key as keyof typeof settings] === undefined) {
-				settings[key as keyof typeof settings] = value as any
+			if (value && isSettingsKey(key) && settings[key] === undefined) {
+				(settings as Record<string, unknown>)[key] = value
 			}
 		}
 
-
-		return {
-			...secrets,
-			...settings,
-		} satisfies ApiConfiguration
-	}
-
-	/**
-	 * Get all global state entries (for debugging/inspection)
-	 */
-	public getAllGlobalStateEntries(): Record<string, unknown> {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-		return { ...this.globalStateCache }
-	}
-
-	/**
-	 * Get all workspace state entries (for debugging/inspection)
-	 */
-	public getAllWorkspaceStateEntries(): Record<string, unknown> {
-		if (!this.isInitialized) {
-			throw new Error(STATE_MANAGER_NOT_INITIALIZED)
-		}
-		return { ...this.workspaceStateCache }
+		return { ...secrets, ...settings } satisfies ApiConfiguration
 	}
 }

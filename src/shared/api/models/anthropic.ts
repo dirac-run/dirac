@@ -8,6 +8,12 @@ export const ANTHROPIC_FAST_MODE_SUFFIX = ":fast"
 export const ANTHROPIC_MIN_THINKING_BUDGET = 1_024
 export const ANTHROPIC_MAX_THINKING_BUDGET = 6_000
 
+// Anthropic beta feature flags — versioned strings that change with API updates.
+// Centralized here so all Anthropic-compatible providers (anthropic, bedrock, vertex) reference one source.
+export const ANTHROPIC_BETAS = {
+	CONTEXT_1M: "context-1m-2025-08-07",
+} as const
+
 export type AnthropicModelId = keyof typeof anthropicModels
 
 export const anthropicDefaultModelId: AnthropicModelId = "claude-sonnet-4-6"

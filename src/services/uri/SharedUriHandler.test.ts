@@ -8,7 +8,7 @@ import { SharedUriHandler } from "./SharedUriHandler"
 
 describe("SharedUriHandler", () => {
     let sandbox: sinon.SinonSandbox
-    let handleOpenRouterCallbackStub: sinon.SinonStub
+    let completeOpenRouterAuthStub: sinon.SinonStub
     let handleAuthCallbackStub: sinon.SinonStub
 
     beforeEach(async () => {
@@ -32,11 +32,11 @@ describe("SharedUriHandler", () => {
 
         await ErrorService.initialize()
 
-        handleOpenRouterCallbackStub = sandbox.stub().resolves()
+        completeOpenRouterAuthStub = sandbox.stub().resolves()
         handleAuthCallbackStub = sandbox.stub().resolves()
         const mockDiracWebviewProvider = {
             controller: {
-                handleOpenRouterCallback: handleOpenRouterCallbackStub,
+                completeOpenRouterAuth: completeOpenRouterAuthStub,
                 handleAuthCallback: handleAuthCallbackStub,
             },
         } as any
@@ -53,14 +53,14 @@ describe("SharedUriHandler", () => {
                 const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
 
                 expect(result).to.be.true
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test123")
             })
 
             it("should return false when OpenRouter code is missing", async () => {
                 const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter")
 
                 expect(result).to.be.false
-                expect(handleOpenRouterCallbackStub.called).to.be.false
+                expect(completeOpenRouterAuthStub.called).to.be.false
             })
 
             it("should handle URL with plus signs in code parameter", async () => {
@@ -68,7 +68,7 @@ describe("SharedUriHandler", () => {
 
                 expect(result).to.be.true
                 // Plus signs in query params are preserved
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test+123+abc")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test+123+abc")
             })
         })
 
@@ -87,13 +87,13 @@ describe("SharedUriHandler", () => {
 
                 expect(result).to.be.false
                 expect(handleAuthCallbackStub.called).to.be.false
-                expect(handleOpenRouterCallbackStub.called).to.be.false
+                expect(completeOpenRouterAuthStub.called).to.be.false
             })
         })
 
         describe("Error handling", () => {
             it("should catch and log errors from controller methods", async () => {
-                handleOpenRouterCallbackStub.rejects(new Error("Controller error"))
+                completeOpenRouterAuthStub.rejects(new Error("Controller error"))
 
                 const result = await SharedUriHandler.handleUri("vscode://dirac.dirac/openrouter?code=test123")
 
@@ -105,7 +105,7 @@ describe("SharedUriHandler", () => {
 
                 expect(result).to.be.false
                 expect(handleAuthCallbackStub.called).to.be.false
-                expect(handleOpenRouterCallbackStub.called).to.be.false
+                expect(completeOpenRouterAuthStub.called).to.be.false
             })
         })
 
@@ -116,7 +116,7 @@ describe("SharedUriHandler", () => {
                 )
 
                 expect(result).to.be.true
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test123")
             })
 
             it("should handle URL-encoded parameters", async () => {
@@ -126,7 +126,7 @@ describe("SharedUriHandler", () => {
 
                 expect(result).to.be.true
                 // URLSearchParams should decode %20 to spaces
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test 123")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test 123")
             })
 
             it("should handle empty query string", async () => {
@@ -134,7 +134,7 @@ describe("SharedUriHandler", () => {
 
                 expect(result).to.be.false
                 expect(handleAuthCallbackStub.called).to.be.false
-                expect(handleOpenRouterCallbackStub.called).to.be.false
+                expect(completeOpenRouterAuthStub.called).to.be.false
             })
         })
 
@@ -143,14 +143,14 @@ describe("SharedUriHandler", () => {
                 const result = await SharedUriHandler.handleUri("http://localhost:3000/openrouter?code=test123")
 
                 expect(result).to.be.true
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test123")
             })
 
             it("should handle HTTPS scheme URIs", async () => {
                 const result = await SharedUriHandler.handleUri("https://example.com/openrouter?code=test123")
 
                 expect(result).to.be.true
-                sinon.assert.calledOnceWithExactly(handleOpenRouterCallbackStub, "test123")
+                sinon.assert.calledOnceWithExactly(completeOpenRouterAuthStub, "test123")
             })
         })
     })

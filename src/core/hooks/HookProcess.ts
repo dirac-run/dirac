@@ -1,79 +1,12 @@
 import { ChildProcess, spawn } from "child_process"
 import { EventEmitter } from "events"
 import { Logger } from "@/shared/services/Logger"
-import { resolveWindowsPowerShellExecutable } from "@/utils/powershell"
+import { getHookLaunchConfig, resetHookLaunchConfigCacheForTesting } from "./HookLaunchConfig"
+import { HookOutputParser } from "./HookOutputParser"
 import { HookProcessRegistry } from "./HookProcessRegistry"
-import { escapeShellPath } from "./shell-escape"
 
-// Maximum total output size (stdout + stderr combined)
-const MAX_HOOK_OUTPUT_SIZE = 1024 * 1024 // 1MB
-
-interface HookLaunchConfig {
-	command: string
-	args: string[]
-	shell: boolean
-	detached: boolean
-}
-
-const WINDOWS_HOOK_LAUNCHER_CACHE_TTL_MS = 5 * 60 * 1000
-
-let resolvedHookLauncherCommandPromise: Promise<string> | null = null
-let resolvedHookLauncherCommandExpiresAt = 0
-
-export function resetHookLaunchConfigCacheForTesting(): void {
-	resolvedHookLauncherCommandPromise = null
-	resolvedHookLauncherCommandExpiresAt = 0
-}
-
-function shouldRefreshWindowsLauncherCache(now: number): boolean {
-	return !resolvedHookLauncherCommandPromise || now >= resolvedHookLauncherCommandExpiresAt
-}
-
-/**
- * Returns the process launch configuration for a hook script.
- *
- * On Windows, the PowerShell executable lookup is cached briefly so concurrent
- * hook launches share the same in-flight resolution and avoid repeated process
- * spawning.
- *
- * @param scriptPath Path to the hook script to launch.
- * @param resolvePowerShellExecutable Windows only. Called at most once per
- *   `WINDOWS_HOOK_LAUNCHER_CACHE_TTL_MS` window; subsequent concurrent or cached
- *   calls reuse the shared result and ignore this parameter.
- */
-export async function getHookLaunchConfig(
-	scriptPath: string,
-	resolvePowerShellExecutable: () => Promise<string> = resolveWindowsPowerShellExecutable,
-): Promise<HookLaunchConfig> {
-	if (process.platform === "win32") {
-		const now = Date.now()
-
-		if (shouldRefreshWindowsLauncherCache(now)) {
-			resolvedHookLauncherCommandPromise = resolvePowerShellExecutable().catch((error) => {
-				resolvedHookLauncherCommandPromise = null
-				resolvedHookLauncherCommandExpiresAt = 0
-				throw error
-			})
-			resolvedHookLauncherCommandExpiresAt = now + WINDOWS_HOOK_LAUNCHER_CACHE_TTL_MS
-		}
-
-		const powerShellExecutable = await resolvedHookLauncherCommandPromise!
-		return {
-			command: powerShellExecutable,
-			args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
-			shell: false,
-			detached: false,
-		}
-	}
-
-	const escapedScriptPath = escapeShellPath(scriptPath)
-	return {
-		command: escapedScriptPath,
-		args: [],
-		shell: true,
-		detached: true,
-	}
-}
+// Re-export so existing imports from HookProcess keep working.
+export { getHookLaunchConfig, resetHookLaunchConfigCacheForTesting }
 
 /**
  * HookProcess manages the execution of a hook script with streaming output capabilities.
@@ -88,21 +21,11 @@ export async function getHookLaunchConfig(
  */
 export class HookProcess extends EventEmitter {
 	private childProcess: ChildProcess | null = null
-	private buffer = ""
-	private fullOutput = ""
-	private lastRetrievedIndex = 0
 	private exitCode: number | null = null
 	private isCompleted = false
 	private timeoutHandle: NodeJS.Timeout | null = null // 30-second execution timeout
 
-	// Separate buffers for stdout and stderr
-	private stdoutBuffer = ""
-	private stderrBuffer = ""
-
-	// Output size tracking
-	private stdoutSize = 0
-	private stderrSize = 0
-	private outputTruncated = false
+	private readonly outputParser: HookOutputParser
 
 	// Track registration state to prevent leaks and ensure cleanup
 	private isRegistered = false
@@ -114,6 +37,7 @@ export class HookProcess extends EventEmitter {
 		private readonly cwd?: string,
 	) {
 		super()
+		this.outputParser = new HookOutputParser(this.emit.bind(this))
 	}
 
 	/**
@@ -198,8 +122,7 @@ export class HookProcess extends EventEmitter {
 						// Handle stdout
 						this.childProcess.stdout?.on("data", (data) => {
 							const output = data.toString()
-							this.stdoutBuffer += output
-							this.handleOutput(output, didEmitEmptyLine, "stdout")
+							this.outputParser.parseOutput(output, "stdout")
 							if (!didEmitEmptyLine && output) {
 								this.emit("line", "", "stdout") // Signal start of output
 								didEmitEmptyLine = true
@@ -209,8 +132,7 @@ export class HookProcess extends EventEmitter {
 						// Handle stderr
 						this.childProcess.stderr?.on("data", (data) => {
 							const output = data.toString()
-							this.stderrBuffer += output
-							this.handleOutput(output, didEmitEmptyLine, "stderr")
+							this.outputParser.parseOutput(output, "stderr")
 							if (!didEmitEmptyLine && output) {
 								this.emit("line", "", "stderr") // Signal start of output
 								didEmitEmptyLine = true
@@ -221,7 +143,7 @@ export class HookProcess extends EventEmitter {
 						this.childProcess.on("close", (code, signal) => {
 							this.exitCode = code
 							this.isCompleted = true
-							this.emitRemainingBuffer()
+							this.outputParser.emitRemainingBuffer()
 
 							// Unregister from active processes
 							this.safeUnregister()
@@ -297,89 +219,24 @@ export class HookProcess extends EventEmitter {
 	}
 
 	/**
-	 * Handle output data and emit line events.
-	 * Enforces 1MB total output limit to prevent memory issues.
-	 */
-	private handleOutput(data: string, _didEmitEmptyLine: boolean, stream: "stdout" | "stderr"): void {
-		// Check output size limit
-		const dataSize = Buffer.byteLength(data)
-		const currentTotalSize = this.stdoutSize + this.stderrSize
-
-		if (currentTotalSize + dataSize > MAX_HOOK_OUTPUT_SIZE) {
-			if (!this.outputTruncated) {
-				this.outputTruncated = true
-				const truncationMsg = "\n\n[Output truncated: exceeded 1MB limit]"
-				this.emit("line", truncationMsg, stream)
-				Logger.warn(`[HookProcess] Output exceeded ${MAX_HOOK_OUTPUT_SIZE} bytes, truncating`)
-			}
-			return // Drop further output
-		}
-
-		// Track size by stream
-		if (stream === "stdout") {
-			this.stdoutSize += dataSize
-		} else {
-			this.stderrSize += dataSize
-		}
-
-		// Store full output
-		this.fullOutput += data
-
-		// Emit lines immediately
-		this.emitLines(data, stream)
-	}
-
-	/**
-	 * Emit complete lines from buffered output
-	 */
-	private emitLines(chunk: string, stream: "stdout" | "stderr"): void {
-		this.buffer += chunk
-		let lineEndIndex
-		while ((lineEndIndex = this.buffer.indexOf("\n")) !== -1) {
-			const line = this.buffer.slice(0, lineEndIndex).trimEnd()
-			this.emit("line", line, stream)
-			this.buffer = this.buffer.slice(lineEndIndex + 1)
-		}
-		this.lastRetrievedIndex = this.fullOutput.length - this.buffer.length
-	}
-
-	/**
-	 * Emit any remaining buffered output when process completes
-	 */
-	private emitRemainingBuffer(): void {
-		if (this.buffer) {
-			const remainingBuffer = this.buffer.trimEnd()
-			if (remainingBuffer) {
-				// Determine which stream this came from based on content
-				// This is a fallback; in practice, line events should capture most output
-				this.emit("line", remainingBuffer, "stdout")
-			}
-			this.buffer = ""
-			this.lastRetrievedIndex = this.fullOutput.length
-		}
-	}
-
-	/**
 	 * Get unretrieved output (for compatibility with terminal process interface)
 	 */
 	getUnretrievedOutput(): string {
-		const unretrieved = this.fullOutput.slice(this.lastRetrievedIndex)
-		this.lastRetrievedIndex = this.fullOutput.length
-		return unretrieved.trimEnd()
+		return this.outputParser.getUnretrievedOutput()
 	}
 
 	/**
 	 * Get the complete stdout buffer (for JSON parsing)
 	 */
 	getStdout(): string {
-		return this.stdoutBuffer
+		return this.outputParser.getStdout()
 	}
 
 	/**
 	 * Get the complete stderr buffer (for error reporting)
 	 */
 	getStderr(): string {
-		return this.stderrBuffer
+		return this.outputParser.getStderr()
 	}
 
 	/**

@@ -29,8 +29,8 @@ class RenameSymbolToolHandler {
         return this.tool.processCall(block.params, env)
     }
 
-    async handlePartialBlock(block: any, uiHelpers: any) {
-        return (this.tool as any).handlePartialBlock?.(block, uiHelpers)
+    async bufferPartialToolUse(block: any, uiHelpers: any) {
+        return (this.tool as any).bufferPartialToolUse?.(block, uiHelpers)
     }
 }
 

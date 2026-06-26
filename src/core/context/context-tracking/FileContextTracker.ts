@@ -1,3 +1,4 @@
+import type { WatcherFactory } from "@core/ignore/DiracIgnoreController"
 import { getTaskMetadata, readTaskHistoryFromState, saveTaskMetadata } from "@core/storage/disk"
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import chokidar, { FSWatcher } from "chokidar"
@@ -31,7 +32,7 @@ export class FileContextTracker {
 	private recentlyModifiedFiles = new Set<string>()
 	private recentlyEditedByDirac = new Set<string>()
 
-	constructor(controller: Controller, taskId: string) {
+	constructor(controller: Controller, taskId: string, private watcherFactory: WatcherFactory = chokidar.watch) {
 		this.controller = controller
 		this.taskId = taskId
 	}
@@ -53,7 +54,7 @@ export class FileContextTracker {
 
 		// Create a chokidar file watcher for this specific file
 		const resolvedFilePath = path.resolve(cwd, filePath)
-		const watcher = chokidar.watch(resolvedFilePath, {
+		const watcher = this.watcherFactory(resolvedFilePath, {
 			persistent: true, // Keep process alive while watching
 			ignoreInitial: true, // Don't emit events for existing files on startup
 			atomic: true, // Handle atomic writes (editors that use temp files)
@@ -236,9 +237,7 @@ export class FileContextTracker {
 	async storePendingFileContextWarning(files: string[]): Promise<void> {
 		try {
 			const key = `pendingFileContextWarning_${this.taskId}`
-			// NOTE: Using 'as any' because dynamic keys like pendingFileContextWarning_${taskId}
-			// are legitimate workspace state keys but don't fit the strict LocalStateKey type system
-			this.controller.stateManager.setWorkspaceState(key as any, files)
+			this.controller.stateManager.setWorkspaceState(key, files)
 		} catch (error) {
 			Logger.error("Error storing pending file context warning:", error)
 		}
@@ -250,9 +249,7 @@ export class FileContextTracker {
 	async retrievePendingFileContextWarning(): Promise<string[] | undefined> {
 		try {
 			const key = `pendingFileContextWarning_${this.taskId}`
-			// NOTE: Using 'as any' because dynamic keys like pendingFileContextWarning_${taskId}
-			// are legitimate workspace state keys but don't fit the strict LocalStateKey type system
-			const files = this.controller.stateManager.getWorkspaceStateKey(key as any) as string[]
+			const files = this.controller.stateManager.getWorkspaceStateKey(key) as string[] | undefined
 			return files
 		} catch (error) {
 			Logger.error("Error retrieving pending file context warning:", error)
@@ -267,9 +264,7 @@ export class FileContextTracker {
 		try {
 			const files = await this.retrievePendingFileContextWarning()
 			if (files) {
-				// NOTE: Using 'as any' because dynamic keys like pendingFileContextWarning_${taskId}
-				// are legitimate workspace state keys but don't fit the strict LocalStateKey type system
-				this.controller.stateManager.setWorkspaceState(`pendingFileContextWarning_${this.taskId}` as any, undefined)
+				this.controller.stateManager.setWorkspaceState(`pendingFileContextWarning_${this.taskId}`, undefined)
 				return files
 			}
 		} catch (error) {
@@ -300,9 +295,7 @@ export class FileContextTracker {
 
 			if (orphanedPendingContextTasks.length > 0) {
 				for (const key of orphanedPendingContextTasks) {
-					// NOTE: Using 'as any' because dynamic keys like pendingFileContextWarning_${taskId}
-					// are legitimate workspace state keys but don't fit the strict LocalStateKey type system
-					await stateManager.setWorkspaceState(key as any, undefined)
+					await stateManager.setWorkspaceState(key, undefined)
 				}
 			}
 

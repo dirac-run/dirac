@@ -2,6 +2,7 @@ import { StateManager } from "@/core/storage/StateManager"
 import { fetch } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import { z } from "zod"
+import { jsonHeaders } from "@shared/net"
 
 const CLIENT_ID = "Iv1.b507a08c87ecfe98"
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -81,7 +82,7 @@ export class GithubCopilotAuthManager {
 			method: "POST",
 			headers: {
 				Accept: "application/json",
-				"Content-Type": "application/json",
+				...jsonHeaders(),
 			},
 			body: JSON.stringify({
 				client_id: CLIENT_ID,
@@ -103,7 +104,7 @@ export class GithubCopilotAuthManager {
 				method: "POST",
 				headers: {
 					Accept: "application/json",
-					"Content-Type": "application/json",
+					...jsonHeaders(),
 				},
 				body: JSON.stringify({
 					client_id: CLIENT_ID,

@@ -4,8 +4,8 @@ import { DiracIcon } from "@/shared/icons"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 import { SurfaceType } from "../../interfaces/SurfaceType"
 import { CardStatus } from "@/shared/ExtensionMessage"
-import { formatResponse } from "../../../../prompts/responses"
-import { TOOL_EXAMPLES } from "../../../../prompts/tool-examples"
+import { formatResponse } from "@core/formatResponse"
+import { TOOL_EXAMPLES } from "@core/tool-examples"
 
 export interface GetFunctionArgs {
     paths: string[]
@@ -69,7 +69,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
         const includeAnchors = args.include_anchors === true
 
         if (paths.length === 0 || functionNames.length === 0) {
-            return this.handleMissingParameters(paths, env)
+            return this.reportMissingParameters(paths, env)
         }
 
         const results: string[] = []
@@ -77,7 +77,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
         const functionHashes = env.context.task.get<Record<string, string>>("functionHashes") || {}
 
         for (const relPath of paths) {
-            const result = await this.processFile(relPath, functionNames, functionHashes, env, includeAnchors)
+            const result = await this.extractFunctionsFromFile(relPath, functionNames, functionHashes, env, includeAnchors)
             results.push(result.content)
             for (const name of result.foundNames) {
                 foundNamesTotal.add(name)
@@ -95,7 +95,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
         return this.formatFinalResult(results, functionNames, foundNamesTotal)
     }
 
-    private async handleMissingParameters(paths: string[], env: IToolEnvironment): Promise<string> {
+    private async reportMissingParameters(paths: string[], env: IToolEnvironment): Promise<string> {
         this.updateMistakeCount(env, false)
         const paramName = paths.length === 0 ? "paths" : "function_names"
         const example = TOOL_EXAMPLES[DiracDefaultTool.GET_FUNCTION]
@@ -107,7 +107,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
         return formatResponse.toolError(formatResponse.missingToolParameterError(paramName, example))
     }
 
-    private async processFile(
+    private async extractFunctionsFromFile(
         relPath: string,
         functionNames: string[],
         functionHashes: Record<string, string>,
@@ -129,7 +129,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
             const result = await env.ast.getFunctions(absolutePath, displayPath, functionNames, includeAnchors)
 
             if (result) {
-                const processedFuncs = this.processFunctionHashes(relPath, result.formattedContent, functionHashes, includeAnchors)
+                const processedFuncs = this.computeFunctionHashes(relPath, result.formattedContent, functionHashes, includeAnchors)
                 const bodyLines = result.foundNames.map((name) => `✓ ${name}`)
                 await card?.update({
                     header: `Extracted ${functionNames[0]}${functionNames.length > 1 ? ` (+${functionNames.length - 1} more)` : ""} from ${displayPath}`,
@@ -156,7 +156,7 @@ export class GetFunctionTool implements IDiracTool<GetFunctionArgs> {
         }
     }
 
-    private processFunctionHashes(relPath: string, formattedContent: string, functionHashes: Record<string, string>, includeAnchors: boolean): string[] {
+    private computeFunctionHashes(relPath: string, formattedContent: string, functionHashes: Record<string, string>, includeAnchors: boolean): string[] {
         const individualFuncs = formattedContent.split("\n\n---\n\n")
         const processedFuncs: string[] = []
 

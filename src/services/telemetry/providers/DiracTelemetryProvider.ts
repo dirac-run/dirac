@@ -7,6 +7,7 @@ import { Setting } from "@/shared/proto/index.host"
 import { Logger } from "@/shared/services/Logger"
 import { diracTelemetryConfig } from "@/shared/services/config/dirac-telemetry-config"
 import type { ITelemetryProvider, TelemetryProperties, TelemetrySettings } from "./ITelemetryProvider"
+import { jsonHeaders } from "@shared/net"
 
 /**
  * Dirac implementation of the telemetry provider interface
@@ -85,7 +86,7 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 			await fetch(diracTelemetryConfig.host, {
 				method: "POST",
 				headers: {
-					"Content-Type": "application/json",
+					...jsonHeaders(),
 					"X-Dirac-API-Key": diracTelemetryConfig.apiKey,
 				},
 				body: JSON.stringify({

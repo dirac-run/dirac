@@ -1,13 +1,13 @@
 import { ResponseInput, ResponseInputMessageContentList } from "openai/resources/responses/responses"
 import {
-	DiracAssistantThinkingBlock,
-	DiracAssistantToolUseBlock,
-	DiracContent,
-	DiracImageContentBlock,
-	DiracStorageMessage,
-	DiracTextContentBlock,
-	DiracUserToolResultContentBlock,
-	DiracAssistantRedactedThinkingBlock,
+    DiracAssistantRedactedThinkingBlock,
+    DiracAssistantThinkingBlock,
+    DiracAssistantToolUseBlock,
+    DiracContent,
+    DiracImageContentBlock,
+    DiracStorageMessage,
+    DiracTextContentBlock,
+    DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 
 /**
@@ -116,175 +116,167 @@ export function convertToOpenAIResponsesInput(
 			allItems.push({ role: m.role, content: [{ type: "input_text", text: m.content }] })
 			continue
 		}
-
 		if (m.role === "assistant") {
-			// For assistant messages, we must ensure reasoning items are IMMEDIATELY followed
-			// by their corresponding message or function_call. Process the entire assistant
-			// turn and ensure proper pairing.
-			const assistantTurnItems = new Map<string, any>()
-			const itemOrder: string[] = []
-
-			for (const _part of m.content) {
-				const part = _part as DiracContent
-				const call_id = (part as any).call_id || (part as any).id
-				if (!call_id) continue
-
-				if (!assistantTurnItems.has(call_id)) {
-					itemOrder.push(call_id)
-				}
-
-				let item = assistantTurnItems.get(call_id)
-
-				switch (part.type) {
-					case "thinking": {
-						const thinkingBlock = part as DiracAssistantThinkingBlock
-						const hasThinkingContent = thinkingBlock.thinking && thinkingBlock.thinking.trim().length > 0
-						const hasSummaryContent =
-							thinkingBlock.summary && Array.isArray(thinkingBlock.summary) && thinkingBlock.summary.length > 0
-
-						if (!item) {
-							item = { type: "reasoning", summary: [] }
-							assistantTurnItems.set(call_id, item)
-						}
-
-						if (hasSummaryContent) {
-							item.summary = thinkingBlock.summary as any[]
-						} else if (hasThinkingContent) {
-							item.summary = [{ type: "summary_text", text: thinkingBlock.thinking }]
-						}
-						break
-					}
-					case "redacted_thinking": {
-						const redactedBlock = part as DiracAssistantRedactedThinkingBlock
-						if (!item) {
-							item = { type: "reasoning", summary: [] }
-							assistantTurnItems.set(call_id, item)
-						}
-						if (redactedBlock.data) {
-							item.encrypted_content = redactedBlock.data
-						}
-						break
-					}
-					case "text": {
-						const textBlock = part as DiracTextContentBlock
-						assistantTurnItems.set(call_id, {
-							type: "message",
-							role: "assistant",
-							content: [{ type: "output_text", text: textBlock.text || "" }],
-						})
-						break
-					}
-					case "image": {
-						const imageBlock = part as DiracImageContentBlock
-						assistantTurnItems.set(call_id, {
-							type: "message",
-							role: "assistant",
-							content: [
-								{
-									type: "output_text",
-									text: `[image:${imageBlock.source.type === "base64" ? imageBlock.source.media_type : "url"}]`,
-								},
-							],
-						})
-						break
-					}
-					case "tool_use": {
-						const toolUseBlock = part as DiracAssistantToolUseBlock
-						const call_id = toolUseBlock.call_id || toolUseBlock.id
-						if (toolUseBlock.call_id) {
-							toolUseIdToCallId.set(toolUseBlock.id, toolUseBlock.call_id)
-						}
-						assistantTurnItems.set(call_id, {
-							type: "function_call",
-							call_id,
-							name: toolUseBlock.name,
-							arguments: JSON.stringify(toolUseBlock.input ?? {}),
-						})
-						break
-					}
-				}
-			}
-
-			// Sort by raw ID (time-sortable hex) to restore original generation sequence.
-			// This ensures that reasoning items are correctly followed by their corresponding output items.
-			const sortedIds = itemOrder.sort((a, b) => {
-				const rawA = a.includes("_") ? a.split("_")[1] : a
-				const rawB = b.includes("_") ? b.split("_")[1] : b
-				return rawA.localeCompare(rawB)
-			})
-
-			// Post-process to ensure strict pairing (every reasoning item must be followed by a message or function_call)
-			const finalizedTurnItems: any[] = []
-			for (let i = 0; i < sortedIds.length; i++) {
-				const id = sortedIds[i]
-				const item = assistantTurnItems.get(id)
-				finalizedTurnItems.push(item)
-
-				if (item.type === "reasoning") {
-					const nextId = sortedIds[i + 1]
-					const nextItem = nextId ? assistantTurnItems.get(nextId) : null
-					if (!nextItem || nextItem.type === "reasoning") {
-						finalizedTurnItems.push({
-							type: "message",
-							role: "assistant",
-							content: [{ type: "output_text", text: "" }],
-						})
-					}
-				}
-			}
-
-			allItems.push(...finalizedTurnItems)
+			allItems.push(...convertAssistantTurnItems(m.content as DiracContent[], toolUseIdToCallId))
 		} else {
-			// User messages - collect all content
-			const messageContent: ResponseInputMessageContentList = []
-
-			for (const _part of m.content) {
-				const part = _part as DiracContent
-				switch (part.type) {
-					case "text": {
-						const textBlock = part as DiracTextContentBlock
-						messageContent.push({ type: "input_text", text: textBlock.text || "" })
-						break
-					}
-					case "image": {
-						const imageBlock = part as DiracImageContentBlock
-						messageContent.push({
-							type: "input_image",
-							detail: "auto",
-							image_url: imageBlock.source.type === "base64" ? `data:${imageBlock.source.media_type};base64,${imageBlock.source.data}` : (imageBlock.source as any).url,
-						})
-						break
-					}
-					case "tool_result": {
-						const toolResultBlock = part as DiracUserToolResultContentBlock
-						// Flush any pending message content before adding tool result
-						if (messageContent.length > 0) {
-							allItems.push({ role: m.role, content: [...messageContent] })
-							messageContent.length = 0
-						}
-						const call_id =
-							toolResultBlock.call_id ||
-							toolUseIdToCallId.get(toolResultBlock.tool_use_id) ||
-							toolResultBlock.tool_use_id
-						allItems.push({
-							type: "function_call_output",
-							call_id,
-							output:
-								typeof toolResultBlock.content === "string"
-									? toolResultBlock.content
-									: JSON.stringify(toolResultBlock.content),
-						})
-						break
-					}
-				}
-			}
-
-			// Flush any remaining user message content
-			if (messageContent.length > 0) {
-				allItems.push({ role: m.role, content: [...messageContent] })
-			}
+			allItems.push(...convertUserTurnItems(m.content as DiracContent[], m.role, toolUseIdToCallId, allItems))
 		}
 	}
 
 	return { input: allItems, previousResponseId }
+}
+
+// Extracts the call_id (Responses API) or id (Anthropic) used to group assistant turn parts.
+function getPartCallId(part: DiracContent): string | undefined {
+	if ("call_id" in part && typeof part.call_id === "string") return part.call_id
+	if ("id" in part && typeof part.id === "string") return part.id
+	return undefined
+}
+
+// Processes an assistant turn: groups parts by call_id, sorts by hex ID, and ensures
+// every reasoning item is immediately followed by a message or function_call (inserts
+// placeholder messages where needed).
+function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: Map<string, string>): any[] {
+	const assistantTurnItems = new Map<string, any>()
+	const itemOrder: string[] = []
+
+	for (const _part of content) {
+		const part = _part as DiracContent
+		const call_id = getPartCallId(part)
+		if (!call_id) continue
+		if (!assistantTurnItems.has(call_id)) itemOrder.push(call_id)
+		let item = assistantTurnItems.get(call_id)
+
+		switch (part.type) {
+			case "thinking": {
+				const thinkingBlock = part as DiracAssistantThinkingBlock
+				const hasThinkingContent = thinkingBlock.thinking && thinkingBlock.thinking.trim().length > 0
+				const hasSummaryContent =
+					thinkingBlock.summary && Array.isArray(thinkingBlock.summary) && thinkingBlock.summary.length > 0
+				if (!item) {
+					item = { type: "reasoning", summary: [] }
+					assistantTurnItems.set(call_id, item)
+				}
+				if (hasSummaryContent) item.summary = thinkingBlock.summary
+				else if (hasThinkingContent) item.summary = [{ type: "summary_text", text: thinkingBlock.thinking }]
+				break
+			}
+			case "redacted_thinking": {
+				const redactedBlock = part as DiracAssistantRedactedThinkingBlock
+				if (!item) {
+					item = { type: "reasoning", summary: [] }
+					assistantTurnItems.set(call_id, item)
+				}
+				if (redactedBlock.data) item.encrypted_content = redactedBlock.data
+				break
+			}
+			case "text":
+				assistantTurnItems.set(call_id, {
+					type: "message",
+					role: "assistant",
+					content: [{ type: "output_text", text: (part as DiracTextContentBlock).text || "" }],
+				})
+				break
+			case "image": {
+				const imageSource = (part as DiracImageContentBlock).source
+				assistantTurnItems.set(call_id, {
+					type: "message",
+					role: "assistant",
+					content: [
+						{
+							type: "output_text",
+							text: `[image:${imageSource.type === "base64" ? imageSource.media_type : "url"}]`,
+						},
+					],
+				})
+				break
+			}
+			case "tool_use": {
+				const toolUseBlock = part as DiracAssistantToolUseBlock
+				const id = toolUseBlock.call_id || toolUseBlock.id
+				if (toolUseBlock.call_id) toolUseIdToCallId.set(toolUseBlock.id, toolUseBlock.call_id)
+				assistantTurnItems.set(id, {
+					type: "function_call",
+					call_id: id,
+					name: toolUseBlock.name,
+					arguments: JSON.stringify(toolUseBlock.input ?? {}),
+				})
+				break
+			}
+		}
+	}
+
+	// Sort by raw hex suffix to restore generation sequence
+	const sortedIds = itemOrder.sort((a, b) => {
+		const rawA = a.includes("_") ? a.split("_")[1] : a
+		const rawB = b.includes("_") ? b.split("_")[1] : b
+		return rawA.localeCompare(rawB)
+	})
+
+	// Ensure strict pairing: every reasoning must be followed by a message or function_call
+	const finalized: any[] = []
+	for (let i = 0; i < sortedIds.length; i++) {
+		const item = assistantTurnItems.get(sortedIds[i])
+		finalized.push(item)
+		if (item.type === "reasoning") {
+			const nextItem = sortedIds[i + 1] ? assistantTurnItems.get(sortedIds[i + 1]) : null
+			if (!nextItem || nextItem.type === "reasoning") {
+				finalized.push({ type: "message", role: "assistant", content: [{ type: "output_text", text: "" }] })
+			}
+		}
+	}
+	return finalized
+}
+
+// Processes a user turn: collects text/image content into messages, and tool_result
+// parts into function_call_output items (flushing pending content first).
+function convertUserTurnItems(
+	content: DiracContent[],
+	role: string,
+	toolUseIdToCallId: Map<string, string>,
+	allItems: any[],
+): any[] {
+	const newItems: any[] = []
+	const messageContent: ResponseInputMessageContentList = []
+
+	for (const _part of content) {
+		const part = _part as DiracContent
+		switch (part.type) {
+			case "text":
+				messageContent.push({ type: "input_text", text: (part as DiracTextContentBlock).text || "" })
+				break
+			case "image": {
+				const imageBlock = part as DiracImageContentBlock
+				messageContent.push({
+					type: "input_image",
+					detail: "auto",
+					image_url:
+						imageBlock.source.type === "base64"
+							? `data:${imageBlock.source.media_type};base64,${imageBlock.source.data}`
+							: imageBlock.source.url,
+				})
+				break
+			}
+			case "tool_result": {
+				const toolResultBlock = part as DiracUserToolResultContentBlock
+				if (messageContent.length > 0) {
+					newItems.push({ role, content: [...messageContent] })
+					messageContent.length = 0
+				}
+				const call_id =
+					toolResultBlock.call_id || toolUseIdToCallId.get(toolResultBlock.tool_use_id) || toolResultBlock.tool_use_id
+				newItems.push({
+					type: "function_call_output",
+					call_id,
+					output:
+						typeof toolResultBlock.content === "string"
+							? toolResultBlock.content
+							: JSON.stringify(toolResultBlock.content),
+				})
+				break
+			}
+		}
+	}
+	if (messageContent.length > 0) newItems.push({ role, content: [...messageContent] })
+	return newItems
 }

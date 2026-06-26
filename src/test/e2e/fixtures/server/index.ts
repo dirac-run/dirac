@@ -3,6 +3,7 @@ import type { Socket } from "node:net"
 import { parse } from "node:url"
 import { v4 as uuidv4 } from "uuid"
 import type { BalanceResponse, OrganizationBalanceResponse, UserResponse } from "../../../../shared/DiracAccount"
+import { jsonHeaders } from "../../../../shared/net"
 import { E2E_MOCK_API_RESPONSES, E2E_REGISTERED_MOCK_ENDPOINTS } from "./api"
 import { DiracDataMock } from "./data"
 
@@ -140,7 +141,7 @@ export class DiracApiServerMock {
 
 			// Helper to send JSON response
 			const sendJson = (data: unknown, status = 200) => {
-				res.writeHead(status, { "Content-Type": "application/json" })
+				res.writeHead(status, jsonHeaders())
 				res.end(JSON.stringify(data))
 			}
 

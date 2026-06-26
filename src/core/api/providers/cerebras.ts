@@ -1,14 +1,20 @@
 import Cerebras from "@cerebras/cerebras_cloud_sdk"
+import type { ChatCompletion, ChatCompletionCreateParamsStreaming } from "@cerebras/cerebras_cloud_sdk/resources/chat/completions"
+
+type CerebrasChunk = ChatCompletion.ChatChunkResponse
+
 import { CerebrasModelId, cerebrasDefaultModelId, cerebrasModels, ModelInfo } from "@shared/api"
+import { isRateLimited, isServerError } from "@shared/net"
+import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { fetch } from "@/shared/net"
+import { DiracTool } from "@/shared/tools"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
+import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
-import { DiracTool } from "@/shared/tools"
-import { convertToOpenAiMessages } from "../transform/openai-format"
 
 interface CerebrasHandlerOptions extends CommonApiHandlerOptions {
 	cerebrasApiKey?: string
@@ -64,8 +70,11 @@ export class CerebrasHandler implements ApiHandler {
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: DiracTool[]): ApiStream {
 		const client = this.ensureClient()
 
-		const toolParams = getOpenAIToolParams(tools as any)
-		const openAiMessages: any[] = [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)]
+		const toolParams = getOpenAIToolParams(tools as OpenAITool[])
+		const openAiMessages = [
+			{ role: "system", content: systemPrompt },
+			...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+		] as ChatCompletionCreateParamsStreaming["messages"]
 
 		// Check if this is a reasoning model that uses thinking tags
 		const modelId = this.getModel().id
@@ -80,72 +89,43 @@ export class CerebrasHandler implements ApiHandler {
 				stream: true,
 				max_tokens: CEREBRAS_DEFAULT_MAX_TOKENS,
 				...toolParams,
-			} as any)
+			} as ChatCompletionCreateParamsStreaming)
 
 			// Handle streaming response
-			let reasoning: string | null = null // Track reasoning content for models that support thinking
+			let reasoning: string | null = null
 			const toolCallProcessor = new ToolCallProcessor()
 
-			for await (const chunk of stream as any) {
-				// Type assertion for the streaming chunk
-				const streamChunk = chunk as any
+			for await (const chunk of stream as AsyncIterable<CerebrasChunk>) {
+				const choices = chunk.choices
+				const delta = choices?.[0]?.delta
 
-				if (streamChunk.choices?.[0]?.delta?.tool_calls) {
-					yield* toolCallProcessor.processToolCallDeltas(streamChunk.choices[0].delta.tool_calls)
+				if (delta?.tool_calls) {
+					yield* toolCallProcessor.processToolCallDeltas(
+						delta.tool_calls as unknown as Parameters<typeof toolCallProcessor.processToolCallDeltas>[0],
+					)
 				}
 
-				if (streamChunk.choices?.[0]?.delta?.content) {
-					const content = streamChunk.choices[0].delta.content
-
-					// Handle reasoning models (Qwen and DeepSeek R1 Distill) that use <think> tags
+				if (delta?.content) {
+					const content = delta.content
 					if (isReasoningModel) {
-						// Check if we're entering or continuing reasoning mode
-						if (reasoning || content.includes("<think>")) {
-							reasoning = (reasoning || "") + content
-
-							// Clean the content by removing think tags for display
-							const cleanContent = content.replace(/<think>/g, "").replace(/<\/think>/g, "")
-
-							// Only yield reasoning content if there's actual content after cleaning
-							if (cleanContent.trim()) {
-								yield {
-									type: "reasoning",
-									reasoning: cleanContent,
-								}
-							}
-
-							// Check if reasoning is complete
-							if (reasoning.includes("</think>")) {
-								reasoning = null
-							}
-						} else {
-							// Regular content outside of thinking tags
-							yield {
-								type: "text",
-								text: content,
-							}
-						}
+						const result = this.parseCerebrasReasoningContent(content, reasoning)
+						reasoning = result.reasoning
+						yield* result.chunks
 					} else {
-						// Non-reasoning models - just yield text content
-						yield {
-							type: "text",
-							text: content,
-						}
+						yield { type: "text", text: content }
 					}
 				}
 
-				// Handle usage information from Cerebras API
-				// Usage is typically only available in the final chunk
-				if (streamChunk.usage) {
+				if (chunk.usage) {
+					const usage = chunk.usage
 					const totalCost = this.calculateCost({
-						inputTokens: streamChunk.usage.prompt_tokens || 0,
-						outputTokens: streamChunk.usage.completion_tokens || 0,
+						inputTokens: usage.prompt_tokens || 0,
+						outputTokens: usage.completion_tokens || 0,
 					})
-
 					yield {
 						type: "usage",
-						inputTokens: streamChunk.usage.prompt_tokens || 0,
-						outputTokens: streamChunk.usage.completion_tokens || 0,
+						inputTokens: usage.prompt_tokens || 0,
+						outputTokens: usage.completion_tokens || 0,
 						cacheReadTokens: 0,
 						cacheWriteTokens: 0,
 						totalCost,
@@ -154,7 +134,7 @@ export class CerebrasHandler implements ApiHandler {
 			}
 		} catch (error: any) {
 			// Enhanced error handling for Cerebras API
-			if (error?.status === 429 || error?.code === "rate_limit_exceeded") {
+			if (isRateLimited(error?.status) || error?.code === "rate_limit_exceeded") {
 				// Rate limit error - will be handled by retry decorator with patient backoff
 				throw new Error(`Cerebras API rate limit exceeded.`)
 			}
@@ -164,7 +144,7 @@ export class CerebrasHandler implements ApiHandler {
 			if (error?.status === 403) {
 				throw new Error("Cerebras API access denied. Please check your API key permissions.")
 			}
-			if (error?.status >= 500) {
+			if (isServerError(error?.status)) {
 				// Server errors - retryable
 				throw new Error(`Cerebras API server error (${error.status}): ${error.message || "Unknown server error"}`)
 			}
@@ -176,6 +156,24 @@ export class CerebrasHandler implements ApiHandler {
 			// Re-throw original error for other cases
 			throw error
 		}
+	}
+
+	// Parses reasoning content from Cerebras reasoning models that use think tags.
+	// Returns updated reasoning state and chunks to yield.
+	private parseCerebrasReasoningContent(
+		content: string,
+		reasoning: string | null,
+	): { reasoning: string | null; chunks: any[] } {
+		const chunks: any[] = []
+		if (reasoning || content.includes("<think>")) {
+			reasoning = (reasoning || "") + content
+			const cleanContent = content.replace(/<think>/g, "").replace(/<\/think>/g, "")
+			if (cleanContent.trim()) chunks.push({ type: "reasoning", reasoning: cleanContent })
+			if (reasoning.includes("</think>")) reasoning = null
+		} else {
+			chunks.push({ type: "text", text: content })
+		}
+		return { reasoning, chunks }
 	}
 
 	getModel(): { id: string; info: ModelInfo } {

@@ -29,13 +29,66 @@ export function asObjectSafe(value: any): object {
 	}
 }
 
+// Describes an unsupported image as a text placeholder for the VSCode LM API.
+function imagePlaceholder(source?: any): string {
+	const type = source?.type || "Unknown source-type"
+	const detail = source?.type === "base64" ? source.media_type : "url"
+	return `[Image (${type}): ${detail} not supported by VSCode LM API]`
+}
+
+// Converts a tool_result's content into VSCode TextParts (images become placeholders).
+function convertToolResultContent(content: string | Anthropic.ToolResultBlockParam["content"] | undefined): vscode.LanguageModelTextPart[] {
+	if (typeof content === "string") return [new vscode.LanguageModelTextPart(content)]
+	if (!Array.isArray(content)) return [new vscode.LanguageModelTextPart("")]
+	return content.map((part: any) =>
+		part.type === "image" ? new vscode.LanguageModelTextPart(imagePlaceholder(part.source)) : new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
+	)
+}
+
+// Converts user-role array content: tool results first, then text/image parts.
+function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
+	const { nonToolMessages, toolMessages } = content.reduce<{ nonToolMessages: any[]; toolMessages: any[] }>(
+		(acc, part) => {
+			if (part.type === "tool_result") acc.toolMessages.push(part)
+			else if (part.type === "text" || part.type === "image") acc.nonToolMessages.push(part)
+			return acc
+		},
+		{ nonToolMessages: [], toolMessages: [] },
+	)
+	const contentParts = [
+		...toolMessages.map((tm: any) => new vscode.LanguageModelToolResultPart(tm.tool_use_id, convertToolResultContent(tm.content))),
+		...nonToolMessages.map((part: any) =>
+			part.type === "image" ? new vscode.LanguageModelTextPart(imagePlaceholder(part.source)) : new vscode.LanguageModelTextPart(part.text),
+		),
+	]
+	return vscode.LanguageModelChatMessage.User(contentParts)
+}
+
+// Converts assistant-role array content: tool calls first, then text/image parts.
+function convertVsCodeLmAssistantMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
+	const { nonToolMessages, toolMessages } = content.reduce<{ nonToolMessages: any[]; toolMessages: any[] }>(
+		(acc, part) => {
+			if (part.type === "tool_use") acc.toolMessages.push(part)
+			else if (part.type === "text" || part.type === "image") acc.nonToolMessages.push(part)
+			return acc
+		},
+		{ nonToolMessages: [], toolMessages: [] },
+	)
+	const contentParts = [
+		...toolMessages.map((tm: any) => new vscode.LanguageModelToolCallPart(tm.id, tm.name, asObjectSafe(tm.input))),
+		...nonToolMessages.map((part: any) =>
+			part.type === "image" ? new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]") : new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
+		),
+	]
+	return vscode.LanguageModelChatMessage.Assistant(contentParts)
+}
+
 export function convertToVsCodeLmMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
 ): vscode.LanguageModelChatMessage[] {
 	const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = []
 
 	for (const anthropicMessage of anthropicMessages) {
-		// Handle simple string messages
 		if (typeof anthropicMessage.content === "string") {
 			vsCodeLmMessages.push(
 				anthropicMessage.role === "assistant"
@@ -44,102 +97,10 @@ export function convertToVsCodeLmMessages(
 			)
 			continue
 		}
-
-		// Handle complex message structures
-		switch (anthropicMessage.role) {
-			case "user": {
-				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
-					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
-					toolMessages: Anthropic.ToolResultBlockParam[]
-				}>(
-					(acc, part) => {
-						if (part.type === "tool_result") {
-							acc.toolMessages.push(part as Anthropic.ToolResultBlockParam)
-						} else if (part.type === "text" || part.type === "image") {
-							acc.nonToolMessages.push(part as Anthropic.TextBlockParam | Anthropic.ImageBlockParam)
-						}
-						return acc
-					},
-					{ nonToolMessages: [], toolMessages: [] },
-				)
-
-				// Process tool messages first then non-tool messages
-				const contentParts = [
-					// Convert tool messages to ToolResultParts
-					...toolMessages.map((toolMessage) => {
-						// Process tool result content into TextParts
-						const toolContentParts: vscode.LanguageModelTextPart[] =
-							typeof toolMessage.content === "string"
-								? [new vscode.LanguageModelTextPart(toolMessage.content)]
-								: (toolMessage.content?.map((part) => {
-										if (part.type === "image") {
-											return new vscode.LanguageModelTextPart(
-												`[Image (${part.source?.type || "Unknown source-type"}): ${part.source?.type === "base64" ? part.source.media_type : "url"} not supported by VSCode LM API]`,
-											)
-										}
-										return new vscode.LanguageModelTextPart(part.type === "text" ? part.text : "")
-									}) ?? [new vscode.LanguageModelTextPart("")])
-
-						return new vscode.LanguageModelToolResultPart(toolMessage.tool_use_id, toolContentParts)
-					}),
-
-					// Convert non-tool messages to TextParts after tool messages
-					...nonToolMessages.map((part) => {
-						if (part.type === "image") {
-							return new vscode.LanguageModelTextPart(
-								`[Image (${part.source?.type || "Unknown source-type"}): ${part.source?.type === "base64" ? part.source.media_type : "url"} not supported by VSCode LM API]`,
-							)
-						}
-						return new vscode.LanguageModelTextPart(part.text)
-					}),
-				]
-
-				// Add single user message with all content parts
-				vsCodeLmMessages.push(vscode.LanguageModelChatMessage.User(contentParts))
-				break
-			}
-
-			case "assistant": {
-				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
-					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
-					toolMessages: Anthropic.ToolUseBlockParam[]
-				}>(
-					(acc, part) => {
-						if (part.type === "tool_use") {
-							acc.toolMessages.push(part as Anthropic.ToolUseBlockParam)
-						} else if (part.type === "text" || part.type === "image") {
-							acc.nonToolMessages.push(part as Anthropic.TextBlockParam | Anthropic.ImageBlockParam)
-						}
-						return acc
-					},
-					{ nonToolMessages: [], toolMessages: [] },
-				)
-
-				// Process tool messages first then non-tool messages
-				const contentParts = [
-					// Convert tool messages to ToolCallParts first
-					...toolMessages.map(
-						(toolMessage) =>
-							new vscode.LanguageModelToolCallPart(
-								toolMessage.id,
-								toolMessage.name,
-								asObjectSafe(toolMessage.input),
-							),
-					),
-
-					// Convert non-tool messages to TextParts after tool messages
-					...nonToolMessages.map((part) => {
-						if (part.type === "image") {
-							return new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]")
-						}
-						return new vscode.LanguageModelTextPart(part.type === "text" ? part.text : "")
-					}),
-				]
-
-				// Add the assistant message to the list of messages
-				vsCodeLmMessages.push(vscode.LanguageModelChatMessage.Assistant(contentParts))
-				break
-			}
+		if (anthropicMessage.role === "user") {
+			vsCodeLmMessages.push(convertVsCodeLmUserMessage(anthropicMessage.content))
+		} else if (anthropicMessage.role === "assistant") {
+			vsCodeLmMessages.push(convertVsCodeLmAssistantMessage(anthropicMessage.content))
 		}
 	}
 
@@ -186,7 +147,7 @@ export function convertToAnthropicMessage(vsCodeLmMessage: vscode.LanguageModelC
 						id: part.callId || crypto.randomUUID(),
 						name: part.name,
 						input: asObjectSafe(part.input),
-							caller: null as any,
+							caller: { type: "direct" },
 						}
 				}
 
@@ -201,13 +162,12 @@ export function convertToAnthropicMessage(vsCodeLmMessage: vscode.LanguageModelC
 		usage: {
 			input_tokens: 0,
 			output_tokens: 0,
-			cache_creation_input_tokens: undefined,
-			cache_read_input_tokens: undefined,
-			cache_creation: undefined,
-			cache_read: undefined,
-			inference_geo: undefined,
-			server_tool_use: undefined,
-			service_tier: undefined,
-		} as any,
+			cache_creation_input_tokens: null,
+			cache_read_input_tokens: null,
+			cache_creation: null,
+			inference_geo: null,
+			server_tool_use: null,
+			service_tier: null,
+		},
 	}
 }

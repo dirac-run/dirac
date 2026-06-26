@@ -14,12 +14,13 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { TerminalHandle } from "@agentclientprotocol/sdk"
 import { DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT, PROCESS_HOT_TIMEOUT_NORMAL } from "@integrations/terminal/constants"
 import type {
-	ITerminal,
-	ITerminalManager,
-	ITerminalProcess,
-	TerminalInfo,
-	TerminalProcessEvents,
-	TerminalProcessResultPromise,
+    ITerminal,
+    ITerminalManager,
+    ITerminalProcess,
+    TerminalInfo,
+    TerminalProcessEvents,
+    TerminalProcessResultPromise,
+    TerminalProfileChangeResult,
 } from "@integrations/terminal/types"
 import { EventEmitter } from "events"
 import { Logger } from "@/shared/services/Logger"
@@ -147,13 +148,18 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 	private _hotTimeout: NodeJS.Timeout | null = null
 	private _exitWaitTimeout: NodeJS.Timeout | null = null
 	private readonly manager: AcpTerminalManager
-	private readonly terminalId: string
+	private terminalId: string
 	private pollInterval: NodeJS.Timeout | null = null
 
 	constructor(manager: AcpTerminalManager, terminalId: string) {
 		super()
 		this.manager = manager
 		this.terminalId = terminalId
+	}
+
+	/** Update the terminal ID after recreating a terminal. */
+	updateTerminalId(id: string): void {
+		this.terminalId = id
 	}
 
 	continue(): void {
@@ -504,7 +510,7 @@ export class AcpTerminalManager implements ITerminalManager {
 			this.numericIdToStringId.set(managedTerminal.numericId, handle.id)
 
 			// Update the process with the new terminal ID
-			;(process as any).terminalId = handle.id
+			process.updateTerminalId(handle.id)
 
 			// Start the process polling
 			process.run(command)
@@ -665,9 +671,10 @@ export class AcpTerminalManager implements ITerminalManager {
 	/**
 	 * Set the default terminal profile.
 	 * @param profile The profile identifier
+	 * @returns Info about closed and busy terminals (no-op in ACP, always empty)
 	 */
-	setDefaultTerminalProfile(_profile: string): void {
-		// no-op
+	setDefaultTerminalProfile(_profile: string): TerminalProfileChangeResult {
+		return { closedCount: 0, busyTerminals: [] }
 	}
 
 	/**

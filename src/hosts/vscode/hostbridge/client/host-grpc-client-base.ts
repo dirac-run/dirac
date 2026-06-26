@@ -31,7 +31,7 @@ export type GrpcClientType<T extends ProtoService> = {
 
 // Create a client for any protobuf service with inferred types
 export function createGrpcClient<T extends ProtoService>(service: T): GrpcClientType<T> {
-	const client = {} as GrpcClientType<T>
+	const client: Record<string, Function> = {}
 	const grpcHandler = new GrpcHandler()
 
 	Object.values(service.methods).forEach((method) => {
@@ -40,17 +40,14 @@ export function createGrpcClient<T extends ProtoService>(service: T): GrpcClient
 
 		// Streaming method implementation
 		if (method.responseStream) {
-			client[methodKey as keyof GrpcClientType<T>] = ((
-				request: any,
-				options: StreamingCallbacks<InstanceType<typeof method.responseType>>,
-			) => {
-				// Use handleRequest with streaming callbacks
+			client[methodKey] = (request: any, options: StreamingCallbacks<InstanceType<typeof method.responseType>>) => {
+				// Use dispatchGrpcMethod with streaming callbacks
 				const requestId = uuidv4()
 
 				// We need to await the promise and then return the cancel function
 				return (async () => {
 					try {
-						const result = await grpcHandler.handleRequest<InstanceType<typeof method.responseType>>(
+						const result = await grpcHandler.dispatchGrpcMethod<InstanceType<typeof method.responseType>>(
 							service.fullName,
 							methodKey,
 							request,
@@ -73,13 +70,13 @@ export function createGrpcClient<T extends ProtoService>(service: T): GrpcClient
 						return () => {}
 					}
 				})()
-			}) as any
+			}
 		} else {
 			// Unary method implementation
-			client[methodKey as keyof GrpcClientType<T>] = (async (request: any) => {
+			client[methodKey] = async (request: any) => {
 				const requestId = uuidv4()
 				try {
-					const response = await grpcHandler.handleRequest(service.fullName, methodKey, request, requestId)
+					const response = await grpcHandler.dispatchGrpcMethod(service.fullName, methodKey, request, requestId)
 
 					// Check if the response is a function (streaming)
 					if (typeof response === "function") {
@@ -91,8 +88,8 @@ export function createGrpcClient<T extends ProtoService>(service: T): GrpcClient
 					Logger.log(`[DEBUG] gRPC host ERR to ${service.fullName}.${methodKey} req:${requestId} err:${e}`)
 					throw e
 				}
-			}) as any
+			}
 		}
 	})
-	return client
+	return client as GrpcClientType<T>
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import * as sinon from "sinon"
 import type { TaskMetadata } from "./ContextTrackerTypes"
 import { ModelContextTracker } from "./ModelContextTracker"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("ModelContextTracker", () => {
 	const taskId = "test-task-id"
@@ -32,7 +33,7 @@ describe("ModelContextTracker", () => {
 	it("should record model usage with correct data", async () => {
 		// Test data
 		const apiProviderId = "anthropic"
-		const modelId = "claude-3-opus"
+		const modelId = TEST_MODEL_IDS.ANTHROPIC_OPUS
 		const mode = "act"
 
 		// Use a fake timer to have a predictable timestamp
@@ -125,8 +126,8 @@ describe("ModelContextTracker", () => {
 	it("should handle multiple model usages in sequence", async () => {
 		// Test data for sequential calls
 		const usages = [
-			{ provider: "anthropic", model: "claude-3-opus", mode: "plan" },
-			{ provider: "openai", model: "gpt-4", mode: "act" },
+			{ provider: "anthropic", model: TEST_MODEL_IDS.ANTHROPIC_OPUS, mode: "plan" },
+			{ provider: "openai", model: TEST_MODEL_IDS.OPENAI, mode: "act" },
 			{ provider: "anthropic", model: "claude-3-haiku", mode: "plan" },
 		]
 

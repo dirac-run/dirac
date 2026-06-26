@@ -5,54 +5,22 @@
  * in CLI and JetBrains environments by using subprocess management instead of
  * VSCode's terminal API.
  *
- * Also handles background command tracking for "Proceed While Running" functionality:
- * - Logs output to temp files for later retrieval
- * - Tracks command status (running, completed, error, timed_out)
- * - Implements 10-minute hard timeout to prevent zombie processes
- * - Provides summary for environment details
+ * Process spawning and background command tracking are delegated to TerminalProcessManager.
  */
 
-import { DiracTempManager } from "@services/temp"
-import * as fs from "fs"
-import { BACKGROUND_COMMAND_TIMEOUT_MS, DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT } from "../constants"
-import type { BackgroundCommand, ITerminalManager, TerminalInfo, TerminalProcessResultPromise } from "../types"
-import { StandaloneTerminalProcess } from "./StandaloneTerminalProcess"
+import { DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT } from "../constants"
+import type {
+    BackgroundCommand,
+    ITerminalManager,
+    TerminalInfo,
+    TerminalProcessResultPromise,
+    TerminalProfileChangeResult,
+} from "../types"
 import { StandaloneTerminalRegistry } from "./StandaloneTerminalRegistry"
+import { TerminalProcessManager } from "./TerminalProcessManager"
 
 // Re-export BackgroundCommand for backwards compatibility
 export type { BackgroundCommand }
-
-/**
- * Helper function to merge a process with a promise for the TerminalProcessResultPromise type.
- * This allows the returned object to be both awaitable and have event methods.
- */
-function mergePromise(process: StandaloneTerminalProcess, promise: Promise<void>): TerminalProcessResultPromise {
-	const nativePromisePrototype = (async () => {})().constructor.prototype
-	const descriptors = ["then", "catch", "finally"].map((property) => [
-		property,
-		Reflect.getOwnPropertyDescriptor(nativePromisePrototype, property),
-	]) as [string, PropertyDescriptor][]
-
-	for (const [property, descriptor] of descriptors) {
-		if (descriptor) {
-			const value = (descriptor.value as Function).bind(promise)
-			Reflect.defineProperty(process, property, { ...descriptor, value })
-		}
-	}
-
-	// Ensure terminate() is accessible on the merged promise
-	// This allows Task.cancelBackgroundCommand() to kill the process
-	if (process.terminate && typeof process.terminate === "function") {
-		Object.defineProperty(process, "terminate", {
-			value: process.terminate.bind(process),
-			writable: false,
-			enumerable: false,
-			configurable: false,
-		})
-	}
-
-	return process as unknown as TerminalProcessResultPromise
-}
 
 /**
  * Terminal manager for standalone (non-VSCode) environments.
@@ -62,13 +30,13 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	/** Registry for tracking terminals */
 	private registry: StandaloneTerminalRegistry = new StandaloneTerminalRegistry()
 
-	/** Map of terminal ID to process */
-	private processes: Map<number, StandaloneTerminalProcess> = new Map()
+	/** Process manager for spawning commands and tracking background commands */
+	private processManager: TerminalProcessManager = new TerminalProcessManager()
 
 	/** Set of terminal IDs managed by this instance */
 	private terminalIds: Set<number> = new Set()
 
-	/** Timeout for shell integration (not used in standalone, but kept for interface compatibility) */
+	/** Timeout for shell integration (kept for interface compatibility, not used in standalone) */
 	private shellIntegrationTimeout = 4000
 
 	/** Whether terminal reuse is enabled */
@@ -80,58 +48,19 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	/** Default terminal profile */
 	private defaultTerminalProfile = "default"
 
-	// =========================================================================
-	// Background Command Tracking
-	// =========================================================================
+	/** Disposables array (for VSCode compatibility) */
+	disposables: any[] = []
 
-	/** Map of background command ID to command info */
-	private backgroundCommands: Map<string, BackgroundCommand> = new Map()
+	// --- Process Spawning (delegated to TerminalProcessManager) ---
 
-	/** Map of background command ID to log file write stream */
-	private logStreams: Map<string, fs.WriteStream> = new Map()
-
-	/** Map of background command ID to timeout handle */
-	private backgroundTimeouts: Map<string, NodeJS.Timeout> = new Map()
-
-	/**
-	 * Run a command in the specified terminal.
-	 * @param terminalInfo The terminal to run the command in
-	 * @param command The command to execute
-	 * @returns A promise-like object that emits events and resolves on completion
-	 */
+	/** Run a command in the specified terminal. */
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
-		terminalInfo.busy = true
-		terminalInfo.lastCommand = command
-
-		const process = new StandaloneTerminalProcess()
-		this.processes.set(terminalInfo.id, process)
-
-		process.once("completed", () => {
-			terminalInfo.busy = false
-		})
-
-		process.once("error", (_error: Error) => {
-			terminalInfo.busy = false
-		})
-
-		// Create promise for the process
-		const promise = new Promise<void>((resolve, reject) => {
-			process.once("continue", () => resolve())
-			process.once("error", (error: Error) => reject(error))
-		})
-
-		// Run the command immediately (no shell integration wait needed)
-		process.run(terminalInfo.terminal, command)
-
-		// Return merged promise/process object
-		return mergePromise(process, promise)
+		return this.processManager.runCommand(terminalInfo, command)
 	}
 
-	/**
-	 * Get or create a terminal for the specified working directory.
-	 * @param cwd The working directory for the terminal
-	 * @returns The terminal info for an available terminal
-	 */
+	// --- Terminal Lifecycle ---
+
+	/** Get or create a terminal for the specified working directory. */
 	async getOrCreateTerminal(cwd: string, env?: { [key: string]: string | undefined }): Promise<TerminalInfo> {
 		const terminals = this.registry.getAllTerminals()
 
@@ -140,7 +69,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 			if (t.busy) {
 				return false
 			}
-			return (t.terminal as any)._cwd === cwd
+			return t.terminal._cwd === cwd
 		})
 
 		if (matchingTerminal) {
@@ -152,10 +81,9 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		if (this.terminalReuseEnabled) {
 			const availableTerminal = terminals.find((t) => !t.busy)
 			if (availableTerminal) {
-				// Change directory
 				await this.runCommand(availableTerminal, `cd "${cwd}"`)
-				;(availableTerminal.terminal as any)._cwd = cwd
-				;(availableTerminal.terminal as any)._env = env
+				availableTerminal.terminal._cwd = cwd
+				availableTerminal.terminal._env = env
 				if (availableTerminal.terminal.shellIntegration?.cwd) {
 					availableTerminal.terminal.shellIntegration.cwd.fsPath = cwd
 				}
@@ -174,56 +102,34 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		return newTerminalInfo
 	}
 
-	/**
-	 * Get terminals filtered by busy state.
-	 * @param busy Whether to get busy or idle terminals
-	 * @returns Array of terminal info with id and last command
-	 */
+	/** Get terminals filtered by busy state. */
 	getTerminals(busy: boolean): { id: number; lastCommand: string }[] {
 		const allTerminalIds = Array.from(this.terminalIds)
 
-		const terminals = allTerminalIds
+		return allTerminalIds
 			.map((id) => this.registry.getTerminal(id))
-			.filter((t): t is TerminalInfo => {
-				if (t === undefined) {
-					return false
-				}
-				return t.busy === busy
-			})
+			.filter((t): t is TerminalInfo => t !== undefined && t.busy === busy)
 			.map((t) => ({ id: t.id, lastCommand: t.lastCommand }))
-
-		return terminals
 	}
 
-	/**
-	 * Get output that hasn't been retrieved yet from a terminal.
-	 * @param terminalId The terminal ID
-	 * @returns The unretrieved output string
-	 */
+	// --- Process State Queries (delegated to TerminalProcessManager) ---
+
+	/** Get output that hasn't been retrieved yet from a terminal. */
 	getUnretrievedOutput(terminalId: number): string {
 		if (!this.terminalIds.has(terminalId)) {
 			return ""
 		}
-		const process = this.processes.get(terminalId)
-		return process ? process.getUnretrievedOutput() : ""
+		return this.processManager.getUnretrievedOutput(terminalId)
 	}
 
-	/**
-	 * Check if a terminal's process is actively outputting.
-	 * @param terminalId The terminal ID
-	 * @returns Whether the process is hot
-	 */
+	/** Check if a terminal's process is actively outputting. */
 	isProcessHot(terminalId: number): boolean {
-		const process = this.processes.get(terminalId)
-		return process ? process.isHot : false
+		return this.processManager.isProcessHot(terminalId)
 	}
 
-	/**
-	 * Process output lines, potentially truncating if over limit.
-	 * @param outputLines Array of output lines
-	 * @param overrideLimit Optional limit override
-	 * @returns Processed output string
-	 */
+	// --- Output Processing ---
+
+	/** Process output lines, truncating if over limit. */
 	processOutput(outputLines: string[], overrideLimit?: number): string {
 		const limit = overrideLimit !== undefined ? overrideLimit : this.terminalOutputLineLimit
 		if (outputLines.length > limit) {
@@ -235,23 +141,19 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		return outputLines.join("\n").trim()
 	}
 
-	/**
-	 * Dispose of all terminals and clean up resources.
-	 */
+	// --- Cleanup ---
+
+	/** Dispose of all terminals and clean up resources. */
 	disposeAll(): void {
 		// Dispose background commands first
-		this.disposeBackgroundCommands()
+		this.processManager.disposeBackgroundCommands()
 
 		// Terminate all processes
-		for (const [_terminalId, process] of this.processes) {
-			if (process && process.terminate) {
-				process.terminate()
-			}
-		}
+		this.processManager.terminateAll()
 
 		// Clear all tracking
 		this.terminalIds.clear()
-		this.processes.clear()
+		this.processManager.clearProcesses()
 
 		// Dispose all terminals
 		for (const terminalInfo of this.registry.getAllTerminals()) {
@@ -261,40 +163,28 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		this.registry.clear()
 	}
 
-	/**
-	 * Set the timeout for waiting for shell integration.
-	 * @param timeout Timeout in milliseconds
-	 */
+	// --- Configuration Setters ---
+
+	/** Set the timeout for waiting for shell integration. */
 	setShellIntegrationTimeout(timeout: number): void {
 		this.shellIntegrationTimeout = timeout
 	}
 
-	/**
-	 * Enable or disable terminal reuse.
-	 * @param enabled Whether to enable terminal reuse
-	 */
+	/** Enable or disable terminal reuse. */
 	setTerminalReuseEnabled(enabled: boolean): void {
 		this.terminalReuseEnabled = enabled
 	}
 
-	/**
-	 * Set the maximum number of output lines to keep.
-	 * @param limit Maximum number of lines
-	 */
+	/** Set the maximum number of output lines to keep. */
 	setTerminalOutputLineLimit(limit: number): void {
 		this.terminalOutputLineLimit = limit
 	}
 
-	/**
-	 * Set the default terminal profile.
-	 * @param profile The profile identifier
-	 * @returns Object with information about closed terminals and remaining busy terminals
-	 */
-	setDefaultTerminalProfile(profile: string): { closedCount: number; busyTerminals: TerminalInfo[] } {
+	/** Set the default terminal profile. Returns info about closed and remaining busy terminals. */
+	setDefaultTerminalProfile(profile: string): TerminalProfileChangeResult {
 		const previousProfile = this.defaultTerminalProfile
 		this.defaultTerminalProfile = profile
 
-		// If profile changed, handle terminal cleanup like TerminalManager does
 		if (previousProfile !== profile) {
 			return this.handleTerminalProfileChange(profile)
 		}
@@ -302,51 +192,29 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		return { closedCount: 0, busyTerminals: [] }
 	}
 
-	// Additional methods required for TerminalManager compatibility
+	// --- Terminal Management ---
 
-	/** Disposables array (for VSCode compatibility) */
-	disposables: any[] = []
-
-	/**
-	 * Find a TerminalInfo by its terminal instance.
-	 * @param terminal The terminal instance to find
-	 * @returns The terminal info or undefined
-	 */
+	/** Find a TerminalInfo by its terminal instance. */
 	findTerminalInfoByTerminal(terminal: any): TerminalInfo | undefined {
-		const terminals = this.registry.getAllTerminals()
-		return terminals.find((t) => t.terminal === terminal)
+		return this.registry.getAllTerminals().find((t) => t.terminal === terminal)
 	}
 
-	/**
-	 * Check if a terminal's CWD matches its expected pending change.
-	 * @param terminalInfo The terminal info to check
-	 * @returns Whether the CWD matches
-	 */
+	/** Check if a terminal's CWD matches its expected pending change. */
 	isCwdMatchingExpected(terminalInfo: TerminalInfo): boolean {
-		if (!(terminalInfo as any).pendingCwdChange) {
+		if (!terminalInfo.pendingCwdChange) {
 			return false
 		}
-		const currentCwd = (terminalInfo.terminal as any)._cwd
-		const targetCwd = (terminalInfo as any).pendingCwdChange
+		const currentCwd = terminalInfo.terminal._cwd
+		const targetCwd = terminalInfo.pendingCwdChange
 		return currentCwd === targetCwd
 	}
 
-	/**
-	 * Filter terminals based on a provided criteria function.
-	 * @param filterFn Function that accepts TerminalInfo and returns boolean
-	 * @returns Array of terminals that match the criteria
-	 */
+	/** Filter terminals based on a provided criteria function. */
 	filterTerminals(filterFn: (terminal: TerminalInfo) => boolean): TerminalInfo[] {
-		const terminals = this.registry.getAllTerminals()
-		return terminals.filter(filterFn)
+		return this.registry.getAllTerminals().filter(filterFn)
 	}
 
-	/**
-	 * Close terminals that match the provided criteria.
-	 * @param filterFn Function that accepts TerminalInfo and returns boolean for terminals to close
-	 * @param force If true, closes even busy terminals
-	 * @returns Number of terminals closed
-	 */
+	/** Close terminals that match the provided criteria. Returns number of terminals closed. */
 	closeTerminals(filterFn: (terminal: TerminalInfo) => boolean, force = false): number {
 		const terminalsToClose = this.filterTerminals(filterFn)
 		let closedCount = 0
@@ -357,7 +225,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 			}
 
 			this.terminalIds.delete(terminalInfo.id)
-			this.processes.delete(terminalInfo.id)
+			this.processManager.removeProcess(terminalInfo.id)
 			terminalInfo.terminal.dispose()
 			this.registry.removeTerminal(terminalInfo.id)
 			closedCount++
@@ -366,253 +234,64 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		return closedCount
 	}
 
-	/**
-	 * Handle terminal management when the terminal profile changes.
-	 * @param newShellPath New shell path to use
-	 * @returns Object with information about closed terminals and remaining busy terminals
-	 */
-	handleTerminalProfileChange(newShellPath: string | undefined): {
-		closedCount: number
-		busyTerminals: TerminalInfo[]
-	} {
+	/** Handle terminal management when the terminal profile changes. */
+	handleTerminalProfileChange(newShellPath: string | undefined): TerminalProfileChangeResult {
 		const closedCount = this.closeTerminals(
-			(terminal) => !terminal.busy && (terminal as any).shellPath !== newShellPath,
+			(terminal) => !terminal.busy && terminal.shellPath !== newShellPath,
 			false,
 		)
-		const busyTerminals = this.filterTerminals((terminal) => terminal.busy && (terminal as any).shellPath !== newShellPath)
+		const busyTerminals = this.filterTerminals((terminal) => terminal.busy && terminal.shellPath !== newShellPath)
 		return { closedCount, busyTerminals }
 	}
 
-	/**
-	 * Force closure of all terminals (including busy ones).
-	 * @returns Number of terminals closed
-	 */
+	/** Force closure of all terminals (including busy ones). Returns number closed. */
 	closeAllTerminals(): number {
 		return this.closeTerminals(() => true, true)
 	}
 
-	// =========================================================================
-	// Background Command Tracking Methods
-	// =========================================================================
+	// --- Background Command Tracking (delegated to TerminalProcessManager) ---
 
-	/**
-	 * Track a command that will continue running in the background.
-	 * Called when user clicks "Proceed While Running".
-	 * Creates a log file and pipes output to it.
-	 * Sets up a 10-minute hard timeout to prevent zombie processes.
-	 *
-	 * @param process The terminal process to track
-	 * @param command The command string being executed
-	 * @param existingOutput Output lines already captured before tracking started
-	 * @returns The background command info with log file path
-	 */
+	/** Track a command running in the background. */
 	trackBackgroundCommand(
 		process: TerminalProcessResultPromise,
 		command: string,
 		existingOutput: string[] = [],
 	): BackgroundCommand {
-		const id = `background-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-		// Use DiracTempManager for proper temp file management and cleanup
-		const logFilePath = DiracTempManager.createTempFilePath("background")
-
-		const backgroundCommand: BackgroundCommand = {
-			id,
-			command,
-			startTime: Date.now(),
-			status: "running",
-			logFilePath,
-			lineCount: existingOutput.length,
-			process,
-		}
-
-		// Create write stream for log file
-		const logStream = fs.createWriteStream(logFilePath, { flags: "a" })
-		this.logStreams.set(id, logStream)
-
-		// Write existing output that was captured before tracking started
-		if (existingOutput.length > 0) {
-			logStream.write(existingOutput.join("\n") + "\n")
-		}
-
-		// Pipe future process output to log file
-		process.on("line", (line: string) => {
-			backgroundCommand.lineCount++
-			logStream.write(line + "\n")
-		})
-
-		// Set up 10-minute hard timeout to prevent zombie processes
-		const timeoutId = setTimeout(() => {
-			if (backgroundCommand.status === "running") {
-				backgroundCommand.status = "timed_out"
-				logStream.write("\n[TIMEOUT] Process killed after 10 minutes\n")
-				logStream.end()
-
-				// Terminate the process if it has a terminate method
-				if (process && typeof (process as any).terminate === "function") {
-					;(process as any).terminate()
-				}
-			}
-		}, BACKGROUND_COMMAND_TIMEOUT_MS)
-		this.backgroundTimeouts.set(id, timeoutId)
-
-		// Listen for completion - clear timeout
-		process.on("completed", (details) => {
-			// Guard: Skip if already handled by timeout
-			if (backgroundCommand.status !== "running") {
-				return
-			}
-			const timeout = this.backgroundTimeouts.get(id)
-			if (timeout) {
-				clearTimeout(timeout)
-				this.backgroundTimeouts.delete(id)
-			}
-			const exitCode = details?.exitCode
-			const signal = details?.signal
-			if (typeof exitCode === "number") {
-				backgroundCommand.exitCode = exitCode
-			}
-
-			if ((typeof exitCode === "number" && exitCode !== 0) || signal) {
-				backgroundCommand.status = "error"
-				if (typeof exitCode === "number" && exitCode !== 0) {
-					logStream.write(`\n[EXIT_CODE] Process exited with code ${exitCode}\n`)
-				}
-				if (signal) {
-					logStream.write(`\n[SIGNAL] Process terminated by signal ${signal}\n`)
-				}
-			} else {
-				backgroundCommand.status = "completed"
-			}
-			logStream.end()
-		})
-
-		// Listen for errors - clear timeout
-		process.on("error", (error: Error) => {
-			// Guard: Skip if already handled by timeout
-			if (backgroundCommand.status !== "running") {
-				return
-			}
-			const timeout = this.backgroundTimeouts.get(id)
-			if (timeout) {
-				clearTimeout(timeout)
-				this.backgroundTimeouts.delete(id)
-			}
-			backgroundCommand.status = "error"
-			// Try to extract exit code from error message if available
-			const exitCodeMatch = error.message.match(/exit code (\d+)/)
-			if (exitCodeMatch) {
-				backgroundCommand.exitCode = Number.parseInt(exitCodeMatch[1], 10)
-			}
-			logStream.end()
-		})
-
-		this.backgroundCommands.set(id, backgroundCommand)
-		return backgroundCommand
+		return this.processManager.trackBackgroundCommand(process, command, existingOutput)
 	}
 
-	/**
-	 * Get a specific background command by ID.
-	 */
+	/** Get a specific background command by ID. */
 	getBackgroundCommand(id: string): BackgroundCommand | undefined {
-		return this.backgroundCommands.get(id)
+		return this.processManager.getBackgroundCommand(id)
 	}
 
-	/**
-	 * Get all tracked background commands.
-	 */
+	/** Get all tracked background commands. */
 	getAllBackgroundCommands(): BackgroundCommand[] {
-		return Array.from(this.backgroundCommands.values())
+		return this.processManager.getAllBackgroundCommands()
 	}
 
-	/**
-	 * Get only running background commands.
-	 */
+	/** Get only running background commands. */
 	getRunningBackgroundCommands(): BackgroundCommand[] {
-		return this.getAllBackgroundCommands().filter((c) => c.status === "running")
+		return this.processManager.getRunningBackgroundCommands()
 	}
 
-	/**
-	 * Check if there are any active background commands.
-	 */
+	/** Check if there are any active background commands. */
 	hasActiveBackgroundCommands(): boolean {
-		return this.getRunningBackgroundCommands().length > 0
+		return this.processManager.hasActiveBackgroundCommands()
 	}
 
-	/**
-	 * Cancel/terminate a specific background command.
-	 * @param id The background command ID to cancel
-	 * @returns true if cancelled, false if not found or already completed
-	 */
+	/** Cancel/terminate a specific background command. */
 	cancelBackgroundCommand(id: string): boolean {
-		const command = this.backgroundCommands.get(id)
-		if (!command || command.status !== "running") {
-			return false
-		}
-
-		// Clear timeout
-		const timeout = this.backgroundTimeouts.get(id)
-		if (timeout) {
-			clearTimeout(timeout)
-			this.backgroundTimeouts.delete(id)
-		}
-
-		// Close log stream
-		const logStream = this.logStreams.get(id)
-		if (logStream) {
-			logStream.write("\n[CANCELLED] Command cancelled by user\n")
-			logStream.end()
-			this.logStreams.delete(id)
-		}
-
-		// Terminate process
-		if (command.process && typeof (command.process as any).terminate === "function") {
-			;(command.process as any).terminate()
-		}
-
-		command.status = "error"
-		return true
+		return this.processManager.cancelBackgroundCommand(id)
 	}
 
-	/**
-	 * Get a summary string for environment details.
-	 * Shows running background commands with duration, line count, and log paths.
-	 */
+	/** Get a summary string for environment details. */
 	getBackgroundCommandsSummary(): string {
-		const running = this.getRunningBackgroundCommands()
-		if (running.length === 0) {
-			return ""
-		}
-
-		const lines = [`# Background Commands (${running.length} running)`]
-		for (const c of running) {
-			const duration = Math.round((Date.now() - c.startTime) / 1000 / 60)
-			lines.push(`- ${c.command} (running ${duration}m, ${c.lineCount} lines, log: ${c.logFilePath})`)
-		}
-		return lines.join("\n")
+		return this.processManager.getBackgroundCommandsSummary()
 	}
 
-	/**
-	 * Clean up all background command resources.
-	 * Called when disposing the manager.
-	 */
+	/** Clean up all background command resources. */
 	disposeBackgroundCommands(): void {
-		// Clear all timeouts
-		for (const [_id, timeout] of this.backgroundTimeouts) {
-			clearTimeout(timeout)
-		}
-		this.backgroundTimeouts.clear()
-
-		// Close all log streams
-		for (const [_id, logStream] of this.logStreams) {
-			try {
-				logStream.end()
-			} catch (_error) {
-				// Ignore errors when closing log streams
-			}
-		}
-		this.logStreams.clear()
-
-		// Clear command tracking
-		this.backgroundCommands.clear()
+		this.processManager.disposeBackgroundCommands()
 	}
 }

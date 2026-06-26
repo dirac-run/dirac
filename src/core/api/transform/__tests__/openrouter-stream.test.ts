@@ -1,6 +1,7 @@
 import { describe, it } from "mocha"
 import "should"
 import type { ModelInfo } from "@shared/api"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 import sinon from "sinon"
 import { createOpenRouterStream } from "../openrouter-stream"
 
@@ -54,7 +55,7 @@ describe("createOpenRouterStream", () => {
 		payload.should.have.property("max_tokens", 4_096)
 	})
 
-	it("does not send max_tokens for non-Gemini models", async () => {
+	it("caps non-Gemini models to 32768 max_tokens", async () => {
 		const { client, create } = createClient()
 
 		await createOpenRouterStream(client as any, "system prompt", [{ role: "user", content: "hello" }] as any, {
@@ -66,11 +67,11 @@ describe("createOpenRouterStream", () => {
 		payload.should.have.property("max_tokens", 32_768)
 	})
 
-	it("does not send max_tokens for non-Flash Gemini models", async () => {
+	it("caps non-Flash Gemini models to 32768 max_tokens", async () => {
 		const { client, create } = createClient()
 
 		await createOpenRouterStream(client as any, "system prompt", [{ role: "user", content: "hello" }] as any, {
-			id: "google/gemini-2.5-pro",
+			id: TEST_MODEL_IDS.GEMINI_OPENROUTER,
 			info: createModelInfo(65_536),
 		})
 

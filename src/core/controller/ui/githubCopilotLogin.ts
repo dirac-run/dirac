@@ -8,6 +8,6 @@ import type { Controller } from "../index"
  * @returns Empty response
  */
 export async function githubCopilotLogin(controller: Controller, _request: EmptyRequest): Promise<Empty> {
-	await controller.handleGithubCopilotLogin()
+	await controller.completeGithubLogin()
 	return Empty.create({})
 }

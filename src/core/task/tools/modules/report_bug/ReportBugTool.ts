@@ -1,8 +1,8 @@
 import { showSystemNotification } from "@integrations/notifications"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { createAndOpenGitHubIssue } from "@utils/github-url-utils"
-import { formatResponse } from "@core/prompts/responses"
-import { TOOL_EXAMPLES } from "@core/prompts/tool-examples"
+import { formatResponse } from "@core/formatResponse"
+import { TOOL_EXAMPLES } from "@core/tool-examples"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import { IDiracTool } from "../../interfaces/IDiracTool"
@@ -85,7 +85,7 @@ export class ReportBugTool implements IDiracTool {
         }
 
         if (this.hasUserFeedback(askResponse)) {
-            return this.handleUserFeedback(askResponse, card, env)
+            return this.collectBugReportFeedback(askResponse, card, env)
         }
 
         return this.submitBugReport(args, systemInfo, card)
@@ -148,7 +148,7 @@ export class ReportBugTool implements IDiracTool {
         )
     }
 
-    private async handleUserFeedback(askResponse: any, card: any, env: IToolEnvironment): Promise<any> {
+    private async collectBugReportFeedback(askResponse: any, card: any, env: IToolEnvironment): Promise<any> {
         let fileContentString = ""
         if (askResponse.files && askResponse.files.length > 0) {
             fileContentString = await processFilesIntoText(askResponse.files)

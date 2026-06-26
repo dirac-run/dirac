@@ -1,5 +1,6 @@
 import { parseKeyPairsIntoRecord } from "@opentelemetry/core"
 import { BUILD_CONSTANTS } from "@/shared/constants"
+import { isTest } from "@shared/config/environment"
 
 export interface OpenTelemetryClientConfig {
 	/**
@@ -94,7 +95,7 @@ export interface OpenTelemetryClientValidConfig extends OpenTelemetryClientConfi
 	enabled: true
 }
 
-const isTestEnv = process.env.E2E_TEST === "true" || process.env.IS_TEST === "true"
+const isTestEnv = isTest()
 
 export function remoteConfigToOtelConfig(settings: any): OpenTelemetryClientConfig {
 	return {

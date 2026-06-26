@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { MinimaxModelId, ModelInfo, minimaxDefaultModelId, minimaxModels } from "@/shared/api"
@@ -53,7 +54,7 @@ export class MinimaxHandler implements ApiHandler {
         const model = this.getModel()
 
         // Tools are available only when native tools are enabled
-        const nativeToolsOn = tools?.length && tools?.length > 0
+        const nativeToolsOn = (tools?.length ?? 0) > 0
 
         const budget_tokens = this.options.thinkingBudgetTokens || 0
         const reasoningOn = (model.info.supportsReasoning ?? false) && budget_tokens !== 0
@@ -65,7 +66,7 @@ export class MinimaxHandler implements ApiHandler {
             system: [{ text: systemPrompt, type: "text" }],
             messages,
             stream: true,
-            tools: nativeToolsOn ? (tools as any) : undefined,
+            tools: nativeToolsOn ? (tools as AnthropicTool[]) : undefined,
             thinking: reasoningOn ? { type: "enabled", budget_tokens: budget_tokens } : undefined,
             // "Thinking isn't compatible with temperature, top_p, or top_k modifications"
             temperature: reasoningOn ? undefined : 1.0, // MiniMax recommends 1.0, range is (0.0, 1.0]
@@ -76,130 +77,101 @@ export class MinimaxHandler implements ApiHandler {
         const lastStartedToolCall = { id: "", name: "", arguments: "" }
 
         for await (const chunk of stream) {
-            switch (chunk?.type) {
-                case "message_start": {
-                    // tells us cache reads/writes/input/output
-                    const usage = chunk.message.usage
-                    yield {
-                        type: "usage",
-                        inputTokens: usage.input_tokens || 0,
-                        outputTokens: usage.output_tokens || 0,
-                        cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-                        cacheReadTokens: usage.cache_read_input_tokens || undefined,
-                    }
-                    break
-                }
-                case "message_delta":
-                    // tells us stop_reason, stop_sequence, and output tokens along the way and at the end of the message
-                    yield {
-                        type: "usage",
-                        inputTokens: chunk.usage.input_tokens || 0,
-                        outputTokens: chunk.usage.output_tokens || 0,
-                    }
-                    break
-                case "message_stop":
-                    // no usage data, just an indicator that the message is done
-                    break
-                case "content_block_start":
-                    switch (chunk.content_block.type) {
-                        case "thinking":
-                            yield {
-                                type: "reasoning",
-                                reasoning: chunk.content_block.thinking || "",
-                                signature: chunk.content_block.signature,
-                            }
-                            break
-                        case "redacted_thinking":
-                            // Content is encrypted, and we don't want to pass placeholder text back to the API
-                            yield {
-                                type: "reasoning",
-                                reasoning: "[Redacted thinking block]",
-                                redacted_data: chunk.content_block.data,
-                            }
-                            break
-                        case "tool_use":
-                            if (chunk.content_block.id && chunk.content_block.name) {
-                                // Store tool call information for streaming
-                                lastStartedToolCall.id = chunk.content_block.id
-                                lastStartedToolCall.name = chunk.content_block.name
-                                lastStartedToolCall.arguments = ""
-                            }
-                            break
-                        case "text":
-                            // we may receive multiple text blocks, in which case just insert a line break between them
-                            if (chunk.index > 0) {
-                                yield {
-                                    type: "text",
-                                    text: "\n",
-                                }
-                            }
-                            yield {
-                                type: "text",
-                                text: chunk.content_block.text,
-                            }
-                            break
-                    }
-                    break
-                case "content_block_delta":
-                    switch (chunk.delta.type) {
-                        case "thinking_delta":
-                            // 'reasoning' type just displays in the UI, but reasoning with signature will be used to send the thinking traces back to the API
-                            yield {
-                                type: "reasoning",
-                                reasoning: chunk.delta.thinking,
-                            }
-                            break
-                        case "signature_delta":
-                            // It's used when sending the thinking block back to the API
-                            // API expects this in completed form, not as array of deltas
-                            if (chunk.delta.signature) {
-                                yield {
-                                    type: "reasoning",
-                                    reasoning: "",
-                                    signature: chunk.delta.signature,
-                                }
-                            }
-                            break
-                        case "text_delta":
-                            yield {
-                                type: "text",
-                                text: chunk.delta.text,
-                            }
-                            break
-                        case "input_json_delta":
-                            if (lastStartedToolCall.id && lastStartedToolCall.name && chunk.delta.partial_json) {
-                                yield {
-                                    type: "tool_calls",
-                                    tool_call: {
-                                        ...lastStartedToolCall,
-                                        function: {
-                                            ...lastStartedToolCall,
-                                            id: lastStartedToolCall.id,
-                                            name: lastStartedToolCall.name,
-                                            arguments: chunk.delta.partial_json,
-                                        },
-                                    },
-                                }
-                            }
-                            break
-                    }
-                    break
-                case "content_block_stop":
-                    lastStartedToolCall.id = ""
-                    lastStartedToolCall.name = ""
-                    lastStartedToolCall.arguments = ""
-                    break
-            }
+            yield* handleStreamChunk(chunk, lastStartedToolCall)
         }
     }
 
     getModel(): { id: MinimaxModelId; info: ModelInfo } {
         const modelId = this.options.apiModelId
-
         if (modelId && modelId in minimaxModels) {
             const id = modelId as MinimaxModelId
             return { id, info: minimaxModels[id] }
         }
         return { id: minimaxDefaultModelId, info: minimaxModels[minimaxDefaultModelId] }
     }
+}
+
+type ToolCallState = { id: string; name: string; arguments: string }
+
+/** Dispatches a single Anthropic stream chunk to the appropriate handler. */
+async function* handleStreamChunk(chunk: Anthropic.RawMessageStreamEvent, state: ToolCallState): ApiStream {
+    switch (chunk.type) {
+        case "message_start": return yield* handleMessageStart(chunk)
+        case "message_delta": return yield* handleMessageDelta(chunk)
+        case "message_stop": return
+        case "content_block_start": return yield* handleContentBlockStart(chunk, state)
+        case "content_block_delta": return yield* handleContentBlockDelta(chunk, state)
+        case "content_block_stop": return resetToolCall(state)
+    }
+}
+
+async function* handleMessageStart(chunk: Anthropic.RawMessageStartEvent): ApiStream {
+    const usage = chunk.message.usage
+    yield {
+        type: "usage",
+        inputTokens: usage.input_tokens || 0,
+        outputTokens: usage.output_tokens || 0,
+        cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+        cacheReadTokens: usage.cache_read_input_tokens || undefined,
+    }
+}
+
+async function* handleMessageDelta(chunk: Anthropic.RawMessageDeltaEvent): ApiStream {
+    yield { type: "usage", inputTokens: chunk.usage.input_tokens || 0, outputTokens: chunk.usage.output_tokens || 0 }
+}
+
+async function* handleContentBlockStart(chunk: Anthropic.RawContentBlockStartEvent, state: ToolCallState): ApiStream {
+    switch (chunk.content_block.type) {
+        case "thinking": return yield { type: "reasoning", reasoning: chunk.content_block.thinking || "", signature: chunk.content_block.signature }
+        case "redacted_thinking": return yield { type: "reasoning", reasoning: "[Redacted thinking block]", redacted_data: chunk.content_block.data }
+        case "tool_use": return handleToolUseStart(chunk, state)
+        case "text": return yield* handleTextBlockStart(chunk)
+    }
+}
+
+function handleToolUseStart(chunk: Anthropic.RawContentBlockStartEvent, state: ToolCallState): void {
+    const block = chunk.content_block
+    if (block.type !== "tool_use" || !block.id || !block.name) return
+    state.id = block.id
+    state.name = block.name
+    state.arguments = ""
+}
+
+async function* handleTextBlockStart(chunk: Anthropic.RawContentBlockStartEvent): ApiStream {
+    if (chunk.index > 0) yield { type: "text", text: "\n" }
+    const block = chunk.content_block
+    if (block.type === "text") yield { type: "text", text: block.text }
+}
+
+async function* handleContentBlockDelta(chunk: Anthropic.RawContentBlockDeltaEvent, state: ToolCallState): ApiStream {
+    switch (chunk.delta.type) {
+        case "thinking_delta": return yield { type: "reasoning", reasoning: chunk.delta.thinking }
+        case "signature_delta": return yield* handleSignatureDelta(chunk)
+        case "text_delta": return yield { type: "text", text: chunk.delta.text }
+        case "input_json_delta": return yield* handleInputJsonDelta(chunk, state)
+    }
+}
+
+async function* handleSignatureDelta(chunk: Anthropic.RawContentBlockDeltaEvent): ApiStream {
+    const delta = chunk.delta
+    if (delta.type !== "signature_delta" || !delta.signature) return
+    yield { type: "reasoning", reasoning: "", signature: delta.signature }
+}
+
+async function* handleInputJsonDelta(chunk: Anthropic.RawContentBlockDeltaEvent, state: ToolCallState): ApiStream {
+    const delta = chunk.delta
+    if (delta.type !== "input_json_delta" || !state.id || !state.name || !delta.partial_json) return
+    yield {
+        type: "tool_calls",
+        tool_call: {
+            ...state,
+            function: { ...state, id: state.id, name: state.name, arguments: delta.partial_json },
+        },
+    }
+}
+
+function resetToolCall(state: ToolCallState): void {
+    state.id = ""
+    state.name = ""
+    state.arguments = ""
 }
