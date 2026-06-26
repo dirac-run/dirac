@@ -24,6 +24,7 @@ import { syncWorker } from "./shared/services/worker/sync";
 import { getBlobStoreSettingsFromEnv } from "./shared/services/worker/worker";
 import { getLatestAnnouncementId } from "./utils/announcements";
 import { arePathsEqual } from "./utils/path";
+import { initFileLogger } from "@shared/services/file-logger";
 
 /**
  * Performs intialization for Dirac that is common to all platforms.
@@ -35,7 +36,7 @@ import { arePathsEqual } from "./utils/path";
 export async function initialize(storageContext: StorageContext): Promise<DiracWebviewProvider> {
     // Configure the shared Logging class to use HostProvider's output channels and debug logger
     Logger.subscribe((msg: string) => HostProvider.get().logToChannel(msg)) // File system logging
-    Logger.subscribe((msg: string) => HostProvider.env.debugLog({ value: msg })) // Host debug logging
+    Logger.subscribe(initFileLogger()) // Disk file logging at ~/.dirac/data/logs/
 
     // Initialize DiracEndpoint configuration (reads bundled and ~/.dirac/endpoints.json if present)
     // This must be done before any other code that calls DiracEnv.config()
