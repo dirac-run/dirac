@@ -24,7 +24,7 @@ export function asObjectSafe(value: any): object {
 
 		return {}
 	} catch (error) {
-		Logger.warn("Dirac <Language Model API>: Failed to parse object:", error)
+		Logger.debug("Dirac <Language Model API>: Failed to parse object:", error)
 		return {}
 	}
 }
@@ -37,11 +37,15 @@ function imagePlaceholder(source?: any): string {
 }
 
 // Converts a tool_result's content into VSCode TextParts (images become placeholders).
-function convertToolResultContent(content: string | Anthropic.ToolResultBlockParam["content"] | undefined): vscode.LanguageModelTextPart[] {
+function convertToolResultContent(
+	content: string | Anthropic.ToolResultBlockParam["content"] | undefined,
+): vscode.LanguageModelTextPart[] {
 	if (typeof content === "string") return [new vscode.LanguageModelTextPart(content)]
 	if (!Array.isArray(content)) return [new vscode.LanguageModelTextPart("")]
 	return content.map((part: any) =>
-		part.type === "image" ? new vscode.LanguageModelTextPart(imagePlaceholder(part.source)) : new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
+		part.type === "image"
+			? new vscode.LanguageModelTextPart(imagePlaceholder(part.source))
+			: new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
 	)
 }
 
@@ -56,9 +60,13 @@ function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockPara
 		{ nonToolMessages: [], toolMessages: [] },
 	)
 	const contentParts = [
-		...toolMessages.map((tm: any) => new vscode.LanguageModelToolResultPart(tm.tool_use_id, convertToolResultContent(tm.content))),
+		...toolMessages.map(
+			(tm: any) => new vscode.LanguageModelToolResultPart(tm.tool_use_id, convertToolResultContent(tm.content)),
+		),
 		...nonToolMessages.map((part: any) =>
-			part.type === "image" ? new vscode.LanguageModelTextPart(imagePlaceholder(part.source)) : new vscode.LanguageModelTextPart(part.text),
+			part.type === "image"
+				? new vscode.LanguageModelTextPart(imagePlaceholder(part.source))
+				: new vscode.LanguageModelTextPart(part.text),
 		),
 	]
 	return vscode.LanguageModelChatMessage.User(contentParts)
@@ -77,7 +85,9 @@ function convertVsCodeLmAssistantMessage(content: Anthropic.Messages.ContentBloc
 	const contentParts = [
 		...toolMessages.map((tm: any) => new vscode.LanguageModelToolCallPart(tm.id, tm.name, asObjectSafe(tm.input))),
 		...nonToolMessages.map((part: any) =>
-			part.type === "image" ? new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]") : new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
+			part.type === "image"
+				? new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]")
+				: new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
 		),
 	]
 	return vscode.LanguageModelChatMessage.Assistant(contentParts)
@@ -147,8 +157,8 @@ export function convertToAnthropicMessage(vsCodeLmMessage: vscode.LanguageModelC
 						id: part.callId || crypto.randomUUID(),
 						name: part.name,
 						input: asObjectSafe(part.input),
-							caller: { type: "direct" },
-						}
+						caller: { type: "direct" },
+					}
 				}
 
 				return null

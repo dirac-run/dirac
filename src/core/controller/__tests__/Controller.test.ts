@@ -144,6 +144,7 @@ describe("Controller (original)", () => {
 			flushPendingState: sandbox.stub().resolves(),
 			getAllGlobalStateEntries: sandbox.stub().returns({}),
 			getAllWorkspaceStateEntries: sandbox.stub().returns({}),
+			getSecretKey: sandbox.stub().returns(undefined),
 		}
 		sandbox.stub(StateManager, "get").returns(mockSM as any)
 

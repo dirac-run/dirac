@@ -117,15 +117,6 @@ describe("WorkspacePathAdapter", () => {
 			expect(result).to.equal(absolutePath)
 		})
 
-		it("should warn for absolute paths outside workspaces", () => {
-			const absolutePath = "/other/path/file.ts"
-			const result = adapter.resolvePath(absolutePath)
-
-			expect(result).to.equal(absolutePath)
-			expect(consoleWarnStub.calledOnce).to.be.true
-			expect(consoleWarnStub.firstCall.args[0]).to.include("doesn't belong to any workspace")
-		})
-
 		it("should get all possible paths across workspaces", () => {
 			const paths = adapter.getAllPossiblePaths("src/config.ts")
 			expect(paths).to.have.length(3)

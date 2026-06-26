@@ -83,6 +83,7 @@ describe("Controller — Auth delegate", () => {
 			setSessionOverride: sandbox.stub(),
 			getModelsCache: sandbox.stub().returns(null),
 			registerCallbacks: sandbox.stub(),
+			getSecretKey: sandbox.stub().returns(undefined),
 		} as any)
 
 		const mockBannerInstance = { getActiveBanners: sandbox.stub().returns([]), getWelcomeBanners: sandbox.stub().returns([]) }
@@ -157,6 +158,8 @@ describe("Controller — Auth delegate", () => {
 		stub.resolves({ user_code: "XYZ789", verification_uri: "https://claim.example.com", device_code: "dc", interval: 10 })
 		await controller.completeGithubLogin()
 		sandbox.assert.called(stub)
+		// Flush microtasks spawned by fire-and-forget pollForToken().then(postStateToWebview)
+		await new Promise((resolve) => setImmediate(resolve))
 	})
 
 	it("completeGithubLogin shows error message on failure", async () => {

@@ -30,20 +30,24 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 
 	public async initialize(): Promise<DiracTelemetryProvider> {
 		// Listen for host telemetry changes
-		HostProvider.env.subscribeToTelemetrySettings(
-			{},
-			{
-				onResponse: (event: { isEnabled: Setting }) => {
-					const hostEnabled = event.isEnabled === Setting.ENABLED || event.isEnabled === Setting.UNSUPPORTED
-					this.telemetrySettings.hostEnabled = hostEnabled
+		if (typeof HostProvider.env.subscribeToTelemetrySettings === "function") {
+			HostProvider.env.subscribeToTelemetrySettings(
+				{},
+				{
+					onResponse: (event: { isEnabled: Setting }) => {
+						const hostEnabled = event.isEnabled === Setting.ENABLED || event.isEnabled === Setting.UNSUPPORTED
+						this.telemetrySettings.hostEnabled = hostEnabled
+					},
 				},
-			},
-		)
+			)
+		}
 
 		// Check host-specific telemetry setting (e.g. VS Code setting)
-		const hostSettings = await HostProvider.env.getTelemetrySettings({})
-		if (hostSettings.isEnabled === Setting.DISABLED) {
-			this.telemetrySettings.hostEnabled = false
+		if (typeof HostProvider.env.getTelemetrySettings === "function") {
+			const hostSettings = await HostProvider.env.getTelemetrySettings({})
+			if (hostSettings.isEnabled === Setting.DISABLED) {
+				this.telemetrySettings.hostEnabled = false
+			}
 		}
 
 		this.telemetrySettings.level = await this.getTelemetryLevel()
@@ -101,7 +105,7 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 		}
 	}
 
-		public identifyUser(userInfo: any, properties: TelemetryProperties = {}) {
+	public identifyUser(userInfo: any, properties: TelemetryProperties = {}) {
 		this.captureToDirac("$identify", properties)
 	}
 

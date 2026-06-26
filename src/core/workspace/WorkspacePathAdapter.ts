@@ -43,7 +43,7 @@ export class WorkspacePathAdapter {
 			const root = manager.resolvePathToRoot(relativePath)
 			if (!root) {
 				// Path doesn't belong to any workspace, but return it anyway
-				Logger.warn(`[WorkspacePathAdapter] Absolute path ${relativePath} doesn't belong to any workspace`)
+				Logger.debug(`[WorkspacePathAdapter] Absolute path ${relativePath} doesn't belong to any workspace`)
 			}
 			return relativePath
 		}
