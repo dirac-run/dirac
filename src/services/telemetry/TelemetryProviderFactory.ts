@@ -57,8 +57,6 @@ export class TelemetryProviderFactory {
 		if (providers.length === 0) {
 			providers.push(new NoOpTelemetryProvider())
 		}
-
-		Logger.info("TelemetryProviderFactory: Created providers - " + providers.map((p) => p.name).join(", "))
 		return providers
 	}
 
