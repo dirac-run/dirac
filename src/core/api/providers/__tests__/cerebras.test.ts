@@ -171,12 +171,10 @@ describe("CerebrasHandler stream parsing", () => {
 
 	it("yields a usage chunk with calculated cost from the final chunk", async () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
-		sinon
-			.stub(handler, "getModel")
-			.returns({
-				id: "llama-3.3-70b",
-				info: { supportsImages: false, temperature: 0, inputPrice: 2, outputPrice: 6 } as any,
-			})
+		sinon.stub(handler, "getModel").returns({
+			id: "llama-3.3-70b",
+			info: { supportsImages: false, temperature: 0, inputPrice: 2, outputPrice: 6 } as any,
+		})
 		stubClient(handler, [
 			{ choices: [{ delta: { content: "hi" } }] },
 			{ usage: { prompt_tokens: 100, completion_tokens: 50 } },
@@ -192,12 +190,10 @@ describe("CerebrasHandler stream parsing", () => {
 
 	it("defaults usage tokens to 0 when usage fields are missing", async () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
-		sinon
-			.stub(handler, "getModel")
-			.returns({
-				id: "llama-3.3-70b",
-				info: { supportsImages: false, temperature: 0, inputPrice: 0, outputPrice: 0 } as any,
-			})
+		sinon.stub(handler, "getModel").returns({
+			id: "llama-3.3-70b",
+			info: { supportsImages: false, temperature: 0, inputPrice: 0, outputPrice: 0 } as any,
+		})
 		stubClient(handler, [{ usage: {} }])
 		const chunks: any[] = []
 		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }])) chunks.push(chunk)
@@ -326,11 +322,9 @@ describe("CerebrasHandler rate_limit_exceeded code", () => {
 	it("maps error.code rate_limit_exceeded to rate limit message", async () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
 		sinon.stub(handler, "getModel").returns({ id: "llama-3.3-70b", info: { supportsImages: false } as any })
-		sinon
-			.stub(handler as any, "ensureClient")
-			.returns({
-				chat: { completions: { create: sinon.stub().rejects({ code: "rate_limit_exceeded", message: "slow" }) } },
-			} as any)
+		sinon.stub(handler as any, "ensureClient").returns({
+			chat: { completions: { create: sinon.stub().rejects({ code: "rate_limit_exceeded", message: "slow" }) } },
+		} as any)
 		try {
 			for await (const _ of handler.createMessage("system", [{ role: "user", content: "hi" }])) {
 				/* drain */

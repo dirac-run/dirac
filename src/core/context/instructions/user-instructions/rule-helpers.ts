@@ -302,14 +302,12 @@ export async function ensureLocalDiracDirExists(diracrulePath: string, defaultRu
 			} catch (_conversionError) {
 				// attempt to restore backup on conversion failure
 				try {
-					await fs
-						.rm(diracrulePath, { recursive: true, force: true })
-						.catch((err) =>
-							Logger.warn("Failed to remove directory during rule conversion rollback", {
-								path: diracrulePath,
-								error: err,
-							}),
-						)
+					await fs.rm(diracrulePath, { recursive: true, force: true }).catch((err) =>
+						Logger.warn("Failed to remove directory during rule conversion rollback", {
+							path: diracrulePath,
+							error: err,
+						}),
+					)
 					await fs.rename(tempPath, diracrulePath) // restore backup
 				} catch (restoreError) {
 					Logger.error("Failed to restore rule backup after conversion failure — rules file may be corrupted", {

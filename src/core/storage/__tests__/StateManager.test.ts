@@ -54,12 +54,10 @@ describe("StateManager", () => {
 
 	beforeEach(async () => {
 		sandbox = sinon.createSandbox()
-		sandbox
-			.stub(HostProvider, "get")
-			.returns({
-				globalStorageFsPath: tempDir,
-				hostBridge: { workspaceClient: {}, envClient: { getHostVersion: sandbox.stub().resolves({}) } },
-			} as any)
+		sandbox.stub(HostProvider, "get").returns({
+			globalStorageFsPath: tempDir,
+			hostBridge: { workspaceClient: {}, envClient: { getHostVersion: sandbox.stub().resolves({}) } },
+		} as any)
 		tempDir = path.join(os.tmpdir(), `dirac-sm-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 		await fs.mkdir(tempDir, { recursive: true })
 

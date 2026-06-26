@@ -6,952 +6,433 @@ import { ProtoBusClient, Callbacks } from "./grpc-client-base"
 
 export class BrowserServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.BrowserService"
-	static async getBrowserConnectionInfo(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BrowserConnectionInfo> {
-		return this.makeUnaryRequest(
-			"getBrowserConnectionInfo",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.BrowserConnectionInfo.fromJSON,
-		)
+    static async getBrowserConnectionInfo(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BrowserConnectionInfo> {
+		return this.makeUnaryRequest("getBrowserConnectionInfo", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.BrowserConnectionInfo.fromJSON)
 	}
-	static async testBrowserConnection(request: proto.dirac.StringRequest): Promise<proto.dirac.BrowserConnection> {
-		return this.makeUnaryRequest(
-			"testBrowserConnection",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.BrowserConnection.fromJSON,
-		)
+    static async testBrowserConnection(request: proto.dirac.StringRequest): Promise<proto.dirac.BrowserConnection> {
+		return this.makeUnaryRequest("testBrowserConnection", request, proto.dirac.StringRequest.toJSON, proto.dirac.BrowserConnection.fromJSON)
 	}
-	static async discoverBrowser(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BrowserConnection> {
-		return this.makeUnaryRequest(
-			"discoverBrowser",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.BrowserConnection.fromJSON,
-		)
+    static async discoverBrowser(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BrowserConnection> {
+		return this.makeUnaryRequest("discoverBrowser", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.BrowserConnection.fromJSON)
 	}
-	static async getDetectedChromePath(request: proto.dirac.EmptyRequest): Promise<proto.dirac.ChromePath> {
-		return this.makeUnaryRequest(
-			"getDetectedChromePath",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.ChromePath.fromJSON,
-		)
+    static async getDetectedChromePath(request: proto.dirac.EmptyRequest): Promise<proto.dirac.ChromePath> {
+		return this.makeUnaryRequest("getDetectedChromePath", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.ChromePath.fromJSON)
 	}
-	static async relaunchChromeDebugMode(request: proto.dirac.EmptyRequest): Promise<proto.dirac.String> {
-		return this.makeUnaryRequest(
-			"relaunchChromeDebugMode",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.String.fromJSON,
-		)
+    static async relaunchChromeDebugMode(request: proto.dirac.EmptyRequest): Promise<proto.dirac.String> {
+		return this.makeUnaryRequest("relaunchChromeDebugMode", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.String.fromJSON)
 	}
 }
 export class CheckpointsServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.CheckpointsService"
-	static async checkpointDiff(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
+    static async checkpointDiff(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("checkpointDiff", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async checkpointRestore(request: proto.dirac.CheckpointRestoreRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"checkpointRestore",
-			request,
-			proto.dirac.CheckpointRestoreRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async checkpointRestore(request: proto.dirac.CheckpointRestoreRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("checkpointRestore", request, proto.dirac.CheckpointRestoreRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static subscribeToCheckpoints(
-		request: proto.dirac.CheckpointSubscriptionRequest,
-		callbacks: Callbacks<proto.dirac.CheckpointEvent>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToCheckpoints",
-			request,
-			proto.dirac.CheckpointSubscriptionRequest.toJSON,
-			proto.dirac.CheckpointEvent.fromJSON,
-			callbacks,
-		)
+    static subscribeToCheckpoints(request: proto.dirac.CheckpointSubscriptionRequest, callbacks: Callbacks<proto.dirac.CheckpointEvent>): ()=>void {
+		return this.makeStreamingRequest("subscribeToCheckpoints", request, proto.dirac.CheckpointSubscriptionRequest.toJSON, proto.dirac.CheckpointEvent.fromJSON, callbacks)
 	}
-	static async getCwdHash(request: proto.dirac.StringArrayRequest): Promise<proto.dirac.PathHashMap> {
-		return this.makeUnaryRequest(
-			"getCwdHash",
-			request,
-			proto.dirac.StringArrayRequest.toJSON,
-			proto.dirac.PathHashMap.fromJSON,
-		)
+    static async getCwdHash(request: proto.dirac.StringArrayRequest): Promise<proto.dirac.PathHashMap> {
+		return this.makeUnaryRequest("getCwdHash", request, proto.dirac.StringArrayRequest.toJSON, proto.dirac.PathHashMap.fromJSON)
 	}
 }
 export class CommandsServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.CommandsService"
-	static async addToDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
+    static async addToDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("addToDirac", request, proto.dirac.CommandContext.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async fixWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
+    static async fixWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("fixWithDirac", request, proto.dirac.CommandContext.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async explainWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
+    static async explainWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("explainWithDirac", request, proto.dirac.CommandContext.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async improveWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
+    static async improveWithDirac(request: proto.dirac.CommandContext): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("improveWithDirac", request, proto.dirac.CommandContext.toJSON, proto.dirac.Empty.fromJSON)
 	}
 }
 export class FileServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.FileService"
-	static async copyToClipboard(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async copyToClipboard(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("copyToClipboard", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async openFile(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async openFile(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openFile", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async openImage(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async openImage(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openImage", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async openMention(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async openMention(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openMention", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async deleteRuleFile(request: proto.dirac.RuleFileRequest): Promise<proto.dirac.RuleFile> {
+    static async deleteRuleFile(request: proto.dirac.RuleFileRequest): Promise<proto.dirac.RuleFile> {
 		return this.makeUnaryRequest("deleteRuleFile", request, proto.dirac.RuleFileRequest.toJSON, proto.dirac.RuleFile.fromJSON)
 	}
-	static async createRuleFile(request: proto.dirac.RuleFileRequest): Promise<proto.dirac.RuleFile> {
+    static async createRuleFile(request: proto.dirac.RuleFileRequest): Promise<proto.dirac.RuleFile> {
 		return this.makeUnaryRequest("createRuleFile", request, proto.dirac.RuleFileRequest.toJSON, proto.dirac.RuleFile.fromJSON)
 	}
-	static async searchCommits(request: proto.dirac.StringRequest): Promise<proto.dirac.GitCommits> {
+    static async searchCommits(request: proto.dirac.StringRequest): Promise<proto.dirac.GitCommits> {
 		return this.makeUnaryRequest("searchCommits", request, proto.dirac.StringRequest.toJSON, proto.dirac.GitCommits.fromJSON)
 	}
-	static async selectFiles(request: proto.dirac.BooleanRequest): Promise<proto.dirac.StringArrays> {
+    static async selectFiles(request: proto.dirac.BooleanRequest): Promise<proto.dirac.StringArrays> {
 		return this.makeUnaryRequest("selectFiles", request, proto.dirac.BooleanRequest.toJSON, proto.dirac.StringArrays.fromJSON)
 	}
-	static async getRelativePaths(request: proto.dirac.RelativePathsRequest): Promise<proto.dirac.RelativePaths> {
-		return this.makeUnaryRequest(
-			"getRelativePaths",
-			request,
-			proto.dirac.RelativePathsRequest.toJSON,
-			proto.dirac.RelativePaths.fromJSON,
-		)
+    static async getRelativePaths(request: proto.dirac.RelativePathsRequest): Promise<proto.dirac.RelativePaths> {
+		return this.makeUnaryRequest("getRelativePaths", request, proto.dirac.RelativePathsRequest.toJSON, proto.dirac.RelativePaths.fromJSON)
 	}
-	static async searchFiles(request: proto.dirac.FileSearchRequest): Promise<proto.dirac.FileSearchResults> {
-		return this.makeUnaryRequest(
-			"searchFiles",
-			request,
-			proto.dirac.FileSearchRequest.toJSON,
-			proto.dirac.FileSearchResults.fromJSON,
-		)
+    static async searchFiles(request: proto.dirac.FileSearchRequest): Promise<proto.dirac.FileSearchResults> {
+		return this.makeUnaryRequest("searchFiles", request, proto.dirac.FileSearchRequest.toJSON, proto.dirac.FileSearchResults.fromJSON)
 	}
-	static async toggleDiracRule(request: proto.dirac.ToggleDiracRuleRequest): Promise<proto.dirac.ToggleDiracRules> {
-		return this.makeUnaryRequest(
-			"toggleDiracRule",
-			request,
-			proto.dirac.ToggleDiracRuleRequest.toJSON,
-			proto.dirac.ToggleDiracRules.fromJSON,
-		)
+    static async toggleDiracRule(request: proto.dirac.ToggleDiracRuleRequest): Promise<proto.dirac.ToggleDiracRules> {
+		return this.makeUnaryRequest("toggleDiracRule", request, proto.dirac.ToggleDiracRuleRequest.toJSON, proto.dirac.ToggleDiracRules.fromJSON)
 	}
-	static async toggleCursorRule(request: proto.dirac.ToggleCursorRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
-		return this.makeUnaryRequest(
-			"toggleCursorRule",
-			request,
-			proto.dirac.ToggleCursorRuleRequest.toJSON,
-			proto.dirac.DiracRulesToggles.fromJSON,
-		)
+    static async toggleCursorRule(request: proto.dirac.ToggleCursorRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
+		return this.makeUnaryRequest("toggleCursorRule", request, proto.dirac.ToggleCursorRuleRequest.toJSON, proto.dirac.DiracRulesToggles.fromJSON)
 	}
-	static async toggleWindsurfRule(request: proto.dirac.ToggleWindsurfRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
-		return this.makeUnaryRequest(
-			"toggleWindsurfRule",
-			request,
-			proto.dirac.ToggleWindsurfRuleRequest.toJSON,
-			proto.dirac.DiracRulesToggles.fromJSON,
-		)
+    static async toggleWindsurfRule(request: proto.dirac.ToggleWindsurfRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
+		return this.makeUnaryRequest("toggleWindsurfRule", request, proto.dirac.ToggleWindsurfRuleRequest.toJSON, proto.dirac.DiracRulesToggles.fromJSON)
 	}
-	static async toggleAgentsRule(request: proto.dirac.ToggleAgentsRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
-		return this.makeUnaryRequest(
-			"toggleAgentsRule",
-			request,
-			proto.dirac.ToggleAgentsRuleRequest.toJSON,
-			proto.dirac.DiracRulesToggles.fromJSON,
-		)
+    static async toggleAgentsRule(request: proto.dirac.ToggleAgentsRuleRequest): Promise<proto.dirac.DiracRulesToggles> {
+		return this.makeUnaryRequest("toggleAgentsRule", request, proto.dirac.ToggleAgentsRuleRequest.toJSON, proto.dirac.DiracRulesToggles.fromJSON)
 	}
-	static async refreshRules(request: proto.dirac.EmptyRequest): Promise<proto.dirac.RefreshedRules> {
-		return this.makeUnaryRequest(
-			"refreshRules",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.RefreshedRules.fromJSON,
-		)
+    static async refreshRules(request: proto.dirac.EmptyRequest): Promise<proto.dirac.RefreshedRules> {
+		return this.makeUnaryRequest("refreshRules", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.RefreshedRules.fromJSON)
 	}
-	static async openDiskConversationHistory(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"openDiskConversationHistory",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async openDiskConversationHistory(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("openDiskConversationHistory", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async toggleWorkflow(request: proto.dirac.ToggleWorkflowRequest): Promise<proto.dirac.DiracRulesToggles> {
-		return this.makeUnaryRequest(
-			"toggleWorkflow",
-			request,
-			proto.dirac.ToggleWorkflowRequest.toJSON,
-			proto.dirac.DiracRulesToggles.fromJSON,
-		)
+    static async toggleWorkflow(request: proto.dirac.ToggleWorkflowRequest): Promise<proto.dirac.DiracRulesToggles> {
+		return this.makeUnaryRequest("toggleWorkflow", request, proto.dirac.ToggleWorkflowRequest.toJSON, proto.dirac.DiracRulesToggles.fromJSON)
 	}
-	static async ifFileExistsRelativePath(request: proto.dirac.StringRequest): Promise<proto.dirac.BooleanResponse> {
-		return this.makeUnaryRequest(
-			"ifFileExistsRelativePath",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.BooleanResponse.fromJSON,
-		)
+    static async ifFileExistsRelativePath(request: proto.dirac.StringRequest): Promise<proto.dirac.BooleanResponse> {
+		return this.makeUnaryRequest("ifFileExistsRelativePath", request, proto.dirac.StringRequest.toJSON, proto.dirac.BooleanResponse.fromJSON)
 	}
-	static async openFileRelativePath(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"openFileRelativePath",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async openFileRelativePath(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("openFileRelativePath", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async refreshHooks(request: proto.dirac.EmptyRequest): Promise<proto.dirac.HooksToggles> {
+    static async refreshHooks(request: proto.dirac.EmptyRequest): Promise<proto.dirac.HooksToggles> {
 		return this.makeUnaryRequest("refreshHooks", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.HooksToggles.fromJSON)
 	}
-	static async toggleHook(request: proto.dirac.ToggleHookRequest): Promise<proto.dirac.ToggleHookResponse> {
-		return this.makeUnaryRequest(
-			"toggleHook",
-			request,
-			proto.dirac.ToggleHookRequest.toJSON,
-			proto.dirac.ToggleHookResponse.fromJSON,
-		)
+    static async toggleHook(request: proto.dirac.ToggleHookRequest): Promise<proto.dirac.ToggleHookResponse> {
+		return this.makeUnaryRequest("toggleHook", request, proto.dirac.ToggleHookRequest.toJSON, proto.dirac.ToggleHookResponse.fromJSON)
 	}
-	static async createHook(request: proto.dirac.CreateHookRequest): Promise<proto.dirac.CreateHookResponse> {
-		return this.makeUnaryRequest(
-			"createHook",
-			request,
-			proto.dirac.CreateHookRequest.toJSON,
-			proto.dirac.CreateHookResponse.fromJSON,
-		)
+    static async createHook(request: proto.dirac.CreateHookRequest): Promise<proto.dirac.CreateHookResponse> {
+		return this.makeUnaryRequest("createHook", request, proto.dirac.CreateHookRequest.toJSON, proto.dirac.CreateHookResponse.fromJSON)
 	}
-	static async deleteHook(request: proto.dirac.DeleteHookRequest): Promise<proto.dirac.DeleteHookResponse> {
-		return this.makeUnaryRequest(
-			"deleteHook",
-			request,
-			proto.dirac.DeleteHookRequest.toJSON,
-			proto.dirac.DeleteHookResponse.fromJSON,
-		)
+    static async deleteHook(request: proto.dirac.DeleteHookRequest): Promise<proto.dirac.DeleteHookResponse> {
+		return this.makeUnaryRequest("deleteHook", request, proto.dirac.DeleteHookRequest.toJSON, proto.dirac.DeleteHookResponse.fromJSON)
 	}
-	static async refreshSkills(request: proto.dirac.EmptyRequest): Promise<proto.dirac.RefreshedSkills> {
-		return this.makeUnaryRequest(
-			"refreshSkills",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.RefreshedSkills.fromJSON,
-		)
+    static async refreshSkills(request: proto.dirac.EmptyRequest): Promise<proto.dirac.RefreshedSkills> {
+		return this.makeUnaryRequest("refreshSkills", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.RefreshedSkills.fromJSON)
 	}
-	static async toggleSkill(request: proto.dirac.ToggleSkillRequest): Promise<proto.dirac.SkillsToggles> {
-		return this.makeUnaryRequest(
-			"toggleSkill",
-			request,
-			proto.dirac.ToggleSkillRequest.toJSON,
-			proto.dirac.SkillsToggles.fromJSON,
-		)
+    static async toggleSkill(request: proto.dirac.ToggleSkillRequest): Promise<proto.dirac.SkillsToggles> {
+		return this.makeUnaryRequest("toggleSkill", request, proto.dirac.ToggleSkillRequest.toJSON, proto.dirac.SkillsToggles.fromJSON)
 	}
-	static async createSkillFile(request: proto.dirac.CreateSkillRequest): Promise<proto.dirac.SkillsToggles> {
-		return this.makeUnaryRequest(
-			"createSkillFile",
-			request,
-			proto.dirac.CreateSkillRequest.toJSON,
-			proto.dirac.SkillsToggles.fromJSON,
-		)
+    static async createSkillFile(request: proto.dirac.CreateSkillRequest): Promise<proto.dirac.SkillsToggles> {
+		return this.makeUnaryRequest("createSkillFile", request, proto.dirac.CreateSkillRequest.toJSON, proto.dirac.SkillsToggles.fromJSON)
 	}
-	static async deleteSkillFile(request: proto.dirac.DeleteSkillRequest): Promise<proto.dirac.SkillsToggles> {
-		return this.makeUnaryRequest(
-			"deleteSkillFile",
-			request,
-			proto.dirac.DeleteSkillRequest.toJSON,
-			proto.dirac.SkillsToggles.fromJSON,
-		)
+    static async deleteSkillFile(request: proto.dirac.DeleteSkillRequest): Promise<proto.dirac.SkillsToggles> {
+		return this.makeUnaryRequest("deleteSkillFile", request, proto.dirac.DeleteSkillRequest.toJSON, proto.dirac.SkillsToggles.fromJSON)
 	}
 }
 export class ModelsServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.ModelsService"
-	static async getLmStudioModels(request: proto.dirac.StringRequest): Promise<proto.dirac.StringArray> {
-		return this.makeUnaryRequest(
-			"getLmStudioModels",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.StringArray.fromJSON,
-		)
+    static async getLmStudioModels(request: proto.dirac.StringRequest): Promise<proto.dirac.StringArray> {
+		return this.makeUnaryRequest("getLmStudioModels", request, proto.dirac.StringRequest.toJSON, proto.dirac.StringArray.fromJSON)
 	}
-	static async getVsCodeLmModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.VsCodeLmModelsArray> {
-		return this.makeUnaryRequest(
-			"getVsCodeLmModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.VsCodeLmModelsArray.fromJSON,
-		)
+    static async getVsCodeLmModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.VsCodeLmModelsArray> {
+		return this.makeUnaryRequest("getVsCodeLmModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.VsCodeLmModelsArray.fromJSON)
 	}
-	static async refreshOpenRouterModelsRpc(
-		request: proto.dirac.EmptyRequest,
-	): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshOpenRouterModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshOpenRouterModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshOpenRouterModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshDiracModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshDiracModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshDiracModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshDiracModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshHuggingFaceModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshHuggingFaceModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshHuggingFaceModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshHuggingFaceModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshOpenAiModels(request: proto.dirac.OpenAiModelsRequest): Promise<proto.dirac.StringArray> {
-		return this.makeUnaryRequest(
-			"refreshOpenAiModels",
-			request,
-			proto.dirac.OpenAiModelsRequest.toJSON,
-			proto.dirac.StringArray.fromJSON,
-		)
+    static async refreshOpenAiModels(request: proto.dirac.OpenAiModelsRequest): Promise<proto.dirac.StringArray> {
+		return this.makeUnaryRequest("refreshOpenAiModels", request, proto.dirac.OpenAiModelsRequest.toJSON, proto.dirac.StringArray.fromJSON)
 	}
-	static async refreshRequestyModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshRequestyModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshRequestyModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshRequestyModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshLiteLlmModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshLiteLlmModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshLiteLlmModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshLiteLlmModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static subscribeToOpenRouterModels(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.OpenRouterCompatibleModelInfo>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToOpenRouterModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-			callbacks,
-		)
+    static subscribeToOpenRouterModels(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.OpenRouterCompatibleModelInfo>): ()=>void {
+		return this.makeStreamingRequest("subscribeToOpenRouterModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON, callbacks)
 	}
-	static subscribeToLiteLlmModels(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.OpenRouterCompatibleModelInfo>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToLiteLlmModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-			callbacks,
-		)
+    static subscribeToLiteLlmModels(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.OpenRouterCompatibleModelInfo>): ()=>void {
+		return this.makeStreamingRequest("subscribeToLiteLlmModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON, callbacks)
 	}
-	static async updateApiConfigurationProto(request: proto.dirac.UpdateApiConfigurationRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateApiConfigurationProto",
-			request,
-			proto.dirac.UpdateApiConfigurationRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateApiConfigurationProto(request: proto.dirac.UpdateApiConfigurationRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateApiConfigurationProto", request, proto.dirac.UpdateApiConfigurationRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateApiConfiguration(request: proto.dirac.UpdateApiConfigurationRequestNew): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateApiConfiguration",
-			request,
-			proto.dirac.UpdateApiConfigurationRequestNew.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateApiConfiguration(request: proto.dirac.UpdateApiConfigurationRequestNew): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateApiConfiguration", request, proto.dirac.UpdateApiConfigurationRequestNew.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateApiConfigurationPartial(
-		request: proto.dirac.UpdateApiConfigurationPartialRequest,
-	): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateApiConfigurationPartial",
-			request,
-			proto.dirac.UpdateApiConfigurationPartialRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateApiConfigurationPartial(request: proto.dirac.UpdateApiConfigurationPartialRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateApiConfigurationPartial", request, proto.dirac.UpdateApiConfigurationPartialRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async authenticateOpenAiCodex(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"authenticateOpenAiCodex",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async authenticateOpenAiCodex(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("authenticateOpenAiCodex", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async signOutOpenAiCodex(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async signOutOpenAiCodex(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("signOutOpenAiCodex", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async refreshGroqModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshGroqModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshGroqModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshGroqModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshBasetenModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshBasetenModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshBasetenModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshBasetenModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async getAihubmixModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"getAihubmixModels",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async getAihubmixModels(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("getAihubmixModels", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshVercelAiGatewayModelsRpc(
-		request: proto.dirac.EmptyRequest,
-	): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest(
-			"refreshVercelAiGatewayModelsRpc",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.OpenRouterCompatibleModelInfo.fromJSON,
-		)
+    static async refreshVercelAiGatewayModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("refreshVercelAiGatewayModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
 }
 export class SlashServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.SlashService"
-	static async reportBug(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async reportBug(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("reportBug", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async condense(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async condense(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("condense", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async getAvailableSlashCommands(request: proto.dirac.EmptyRequest): Promise<proto.dirac.SlashCommandsResponse> {
-		return this.makeUnaryRequest(
-			"getAvailableSlashCommands",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.SlashCommandsResponse.fromJSON,
-		)
+    static async getAvailableSlashCommands(request: proto.dirac.EmptyRequest): Promise<proto.dirac.SlashCommandsResponse> {
+		return this.makeUnaryRequest("getAvailableSlashCommands", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.SlashCommandsResponse.fromJSON)
 	}
 }
 export class StateServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.StateService"
-	static async getLatestState(request: proto.dirac.EmptyRequest): Promise<proto.dirac.State> {
+    static async getLatestState(request: proto.dirac.EmptyRequest): Promise<proto.dirac.State> {
 		return this.makeUnaryRequest("getLatestState", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.State.fromJSON)
 	}
-	static async updateTerminalConnectionTimeout(
-		request: proto.dirac.UpdateTerminalConnectionTimeoutRequest,
-	): Promise<proto.dirac.UpdateTerminalConnectionTimeoutResponse> {
-		return this.makeUnaryRequest(
-			"updateTerminalConnectionTimeout",
-			request,
-			proto.dirac.UpdateTerminalConnectionTimeoutRequest.toJSON,
-			proto.dirac.UpdateTerminalConnectionTimeoutResponse.fromJSON,
-		)
+    static async updateTerminalConnectionTimeout(request: proto.dirac.UpdateTerminalConnectionTimeoutRequest): Promise<proto.dirac.UpdateTerminalConnectionTimeoutResponse> {
+		return this.makeUnaryRequest("updateTerminalConnectionTimeout", request, proto.dirac.UpdateTerminalConnectionTimeoutRequest.toJSON, proto.dirac.UpdateTerminalConnectionTimeoutResponse.fromJSON)
 	}
-	static async updateTerminalReuseEnabled(request: proto.dirac.BooleanRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateTerminalReuseEnabled",
-			request,
-			proto.dirac.BooleanRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateTerminalReuseEnabled(request: proto.dirac.BooleanRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateTerminalReuseEnabled", request, proto.dirac.BooleanRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async getAvailableTerminalProfiles(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TerminalProfiles> {
-		return this.makeUnaryRequest(
-			"getAvailableTerminalProfiles",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.TerminalProfiles.fromJSON,
-		)
+    static async getAvailableTerminalProfiles(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TerminalProfiles> {
+		return this.makeUnaryRequest("getAvailableTerminalProfiles", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.TerminalProfiles.fromJSON)
 	}
-	static subscribeToState(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.State>): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToState",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.State.fromJSON,
-			callbacks,
-		)
+    static subscribeToState(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.State>): ()=>void {
+		return this.makeStreamingRequest("subscribeToState", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.State.fromJSON, callbacks)
 	}
-	static async toggleFavoriteModel(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async toggleFavoriteModel(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("toggleFavoriteModel", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async resetState(request: proto.dirac.ResetStateRequest): Promise<proto.dirac.Empty> {
+    static async resetState(request: proto.dirac.ResetStateRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("resetState", request, proto.dirac.ResetStateRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async togglePlanActModeProto(request: proto.dirac.TogglePlanActModeRequest): Promise<proto.dirac.Boolean> {
-		return this.makeUnaryRequest(
-			"togglePlanActModeProto",
-			request,
-			proto.dirac.TogglePlanActModeRequest.toJSON,
-			proto.dirac.Boolean.fromJSON,
-		)
+    static async togglePlanActModeProto(request: proto.dirac.TogglePlanActModeRequest): Promise<proto.dirac.Boolean> {
+		return this.makeUnaryRequest("togglePlanActModeProto", request, proto.dirac.TogglePlanActModeRequest.toJSON, proto.dirac.Boolean.fromJSON)
 	}
-	static async updateAutoApprovalSettings(request: proto.dirac.AutoApprovalSettingsRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateAutoApprovalSettings",
-			request,
-			proto.dirac.AutoApprovalSettingsRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateAutoApprovalSettings(request: proto.dirac.AutoApprovalSettingsRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateAutoApprovalSettings", request, proto.dirac.AutoApprovalSettingsRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateSettings(request: proto.dirac.UpdateSettingsRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateSettings",
-			request,
-			proto.dirac.UpdateSettingsRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateSettings(request: proto.dirac.UpdateSettingsRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateSettings", request, proto.dirac.UpdateSettingsRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateSettingsCli(request: proto.dirac.UpdateSettingsRequestCli): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateSettingsCli",
-			request,
-			proto.dirac.UpdateSettingsRequestCli.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateSettingsCli(request: proto.dirac.UpdateSettingsRequestCli): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateSettingsCli", request, proto.dirac.UpdateSettingsRequestCli.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateTaskSettings(request: proto.dirac.UpdateTaskSettingsRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateTaskSettings",
-			request,
-			proto.dirac.UpdateTaskSettingsRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateTaskSettings(request: proto.dirac.UpdateTaskSettingsRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateTaskSettings", request, proto.dirac.UpdateTaskSettingsRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateTelemetrySetting(request: proto.dirac.TelemetrySettingRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateTelemetrySetting",
-			request,
-			proto.dirac.TelemetrySettingRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateTelemetrySetting(request: proto.dirac.TelemetrySettingRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateTelemetrySetting", request, proto.dirac.TelemetrySettingRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async captureOnboardingProgress(request: proto.dirac.OnboardingProgressRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"captureOnboardingProgress",
-			request,
-			proto.dirac.OnboardingProgressRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async captureOnboardingProgress(request: proto.dirac.OnboardingProgressRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("captureOnboardingProgress", request, proto.dirac.OnboardingProgressRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async setWelcomeViewCompleted(request: proto.dirac.BooleanRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"setWelcomeViewCompleted",
-			request,
-			proto.dirac.BooleanRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async setWelcomeViewCompleted(request: proto.dirac.BooleanRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("setWelcomeViewCompleted", request, proto.dirac.BooleanRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateInfoBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateInfoBannerVersion",
-			request,
-			proto.dirac.Int64Request.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateInfoBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateInfoBannerVersion", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateModelBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateModelBannerVersion",
-			request,
-			proto.dirac.Int64Request.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateModelBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateModelBannerVersion", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async updateCliBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"updateCliBannerVersion",
-			request,
-			proto.dirac.Int64Request.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async updateCliBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("updateCliBannerVersion", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async dismissBanner(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async dismissBanner(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("dismissBanner", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async trackBannerEvent(request: proto.dirac.TrackBannerEventRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"trackBannerEvent",
-			request,
-			proto.dirac.TrackBannerEventRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async trackBannerEvent(request: proto.dirac.TrackBannerEventRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("trackBannerEvent", request, proto.dirac.TrackBannerEventRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async installDiracCli(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async installDiracCli(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("installDiracCli", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async checkCliInstallation(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Boolean> {
-		return this.makeUnaryRequest(
-			"checkCliInstallation",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Boolean.fromJSON,
-		)
+    static async checkCliInstallation(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Boolean> {
+		return this.makeUnaryRequest("checkCliInstallation", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Boolean.fromJSON)
 	}
-	static async getProcessInfo(request: proto.dirac.EmptyRequest): Promise<proto.dirac.ProcessInfo> {
+    static async getProcessInfo(request: proto.dirac.EmptyRequest): Promise<proto.dirac.ProcessInfo> {
 		return this.makeUnaryRequest("getProcessInfo", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.ProcessInfo.fromJSON)
 	}
-	static async flushPendingState(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async flushPendingState(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("flushPendingState", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async testOtelConnection(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TestConnectionResult> {
-		return this.makeUnaryRequest(
-			"testOtelConnection",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.TestConnectionResult.fromJSON,
-		)
+    static async testOtelConnection(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TestConnectionResult> {
+		return this.makeUnaryRequest("testOtelConnection", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.TestConnectionResult.fromJSON)
 	}
-	static async testPromptUploading(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TestConnectionResult> {
-		return this.makeUnaryRequest(
-			"testPromptUploading",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.TestConnectionResult.fromJSON,
-		)
+    static async testPromptUploading(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TestConnectionResult> {
+		return this.makeUnaryRequest("testPromptUploading", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.TestConnectionResult.fromJSON)
 	}
 }
 export class TaskServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.TaskService"
-	static async cancelTask(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async cancelTask(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("cancelTask", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async cancelBackgroundCommand(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"cancelBackgroundCommand",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async cancelBackgroundCommand(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("cancelBackgroundCommand", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async clearTask(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async clearTask(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("clearTask", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async getTotalTasksSize(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Int64> {
+    static async getTotalTasksSize(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Int64> {
 		return this.makeUnaryRequest("getTotalTasksSize", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Int64.fromJSON)
 	}
-	static async deleteTasksWithIds(request: proto.dirac.StringArrayRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"deleteTasksWithIds",
-			request,
-			proto.dirac.StringArrayRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async deleteTasksWithIds(request: proto.dirac.StringArrayRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("deleteTasksWithIds", request, proto.dirac.StringArrayRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async newTask(request: proto.dirac.NewTaskRequest): Promise<proto.dirac.String> {
+    static async newTask(request: proto.dirac.NewTaskRequest): Promise<proto.dirac.String> {
 		return this.makeUnaryRequest("newTask", request, proto.dirac.NewTaskRequest.toJSON, proto.dirac.String.fromJSON)
 	}
-	static async showTaskWithId(request: proto.dirac.StringRequest): Promise<proto.dirac.TaskResponse> {
-		return this.makeUnaryRequest(
-			"showTaskWithId",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.TaskResponse.fromJSON,
-		)
+    static async showTaskWithId(request: proto.dirac.StringRequest): Promise<proto.dirac.TaskResponse> {
+		return this.makeUnaryRequest("showTaskWithId", request, proto.dirac.StringRequest.toJSON, proto.dirac.TaskResponse.fromJSON)
 	}
-	static async exportTaskWithId(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async exportTaskWithId(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("exportTaskWithId", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async toggleTaskFavorite(request: proto.dirac.TaskFavoriteRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"toggleTaskFavorite",
-			request,
-			proto.dirac.TaskFavoriteRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async toggleTaskFavorite(request: proto.dirac.TaskFavoriteRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("toggleTaskFavorite", request, proto.dirac.TaskFavoriteRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async getTaskHistory(request: proto.dirac.GetTaskHistoryRequest): Promise<proto.dirac.TaskHistoryArray> {
-		return this.makeUnaryRequest(
-			"getTaskHistory",
-			request,
-			proto.dirac.GetTaskHistoryRequest.toJSON,
-			proto.dirac.TaskHistoryArray.fromJSON,
-		)
+    static async getTaskHistory(request: proto.dirac.GetTaskHistoryRequest): Promise<proto.dirac.TaskHistoryArray> {
+		return this.makeUnaryRequest("getTaskHistory", request, proto.dirac.GetTaskHistoryRequest.toJSON, proto.dirac.TaskHistoryArray.fromJSON)
 	}
-	static async askResponse(request: proto.dirac.AskResponseRequest): Promise<proto.dirac.Empty> {
+    static async askResponse(request: proto.dirac.AskResponseRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("askResponse", request, proto.dirac.AskResponseRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async taskFeedback(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async taskFeedback(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("taskFeedback", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async taskCompletionViewChanges(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"taskCompletionViewChanges",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async taskCompletionViewChanges(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("taskCompletionViewChanges", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async executeQuickWin(request: proto.dirac.ExecuteQuickWinRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"executeQuickWin",
-			request,
-			proto.dirac.ExecuteQuickWinRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async executeQuickWin(request: proto.dirac.ExecuteQuickWinRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("executeQuickWin", request, proto.dirac.ExecuteQuickWinRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async deleteAllTaskHistory(request: proto.dirac.EmptyRequest): Promise<proto.dirac.DeleteAllTaskHistoryCount> {
-		return this.makeUnaryRequest(
-			"deleteAllTaskHistory",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.DeleteAllTaskHistoryCount.fromJSON,
-		)
+    static async deleteAllTaskHistory(request: proto.dirac.EmptyRequest): Promise<proto.dirac.DeleteAllTaskHistoryCount> {
+		return this.makeUnaryRequest("deleteAllTaskHistory", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.DeleteAllTaskHistoryCount.fromJSON)
 	}
 }
 export class UiServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.UiService"
-	static async scrollToSettings(request: proto.dirac.StringRequest): Promise<proto.dirac.KeyValuePair> {
-		return this.makeUnaryRequest(
-			"scrollToSettings",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.KeyValuePair.fromJSON,
-		)
+    static async scrollToSettings(request: proto.dirac.StringRequest): Promise<proto.dirac.KeyValuePair> {
+		return this.makeUnaryRequest("scrollToSettings", request, proto.dirac.StringRequest.toJSON, proto.dirac.KeyValuePair.fromJSON)
 	}
-	static async setTerminalExecutionMode(request: proto.dirac.BooleanRequest): Promise<proto.dirac.KeyValuePair> {
-		return this.makeUnaryRequest(
-			"setTerminalExecutionMode",
-			request,
-			proto.dirac.BooleanRequest.toJSON,
-			proto.dirac.KeyValuePair.fromJSON,
-		)
+    static async setTerminalExecutionMode(request: proto.dirac.BooleanRequest): Promise<proto.dirac.KeyValuePair> {
+		return this.makeUnaryRequest("setTerminalExecutionMode", request, proto.dirac.BooleanRequest.toJSON, proto.dirac.KeyValuePair.fromJSON)
 	}
-	static async onDidShowAnnouncement(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Boolean> {
-		return this.makeUnaryRequest(
-			"onDidShowAnnouncement",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Boolean.fromJSON,
-		)
+    static async onDidShowAnnouncement(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Boolean> {
+		return this.makeUnaryRequest("onDidShowAnnouncement", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Boolean.fromJSON)
 	}
-	static subscribeToAddToInput(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.String>): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToAddToInput",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.String.fromJSON,
-			callbacks,
-		)
+    static subscribeToAddToInput(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.String>): ()=>void {
+		return this.makeStreamingRequest("subscribeToAddToInput", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.String.fromJSON, callbacks)
 	}
-	static subscribeToHistoryButtonClicked(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.Empty>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToHistoryButtonClicked",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToHistoryButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToHistoryButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static subscribeToChatButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToChatButtonClicked",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToChatButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToChatButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static subscribeToAccountButtonClicked(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.Empty>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToAccountButtonClicked",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToAccountButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToAccountButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static subscribeToSettingsButtonClicked(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.Empty>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToSettingsButtonClicked",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToSettingsButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToSettingsButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static subscribeToWorktreesButtonClicked(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.Empty>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToWorktreesButtonClicked",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToWorktreesButtonClicked(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToWorktreesButtonClicked", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static async initializeWebview(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async initializeWebview(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("initializeWebview", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static subscribeToRelinquishControl(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToRelinquishControl",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-			callbacks,
-		)
+    static subscribeToRelinquishControl(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.Empty>): ()=>void {
+		return this.makeStreamingRequest("subscribeToRelinquishControl", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON, callbacks)
 	}
-	static subscribeToShowWebview(
-		request: proto.dirac.EmptyRequest,
-		callbacks: Callbacks<proto.dirac.ShowWebviewEvent>,
-	): () => void {
-		return this.makeStreamingRequest(
-			"subscribeToShowWebview",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.ShowWebviewEvent.fromJSON,
-			callbacks,
-		)
+    static subscribeToShowWebview(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.ShowWebviewEvent>): ()=>void {
+		return this.makeStreamingRequest("subscribeToShowWebview", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.ShowWebviewEvent.fromJSON, callbacks)
 	}
-	static async getWebviewHtml(request: proto.dirac.EmptyRequest): Promise<proto.dirac.String> {
+    static async getWebviewHtml(request: proto.dirac.EmptyRequest): Promise<proto.dirac.String> {
 		return this.makeUnaryRequest("getWebviewHtml", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.String.fromJSON)
 	}
-	static async openUrl(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async openUrl(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openUrl", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async openWalkthrough(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async openWalkthrough(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openWalkthrough", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
-	static async githubCopilotLogin(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
+    static async githubCopilotLogin(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("githubCopilotLogin", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 }
 export class WebServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.WebService"
-	static async checkIsImageUrl(request: proto.dirac.StringRequest): Promise<proto.dirac.IsImageUrl> {
-		return this.makeUnaryRequest(
-			"checkIsImageUrl",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.IsImageUrl.fromJSON,
-		)
+    static async checkIsImageUrl(request: proto.dirac.StringRequest): Promise<proto.dirac.IsImageUrl> {
+		return this.makeUnaryRequest("checkIsImageUrl", request, proto.dirac.StringRequest.toJSON, proto.dirac.IsImageUrl.fromJSON)
 	}
-	static async fetchOpenGraphData(request: proto.dirac.StringRequest): Promise<proto.dirac.OpenGraphData> {
-		return this.makeUnaryRequest(
-			"fetchOpenGraphData",
-			request,
-			proto.dirac.StringRequest.toJSON,
-			proto.dirac.OpenGraphData.fromJSON,
-		)
+    static async fetchOpenGraphData(request: proto.dirac.StringRequest): Promise<proto.dirac.OpenGraphData> {
+		return this.makeUnaryRequest("fetchOpenGraphData", request, proto.dirac.StringRequest.toJSON, proto.dirac.OpenGraphData.fromJSON)
 	}
-	static async openInBrowser(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+    static async openInBrowser(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("openInBrowser", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 }
 export class WorktreeServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.WorktreeService"
-	static async listWorktrees(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeList> {
+    static async listWorktrees(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeList> {
 		return this.makeUnaryRequest("listWorktrees", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.WorktreeList.fromJSON)
 	}
-	static async createWorktree(request: proto.dirac.CreateWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
-		return this.makeUnaryRequest(
-			"createWorktree",
-			request,
-			proto.dirac.CreateWorktreeRequest.toJSON,
-			proto.dirac.WorktreeResult.fromJSON,
-		)
+    static async createWorktree(request: proto.dirac.CreateWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
+		return this.makeUnaryRequest("createWorktree", request, proto.dirac.CreateWorktreeRequest.toJSON, proto.dirac.WorktreeResult.fromJSON)
 	}
-	static async deleteWorktree(request: proto.dirac.DeleteWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
-		return this.makeUnaryRequest(
-			"deleteWorktree",
-			request,
-			proto.dirac.DeleteWorktreeRequest.toJSON,
-			proto.dirac.WorktreeResult.fromJSON,
-		)
+    static async deleteWorktree(request: proto.dirac.DeleteWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
+		return this.makeUnaryRequest("deleteWorktree", request, proto.dirac.DeleteWorktreeRequest.toJSON, proto.dirac.WorktreeResult.fromJSON)
 	}
-	static async switchWorktree(request: proto.dirac.SwitchWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
-		return this.makeUnaryRequest(
-			"switchWorktree",
-			request,
-			proto.dirac.SwitchWorktreeRequest.toJSON,
-			proto.dirac.WorktreeResult.fromJSON,
-		)
+    static async switchWorktree(request: proto.dirac.SwitchWorktreeRequest): Promise<proto.dirac.WorktreeResult> {
+		return this.makeUnaryRequest("switchWorktree", request, proto.dirac.SwitchWorktreeRequest.toJSON, proto.dirac.WorktreeResult.fromJSON)
 	}
-	static async getAvailableBranches(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BranchList> {
-		return this.makeUnaryRequest(
-			"getAvailableBranches",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.BranchList.fromJSON,
-		)
+    static async getAvailableBranches(request: proto.dirac.EmptyRequest): Promise<proto.dirac.BranchList> {
+		return this.makeUnaryRequest("getAvailableBranches", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.BranchList.fromJSON)
 	}
-	static async getWorktreeDefaults(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeDefaults> {
-		return this.makeUnaryRequest(
-			"getWorktreeDefaults",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.WorktreeDefaults.fromJSON,
-		)
+    static async getWorktreeDefaults(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeDefaults> {
+		return this.makeUnaryRequest("getWorktreeDefaults", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.WorktreeDefaults.fromJSON)
 	}
-	static async getWorktreeIncludeStatus(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeIncludeStatus> {
-		return this.makeUnaryRequest(
-			"getWorktreeIncludeStatus",
-			request,
-			proto.dirac.EmptyRequest.toJSON,
-			proto.dirac.WorktreeIncludeStatus.fromJSON,
-		)
+    static async getWorktreeIncludeStatus(request: proto.dirac.EmptyRequest): Promise<proto.dirac.WorktreeIncludeStatus> {
+		return this.makeUnaryRequest("getWorktreeIncludeStatus", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.WorktreeIncludeStatus.fromJSON)
 	}
-	static async createWorktreeInclude(request: proto.dirac.CreateWorktreeIncludeRequest): Promise<proto.dirac.WorktreeResult> {
-		return this.makeUnaryRequest(
-			"createWorktreeInclude",
-			request,
-			proto.dirac.CreateWorktreeIncludeRequest.toJSON,
-			proto.dirac.WorktreeResult.fromJSON,
-		)
+    static async createWorktreeInclude(request: proto.dirac.CreateWorktreeIncludeRequest): Promise<proto.dirac.WorktreeResult> {
+		return this.makeUnaryRequest("createWorktreeInclude", request, proto.dirac.CreateWorktreeIncludeRequest.toJSON, proto.dirac.WorktreeResult.fromJSON)
 	}
-	static async checkoutBranch(request: proto.dirac.CheckoutBranchRequest): Promise<proto.dirac.WorktreeResult> {
-		return this.makeUnaryRequest(
-			"checkoutBranch",
-			request,
-			proto.dirac.CheckoutBranchRequest.toJSON,
-			proto.dirac.WorktreeResult.fromJSON,
-		)
+    static async checkoutBranch(request: proto.dirac.CheckoutBranchRequest): Promise<proto.dirac.WorktreeResult> {
+		return this.makeUnaryRequest("checkoutBranch", request, proto.dirac.CheckoutBranchRequest.toJSON, proto.dirac.WorktreeResult.fromJSON)
 	}
-	static async mergeWorktree(request: proto.dirac.MergeWorktreeRequest): Promise<proto.dirac.MergeWorktreeResult> {
-		return this.makeUnaryRequest(
-			"mergeWorktree",
-			request,
-			proto.dirac.MergeWorktreeRequest.toJSON,
-			proto.dirac.MergeWorktreeResult.fromJSON,
-		)
+    static async mergeWorktree(request: proto.dirac.MergeWorktreeRequest): Promise<proto.dirac.MergeWorktreeResult> {
+		return this.makeUnaryRequest("mergeWorktree", request, proto.dirac.MergeWorktreeRequest.toJSON, proto.dirac.MergeWorktreeResult.fromJSON)
 	}
-	static async trackWorktreeViewOpened(request: proto.dirac.TrackWorktreeViewOpenedRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest(
-			"trackWorktreeViewOpened",
-			request,
-			proto.dirac.TrackWorktreeViewOpenedRequest.toJSON,
-			proto.dirac.Empty.fromJSON,
-		)
+    static async trackWorktreeViewOpened(request: proto.dirac.TrackWorktreeViewOpenedRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("trackWorktreeViewOpened", request, proto.dirac.TrackWorktreeViewOpenedRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 }

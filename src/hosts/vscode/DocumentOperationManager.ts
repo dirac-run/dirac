@@ -142,9 +142,12 @@ export class DocumentOperationManager {
 		const uri = vscode.Uri.file(filePath)
 		try {
 			const document = await vscode.workspace.openTextDocument(uri)
+			const editorConfig = vscode.workspace.getConfiguration("editor", uri)
+			const insertSpaces = editorConfig.get<boolean>("insertSpaces", true)
+			const tabSize = editorConfig.get<number>("tabSize", 4)
 			const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", uri, {
-				insertSpaces: true,
-				tabSize: 4,
+				insertSpaces,
+				tabSize,
 			})
 			if (edits && edits.length > 0) {
 				const edit = new vscode.WorkspaceEdit()

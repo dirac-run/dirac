@@ -101,9 +101,7 @@ export interface IInteractionTrait {
 	 * Triggers a transient permission request.
 	 * The UI for this request is separate from any execution cards.
 	 */
-	askPermission(
-		message: string,
-	): Promise<{
+	askPermission(message: string): Promise<{
 		approved: boolean
 		action: string
 		value?: string

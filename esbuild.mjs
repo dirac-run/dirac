@@ -230,7 +230,7 @@ const baseConfig = {
 	sourcesContent: false,
 	platform: "node",
 	banner: {
-		js: "const _importMetaUrl=require('url').pathToFileURL(__filename); if (typeof navigator === 'undefined') { global.navigator = { userAgent: 'node' }; }",
+		js: `const _importMetaUrl=require('url').pathToFileURL(__filename);(function(){try{void navigator.userAgent}catch(_){try{Object.defineProperty(globalThis,"navigator",{value:{userAgent:"node",platform:process.platform},writable:true,configurable:true})}catch(__){}}})();`,
 	},
 }
 
@@ -262,6 +262,27 @@ const e2eBuildConfig = {
 	plugins: [aliasResolverPlugin, esbuildProblemMatcherPlugin],
 }
 
+function patchNavigatorDefineProperty(outfile) {
+	let content = fs.readFileSync(outfile, "utf8")
+	const original = content
+
+	// Guard Object.defineProperty(navigator, ...) calls so they only run in
+	// browser contexts. In Node.js 20+, navigator.userAgent is non-configurable
+	// and these calls throw unconditionally.
+	content = content.replace(
+		/Object\.defineProperty\(\s*navigator\s*,/g,
+		'Object.defineProperty(typeof navigator !== "undefined" && typeof process === "undefined" ? navigator : {},',
+	)
+
+	if (content === original) {
+		console.log("[patch] No unguarded Object.defineProperty(navigator) calls found.")
+	} else {
+		const count = (original.match(/Object\.defineProperty\(\s*navigator\s*,/g) || []).length
+		console.log(`[patch] Patched ${count} Object.defineProperty(navigator) call(s) in ${outfile}`)
+		fs.writeFileSync(outfile, content)
+	}
+}
+
 async function main() {
 	const config = standalone ? standaloneConfig : e2eBuild ? e2eBuildConfig : extensionConfig
 	const extensionCtx = await esbuild.context(config)
@@ -270,6 +291,7 @@ async function main() {
 	} else {
 		await extensionCtx.rebuild()
 		await extensionCtx.dispose()
+		patchNavigatorDefineProperty(`${destDir}/extension.js`)
 	}
 }
 

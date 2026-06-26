@@ -36,7 +36,7 @@ export const detectMetaKeyChar = (platform: string) => {
 	return "CMD"
 }
 
-const userAgent = navigator?.userAgent || ""
+const userAgent = (typeof navigator !== "undefined" ? navigator.userAgent : undefined) ?? "node"
 
 export const isChrome = userAgent.indexOf("Chrome") >= 0
 
