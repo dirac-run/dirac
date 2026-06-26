@@ -29,9 +29,7 @@ export class TelemetryProviderManager {
 	}
 
 	getSettings(): TelemetrySettings {
-		return this.providers.length > 0
-			? this.providers[0].getSettings()
-			: { hostEnabled: false, level: "off" as const }
+		return this.providers.length > 0 ? this.providers[0].getSettings() : { hostEnabled: false, level: "off" as const }
 	}
 
 	/** Dispatches user identification to all providers with error isolation. */

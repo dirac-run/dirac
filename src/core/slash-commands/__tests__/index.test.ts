@@ -20,7 +20,17 @@ describe("slash-commands", () => {
 	})
 	it("should process /askDirac slash command", async () => {
 		const text = "<task>" + "/askDirac" + "</task>"
-		const result = await parseSlashCommands(text, {}, {}, "test-ulid", undefined, [], undefined, "/mock/path", "mock-dist/source")
+		const result = await parseSlashCommands(
+			text,
+			{},
+			{},
+			"test-ulid",
+			undefined,
+			[],
+			undefined,
+			"/mock/path",
+			"mock-dist/source",
+		)
 		expect(result.processedText).to.include("The source code is located at: /mock/path/mock-dist/source")
 	})
 })

@@ -118,12 +118,22 @@ export class TaskTelemetry {
 		if (Number.isFinite(tokenUsage.cacheWriteTokens)) {
 			const cacheWriteTokens = tokenUsage.cacheWriteTokens ?? 0
 			this.emitter.recordCounter(TaskTelemetry.METRICS.CACHE.WRITE_TOTAL, cacheWriteTokens, { ulid, provider, model, mode })
-			this.emitter.recordHistogram(TaskTelemetry.METRICS.CACHE.WRITE_PER_EVENT, cacheWriteTokens, { ulid, provider, model, mode })
+			this.emitter.recordHistogram(TaskTelemetry.METRICS.CACHE.WRITE_PER_EVENT, cacheWriteTokens, {
+				ulid,
+				provider,
+				model,
+				mode,
+			})
 		}
 		if (Number.isFinite(tokenUsage.cacheReadTokens)) {
 			const cacheReadTokens = tokenUsage.cacheReadTokens ?? 0
 			this.emitter.recordCounter(TaskTelemetry.METRICS.CACHE.READ_TOTAL, cacheReadTokens, { ulid, provider, model, mode })
-			this.emitter.recordHistogram(TaskTelemetry.METRICS.CACHE.READ_PER_EVENT, cacheReadTokens, { ulid, provider, model, mode })
+			this.emitter.recordHistogram(TaskTelemetry.METRICS.CACHE.READ_PER_EVENT, cacheReadTokens, {
+				ulid,
+				provider,
+				model,
+				mode,
+			})
 		}
 		if (Number.isFinite(tokenUsage.totalCost)) {
 			const totalCost = tokenUsage.totalCost ?? 0
@@ -178,13 +188,7 @@ export class TaskTelemetry {
 		this.emitter.capture({ event: TaskTelemetry.EVENTS.MODE_SWITCH, properties: { ulid, mode } })
 	}
 
-	captureSummarizeTask(
-		ulid: string,
-		modelId: string,
-		provider: string,
-		currentTokens: number,
-		maxContextWindow: number,
-	): void {
+	captureSummarizeTask(ulid: string, modelId: string, provider: string, currentTokens: number, maxContextWindow: number): void {
 		this.emitter.capture({
 			event: TaskTelemetry.EVENTS.AUTO_COMPACT,
 			properties: { ulid, modelId, provider, currentTokens, maxContextWindow },

@@ -179,7 +179,6 @@
 		}
 	}
 
-
 	/* --- Custom Animations --- */
 	@keyframes glowPulse {
 		0%,
@@ -218,7 +217,6 @@
 	--animate-glow-pulse: glowPulse 4s ease-in-out infinite;
 	--animate-float: float 6s ease-in-out infinite;
 	--animate-bulb-glow: bulbGlow 2.5s ease-in-out infinite;
-
 }
 
 @theme inline {

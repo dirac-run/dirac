@@ -118,16 +118,14 @@ describe("SurfaceAdapter", () => {
 				update: sinon.stub().resolves(),
 				appendBody: sinon.stub().resolves(),
 				finalize: sinon.stub().resolves(),
-				waitForInteraction: sinon
-					.stub()
-					.resolves({
-						action: DiracAskResponse.APPROVE,
-						value: "v",
-						text: "t",
-						images: ["img"],
-						files: ["f"],
-						userEdits: {},
-					}),
+				waitForInteraction: sinon.stub().resolves({
+					action: DiracAskResponse.APPROVE,
+					value: "v",
+					text: "t",
+					images: ["img"],
+					files: ["f"],
+					userEdits: {},
+				}),
 			}
 			config.taskMessenger.createCard = sinon.stub().resolves(fakeHandle)
 			const result = await adapter.interaction.askPermission("May I?")

@@ -58,10 +58,16 @@ export class TogetherHandler implements ApiHandler {
 			if ((model.info as any).supportsTools) {
 				openAiMessages = [
 					{ role: "system", content: systemPrompt },
-					...addReasoningContent(convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false), messages),
+					...addReasoningContent(
+						convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+						messages,
+					),
 				]
 			} else {
-				openAiMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages], this.getModel().info.supportsImages !== false)
+				openAiMessages = convertToR1Format(
+					[{ role: "user", content: systemPrompt }, ...messages],
+					this.getModel().info.supportsImages !== false,
+				)
 			}
 		}
 

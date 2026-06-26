@@ -17,7 +17,10 @@ export function buildUiTrait(config: TaskConfig, createCardFn: (params: CardPara
 }
 
 // Builds the interaction trait — permission requests via cards.
-export function buildInteractionTrait(config: TaskConfig, createCardFn: (params: CardParams) => Promise<ICardHandle>): IInteractionTrait {
+export function buildInteractionTrait(
+	config: TaskConfig,
+	createCardFn: (params: CardParams) => Promise<ICardHandle>,
+): IInteractionTrait {
 	return {
 		askPermission: async (message: string) => {
 			const card = await createCardFn({
@@ -42,7 +45,11 @@ export function buildInteractionTrait(config: TaskConfig, createCardFn: (params:
 }
 
 // Creates a card via taskMessenger and wraps the protocol handle in a CardHandle.
-export async function createCardFromMessenger(config: TaskConfig, params: CardParams, tracker: CardHandle[]): Promise<ICardHandle> {
+export async function createCardFromMessenger(
+	config: TaskConfig,
+	params: CardParams,
+	tracker: CardHandle[],
+): Promise<ICardHandle> {
 	const handle = await config.taskMessenger.createCard(params)
 	const adapterHandle = new CardHandle(handle, params)
 	tracker.push(adapterHandle)

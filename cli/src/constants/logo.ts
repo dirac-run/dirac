@@ -28,8 +28,8 @@ export const DIRAC_LOGO = [
  * Index 0 = top line, index 15 = bottom line.
  */
 export const LOGO_GRADIENT: readonly string[] = (() => {
-	const top = [0xb1, 0xb9, 0xf9] as const   // #B1B9F9
-	const bot = [0xf5, 0x9e, 0x0b] as const   // #F59E0B
+	const top = [0xb1, 0xb9, 0xf9] as const // #B1B9F9
+	const bot = [0xf5, 0x9e, 0x0b] as const // #F59E0B
 	const n = DIRAC_LOGO.length
 	return Array.from({ length: n }, (_, i) => {
 		const t = i / (n - 1)

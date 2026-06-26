@@ -26,4 +26,6 @@ export const internationalQwenModels = {
 	},
 } as const satisfies Record<string, ModelInfo>
 
-export const internationalQwenDefaultModelId: InternationalQwenModelId = Object.keys(internationalQwenModels)[0] as InternationalQwenModelId
+export const internationalQwenDefaultModelId: InternationalQwenModelId = Object.keys(
+	internationalQwenModels,
+)[0] as InternationalQwenModelId

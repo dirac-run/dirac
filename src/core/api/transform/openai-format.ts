@@ -2,14 +2,14 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { ApiProvider } from "@/shared/api"
 import {
-    DiracAssistantRedactedThinkingBlock,
-    DiracAssistantThinkingBlock,
-    DiracAssistantToolUseBlock,
-    DiracContent,
-    DiracImageContentBlock,
-    DiracStorageMessage,
-    DiracTextContentBlock,
-    DiracUserToolResultContentBlock,
+	DiracAssistantRedactedThinkingBlock,
+	DiracAssistantThinkingBlock,
+	DiracAssistantToolUseBlock,
+	DiracContent,
+	DiracImageContentBlock,
+	DiracStorageMessage,
+	DiracTextContentBlock,
+	DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
 
@@ -129,10 +129,7 @@ function convertUserMessage(
 }
 
 // Collects reasoning_details from text blocks and tool_use blocks matching a tool ID.
-function collectReasoningDetails(
-	nonToolMessages: DiracContent[],
-	toolMessages: DiracAssistantToolUseBlock[],
-): any[] {
+function collectReasoningDetails(nonToolMessages: DiracContent[], toolMessages: DiracAssistantToolUseBlock[]): any[] {
 	const reasoningDetails: any[] = []
 	const isTextBlock = (part: any): part is DiracTextContentBlock => part.type === "text"
 	const isThinkingBlock = (part: any): part is DiracAssistantThinkingBlock => part.type === "thinking"

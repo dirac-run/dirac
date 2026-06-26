@@ -12,7 +12,8 @@ export function buildBrowserTrait(config: TaskConfig): IBrowserTrait {
 		},
 		click: async (coordinate: string) => await session().click(coordinate),
 		type: async (text: string) => await session().type(text),
-		scroll: async (direction: "up" | "down") => direction === "up" ? await session().scrollUp() : await session().scrollDown(),
+		scroll: async (direction: "up" | "down") =>
+			direction === "up" ? await session().scrollUp() : await session().scrollDown(),
 		close: async () => await session().closeBrowser(),
 	}
 }

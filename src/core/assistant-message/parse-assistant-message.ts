@@ -71,9 +71,11 @@ export function parseAssistantMessageV2(assistantMessage: string, isStreamActive
 		} else if (!nextTagMatch) {
 			// Check for partial opening tag at the end of the string
 			const partialTagMatch = remaining.match(/<t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?$/i)
-			
+
 			if (partialTagMatch && partialTagMatch.index !== undefined) {
-				const text = isStreamActive ? remaining.slice(0, partialTagMatch.index) : remaining.slice(0, partialTagMatch.index).trim()
+				const text = isStreamActive
+					? remaining.slice(0, partialTagMatch.index)
+					: remaining.slice(0, partialTagMatch.index).trim()
 				if (text) {
 					contentBlocks.push({
 						type: "text",

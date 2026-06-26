@@ -97,7 +97,6 @@ describe("getSettingsFromEnv - Bedrock settings", () => {
 	})
 })
 
-
 describe("getProviderFromEnv - Bedrock detection", () => {
 	it("does not return bedrock when only AWS_REGION is set", () => {
 		process.env.AWS_REGION = "us-east-1"

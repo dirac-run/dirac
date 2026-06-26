@@ -63,11 +63,7 @@ export async function runTaskInPlainTextMode(
 /**
  * Run a task with the given prompt - uses welcome view for consistent behavior
  */
-export async function runTask(
-	prompt: string,
-	options: TaskOptions & { images?: string[] },
-	existingContext?: CliContext,
-) {
+export async function runTask(prompt: string, options: TaskOptions & { images?: string[] }, existingContext?: CliContext) {
 	const { parseImagesFromInput, processImagePaths } = await import("../utils/parser")
 	const { telemetryService } = await import("@/services/telemetry")
 	const { StateManager } = await import("@/core/storage/StateManager")

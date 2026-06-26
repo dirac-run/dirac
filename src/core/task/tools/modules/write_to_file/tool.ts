@@ -5,11 +5,11 @@ import { write_to_file_spec, WriteToFileTool, new_rule_spec, NewRuleTool } from 
 export const spec: DiracToolSpec = write_to_file_spec
 
 export function create(): IDiracTool {
-    return new WriteToFileTool()
+	return new WriteToFileTool()
 }
 
 export const secondarySpec: DiracToolSpec = new_rule_spec
 
 export function createSecondary(): IDiracTool {
-    return new NewRuleTool()
+	return new NewRuleTool()
 }

@@ -1,12 +1,14 @@
 {
-  "name": "dirac",
-  "version": "0.2.83",
-  "description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
-  "command": "dirac",
-  "args": ["--acp"],
-  "homepage": "https://dirac.run",
-  "repository": "https://github.com/dirac-run/dirac",
-  "author": "Dirac Delta Labs",
-  "license": "Apache-2.0",
-  "icon": "icon.svg"
+	"name": "dirac",
+	"version": "0.2.83",
+	"description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
+	"command": "dirac",
+	"args": [
+		"--acp"
+	],
+	"homepage": "https://dirac.run",
+	"repository": "https://github.com/dirac-run/dirac",
+	"author": "Dirac Delta Labs",
+	"license": "Apache-2.0",
+	"icon": "icon.svg"
 }

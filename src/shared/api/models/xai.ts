@@ -1,9 +1,6 @@
 import type { ModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
 
-
-
-
 export type XAIModelId = keyof typeof xaiModels
 export const xaiDefaultModelId: XAIModelId = "grok-4-1-fast-reasoning"
 

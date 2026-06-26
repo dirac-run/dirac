@@ -82,10 +82,7 @@ export async function continueTask(options: TaskOptions) {
 	const { printWarning, printInfo } = await import("../utils/display")
 
 	const ctx = await initializeCli({ ...options, enableAuth: true })
-	const historyItem = findMostRecentTaskForWorkspace(
-		StateManager.get().getGlobalStateKey("taskHistory"),
-		ctx.workspacePath,
-	)
+	const historyItem = findMostRecentTaskForWorkspace(StateManager.get().getGlobalStateKey("taskHistory"), ctx.workspacePath)
 
 	if (!historyItem) {
 		printWarning(`No previous task found for ${ctx.workspacePath}`)

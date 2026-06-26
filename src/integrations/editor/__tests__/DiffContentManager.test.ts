@@ -10,7 +10,9 @@ describe("DiffContentManager", () => {
 		await manager.update(
 			"",
 			false,
-			async () => { callCount++ },
+			async () => {
+				callCount++
+			},
 			async () => {},
 			async () => 10,
 		)
@@ -24,7 +26,9 @@ describe("DiffContentManager", () => {
 		await manager.update(
 			"line1\n",
 			false,
-			async () => { callCount++ },
+			async () => {
+				callCount++
+			},
 			async () => {},
 			async () => 10,
 		)
@@ -34,7 +38,9 @@ describe("DiffContentManager", () => {
 		await manager.update(
 			"abcde\n", // same length (6 chars)
 			false,
-			async () => { callCount++ },
+			async () => {
+				callCount++
+			},
 			async () => {},
 			async () => 10,
 		)
@@ -48,7 +54,9 @@ describe("DiffContentManager", () => {
 		await manager.update(
 			"\ufeffhello world",
 			true,
-			async (content) => { receivedContent = content },
+			async (content) => {
+				receivedContent = content
+			},
 			async () => {},
 			async () => 10,
 		)
@@ -84,38 +92,26 @@ describe("DiffContentManager", () => {
 
 	it("should detect user edits when content differs", async () => {
 		const manager = new DiffContentManager("test.ts")
-		const userEdits = manager.detectUserEdits(
-			"new content\n",
-			"old content\n",
-		)
+		const userEdits = manager.detectUserEdits("new content\n", "old content\n")
 		assert.ok(userEdits !== undefined)
 		assert.ok(userEdits.includes("@@")) // unified diff format
 	})
 
 	it("should return undefined when no user edits", async () => {
 		const manager = new DiffContentManager("test.ts")
-		const userEdits = manager.detectUserEdits(
-			"same content\n",
-			"same content\n",
-		)
+		const userEdits = manager.detectUserEdits("same content\n", "same content\n")
 		assert.strictEqual(userEdits, undefined)
 	})
 
 	it("should detect auto-formatting edits", async () => {
 		const manager = new DiffContentManager("test.ts")
-		const formattingEdits = manager.detectAutoFormattingEdits(
-			"  const x = 1;",
-			"const x=1;",
-		)
+		const formattingEdits = manager.detectAutoFormattingEdits("  const x = 1;", "const x=1;")
 		assert.ok(formattingEdits !== undefined)
 	})
 
 	it("should return undefined when no auto-formatting", async () => {
 		const manager = new DiffContentManager("test.ts")
-		const formattingEdits = manager.detectAutoFormattingEdits(
-			"same content\n",
-			"same content\n",
-		)
+		const formattingEdits = manager.detectAutoFormattingEdits("same content\n", "same content\n")
 		assert.strictEqual(formattingEdits, undefined)
 	})
 
@@ -214,7 +210,9 @@ describe("DiffContentManager computeDiffLines (scrollToFirstDiff)", () => {
 		await manager.scrollToFirstDiff(
 			"a\nb\nc\nd",
 			async () => "a\nX\nc\nd",
-			async (line: number) => { scrolledTo = line },
+			async (line: number) => {
+				scrolledTo = line
+			},
 		)
 		// Diff: {count:1}("a"), {removed:1}("b"), {added:1}("X"), {count:2}("c\nd")
 		// First change at lineCount=1 (after "a")
@@ -227,7 +225,9 @@ describe("DiffContentManager computeDiffLines (scrollToFirstDiff)", () => {
 		await manager.scrollToFirstDiff(
 			"old\nb\nc",
 			async () => "new\nb\nc",
-			async (line: number) => { scrolledTo = line },
+			async (line: number) => {
+				scrolledTo = line
+			},
 		)
 		assert.equal(scrolledTo, 0, "Should scroll to line 0 for first-line change")
 	})
@@ -238,7 +238,9 @@ describe("DiffContentManager computeDiffLines (scrollToFirstDiff)", () => {
 		await manager.scrollToFirstDiff(
 			"a\nb\nc",
 			async () => "a\nb\nc",
-			async (line: number) => { scrolledTo = line },
+			async (line: number) => {
+				scrolledTo = line
+			},
 		)
 		assert.strictEqual(scrolledTo, undefined, "Should not scroll when no diffs")
 	})

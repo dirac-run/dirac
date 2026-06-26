@@ -14,13 +14,13 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { TerminalHandle } from "@agentclientprotocol/sdk"
 import { DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT, PROCESS_HOT_TIMEOUT_NORMAL } from "@integrations/terminal/constants"
 import type {
-    ITerminal,
-    ITerminalManager,
-    ITerminalProcess,
-    TerminalInfo,
-    TerminalProcessEvents,
-    TerminalProcessResultPromise,
-    TerminalProfileChangeResult,
+	ITerminal,
+	ITerminalManager,
+	ITerminalProcess,
+	TerminalInfo,
+	TerminalProcessEvents,
+	TerminalProcessResultPromise,
+	TerminalProfileChangeResult,
 } from "@integrations/terminal/types"
 import { EventEmitter } from "events"
 import { Logger } from "@/shared/services/Logger"

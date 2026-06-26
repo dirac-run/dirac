@@ -6,9 +6,7 @@ import { FolderIcon } from "lucide-react"
 export const SearchDecorator: CardDecorator = {
 	id: "search",
 	shouldApply: (card: Card) =>
-		card.icon === "search" ||
-		card.header.toLowerCase().includes("search") ||
-		card.header.toLowerCase().includes("grep"),
+		card.icon === "search" || card.header.toLowerCase().includes("search") || card.header.toLowerCase().includes("grep"),
 	renderBodyWrapper: (card: Card, children: React.ReactNode) => {
 		if (!card.body) return children
 
@@ -56,9 +54,7 @@ export const SearchDecorator: CardDecorator = {
 							<span className="text-xs font-medium">Workspace: {section.workspace}</span>
 						</div>
 						<div className="bg-foreground/[0.02] p-2 rounded-sm border border-foreground/5 overflow-x-auto">
-							<pre className="text-[11px] font-mono whitespace-pre leading-tight">
-								{section.content.trim()}
-							</pre>
+							<pre className="text-[11px] font-mono whitespace-pre leading-tight">{section.content.trim()}</pre>
 						</div>
 					</div>
 				))}

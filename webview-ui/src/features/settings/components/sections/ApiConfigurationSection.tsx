@@ -50,10 +50,7 @@ const ApiConfigurationSection = ({ renderSectionHeader }: ApiConfigurationSectio
 
 						{/* Content container */}
 						<div className="-mb-3">
-							<ApiOptions
-								currentMode={currentTab as Mode}
-								showModelOptions={true}
-							/>
+							<ApiOptions currentMode={currentTab as Mode} showModelOptions={true} />
 						</div>
 					</div>
 				) : (

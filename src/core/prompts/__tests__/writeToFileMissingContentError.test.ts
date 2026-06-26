@@ -22,7 +22,6 @@ describe("formatResponse.writeToFileMissingContentError", () => {
 			result.should.containEql("skeleton")
 		})
 
-
 		it("should mention breaking down the task into smaller steps", () => {
 			const result = formatResponse.writeToFileMissingContentError("src/index.ts", 1)
 			result.should.containEql("breaking down the task into smaller steps")

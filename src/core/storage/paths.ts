@@ -4,11 +4,12 @@ import * as path from "path"
 
 // Returns the cross-platform Documents path, falling back to ~/Documents.
 export async function getDocumentsPath(): Promise<string> {
-	const platformPath = process.platform === "win32"
-		? await getWindowsDocumentsPath()
-		: process.platform === "linux"
-			? await getLinuxDocumentsPath()
-			: undefined
+	const platformPath =
+		process.platform === "win32"
+			? await getWindowsDocumentsPath()
+			: process.platform === "linux"
+				? await getLinuxDocumentsPath()
+				: undefined
 	return platformPath ?? path.join(os.homedir(), "Documents")
 }
 

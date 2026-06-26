@@ -2,12 +2,12 @@ import assert from "node:assert/strict"
 import { EventEmitter } from "events"
 import { describe, it } from "mocha"
 import type {
-    CommandExecutorCallbacks,
-    ITerminalManager,
-    OrchestrationResult,
-    TerminalCompletionDetails,
-    TerminalProcessEvents,
-    TerminalProcessResultPromise,
+	CommandExecutorCallbacks,
+	ITerminalManager,
+	OrchestrationResult,
+	TerminalCompletionDetails,
+	TerminalProcessEvents,
+	TerminalProcessResultPromise,
 } from "../types"
 
 class FakeTerminalProcess extends EventEmitter<TerminalProcessEvents> {

@@ -45,7 +45,6 @@ export function isTerminalResponseSequence(input: string, key: any): boolean {
 	)
 }
 
-
 export function isMouseEscapeSequence(input: string): boolean {
 	// Mouse events look like: \x1b[<35;46;17M (SGR mouse format)
 	// They contain [< followed by numbers, semicolons, and end with M or m

@@ -1,13 +1,13 @@
 import type { ModelInfo } from "@shared/api"
 import {
-    basetenDefaultModelId,
-    basetenModels,
-    groqDefaultModelId,
-    groqModels,
-    openRouterDefaultModelId,
-    openRouterDefaultModelInfo,
-    requestyDefaultModelId,
-    requestyDefaultModelInfo,
+	basetenDefaultModelId,
+	basetenModels,
+	groqDefaultModelId,
+	groqModels,
+	openRouterDefaultModelId,
+	openRouterDefaultModelInfo,
+	requestyDefaultModelId,
+	requestyDefaultModelInfo,
 } from "@shared/api"
 import type { OnboardingModelGroup } from "@shared/proto/dirac/state"
 import { create } from "zustand"

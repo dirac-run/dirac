@@ -39,7 +39,9 @@ export class FileEditProvider extends DiffViewProvider {
 		_currentLine: number | undefined,
 	): Promise<void> {
 		if (this.documentContent === undefined) {
-			throw new Error(`Document not initialized for ${this.relPath || "unknown file"}. This can happen if the file failed to open or was already reset.`)
+			throw new Error(
+				`Document not initialized for ${this.relPath || "unknown file"}. This can happen if the file failed to open or was already reset.`,
+			)
 		}
 
 		// Split the document into lines
@@ -151,20 +153,22 @@ export class FileEditProvider extends DiffViewProvider {
 		}
 	}
 
-	override async applyAndSaveBatchSilently(
-		files: { path: string; content: string }[]
-	): Promise<Map<string, {
-		finalContent: string | undefined
-		autoFormattingEdits: string | undefined
-		userEdits: string | undefined
-	}>> {
+	override async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<
+		Map<
+			string,
+			{
+				finalContent: string | undefined
+				autoFormattingEdits: string | undefined
+				userEdits: string | undefined
+			}
+		>
+	> {
 		const results = new Map()
 		for (const file of files) {
 			results.set(file.path, await this.applyAndSaveSilently(file.path, file.content))
 		}
 		return results
 	}
-
 
 	override async format(path: string): Promise<string> {
 		const { exec } = await import("child_process")

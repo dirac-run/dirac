@@ -1,11 +1,11 @@
 import {
-    ApiError,
-    FunctionCallingConfigMode,
-    type GenerateContentConfig,
-    type GenerateContentResponseUsageMetadata,
-    GoogleGenAI,
-    FunctionDeclaration as GoogleTool,
-    ThinkingLevel,
+	ApiError,
+	FunctionCallingConfigMode,
+	type GenerateContentConfig,
+	type GenerateContentResponseUsageMetadata,
+	GoogleGenAI,
+	FunctionDeclaration as GoogleTool,
+	ThinkingLevel,
 } from "@google/genai"
 import { GeminiModelId, geminiDefaultModelId, geminiModels, ModelInfo } from "@shared/api"
 import { isRateLimited } from "@shared/net"
@@ -411,7 +411,14 @@ export class GeminiHandler implements ApiHandler {
 			yield {
 				type: "tool_calls",
 				id: responseId,
-				tool_call: { call_id: toolCallId, function: { id: toolCallId, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) } },
+				tool_call: {
+					call_id: toolCallId,
+					function: {
+						id: toolCallId,
+						name: part.functionCall.name,
+						arguments: JSON.stringify(part.functionCall.args || {}),
+					},
+				},
 				signature,
 			}
 		}

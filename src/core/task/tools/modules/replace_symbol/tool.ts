@@ -5,5 +5,5 @@ import { replace_symbol_spec, ReplaceSymbolTool } from "./ReplaceSymbolTool"
 export const spec: DiracToolSpec = replace_symbol_spec
 
 export function create(): IDiracTool {
-    return new ReplaceSymbolTool()
+	return new ReplaceSymbolTool()
 }

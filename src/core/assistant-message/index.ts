@@ -100,7 +100,6 @@ export interface ToolUse {
 	 */
 	signature?: string
 	isComplete?: boolean
-
 }
 
 export interface ReasoningStreamContent {

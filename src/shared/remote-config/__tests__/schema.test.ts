@@ -1,14 +1,14 @@
 import { expect } from "chai"
 import { describe, it } from "mocha"
 import {
-    AwsBedrockSettingsSchema,
-    DiracSettingsSchema,
-    EnterpriseTelemetrySchema,
-    OpenAiCompatibleSchema,
-    PromptUploadingSchema,
-    type RemoteConfig,
-    RemoteConfigSchema,
-    S3AccessKeySettingsSchema,
+	AwsBedrockSettingsSchema,
+	DiracSettingsSchema,
+	EnterpriseTelemetrySchema,
+	OpenAiCompatibleSchema,
+	PromptUploadingSchema,
+	type RemoteConfig,
+	RemoteConfigSchema,
+	S3AccessKeySettingsSchema,
 } from "../schema"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 

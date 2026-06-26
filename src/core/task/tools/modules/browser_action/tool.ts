@@ -5,5 +5,5 @@ import { browser_action_spec, BrowserActionTool } from "./BrowserActionTool"
 export const spec: DiracToolSpec = browser_action_spec
 
 export function create(): IDiracTool {
-    return new BrowserActionTool()
+	return new BrowserActionTool()
 }

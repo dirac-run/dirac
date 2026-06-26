@@ -11,24 +11,24 @@ export const ANCHOR_DELIMITER = "§"
  * @returns The anchor delimiter string
  */
 export function getDelimiter(): string {
-    return ANCHOR_DELIMITER
+	return ANCHOR_DELIMITER
 }
 
 /**
  * Removes a hash anchor prefix from a line when the line starts with one.
  */
 function stripAnchorPrefix(line: string, offset = 0): string {
-    const delimiterIndex = line.indexOf(ANCHOR_DELIMITER, offset)
-    if (delimiterIndex === -1) {
-        return line
-    }
+	const delimiterIndex = line.indexOf(ANCHOR_DELIMITER, offset)
+	if (delimiterIndex === -1) {
+		return line
+	}
 
-    const prefix = line.substring(offset, delimiterIndex)
-    if (!/^[A-Z][a-zA-Z]*$/.test(prefix)) {
-        return line
-    }
+	const prefix = line.substring(offset, delimiterIndex)
+	if (!/^[A-Z][a-zA-Z]*$/.test(prefix)) {
+		return line
+	}
 
-    return line.substring(0, offset) + line.substring(delimiterIndex + ANCHOR_DELIMITER.length)
+	return line.substring(0, offset) + line.substring(delimiterIndex + ANCHOR_DELIMITER.length)
 }
 
 /**
@@ -40,14 +40,14 @@ function stripAnchorPrefix(line: string, offset = 0): string {
  * @returns The clean content without line-start hashes
  */
 export function stripHashes(content: string): string {
-    if (!content) {
-        return ""
-    }
+	if (!content) {
+		return ""
+	}
 
-    return content
-        .split("\n")
-        .map((line) => stripAnchorPrefix(line))
-        .join("\n")
+	return content
+		.split("\n")
+		.map((line) => stripAnchorPrefix(line))
+		.join("\n")
 }
 
 /**
@@ -59,20 +59,20 @@ export function stripHashes(content: string): string {
  * @returns The clean diff content without anchor prefixes
  */
 export function stripHashesFromDiff(content: string): string {
-    if (!content) {
-        return ""
-    }
+	if (!content) {
+		return ""
+	}
 
-    return content
-        .split("\n")
-        .map((line) => {
-            if (line.length > 0 && (line[0] === "+" || line[0] === "-" || line[0] === " ")) {
-                return stripAnchorPrefix(line, 1)
-            }
+	return content
+		.split("\n")
+		.map((line) => {
+			if (line.length > 0 && (line[0] === "+" || line[0] === "-" || line[0] === " ")) {
+				return stripAnchorPrefix(line, 1)
+			}
 
-            return stripAnchorPrefix(line)
-        })
-        .join("\n")
+			return stripAnchorPrefix(line)
+		})
+		.join("\n")
 }
 
 /**
@@ -83,9 +83,9 @@ export function stripHashesFromDiff(content: string): string {
  * @returns The extracted ID
  */
 export function extractId(ref: string): string {
-    if (!ref) {
-        return ""
-    }
-    const delimiterIndex = ref.indexOf(ANCHOR_DELIMITER)
-    return delimiterIndex === -1 ? ref : ref.substring(0, delimiterIndex)
+	if (!ref) {
+		return ""
+	}
+	const delimiterIndex = ref.indexOf(ANCHOR_DELIMITER)
+	return delimiterIndex === -1 ? ref : ref.substring(0, delimiterIndex)
 }

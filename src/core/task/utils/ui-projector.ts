@@ -1,114 +1,114 @@
 import {
-    ActionButton,
-    DiracMessage,
-    DiracMessageType,
-    TaskStatus,
-    UIActionButton,
-    UIActionButtonType,
-    UIActionState,
+	ActionButton,
+	DiracMessage,
+	DiracMessageType,
+	TaskStatus,
+	UIActionButton,
+	UIActionButtonType,
+	UIActionState,
 } from "@shared/ExtensionMessage"
 import { isBusyTaskStatus } from "@shared/taskStatusProjection"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { TaskState } from "../TaskState"
 
 export function projectUIActionState(
-    state: TaskState | undefined,
-    messages: DiracMessage[],
-    maxConsecutiveMistakes: number,
+	state: TaskState | undefined,
+	messages: DiracMessage[],
+	maxConsecutiveMistakes: number,
 ): UIActionState {
-    const uiState: UIActionState = {
-        globalButtons: [],
-        cardButtons: [],
-        sendingDisabled:
-            state?.status !== TaskStatus.IDLE &&
-            state?.status !== TaskStatus.COMPLETED &&
-            state?.status !== TaskStatus.AWAITING_USER_INPUT &&
-            state?.status !== TaskStatus.CANCELLED,
-    }
+	const uiState: UIActionState = {
+		globalButtons: [],
+		cardButtons: [],
+		sendingDisabled:
+			state?.status !== TaskStatus.IDLE &&
+			state?.status !== TaskStatus.COMPLETED &&
+			state?.status !== TaskStatus.AWAITING_USER_INPUT &&
+			state?.status !== TaskStatus.CANCELLED,
+	}
 
-    // Active card interactions must take precedence over busy task states.
-    // Tools can create a waiting card before the task status is projected as AWAITING_USER_INPUT.
-    if (state?.waitingCardIds && state.waitingCardIds.length > 0) {
-        const activeCardId = state.waitingCardIds[0]
-        const cardMsg = messages.find((m) => m.id === activeCardId)
-        if (cardMsg?.content.type === DiracMessageType.CARD) {
-            const card = cardMsg.content.card
-            uiState.activeCardId = activeCardId
-            uiState.cardButtons =
-                card.actions?.map(mapCardActionToUIButton) ||
-                (card.requireApproval
-                    ? [
-                        { label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-                        { label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-                    ]
-                    : [])
-            return uiState
-        }
-    }
-    // 1. Terminal Success State
-    if (state?.didAttemptCompletion) {
-        uiState.globalButtons.push({
-            label: "Start New Task",
-            action: UIActionButtonType.NEW_TASK,
-            primary: true,
-        })
-        return uiState
-    }
+	// Active card interactions must take precedence over busy task states.
+	// Tools can create a waiting card before the task status is projected as AWAITING_USER_INPUT.
+	if (state?.waitingCardIds && state.waitingCardIds.length > 0) {
+		const activeCardId = state.waitingCardIds[0]
+		const cardMsg = messages.find((m) => m.id === activeCardId)
+		if (cardMsg?.content.type === DiracMessageType.CARD) {
+			const card = cardMsg.content.card
+			uiState.activeCardId = activeCardId
+			uiState.cardButtons =
+				card.actions?.map(mapCardActionToUIButton) ||
+				(card.requireApproval
+					? [
+							{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+							{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+						]
+					: [])
+			return uiState
+		}
+	}
+	// 1. Terminal Success State
+	if (state?.didAttemptCompletion) {
+		uiState.globalButtons.push({
+			label: "Start New Task",
+			action: UIActionButtonType.NEW_TASK,
+			primary: true,
+		})
+		return uiState
+	}
 
-    // 2. Active Streaming State
-    // When awaiting plan feedback, skip the Cancel button and fall through
-    // to section 4 so the card renders without action buttons.
-    const isBusy = isBusyTaskStatus(state?.status)
+	// 2. Active Streaming State
+	// When awaiting plan feedback, skip the Cancel button and fall through
+	// to section 4 so the card renders without action buttons.
+	const isBusy = isBusyTaskStatus(state?.status)
 
-    if (isBusy && !state?.isAwaitingPlanResponse) {
-        uiState.globalButtons.push({
-            label: "Cancel",
-            action: UIActionButtonType.CANCEL,
-            style: "secondary",
-        })
-        return uiState
-    }
+	if (isBusy && !state?.isAwaitingPlanResponse) {
+		uiState.globalButtons.push({
+			label: "Cancel",
+			action: UIActionButtonType.CANCEL,
+			style: "secondary",
+		})
+		return uiState
+	}
 
-    // 2b. Cancelled State (task was aborted, awaiting resume)
-    if (state?.status === TaskStatus.CANCELLED) {
-        uiState.globalButtons.push({
-            label: "Resume",
-            action: UIActionButtonType.APPROVE,
-            primary: true,
-        })
-        return uiState
-    }
+	// 2b. Cancelled State (task was aborted, awaiting resume)
+	if (state?.status === TaskStatus.CANCELLED) {
+		uiState.globalButtons.push({
+			label: "Resume",
+			action: UIActionButtonType.APPROVE,
+			primary: true,
+		})
+		return uiState
+	}
 
-    // 3. Error Recovery State (Mistake Limit)
+	// 3. Error Recovery State (Mistake Limit)
 
-    if (state && state.consecutiveMistakeCount >= maxConsecutiveMistakes) {
-        uiState.globalButtons.push(
-            { label: "Proceed Anyways", action: UIActionButtonType.PROCEED, primary: true },
-            { label: "Start New Task", action: UIActionButtonType.NEW_TASK, style: "secondary" },
-        )
-        return uiState
-    }
+	if (state && state.consecutiveMistakeCount >= maxConsecutiveMistakes) {
+		uiState.globalButtons.push(
+			{ label: "Proceed Anyways", action: UIActionButtonType.PROCEED, primary: true },
+			{ label: "Start New Task", action: UIActionButtonType.NEW_TASK, style: "secondary" },
+		)
+		return uiState
+	}
 
-    return uiState
+	return uiState
 }
 
 function mapCardActionToUIButton(action: ActionButton): UIActionButton {
-    return {
-        label: action.label,
-        action: mapValueToActionButtonType(action.value),
-        value: action.value,
-        primary: action.primary,
-        style: action.style,
-    }
+	return {
+		label: action.label,
+		action: mapValueToActionButtonType(action.value),
+		value: action.value,
+		primary: action.primary,
+		style: action.style,
+	}
 }
 
 function mapValueToActionButtonType(value: string): UIActionButtonType {
-    switch (value) {
-        case DiracAskResponse.APPROVE:
-            return UIActionButtonType.APPROVE
-        case DiracAskResponse.REJECT:
-            return UIActionButtonType.REJECT
-        default:
-            return UIActionButtonType.UTILITY
-    }
+	switch (value) {
+		case DiracAskResponse.APPROVE:
+			return UIActionButtonType.APPROVE
+		case DiracAskResponse.REJECT:
+			return UIActionButtonType.REJECT
+		default:
+			return UIActionButtonType.UTILITY
+	}
 }

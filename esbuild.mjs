@@ -18,263 +18,262 @@ const destDir = standalone ? "dist-standalone" : "dist"
  * @type {import('esbuild').Plugin}
  */
 const aliasResolverPlugin = {
-    name: "alias-resolver",
-    setup(build) {
-        const aliases = {
-            "@api": path.resolve(__dirname, "src/core/api"),
-            "@core": path.resolve(__dirname, "src/core"),
-            "@generated": path.resolve(__dirname, "src/generated"),
-            "@hosts": path.resolve(__dirname, "src/hosts"),
-            "@integrations": path.resolve(__dirname, "src/integrations"),
-            "@packages": path.resolve(__dirname, "src/packages"),
-            "@services": path.resolve(__dirname, "src/services"),
-            "@shared": path.resolve(__dirname, "src/shared"),
-            "@utils": path.resolve(__dirname, "src/utils"),
-            "@": path.resolve(__dirname, "src"),
-        }
+	name: "alias-resolver",
+	setup(build) {
+		const aliases = {
+			"@api": path.resolve(__dirname, "src/core/api"),
+			"@core": path.resolve(__dirname, "src/core"),
+			"@generated": path.resolve(__dirname, "src/generated"),
+			"@hosts": path.resolve(__dirname, "src/hosts"),
+			"@integrations": path.resolve(__dirname, "src/integrations"),
+			"@packages": path.resolve(__dirname, "src/packages"),
+			"@services": path.resolve(__dirname, "src/services"),
+			"@shared": path.resolve(__dirname, "src/shared"),
+			"@utils": path.resolve(__dirname, "src/utils"),
+			"@": path.resolve(__dirname, "src"),
+		}
 
-        // For each alias entry, create a resolver
-        Object.entries(aliases).forEach(([alias, aliasPath]) => {
-            const aliasRegex = new RegExp(`^${alias}($|/.*)`)
-            build.onResolve({ filter: aliasRegex }, (args) => {
-                const importPath = args.path.replace(alias, aliasPath)
+		// For each alias entry, create a resolver
+		Object.entries(aliases).forEach(([alias, aliasPath]) => {
+			const aliasRegex = new RegExp(`^${alias}($|/.*)`)
+			build.onResolve({ filter: aliasRegex }, (args) => {
+				const importPath = args.path.replace(alias, aliasPath)
 
-                // First, check if the path exists as is
-                if (fs.existsSync(importPath)) {
-                    const stats = fs.statSync(importPath)
-                    if (stats.isDirectory()) {
-                        // If it's a directory, try to find index files
-                        const extensions = [".ts", ".tsx", ".js", ".jsx"]
-                        for (const ext of extensions) {
-                            const indexFile = path.join(importPath, `index${ext}`)
-                            if (fs.existsSync(indexFile)) {
-                                return { path: indexFile }
-                            }
-                        }
-                    } else {
-                        // It's a file that exists, so return it
-                        return { path: importPath }
-                    }
-                }
+				// First, check if the path exists as is
+				if (fs.existsSync(importPath)) {
+					const stats = fs.statSync(importPath)
+					if (stats.isDirectory()) {
+						// If it's a directory, try to find index files
+						const extensions = [".ts", ".tsx", ".js", ".jsx"]
+						for (const ext of extensions) {
+							const indexFile = path.join(importPath, `index${ext}`)
+							if (fs.existsSync(indexFile)) {
+								return { path: indexFile }
+							}
+						}
+					} else {
+						// It's a file that exists, so return it
+						return { path: importPath }
+					}
+				}
 
-                // If the path doesn't exist, try appending extensions
-                const extensions = [".ts", ".tsx", ".js", ".jsx"]
-                for (const ext of extensions) {
-                    const pathWithExtension = `${importPath}${ext}`
-                    if (fs.existsSync(pathWithExtension)) {
-                        return { path: pathWithExtension }
-                    }
-                }
+				// If the path doesn't exist, try appending extensions
+				const extensions = [".ts", ".tsx", ".js", ".jsx"]
+				for (const ext of extensions) {
+					const pathWithExtension = `${importPath}${ext}`
+					if (fs.existsSync(pathWithExtension)) {
+						return { path: pathWithExtension }
+					}
+				}
 
-                // If nothing worked, return the original path and let esbuild handle the error
-                return { path: importPath }
-            })
-        })
-    },
+				// If nothing worked, return the original path and let esbuild handle the error
+				return { path: importPath }
+			})
+		})
+	},
 }
 
 const esbuildProblemMatcherPlugin = {
-    name: "esbuild-problem-matcher",
+	name: "esbuild-problem-matcher",
 
-    setup(build) {
-        build.onStart(() => {
-            console.log("[watch] build started")
-        })
-        build.onEnd((result) => {
-            result.errors.forEach(({ text, location }) => {
-                console.error(`✘ [ERROR] ${text}`)
-                console.error(`    ${location.file}:${location.line}:${location.column}:`)
-            })
-            console.log("[watch] build finished")
-        })
-    },
+	setup(build) {
+		build.onStart(() => {
+			console.log("[watch] build started")
+		})
+		build.onEnd((result) => {
+			result.errors.forEach(({ text, location }) => {
+				console.error(`✘ [ERROR] ${text}`)
+				console.error(`    ${location.file}:${location.line}:${location.column}:`)
+			})
+			console.log("[watch] build finished")
+		})
+	},
 }
 
 const copyAssets = {
-    name: "copy-assets",
-    setup(build) {
-        build.onEnd(() => {
-            // tree sitter
-            const sourceDir = path.join(__dirname, "node_modules", "web-tree-sitter")
-            const targetDir = path.join(__dirname, destDir)
+	name: "copy-assets",
+	setup(build) {
+		build.onEnd(() => {
+			// tree sitter
+			const sourceDir = path.join(__dirname, "node_modules", "web-tree-sitter")
+			const targetDir = path.join(__dirname, destDir)
 
-            // Copy .hash_anchors
-            const dictionarySource = path.join(__dirname, "src", "utils", ".hash_anchors")
-            const dictionaryTarget = path.join(targetDir, ".hash_anchors")
-            if (fs.existsSync(dictionarySource)) {
-                fs.copyFileSync(dictionarySource, dictionaryTarget)
-            }
+			// Copy .hash_anchors
+			const dictionarySource = path.join(__dirname, "src", "utils", ".hash_anchors")
+			const dictionaryTarget = path.join(targetDir, ".hash_anchors")
+			if (fs.existsSync(dictionarySource)) {
+				fs.copyFileSync(dictionarySource, dictionaryTarget)
+			}
 
-            // Copy web-tree-sitter module to dist/node_modules so it can be loaded at runtime
-            // (web-tree-sitter is externalized from the bundle to avoid Emscripten bundling issues)
-            const webTreeSitterTarget = path.join(targetDir, "node_modules", "web-tree-sitter")
-            fs.mkdirSync(webTreeSitterTarget, { recursive: true })
-            fs.copyFileSync(path.join(sourceDir, "tree-sitter.js"), path.join(webTreeSitterTarget, "tree-sitter.js"))
-            fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(webTreeSitterTarget, "tree-sitter.wasm"))
-            fs.copyFileSync(path.join(sourceDir, "web-tree-sitter.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
-            // Write a minimal package.json so require('web-tree-sitter') resolves correctly
-            fs.writeFileSync(
-                path.join(webTreeSitterTarget, "package.json"),
-                JSON.stringify({ name: "web-tree-sitter", main: "tree-sitter.js" }),
-            )
+			// Copy web-tree-sitter module to dist/node_modules so it can be loaded at runtime
+			// (web-tree-sitter is externalized from the bundle to avoid Emscripten bundling issues)
+			const webTreeSitterTarget = path.join(targetDir, "node_modules", "web-tree-sitter")
+			fs.mkdirSync(webTreeSitterTarget, { recursive: true })
+			fs.copyFileSync(path.join(sourceDir, "tree-sitter.js"), path.join(webTreeSitterTarget, "tree-sitter.js"))
+			fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(webTreeSitterTarget, "tree-sitter.wasm"))
+			fs.copyFileSync(path.join(sourceDir, "web-tree-sitter.d.ts"), path.join(webTreeSitterTarget, "tree-sitter-web.d.ts"))
+			// Write a minimal package.json so require('web-tree-sitter') resolves correctly
+			fs.writeFileSync(
+				path.join(webTreeSitterTarget, "package.json"),
+				JSON.stringify({ name: "web-tree-sitter", main: "tree-sitter.js" }),
+			)
 
-            // Also copy tree-sitter.wasm to dist root for the locateFile callback
-            fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(targetDir, "tree-sitter.wasm"))
+			// Also copy tree-sitter.wasm to dist root for the locateFile callback
+			fs.copyFileSync(path.join(sourceDir, "tree-sitter.wasm"), path.join(targetDir, "tree-sitter.wasm"))
 
-            // Copy language-specific WASM files
-            const languageWasmDir = path.join(__dirname, "node_modules", "tree-sitter-wasms", "out")
-            const languages = [
-                "typescript",
-                "tsx",
-                "python",
-                "rust",
-                "javascript",
-                "go",
-                "cpp",
-                "c",
-                "c_sharp",
-                "ruby",
-                "java",
-                "php",
-                "swift",
-                "kotlin",
-                "zig",
-            ]
+			// Copy language-specific WASM files
+			const languageWasmDir = path.join(__dirname, "node_modules", "tree-sitter-wasms", "out")
+			const languages = [
+				"typescript",
+				"tsx",
+				"python",
+				"rust",
+				"javascript",
+				"go",
+				"cpp",
+				"c",
+				"c_sharp",
+				"ruby",
+				"java",
+				"php",
+				"swift",
+				"kotlin",
+				"zig",
+			]
 
-            // Copy sql-wasm.wasm
-            const sqlJsSource = path.join(__dirname, "node_modules", "sql.js", "dist", "sql-wasm.wasm")
-            if (fs.existsSync(sqlJsSource)) {
-                fs.copyFileSync(sqlJsSource, path.join(targetDir, "sql-wasm.wasm"))
-            }
+			// Copy sql-wasm.wasm
+			const sqlJsSource = path.join(__dirname, "node_modules", "sql.js", "dist", "sql-wasm.wasm")
+			if (fs.existsSync(sqlJsSource)) {
+				fs.copyFileSync(sqlJsSource, path.join(targetDir, "sql-wasm.wasm"))
+			}
 
-            languages.forEach((lang) => {
-                const filename = `tree-sitter-${lang}.wasm`
-                fs.copyFileSync(path.join(languageWasmDir, filename), path.join(targetDir, filename))
-            })
+			languages.forEach((lang) => {
+				const filename = `tree-sitter-${lang}.wasm`
+				fs.copyFileSync(path.join(languageWasmDir, filename), path.join(targetDir, filename))
+			})
 
-            // Copy source code for /askDirac command
-            copySourceCode(__dirname, path.join(__dirname, destDir))
+			// Copy source code for /askDirac command
+			copySourceCode(__dirname, path.join(__dirname, destDir))
 
-            // Copy runtime modules that are externalized or need files/binaries available on disk
-            const modulesToCopy = ["@vscode/ripgrep"]
-            for (const mod of modulesToCopy) {
-                const sourceModuleDir = path.join(__dirname, "node_modules", mod)
-                const targetModuleDir = path.join(targetDir, "node_modules", mod)
-                if (fs.existsSync(sourceModuleDir)) {
-                    fs.cpSync(sourceModuleDir, targetModuleDir, { recursive: true })
-                }
-            }
-
-        })
-    },
+			// Copy runtime modules that are externalized or need files/binaries available on disk
+			const modulesToCopy = ["@vscode/ripgrep"]
+			for (const mod of modulesToCopy) {
+				const sourceModuleDir = path.join(__dirname, "node_modules", mod)
+				const targetModuleDir = path.join(targetDir, "node_modules", mod)
+				if (fs.existsSync(sourceModuleDir)) {
+					fs.cpSync(sourceModuleDir, targetModuleDir, { recursive: true })
+				}
+			}
+		})
+	},
 }
 
 const buildEnvVars = {
-    "import.meta.url": "_importMetaUrl",
-    "process.env.IS_STANDALONE": JSON.stringify(standalone ? "true" : "false"),
+	"import.meta.url": "_importMetaUrl",
+	"process.env.IS_STANDALONE": JSON.stringify(standalone ? "true" : "false"),
 }
 
 if (production) {
-    // IS_DEV is always disable in production builds.
-    buildEnvVars["process.env.IS_DEV"] = "false"
+	// IS_DEV is always disable in production builds.
+	buildEnvVars["process.env.IS_DEV"] = "false"
 }
 // Set the environment and telemetry env vars. The API key env vars need to be populated in the GitHub
 // workflows from the secrets.
 if (process.env.DIRAC_ENVIRONMENT) {
-    buildEnvVars["process.env.DIRAC_ENVIRONMENT"] = JSON.stringify(process.env.DIRAC_ENVIRONMENT)
+	buildEnvVars["process.env.DIRAC_ENVIRONMENT"] = JSON.stringify(process.env.DIRAC_ENVIRONMENT)
 }
 if (process.env.TELEMETRY_SERVICE_API_KEY) {
-    buildEnvVars["process.env.TELEMETRY_SERVICE_API_KEY"] = JSON.stringify(process.env.TELEMETRY_SERVICE_API_KEY)
+	buildEnvVars["process.env.TELEMETRY_SERVICE_API_KEY"] = JSON.stringify(process.env.TELEMETRY_SERVICE_API_KEY)
 }
 if (process.env.ERROR_SERVICE_API_KEY) {
-    buildEnvVars["process.env.ERROR_SERVICE_API_KEY"] = JSON.stringify(process.env.ERROR_SERVICE_API_KEY)
+	buildEnvVars["process.env.ERROR_SERVICE_API_KEY"] = JSON.stringify(process.env.ERROR_SERVICE_API_KEY)
 }
 
 // OpenTelemetry configuration (injected at build time from GitHub secrets)
 // These provide production defaults that can be overridden at runtime via environment variables
 if (process.env.OTEL_TELEMETRY_ENABLED) {
-    buildEnvVars["process.env.OTEL_TELEMETRY_ENABLED"] = JSON.stringify(process.env.OTEL_TELEMETRY_ENABLED)
+	buildEnvVars["process.env.OTEL_TELEMETRY_ENABLED"] = JSON.stringify(process.env.OTEL_TELEMETRY_ENABLED)
 }
 if (process.env.OTEL_LOGS_EXPORTER) {
-    buildEnvVars["process.env.OTEL_LOGS_EXPORTER"] = JSON.stringify(process.env.OTEL_LOGS_EXPORTER)
+	buildEnvVars["process.env.OTEL_LOGS_EXPORTER"] = JSON.stringify(process.env.OTEL_LOGS_EXPORTER)
 }
 if (process.env.OTEL_METRICS_EXPORTER) {
-    buildEnvVars["process.env.OTEL_METRICS_EXPORTER"] = JSON.stringify(process.env.OTEL_METRICS_EXPORTER)
+	buildEnvVars["process.env.OTEL_METRICS_EXPORTER"] = JSON.stringify(process.env.OTEL_METRICS_EXPORTER)
 }
 if (process.env.OTEL_EXPORTER_OTLP_PROTOCOL) {
-    buildEnvVars["process.env.OTEL_EXPORTER_OTLP_PROTOCOL"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_PROTOCOL)
+	buildEnvVars["process.env.OTEL_EXPORTER_OTLP_PROTOCOL"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_PROTOCOL)
 }
 if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-    buildEnvVars["process.env.OTEL_EXPORTER_OTLP_ENDPOINT"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_ENDPOINT)
+	buildEnvVars["process.env.OTEL_EXPORTER_OTLP_ENDPOINT"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_ENDPOINT)
 }
 if (process.env.OTEL_EXPORTER_OTLP_HEADERS) {
-    buildEnvVars["process.env.OTEL_EXPORTER_OTLP_HEADERS"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_HEADERS)
+	buildEnvVars["process.env.OTEL_EXPORTER_OTLP_HEADERS"] = JSON.stringify(process.env.OTEL_EXPORTER_OTLP_HEADERS)
 }
 if (process.env.OTEL_METRIC_EXPORT_INTERVAL) {
-    buildEnvVars["process.env.OTEL_METRIC_EXPORT_INTERVAL"] = JSON.stringify(process.env.OTEL_METRIC_EXPORT_INTERVAL)
+	buildEnvVars["process.env.OTEL_METRIC_EXPORT_INTERVAL"] = JSON.stringify(process.env.OTEL_METRIC_EXPORT_INTERVAL)
 }
 // Base configuration shared between extension and standalone builds
 const baseConfig = {
-    bundle: true,
-    minify: production,
-    sourcemap: !production,
-    logLevel: "silent",
-    define: buildEnvVars,
-    tsconfig: path.resolve(__dirname, "tsconfig.json"),
-    plugins: [
-        copyAssets,
-        aliasResolverPlugin,
-        /* add to the end of plugins array */
-        esbuildProblemMatcherPlugin,
-    ],
-    format: "cjs",
-    sourcesContent: false,
-    platform: "node",
-    banner: {
-        js: "const _importMetaUrl=require('url').pathToFileURL(__filename); if (typeof navigator === 'undefined') { global.navigator = { userAgent: 'node' }; }",
-    },
+	bundle: true,
+	minify: production,
+	sourcemap: !production,
+	logLevel: "silent",
+	define: buildEnvVars,
+	tsconfig: path.resolve(__dirname, "tsconfig.json"),
+	plugins: [
+		copyAssets,
+		aliasResolverPlugin,
+		/* add to the end of plugins array */
+		esbuildProblemMatcherPlugin,
+	],
+	format: "cjs",
+	sourcesContent: false,
+	platform: "node",
+	banner: {
+		js: "const _importMetaUrl=require('url').pathToFileURL(__filename); if (typeof navigator === 'undefined') { global.navigator = { userAgent: 'node' }; }",
+	},
 }
 
 // Extension-specific configuration
 const extensionConfig = {
-    ...baseConfig,
-    entryPoints: ["src/extension.ts"],
-    outfile: `${destDir}/extension.js`,
-    external: ["vscode", "web-tree-sitter"],
+	...baseConfig,
+	entryPoints: ["src/extension.ts"],
+	outfile: `${destDir}/extension.js`,
+	external: ["vscode", "web-tree-sitter"],
 }
 
 // Standalone-specific configuration
 const standaloneConfig = {
-    ...baseConfig,
-    entryPoints: ["src/standalone/dirac-core.ts"],
-    outfile: `${destDir}/dirac-core.js`,
-    // These modules need to load files from the module directory at runtime,
-    // so they cannot be bundled.
-    external: ["vscode", "web-tree-sitter", "@grpc/reflection", "grpc-health-check"],
+	...baseConfig,
+	entryPoints: ["src/standalone/dirac-core.ts"],
+	outfile: `${destDir}/dirac-core.js`,
+	// These modules need to load files from the module directory at runtime,
+	// so they cannot be bundled.
+	external: ["vscode", "web-tree-sitter", "@grpc/reflection", "grpc-health-check"],
 }
 
 // E2E build script configuration
 const e2eBuildConfig = {
-    ...baseConfig,
-    entryPoints: ["src/test/e2e/utils/build.ts"],
-    outfile: `${destDir}/e2e-build.mjs`,
-    external: ["@vscode/test-electron", "execa"],
-    sourcemap: false,
-    plugins: [aliasResolverPlugin, esbuildProblemMatcherPlugin],
+	...baseConfig,
+	entryPoints: ["src/test/e2e/utils/build.ts"],
+	outfile: `${destDir}/e2e-build.mjs`,
+	external: ["@vscode/test-electron", "execa"],
+	sourcemap: false,
+	plugins: [aliasResolverPlugin, esbuildProblemMatcherPlugin],
 }
 
 async function main() {
-    const config = standalone ? standaloneConfig : e2eBuild ? e2eBuildConfig : extensionConfig
-    const extensionCtx = await esbuild.context(config)
-    if (watch) {
-        await extensionCtx.watch()
-    } else {
-        await extensionCtx.rebuild()
-        await extensionCtx.dispose()
-    }
+	const config = standalone ? standaloneConfig : e2eBuild ? e2eBuildConfig : extensionConfig
+	const extensionCtx = await esbuild.context(config)
+	if (watch) {
+		await extensionCtx.watch()
+	} else {
+		await extensionCtx.rebuild()
+		await extensionCtx.dispose()
+	}
 }
 
 main().catch((e) => {
-    console.error(e)
-    process.exit(1)
+	console.error(e)
+	process.exit(1)
 })

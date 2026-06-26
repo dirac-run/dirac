@@ -99,7 +99,6 @@ export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 			cancelTask,
 			postStateToWebview,
 			resetTransientState,
-
 		},
 		{
 			conversationHistoryDeletedRange: initialConversationHistoryDeletedRange,

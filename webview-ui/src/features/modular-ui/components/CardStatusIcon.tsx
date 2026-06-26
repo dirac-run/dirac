@@ -2,13 +2,13 @@ import React from "react"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { cn } from "@/lib/utils"
 import {
-    Loader2Icon,
-    CheckCircle2Icon,
-    XCircleIcon,
-    FastForwardIcon,
-    GhostIcon,
-    CircleIcon,
-    MessageSquareIcon,
+	Loader2Icon,
+	CheckCircle2Icon,
+	XCircleIcon,
+	FastForwardIcon,
+	GhostIcon,
+	CircleIcon,
+	MessageSquareIcon,
 } from "lucide-react"
 
 interface CardStatusIconProps {

@@ -56,7 +56,6 @@ export class FireworksHandler implements ApiHandler {
 		]
 		const toolParams = getOpenAIToolParams(tools as any)
 
-
 		const stream = await client.chat.completions.create({
 			model: modelId,
 			messages: openAiMessages,

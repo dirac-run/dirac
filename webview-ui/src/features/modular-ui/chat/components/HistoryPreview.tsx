@@ -147,7 +147,10 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 					<div className="flex flex-col items-center gap-2">
 						<div className="relative">
 							<div className="absolute -inset-6 rounded-[40%_60%_55%_45%/60%_40%_55%_45%] bg-[radial-gradient(ellipse_at_40%_30%,rgba(150,99,241,0.18)_0%,rgba(150,99,241,0.08)_40%,transparent_70%)] blur-sm animate-glow-pulse pointer-events-none" />
-							<div className="absolute -inset-4 rounded-[55%_45%_40%_60%/45%_55%_60%_40%] bg-[radial-gradient(ellipse_at_60%_70%,rgba(139,92,246,0.12)_0%,rgba(150,99,241,0.05)_50%,transparent_75%)] blur-md animate-glow-pulse pointer-events-none" style={{ animationDelay: "2s" }} />
+							<div
+								className="absolute -inset-4 rounded-[55%_45%_40%_60%/45%_55%_60%_40%] bg-[radial-gradient(ellipse_at_60%_70%,rgba(139,92,246,0.12)_0%,rgba(150,99,241,0.05)_50%,transparent_75%)] blur-md animate-glow-pulse pointer-events-none"
+								style={{ animationDelay: "2s" }}
+							/>
 							<DiracLogoVariable />
 						</div>
 						<div className="text-[0.9em] text-(--vscode-textLink-foreground) italic text-center max-w-[80%] leading-[1.4]">

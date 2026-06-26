@@ -19,7 +19,8 @@ describe("ChatMessage markdown rendering", () => {
 			ts: Date.now(),
 			content: {
 				type: DiracMessageType.MARKDOWN,
-				content: "# Heading 1\n\nThis is a **bold** and *italic* text with `inline code`.\n\n- List item 1\n- List item 2\n\n> Blockquote\n\n```javascript\nconst x = 1;\n```",
+				content:
+					"# Heading 1\n\nThis is a **bold** and *italic* text with `inline code`.\n\n- List item 1\n- List item 2\n\n> Blockquote\n\n```javascript\nconst x = 1;\n```",
 			},
 		}
 

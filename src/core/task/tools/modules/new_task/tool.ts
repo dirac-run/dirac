@@ -5,5 +5,5 @@ import { new_task_spec, NewTaskTool } from "./NewTaskTool"
 export const spec: DiracToolSpec = new_task_spec
 
 export function create(): IDiracTool {
-    return new NewTaskTool()
+	return new NewTaskTool()
 }

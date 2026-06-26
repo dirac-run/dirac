@@ -1,7 +1,6 @@
 import type { OpenAiCompatibleModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
 
-
 export type MoonshotModelId = keyof typeof moonshotModels
 export const moonshotDefaultModelId = "kimi-k2.6" satisfies MoonshotModelId
 

@@ -1,13 +1,13 @@
 import { ResponseInput, ResponseInputMessageContentList } from "openai/resources/responses/responses"
 import {
-    DiracAssistantRedactedThinkingBlock,
-    DiracAssistantThinkingBlock,
-    DiracAssistantToolUseBlock,
-    DiracContent,
-    DiracImageContentBlock,
-    DiracStorageMessage,
-    DiracTextContentBlock,
-    DiracUserToolResultContentBlock,
+	DiracAssistantRedactedThinkingBlock,
+	DiracAssistantThinkingBlock,
+	DiracAssistantToolUseBlock,
+	DiracContent,
+	DiracImageContentBlock,
+	DiracStorageMessage,
+	DiracTextContentBlock,
+	DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 
 /**

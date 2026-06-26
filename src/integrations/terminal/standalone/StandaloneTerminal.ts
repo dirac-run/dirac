@@ -38,7 +38,6 @@ export class StandaloneTerminal implements ITerminal {
 	/** Environment variables */
 	_env: { [key: string]: string | undefined } | undefined
 
-
 	/** Active child process */
 	_process: ChildProcess | null = null
 

@@ -133,13 +133,13 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		it("getEmail returns the stored email", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ email: "hello@example.com" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;(await manager.getEmail() as string).should.equal("hello@example.com")
+			;((await manager.getEmail()) as string).should.equal("hello@example.com")
 		})
 
 		it("getAccountId returns the stored accountId", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ accountId: "acct-xyz" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;(await manager.getAccountId() as string).should.equal("acct-xyz")
+			;((await manager.getAccountId()) as string).should.equal("acct-xyz")
 		})
 
 		it("getEmail returns null when no email is present", async () => {
@@ -156,7 +156,7 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		it("returns the stored access token when it is not expired", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ access_token: "fresh-token" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;(await manager.getAccessToken() as string).should.equal("fresh-token")
+			;((await manager.getAccessToken()) as string).should.equal("fresh-token")
 		})
 
 		it("refreshes an expired token and persists the new one", async () => {

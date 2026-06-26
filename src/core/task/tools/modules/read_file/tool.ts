@@ -5,5 +5,5 @@ import { read_file_spec, ReadFileTool } from "./ReadFileTool"
 export const spec: DiracToolSpec = read_file_spec
 
 export function create(): IDiracTool {
-    return new ReadFileTool()
+	return new ReadFileTool()
 }

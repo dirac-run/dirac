@@ -2,15 +2,15 @@ import { HistoryItem } from "@shared/HistoryItem"
 import { StringRequest } from "@shared/proto/dirac/common"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import {
-    ArrowDownIcon,
-    ArrowLeftIcon,
-    ArrowRightIcon,
-    ArrowUpIcon,
-    ChevronsDownUpIcon,
-    ChevronsUpDownIcon,
-    DownloadIcon,
-    StarIcon,
-    TrashIcon,
+	ArrowDownIcon,
+	ArrowLeftIcon,
+	ArrowRightIcon,
+	ArrowUpIcon,
+	ChevronsDownUpIcon,
+	ChevronsUpDownIcon,
+	DownloadIcon,
+	StarIcon,
+	TrashIcon,
 } from "lucide-react"
 import { memo, useCallback, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"

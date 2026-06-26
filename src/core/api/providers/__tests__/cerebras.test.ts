@@ -160,10 +160,7 @@ describe("CerebrasHandler stream parsing", () => {
 	it("yields text deltas for a non-reasoning model", async () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
 		sinon.stub(handler, "getModel").returns({ id: "llama-3.3-70b", info: { supportsImages: false, temperature: 0 } as any })
-		stubClient(handler, [
-			{ choices: [{ delta: { content: "Hello" } }] },
-			{ choices: [{ delta: { content: " world" } }] },
-		])
+		stubClient(handler, [{ choices: [{ delta: { content: "Hello" } }] }, { choices: [{ delta: { content: " world" } }] }])
 		const chunks: any[] = []
 		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }])) chunks.push(chunk)
 		chunks.should.deepEqual([
@@ -176,7 +173,10 @@ describe("CerebrasHandler stream parsing", () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
 		sinon
 			.stub(handler, "getModel")
-			.returns({ id: "llama-3.3-70b", info: { supportsImages: false, temperature: 0, inputPrice: 2, outputPrice: 6 } as any })
+			.returns({
+				id: "llama-3.3-70b",
+				info: { supportsImages: false, temperature: 0, inputPrice: 2, outputPrice: 6 } as any,
+			})
 		stubClient(handler, [
 			{ choices: [{ delta: { content: "hi" } }] },
 			{ usage: { prompt_tokens: 100, completion_tokens: 50 } },
@@ -192,7 +192,12 @@ describe("CerebrasHandler stream parsing", () => {
 
 	it("defaults usage tokens to 0 when usage fields are missing", async () => {
 		const handler = new CerebrasHandler({ cerebrasApiKey: "k" })
-		sinon.stub(handler, "getModel").returns({ id: "llama-3.3-70b", info: { supportsImages: false, temperature: 0, inputPrice: 0, outputPrice: 0 } as any })
+		sinon
+			.stub(handler, "getModel")
+			.returns({
+				id: "llama-3.3-70b",
+				info: { supportsImages: false, temperature: 0, inputPrice: 0, outputPrice: 0 } as any,
+			})
 		stubClient(handler, [{ usage: {} }])
 		const chunks: any[] = []
 		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }])) chunks.push(chunk)
@@ -233,10 +238,7 @@ describe("CerebrasHandler stream parsing", () => {
 			.returns({ id: "qwen-3-235b-a22b-thinking-2507", info: { supportsImages: false, temperature: 0 } as any })
 		const open = "<" + "think" + ">"
 		// First chunk is only the opening tag: cleanContent is empty after stripping -> no yield, reasoning mode active
-		stubClient(handler, [
-			{ choices: [{ delta: { content: open } }] },
-			{ choices: [{ delta: { content: "real answer" } }] },
-		])
+		stubClient(handler, [{ choices: [{ delta: { content: open } }] }, { choices: [{ delta: { content: "real answer" } }] }])
 		const chunks: any[] = []
 		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }])) chunks.push(chunk)
 		// Opening tag enters reasoning mode; second chunk continues reasoning (no closing tag)
@@ -252,7 +254,12 @@ describe("CerebrasHandler stream parsing", () => {
 					{
 						delta: {
 							tool_calls: [
-								{ index: 0, id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"city":"SF"}' } },
+								{
+									index: 0,
+									id: "call_1",
+									type: "function",
+									function: { name: "get_weather", arguments: '{"city":"SF"}' },
+								},
 							],
 						},
 					},
@@ -321,7 +328,9 @@ describe("CerebrasHandler rate_limit_exceeded code", () => {
 		sinon.stub(handler, "getModel").returns({ id: "llama-3.3-70b", info: { supportsImages: false } as any })
 		sinon
 			.stub(handler as any, "ensureClient")
-			.returns({ chat: { completions: { create: sinon.stub().rejects({ code: "rate_limit_exceeded", message: "slow" }) } } } as any)
+			.returns({
+				chat: { completions: { create: sinon.stub().rejects({ code: "rate_limit_exceeded", message: "slow" }) } },
+			} as any)
 		try {
 			for await (const _ of handler.createMessage("system", [{ role: "user", content: "hi" }])) {
 				/* drain */

@@ -5,5 +5,5 @@ import { ask_followup_question_spec, AskFollowupQuestionTool } from "./AskFollow
 export const spec: DiracToolSpec = ask_followup_question_spec
 
 export function create(): IDiracTool {
-    return new AskFollowupQuestionTool()
+	return new AskFollowupQuestionTool()
 }

@@ -24,11 +24,7 @@ export const DiracProvider = ({ showModelOptions, isPopup, currentMode }: DiracP
 
 			{showModelOptions && (
 				<>
-					<DiracModelPicker
-						currentMode={currentMode}
-						isPopup={isPopup}
-						showProviderRouting={true}
-					/>
+					<DiracModelPicker currentMode={currentMode} isPopup={isPopup} showProviderRouting={true} />
 				</>
 			)}
 		</div>

@@ -84,7 +84,7 @@ export class CommandExecutor {
 		}
 	}
 
-		async execute(
+	async execute(
 		command: string,
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
@@ -193,7 +193,7 @@ export class CommandExecutor {
 			const messages = this.callbacks.getDiracMessages()
 			const lastCommandOutputIndex = findLastIndex(
 				messages,
-				(m) => m.content.type === "card" && m.content.card.header === "Command Output"
+				(m) => m.content.type === "card" && m.content.card.header === "Command Output",
 			)
 			if (lastCommandOutputIndex !== -1) {
 				const msg = messages[lastCommandOutputIndex]

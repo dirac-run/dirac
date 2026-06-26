@@ -51,7 +51,7 @@ describe("TEST_MODEL_IDS fixture", () => {
 
 	describe("contract stability", () => {
 		it("is frozen (no accidental mutation)", () => {
-			(Object.keys(TEST_MODEL_IDS) as Array<keyof typeof TEST_MODEL_IDS>).forEach((key) => {
+			;(Object.keys(TEST_MODEL_IDS) as Array<keyof typeof TEST_MODEL_IDS>).forEach((key) => {
 				TEST_MODEL_IDS[key].should.be.a.String()
 				TEST_MODEL_IDS[key].length.should.be.greaterThan(0)
 			})

@@ -173,7 +173,6 @@ export interface AcpSessionState {
 	autoRetryAttempts?: number
 	didAutomaticallyRetryFailedApiRequest?: boolean
 	isStreaming?: boolean
-
 }
 
 // ============================================================

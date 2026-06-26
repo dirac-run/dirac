@@ -5,5 +5,5 @@ import { list_skills_spec, ListSkillsTool } from "./ListSkillsTool"
 export const spec: DiracToolSpec = list_skills_spec
 
 export function create(): IDiracTool {
-    return new ListSkillsTool()
+	return new ListSkillsTool()
 }

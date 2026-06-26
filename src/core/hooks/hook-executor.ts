@@ -9,9 +9,6 @@ import { HookFactory } from "./hook-factory"
 
 import { ITaskMessenger } from "@shared/ExtensionMessage"
 
-
-
-
 export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	hookName: Name
 	hookInput: Hooks[Name]
@@ -33,8 +30,6 @@ export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	toolName?: string // Optional tool name for PreToolUse/PostToolUse hooks
 	pendingToolInfo?: any // Optional metadata about pending tool execution for PreToolUse
 }
-
-
 
 export interface HookExecutionResult {
 	cancel?: boolean
@@ -116,7 +111,6 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		})
 		hookMessageId = cardHandle.id
 
-
 		// Reorder messages immediately so hook UI appears above tool UI
 		// This must happen right after creating the hook message, before the hook runs
 		if (hookName === "PreToolUse") {
@@ -151,7 +145,6 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 			}
 			const prefix = prefixParts.length ? `[${prefixParts.join(" ")}] ` : ""
 			await messenger.upsertText(prefix + line)
-
 		}
 
 		// Create and execute hook
@@ -283,9 +276,14 @@ async function updateHookMessage(
 		const msg = messageStateHandler.getDiracMessages()[index]
 		if (msg.content.type === DiracMessageType.CARD) {
 			msg.content.card.body = JSON.stringify(metadata)
-			msg.content.card.status = metadata.status === "completed" ? CardStatus.SUCCESS : 
-									 metadata.status === "failed" ? CardStatus.ERROR :
-									 metadata.status === "cancelled" ? CardStatus.CANCELLED : CardStatus.RUNNING
+			msg.content.card.status =
+				metadata.status === "completed"
+					? CardStatus.SUCCESS
+					: metadata.status === "failed"
+						? CardStatus.ERROR
+						: metadata.status === "cancelled"
+							? CardStatus.CANCELLED
+							: CardStatus.RUNNING
 			await messageStateHandler.updateDiracMessage(index, msg)
 		}
 	}

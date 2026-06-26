@@ -108,8 +108,6 @@ export function getSettingsFromEnv(): Partial<Settings> {
 	return settings
 }
 
-
-
 /**
  * Get the best provider based on available environment variables.
  */
@@ -140,4 +138,3 @@ export function getProviderFromEnv(): ApiProvider | undefined {
 	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY || process.env.OPENAI_API_BASE) return "openai"
 	return undefined
 }
-

@@ -12,7 +12,7 @@ export class DiracContext implements IDiracContext {
 
 	constructor(
 		private taskId: string,
-		private stateManager: StateManager
+		private stateManager: StateManager,
 	) {
 		this.taskPath = path.join(os.homedir(), ".dirac", "data", "tasks", taskId, "tool_context.json")
 	}
@@ -65,7 +65,6 @@ export class DiracContext implements IDiracContext {
 		this.taskData = {}
 		await this.save()
 	}
-
 
 	public global = {
 		get: <T>(key: string): T | undefined => this.stateManager.getGlobalStateKey(key as any) as T,

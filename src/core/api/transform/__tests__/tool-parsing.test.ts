@@ -13,10 +13,10 @@ import { describe, it } from "mocha"
 import "should"
 import OpenAI from "openai"
 import {
-    DiracAssistantToolUseBlock,
-    DiracStorageMessage,
-    DiracTextContentBlock,
-    DiracUserToolResultContentBlock,
+	DiracAssistantToolUseBlock,
+	DiracStorageMessage,
+	DiracTextContentBlock,
+	DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 import { convertToAnthropicMessage, convertToOpenAiMessages } from "../openai-format"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"

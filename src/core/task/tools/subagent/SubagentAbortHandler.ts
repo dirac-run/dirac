@@ -3,7 +3,10 @@ import type { SubagentRunResult, SubagentRunStats } from "./SubagentRunner"
 // Handles abort/limit-reached result construction for subagent runs.
 // Extracted to eliminate duplication of the abort→result pattern (was repeated 4x in run()).
 export class SubagentAbortHandler {
-	constructor(private getAbortReason: () => string | undefined, private getBestEffortResult: (conversation: any[]) => string) {}
+	constructor(
+		private getAbortReason: () => string | undefined,
+		private getBestEffortResult: (conversation: any[]) => string,
+	) {}
 
 	// Builds the result for an aborted run — completed if limit reached (with partial results), failed otherwise.
 	buildAbortResult(conversation: any[], stats: SubagentRunStats, onProgress: (update: any) => void): SubagentRunResult {

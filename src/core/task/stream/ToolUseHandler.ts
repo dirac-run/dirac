@@ -24,14 +24,26 @@ export class ToolUseHandler {
 		if (delta.signature) pending.signature = delta.signature
 		if (delta.input) {
 			pending.input += delta.input
-			try { pending.jsonParser?.write(delta.input) } catch { /* Expected during streaming — JSONParser may not have complete JSON yet */ }
+			try {
+				pending.jsonParser?.write(delta.input)
+			} catch {
+				/* Expected during streaming — JSONParser may not have complete JSON yet */
+			}
 		}
 	}
 
-	getFinalizedToolUse(id: string): DiracAssistantToolUseBlock & { isComplete: boolean } | undefined {
+	getFinalizedToolUse(id: string): (DiracAssistantToolUseBlock & { isComplete: boolean }) | undefined {
 		const pending = this.pendingToolUses.get(id)
 		if (!pending?.name) return undefined
-		return { type: "tool_use", id: pending.id, name: pending.name, input: this.parsePendingInput(pending), signature: pending.signature, call_id: pending.call_id, isComplete: pending.isComplete }
+		return {
+			type: "tool_use",
+			id: pending.id,
+			name: pending.name,
+			input: this.parsePendingInput(pending),
+			signature: pending.signature,
+			call_id: pending.call_id,
+			isComplete: pending.isComplete,
+		}
 	}
 
 	getAllFinalizedToolUses(summary?: DiracAssistantToolUseBlock["reasoning_details"]): DiracAssistantToolUseBlock[] {
@@ -43,7 +55,9 @@ export class ToolUseHandler {
 		return results
 	}
 
-	hasToolUse(id: string): boolean { return this.pendingToolUses.has(id) }
+	hasToolUse(id: string): boolean {
+		return this.pendingToolUses.has(id)
+	}
 
 	getParsedToolUseStates(isComplete: boolean = false): ParsedToolUseState[] {
 		const results: ParsedToolUseState[] = []
@@ -52,7 +66,14 @@ export class ToolUseHandler {
 			const input = this.parsePendingInput(pending)
 			const params: Record<string, any> = {}
 			if (typeof input === "object" && input !== null) for (const [key, value] of Object.entries(input)) params[key] = value
-			results.push({ id: pending.id, name: pending.name, input: params, signature: pending.signature, call_id: pending.call_id, isComplete: isComplete || pending.isComplete })
+			results.push({
+				id: pending.id,
+				name: pending.name,
+				input: params,
+				signature: pending.signature,
+				call_id: pending.call_id,
+				isComplete: isComplete || pending.isComplete,
+			})
 		}
 		return results
 	}
@@ -60,13 +81,28 @@ export class ToolUseHandler {
 	private parsePendingInput(pending: PendingToolUse): unknown {
 		if (pending.parsedInput != null) return pending.parsedInput
 		if (!pending.input) return {}
-		try { return JSON.parse(pending.input) } catch { return this.extractPartialJsonFields(pending.input) }
+		try {
+			return JSON.parse(pending.input)
+		} catch {
+			return this.extractPartialJsonFields(pending.input)
+		}
 	}
 
 	private createPendingToolUse(id: string, name: string, callId?: string): PendingToolUse {
 		const jsonParser = new JSONParser()
-		const pending: PendingToolUse = { id, name, input: "", parsedInput: undefined, jsonParser, call_id: callId || id || nanoid(8), signature: undefined, isComplete: false }
-		jsonParser.onValue = (info: any) => { if (info.stack.length === 0 && info.value && typeof info.value === "object") pending.parsedInput = info.value }
+		const pending: PendingToolUse = {
+			id,
+			name,
+			input: "",
+			parsedInput: undefined,
+			jsonParser,
+			call_id: callId || id || nanoid(8),
+			signature: undefined,
+			isComplete: false,
+		}
+		jsonParser.onValue = (info: any) => {
+			if (info.stack.length === 0 && info.value && typeof info.value === "object") pending.parsedInput = info.value
+		}
 		jsonParser.onError = () => {}
 		this.pendingToolUses.set(id, pending)
 		Session.get().updateToolCall(pending.call_id, pending.name)
@@ -77,10 +113,14 @@ export class ToolUseHandler {
 	private extractPartialJsonFields(partialJson: string): Record<string, any> {
 		const result: Record<string, any> = {}
 		const stringPattern = /"(\w+)":\s*"((?:[^"\\]|\\.)*)(?:")?/g
-		for (const match of partialJson.matchAll(stringPattern)) result[match[1]] = match[2].replace(ESCAPE_PATTERN, (m) => ESCAPE_MAP[m])
+		for (const match of partialJson.matchAll(stringPattern))
+			result[match[1]] = match[2].replace(ESCAPE_PATTERN, (m) => ESCAPE_MAP[m])
 		const arrayPattern = /"(\w+)":\s*\[\s*([^\]]*)\s*\]?/g
 		for (const match of partialJson.matchAll(arrayPattern)) {
-			result[match[1]] = match[2].split(",").map((v) => v.trim().replace(/^"(.*)"$/, "$1")).filter((v) => v !== "")
+			result[match[1]] = match[2]
+				.split(",")
+				.map((v) => v.trim().replace(/^"(.*)"$/, "$1"))
+				.filter((v) => v !== "")
 		}
 		return result
 	}

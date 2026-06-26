@@ -1,8 +1,5 @@
-import type {
-	ChatCompletionToolChoiceOption,
-	ChatCompletionTool as OpenAITool
-} from "openai/resources/chat/completions";
-import type { ApiStreamToolCallsChunk } from "./stream";
+import type { ChatCompletionToolChoiceOption, ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
+import type { ApiStreamToolCallsChunk } from "./stream"
 
 // Generalized tool call delta that accepts null for id/index (Cerebras SDK returns null)
 interface ToolCallDelta {
@@ -30,9 +27,7 @@ export class ToolCallProcessor {
 	 * @param toolCallDeltas - Array of tool call deltas from the chunk
 	 * @yields Formatted tool call chunks ready to be yielded in the API stream
 	 */
-	*processToolCallDeltas(
-		toolCallDeltas: ToolCallDelta[] | undefined,
-	): Generator<ApiStreamToolCallsChunk> {
+	*processToolCallDeltas(toolCallDeltas: ToolCallDelta[] | undefined): Generator<ApiStreamToolCallsChunk> {
 		if (!toolCallDeltas) {
 			return
 		}
@@ -70,8 +65,12 @@ export class ToolCallProcessor {
 									call_id: toolCallState.id,
 									type: "web_search",
 									web_search: toolCallDelta.web_search || { query: "" },
-									function: { id: toolCallState.id, name: "web_search", arguments: toolCallDelta.web_search?.query || "" },
-							  }
+									function: {
+										id: toolCallState.id,
+										name: "web_search",
+										arguments: toolCallDelta.web_search?.query || "",
+									},
+								}
 							: {
 									...toolCallDelta,
 									call_id: toolCallState.id,
@@ -80,7 +79,7 @@ export class ToolCallProcessor {
 										id: toolCallState.id,
 										name: toolCallState.name,
 									},
-							  },
+								},
 				}
 			}
 		}

@@ -4,7 +4,6 @@ import { AsciiMotionCli, StaticRobotFrame } from "./AsciiMotionCli"
 import { centerText } from "../utils/display"
 import { version as CLI_VERSION } from "../../package.json"
 
-
 interface ChatHeaderProps {
 	isWelcomeState?: boolean
 	quote?: string
@@ -14,11 +13,7 @@ interface ChatHeaderProps {
 export const ChatHeader: React.FC<ChatHeaderProps> = ({ isWelcomeState, quote, onInteraction }) => {
 	const content = (
 		<React.Fragment>
-			{isWelcomeState ? (
-				<AsciiMotionCli onInteraction={onInteraction} />
-			) : (
-				<StaticRobotFrame />
-			)}
+			{isWelcomeState ? <AsciiMotionCli onInteraction={onInteraction} /> : <StaticRobotFrame />}
 			<Text> </Text>
 			<Text bold color="white">
 				{centerText(`Questions about Dirac? Query the code (v${CLI_VERSION}) directly using /askDirac`)}

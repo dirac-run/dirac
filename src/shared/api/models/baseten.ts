@@ -1,7 +1,6 @@
 import type { ModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
 
-
 export type BasetenModelId = keyof typeof basetenModels
 export const basetenDefaultModelId = "zai-org/GLM-4.6" satisfies BasetenModelId
 

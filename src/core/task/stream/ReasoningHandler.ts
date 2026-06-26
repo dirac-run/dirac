@@ -11,8 +11,12 @@ export class ReasoningHandler {
 		if (pending) pending.isComplete = true
 	}
 
-	hasReasoning(id: string): boolean { return this.pendingReasonings.has(id) }
-	getLastReasoningId(): string | undefined { return this.lastReasoningId }
+	hasReasoning(id: string): boolean {
+		return this.pendingReasonings.has(id)
+	}
+	getLastReasoningId(): string | undefined {
+		return this.lastReasoningId
+	}
 
 	getReasoningBlock(id: string): DiracAssistantThinkingBlock | null {
 		const pending = this.pendingReasonings.get(id)
@@ -34,8 +38,14 @@ export class ReasoningHandler {
 		}
 		if (delta.reasoning) pending.content += delta.reasoning
 		if (delta.signature) pending.signature = delta.signature
-		if (delta.details) Array.isArray(delta.details) ? pending.summary.push(...delta.details) : pending.summary.push(delta.details)
-		if (delta.redacted_data) pending.redactedThinking.push({ type: "redacted_thinking", data: delta.redacted_data, call_id: delta.id || pending.id })
+		if (delta.details)
+			Array.isArray(delta.details) ? pending.summary.push(...delta.details) : pending.summary.push(delta.details)
+		if (delta.redacted_data)
+			pending.redactedThinking.push({
+				type: "redacted_thinking",
+				data: delta.redacted_data,
+				call_id: delta.id || pending.id,
+			})
 	}
 
 	getCurrentReasoning(): DiracAssistantThinkingBlock | null {
@@ -64,12 +74,25 @@ export class ReasoningHandler {
 		this.lastReasoningId = undefined
 	}
 
-	private mapToThinkingBlock(pending: PendingReasoning): DiracAssistantThinkingBlock & { isComplete: boolean } | null {
+	private mapToThinkingBlock(pending: PendingReasoning): (DiracAssistantThinkingBlock & { isComplete: boolean }) | null {
 		if (!pending.summary.length && !pending.content && pending.redactedThinking.length > 0) return null
 		if (!pending.signature && pending.summary.length) {
 			const lastSummary = pending.summary.at(-1)
-			if (lastSummary && typeof lastSummary === "object" && "signature" in lastSummary && typeof lastSummary.signature === "string") pending.signature = lastSummary.signature
+			if (
+				lastSummary &&
+				typeof lastSummary === "object" &&
+				"signature" in lastSummary &&
+				typeof lastSummary.signature === "string"
+			)
+				pending.signature = lastSummary.signature
 		}
-		return { type: "thinking", thinking: pending.content, signature: pending.signature, summary: pending.summary, call_id: pending.id, isComplete: pending.isComplete }
+		return {
+			type: "thinking",
+			thinking: pending.content,
+			signature: pending.signature,
+			summary: pending.summary,
+			call_id: pending.id,
+			isComplete: pending.isComplete,
+		}
 	}
 }

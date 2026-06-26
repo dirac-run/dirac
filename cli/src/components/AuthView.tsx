@@ -415,7 +415,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 		[modelId, saveConfiguration],
 	)
 
-
 	const handleBedrockComplete = useCallback((config: BedrockConfig) => {
 		setBedrockConfig(config)
 		setStep("modelid")
@@ -656,7 +655,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 									</Text>
 								</Box>
 
-
 								<Box marginTop={1}>
 									{copied ? (
 										<Text color="green">✔ Copied to clipboard!</Text>
@@ -765,9 +763,15 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 
 	// Steps that allow going back with escape (apikey handled by ApiKeyInput component)
 	// OcaEmployeeCheck handles its own escape key, so oca_employee_check is not in this list
-	const canGoBack = ["provider", "modelid", "baseurl", "openai_codex_auth", "openai_codex_device_auth", "bedrock", "error"].includes(
-		step,
-	)
+	const canGoBack = [
+		"provider",
+		"modelid",
+		"baseurl",
+		"openai_codex_auth",
+		"openai_codex_device_auth",
+		"bedrock",
+		"error",
+	].includes(step)
 
 	useInput(
 		(input, key) => {
@@ -781,7 +785,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				}
 				return
 			}
-
 
 			if (key.escape && canGoBack) {
 				goBack()
@@ -820,7 +823,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 		<Box flexDirection="column" paddingLeft={1} paddingRight={1} width="100%">
 			{/* Dirac robot - centered */}
 			<StaticRobotFrame />
-
 
 			<Box justifyContent="center" marginTop={1} paddingX={4}>
 				<Text color="cyan" italic>

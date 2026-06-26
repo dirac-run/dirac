@@ -30,7 +30,6 @@ describe("ToolHookUtils", () => {
 				type: "tool_use",
 				name: DiracDefaultTool.FILE_READ,
 				params: { path: "src/index.ts" },
-				
 			}
 
 			const shouldContinue = await ToolHookUtils.runPreToolUseIfEnabled(config, block)
@@ -76,7 +75,6 @@ describe("ToolHookUtils", () => {
 				type: "tool_use",
 				name: DiracDefaultTool.BASH,
 				params: { command: "echo hello" },
-				
 			}
 
 			try {

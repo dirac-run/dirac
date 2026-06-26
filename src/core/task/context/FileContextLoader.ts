@@ -97,7 +97,11 @@ export class FileContextLoader {
 	}
 
 	// Find all path-like matches in text, filter by type via fs.stat, and consume matched paths from text
-	private async collectPaths(text: string, cwd: string, type: "file" | "directory"): Promise<{ paths: string[]; text: string }> {
+	private async collectPaths(
+		text: string,
+		cwd: string,
+		type: "file" | "directory",
+	): Promise<{ paths: string[]; text: string }> {
 		const candidates = this.getPathMatches(text)
 		const paths: string[] = []
 		let consumedText = text

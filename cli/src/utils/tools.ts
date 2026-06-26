@@ -164,7 +164,6 @@ export function parseToolFromMessage(
 	}
 }
 
-
 /**
  * Format a list of items with a limit and "and X more"
  */

@@ -5,7 +5,7 @@ export function insertTextAtCursor(
 	textArea: HTMLTextAreaElement,
 	textToInsert: string,
 	currentValue: string,
-	cursorPosition: number
+	cursorPosition: number,
 ): { newValue: string; newCursorPosition: number } {
 	const before = currentValue.substring(0, cursorPosition)
 	const after = currentValue.substring(cursorPosition)

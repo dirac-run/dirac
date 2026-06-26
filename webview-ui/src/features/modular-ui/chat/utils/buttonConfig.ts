@@ -1,4 +1,3 @@
-
 import { DiracAskResponse } from "@shared/WebviewMessage"
 /**
  * Button action types that determine the behavior
@@ -22,4 +21,3 @@ export type ButtonActionType =
  * Centralized button state configurations based on task lifecycle
  * This is the single source of truth for both button display and actions
  */
-

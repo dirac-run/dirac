@@ -44,9 +44,15 @@ export class NebiusHandler implements ApiHandler {
 		const model = this.getModel()
 
 		const convertedMessages = convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = (model.id.includes("DeepSeek-R1") || (model.info as any).isR1FormatRequired)
-			? ((model.info as any).supportsTools ? [{ role: "system", content: systemPrompt }, ...addReasoningContent(convertedMessages, messages)] : convertToR1Format([{ role: "user", content: systemPrompt }, ...messages], this.getModel().info.supportsImages !== false))
-			: [{ role: "system", content: systemPrompt }, ...convertedMessages]
+		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] =
+			model.id.includes("DeepSeek-R1") || (model.info as any).isR1FormatRequired
+				? (model.info as any).supportsTools
+					? [{ role: "system", content: systemPrompt }, ...addReasoningContent(convertedMessages, messages)]
+					: convertToR1Format(
+							[{ role: "user", content: systemPrompt }, ...messages],
+							this.getModel().info.supportsImages !== false,
+						)
+				: [{ role: "system", content: systemPrompt }, ...convertedMessages]
 
 		const stream = await client.chat.completions.create({
 			model: model.id,

@@ -1,19 +1,19 @@
 import type { ApiConfiguration, ModelInfo } from "@shared/api"
 import { getSecretsFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
 import {
-    ApiHandlerSettingsKeys,
-    type GlobalState,
-    type GlobalStateAndSettings,
-    type GlobalStateAndSettingsKey,
-    isSecretKey,
-    isSettingsKey,
-    type LocalState,
-    type LocalStateKey,
-    type SecretKey,
-    SecretKeys,
-    type Secrets,
-    type Settings,
-    type SettingsKey,
+	ApiHandlerSettingsKeys,
+	type GlobalState,
+	type GlobalStateAndSettings,
+	type GlobalStateAndSettingsKey,
+	isSecretKey,
+	isSettingsKey,
+	type LocalState,
+	type LocalStateKey,
+	type SecretKey,
+	SecretKeys,
+	type Secrets,
+	type Settings,
+	type SettingsKey,
 } from "@shared/storage/state-keys"
 import type { StorageContext } from "@shared/storage/storage-context"
 import { initializeDistinctId } from "@/services/logging/distinctId"
@@ -306,9 +306,9 @@ export class StateManager {
 			(acc, [key, value]) => {
 				if (key === undefined) return acc
 				if (isSecretKey(key)) {
-					(acc.secretsUpdates as Record<string, string | undefined>)[key] = value as string | undefined
+					;(acc.secretsUpdates as Record<string, string | undefined>)[key] = value as string | undefined
 				} else if (isSettingsKey(key)) {
-					(acc.settingsUpdates as Record<string, unknown>)[key] = value
+					;(acc.settingsUpdates as Record<string, unknown>)[key] = value
 				}
 				return acc
 			},
@@ -404,13 +404,15 @@ export class StateManager {
 		}
 
 		// Build API handler settings object with task override support
-		const settings: Partial<Settings> = Object.fromEntries(ApiHandlerSettingsKeys.map((key) => [key, this.getSettingWithOverride(key)]))
+		const settings: Partial<Settings> = Object.fromEntries(
+			ApiHandlerSettingsKeys.map((key) => [key, this.getSettingWithOverride(key)]),
+		)
 
 		// Merge environment variables as fallback for settings (only fills undefined values)
 		const envSettings = getSettingsFromEnv()
 		for (const [key, value] of Object.entries(envSettings)) {
 			if (value && isSettingsKey(key) && settings[key] === undefined) {
-				(settings as Record<string, unknown>)[key] = value
+				;(settings as Record<string, unknown>)[key] = value
 			}
 		}
 

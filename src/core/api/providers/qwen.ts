@@ -1,12 +1,12 @@
 import {
-    InternationalQwenModelId,
-    internationalQwenDefaultModelId,
-    internationalQwenModels,
-    MainlandQwenModelId,
-    ModelInfo,
-    mainlandQwenDefaultModelId,
-    mainlandQwenModels,
-    QwenApiRegions,
+	InternationalQwenModelId,
+	internationalQwenDefaultModelId,
+	internationalQwenModels,
+	MainlandQwenModelId,
+	ModelInfo,
+	mainlandQwenDefaultModelId,
+	mainlandQwenModels,
+	QwenApiRegions,
 } from "@shared/api"
 import OpenAI from "openai"
 import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"

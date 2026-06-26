@@ -4,41 +4,40 @@
  */
 
 import {
-    GlobalStateAndSettings,
-    GlobalStateAndSettingsKey,
-    LocalState,
-    LocalStateKey,
-    SETTINGS_DEFAULTS,
+	GlobalStateAndSettings,
+	GlobalStateAndSettingsKey,
+	LocalState,
+	LocalStateKey,
+	SETTINGS_DEFAULTS,
 } from "@shared/storage/state-keys"
 import { Box, Text, useApp, useInput } from "ink"
 import React, { useMemo, useState } from "react"
 import { useStdinContext } from "../context/StdinContext"
 import { fuzzyFilter } from "../utils/fuzzy-search"
 import {
-    BooleanSelect,
-    buildConfigEntries,
-    buildToggleEntries,
-    ConfigRow,
-    HookInfo,
-    HookRow,
-    MAX_VISIBLE,
-    ObjectEditorPanel,
-    ObjectEditorState,
-    parseValue,
-    SEPARATOR,
-    SectionHeader,
-    SkillInfo,
-    SkillRow,
-    TABS,
-    TabBar,
-    TabView,
-    TextInput,
-    ToggleEntry,
-    ToggleRow,
-    WorkspaceHooks,
+	BooleanSelect,
+	buildConfigEntries,
+	buildToggleEntries,
+	ConfigRow,
+	HookInfo,
+	HookRow,
+	MAX_VISIBLE,
+	ObjectEditorPanel,
+	ObjectEditorState,
+	parseValue,
+	SEPARATOR,
+	SectionHeader,
+	SkillInfo,
+	SkillRow,
+	TABS,
+	TabBar,
+	TabView,
+	TextInput,
+	ToggleEntry,
+	ToggleRow,
+	WorkspaceHooks,
 } from "./ConfigViewComponents"
 import { getObjectAtPath, setObjectValueAtPath } from "../utils/config"
-
 
 const SETTING_HELP_TEXT: Record<string, string> = {
 	openAiBaseUrl: "The base URL of the OpenAI-compatible API. Note: Do not include /chat/completions at the end.",
@@ -239,7 +238,6 @@ export const ConfigView: React.FC<ConfigViewProps> = ({
 		}
 		setIsEditing(false)
 	}
-
 
 	const persistObjectEditor = (nextObject: Record<string, unknown>, source: "global" | "workspace", key: string) => {
 		if (source === "global" && onUpdateGlobal) {

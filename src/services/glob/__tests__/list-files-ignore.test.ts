@@ -18,12 +18,12 @@ describe("listFiles ignore patterns", () => {
 
 	it("ignores .log files and node_modules recursively", async () => {
 		await fs.mkdir(tmpDir, { recursive: true })
-		
+
 		const logFile = path.join(tmpDir, "test.log")
 		const txtFile = path.join(tmpDir, "test.txt")
 		const nodeModulesDir = path.join(tmpDir, "node_modules")
 		const nodeModulesFile = path.join(nodeModulesDir, "index.js")
-		
+
 		await fs.writeFile(logFile, "log content")
 		await fs.writeFile(txtFile, "txt content")
 		await fs.mkdir(nodeModulesDir)

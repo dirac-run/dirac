@@ -4,10 +4,10 @@
  */
 
 import type {
-    DiffServiceClientInterface,
-    EnvServiceClientInterface,
-    WindowServiceClientInterface,
-    WorkspaceServiceClientInterface,
+	DiffServiceClientInterface,
+	EnvServiceClientInterface,
+	WindowServiceClientInterface,
+	WorkspaceServiceClientInterface,
 } from "@generated/hosts/host-bridge-client-types"
 import type { HostBridgeClientProvider, StreamingCallbacks } from "@hosts/host-provider-types"
 import * as proto from "@shared/proto/index"
@@ -152,7 +152,7 @@ export class CliEnvServiceClient implements EnvServiceClientInterface {
 				// Dynamically import 'open' to open URL in default browser
 				const { default: open } = await import("open")
 				const cp = await open(url)
-				
+
 				// Handle potential errors from the child process (e.g. spawn ENOENT)
 				// that might not be caught by the promise rejection.
 				cp.on("error", (err) => {
@@ -304,7 +304,6 @@ export class CliWorkspaceServiceClient implements WorkspaceServiceClientInterfac
 	async prepareDiagnostics(_request: proto.host.PrepareDiagnosticsRequest): Promise<proto.host.PrepareDiagnosticsResponse> {
 		return proto.host.PrepareDiagnosticsResponse.create({ success: true })
 	}
-
 
 	async openFolder(request: proto.host.OpenFolderRequest): Promise<proto.host.OpenFolderResponse> {
 		const path = request.path || ""

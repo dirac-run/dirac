@@ -3,21 +3,21 @@
 import type { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import type { ContentBlock, Message, ToolConfiguration } from "@aws-sdk/client-bedrock-runtime"
 import {
-    BedrockRuntimeClient,
-    ConversationRole,
-    ConverseCommand,
-    ConverseStreamCommand,
-    InvokeModelWithResponseStreamCommand,
+	BedrockRuntimeClient,
+	ConversationRole,
+	ConverseCommand,
+	ConverseStreamCommand,
+	InvokeModelWithResponseStreamCommand,
 } from "@aws-sdk/client-bedrock-runtime"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import {
-    ANTHROPIC_BETAS,
-    type BedrockModelId,
-    bedrockDefaultModelId,
-    bedrockModels,
-    CLAUDE_SONNET_1M_SUFFIX,
-    isAnthropicAdaptiveThinkingSupported,
-    type ModelInfo,
+	ANTHROPIC_BETAS,
+	type BedrockModelId,
+	bedrockDefaultModelId,
+	bedrockModels,
+	CLAUDE_SONNET_1M_SUFFIX,
+	isAnthropicAdaptiveThinkingSupported,
+	type ModelInfo,
 } from "@shared/api"
 import { calculateApiCostOpenAI, calculateApiCostQwen } from "@utils/cost"
 import { ExtensionRegistryInfo } from "@/registry"
@@ -1185,14 +1185,24 @@ export class AwsBedrockHandler implements ApiHandler {
 
 			if (response.usage) {
 				const actualInputTokens = response.usage.inputTokens || inputTokenEstimate
-				yield { type: "usage", inputTokens: actualInputTokens, outputTokens, totalCost: costFn(model.info, actualInputTokens, outputTokens, 0, 0) }
+				yield {
+					type: "usage",
+					inputTokens: actualInputTokens,
+					outputTokens,
+					totalCost: costFn(model.info, actualInputTokens, outputTokens, 0, 0),
+				}
 			}
 
 			yield* this.chunkText(reasoningText, "reasoning")
 			yield* this.chunkText(fullText, "text")
 
 			if (!response.usage) {
-				yield { type: "usage", inputTokens: inputTokenEstimate, outputTokens, totalCost: costFn(model.info, inputTokenEstimate, outputTokens, 0, 0) }
+				yield {
+					type: "usage",
+					inputTokens: inputTokenEstimate,
+					outputTokens,
+					totalCost: costFn(model.info, inputTokenEstimate, outputTokens, 0, 0),
+				}
 			}
 		} catch (error) {
 			Logger.error(`Error with ${label} model via Converse API:`, error)

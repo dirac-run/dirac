@@ -10,10 +10,10 @@
 
 import type * as acp from "@agentclientprotocol/sdk"
 import type {
-    DiffServiceClientInterface,
-    EnvServiceClientInterface,
-    WindowServiceClientInterface,
-    WorkspaceServiceClientInterface,
+	DiffServiceClientInterface,
+	EnvServiceClientInterface,
+	WindowServiceClientInterface,
+	WorkspaceServiceClientInterface,
 } from "@generated/hosts/host-bridge-client-types"
 import type { HostBridgeClientProvider, StreamingCallbacks } from "@hosts/host-provider-types"
 import * as proto from "@shared/proto/index"
@@ -366,7 +366,6 @@ class ACPWorkspaceServiceClient implements WorkspaceServiceClientInterface {
 	async prepareDiagnostics(_request: proto.host.PrepareDiagnosticsRequest): Promise<proto.host.PrepareDiagnosticsResponse> {
 		return proto.host.PrepareDiagnosticsResponse.create({ success: true })
 	}
-
 
 	async openFolder(request: proto.host.OpenFolderRequest): Promise<proto.host.OpenFolderResponse> {
 		// Next phase: Send ACP extension request to change workspace/folder.

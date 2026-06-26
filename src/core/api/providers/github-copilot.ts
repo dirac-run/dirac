@@ -5,11 +5,11 @@ import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/com
 import { z } from "zod"
 import { openAIToolToAnthropic } from "@/core/prompts/system-prompt/spec"
 import {
-    COPILOT_SPOOF_HEADERS,
-    fetchCopilotModels,
-    GITHUB_COPILOT_BASE_URL,
-    getCopilotToken,
-    githubCopilotModelSchema,
+	COPILOT_SPOOF_HEADERS,
+	fetchCopilotModels,
+	GITHUB_COPILOT_BASE_URL,
+	getCopilotToken,
+	githubCopilotModelSchema,
 } from "@/integrations/github-copilot/api"
 import { githubCopilotAuthManager } from "@/integrations/github-copilot/auth"
 import { convertDiracStorageToAnthropicMessage, DiracStorageMessage } from "@/shared/messages/content"

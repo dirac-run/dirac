@@ -8,72 +8,72 @@ import { StateManager } from "@/core/storage/StateManager"
 import { fuzzyFilter } from "./fuzzy-search"
 
 export interface SlashQueryInfo {
-    inSlashMode: boolean
-    query: string
-    slashIndex: number
+	inSlashMode: boolean
+	query: string
+	slashIndex: number
 }
 
 export interface VisibleWindow<T> {
-    items: T[]
-    startIndex: number
+	items: T[]
+	startIndex: number
 }
 
 export type LocalSlashCommandPanel =
-    | {
-        type: "settings"
-        initialMode?: "model-picker" | "featured-models" | "provider-picker"
-        initialModelKey?: "actModelId" | "planModelId"
-    }
-    | { type: "history" }
-    | { type: "help" }
-    | { type: "skills" }
+	| {
+			type: "settings"
+			initialMode?: "model-picker" | "featured-models" | "provider-picker"
+			initialModelKey?: "actModelId" | "planModelId"
+	  }
+	| { type: "history" }
+	| { type: "help" }
+	| { type: "skills" }
 
 export interface LocalSlashCommandContext {
-    mode: string
-    setActivePanel: (panel: LocalSlashCommandPanel) => void
-    resetInputLine: () => void
-    clearViewAndResetTask: () => void
-    handleExit: () => void
+	mode: string
+	setActivePanel: (panel: LocalSlashCommandPanel) => void
+	resetInputLine: () => void
+	clearViewAndResetTask: () => void
+	handleExit: () => void
 }
 
 type LocalSlashCommandHandler = (context: LocalSlashCommandContext) => void
 
 function openPanel(panel: LocalSlashCommandPanel): LocalSlashCommandHandler {
-    return ({ setActivePanel, resetInputLine }) => {
-        setActivePanel(panel)
-        resetInputLine()
-    }
+	return ({ setActivePanel, resetInputLine }) => {
+		setActivePanel(panel)
+		resetInputLine()
+	}
 }
 
 function openModelsPanel({ mode, setActivePanel, resetInputLine }: LocalSlashCommandContext) {
-    const apiConfig = StateManager.get().getApiConfiguration()
-    const provider =
-        mode === "act"
-            ? apiConfig.actModeApiProvider || apiConfig.planModeApiProvider
-            : apiConfig.planModeApiProvider || apiConfig.actModeApiProvider
-    const initialMode = !provider ? undefined : provider === "dirac" ? "featured-models" : "model-picker"
-    const initialModelKey = mode === "act" ? "actModelId" : "planModelId"
-    setActivePanel({ type: "settings", initialMode, initialModelKey })
-    resetInputLine()
+	const apiConfig = StateManager.get().getApiConfiguration()
+	const provider =
+		mode === "act"
+			? apiConfig.actModeApiProvider || apiConfig.planModeApiProvider
+			: apiConfig.planModeApiProvider || apiConfig.actModeApiProvider
+	const initialMode = !provider ? undefined : provider === "dirac" ? "featured-models" : "model-picker"
+	const initialModelKey = mode === "act" ? "actModelId" : "planModelId"
+	setActivePanel({ type: "settings", initialMode, initialModelKey })
+	resetInputLine()
 }
 
 const LOCAL_SLASH_COMMANDS: Record<string, LocalSlashCommandHandler> = {
-    help: openPanel({ type: "help" }),
-    settings: openPanel({ type: "settings" }),
-    models: openModelsPanel,
-    history: openPanel({ type: "history" }),
-    skills: openPanel({ type: "skills" }),
-    clear: ({ clearViewAndResetTask }) => clearViewAndResetTask(),
-    exit: ({ handleExit }) => handleExit(),
-    q: ({ handleExit }) => handleExit(),
-    providers: openPanel({ type: "settings", initialMode: "provider-picker" }),
+	help: openPanel({ type: "help" }),
+	settings: openPanel({ type: "settings" }),
+	models: openModelsPanel,
+	history: openPanel({ type: "history" }),
+	skills: openPanel({ type: "skills" }),
+	clear: ({ clearViewAndResetTask }) => clearViewAndResetTask(),
+	exit: ({ handleExit }) => handleExit(),
+	q: ({ handleExit }) => handleExit(),
+	providers: openPanel({ type: "settings", initialMode: "provider-picker" }),
 }
 
 export function executeLocalSlashCommand(commandName: string, context: LocalSlashCommandContext): boolean {
-    const handler = LOCAL_SLASH_COMMANDS[commandName]
-    if (!handler) return false
-    handler(context)
-    return true
+	const handler = LOCAL_SLASH_COMMANDS[commandName]
+	if (!handler) return false
+	handler(context)
+	return true
 }
 
 /**
@@ -82,27 +82,27 @@ export function executeLocalSlashCommand(commandName: string, context: LocalSlas
  * Returns the visible items and the start index for selection tracking.
  */
 export function getVisibleWindow<T>(items: T[], selectedIndex: number, maxVisible = 5): VisibleWindow<T> {
-    if (items.length <= maxVisible) {
-        return { items, startIndex: 0 }
-    }
+	if (items.length <= maxVisible) {
+		return { items, startIndex: 0 }
+	}
 
-    const halfWindow = Math.floor(maxVisible / 2)
-    let startIndex = Math.max(0, selectedIndex - halfWindow)
-    const endIndex = Math.min(items.length, startIndex + maxVisible)
+	const halfWindow = Math.floor(maxVisible / 2)
+	let startIndex = Math.max(0, selectedIndex - halfWindow)
+	const endIndex = Math.min(items.length, startIndex + maxVisible)
 
-    // Adjust if we're near the end
-    if (endIndex - startIndex < maxVisible) {
-        startIndex = Math.max(0, endIndex - maxVisible)
-    }
+	// Adjust if we're near the end
+	if (endIndex - startIndex < maxVisible) {
+		startIndex = Math.max(0, endIndex - maxVisible)
+	}
 
-    return { items: items.slice(startIndex, endIndex), startIndex }
+	return { items: items.slice(startIndex, endIndex), startIndex }
 }
 
 /**
  * Sort commands with workflows (custom section) first, then default commands.
  */
 export function sortCommandsWorkflowsFirst(commands: SlashCommandInfo[]): SlashCommandInfo[] {
-    return [...commands.filter((cmd) => cmd.section === "custom"), ...commands.filter((cmd) => cmd.section !== "custom")]
+	return [...commands.filter((cmd) => cmd.section === "custom"), ...commands.filter((cmd) => cmd.section !== "custom")]
 }
 
 /**
@@ -111,60 +111,60 @@ export function sortCommandsWorkflowsFirst(commands: SlashCommandInfo[]): SlashC
  * Takes cursor position to only examine text before cursor (matching webview behavior).
  */
 export function extractSlashQuery(text: string, cursorPosition?: number): SlashQueryInfo {
-    // Use text up to cursor position (or full text if no cursor position provided)
-    const beforeCursor = cursorPosition !== undefined ? text.slice(0, cursorPosition) : text
+	// Use text up to cursor position (or full text if no cursor position provided)
+	const beforeCursor = cursorPosition !== undefined ? text.slice(0, cursorPosition) : text
 
-    // Find the last slash before cursor
-    const slashIndex = beforeCursor.lastIndexOf("/")
+	// Find the last slash before cursor
+	const slashIndex = beforeCursor.lastIndexOf("/")
 
-    if (slashIndex === -1) {
-        return { inSlashMode: false, query: "", slashIndex: -1 }
-    }
+	if (slashIndex === -1) {
+		return { inSlashMode: false, query: "", slashIndex: -1 }
+	}
 
-    // Slash must be at start or preceded by whitespace
-    const charBeforeSlash = slashIndex > 0 ? beforeCursor[slashIndex - 1] : null
-    if (charBeforeSlash !== null && !/\s/.test(charBeforeSlash)) {
-        return { inSlashMode: false, query: "", slashIndex: -1 }
-    }
+	// Slash must be at start or preceded by whitespace
+	const charBeforeSlash = slashIndex > 0 ? beforeCursor[slashIndex - 1] : null
+	if (charBeforeSlash !== null && !/\s/.test(charBeforeSlash)) {
+		return { inSlashMode: false, query: "", slashIndex: -1 }
+	}
 
-    // Get text after slash (up to cursor)
-    const textAfterSlash = beforeCursor.slice(slashIndex + 1)
+	// Get text after slash (up to cursor)
+	const textAfterSlash = beforeCursor.slice(slashIndex + 1)
 
-    // If there's whitespace after slash, we're not in slash mode anymore
-    if (/\s/.test(textAfterSlash)) {
-        return { inSlashMode: false, query: "", slashIndex: -1 }
-    }
+	// If there's whitespace after slash, we're not in slash mode anymore
+	if (/\s/.test(textAfterSlash)) {
+		return { inSlashMode: false, query: "", slashIndex: -1 }
+	}
 
-    // Check if there's already a completed slash command earlier in the text
-    // (only first slash command per message is processed)
-    const firstSlashCommandRegex = /(^|\s)\/[a-zA-Z0-9_.-]+\s/
-    const textBeforeCurrentSlash = text.slice(0, slashIndex)
-    if (firstSlashCommandRegex.test(textBeforeCurrentSlash)) {
-        return { inSlashMode: false, query: "", slashIndex: -1 }
-    }
+	// Check if there's already a completed slash command earlier in the text
+	// (only first slash command per message is processed)
+	const firstSlashCommandRegex = /(^|\s)\/[a-zA-Z0-9_.-]+\s/
+	const textBeforeCurrentSlash = text.slice(0, slashIndex)
+	if (firstSlashCommandRegex.test(textBeforeCurrentSlash)) {
+		return { inSlashMode: false, query: "", slashIndex: -1 }
+	}
 
-    return {
-        inSlashMode: true,
-        query: textAfterSlash,
-        slashIndex,
-    }
+	return {
+		inSlashMode: true,
+		query: textAfterSlash,
+		slashIndex,
+	}
 }
 
 /**
  * Filter commands using fuzzy matching
  */
 export function filterCommands(commands: SlashCommandInfo[], query: string): SlashCommandInfo[] {
-    if (!query) {
-        return commands
-    }
-    return fuzzyFilter(commands, query, (cmd) => cmd.name)
+	if (!query) {
+		return commands
+	}
+	return fuzzyFilter(commands, query, (cmd) => cmd.name)
 }
 
 /**
  * Insert a slash command at the given slash index, replacing any partial query
  */
 export function insertSlashCommand(text: string, slashIndex: number, commandName: string): string {
-    const beforeSlash = text.slice(0, slashIndex)
-    // Insert command with trailing space
-    return `${beforeSlash}/${commandName} `
+	const beforeSlash = text.slice(0, slashIndex)
+	// Insert command with trailing space
+	return `${beforeSlash}/${commandName} `
 }

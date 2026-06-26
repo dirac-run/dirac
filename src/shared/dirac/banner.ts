@@ -3,18 +3,18 @@
  * Frontend maps these to actual handlers
  */
 export enum BannerActionType {
-    /** Open external URL */
-    Link = "link",
-    /** Open API settings tab */
-    ShowApiSettings = "show-api-settings",
-    /** Open feature settings tab */
-    ShowFeatureSettings = "show-feature-settings",
-    /** Open account/login view */
-    ShowAccount = "show-account",
-    /** Set the active model */
-    SetModel = "set-model",
-    /** Trigger CLI installation flow */
-    InstallCli = "install-cli",
+	/** Open external URL */
+	Link = "link",
+	/** Open API settings tab */
+	ShowApiSettings = "show-api-settings",
+	/** Open feature settings tab */
+	ShowFeatureSettings = "show-feature-settings",
+	/** Open account/login view */
+	ShowAccount = "show-account",
+	/** Set the active model */
+	SetModel = "set-model",
+	/** Trigger CLI installation flow */
+	InstallCli = "install-cli",
 }
 
 /**
@@ -22,63 +22,63 @@ export enum BannerActionType {
  * Backend constructs this JSON, frontend renders it via BannerCarousel.
  */
 export interface BannerCardData {
-    /** Unique identifier for the banner (used for dismissal tracking) */
-    id: string
+	/** Unique identifier for the banner (used for dismissal tracking) */
+	id: string
 
-    /** Banner title text */
-    title: string
+	/** Banner title text */
+	title: string
 
-    /** Banner description/body markdown text */
-    description: string
+	/** Banner description/body markdown text */
+	description: string
 
-    /**
-     * Icon ID from Lucide icon set (e.g., "lightbulb", "megaphone", "terminal")
-     * LINK: https://lucide.dev/icons/
-     * Optional - if omitted, no icon is shown
-     */
-    icon?: string
+	/**
+	 * Icon ID from Lucide icon set (e.g., "lightbulb", "megaphone", "terminal")
+	 * LINK: https://lucide.dev/icons/
+	 * Optional - if omitted, no icon is shown
+	 */
+	icon?: string
 
-    /**
-     * Optional footer action buttons
-     * Rendered below the description as prominent buttons
-     */
-    actions?: BannerAction[]
+	/**
+	 * Optional footer action buttons
+	 * Rendered below the description as prominent buttons
+	 */
+	actions?: BannerAction[]
 
-    /**
-     * Platform filter - only show on specified platforms
-     * If undefined, show on all platforms
-     */
-    platforms?: ("windows" | "mac" | "linux")[]
+	/**
+	 * Platform filter - only show on specified platforms
+	 * If undefined, show on all platforms
+	 */
+	platforms?: ("windows" | "mac" | "linux")[]
 
-    /** Only show to Dirac users */
-    isDiracUserOnly?: boolean
+	/** Only show to Dirac users */
+	isDiracUserOnly?: boolean
 }
 
 /**
  * Single action definition (button or link)
  */
 export interface BannerAction {
-    /** Button/link label text */
-    title: string
+	/** Button/link label text */
+	title: string
 
-    /**
-     * Action type - determines what happens on click
-     * Defaults to "link" if omitted
-     */
-    action?: BannerActionType
+	/**
+	 * Action type - determines what happens on click
+	 * Defaults to "link" if omitted
+	 */
+	action?: BannerActionType
 
-    /**
-     * Action argument - interpretation depends on action type:
-     * - Link: URL to open
-     * - SetModel: model ID (e.g., "anthropic/claude-opus-4.5")
-     * - Others: generally unused
-     */
-    arg?: string
+	/**
+	 * Action argument - interpretation depends on action type:
+	 * - Link: URL to open
+	 * - SetModel: model ID (e.g., "anthropic/claude-opus-4.5")
+	 * - Others: generally unused
+	 */
+	arg?: string
 
-    /**
-     * Optional model picker tab to open when using SetModel action
-     */
-    tab?: "recommended" | "free"
+	/**
+	 * Optional model picker tab to open when using SetModel action
+	 */
+	tab?: "recommended" | "free"
 }
 
 /**
@@ -87,21 +87,19 @@ export interface BannerAction {
  */
 
 export const BANNER_DATA: BannerCardData[] = [
-
-    // ChatGPT integration banner
-    {
-        id: "chatgpt-integration-v1",
-        icon: "megaphone",
-        title: "Use ChatGPT with Dirac",
-        description:
-            "Bring your ChatGPT subscription to Dirac! Use your existing plan directly with no per token costs or API keys to manage.",
-        actions: [
-            {
-                title: "Connect",
-                action: BannerActionType.ShowApiSettings,
-                arg: "openai-codex", // Pre-select OpenAI Codex provider
-            },
-        ],
-    },
-
+	// ChatGPT integration banner
+	{
+		id: "chatgpt-integration-v1",
+		icon: "megaphone",
+		title: "Use ChatGPT with Dirac",
+		description:
+			"Bring your ChatGPT subscription to Dirac! Use your existing plan directly with no per token costs or API keys to manage.",
+		actions: [
+			{
+				title: "Connect",
+				action: BannerActionType.ShowApiSettings,
+				arg: "openai-codex", // Pre-select OpenAI Codex provider
+			},
+		],
+	},
 ]

@@ -3,13 +3,13 @@ import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
 import { FunctionDeclaration as GoogleTool } from "@google/genai"
 import {
-    ANTHROPIC_BETAS,
-    CLAUDE_SONNET_1M_SUFFIX,
-    isAnthropicAdaptiveThinkingSupported,
-    ModelInfo,
-    VertexModelId,
-    vertexDefaultModelId,
-    vertexModels,
+	ANTHROPIC_BETAS,
+	CLAUDE_SONNET_1M_SUFFIX,
+	isAnthropicAdaptiveThinkingSupported,
+	ModelInfo,
+	VertexModelId,
+	vertexDefaultModelId,
+	vertexModels,
 } from "@shared/api"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"

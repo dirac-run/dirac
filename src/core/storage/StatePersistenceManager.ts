@@ -1,21 +1,21 @@
 import type {
-    GlobalState,
-    GlobalStateAndSettingsKey,
-    LocalState,
-    LocalStateKey,
-    SecretKey,
-    Secrets,
-    SettingsKey,
+	GlobalState,
+	GlobalStateAndSettingsKey,
+	LocalState,
+	LocalStateKey,
+	SecretKey,
+	Secrets,
+	SettingsKey,
 } from "@shared/storage/state-keys"
 import type { StorageContext } from "@shared/storage/storage-context"
 import chokidar, { type FSWatcher } from "chokidar"
 import { Logger } from "@/shared/services/Logger"
 import {
-    getTaskHistoryStateFilePath,
-    readTaskHistoryFromState,
-    readTaskSettingsFromStorage,
-    writeTaskHistoryToState,
-    writeTaskSettingsToStorage,
+	getTaskHistoryStateFilePath,
+	readTaskHistoryFromState,
+	readTaskSettingsFromStorage,
+	writeTaskHistoryToState,
+	writeTaskSettingsToStorage,
 } from "./disk"
 import { readGlobalStateFromStorage, readSecretsFromStorage, readWorkspaceStateFromStorage } from "./utils/state-helpers"
 

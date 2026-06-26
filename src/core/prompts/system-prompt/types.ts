@@ -53,7 +53,6 @@ export interface SystemPromptContext {
 	readonly shouldCompact?: boolean
 }
 
-
 /**
  * Utility functions for validating prompt components
  */

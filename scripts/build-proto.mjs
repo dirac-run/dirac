@@ -19,15 +19,13 @@ function findProtoc() {
 	try {
 		execSync(`node "${grpcToolsPath}" --version`, { stdio: "ignore" })
 		return `node "${grpcToolsPath}"`
-	}
-	catch {}
+	} catch {}
 
 	// Fall back to system protoc in PATH (homebrew, nix, etc.) — works on Apple Silicon without Rosetta
 	try {
 		execSync("protoc --version", { stdio: "ignore" })
 		return "protoc"
-	}
-	catch {}
+	} catch {}
 
 	console.error(chalk.red("Could not find a working protoc."))
 	console.error(chalk.yellow("  grpc-tools bundled binary failed or is missing."))

@@ -40,13 +40,7 @@ export class TelemetryEventEmitter {
 		})
 	}
 
-	recordCounter(
-		name: string,
-		value: number,
-		attributes?: TelemetryProperties,
-		description?: string,
-		required = false,
-	): void {
+	recordCounter(name: string, value: number, attributes?: TelemetryProperties, description?: string, required = false): void {
 		const attrs = this.contextManager.getStandardAttributes(attributes)
 		this.providerManager.getProviderList().forEach((provider) => {
 			try {
@@ -57,13 +51,7 @@ export class TelemetryEventEmitter {
 		})
 	}
 
-	recordHistogram(
-		name: string,
-		value: number,
-		attributes?: TelemetryProperties,
-		description?: string,
-		required = false,
-	): void {
+	recordHistogram(name: string, value: number, attributes?: TelemetryProperties, description?: string, required = false): void {
 		const attrs = this.contextManager.getStandardAttributes(attributes)
 		this.providerManager.getProviderList().forEach((provider) => {
 			try {

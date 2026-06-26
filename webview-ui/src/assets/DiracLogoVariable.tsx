@@ -21,12 +21,7 @@ const DiracLogoVariable = (props: SVGProps<SVGSVGElement> & { environment?: Envi
 	const accentColor = environment ? getEnvironmentColor(environment) : "#F59E0B"
 
 	return (
-		<svg
-			height="129"
-			viewBox="138.273 119.091 129 129"
-			width="129"
-			xmlns="http://www.w3.org/2000/svg"
-			{...svgProps}>
+		<svg height="129" viewBox="138.273 119.091 129 129" width="129" xmlns="http://www.w3.org/2000/svg" {...svgProps}>
 			<rect
 				fill="var(--vscode-sideBar-background, #09090B)"
 				height="128"

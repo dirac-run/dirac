@@ -5,5 +5,5 @@ import { plan_mode_respond_spec, PlanModeRespondTool } from "./PlanModeRespondTo
 export const spec: DiracToolSpec = plan_mode_respond_spec
 
 export function create(): IDiracTool {
-    return new PlanModeRespondTool()
+	return new PlanModeRespondTool()
 }

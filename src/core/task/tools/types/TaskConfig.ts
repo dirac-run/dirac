@@ -30,103 +30,101 @@ import { TaskMessenger } from "../../TaskMessenger"
  * Strongly-typed configuration object passed to tool handlers
  */
 export interface TaskConfig {
-    // Core identifiers
-    taskId: string
-    ulid: string
-    cwd: string
-    mode: Mode
-    strictPlanModeEnabled: boolean
-    yoloModeToggled: boolean
-    doubleCheckCompletionEnabled: boolean
-    vscodeTerminalExecutionMode: "vscodeTerminal" | "backgroundExec"
-    enableParallelToolCalling: boolean
-    isSubagentExecution: boolean
-    backgroundEditEnabled: boolean
+	// Core identifiers
+	taskId: string
+	ulid: string
+	cwd: string
+	mode: Mode
+	strictPlanModeEnabled: boolean
+	yoloModeToggled: boolean
+	doubleCheckCompletionEnabled: boolean
+	vscodeTerminalExecutionMode: "vscodeTerminal" | "backgroundExec"
+	enableParallelToolCalling: boolean
+	isSubagentExecution: boolean
+	backgroundEditEnabled: boolean
 
-    // Multi-workspace support
-    workspaceManager?: WorkspaceRootManager
-    isMultiRootEnabled?: boolean
+	// Multi-workspace support
+	workspaceManager?: WorkspaceRootManager
+	isMultiRootEnabled?: boolean
 
-    // State management
-    taskState: TaskState
-    messageState: MessageStateHandler
+	// State management
+	taskState: TaskState
+	messageState: MessageStateHandler
 
-    // API and services
-    api: ApiHandler
-    services: TaskServices
+	// API and services
+	api: ApiHandler
+	services: TaskServices
 
-    // Settings
-    autoApprovalSettings: AutoApprovalSettings
-    autoApprover: AutoApprove
-    browserSettings: BrowserSettings
+	// Settings
+	autoApprovalSettings: AutoApprovalSettings
+	autoApprover: AutoApprove
+	browserSettings: BrowserSettings
 
-    // Callbacks (strongly typed)
-    callbacks: TaskCallbacks
+	// Callbacks (strongly typed)
+	callbacks: TaskCallbacks
 
-    // Tool coordination
-    coordinator: ToolExecutorCoordinator
-    taskMessenger: TaskMessenger
-    context: IDiracContext
+	// Tool coordination
+	coordinator: ToolExecutorCoordinator
+	taskMessenger: TaskMessenger
+	context: IDiracContext
 
-    /** Snapshot active for the request that created this tool execution context. */
-    activeToolSnapshot?: ToolRequestSnapshot
-
+	/** Snapshot active for the request that created this tool execution context. */
+	activeToolSnapshot?: ToolRequestSnapshot
 }
 
 /**
  * All services available to tool handlers
  */
 export interface TaskServices {
-    browserSession: BrowserSession
-    urlContentFetcher: UrlContentFetcher
-    diffViewProvider: DiffViewProvider
-    fileContextTracker: FileContextTracker
-    diracIgnoreController: DiracIgnoreController
-    commandPermissionController: CommandPermissionController
-    contextManager: ContextManager
-    stateManager: StateManager
+	browserSession: BrowserSession
+	urlContentFetcher: UrlContentFetcher
+	diffViewProvider: DiffViewProvider
+	fileContextTracker: FileContextTracker
+	diracIgnoreController: DiracIgnoreController
+	commandPermissionController: CommandPermissionController
+	contextManager: ContextManager
+	stateManager: StateManager
 }
 
 /**
  * All callback functions available to tool handlers
  */
 export interface TaskCallbacks {
-    saveCheckpoint: (isAttemptCompletionMessage?: boolean, completionMessageId?: string) => Promise<void>
+	saveCheckpoint: (isAttemptCompletionMessage?: boolean, completionMessageId?: string) => Promise<void>
 
-    executeCommandTool: (
-        command: string,
-        timeoutSeconds: number | undefined,
-        options?: CommandExecutionOptions,
-    ) => Promise<[boolean, any]>
-    cancelRunningCommandTool?: () => Promise<boolean>
+	executeCommandTool: (
+		command: string,
+		timeoutSeconds: number | undefined,
+		options?: CommandExecutionOptions,
+	) => Promise<[boolean, any]>
+	cancelRunningCommandTool?: () => Promise<boolean>
 
-    doesLatestTaskCompletionHaveNewChanges: () => Promise<boolean>
+	doesLatestTaskCompletionHaveNewChanges: () => Promise<boolean>
 
-    shouldAutoApproveTool: (toolName: DiracDefaultTool) => boolean | [boolean, boolean]
-    shouldAutoApproveToolWithPath: (toolName: DiracToolSpec["id"], path?: string) => Promise<boolean>
+	shouldAutoApproveTool: (toolName: DiracDefaultTool) => boolean | [boolean, boolean]
+	shouldAutoApproveToolWithPath: (toolName: DiracToolSpec["id"], path?: string) => Promise<boolean>
 
-    // Additional callbacks for task management
-    postStateToWebview: () => Promise<void>
-    cancelTask: () => Promise<void>
-    getDiracMessages: () => DiracMessage[]
-    updateDiracMessage: (index: number, updates: Partial<DiracMessage>) => Promise<void>
+	// Additional callbacks for task management
+	postStateToWebview: () => Promise<void>
+	cancelTask: () => Promise<void>
+	getDiracMessages: () => DiracMessage[]
+	updateDiracMessage: (index: number, updates: Partial<DiracMessage>) => Promise<void>
 
-    applyLatestBrowserSettings: () => Promise<BrowserSession>
+	applyLatestBrowserSettings: () => Promise<BrowserSession>
 
-    switchToActMode: () => Promise<boolean>
+	switchToActMode: () => Promise<boolean>
 
-    // Hook execution callbacks
-    setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
-    clearActiveHookExecution: () => Promise<void>
-    getActiveHookExecution: () => Promise<HookExecution | undefined>
+	// Hook execution callbacks
+	setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
+	clearActiveHookExecution: () => Promise<void>
+	getActiveHookExecution: () => Promise<HookExecution | undefined>
 
-    // User prompt hook callback
-    runUserPromptSubmitHook: (
-        userContent: DiracContent[],
-        context: "initial_task" | "resume" | "feedback",
-    ) => Promise<{ cancel?: boolean; wasCancelled?: boolean; contextModification?: string; errorMessage?: string }>
-    resetTransientState: () => Promise<void>
-
+	// User prompt hook callback
+	runUserPromptSubmitHook: (
+		userContent: DiracContent[],
+		context: "initial_task" | "resume" | "feedback",
+	) => Promise<{ cancel?: boolean; wasCancelled?: boolean; contextModification?: string; errorMessage?: string }>
+	resetTransientState: () => Promise<void>
 }
 
 /**
@@ -134,37 +132,37 @@ export interface TaskCallbacks {
  * Automatically derives expected keys from the interface definitions
  */
 export function validateTaskConfig(config: any): asserts config is TaskConfig {
-    if (!config) {
-        throw new Error("TaskConfig is null or undefined")
-    }
+	if (!config) {
+		throw new Error("TaskConfig is null or undefined")
+	}
 
-    // Validate all expected keys exist
-    for (const key of TASK_CONFIG_KEYS) {
-        if (!(key in config)) {
-            throw new Error(`Missing ${key} in TaskConfig`)
-        }
-    }
+	// Validate all expected keys exist
+	for (const key of TASK_CONFIG_KEYS) {
+		if (!(key in config)) {
+			throw new Error(`Missing ${key} in TaskConfig`)
+		}
+	}
 
-    // Special validation for boolean type
-    if (typeof config.strictPlanModeEnabled !== "boolean") {
-        throw new Error("strictPlanModeEnabled must be a boolean in TaskConfig")
-    }
+	// Special validation for boolean type
+	if (typeof config.strictPlanModeEnabled !== "boolean") {
+		throw new Error("strictPlanModeEnabled must be a boolean in TaskConfig")
+	}
 
-    // Validate services object
-    if (config.services) {
-        for (const key of TASK_SERVICES_KEYS) {
-            if (!(key in config.services)) {
-                throw new Error(`Missing services.${key} in TaskConfig`)
-            }
-        }
-    }
+	// Validate services object
+	if (config.services) {
+		for (const key of TASK_SERVICES_KEYS) {
+			if (!(key in config.services)) {
+				throw new Error(`Missing services.${key} in TaskConfig`)
+			}
+		}
+	}
 
-    // Validate callbacks object
-    if (config.callbacks) {
-        for (const key of TASK_CALLBACKS_KEYS) {
-            if (typeof config.callbacks[key] !== "function") {
-                throw new Error(`Missing or invalid callbacks.${key} in TaskConfig (must be a function)`)
-            }
-        }
-    }
+	// Validate callbacks object
+	if (config.callbacks) {
+		for (const key of TASK_CALLBACKS_KEYS) {
+			if (typeof config.callbacks[key] !== "function") {
+				throw new Error(`Missing or invalid callbacks.${key} in TaskConfig (must be a function)`)
+			}
+		}
+	}
 }

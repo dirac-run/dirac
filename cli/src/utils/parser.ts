@@ -77,9 +77,8 @@ function fileExists(p: string): boolean {
 	}
 }
 
-
 function unescapePath(p: string): string {
-	if ((p.startsWith("\"") && p.endsWith("\"")) || (p.startsWith("'") && p.endsWith("'"))) {
+	if ((p.startsWith('"') && p.endsWith('"')) || (p.startsWith("'") && p.endsWith("'"))) {
 		return p.slice(1, -1)
 	}
 	// Handle backslash-escaped spaces and other common terminal escapes

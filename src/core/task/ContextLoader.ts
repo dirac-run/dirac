@@ -10,7 +10,9 @@ import { MentionContextLoader } from "./context/MentionContextLoader"
 import { ContextLoaderDependencies } from "./types/context-loader"
 
 type ToolResultBlock = DiracUserToolResultContentBlock
-function isToolResultBlock(block: DiracContent): block is ToolResultBlock { return block.type === "tool_result" }
+function isToolResultBlock(block: DiracContent): block is ToolResultBlock {
+	return block.type === "tool_result"
+}
 
 export class ContextLoader {
 	private fileContextLoader: FileContextLoader

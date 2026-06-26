@@ -207,7 +207,9 @@ describe("EditFileTool – characterization edge cases", () => {
 			const handler = new EditFileToolHandler(validator, false)
 			await fs.writeFile(path.join(tmpDir, "test.txt"), "content")
 			const before = taskState.consecutiveMistakeCount
-			const block = makeBlock([{ path: "test.txt", edits: [{ edit_type: "replace", anchor: "x", end_anchor: "x", text: "y" }] }])
+			const block = makeBlock([
+				{ path: "test.txt", edits: [{ edit_type: "replace", anchor: "x", end_anchor: "x", text: "y" }] },
+			])
 			await handler.execute(config, block.params)
 			assert.equal(taskState.consecutiveMistakeCount, before, "diracignore denial should not increment mistake count")
 		})
@@ -247,7 +249,9 @@ describe("EditFileTool – characterization edge cases", () => {
 			const fileName = "denied.txt"
 			const filePath = path.join(tmpDir, fileName)
 			await fs.writeFile(filePath, "original")
-			const block = makeBlock([{ path: fileName, edits: [{ edit_type: "replace", anchor: "x", end_anchor: "x", text: "y" }] }])
+			const block = makeBlock([
+				{ path: fileName, edits: [{ edit_type: "replace", anchor: "x", end_anchor: "x", text: "y" }] },
+			])
 			const result = await handler.execute(config, block.params)
 			assert.ok(typeof result === "string")
 			const finalContent = await fs.readFile(filePath, "utf8")

@@ -5,5 +5,5 @@ import { list_files_spec, ListFilesTool } from "./index"
 export const spec: DiracToolSpec = list_files_spec
 
 export function create(): IDiracTool {
-    return new ListFilesTool()
+	return new ListFilesTool()
 }

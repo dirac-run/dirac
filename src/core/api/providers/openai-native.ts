@@ -13,12 +13,9 @@ import {
 	mapResponseTools,
 	processResponsesEvents,
 	ResponsesWebsocketManager,
-	shouldRetryWithFullContext
+	shouldRetryWithFullContext,
 } from "./openai-responses-utils"
-import type {
-	ChatCompletionReasoningEffort,
-	ChatCompletionTool,
-} from "openai/resources/chat/completions"
+import type { ChatCompletionReasoningEffort, ChatCompletionTool } from "openai/resources/chat/completions"
 // Removed unused undici imports
 import { featureFlagsService } from "@/services/feature-flags"
 import { DiracStorageMessage } from "@/shared/messages/content"
@@ -218,7 +215,9 @@ export class OpenAiNativeHandler implements ApiHandler {
 					return
 				} catch (error) {
 					if (shouldRetryWithFullContext(error, !!params.previous_response_id)) {
-						Logger.log("Retrying websocket response with full context after previous_response_not_found or socket reset")
+						Logger.log(
+							"Retrying websocket response with full context after previous_response_not_found or socket reset",
+						)
 						this.responsesWsManager?.close()
 						const wsManager = this.getResponsesWsManager()
 						yield* processResponsesEvents(wsManager.createResponseEvents(fallbackParams), model.info)

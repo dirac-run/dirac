@@ -50,7 +50,7 @@ export async function openExternal(url: string): Promise<void> {
 		try {
 			const open = (await import("open")).default
 			const cp = await open(url)
-			
+
 			// Handle potential errors from the child process
 			cp.on("error", (spawnError) => {
 				Logger.error(`Fallback 'open' child process error: ${spawnError}`)

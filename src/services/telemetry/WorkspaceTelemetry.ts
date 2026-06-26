@@ -9,7 +9,11 @@ import type { TelemetryEventEmitter } from "./TelemetryEventEmitter"
 const MAX_ERROR_MESSAGE_LENGTH = 500
 
 export class WorkspaceTelemetry {
-	private static readonly EVENTS = { ...TELEMETRY_EVENTS.WORKSPACE, TASK: TELEMETRY_EVENTS.TASK, WORKTREE: TELEMETRY_EVENTS.WORKTREE }
+	private static readonly EVENTS = {
+		...TELEMETRY_EVENTS.WORKSPACE,
+		TASK: TELEMETRY_EVENTS.TASK,
+		WORKTREE: TELEMETRY_EVENTS.WORKTREE,
+	}
 
 	constructor(private readonly emitter: TelemetryEventEmitter) {}
 

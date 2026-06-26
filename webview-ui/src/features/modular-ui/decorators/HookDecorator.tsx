@@ -28,7 +28,7 @@ export const HookDecorator: CardDecorator = {
 						onClick={(e) => {
 							e.stopPropagation()
 							TaskServiceClient.cancelTask(EmptyRequest.create({})).catch((err) =>
-								console.error("Failed to cancel task from HookDecorator:", err)
+								console.error("Failed to cancel task from HookDecorator:", err),
 							)
 						}}>
 						Abort

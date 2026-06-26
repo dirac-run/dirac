@@ -62,7 +62,9 @@ describe("LifecycleManager", () => {
 			deps.stateManager.getGlobalSettingsKey = sinon.stub().withArgs("enableCheckpointsSetting").returns(true)
 			const initModule = require("@integrations/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
-			initModule.ensureCheckpointInitialized = async () => { throw new Error("init failed") }
+			initModule.ensureCheckpointInitialized = async () => {
+				throw new Error("init failed")
+			}
 			// Stub HostProvider.window.showMessage
 			const hostModule = require("@/hosts/host-provider")
 			sinon.stub(hostModule.HostProvider, "get").returns({ hostBridge: { windowClient: { showMessage: sinon.stub() } } })
@@ -233,7 +235,10 @@ describe("LifecycleManager", () => {
 			const hookModule = require("@core/hooks/hook-executor")
 			const original = hookModule.executeHook
 			let capturedHookName: string | undefined
-			hookModule.executeHook = async (args: any) => { capturedHookName = args.hookName; return {} }
+			hookModule.executeHook = async (args: any) => {
+				capturedHookName = args.hookName
+				return {}
+			}
 			try {
 				await manager.abortTask()
 				capturedHookName!.should.equal("TaskCancel")

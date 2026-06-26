@@ -256,7 +256,11 @@ export class ReplaceSymbolTool implements IDiracTool<ReplaceSymbolArgs> {
 		return { filesToReview, pendingChanges }
 	}
 
-	private async cancelReplacementWithUserReason(reason: string | undefined, cards: any[], env: IToolEnvironment): Promise<string> {
+	private async cancelReplacementWithUserReason(
+		reason: string | undefined,
+		cards: any[],
+		env: IToolEnvironment,
+	): Promise<string> {
 		await env.editor.hideReview()
 		for (const card of cards) {
 			await card.update({

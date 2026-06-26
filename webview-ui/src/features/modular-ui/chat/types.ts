@@ -42,7 +42,6 @@ export interface InputDecorator {
 	renderAction?: (context: ModularInputContext) => React.ReactNode
 }
 
-
 export interface ChatViewContext {
 	task?: DiracMessage
 	messages: DiracMessage[]
@@ -80,7 +79,6 @@ export interface ChatViewProps {
 	hideAnnouncement: () => void
 	showHistoryView: () => void
 }
-
 
 export interface ChatViewDecorator {
 	id: string

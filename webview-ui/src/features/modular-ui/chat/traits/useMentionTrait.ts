@@ -1,10 +1,12 @@
 import React, { useCallback, useRef, useState } from "react"
 import {
-    ContextMenuOptionType, getContextMenuOptionIndex,
-    getContextMenuOptions,
-    insertMention, removeMention,
-    SearchResult,
-    shouldShowContextMenu
+	ContextMenuOptionType,
+	getContextMenuOptionIndex,
+	getContextMenuOptions,
+	insertMention,
+	removeMention,
+	SearchResult,
+	shouldShowContextMenu,
 } from "@/shared/lib/context-mentions"
 import { FileServiceClient } from "@/shared/api/grpc-client"
 import { FileSearchRequest, FileSearchType } from "@shared/proto/dirac/file"
@@ -37,47 +39,44 @@ export const useMentionTrait = (): InputTrait & {
 	const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const currentSearchQueryRef = useRef<string>("")
 
-	const handleMentionSelect = useCallback(
-		(type: ContextMenuOptionType, value?: string, context?: ModularInputContext) => {
-			if (!context) return
+	const handleMentionSelect = useCallback((type: ContextMenuOptionType, value?: string, context?: ModularInputContext) => {
+		if (!context) return
 
-			const { inputValue, setInputValue, cursorPosition, setCursorPosition } = context
+		const { inputValue, setInputValue, cursorPosition, setCursorPosition } = context
 
-			if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder || type === ContextMenuOptionType.Git) {
-				if (!value) {
-					setSelectedType(type)
-					return
-				}
+		if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder || type === ContextMenuOptionType.Git) {
+			if (!value) {
+				setSelectedType(type)
+				return
 			}
+		}
 
-			let insertValue = value || ""
-			if (type === ContextMenuOptionType.Problems) {
-				insertValue = "problems"
-			} else if (type === ContextMenuOptionType.Terminal) {
-				insertValue = "terminal"
-			}
+		let insertValue = value || ""
+		if (type === ContextMenuOptionType.Problems) {
+			insertValue = "problems"
+		} else if (type === ContextMenuOptionType.Terminal) {
+			insertValue = "terminal"
+		}
 
-			const partialQueryLength = searchQuery.length
+		const partialQueryLength = searchQuery.length
 
-			const { newValue, mentionIndex } = insertMention(inputValue, cursorPosition, insertValue, partialQueryLength)
+		const { newValue, mentionIndex } = insertMention(inputValue, cursorPosition, insertValue, partialQueryLength)
 
-			setInputValue(newValue)
-			setShowContextMenu(false)
-			setSelectedType(null)
-			setSearchQuery("")
+		setInputValue(newValue)
+		setShowContextMenu(false)
+		setSelectedType(null)
+		setSearchQuery("")
 
-			// Calculate new cursor position: after the inserted mention and the trailing space
-			const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
-			setCursorPosition(newCursorPosition)
+		// Calculate new cursor position: after the inserted mention and the trailing space
+		const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
+		setCursorPosition(newCursorPosition)
 
-			// Focus back to textarea
-			setTimeout(() => {
-				context.textAreaRef.current?.focus()
-				context.textAreaRef.current?.setSelectionRange(newCursorPosition, newCursorPosition)
-			}, 0)
-		},
-		[]
-	)
+		// Focus back to textarea
+		setTimeout(() => {
+			context.textAreaRef.current?.focus()
+			context.textAreaRef.current?.setSelectionRange(newCursorPosition, newCursorPosition)
+		}, 0)
+	}, [])
 
 	const onInputChange = (value: string, cursorPosition: number, context: ModularInputContext) => {
 		const showMenu = shouldShowContextMenu(value, cursorPosition)
@@ -102,8 +101,8 @@ export const useMentionTrait = (): InputTrait & {
 					selectedType === ContextMenuOptionType.File
 						? FileSearchType.FILE
 						: selectedType === ContextMenuOptionType.Folder
-						? FileSearchType.FOLDER
-						: undefined
+							? FileSearchType.FOLDER
+							: undefined
 
 				let workspaceHint: string | undefined
 				let actualSearchQuery = query
@@ -134,7 +133,7 @@ export const useMentionTrait = (): InputTrait & {
 								selectedType: searchType,
 								workspaceHint: workspaceHint,
 								prioritizeActiveFile: true,
-							})
+							}),
 						)
 							.then((results: any) => {
 								const searchResults = (results.results || []) as SearchResult[]
@@ -144,7 +143,9 @@ export const useMentionTrait = (): InputTrait & {
 								if (searchResults.length === 0 && query.length > 0) {
 									const options = getContextMenuOptions(query, selectedType, [], searchResults)
 									const hasRealOptions = options.some(
-										(opt) => opt.type !== ContextMenuOptionType.NoResults && opt.type !== ContextMenuOptionType.URL
+										(opt) =>
+											opt.type !== ContextMenuOptionType.NoResults &&
+											opt.type !== ContextMenuOptionType.URL,
 									)
 									if (!hasRealOptions) {
 										setShowContextMenu(false)
@@ -183,7 +184,7 @@ export const useMentionTrait = (): InputTrait & {
 				e.preventDefault()
 				const direction = e.key === "ArrowUp" ? -1 : 1
 				const selectableOptions = options.filter(
-					(opt) => opt.type !== ContextMenuOptionType.NoResults && opt.type !== ContextMenuOptionType.URL
+					(opt) => opt.type !== ContextMenuOptionType.NoResults && opt.type !== ContextMenuOptionType.URL,
 				)
 
 				if (selectableOptions.length === 0) return true
@@ -208,7 +209,11 @@ export const useMentionTrait = (): InputTrait & {
 
 			if ((e.key === "Enter" || e.key === "Tab") && selectedMenuIndex !== -1) {
 				const selectedOption = options[selectedMenuIndex]
-				if (selectedOption && selectedOption.type !== ContextMenuOptionType.NoResults && selectedOption.type !== ContextMenuOptionType.URL) {
+				if (
+					selectedOption &&
+					selectedOption.type !== ContextMenuOptionType.NoResults &&
+					selectedOption.type !== ContextMenuOptionType.URL
+				) {
 					e.preventDefault()
 					const mentionValue = selectedOption.label?.includes(":") ? selectedOption.label : selectedOption.value
 					handleMentionSelect(selectedOption.type, mentionValue, context)
@@ -224,10 +229,7 @@ export const useMentionTrait = (): InputTrait & {
 			const charAfterCursor = inputValue[cursorPosition]
 			const charBeforeIsWhitespace = !charBeforeCursor || /\s/.test(charBeforeCursor)
 
-			if (
-				charBeforeIsWhitespace &&
-				inputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
-			) {
+			if (charBeforeIsWhitespace && inputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))) {
 				if (!/\s/.test(charAfterCursor || "")) {
 					e.preventDefault()
 					const newCursorPosition = cursorPosition - 1

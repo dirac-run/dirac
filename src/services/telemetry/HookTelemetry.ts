@@ -36,7 +36,10 @@ export class HookTelemetry {
 		if (!this.categoryGate.isEnabled("hooks")) {
 			return
 		}
-		this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.CACHE_ACCESSES_TOTAL, 1, { hookName, cacheHit: cacheHit.toString() })
+		this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.CACHE_ACCESSES_TOTAL, 1, {
+			hookName,
+			cacheHit: cacheHit.toString(),
+		})
 	}
 
 	captureHookExecution(ulid: string, hookName: string, status: HookExecutionStatus, metadata?: HookExecutionMetadata): void {
@@ -70,7 +73,11 @@ export class HookTelemetry {
 			this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.EXECUTIONS_TOTAL, 1, hookAttributes)
 		} else if (status === "completed") {
 			if (metadata?.durationMs !== undefined) {
-				this.emitter.recordHistogram(HookTelemetry.METRICS.HOOKS.DURATION_SECONDS, metadata.durationMs / 1000, hookAttributes)
+				this.emitter.recordHistogram(
+					HookTelemetry.METRICS.HOOKS.DURATION_SECONDS,
+					metadata.durationMs / 1000,
+					hookAttributes,
+				)
 			}
 			if (metadata?.cancelRequested) {
 				this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.CANCELLATIONS_TOTAL, 1, hookAttributes)
@@ -79,7 +86,10 @@ export class HookTelemetry {
 				this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.CONTEXT_MODIFICATIONS_TOTAL, 1, hookAttributes)
 			}
 		} else if (status === "failed") {
-			this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.FAILURES_TOTAL, 1, { ...hookAttributes, errorType: metadata?.errorType || "unknown" })
+			this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.FAILURES_TOTAL, 1, {
+				...hookAttributes,
+				errorType: metadata?.errorType || "unknown",
+			})
 		} else if (status === "cancelled") {
 			this.emitter.recordCounter(HookTelemetry.METRICS.HOOKS.CANCELLATIONS_TOTAL, 1, hookAttributes)
 		}
@@ -91,7 +101,13 @@ export class HookTelemetry {
 		}
 		this.emitter.capture({
 			event: HookTelemetry.EVENTS.HOOKS.DISCOVERY_COMPLETED,
-			properties: { hookName, globalCount, workspaceCount, totalCount: globalCount + workspaceCount, timestamp: new Date().toISOString() },
+			properties: {
+				hookName,
+				globalCount,
+				workspaceCount,
+				totalCount: globalCount + workspaceCount,
+				timestamp: new Date().toISOString(),
+			},
 		})
 	}
 }

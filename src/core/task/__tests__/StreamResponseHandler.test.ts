@@ -8,7 +8,9 @@ import { StreamResponseHandler } from "../StreamResponseHandler"
 describe("StreamResponseHandler", () => {
 	let handler: StreamResponseHandler
 
-	beforeEach(() => { handler = new StreamResponseHandler() })
+	beforeEach(() => {
+		handler = new StreamResponseHandler()
+	})
 
 	describe("text deltas", () => {
 		it("accumulates text across multiple deltas with same id", () => {

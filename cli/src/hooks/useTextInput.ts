@@ -232,14 +232,8 @@ export function useTextInput(): UseTextInputReturn {
 	// Cursor movement (internal, used by handlers)
 	const moveToStart = useCallback(() => setCursorPos(0), [setCursorPos])
 	const moveToEnd = useCallback(() => setCursorPos((_pos) => stateRef.current.text.length), [setCursorPos])
-	const moveWordLeft = useCallback(
-		() => setCursorPos((pos) => findWordStart(stateRef.current.text, pos)),
-		[setCursorPos],
-	)
-	const moveWordRight = useCallback(
-		() => setCursorPos((pos) => findWordEnd(stateRef.current.text, pos)),
-		[setCursorPos],
-	)
+	const moveWordLeft = useCallback(() => setCursorPos((pos) => findWordStart(stateRef.current.text, pos)), [setCursorPos])
+	const moveWordRight = useCallback(() => setCursorPos((pos) => findWordEnd(stateRef.current.text, pos)), [setCursorPos])
 
 	// Keyboard shortcut handlers
 	const handleKeyboardSequence = useCallback(

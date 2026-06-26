@@ -6,15 +6,15 @@ import { EnvironmentContextTracker } from "@core/context/context-tracking/Enviro
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { ModelContextTracker } from "@core/context/context-tracking/ModelContextTracker"
 import {
-    getGlobalDiracRules,
-    getLocalDiracRules,
-    refreshDiracRulesToggles,
+	getGlobalDiracRules,
+	getLocalDiracRules,
+	refreshDiracRulesToggles,
 } from "@core/context/instructions/user-instructions/dirac-rules"
 import {
-    getLocalAgentsRules,
-    getLocalCursorRules,
-    getLocalWindsurfRules,
-    refreshExternalRulesToggles,
+	getLocalAgentsRules,
+	getLocalCursorRules,
+	getLocalWindsurfRules,
+	refreshExternalRulesToggles,
 } from "@core/context/instructions/user-instructions/external-rules"
 import { formatResponse } from "@core/formatResponse"
 import { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
@@ -32,11 +32,11 @@ import { FileEditProvider } from "@integrations/editor/FileEditProvider"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { showSystemNotification } from "@integrations/notifications"
 import {
-    type CommandExecutionOptions,
-    CommandExecutor,
-    CommandExecutorCallbacks,
-    FullCommandExecutorConfig,
-    StandaloneTerminalManager,
+	type CommandExecutionOptions,
+	CommandExecutor,
+	CommandExecutorCallbacks,
+	FullCommandExecutorConfig,
+	StandaloneTerminalManager,
 } from "@integrations/terminal"
 import { ITerminalManager } from "@integrations/terminal/types"
 import { BrowserSession } from "@services/browser/BrowserSession"
@@ -951,7 +951,9 @@ export class Task {
 			if (!envDir) {
 				const realArtifactDir = await fs.realpath(artifactDir)
 				if (realArtifactDir !== cwdResolved && !realArtifactDir.startsWith(cwdResolved + path.sep)) {
-					Logger.warn(`[Task ${this.taskId}] artifact dir resolves outside cwd (symlink?), rejected: ${realArtifactDir}`)
+					Logger.warn(
+						`[Task ${this.taskId}] artifact dir resolves outside cwd (symlink?), rejected: ${realArtifactDir}`,
+					)
 					return
 				}
 				writeDir = realArtifactDir

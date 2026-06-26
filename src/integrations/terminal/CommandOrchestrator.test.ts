@@ -3,13 +3,13 @@ import { EventEmitter } from "events"
 import { describe, it } from "mocha"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import type {
-    CommandExecutorCallbacks,
-    ITerminalManager,
-    ITerminalProcess,
-    OrchestrationResult,
-    TerminalCompletionDetails,
-    TerminalProcessEvents,
-    TerminalProcessResultPromise,
+	CommandExecutorCallbacks,
+	ITerminalManager,
+	ITerminalProcess,
+	OrchestrationResult,
+	TerminalCompletionDetails,
+	TerminalProcessEvents,
+	TerminalProcessResultPromise,
 } from "./types"
 
 class FakeTerminalProcess extends EventEmitter<TerminalProcessEvents> implements ITerminalProcess {
@@ -64,8 +64,20 @@ function createCallbacks(): CommandExecutorCallbacks {
 	return {
 		taskMessenger: {
 			upsertText: async () => {},
-			streamText: async () => ({ id: "1", append: async () => {}, close: async () => {}, setImages: async () => {}, setFiles: async () => {} }),
-			createCard: async () => ({ id: "1", update: async () => {}, appendBody: async () => {}, finalize: async () => {}, waitForInteraction: async () => ({}) as any }),
+			streamText: async () => ({
+				id: "1",
+				append: async () => {},
+				close: async () => {},
+				setImages: async () => {},
+				setFiles: async () => {},
+			}),
+			createCard: async () => ({
+				id: "1",
+				update: async () => {},
+				appendBody: async () => {},
+				finalize: async () => {},
+				waitForInteraction: async () => ({}) as any,
+			}),
 			upsertApiStatus: async () => {},
 		} as any,
 		updateBackgroundCommandState: () => {},

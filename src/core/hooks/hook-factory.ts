@@ -3,18 +3,18 @@ import { version as diracVersion } from "../../../package.json"
 import { getDistinctId } from "../../services/logging/distinctId"
 import { telemetryService } from "../../services/telemetry"
 import {
-    HookInput,
-    HookModelContext,
-    HookOutput,
-    NotificationData,
-    PostToolUseData,
-    PreCompactData,
-    PreToolUseData,
-    TaskCancelData,
-    TaskCompleteData,
-    TaskResumeData,
-    TaskStartData,
-    UserPromptSubmitData,
+	HookInput,
+	HookModelContext,
+	HookOutput,
+	NotificationData,
+	PostToolUseData,
+	PreCompactData,
+	PreToolUseData,
+	TaskCancelData,
+	TaskCompleteData,
+	TaskResumeData,
+	TaskStartData,
+	UserPromptSubmitData,
 } from "../../shared/proto/dirac/hooks"
 import { getAllHooksDirs } from "../storage/disk"
 import { StateManager } from "../storage/StateManager"

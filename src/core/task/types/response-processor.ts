@@ -10,21 +10,20 @@ import { TaskState } from "../TaskState"
 import { ToolExecutor } from "../ToolExecutor"
 
 export interface ResponseProcessorDependencies {
-    taskState: TaskState
-    messageStateHandler: MessageStateHandler
-    api: ApiHandler
-    stateManager: StateManager
-    taskId: string
-    ulid: string
-    taskMessenger: TaskMessenger
+	taskState: TaskState
+	messageStateHandler: MessageStateHandler
+	api: ApiHandler
+	stateManager: StateManager
+	taskId: string
+	ulid: string
+	taskMessenger: TaskMessenger
 
-    postStateToWebview: () => Promise<void>
-    diffViewProvider: DiffViewProvider
-    streamHandler: StreamResponseHandler
-    withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>
-    getCurrentProviderInfo: () => ApiProviderInfo
-    getApiRequestIdSafe: () => string | undefined
-    toolExecutor: ToolExecutor
-    assistantStreamManager: AssistantStreamManager
-
+	postStateToWebview: () => Promise<void>
+	diffViewProvider: DiffViewProvider
+	streamHandler: StreamResponseHandler
+	withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>
+	getCurrentProviderInfo: () => ApiProviderInfo
+	getApiRequestIdSafe: () => string | undefined
+	toolExecutor: ToolExecutor
+	assistantStreamManager: AssistantStreamManager
 }

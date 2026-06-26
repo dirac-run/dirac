@@ -52,7 +52,6 @@ export function truncateHeadTail(content: string, maxSize: number = MAX_CONTENT_
 ${end}`
 }
 
-
 export function truncateContent(content: string, maxSize: number = MAX_CONTENT_SIZE_BYTES): string {
 	if (content.length <= maxSize) {
 		return content

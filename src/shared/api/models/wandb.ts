@@ -1,9 +1,6 @@
 import type { ModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
 
-
-
-
 export type WandbModelId = keyof typeof wandbModels
 export const wandbDefaultModelId = "openai/gpt-oss-120b" satisfies WandbModelId
 

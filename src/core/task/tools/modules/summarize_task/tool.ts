@@ -5,5 +5,5 @@ import { summarize_task_spec, SummarizeTaskTool } from "./SummarizeTaskTool"
 export const spec: DiracToolSpec = summarize_task_spec
 
 export function create(): IDiracTool {
-    return new SummarizeTaskTool()
+	return new SummarizeTaskTool()
 }

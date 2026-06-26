@@ -38,7 +38,12 @@ export const OpenAiCodexDeviceAuthView: React.FC<OpenAiCodexDeviceAuthViewProps>
 
 			await openExternal(data.verification_uri)
 
-			await openAiCodexOAuthManager.pollForDeviceToken(data.device_code, data.user_code, data.interval ?? 5, abortController.signal)
+			await openAiCodexOAuthManager.pollForDeviceToken(
+				data.device_code,
+				data.user_code,
+				data.interval ?? 5,
+				abortController.signal,
+			)
 			if (!isActiveRef.current) return
 			setStep("success")
 			setTimeout(() => {

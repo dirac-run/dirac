@@ -9,24 +9,24 @@ import * as path from "path"
  * Only the display string is modified. The actual command is never changed.
  */
 export function shortenCommandForDisplay(command: string, cwd?: string): string {
-    const homeDir = os.homedir()
-    const resolvedCwd = cwd ? path.resolve(cwd) : undefined
+	const homeDir = os.homedir()
+	const resolvedCwd = cwd ? path.resolve(cwd) : undefined
 
-    // Replace tokens that look like absolute paths
-    return command.replace(/(?:^|\s)(\/[^\s"'`;&|<>{}()[\]]+)/g, (match, absPath: string) => {
-        const prefix = match.slice(0, match.length - absPath.length)
+	// Replace tokens that look like absolute paths
+	return command.replace(/(?:^|\s)(\/[^\s"'`;&|<>{}()[\]]+)/g, (match, absPath: string) => {
+		const prefix = match.slice(0, match.length - absPath.length)
 
-        // cwd takes priority over homeDir (cwd is more specific)
-        if (resolvedCwd && absPath.startsWith(resolvedCwd)) {
-            const rest = absPath.slice(resolvedCwd.length)
-            return prefix + "." + rest
-        }
+		// cwd takes priority over homeDir (cwd is more specific)
+		if (resolvedCwd && absPath.startsWith(resolvedCwd)) {
+			const rest = absPath.slice(resolvedCwd.length)
+			return prefix + "." + rest
+		}
 
-        if (absPath.startsWith(homeDir)) {
-            const rest = absPath.slice(homeDir.length)
-            return prefix + "~" + rest
-        }
+		if (absPath.startsWith(homeDir)) {
+			const rest = absPath.slice(homeDir.length)
+			return prefix + "~" + rest
+		}
 
-        return match
-    })
+		return match
+	})
 }

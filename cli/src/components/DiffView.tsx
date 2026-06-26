@@ -22,11 +22,11 @@ interface DiffViewProps {
 }
 
 const DIFF_COLORS = {
-  addBg:    "#080f0a",
-  addFg:    "#52C97A",
-  removeBg: "#120707",
-  removeFg: "#DD6B68",
-  gutterFg: "#505866",
+	addBg: "#080f0a",
+	addFg: "#52C97A",
+	removeBg: "#120707",
+	removeFg: "#DD6B68",
+	gutterFg: "#505866",
 } as const
 
 // Default number of context lines to show
@@ -34,7 +34,6 @@ const DEFAULT_CONTEXT_LINES = 3
 
 // Threshold for "large" diffs that should be viewed in a pager
 const LARGE_DIFF_THRESHOLD = 50
-
 
 /**
  * Render a single diff line with gutter and colored content
@@ -67,9 +66,7 @@ const DiffLineRow: React.FC<{
 			{/* Content */}
 			<Box backgroundColor={bgColor} flexGrow={1} paddingX={1}>
 				<Text color={fgColor} dimColor={line.type === "context"}>
-					{prefix}
-					{" "}
-					{line.content || " "}
+					{prefix} {line.content || " "}
 				</Text>
 			</Box>
 		</Box>
@@ -211,7 +208,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ content, contextLines = DEFA
 	if (!diff || diff.blocks.length === 0) {
 		return null
 	}
-
 
 	return (
 		<Box flexDirection="column" width="100%">

@@ -5,5 +5,5 @@ import { rename_symbol_spec, RenameSymbolTool } from "./RenameSymbolTool"
 export const spec: DiracToolSpec = rename_symbol_spec
 
 export function create(): IDiracTool {
-    return new RenameSymbolTool()
+	return new RenameSymbolTool()
 }

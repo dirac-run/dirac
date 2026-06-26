@@ -606,7 +606,11 @@ export class SubagentRunner {
 					assistantContent.push({ ...thinkingBlock })
 				}
 				if (assistantText.trim().length > 0) {
-					assistantContent.push({ type: "text", text: assistantText, signature: assistantTextSignature } satisfies DiracTextContentBlock)
+					assistantContent.push({
+						type: "text",
+						text: assistantText,
+						signature: assistantTextSignature,
+					} satisfies DiracTextContentBlock)
 				}
 				if (useNativeToolCalls) {
 					assistantContent.push(...finalizedToolCalls.map(toAssistantToolUseBlock))
@@ -663,7 +667,12 @@ export class SubagentRunner {
 					stats,
 					onProgress,
 				)
-				if (toolExecResult.completed) return { status: "completed" as const, result: toolExecResult.completed.result, stats: toolExecResult.completed.stats }
+				if (toolExecResult.completed)
+					return {
+						status: "completed" as const,
+						result: toolExecResult.completed.result,
+						stats: toolExecResult.completed.stats,
+					}
 
 				conversation.push({ role: "user", content: toolExecResult.toolResultBlocks })
 

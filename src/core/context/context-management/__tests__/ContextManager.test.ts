@@ -124,7 +124,6 @@ describe("ContextManager", () => {
 		})
 	})
 
-
 	describe("getTruncatedMessages", () => {
 		let contextManager: ContextManager
 

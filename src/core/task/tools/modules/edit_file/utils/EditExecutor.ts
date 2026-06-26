@@ -1,6 +1,6 @@
-import { ToolUse } from "@core/assistant-message";
-import { splitAnchor, stripHashes, getDelimiter } from "@utils/line-hashing";
-import { AppliedEdit, Edit, FailedEdit, ResolvedEdit } from "../types";
+import { ToolUse } from "@core/assistant-message"
+import { splitAnchor, stripHashes, getDelimiter } from "@utils/line-hashing"
+import { AppliedEdit, Edit, FailedEdit, ResolvedEdit } from "../types"
 
 export class EditExecutor {
 	resolveEdits(

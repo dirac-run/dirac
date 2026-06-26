@@ -218,18 +218,15 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 	}
 
 	// Handler for feature toggle changes, supports nested settings like focusChainSettings
-	const handleFeatureChange = useCallback(
-		(feature: FeatureToggle, checked: boolean) => {
-			if (feature.nestedKey) {
-				// For nested settings, spread the existing value and set the nested key
-				let currentValue = {}
-				updateSetting(feature.settingKey, { ...currentValue, [feature.nestedKey]: checked })
-			} else {
-				updateSetting(feature.settingKey, checked)
-			}
-		},
-		[],
-	)
+	const handleFeatureChange = useCallback((feature: FeatureToggle, checked: boolean) => {
+		if (feature.nestedKey) {
+			// For nested settings, spread the existing value and set the nested key
+			let currentValue = {}
+			updateSetting(feature.settingKey, { ...currentValue, [feature.nestedKey]: checked })
+		} else {
+			updateSetting(feature.settingKey, checked)
+		}
+	}, [])
 
 	return (
 		<div className="mb-2">

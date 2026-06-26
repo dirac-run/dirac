@@ -5,5 +5,5 @@ import { edit_file_spec, EditFileTool } from "./EditFileTool"
 export const spec: DiracToolSpec = edit_file_spec
 
 export function create(): IDiracTool {
-    return new EditFileTool()
+	return new EditFileTool()
 }

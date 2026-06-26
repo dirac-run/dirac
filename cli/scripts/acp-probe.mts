@@ -80,27 +80,56 @@ function parseArgs(): Argv {
 		const a = args[i]
 		const next = () => args[++i]
 		switch (a) {
-			case "--cmd": out.cmd = next(); break
-			case "--cwd": out.cwd = next(); break
-			case "--config": out.config = next(); break
-			case "--no-fs": out.noFs = true; break
-			case "--no-load": out.noLoad = true; break
-			case "--reject": out.reject = true; break
-			case "--idle-ms": out.idleMs = Number(next()); break
-			case "--timeout-ms": out.timeoutMs = Number(next()); break
-			case "--log": out.frameLog = next(); break
-			case "--stderr-log": out.stderrLog = next(); break
-			case "--verbose": out.verbose = true; break
-			case "--approve-delay-ms": out.approveDelayMs = Number(next()); break
+			case "--cmd":
+				out.cmd = next()
+				break
+			case "--cwd":
+				out.cwd = next()
+				break
+			case "--config":
+				out.config = next()
+				break
+			case "--no-fs":
+				out.noFs = true
+				break
+			case "--no-load":
+				out.noLoad = true
+				break
+			case "--reject":
+				out.reject = true
+				break
+			case "--idle-ms":
+				out.idleMs = Number(next())
+				break
+			case "--timeout-ms":
+				out.timeoutMs = Number(next())
+				break
+			case "--log":
+				out.frameLog = next()
+				break
+			case "--stderr-log":
+				out.stderrLog = next()
+				break
+			case "--verbose":
+				out.verbose = true
+				break
+			case "--approve-delay-ms":
+				out.approveDelayMs = Number(next())
+				break
 			case "--pre-set": {
 				const kv = next()
 				const eq = kv.indexOf("=")
-				if (eq < 1) { console.error(`--pre-set requires key=value, got: ${kv}`); printHelpAndExit(2) }
+				if (eq < 1) {
+					console.error(`--pre-set requires key=value, got: ${kv}`)
+					printHelpAndExit(2)
+				}
 				out.preSets.push({ configId: kv.slice(0, eq), value: kv.slice(eq + 1) })
 				break
 			}
-			case "-h": case "--help":
-				printHelpAndExit(0); break
+			case "-h":
+			case "--help":
+				printHelpAndExit(0)
+				break
 			default:
 				if (a.startsWith("--")) {
 					console.error(`Unknown flag: ${a}`)
@@ -116,8 +145,7 @@ function parseArgs(): Argv {
 
 function printHelpAndExit(code: number): never {
 	process.stderr.write(
-		"Usage: npx tsx scripts/acp-probe.mts <init|new|prompt|load|chat> [flags]\n" +
-			"See file header for full flag list.\n",
+		"Usage: npx tsx scripts/acp-probe.mts <init|new|prompt|load|chat> [flags]\n" + "See file header for full flag list.\n",
 	)
 	process.exit(code)
 }
@@ -165,11 +193,7 @@ function tapStream(
 /**
  * Tap the writable side: same shape, mirror chunks before forwarding.
  */
-function tapWritable(
-	dst: WritableStream<Uint8Array>,
-	logFile: WriteStream,
-	direction: "→A" | "→C",
-): WritableStream<Uint8Array> {
+function tapWritable(dst: WritableStream<Uint8Array>, logFile: WriteStream, direction: "→A" | "→C"): WritableStream<Uint8Array> {
 	const decoder = new TextDecoder()
 	let buf = ""
 	const writer = dst.getWriter()
@@ -184,8 +208,12 @@ function tapWritable(
 			}
 			await writer.write(chunk)
 		},
-		async close() { await writer.close() },
-		async abort(reason) { await writer.abort(reason) },
+		async close() {
+			await writer.close()
+		},
+		async abort(reason) {
+			await writer.abort(reason)
+		},
 	})
 }
 
@@ -236,9 +264,7 @@ class ProbeClient implements acp.Client {
 		}
 	}
 
-	async requestPermission(
-		params: acp.RequestPermissionRequest,
-	): Promise<acp.RequestPermissionResponse> {
+	async requestPermission(params: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
 		this.bump("requestPermission")
 		const tool = params.toolCall?.title ?? "<no title>"
 		log("permission", `requested for "${tool}" — ${params.options.length} options`)
@@ -263,9 +289,7 @@ class ProbeClient implements acp.Client {
 		return { outcome: { outcome: "selected", optionId: pick.optionId } }
 	}
 
-	async readTextFile(
-		params: acp.ReadTextFileRequest,
-	): Promise<acp.ReadTextFileResponse> {
+	async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
 		this.bump("readTextFile")
 		log("fs", `readTextFile path=${params.path} line=${params.line} limit=${params.limit}`)
 		try {
@@ -278,9 +302,7 @@ class ProbeClient implements acp.Client {
 		}
 	}
 
-	async writeTextFile(
-		params: acp.WriteTextFileRequest,
-	): Promise<acp.WriteTextFileResponse> {
+	async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
 		this.bump("writeTextFile")
 		log("fs", `writeTextFile path=${params.path} (${params.content.length} bytes)`)
 		try {
@@ -363,7 +385,10 @@ async function main(): Promise<number> {
 				fs: argv.noFs ? {} : { readTextFile: true, writeTextFile: true },
 			},
 		})
-		log("ok", `initialize → protocolVersion=${initRes.protocolVersion} agent=${initRes.agentInfo?.name}@${initRes.agentInfo?.version}`)
+		log(
+			"ok",
+			`initialize → protocolVersion=${initRes.protocolVersion} agent=${initRes.agentInfo?.name}@${initRes.agentInfo?.version}`,
+		)
 		log("ok", `  capabilities=${JSON.stringify(initRes.agentCapabilities)}`)
 		if (initRes.authMethods?.length) {
 			log("ok", `  authMethods=${initRes.authMethods.map((m: any) => m.id).join(",")}`)
@@ -418,7 +443,10 @@ async function main(): Promise<number> {
 					})
 					log("ok", `prompt → stopReason=${promptRes.stopReason}`)
 					if (client.lastAgentText) {
-						log("info", `agent text (${client.lastAgentText.length} chars): ${JSON.stringify(client.lastAgentText.slice(0, 500))}`)
+						log(
+							"info",
+							`agent text (${client.lastAgentText.length} chars): ${JSON.stringify(client.lastAgentText.slice(0, 500))}`,
+						)
 					}
 					log("summary", JSON.stringify(client.summary()))
 				} catch (err) {
@@ -466,7 +494,10 @@ async function main(): Promise<number> {
 						})
 						log("ok", `prompt → stopReason=${res.stopReason}`)
 						if (client.lastAgentText) {
-							log("info", `agent text (${client.lastAgentText.length} chars): ${JSON.stringify(client.lastAgentText.slice(0, 500))}`)
+							log(
+								"info",
+								`agent text (${client.lastAgentText.length} chars): ${JSON.stringify(client.lastAgentText.slice(0, 500))}`,
+							)
 						}
 					} catch (err) {
 						log("error", `prompt failed: ${(err as Error).message}`)
@@ -487,7 +518,10 @@ async function main(): Promise<number> {
 							value,
 						})
 						const echoed = res?.configOptions?.find((o: any) => o.id === configId)
-						log("ok", `setSessionConfigOption response: ${configId}.currentValue=${echoed?.currentValue ?? "<not in response>"}`)
+						log(
+							"ok",
+							`setSessionConfigOption response: ${configId}.currentValue=${echoed?.currentValue ?? "<not in response>"}`,
+						)
 						// Also wait briefly for any follow-up config_option_update notification.
 						await new Promise((r) => setTimeout(r, 500))
 					} catch (err) {
@@ -525,7 +559,9 @@ async function main(): Promise<number> {
 		exitCode = 1
 	} finally {
 		clearTimeout(timeoutHandle)
-		try { child.stdin?.end() } catch {}
+		try {
+			child.stdin?.end()
+		} catch {}
 		// Give the agent ~300ms to flush, then kill.
 		await new Promise((r) => setTimeout(r, 300))
 		if (!child.killed) child.kill("SIGTERM")

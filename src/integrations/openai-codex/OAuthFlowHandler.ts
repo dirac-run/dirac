@@ -4,20 +4,20 @@ import { URL } from "url"
 import { fetch, isAuthError } from "@/shared/net"
 import type { OAuthTokenManager } from "./OAuthTokenManager"
 import {
-    buildAuthorizationUrl,
-    buildDeviceAuthUnavailableError,
-    deviceAuthorizationResponseSchema,
-    deviceTokenResponseSchema,
-    exchangeCodeForTokens,
-    exchangeCodeForTokensWithRedirectUri,
-    generateCodeChallenge,
-    generateCodeVerifier,
-    generateState,
-    OPENAI_CODEX_OAUTH_CONFIG,
-    type OpenAiCodexCredentials,
-    type OpenAiCodexDeviceAuthorization,
-    parseOAuthErrorDetails,
-    waitForDevicePollInterval,
+	buildAuthorizationUrl,
+	buildDeviceAuthUnavailableError,
+	deviceAuthorizationResponseSchema,
+	deviceTokenResponseSchema,
+	exchangeCodeForTokens,
+	exchangeCodeForTokensWithRedirectUri,
+	generateCodeChallenge,
+	generateCodeVerifier,
+	generateState,
+	OPENAI_CODEX_OAUTH_CONFIG,
+	type OpenAiCodexCredentials,
+	type OpenAiCodexDeviceAuthorization,
+	parseOAuthErrorDetails,
+	waitForDevicePollInterval,
 } from "./oauth-shared"
 
 /**

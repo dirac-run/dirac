@@ -129,7 +129,7 @@ function setupHostProvider(extensionContext: any, extensionDir: string, dataDir:
 		getBinaryLocation,
 		extensionDir,
 		dataDir,
-		getEnvironmentVariables
+		getEnvironmentVariables,
 	)
 }
 

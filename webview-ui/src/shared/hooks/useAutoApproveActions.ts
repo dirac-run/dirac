@@ -41,7 +41,7 @@ export function useAutoApproveActions() {
 			}
 
 			if (value === false && subActionId) {
-					newActions[subActionId as keyof AutoApprovalSettings["actions"]] = false
+				newActions[subActionId as keyof AutoApprovalSettings["actions"]] = false
 			}
 
 			if (value === true && action.parentActionId) {

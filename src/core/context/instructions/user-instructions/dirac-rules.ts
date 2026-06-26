@@ -1,10 +1,10 @@
 import {
-    ActivatedConditionalRule,
-    getRemoteRulesTotalContentWithMetadata,
-    getRuleFilesTotalContentWithMetadata,
-    RULE_SOURCE_PREFIX,
-    RuleLoadResultWithInstructions,
-    synchronizeRuleToggles,
+	ActivatedConditionalRule,
+	getRemoteRulesTotalContentWithMetadata,
+	getRuleFilesTotalContentWithMetadata,
+	RULE_SOURCE_PREFIX,
+	RuleLoadResultWithInstructions,
+	synchronizeRuleToggles,
 } from "@core/context/instructions/user-instructions/rule-helpers"
 import { formatResponse } from "@core/formatResponse"
 import { ensureRulesDirectoryExists, GlobalFileNames } from "@core/storage/disk"

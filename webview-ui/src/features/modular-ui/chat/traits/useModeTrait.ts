@@ -3,20 +3,15 @@ import { StateServiceClient } from "@/shared/api/grpc-client"
 import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/dirac/state"
 import { InputTrait, ModularInputContext } from "../types"
 
-export const useModeTrait = (mode: "plan" | "act"): InputTrait & {
+export const useModeTrait = (
+	mode: "plan" | "act",
+): InputTrait & {
 	onModeToggle: (context: ModularInputContext) => void
 } => {
 	const onModeToggle = useCallback(
 		async (context: ModularInputContext) => {
-			const {
-				inputValue,
-				setInputValue,
-				selectedImages,
-				setSelectedImages,
-				selectedFiles,
-				setSelectedFiles,
-				textAreaRef,
-			} = context
+			const { inputValue, setInputValue, selectedImages, setSelectedImages, selectedFiles, setSelectedFiles, textAreaRef } =
+				context
 
 			const convertedProtoMode = mode === "plan" ? PlanActMode.ACT : PlanActMode.PLAN
 			const messageToToggle = inputValue.trim()
@@ -30,7 +25,7 @@ export const useModeTrait = (mode: "plan" | "act"): InputTrait & {
 							images: selectedImages,
 							files: selectedFiles,
 						},
-					})
+					}),
 				)
 
 				if (response.value) {
@@ -46,7 +41,7 @@ export const useModeTrait = (mode: "plan" | "act"): InputTrait & {
 				}, 100)
 			}
 		},
-		[mode]
+		[mode],
 	)
 
 	// Note: useShortcut needs to be called in a component, so we might need to handle it differently

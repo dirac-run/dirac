@@ -1,8 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-
-
 export const newTaskToolResponse = () => {
 	const xmlExample = `
 Example:
@@ -208,9 +206,10 @@ Below is the user's input when they indicated that they wanted to submit a Githu
 </explicit_instructions>\n
 `
 
-
 export const askDiracToolResponse = async (extensionPath?: string, sourceDir: string = "dist/source") => {
-	const sourcePath = extensionPath ? path.join(extensionPath, sourceDir) : `the '${sourceDir}' directory within the extension installation`
+	const sourcePath = extensionPath
+		? path.join(extensionPath, sourceDir)
+		: `the '${sourceDir}' directory within the extension installation`
 
 	let tree = ""
 	if (extensionPath) {
@@ -222,12 +221,14 @@ export const askDiracToolResponse = async (extensionPath?: string, sourceDir: st
 		}
 	}
 
-	const treeSection = tree ? `
+	const treeSection = tree
+		? `
 
 Directory structure of the source code:
 \`\`\`
 ${tree}
-\`\`\`` : ""
+\`\`\``
+		: ""
 
 	return `<explicit_instructions type="askDirac">
 The user is asking for help or has questions about Dirac's internal workings.

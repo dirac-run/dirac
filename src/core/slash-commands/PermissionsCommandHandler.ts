@@ -3,7 +3,7 @@ import { ToolPermissionRule } from "../permissions/types"
 
 export async function handlePermissionsCommand(
 	text: string,
-	permissionController: CommandPermissionController
+	permissionController: CommandPermissionController,
 ): Promise<{ processedText: string; success: boolean }> {
 	// Pattern: /permissions (allow|deny) <tool> <pattern>
 	// Or: /permissions (allow|deny) <tool>
@@ -11,8 +11,7 @@ export async function handlePermissionsCommand(
 
 	if (!match) {
 		return {
-			processedText:
-				"Invalid /permissions command. Usage: /permissions <allow|deny> <tool> [pattern]",
+			processedText: "Invalid /permissions command. Usage: /permissions <allow|deny> <tool> [pattern]",
 			success: false,
 		}
 	}

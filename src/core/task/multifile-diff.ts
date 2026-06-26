@@ -104,7 +104,11 @@ async function getChangesSinceLastTaskCompletion(
 	// This value *should* always exist
 	const firstCheckpointMessageCheckpointHash = messageStateHandler
 		.getDiracMessages()
-		.find((m) => m.content.type === DiracMessageType.CHECKPOINT || (m.content.type === DiracMessageType.MARKDOWN && m.content.content === "Checkpoint created"))?.lastCheckpointHash
+		.find(
+			(m) =>
+				m.content.type === DiracMessageType.CHECKPOINT ||
+				(m.content.type === DiracMessageType.MARKDOWN && m.content.content === "Checkpoint created"),
+		)?.lastCheckpointHash
 
 	// either use the diff between the first checkpoint and the task completion, or the diff
 	// between the latest two task completions

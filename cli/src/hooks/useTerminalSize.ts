@@ -38,74 +38,76 @@ import { useCallback, useEffect, useRef, useState } from "react"
  *   content wrapper to force full remount.
  */
 export function useTerminalSize() {
-    const [size, setSize] = useState({
-        columns: process.stdout.columns || 80,
-        rows: process.stdout.rows || 24,
-    })
-    const [resizeKey, setResizeKey] = useState(0)
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const previousColumnsRef = useRef(process.stdout.columns || 80)
-    const pendingWidthRefreshRef = useRef(false)
-    const suppressResizeRef = useRef(false)
+	const [size, setSize] = useState({
+		columns: process.stdout.columns || 80,
+		rows: process.stdout.rows || 24,
+	})
+	const [resizeKey, setResizeKey] = useState(0)
+	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const previousColumnsRef = useRef(process.stdout.columns || 80)
+	const pendingWidthRefreshRef = useRef(false)
+	const suppressResizeRef = useRef(false)
 
-    const refreshAfterResize = useCallback(() => {
-        suppressResizeRef.current = true
-        // Clear terminal + scrollback to wipe stale content from old width
-        // \x1b[2J clears visible screen, \x1b[H moves cursor home
-        // Use process.stdout directly with callback to ensure clear completes before React re-renders.
-        // Without the callback, the state update can trigger a re-render that interleaves with
-        // the buffered escape sequences, causing visual artifacts in the scrollback.
-        process.stdout.write("\x1b[2J\x1b[H", () => {
-            // Increment key to force React remount only after clear is flushed
-            setResizeKey((prev) => prev + 1)
-            // Suppress resize events for 500ms after full recovery to break
-            // the clear→remount→resize feedback loop
-            setTimeout(() => { suppressResizeRef.current = false }, 500)
-        })
-    }, [])
+	const refreshAfterResize = useCallback(() => {
+		suppressResizeRef.current = true
+		// Clear terminal + scrollback to wipe stale content from old width
+		// \x1b[2J clears visible screen, \x1b[H moves cursor home
+		// Use process.stdout directly with callback to ensure clear completes before React re-renders.
+		// Without the callback, the state update can trigger a re-render that interleaves with
+		// the buffered escape sequences, causing visual artifacts in the scrollback.
+		process.stdout.write("\x1b[2J\x1b[H", () => {
+			// Increment key to force React remount only after clear is flushed
+			setResizeKey((prev) => prev + 1)
+			// Suppress resize events for 500ms after full recovery to break
+			// the clear→remount→resize feedback loop
+			setTimeout(() => {
+				suppressResizeRef.current = false
+			}, 500)
+		})
+	}, [])
 
-    useEffect(() => {
-        function updateSize() {
-            if (suppressResizeRef.current) return
-            const nextColumns = process.stdout.columns || 80
-            const nextRows = process.stdout.rows || 24
-            const didWidthChange = nextColumns !== previousColumnsRef.current
-            previousColumnsRef.current = nextColumns
+	useEffect(() => {
+		function updateSize() {
+			if (suppressResizeRef.current) return
+			const nextColumns = process.stdout.columns || 80
+			const nextRows = process.stdout.rows || 24
+			const didWidthChange = nextColumns !== previousColumnsRef.current
+			previousColumnsRef.current = nextColumns
 
-            setSize({
-                columns: nextColumns,
-                rows: nextRows,
-            })
+			setSize({
+				columns: nextColumns,
+				rows: nextRows,
+			})
 
-            if (didWidthChange) {
-                pendingWidthRefreshRef.current = true
-            }
+			if (didWidthChange) {
+				pendingWidthRefreshRef.current = true
+			}
 
-            if (!pendingWidthRefreshRef.current) {
-                return
-            }
+			if (!pendingWidthRefreshRef.current) {
+				return
+			}
 
-            // Debounce: wait 300ms after last resize event to do full recovery
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current)
-            }
-            debounceRef.current = setTimeout(() => {
-                if (pendingWidthRefreshRef.current) {
-                    refreshAfterResize()
-                    pendingWidthRefreshRef.current = false
-                }
-                debounceRef.current = null
-            }, 300)
-        }
-        process.stdout.on("resize", updateSize)
-        return () => {
-            process.stdout.off("resize", updateSize)
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current)
-            }
-            pendingWidthRefreshRef.current = false
-        }
-    }, [refreshAfterResize])
+			// Debounce: wait 300ms after last resize event to do full recovery
+			if (debounceRef.current) {
+				clearTimeout(debounceRef.current)
+			}
+			debounceRef.current = setTimeout(() => {
+				if (pendingWidthRefreshRef.current) {
+					refreshAfterResize()
+					pendingWidthRefreshRef.current = false
+				}
+				debounceRef.current = null
+			}, 300)
+		}
+		process.stdout.on("resize", updateSize)
+		return () => {
+			process.stdout.off("resize", updateSize)
+			if (debounceRef.current) {
+				clearTimeout(debounceRef.current)
+			}
+			pendingWidthRefreshRef.current = false
+		}
+	}, [refreshAfterResize])
 
-    return { ...size, resizeKey }
+	return { ...size, resizeKey }
 }

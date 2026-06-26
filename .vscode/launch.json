@@ -13,7 +13,7 @@
 				"--extensionDevelopmentPath=${workspaceFolder}",
 				"--disable-workspace-trust",
 				"--disable-extension",
-				"dirac-run.dirac", 
+				"dirac-run.dirac",
 				"--disable-extension",
 				"dirac-run.dirac-nightly", // Avoid conflicts with installed Dirac Nightly
 				"${workspaceFolder}",

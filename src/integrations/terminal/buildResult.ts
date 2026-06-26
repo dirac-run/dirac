@@ -1,6 +1,6 @@
 /**
  * buildResult - Pure-ish function for building orchestration results.
- * 
+ *
  * Takes all needed state as parameters (no closure/shared mutable state).
  * This is Strategy 5: functional composition with direct params.
  */
@@ -62,8 +62,8 @@ export function buildResult(input: BuildResultInput): OrchestrationResult {
 				? "Command executed successfully (exit code 0)."
 				: `Command failed with exit code ${input.exitCode}.`
 			: input.signal
-			? `Command terminated by signal ${input.signal}.`
-			: "Command executed."
+				? `Command terminated by signal ${input.signal}.`
+				: "Command executed."
 
 		return {
 			userRejected: false,

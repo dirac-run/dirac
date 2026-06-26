@@ -5,5 +5,5 @@ import { condense_spec, CondenseTool } from "./CondenseTool"
 export const spec: DiracToolSpec = condense_spec
 
 export function create(): IDiracTool {
-    return new CondenseTool()
+	return new CondenseTool()
 }

@@ -23,24 +23,14 @@ export function shouldDoQuickAuth(
 		modelid?: string
 	},
 ): boolean {
-	const hasAnyAuthFlag = !!(
-		options.provider ||
-		options.apikey ||
-		options.modelid ||
-		options.baseurl ||
-		options.azureApiVersion
-	)
+	const hasAnyAuthFlag = !!(options.provider || options.apikey || options.modelid || options.baseurl || options.azureApiVersion)
 	const hasAllRequiredFields = !!(inferred.provider && inferred.apikey && inferred.modelid)
 
 	// We do quick setup if we have all required fields AND the user provided at least one flag.
 	return hasAllRequiredFields && hasAnyAuthFlag
 }
 
-export function hasExplicitAuthQuickSetupFlags(options: {
-	provider?: string
-	apikey?: string
-	modelid?: string
-}): boolean {
+export function hasExplicitAuthQuickSetupFlags(options: { provider?: string; apikey?: string; modelid?: string }): boolean {
 	return !!(options.provider && options.apikey && options.modelid)
 }
 

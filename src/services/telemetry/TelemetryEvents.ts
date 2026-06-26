@@ -141,4 +141,4 @@ export const TELEMETRY_EVENTS = {
 		// Tracks events detected from the host environment
 		DETECTED: "host.detected",
 	},
-	}
+}

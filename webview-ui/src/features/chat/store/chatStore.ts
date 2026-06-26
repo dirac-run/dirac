@@ -11,8 +11,6 @@ interface ChatState {
 	isApiRequestActive?: boolean
 	taskStatus?: TaskStatus
 
-
-
 	// Actions
 	setDiracMessages: (messages: DiracMessage[]) => void
 
@@ -27,11 +25,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	isApiRequestActive: false,
 	taskStatus: undefined,
 
-
-
 	setDiracMessages: (messages) => set({ diracMessages: messages }),
-
-
 
 	hydrate: () => {
 		const cleanup = StateServiceClient.subscribeToState({} as EmptyRequest, {
@@ -40,16 +34,13 @@ export const useChatStore = create<ChatState>((set) => ({
 				const parsedState = JSON.parse(state.stateJson) as ExtensionState
 
 				if (parsedState.diracMessages) {
-
 					set((state) => {
-
 						return {
 							diracMessages: parsedState.diracMessages,
 							uiActionState: parsedState.uiActionState,
 							activeVoiceStreamId: parsedState.activeVoiceStreamId,
 							isApiRequestActive: parsedState.isApiRequestActive,
 							taskStatus: parsedState.taskStatus,
-
 						}
 					})
 				}

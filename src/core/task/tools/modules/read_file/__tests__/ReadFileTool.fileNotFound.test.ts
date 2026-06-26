@@ -38,7 +38,6 @@ class ReadFileToolHandler {
 	}
 }
 
-
 function createConfig() {
 	const taskState = new TaskState()
 
@@ -116,10 +115,9 @@ function createConfig() {
 		},
 		callbacks,
 		coordinator: { getHandler: sinon.stub() },
-	context: createMockContext(),
+		context: createMockContext(),
 
-	taskMessenger: createMockTaskMessenger(),
-
+		taskMessenger: createMockTaskMessenger(),
 	} as unknown as TaskConfig
 
 	const validator = new ToolValidator({ validateAccess: () => true } as any)
@@ -132,7 +130,6 @@ function makeBlock(relPath?: string) {
 		type: "tool_use" as const,
 		name: DiracDefaultTool.FILE_READ,
 		params: relPath !== undefined ? { paths: [relPath] } : {},
-		
 	}
 }
 

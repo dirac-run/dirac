@@ -316,7 +316,11 @@ export function shouldShowContextMenu(text: string, position: number): boolean {
 	}
 
 	// Don't show the menu if it's a problems or terminal
-	if (textAfterAt.toLowerCase().startsWith("problems") || textAfterAt.toLowerCase().startsWith("terminal") || textAfterAt.toLowerCase().startsWith("image")) {
+	if (
+		textAfterAt.toLowerCase().startsWith("problems") ||
+		textAfterAt.toLowerCase().startsWith("terminal") ||
+		textAfterAt.toLowerCase().startsWith("image")
+	) {
 		return false
 	}
 

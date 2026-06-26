@@ -10,31 +10,31 @@ import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import {
-    cleanupConversationHistoryFile,
-    ensureCacheDirectoryExists,
-    ensureSettingsDirectoryExists,
-    ensureStateDirectoryExists,
-    ensureTaskDirectoryExists,
-    getAllHooksDirs,
-    getGlobalHooksDir,
-    getSavedApiConversationHistory,
-    getSavedDiracMessages,
-    getTaskHistoryStateFilePath,
-    getTaskMetadata,
-    getWorkspaceHooksDirs,
-    readRemoteConfigFromCache,
-    readTaskHistoryFromState,
-    readTaskSettingsFromStorage,
-    saveApiConversationHistory,
-    saveDiracMessages,
-    saveTaskMetadata,
-    setRuntimeHooksDir,
-    taskHistoryStateFileExists,
-    writeConversationHistoryJson,
-    writeConversationHistoryText,
-    writeRemoteConfigToCache,
-    writeTaskHistoryToState,
-    writeTaskSettingsToStorage,
+	cleanupConversationHistoryFile,
+	ensureCacheDirectoryExists,
+	ensureSettingsDirectoryExists,
+	ensureStateDirectoryExists,
+	ensureTaskDirectoryExists,
+	getAllHooksDirs,
+	getGlobalHooksDir,
+	getSavedApiConversationHistory,
+	getSavedDiracMessages,
+	getTaskHistoryStateFilePath,
+	getTaskMetadata,
+	getWorkspaceHooksDirs,
+	readRemoteConfigFromCache,
+	readTaskHistoryFromState,
+	readTaskSettingsFromStorage,
+	saveApiConversationHistory,
+	saveDiracMessages,
+	saveTaskMetadata,
+	setRuntimeHooksDir,
+	taskHistoryStateFileExists,
+	writeConversationHistoryJson,
+	writeConversationHistoryText,
+	writeRemoteConfigToCache,
+	writeTaskHistoryToState,
+	writeTaskSettingsToStorage,
 } from "../disk"
 import { StateManager } from "../StateManager"
 
@@ -748,7 +748,9 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("taskHistoryStateFileExists returns true after writing history", async () => {
-			await writeTaskHistoryToState([{ id: "exists-check", ts: Date.now(), task: "t", tokensIn: 1, tokensOut: 1, totalCost: 0 }])
+			await writeTaskHistoryToState([
+				{ id: "exists-check", ts: Date.now(), task: "t", tokensIn: 1, tokensOut: 1, totalCost: 0 },
+			])
 			const exists = await taskHistoryStateFileExists()
 			exists.should.be.true()
 		})
@@ -937,7 +939,10 @@ describe("disk - core read/write/mkdir operations", () => {
 			const history: Anthropic.MessageParam[] = [
 				{
 					role: "assistant",
-					content: [{ type: "text", text: "Thinking" }, { type: "tool_use", name: "Read", input: { path: "/x" } } as any],
+					content: [
+						{ type: "text", text: "Thinking" },
+						{ type: "tool_use", name: "Read", input: { path: "/x" } } as any,
+					],
 				},
 			]
 			const resultPath = await writeConversationHistoryText(taskId, history, 11111)

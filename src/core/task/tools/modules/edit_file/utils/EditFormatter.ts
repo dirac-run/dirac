@@ -5,7 +5,7 @@ import { EditExecutor } from "./EditExecutor"
 import { AppliedEdit, PreparedEdits } from "../types"
 
 export class EditFormatter {
-	constructor(private executor: EditExecutor) { }
+	constructor(private executor: EditExecutor) {}
 
 	getAdditionOnlyDiffBlock(
 		originalLines: string[],
@@ -178,7 +178,9 @@ export class EditFormatter {
 		}
 
 		if (userEdits) {
-			results.push(`*** User Modified File CRITICAL: The user manually modified the file during review. You MUST NOT revert these changes. If you need to fix syntax errors in the same area, you MUST incorporate the user's changes into your new edits.): ${prepared.displayPath}\n\n${userEdits}`)
+			results.push(
+				`*** User Modified File CRITICAL: The user manually modified the file during review. You MUST NOT revert these changes. If you need to fix syntax errors in the same area, you MUST incorporate the user's changes into your new edits.): ${prepared.displayPath}\n\n${userEdits}`,
+			)
 		}
 
 		if (autoFormattingEdits) {
@@ -188,10 +190,13 @@ export class EditFormatter {
 		}
 
 		const lineChanges = ` (+${totalAdded}, -${totalRemoved} lines)`
-		const summary = `Applied ${resolvedEdits.length} edit(s) successfully${lineChanges}. NOTE the UPDATED anchors below.${failedEdits.length > 0 ? ` ${failedEdits.length} edit(s) failed.` : ""
-			}`
+		const summary = `Applied ${resolvedEdits.length} edit(s) successfully${lineChanges}. NOTE the UPDATED anchors below.${
+			failedEdits.length > 0 ? ` ${failedEdits.length} edit(s) failed.` : ""
+		}`
 		if (wasStringified) {
-			results.push(`Note: You provided the 'files' parameter as a stringified JSON array. While this was successfully parsed and applied, you should provide it as a native JSON array in the future.`)
+			results.push(
+				`Note: You provided the 'files' parameter as a stringified JSON array. While this was successfully parsed and applied, you should provide it as a native JSON array in the future.`,
+			)
 		}
 
 		return formatResponse.toolResult(`${summary}\n\n${results.join("\n\n---\n\n")}`)

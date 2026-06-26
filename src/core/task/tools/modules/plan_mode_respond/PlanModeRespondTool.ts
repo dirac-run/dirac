@@ -48,7 +48,10 @@ export class PlanModeRespondTool implements IDiracTool {
 		const { response, options: optionsRaw, needs_more_exploration: needsMoreExploration } = args
 
 		if (!response) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
+			env.orchestration.setTaskState(
+				"consecutiveMistakeCount",
+				env.orchestration.getTaskState("consecutiveMistakeCount") + 1,
+			)
 			return formatResponse.toolError("Missing required parameter: response")
 		}
 
@@ -56,7 +59,7 @@ export class PlanModeRespondTool implements IDiracTool {
 
 		if (needsMoreExploration === true || needsMoreExploration === "true") {
 			return formatResponse.toolResult(
-				`[You have indicated that you need more exploration. Proceed with calling tools to continue the planning process.]`
+				`[You have indicated that you need more exploration. Proceed with calling tools to continue the planning process.]`,
 			)
 		}
 
@@ -88,7 +91,8 @@ export class PlanModeRespondTool implements IDiracTool {
 
 		await this.promptUserDecision(userText, images, planResponseFiles, options, sharedMessage, env)
 
-		const fileContentString = planResponseFiles && planResponseFiles.length > 0 ? await processFilesIntoText(planResponseFiles) : ""
+		const fileContentString =
+			planResponseFiles && planResponseFiles.length > 0 ? await processFilesIntoText(planResponseFiles) : ""
 
 		this.captureTelemetry(env)
 
@@ -106,7 +110,9 @@ export class PlanModeRespondTool implements IDiracTool {
 			env.orchestration.setTaskState("didRespondToPlanAskBySwitchingMode", false)
 			return formatResponse.toolResult(
 				`[The user has switched to ACT MODE, so you may now proceed with the task.]` +
-					(userText ? `\n\nThe user also provided the following message when switching to ACT MODE:\n<user_message>\n${userText}\n</user_message>` : ""),
+					(userText
+						? `\n\nThe user also provided the following message when switching to ACT MODE:\n<user_message>\n${userText}\n</user_message>`
+						: ""),
 				images,
 				fileContentString,
 			)

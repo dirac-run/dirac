@@ -1,9 +1,9 @@
 function testFunction() {
-    return "test";
+	return "test"
 }
 
 class TestClass {
-    method() {
-        return "test";
-    }
+	method() {
+		return "test"
+	}
 }

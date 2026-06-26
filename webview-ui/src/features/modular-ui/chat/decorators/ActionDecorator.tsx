@@ -24,7 +24,6 @@ const modeSwitchClasses = cn(
 	"font-mono text-[9px] tracking-tight whitespace-nowrap",
 )
 
-
 export const createActionDecorator = (props: ActionDecoratorProps): InputDecorator => ({
 	id: "actions",
 	renderAction: (context: ModularInputContext) => (
@@ -42,7 +41,8 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 								onClick={() => {
 									context.textAreaRef.current?.focus()
 									const currentValue = context.inputValue
-									const newValue = currentValue.endsWith(" ") || !currentValue ? currentValue + "@" : currentValue + " @"
+									const newValue =
+										currentValue.endsWith(" ") || !currentValue ? currentValue + "@" : currentValue + " @"
 									context.setInputValue(newValue)
 									// Trigger mention trait if needed
 								}}>
@@ -105,10 +105,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 					)}
 				</TooltipContent>
 				<TooltipTrigger>
-					<div
-						className={modeSwitchClasses}
-						data-testid="mode-switch"
-						onClick={() => props.onModeToggle(context)}>
+					<div className={modeSwitchClasses} data-testid="mode-switch" onClick={() => props.onModeToggle(context)}>
 						<motion.div
 							animate={{
 								x: props.mode === "act" ? "100%" : "0%",

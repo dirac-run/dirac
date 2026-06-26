@@ -5,13 +5,11 @@ import cloneDeep from "clone-deep"
 import { Logger } from "@/shared/services/Logger"
 import { getContextWindowInfo } from "./context-window-utils"
 
-
 export class ContextManager {
 	// mapping from the apiMessages outer index to the inner message index to a list of actual changes, ordered by timestamp
 	// timestamp is required in order to support full checkpointing, where the changes we apply need to be able to be undone when
 	// moving to an earlier conversation history checkpoint - this ordering intuitively allows for binary search on truncation
 	// there is also a number stored for each (EditType) which defines which message type it is, for custom handling
-
 
 	constructor() {}
 
@@ -53,7 +51,6 @@ export class ContextManager {
 		return false
 	}
 
-
 	/**
 	 * Determine whether we should compact context window, based on token counts
 	 */
@@ -65,7 +62,8 @@ export class ContextManager {
 	): boolean {
 		if (previousApiReqIndex >= 0) {
 			const previousRequest = diracMessages[previousApiReqIndex]
-			const previousRequestStatus = previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
+			const previousRequestStatus =
+				previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
 			if (previousRequestStatus) {
 				try {
 					const { tokensIn, tokensOut, cacheWrites, cacheReads } = previousRequestStatus || {}
@@ -151,7 +149,8 @@ export class ContextManager {
 			// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 			if (previousApiReqIndex >= 0) {
 				const previousRequest = diracMessages[previousApiReqIndex]
-				const previousRequestStatus = previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
+				const previousRequestStatus =
+					previousRequest?.content.type === "api_status" ? previousRequest.content.status : undefined
 				if (previousRequestStatus) {
 					const { tokensIn, tokensOut, cacheWrites, cacheReads } = previousRequestStatus || {}
 					const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)

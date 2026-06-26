@@ -1,7 +1,6 @@
 import type { ModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
 
-
 export type NebiusModelId = keyof typeof nebiusModels
 export const nebiusDefaultModelId = "openai/gpt-oss-120b" satisfies NebiusModelId
 

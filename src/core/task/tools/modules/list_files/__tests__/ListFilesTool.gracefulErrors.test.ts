@@ -47,7 +47,6 @@ describe("ListFilesTool.execute – error recovery", () => {
 			type: "tool_use" as const,
 			name: DiracDefaultTool.LIST_FILES,
 			params,
-			
 		}
 	}
 

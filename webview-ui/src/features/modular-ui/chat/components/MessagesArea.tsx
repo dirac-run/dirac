@@ -6,12 +6,12 @@ import type { ChatState, MessageHandlers, ScrollBehavior } from "../types/chatTy
 import { MessageRenderer } from "./VirtuosoItemRenderer"
 
 interface MessagesAreaProps {
-    task: DiracMessage
-    renderedMessages: DiracMessage[]
-    modifiedMessages: DiracMessage[]
-    scrollBehavior: ScrollBehavior
-    chatState: ChatState
-    messageHandlers: MessageHandlers
+	task: DiracMessage
+	renderedMessages: DiracMessage[]
+	modifiedMessages: DiracMessage[]
+	scrollBehavior: ScrollBehavior
+	chatState: ChatState
+	messageHandlers: MessageHandlers
 }
 
 /**
@@ -19,142 +19,139 @@ interface MessagesAreaProps {
  * Handles rendering of chat rows
  */
 export const MessagesArea: React.FC<MessagesAreaProps> = ({
-    task,
-    renderedMessages,
-    modifiedMessages,
-    scrollBehavior,
-    chatState,
-    messageHandlers,
+	task,
+	renderedMessages,
+	modifiedMessages,
+	scrollBehavior,
+	chatState,
+	messageHandlers,
 }) => {
-    const parentRef = useRef<HTMLDivElement>(null)
+	const parentRef = useRef<HTMLDivElement>(null)
 
-    const {
-        virtuosoRef,
-        footerRef,
-        toggleRowExpansion,
-        setIsAtBottom,
-        setShowScrollToBottom,
-        disableAutoScrollRef,
-        programmaticScrollRef,
-        handleRangeChanged,
-    } = scrollBehavior
+	const {
+		virtuosoRef,
+		footerRef,
+		toggleRowExpansion,
+		setIsAtBottom,
+		setShowScrollToBottom,
+		disableAutoScrollRef,
+		programmaticScrollRef,
+		handleRangeChanged,
+	} = scrollBehavior
 
-    const { activeVoiceStreamId } = chatState
-    const { expandedRows, inputValue, setActiveQuote, uiActionState } = chatState
-    const activeCardId = uiActionState?.activeCardId
+	const { activeVoiceStreamId } = chatState
+	const { expandedRows, inputValue, setActiveQuote, uiActionState } = chatState
+	const activeCardId = uiActionState?.activeCardId
 
-    // Use refs for renderer deps to keep itemContent callback stable
-    const rendererStateRef = useRef({
-        renderedMessages,
-        modifiedMessages,
-        expandedRows,
-        toggleRowExpansion,
-        setActiveQuote,
-        inputValue,
-        messageHandlers,
-        activeCardId,
-        activeVoiceStreamId,
-    })
-    rendererStateRef.current = {
-        renderedMessages,
-        modifiedMessages,
-        expandedRows,
-        toggleRowExpansion,
-        setActiveQuote,
-        inputValue,
-        messageHandlers,
-        activeCardId,
-        activeVoiceStreamId,
-    }
+	// Use refs for renderer deps to keep itemContent callback stable
+	const rendererStateRef = useRef({
+		renderedMessages,
+		modifiedMessages,
+		expandedRows,
+		toggleRowExpansion,
+		setActiveQuote,
+		inputValue,
+		messageHandlers,
+		activeCardId,
+		activeVoiceStreamId,
+	})
+	rendererStateRef.current = {
+		renderedMessages,
+		modifiedMessages,
+		expandedRows,
+		toggleRowExpansion,
+		setActiveQuote,
+		inputValue,
+		messageHandlers,
+		activeCardId,
+		activeVoiceStreamId,
+	}
 
-    const itemContent = useCallback(
-        (index: number, message: DiracMessage) => {
-            const state = rendererStateRef.current
-            return (
-                <MessageRenderer
-                    index={index}
-                    message={message}
-                    renderedMessages={state.renderedMessages}
-                    modifiedMessages={state.modifiedMessages}
-                    expandedRows={state.expandedRows}
-                    onToggleExpand={state.toggleRowExpansion}
-                    onSetQuote={state.setActiveQuote}
-                    inputValue={state.inputValue}
-                    messageHandlers={state.messageHandlers}
-                    footerActive={false}
-                    activeCardId={state.activeCardId}
-                    activeVoiceStreamId={state.activeVoiceStreamId}
-                />
-            )
-        },
-        [],
-    )
+	const itemContent = useCallback((index: number, message: DiracMessage) => {
+		const state = rendererStateRef.current
+		return (
+			<MessageRenderer
+				index={index}
+				message={message}
+				renderedMessages={state.renderedMessages}
+				modifiedMessages={state.modifiedMessages}
+				expandedRows={state.expandedRows}
+				onToggleExpand={state.toggleRowExpansion}
+				onSetQuote={state.setActiveQuote}
+				inputValue={state.inputValue}
+				messageHandlers={state.messageHandlers}
+				footerActive={false}
+				activeCardId={state.activeCardId}
+				activeVoiceStreamId={state.activeVoiceStreamId}
+			/>
+		)
+	}, [])
 
-    const virtuosoComponents = useMemo(
-        () => ({
-            Footer: () => <div ref={footerRef} className="min-h-1" />,
-        }),
-        [],
-    )
+	const virtuosoComponents = useMemo(
+		() => ({
+			Footer: () => <div ref={footerRef} className="min-h-1" />,
+		}),
+		[],
+	)
 
-    return (
-        <div className="overflow-hidden flex flex-col h-full relative">
-            <div className="grow flex">
-                <div
-                    className="scrollable grow overflow-y-scroll custom-scrollbar"
-                    ref={parentRef}
-                    style={{
-                        height: "100%",
-                        width: "100%",
-                        overflowAnchor: "none",
-                    }}>
-                    <Virtuoso
-                        atBottomStateChange={(isAtBottom) => {
-                            if (programmaticScrollRef.current) {
-                                programmaticScrollRef.current = false
-                                return
-                            }
-                            // Debounce to absorb scroll jitter during streaming
-                            if (scrollBehavior.atBottomDebounceRef.current) {
-                                clearTimeout(scrollBehavior.atBottomDebounceRef.current)
-                            }
-                            scrollBehavior.atBottomDebounceRef.current = setTimeout(() => {
-                                setIsAtBottom(isAtBottom)
-                                disableAutoScrollRef.current = !isAtBottom
-                                setShowScrollToBottom(!isAtBottom)
-                            }, 150)
-                        }}
-                        atBottomThreshold={500}
-                        className="grow"
-                        components={virtuosoComponents}
-                        data={renderedMessages}
-                        increaseViewportBy={{
-                            top: 1_000,
-                            bottom: 800,
-                        }}
-                        followOutput={(isAtBottom) => {
-                            if (disableAutoScrollRef.current) return false
-                            return "smooth"
-                        }}
-                        initialTopMostItemIndex={renderedMessages.length - 1}
-                        itemContent={itemContent}
-                        key={task.id}
-                        rangeChanged={handleRangeChanged}
-                        ref={virtuosoRef}
-                        scrollerRef={(ref) => {
-                            if (ref instanceof HTMLElement) {
-                                // @ts-expect-error
-                                parentRef.current = ref
-                            }
-                        }}
-                        style={{
-                            scrollbarWidth: "none",
-                            msOverflowStyle: "none",
-                            overflowAnchor: "none",
-                        }}
-                    />
-                </div>
-            </div>
-        </div>
-    )
+	return (
+		<div className="overflow-hidden flex flex-col h-full relative">
+			<div className="grow flex">
+				<div
+					className="scrollable grow overflow-y-scroll custom-scrollbar"
+					ref={parentRef}
+					style={{
+						height: "100%",
+						width: "100%",
+						overflowAnchor: "none",
+					}}>
+					<Virtuoso
+						atBottomStateChange={(isAtBottom) => {
+							if (programmaticScrollRef.current) {
+								programmaticScrollRef.current = false
+								return
+							}
+							// Debounce to absorb scroll jitter during streaming
+							if (scrollBehavior.atBottomDebounceRef.current) {
+								clearTimeout(scrollBehavior.atBottomDebounceRef.current)
+							}
+							scrollBehavior.atBottomDebounceRef.current = setTimeout(() => {
+								setIsAtBottom(isAtBottom)
+								disableAutoScrollRef.current = !isAtBottom
+								setShowScrollToBottom(!isAtBottom)
+							}, 150)
+						}}
+						atBottomThreshold={500}
+						className="grow"
+						components={virtuosoComponents}
+						data={renderedMessages}
+						increaseViewportBy={{
+							top: 1_000,
+							bottom: 800,
+						}}
+						followOutput={(isAtBottom) => {
+							if (disableAutoScrollRef.current) return false
+							return "smooth"
+						}}
+						initialTopMostItemIndex={renderedMessages.length - 1}
+						itemContent={itemContent}
+						key={task.id}
+						rangeChanged={handleRangeChanged}
+						ref={virtuosoRef}
+						scrollerRef={(ref) => {
+							if (ref instanceof HTMLElement) {
+								// @ts-expect-error
+								parentRef.current = ref
+							}
+						}}
+						style={{
+							scrollbarWidth: "none",
+							msOverflowStyle: "none",
+							overflowAnchor: "none",
+						}}
+					/>
+				</div>
+			</div>
+		</div>
+	)
 }

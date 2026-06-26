@@ -35,7 +35,10 @@ export class FileOperationManager {
 
 	async ensureFileExists(): Promise<void> {
 		if (this.editType !== "modify") {
-			const exists = await fs.stat(this.absolutePath).then(() => true).catch(() => false)
+			const exists = await fs
+				.stat(this.absolutePath)
+				.then(() => true)
+				.catch(() => false)
 			if (!exists) {
 				await fs.writeFile(this.absolutePath, "")
 			}

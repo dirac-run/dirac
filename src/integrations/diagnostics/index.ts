@@ -126,7 +126,7 @@ export async function pollForNewDiagnostics(
 	filePaths: string | string[],
 	timeoutMs = 3500,
 	pollingIntervalMs = 500,
-	quietPeriodMs = 500
+	quietPeriodMs = 500,
 ): Promise<FileDiagnostics[]> {
 	const startTime = Date.now()
 	let attempts = 0

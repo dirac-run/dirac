@@ -173,39 +173,35 @@ describe("LiteLlmHandler (characterization)", () => {
 
 		// Characterizes a source bug: tool_calls are only processed when delta.content is truthy.
 		it("emits tool_calls chunks only when delta also carries content", async () => {
-			const createStub = sinon
-				.stub()
-				.resolves(
-					createAsyncIterable([
-						{
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_1",
-												function: { name: "read_file", arguments: '{"path":"a"}' },
-											},
-										],
-									},
+			const createStub = sinon.stub().resolves(
+				createAsyncIterable([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_1",
+											function: { name: "read_file", arguments: '{"path":"a"}' },
+										},
+									],
 								},
-							],
-						},
-						{
-							choices: [
-								{
-									delta: {
-										content: "x",
-										tool_calls: [
-											{ index: 0, id: "call_2", function: { name: "write_file", arguments: "{}" } },
-										],
-									},
+							},
+						],
+					},
+					{
+						choices: [
+							{
+								delta: {
+									content: "x",
+									tool_calls: [{ index: 0, id: "call_2", function: { name: "write_file", arguments: "{}" } }],
 								},
-							],
-						},
-					]),
-				)
+							},
+						],
+					},
+				]),
+			)
 			const handler = makeHandler({ createStub })
 
 			const chunks = await collect(handler.createMessage("sys", [{ role: "user", content: "hi" }]))
@@ -297,21 +293,19 @@ describe("LiteLlmHandler (characterization)", () => {
 		})
 
 		it("treats usage with zero cache tokens as undefined", async () => {
-			const createStub = sinon
-				.stub()
-				.resolves(
-					createAsyncIterable([
-						{
-							choices: [{}],
-							usage: {
-								prompt_tokens: 1,
-								completion_tokens: 1,
-								cache_creation_input_tokens: 0,
-								cache_read_input_tokens: 0,
-							},
+			const createStub = sinon.stub().resolves(
+				createAsyncIterable([
+					{
+						choices: [{}],
+						usage: {
+							prompt_tokens: 1,
+							completion_tokens: 1,
+							cache_creation_input_tokens: 0,
+							cache_read_input_tokens: 0,
 						},
-					]),
-				)
+					},
+				]),
+			)
 			const handler = makeHandler({ createStub })
 
 			const chunks = await collect(handler.createMessage("sys", [{ role: "user", content: "hi" }]))
@@ -327,7 +321,9 @@ describe("LiteLlmHandler (characterization)", () => {
 			sinon.stub(handler, "getModel").returns({ id: liteLlmDefaultModelId, info: liteLlmModelInfoSaneDefaults as any })
 
 			// ensureClient runs inside the generator body, so the error surfaces on iteration.
-			await collect(handler.createMessage("sys", [{ role: "user", content: "hi" }])).should.be.rejectedWith("LiteLLM API key is required")
+			await collect(handler.createMessage("sys", [{ role: "user", content: "hi" }])).should.be.rejectedWith(
+				"LiteLLM API key is required",
+			)
 		})
 
 		it("propagates errors thrown mid-stream", async () => {

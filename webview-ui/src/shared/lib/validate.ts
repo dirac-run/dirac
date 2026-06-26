@@ -4,14 +4,8 @@ import { getModeSpecificFields } from "@/features/settings/components/utils/prov
 
 export function validateApiConfiguration(currentMode: Mode, apiConfiguration?: ApiConfiguration): string | undefined {
 	if (apiConfiguration) {
-		const {
-			apiProvider,
-			openAiModelId,
-			requestyModelId,
-			togetherModelId,
-			lmStudioModelId,
-			vsCodeLmModelSelector,
-		} = getModeSpecificFields(apiConfiguration, currentMode)
+		const { apiProvider, openAiModelId, requestyModelId, togetherModelId, lmStudioModelId, vsCodeLmModelSelector } =
+			getModeSpecificFields(apiConfiguration, currentMode)
 
 		switch (apiProvider) {
 			case "anthropic":

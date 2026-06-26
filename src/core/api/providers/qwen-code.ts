@@ -191,7 +191,10 @@ export class QwenCodeHandler implements ApiHandler {
 			content: systemPrompt,
 		}
 
-		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)]
+		const convertedMessages = [
+			systemMessage,
+			...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+		]
 
 		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 			model: model.id,
@@ -212,7 +215,9 @@ export class QwenCodeHandler implements ApiHandler {
 			const delta = apiChunk.choices[0]?.delta ?? {}
 
 			if (delta.content) {
-				const newText = delta.content.startsWith(fullContent) ? delta.content.substring(fullContent.length) : delta.content
+				const newText = delta.content.startsWith(fullContent)
+					? delta.content.substring(fullContent.length)
+					: delta.content
 				fullContent = delta.content
 				yield* this.parseQwenContent(newText)
 			}
@@ -224,7 +229,11 @@ export class QwenCodeHandler implements ApiHandler {
 			}
 
 			if (apiChunk.usage) {
-				yield { type: "usage", inputTokens: apiChunk.usage.prompt_tokens || 0, outputTokens: apiChunk.usage.completion_tokens || 0 }
+				yield {
+					type: "usage",
+					inputTokens: apiChunk.usage.prompt_tokens || 0,
+					outputTokens: apiChunk.usage.completion_tokens || 0,
+				}
 			}
 		}
 	}

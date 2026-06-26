@@ -12,8 +12,6 @@ import type { ErrorSettings, IErrorProvider } from "./IErrorProvider"
 import { isDev } from "@shared/config/environment"
 import { jsonHeaders } from "@shared/net"
 
-
-
 type DiracErrorClientConfig = DiracTelemetryClientValidConfig & {
 	enableExceptionAutocapture: boolean
 }

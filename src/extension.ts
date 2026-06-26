@@ -15,7 +15,7 @@ import { DiracWebviewProvider } from "./core/webview"
 import { createDiracAPI } from "./exports"
 import { initializeTestMode } from "./services/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
-import "./utils/path"; // necessary to have access to String.prototype.toPosix
+import "./utils/path" // necessary to have access to String.prototype.toPosix
 import path from "node:path"
 import { isDev } from "@shared/config/environment"
 import type { ExtensionContext } from "vscode"
@@ -797,7 +797,9 @@ async function getBinaryLocation(name: string): Promise<string> {
 	}
 
 	const installHint = process.platform === "darwin" ? " Install ripgrep with: brew install ripgrep." : ""
-	throw new Error(`Could not find an executable ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}.${installHint}`)
+	throw new Error(
+		`Could not find an executable ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}.${installHint}`,
+	)
 }
 
 // This method is called when your extension is deactivated

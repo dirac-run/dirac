@@ -1,20 +1,20 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import type {
-    MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming,
-    BetaRawMessageStreamEvent,
+	MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming,
+	BetaRawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import type { MessageCreateParamsStreaming as AnthropicMessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/messages/messages"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import {
-    ANTHROPIC_BETAS,
-    ANTHROPIC_FAST_MODE_SUFFIX,
-    AnthropicModelId,
-    anthropicDefaultModelId,
-    anthropicModels,
-    CLAUDE_SONNET_1M_SUFFIX,
-    isAnthropicAdaptiveThinkingSupported,
-    ModelInfo,
+	ANTHROPIC_BETAS,
+	ANTHROPIC_FAST_MODE_SUFFIX,
+	AnthropicModelId,
+	anthropicDefaultModelId,
+	anthropicModels,
+	CLAUDE_SONNET_1M_SUFFIX,
+	isAnthropicAdaptiveThinkingSupported,
+	ModelInfo,
 } from "@shared/api"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
@@ -171,9 +171,7 @@ export class AnthropicHandler implements ApiHandler {
 				stream: true,
 			}
 
-			stream = useFastMode
-				? await createFastModeMessage(requestBody)
-				: await client.messages.create(requestBody)
+			stream = useFastMode ? await createFastModeMessage(requestBody) : await client.messages.create(requestBody)
 		}
 
 		const lastStartedToolCall = { id: "", name: "", arguments: "" }

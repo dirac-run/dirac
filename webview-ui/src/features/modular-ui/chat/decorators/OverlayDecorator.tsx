@@ -8,16 +8,15 @@ interface OverlayDecoratorProps {
 	slashCommandTrait: any
 }
 
-export const createOverlayDecorator = (
-	mentionTrait: any,
-	slashCommandTrait: any
-): InputDecorator => ({
+export const createOverlayDecorator = (mentionTrait: any, slashCommandTrait: any): InputDecorator => ({
 	id: "overlay",
 	renderOverlay: (context: ModularInputContext) => (
 		<>
 			{mentionTrait.showContextMenu && (
 				<ContextMenu
-					onSelect={(type: ContextMenuOptionType, value?: string) => mentionTrait.handleMentionSelect(type, value, context)}
+					onSelect={(type: ContextMenuOptionType, value?: string) =>
+						mentionTrait.handleMentionSelect(type, value, context)
+					}
 					searchQuery={mentionTrait.searchQuery}
 					onMouseDown={() => {}}
 					selectedIndex={mentionTrait.selectedMenuIndex}

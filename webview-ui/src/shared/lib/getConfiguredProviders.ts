@@ -106,7 +106,6 @@ export function getConfiguredProviders(
 		configured.push("nebius")
 	}
 
-
 	// SambaNova - requires API key
 	if (apiConfiguration.sambanovaApiKey) {
 		configured.push("sambanova")
@@ -116,7 +115,6 @@ export function getConfiguredProviders(
 	if (apiConfiguration.cerebrasApiKey) {
 		configured.push("cerebras")
 	}
-
 
 	// Z AI - requires API key
 	if (apiConfiguration.zaiApiKey) {
@@ -148,7 +146,6 @@ export function getConfiguredProviders(
 		configured.push("minimax")
 	}
 
-
 	// Huawei Cloud MaaS - requires API key
 	if (apiConfiguration.huaweiCloudMaasApiKey) {
 		configured.push("huawei-cloud-maas")
@@ -177,7 +174,6 @@ export function getConfiguredProviders(
 	) {
 		configured.push("openai")
 	}
-
 
 	// LM Studio - local provider, check base URL OR model configured
 	if (apiConfiguration.lmStudioBaseUrl || apiConfiguration.planModeLmStudioModelId || apiConfiguration.actModeLmStudioModelId) {

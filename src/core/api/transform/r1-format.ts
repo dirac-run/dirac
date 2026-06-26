@@ -114,7 +114,7 @@ function mergeR1Message(lastMessage: any, messageContent: any, thinking: string,
 		lastMessage.content = [...lastContent, ...newContent]
 		if (thinking) {
 			const current = lastMessage.reasoning_content || ""
-			;lastMessage.reasoning_content = current + (current ? "\n" : "") + thinking
+			lastMessage.reasoning_content = current + (current ? "\n" : "") + thinking
 		}
 	} else {
 		lastMessage.content = [...lastContent, ...newContent]
@@ -142,7 +142,11 @@ export function convertToR1Format(
 		if (lastMessage?.role === message.role) {
 			mergeR1Message(lastMessage, messageContent, thinking, message.role)
 		} else if (message.role === "assistant") {
-			merged.push({ role: "assistant", content: messageContent as OpenAI.Chat.ChatCompletionAssistantMessageParam["content"], reasoning_content: thinking || "" })
+			merged.push({
+				role: "assistant",
+				content: messageContent as OpenAI.Chat.ChatCompletionAssistantMessageParam["content"],
+				reasoning_content: thinking || "",
+			})
 		} else {
 			merged.push({ role: "user", content: messageContent })
 		}

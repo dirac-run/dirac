@@ -11,13 +11,7 @@ import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGith
 import { type ApiProvider } from "@/shared/api"
 import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { COLORS } from "../constants/colors"
-import {
-	getDefaultModelId,
-	getModelList,
-	hasModelPicker,
-	hasStaticModels,
-	providerModels,
-} from "../utils/model-metadata"
+import { getDefaultModelId, getModelList, hasModelPicker, hasStaticModels, providerModels } from "../utils/model-metadata"
 import { usesOpenRouterModels } from "../utils/openrouter-models"
 import { SearchableList, SearchableListItem } from "./SearchableList"
 

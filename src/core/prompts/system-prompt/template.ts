@@ -56,18 +56,16 @@ SYSTEM INFO
 
 - Operating System: {{OS}}
 - Default Shell: {{SHELL}}${
-	context.activeShellIsPosix
-		? "\n- You are running in a full-featured shell environment. You have access to standard Unix tools (`grep`, `sed`, `awk`, `find`, `xargs`, etc.)."
-		: process.platform === "win32"
-			? "\n- You are in a limited Windows shell environment. Standard Unix tools are NOT available. You MUST use PowerShell cmdlets or standard cmd commands."
+		context.activeShellIsPosix
+			? "\n- You are running in a full-featured shell environment. You have access to standard Unix tools (`grep`, `sed`, `awk`, `find`, `xargs`, etc.)."
+			: process.platform === "win32"
+				? "\n- You are in a limited Windows shell environment. Standard Unix tools are NOT available. You MUST use PowerShell cmdlets or standard cmd commands."
+				: ""
+	}${
+		context.activeShellType === "git-bash"
+			? "\n- Note: Use Git Bash path formatting (e.g., `/c/Users/...`) and account for Windows CRLF line endings."
 			: ""
-}${
-	context.activeShellType === "git-bash"
-		? "\n- Note: Use Git Bash path formatting (e.g., `/c/Users/...`) and account for Windows CRLF line endings."
-		: ""
-}${
-	context.activeShellType === "wsl" ? "\n- Note: Windows drives are mounted at `/mnt/c/`." : ""
-}
+	}${context.activeShellType === "wsl" ? "\n- Note: Windows drives are mounted at `/mnt/c/`." : ""}
 - Current Working Directory: ${currentCwd} (this is where all the tools will be executed from)
 - Available CPU Cores: {{AVAILABLE_CORES}} (Use this value for parallel jobs like 'make -j' instead of 'nproc')
 ${yoloModeToggled ? "- You are running in fully autonomous mode.\n" : ""}
@@ -78,10 +76,10 @@ You accomplish a given task iteratively, breaking it down into clear steps and w
 
 1. Analyze the user's task and set clear, achievable goals to accomplish it. Prioritize these goals in a logical order.
 2. Work through these goals sequentially, utilizing available tools ${
-	enableParallelToolCalling
-		? "as necessary. You may call multiple independent tools in a single response to work efficiently."
-		: "one at a time as necessary."
-} 
+		enableParallelToolCalling
+			? "as necessary. You may call multiple independent tools in a single response to work efficiently."
+			: "one at a time as necessary."
+	} 
 3. Once you've completed the user's task, you must use the attempt_completion tool to present the result of the task to the user. 
 ${yoloModeToggled ? "4. You are running in fully autonomous mode. Make sure to keep the CPU usage and RAM use reasonable when using `execute_command`.\n" : ""}
 

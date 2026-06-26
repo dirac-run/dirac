@@ -11,15 +11,23 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { Logger } from "@/shared/services/Logger"
 import { type BuildResultInput, buildResult } from "./buildResult"
 import { BUFFER_STUCK_TIMEOUT_MS, CHUNK_BYTE_SIZE, CHUNK_DEBOUNCE_MS, CHUNK_LINE_COUNT } from "./constants"
-import { buildFileSummary, cleanupFileLog, createFileLog, createFileLogState, shouldSwitchToFile, updateFirstLines, writeLineToFile } from "./file-logging"
+import {
+	buildFileSummary,
+	cleanupFileLog,
+	createFileLog,
+	createFileLogState,
+	shouldSwitchToFile,
+	updateFirstLines,
+	writeLineToFile,
+} from "./file-logging"
 import { attachProcessListeners } from "./process-listeners"
 import type {
-    CommandExecutorCallbacks,
-    ITerminalManager,
-    OrchestrationOptions,
-    OrchestrationResult,
-    TerminalCompletionDetails,
-    TerminalProcessResultPromise,
+	CommandExecutorCallbacks,
+	ITerminalManager,
+	OrchestrationOptions,
+	OrchestrationResult,
+	TerminalCompletionDetails,
+	TerminalProcessResultPromise,
 } from "./types"
 
 export async function orchestrateCommandExecution(

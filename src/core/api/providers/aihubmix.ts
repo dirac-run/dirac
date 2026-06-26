@@ -250,7 +250,10 @@ export class AIhubmixHandler implements ApiHandler {
 		const client = this.ensureOpenaiClient()
 		const modelId = this.options.modelId || "gpt-4o-mini"
 
-		const openaiMessages = [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)]
+		const openaiMessages = [
+			{ role: "system", content: systemPrompt },
+			...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+		]
 
 		const requestBody = {
 			model: modelId,

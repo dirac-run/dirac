@@ -5,5 +5,5 @@ import { attempt_completion_spec, AttemptCompletionTool } from "./AttemptComplet
 export const spec: DiracToolSpec = attempt_completion_spec
 
 export function create(): IDiracTool {
-    return new AttemptCompletionTool()
+	return new AttemptCompletionTool()
 }

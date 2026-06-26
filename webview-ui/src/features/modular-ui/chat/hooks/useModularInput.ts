@@ -29,8 +29,7 @@ export const useModularInput = ({
 	const selectedFiles = externalSelectedFiles !== undefined ? externalSelectedFiles : internalSelectedFiles
 	const setSelectedFiles = externalSetSelectedFiles !== undefined ? externalSetSelectedFiles : internalSetSelectedFiles
 	const selectedImages = externalSelectedImages !== undefined ? externalSelectedImages : internalSelectedImages
-	const setSelectedImages =
-		externalSetSelectedImages !== undefined ? externalSetSelectedImages : internalSetSelectedImages
+	const setSelectedImages = externalSetSelectedImages !== undefined ? externalSetSelectedImages : internalSetSelectedImages
 
 	const [cursorPosition, setCursorPosition] = useState(0)
 	const [isFocused, setIsFocused] = useState(false)
@@ -50,7 +49,7 @@ export const useModularInput = ({
 			selectedImages,
 			setSelectedImages,
 		}),
-		[inputValue, cursorPosition, isFocused, selectedFiles, selectedImages]
+		[inputValue, cursorPosition, isFocused, selectedFiles, selectedImages],
 	)
 
 	// Initialize traits
@@ -67,7 +66,7 @@ export const useModularInput = ({
 			}
 			return false
 		},
-		[traits, context]
+		[traits, context],
 	)
 
 	const handleInputChange = useCallback(
@@ -79,21 +78,21 @@ export const useModularInput = ({
 
 			traits.forEach((trait) => trait.onInputChange?.(newValue, newPos, context))
 		},
-		[traits, context]
+		[traits, context],
 	)
 
 	const handlePaste = useCallback(
 		(e: React.ClipboardEvent) => {
 			traits.forEach((trait) => trait.onPaste?.(e, context))
 		},
-		[traits, context]
+		[traits, context],
 	)
 
 	const handleDrop = useCallback(
 		(e: React.DragEvent) => {
 			traits.forEach((trait) => trait.onDrop?.(e, context))
 		},
-		[traits, context]
+		[traits, context],
 	)
 
 	const updateCursorPosition = useCallback(() => {

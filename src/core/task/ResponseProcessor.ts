@@ -34,8 +34,12 @@ export class ResponseProcessor {
 	}
 
 	// Passthrough for tests — exposes pending presentation error from presenter.
-	public get pendingPresentationError(): Error | undefined { return this.presenter.pendingPresentationError }
-	public set pendingPresentationError(e: Error | undefined) { this.presenter.pendingPresentationError = e }
+	public get pendingPresentationError(): Error | undefined {
+		return this.presenter.pendingPresentationError
+	}
+	public set pendingPresentationError(e: Error | undefined) {
+		this.presenter.pendingPresentationError = e
+	}
 
 	public async consumeStream(
 		streamCoordinator: StreamChunkCoordinator,

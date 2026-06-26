@@ -1,10 +1,10 @@
 import { LiteLLMModelInfo, ModelInfo, OcaModelInfo, OpenAiCompatibleModelInfo, openAiModelInfoSaneDefaults } from "@shared/api"
 import {
-    OpenRouterModelInfo,
-    LiteLLMModelInfo as ProtoLiteLLMModelInfo,
-    OcaModelInfo as ProtoOcaModelInfo,
-    OpenAiCompatibleModelInfo as ProtoOpenAiCompatibleModelInfo,
-    ThinkingConfig,
+	OpenRouterModelInfo,
+	LiteLLMModelInfo as ProtoLiteLLMModelInfo,
+	OcaModelInfo as ProtoOcaModelInfo,
+	OpenAiCompatibleModelInfo as ProtoOpenAiCompatibleModelInfo,
+	ThinkingConfig,
 } from "@shared/proto/dirac/models"
 
 /**

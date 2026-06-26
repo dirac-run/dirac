@@ -260,45 +260,43 @@ export class LiteLlmHandler implements ApiHandler {
 
 		// Apply cache_control to the last two user messages if enabled
 		// https://docs.litellm.ai/docs/providers/anthropic#caching---large-context-caching
-		const enhancedMessages = formattedMessages.map(
-			(message, index): OpenAI.Chat.ChatCompletionMessageParam => {
-				if ((index === lastUserMsgIndex || index === secondLastUserMsgIndex) && cacheControl) {
-					// Handle both string and array content types
-					if (typeof message.content === "string") {
-						return {
-							...message,
-							content: [
-								{
-									type: "text",
-									text: message.content,
-									...cacheControl,
-								},
-							],
-						} as OpenAI.Chat.ChatCompletionMessageParam
-					}
-					if (Array.isArray(message.content)) {
-						// Apply cache control to the last content item in the array
-						return {
-							...message,
-							content: message.content.map((item, contentIndex) =>
-								contentIndex === (message.content?.length || 0) - 1
-									? {
-											...item,
-											...cacheControl,
-										}
-									: item,
-							),
-						} as OpenAI.Chat.ChatCompletionMessageParam
-					}
-
+		const enhancedMessages = formattedMessages.map((message, index): OpenAI.Chat.ChatCompletionMessageParam => {
+			if ((index === lastUserMsgIndex || index === secondLastUserMsgIndex) && cacheControl) {
+				// Handle both string and array content types
+				if (typeof message.content === "string") {
 					return {
 						...message,
-						...cacheControl,
-					}
+						content: [
+							{
+								type: "text",
+								text: message.content,
+								...cacheControl,
+							},
+						],
+					} as OpenAI.Chat.ChatCompletionMessageParam
 				}
-				return message
-			},
-		)
+				if (Array.isArray(message.content)) {
+					// Apply cache control to the last content item in the array
+					return {
+						...message,
+						content: message.content.map((item, contentIndex) =>
+							contentIndex === (message.content?.length || 0) - 1
+								? {
+										...item,
+										...cacheControl,
+									}
+								: item,
+						),
+					} as OpenAI.Chat.ChatCompletionMessageParam
+				}
+
+				return {
+					...message,
+					...cacheControl,
+				}
+			}
+			return message
+		})
 
 		const toolParams = getOpenAIToolParams(tools as OpenAITool[])
 

@@ -4,12 +4,12 @@ import { fetch, getAxiosSettings } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 
 export interface OpenGraphData {
-    title?: string
-    description?: string
-    image?: string
-    url?: string
-    siteName?: string
-    type?: string
+	title?: string
+	description?: string
+	image?: string
+	url?: string
+	siteName?: string
+	type?: string
 }
 
 /**
@@ -18,71 +18,71 @@ export interface OpenGraphData {
  * @returns Promise resolving to OpenGraphData
  */
 export async function fetchOpenGraphData(url: string): Promise<OpenGraphData> {
-    try {
-        const options = {
-            url: url,
-            timeout: 5000,
-            headers: {
-                "user-agent": "Mozilla/5.0 (compatible; VSCodeExtension/1.0; +https://dirac.run)",
-            },
-            onlyGetOpenGraphInfo: false, // Get all metadata, not just Open Graph
-            fetchOptions: {
-                redirect: "follow", // Follow redirects
-            } as any,
-            fetch, // Use configured fetch with proxy support
-        }
+	try {
+		const options = {
+			url: url,
+			timeout: 5000,
+			headers: {
+				"user-agent": "Mozilla/5.0 (compatible; VSCodeExtension/1.0; +https://dirac.run)",
+			},
+			onlyGetOpenGraphInfo: false, // Get all metadata, not just Open Graph
+			fetchOptions: {
+				redirect: "follow", // Follow redirects
+			} as any,
+			fetch, // Use configured fetch with proxy support
+		}
 
-        const { result } = await ogs(options)
+		const { result } = await ogs(options)
 
-        // Use type assertion to avoid TypeScript errors
-        const data = result as any
+		// Use type assertion to avoid TypeScript errors
+		const data = result as any
 
-        // Handle image URLs
-        let imageUrl = data.ogImage?.[0]?.url || data.twitterImage?.[0]?.url
+		// Handle image URLs
+		let imageUrl = data.ogImage?.[0]?.url || data.twitterImage?.[0]?.url
 
-        // If the image URL is relative, make it absolute
-        if (imageUrl && (imageUrl.startsWith("/") || imageUrl.startsWith("./"))) {
-            try {
-                // Extract the base URL and make the relative URL absolute
-                const urlObj = new URL(url)
-                const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`
-                imageUrl = new URL(imageUrl, baseUrl).href
-            } catch (error) {
-                Logger.error(`Error converting relative URL to absolute: ${imageUrl}`, error)
-            }
-        }
+		// If the image URL is relative, make it absolute
+		if (imageUrl && (imageUrl.startsWith("/") || imageUrl.startsWith("./"))) {
+			try {
+				// Extract the base URL and make the relative URL absolute
+				const urlObj = new URL(url)
+				const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`
+				imageUrl = new URL(imageUrl, baseUrl).href
+			} catch (error) {
+				Logger.error(`Error converting relative URL to absolute: ${imageUrl}`, error)
+			}
+		}
 
-        return {
-            title: data.ogTitle || data.twitterTitle || data.dcTitle || data.title || new URL(url).hostname,
-            description:
-                data.ogDescription ||
-                data.twitterDescription ||
-                data.dcDescription ||
-                data.description ||
-                "No description available",
-            image: imageUrl,
-            url: data.ogUrl || url,
-            siteName: data.ogSiteName || new URL(url).hostname,
-            type: data.ogType,
-        }
-    } catch (_error) {
-        // Return basic information based on the URL
-        try {
-            const urlObj = new URL(url)
-            return {
-                title: urlObj.hostname,
-                description: url,
-                url: url,
-                siteName: urlObj.hostname,
-            }
-        } catch {
-            return {
-                title: url,
-                description: url,
-                url: url,
-            }
-        }
-    }
+		return {
+			title: data.ogTitle || data.twitterTitle || data.dcTitle || data.title || new URL(url).hostname,
+			description:
+				data.ogDescription ||
+				data.twitterDescription ||
+				data.dcDescription ||
+				data.description ||
+				"No description available",
+			image: imageUrl,
+			url: data.ogUrl || url,
+			siteName: data.ogSiteName || new URL(url).hostname,
+			type: data.ogType,
+		}
+	} catch (_error) {
+		// Return basic information based on the URL
+		try {
+			const urlObj = new URL(url)
+			return {
+				title: urlObj.hostname,
+				description: url,
+				url: url,
+				siteName: urlObj.hostname,
+			}
+		} catch {
+			return {
+				title: url,
+				description: url,
+				url: url,
+			}
+		}
+	}
 }
 
 /**
@@ -91,19 +91,19 @@ export async function fetchOpenGraphData(url: string): Promise<OpenGraphData> {
  * @returns Promise resolving to boolean indicating if the URL is an image
  */
 export async function detectImageUrl(url: string): Promise<boolean> {
-    try {
-        const response = await axios.head(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (compatible; VSCodeExtension/1.0; +https://dirac.run)",
-            },
-            timeout: 3000,
-            ...getAxiosSettings(),
-        })
+	try {
+		const response = await axios.head(url, {
+			headers: {
+				"User-Agent": "Mozilla/5.0 (compatible; VSCodeExtension/1.0; +https://dirac.run)",
+			},
+			timeout: 3000,
+			...getAxiosSettings(),
+		})
 
-        const contentType = response.headers["content-type"]
-        return typeof contentType === "string" && contentType.startsWith("image/")
-    } catch (_error) {
-        // If we can't determine, fall back to checking the file extension
-        return /\.(jpg|jpeg|png|gif|webp|bmp|svg|tiff|tif|avif)$/i.test(url)
-    }
+		const contentType = response.headers["content-type"]
+		return typeof contentType === "string" && contentType.startsWith("image/")
+	} catch (_error) {
+		// If we can't determine, fall back to checking the file extension
+		return /\.(jpg|jpeg|png|gif|webp|bmp|svg|tiff|tif|avif)$/i.test(url)
+	}
 }

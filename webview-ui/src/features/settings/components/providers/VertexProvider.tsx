@@ -150,7 +150,6 @@ export const VertexProvider = ({ showModelOptions, isPopup, currentMode }: Verte
 						<ReasoningEffortSelector currentMode={currentMode} />
 					)}
 
-
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>
 			)}

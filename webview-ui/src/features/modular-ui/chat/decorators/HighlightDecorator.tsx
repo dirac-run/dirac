@@ -5,15 +5,10 @@ import { InputDecorator, ModularInputContext } from "../types"
 export const HighlightDecorator: InputDecorator = {
 	id: "highlight",
 	renderHighlight: (value: string, context: ModularInputContext) => {
-		let processedText = value
-			.replace(/\n$/, "\n\n")
-			.replace(/[<>&]/g, (c) => ({ "<": "<", ">": ">", "&": "&" })[c] || c)
+		let processedText = value.replace(/\n$/, "\n\n").replace(/[<>&]/g, (c) => ({ "<": "<", ">": ">", "&": "&" })[c] || c)
 
 		// Highlight @mentions
-		processedText = processedText.replace(
-			mentionRegexGlobal,
-			'<mark class="mention-context-textarea-highlight">$&</mark>'
-		)
+		processedText = processedText.replace(mentionRegexGlobal, '<mark class="mention-context-textarea-highlight">$&</mark>')
 
 		// Highlight only the FIRST valid /slash-command in the text
 		slashCommandRegexGlobal.lastIndex = 0

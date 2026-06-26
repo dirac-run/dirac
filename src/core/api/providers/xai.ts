@@ -58,7 +58,10 @@ export class XAIHandler implements ApiHandler {
 			model: modelId,
 			max_completion_tokens: this.getModel().info.maxTokens,
 			temperature: 0,
-			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)],
+			messages: [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+			],
 			stream: true,
 			stream_options: { include_usage: true },
 			reasoning_effort: reasoningEffort,

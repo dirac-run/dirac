@@ -1,8 +1,8 @@
 import {
-    combineRuleToggles,
-    getRuleFilesTotalContent,
-    readDirectoryRecursive,
-    synchronizeRuleToggles,
+	combineRuleToggles,
+	getRuleFilesTotalContent,
+	readDirectoryRecursive,
+	synchronizeRuleToggles,
 } from "@core/context/instructions/user-instructions/rule-helpers"
 import { formatResponse } from "@core/formatResponse"
 import { GlobalFileNames } from "@core/storage/disk"

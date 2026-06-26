@@ -4,14 +4,7 @@ import React from "react"
 import { useLastCompletedAskMessage } from "../hooks/useStateSubscriber"
 import { jsonParseSafe } from "../utils/parser"
 
-type PromptType =
-	| "confirmation"
-	| "text"
-	| "options"
-	| "plan_mode_text"
-	| "completion"
-	| "exit_confirmation"
-	| "none"
+type PromptType = "confirmation" | "text" | "options" | "plan_mode_text" | "completion" | "exit_confirmation" | "none"
 
 function getPromptType(message: DiracMessage): PromptType {
 	const { content } = message
@@ -78,7 +71,15 @@ export const AskPrompt: React.FC = () => {
 					<Text>{icon} </Text>
 					<Text color={color}>{` ${label} `}</Text>
 					<Text color="gray">
-						[<Text bold color="white">y</Text>]es / [<Text bold color="white">n</Text>]o
+						[
+						<Text bold color="white">
+							y
+						</Text>
+						]es / [
+						<Text bold color="white">
+							n
+						</Text>
+						]o
 					</Text>
 				</Box>
 			</Box>

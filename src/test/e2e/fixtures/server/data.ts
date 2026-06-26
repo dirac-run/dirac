@@ -1,10 +1,10 @@
 import type {
-    BalanceResponse,
-    OrganizationBalanceResponse,
-    OrganizationUsageTransaction,
-    PaymentTransaction,
-    UsageTransaction,
-    UserResponse,
+	BalanceResponse,
+	OrganizationBalanceResponse,
+	OrganizationUsageTransaction,
+	PaymentTransaction,
+	UsageTransaction,
+	UserResponse,
 } from "../../../../shared/DiracAccount"
 
 const organizations = [

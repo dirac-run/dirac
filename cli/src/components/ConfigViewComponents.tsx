@@ -498,14 +498,24 @@ export const ObjectEditorPanel: React.FC<ObjectEditorPanelProps> = ({
 					const [entryKey] = selectedEntry
 					const currentNode = getObjectAtPath(state.value, state.path)
 					const { [entryKey]: _, ...rest } = currentNode
-					const nextObject = setObjectValueAtPath(state.value, state.path.slice(0, -1), state.path[state.path.length - 1], rest)
+					const nextObject = setObjectValueAtPath(
+						state.value,
+						state.path.slice(0, -1),
+						state.path[state.path.length - 1],
+						rest,
+					)
 					// Wait, setObjectValueAtPath needs to be used carefully here.
 					// If path is empty, we just update the root.
 					let updatedRoot: Record<string, unknown>
 					if (state.path.length === 0) {
 						updatedRoot = rest
 					} else {
-						updatedRoot = setObjectValueAtPath(state.value, state.path.slice(0, -1), state.path[state.path.length - 1], rest)
+						updatedRoot = setObjectValueAtPath(
+							state.value,
+							state.path.slice(0, -1),
+							state.path[state.path.length - 1],
+							rest,
+						)
 					}
 
 					onPersist(updatedRoot)

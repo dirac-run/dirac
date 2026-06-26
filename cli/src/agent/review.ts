@@ -282,9 +282,7 @@ export async function runReviewModelOnDiff(controller: Controller, input: Review
 	const changedFiles = input.context.files.map((file) => file.path).join("\n")
 	const skippedBinaryFiles = input.context.skippedBinaryFiles.join("\n")
 	const commandLabel =
-		input.command.kind === "review"
-			? "/review"
-			: `/${input.command.kind} ${input.command.target ?? ""}`.trim()
+		input.command.kind === "review" ? "/review" : `/${input.command.kind} ${input.command.target ?? ""}`.trim()
 
 	const systemPrompt = `You are performing a read-only code review.
 
@@ -477,14 +475,14 @@ function collectWorktreeSpecs(cwd: string, hasHead: boolean): DiffFileSpec[] {
 		}))
 	}
 
-	const specs: DiffFileSpec[] = parseNameStatus(gitText(cwd, ["diff", "--name-status", "-z", "--find-renames", "HEAD", "--"])).map(
-		(entry) => ({
-			currentPath: entry.currentPath,
-			oldPath: entry.previousPath ?? entry.currentPath,
-			oldRef: "HEAD",
-			newRef: entry.status === "D" ? null : "WORKTREE",
-		}),
-	)
+	const specs: DiffFileSpec[] = parseNameStatus(
+		gitText(cwd, ["diff", "--name-status", "-z", "--find-renames", "HEAD", "--"]),
+	).map((entry) => ({
+		currentPath: entry.currentPath,
+		oldPath: entry.previousPath ?? entry.currentPath,
+		oldRef: "HEAD",
+		newRef: entry.status === "D" ? null : "WORKTREE",
+	}))
 
 	for (const filePath of collectPaths(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])) {
 		specs.push({

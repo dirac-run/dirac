@@ -38,8 +38,7 @@ export function formatOpenAiCompatibleUsage(
 
 	// Prefer provider-reported cost (e.g. OpenRouter) or calculate locally
 	const totalCost =
-		usage.cost ??
-		calculateApiCostOpenAI(modelInfo, totalInputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+		usage.cost ?? calculateApiCostOpenAI(modelInfo, totalInputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
 
 	return {
 		type: "usage",

@@ -52,7 +52,6 @@ function isNotADirectory(error: any): boolean {
 	return error.code === "ENOTDIR"
 }
 
-
 export async function fileExistsAtPath(filePath: string): Promise<boolean> {
 	try {
 		await fs.access(filePath)

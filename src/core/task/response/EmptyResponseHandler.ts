@@ -4,7 +4,8 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 import { ResponseProcessorDependencies } from "../types/response-processor"
 
-const BASE_ERROR_MESSAGE = "Invalid API Response: The provider returned an empty or unparsable response. This is a provider-side issue where the model failed to generate valid output or returned tool calls that Dirac cannot process. Retrying the request may help resolve this issue."
+const BASE_ERROR_MESSAGE =
+	"Invalid API Response: The provider returned an empty or unparsable response. This is a provider-side issue where the model failed to generate valid output or returned tool calls that Dirac cannot process. Retrying the request may help resolve this issue."
 const NO_RESPONSE_ERROR_MESSAGE = "No assistant message was received. Would you like to retry the request?"
 const MAX_RETRY_ATTEMPTS = 3
 
@@ -15,7 +16,13 @@ export class EmptyResponseHandler {
 
 	async handleEmptyResponse(params: {
 		modelInfo: any
-		taskMetrics: { inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; totalCost?: number }
+		taskMetrics: {
+			inputTokens: number
+			outputTokens: number
+			cacheWriteTokens: number
+			cacheReadTokens: number
+			totalCost?: number
+		}
 		providerId: string
 		model: any
 	}): Promise<boolean> {
@@ -39,7 +46,14 @@ export class EmptyResponseHandler {
 			content: [{ type: "text", text: "Failure: I did not provide a response." }],
 			modelInfo: params.modelInfo,
 			id: this.deps.streamHandler.requestId,
-			metrics: { tokens: { prompt: params.taskMetrics.inputTokens, completion: params.taskMetrics.outputTokens, cached: (params.taskMetrics.cacheWriteTokens ?? 0) + (params.taskMetrics.cacheReadTokens ?? 0) }, cost: params.taskMetrics.totalCost },
+			metrics: {
+				tokens: {
+					prompt: params.taskMetrics.inputTokens,
+					completion: params.taskMetrics.outputTokens,
+					cached: (params.taskMetrics.cacheWriteTokens ?? 0) + (params.taskMetrics.cacheReadTokens ?? 0),
+				},
+				cost: params.taskMetrics.totalCost,
+			},
 			ts: Date.now(),
 		})
 	}
@@ -56,7 +70,12 @@ export class EmptyResponseHandler {
 		const delay = 2000 * 2 ** (this.deps.taskState.emptyResponseRetryAttempts - 1)
 		const card = await this.deps.taskMessenger.createCard({
 			header: "Auto-Retry",
-			body: JSON.stringify({ attempt: this.deps.taskState.emptyResponseRetryAttempts, maxAttempts: MAX_RETRY_ATTEMPTS, delaySeconds: delay / 1000, errorMessage: NO_RESPONSE_ERROR_MESSAGE }),
+			body: JSON.stringify({
+				attempt: this.deps.taskState.emptyResponseRetryAttempts,
+				maxAttempts: MAX_RETRY_ATTEMPTS,
+				delaySeconds: delay / 1000,
+				errorMessage: NO_RESPONSE_ERROR_MESSAGE,
+			}),
 			status: CardStatus.PENDING,
 		})
 		await setTimeoutPromise(delay)
@@ -68,10 +87,19 @@ export class EmptyResponseHandler {
 	private async promptManualRetry(): Promise<boolean> {
 		const cardHandle = await this.deps.taskMessenger.createCard({
 			header: "Auto-Retry Failed",
-			body: JSON.stringify({ attempt: MAX_RETRY_ATTEMPTS, maxAttempts: MAX_RETRY_ATTEMPTS, delaySeconds: 0, failed: true, errorMessage: NO_RESPONSE_ERROR_MESSAGE }),
+			body: JSON.stringify({
+				attempt: MAX_RETRY_ATTEMPTS,
+				maxAttempts: MAX_RETRY_ATTEMPTS,
+				delaySeconds: 0,
+				failed: true,
+				errorMessage: NO_RESPONSE_ERROR_MESSAGE,
+			}),
 			status: CardStatus.ERROR,
 			requireApproval: true,
-			actions: [{ label: "Retry", value: DiracAskResponse.APPROVE, primary: true }, { label: "Cancel", value: DiracAskResponse.REJECT }],
+			actions: [
+				{ label: "Retry", value: DiracAskResponse.APPROVE, primary: true },
+				{ label: "Cancel", value: DiracAskResponse.REJECT },
+			],
 		})
 		let response: DiracAskResponse
 		try {

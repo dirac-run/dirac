@@ -43,7 +43,10 @@ export class WandbHandler implements ApiHandler {
 
 		const stream = await client.chat.completions.create({
 			model: model.id,
-			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false)],
+			messages: [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
+			],
 			temperature: 0,
 			stream: true,
 			stream_options: { include_usage: true },

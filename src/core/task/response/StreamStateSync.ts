@@ -48,9 +48,22 @@ export class StreamStateSync {
 	private convertTextBlock(block: any, isStreamComplete: boolean): AssistantMessageContent[] {
 		const parsed = parseAssistantMessageV2(block.text, !isStreamComplete)
 		return parsed.map((p) => {
-			if (p.type === "text") return { type: "text", content: p.content, isComplete: p.isComplete || isStreamComplete, signature: block.signature, call_id: block.call_id }
+			if (p.type === "text")
+				return {
+					type: "text",
+					content: p.content,
+					isComplete: p.isComplete || isStreamComplete,
+					signature: block.signature,
+					call_id: block.call_id,
+				}
 			const r = p as ReasoningStreamContent
-			return { type: "reasoning", reasoning: r.reasoning, isComplete: r.isComplete || isStreamComplete, signature: block.signature, call_id: block.call_id }
+			return {
+				type: "reasoning",
+				reasoning: r.reasoning,
+				isComplete: r.isComplete || isStreamComplete,
+				signature: block.signature,
+				call_id: block.call_id,
+			}
 		}) as AssistantMessageContent[]
 	}
 

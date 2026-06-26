@@ -15,10 +15,10 @@ import { ModelInfoView } from "./common/ModelInfoView"
 import ReasoningEffortSelector from "./ReasoningEffortSelector"
 import ThinkingBudgetSlider from "./ThinkingBudgetSlider"
 import {
-    filterOpenRouterModelIds,
-    getModeSpecificFields,
-    normalizeApiConfiguration,
-    supportsReasoningEffortForModelId,
+	filterOpenRouterModelIds,
+	getModeSpecificFields,
+	normalizeApiConfiguration,
+	supportsReasoningEffortForModelId,
 } from "./utils/providerUtils"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
 
@@ -202,7 +202,10 @@ const OpenRouterModelPicker: React.FC<OpenRouterModelPickerProps> = ({ isPopup, 
 	}, [selectedIndex])
 
 	const selectedModelIdLower = selectedModelId?.toLowerCase() || ""
-	const showReasoningEffort = useMemo(() => supportsReasoningEffortForModelId(selectedModelId, selectedModelInfo), [selectedModelId, selectedModelInfo])
+	const showReasoningEffort = useMemo(
+		() => supportsReasoningEffortForModelId(selectedModelId, selectedModelInfo),
+		[selectedModelId, selectedModelInfo],
+	)
 
 	const showBudgetSlider = useMemo(() => {
 		if (showReasoningEffort) {

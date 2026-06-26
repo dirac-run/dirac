@@ -1,1 +1,1 @@
-export type SurfaceType = "cli" | "ide" | "all";
+export type SurfaceType = "cli" | "ide" | "all"

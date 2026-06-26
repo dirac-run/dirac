@@ -4,7 +4,7 @@ import { CommandExecutor } from "../../../src/hosts/vscode/terminal/VscodeComman
 
 describe("VscodeShellIntegrationManager", () => {
 	it("should be instantiable", () => {
-		const manager = new (class extends (require("events").EventEmitter) {
+		const manager = new (class extends require("events").EventEmitter {
 			setupListeners() {}
 			dispose() {}
 		})()
@@ -17,11 +17,25 @@ describe("TerminalLifecycleManager", () => {
 	it("should be instantiable with options", () => {
 		const manager = new (class {
 			constructor(_options: any) {}
-			getOrCreateTerminal() { return Promise.resolve({ id: 1, terminal: {} as vscode.Terminal, busy: false, lastCommand: "", shellPath: undefined } as any) }
-			getTerminals(busy: boolean) { return [] }
+			getOrCreateTerminal() {
+				return Promise.resolve({
+					id: 1,
+					terminal: {} as vscode.Terminal,
+					busy: false,
+					lastCommand: "",
+					shellPath: undefined,
+				} as any)
+			}
+			getTerminals(busy: boolean) {
+				return []
+			}
 			setShellIntegrationTimeout(timeout: number) {}
-			findMatchingTerminal(terminals: any[], shellPath: string | undefined, cwd?: string): any { return null }
-			findAvailableTerminal(terminals: any[], shellPath: string | undefined): any { return null }
+			findMatchingTerminal(terminals: any[], shellPath: string | undefined, cwd?: string): any {
+				return null
+			}
+			findAvailableTerminal(terminals: any[], shellPath: string | undefined): any {
+				return null
+			}
 		})({ terminalReuseEnabled: true, defaultTerminalProfile: "default" })
 
 		assert.isFunction(manager.getOrCreateTerminal)
@@ -63,8 +77,12 @@ describe("TerminalProfileManager", () => {
 
 	beforeEach(() => {
 		manager = new (class extends require("@/hosts/vscode/terminal/VscodeTerminalProfileManager").TerminalProfileManager {
-			filterTerminals() { return [] }
-			closeAllTerminals() { return 0 }
+			filterTerminals() {
+				return []
+			}
+			closeAllTerminals() {
+				return 0
+			}
 		})()
 	})
 
@@ -102,7 +120,7 @@ describe("VscodeTerminalManager composition", () => {
 	it("should compose all extracted managers", async () => {
 		const { VscodeTerminalManager } = await import("../../../src/hosts/vscode/terminal/VscodeTerminalManager")
 		const manager = new VscodeTerminalManager()
-		
+
 		assert.isFunction(manager.runCommand)
 		assert.isFunction(manager.getOrCreateTerminal)
 		assert.isFunction(manager.getTerminals)

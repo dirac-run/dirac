@@ -1,24 +1,13 @@
 import { TooltipContent, TooltipTrigger } from "@radix-ui/react-tooltip"
-import {
-    azureOpenAiDefaultApiVersion,
-    openAiModelInfoSaneDefaults,
-    OpenAiCompatibleProfile,
-    ModelInfo,
-} from "@shared/api"
+import { azureOpenAiDefaultApiVersion, openAiModelInfoSaneDefaults, OpenAiCompatibleProfile, ModelInfo } from "@shared/api"
 import { Mode } from "@shared/ExtensionMessage"
-import {
-    VSCodeButton,
-    VSCodeCheckbox,
-    VSCodeDropdown,
-    VSCodeOption,
-    VSCodeTextField,
-} from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeCheckbox, VSCodeDropdown, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { PlusIcon, RefreshCwIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-    getModeSpecificFields,
-    normalizeApiConfiguration,
-    supportsReasoningEffortForModelId,
+	getModeSpecificFields,
+	normalizeApiConfiguration,
+	supportsReasoningEffortForModelId,
 } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { getAsVar, VSC_DESCRIPTION_FOREGROUND } from "@/shared/lib/vscStyles"
@@ -45,8 +34,7 @@ interface OpenAICompatibleProviderProps {
  */
 export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMode }: OpenAICompatibleProviderProps) => {
 	const { apiConfiguration, remoteConfigSettings, openAiModels, refreshOpenAiModels } = useSettingsStore()
-	const { handleFieldChange, handleModeFieldChange, handleModeFieldsChange, handleFieldsChange } =
-		useApiConfigurationHandlers()
+	const { handleFieldChange, handleModeFieldChange, handleModeFieldsChange, handleFieldsChange } = useApiConfigurationHandlers()
 
 	const [modelConfigurationSelected, setModelConfigurationSelected] = useState(false)
 	const [isRefreshingModels, setIsRefreshingModels] = useState(false)
@@ -419,9 +407,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 						className={`codicon ${modelConfigurationSelected ? "codicon-chevron-down" : "codicon-chevron-right"}`}
 						style={{ marginRight: "4px" }}
 					/>
-					<span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "11px" }}>
-						Model Configuration
-					</span>
+					<span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "11px" }}>Model Configuration</span>
 				</div>
 
 				{modelConfigurationSelected && (

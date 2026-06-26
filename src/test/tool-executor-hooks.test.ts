@@ -53,7 +53,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const pendingToolInfo = {
@@ -92,7 +92,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 			const pendingToolInfo = {
 				tool: "execute_command",
@@ -128,7 +128,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			// Test that cancellable hooks can use setActiveHookExecution
@@ -166,7 +166,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -200,7 +200,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -234,7 +234,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -268,7 +268,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -302,7 +302,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -340,7 +340,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -373,7 +373,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({
@@ -409,7 +409,7 @@ describe("Tool Executor Hooks", () => {
 				},
 				createCard: async (params: any) => {
 					return { id: "card-id", update: async () => {}, appendBody: async () => {}, finalize: async () => {} }
-				}
+				},
 			}
 
 			const result = await executeHook({

@@ -9,9 +9,7 @@ import { ChatViewProps } from "@/features/modular-ui/chat/types/chatTypes"
 
 import { useChatState } from "@/features/modular-ui/chat/hooks/useChatState"
 
-
 // ChatViewProps is now imported from types/chatTypes
-
 
 const ChatViewContent = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryView }: ChatViewProps) => {
 	const messages = useChatStore((state) => state.diracMessages)

@@ -81,7 +81,6 @@ export const GeminiProvider = ({ showModelOptions, isPopup, currentMode }: Gemin
 						}}>
 						Connects the Gemini model to real-time web content. Each search query is billed separately.
 					</p>
-
 				</>
 			)}
 		</div>

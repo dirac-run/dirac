@@ -24,7 +24,6 @@ import {
 	xaiDefaultModelId,
 } from "../api"
 
-
 const ProviderKeyMap: Partial<Record<ApiProvider, string>> = {
 	openrouter: "OpenRouterModelId",
 	dirac: "DiracModelId",
@@ -41,7 +40,6 @@ const ProviderKeyMap: Partial<Record<ApiProvider, string>> = {
 	nousResearch: "NousResearchModelId",
 	"vercel-ai-gateway": "VercelAiGatewayModelId",
 } as const
-
 
 export const ProviderToBaseUrlKeyMap: Partial<Record<ApiProvider, SettingsKey>> = {
 	openai: "openAiBaseUrl",

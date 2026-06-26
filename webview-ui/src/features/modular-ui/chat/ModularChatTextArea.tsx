@@ -63,14 +63,14 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 
 	const traits = useMemo<InputTrait[]>(
 		() => [mentionTrait, slashCommandTrait, fileHandlingTrait, modeTrait],
-		[mentionTrait, slashCommandTrait, fileHandlingTrait, modeTrait]
+		[mentionTrait, slashCommandTrait, fileHandlingTrait, modeTrait],
 	)
 
 	// Initialize Decorators
 	const platform = usePlatform()
 	const overlayDecorator = useMemo(
 		() => createOverlayDecorator(mentionTrait, slashCommandTrait),
-		[mentionTrait, slashCommandTrait]
+		[mentionTrait, slashCommandTrait],
 	)
 	const actionDecorator = useMemo(
 		() =>
@@ -95,24 +95,23 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 			taskStatus,
 			modeTrait.onModeToggle,
 			platform.togglePlanActKeys,
-		]
+		],
 	)
 
 	const decorators = useMemo<InputDecorator[]>(
 		() => [HighlightDecorator, overlayDecorator, actionDecorator],
-		[overlayDecorator, actionDecorator]
+		[overlayDecorator, actionDecorator],
 	)
 
-	const { context, handleKeyDown, handleInputChange, handlePaste, handleDrop, updateCursorPosition } =
-		useModularInput({
-			traits,
-			inputValue,
-			setInputValue,
-			selectedFiles,
-			setSelectedFiles,
-			selectedImages,
-			setSelectedImages,
-		})
+	const { context, handleKeyDown, handleInputChange, handlePaste, handleDrop, updateCursorPosition } = useModularInput({
+		traits,
+		inputValue,
+		setInputValue,
+		selectedFiles,
+		setSelectedFiles,
+		selectedImages,
+		setSelectedImages,
+	})
 
 	// Register keyboard shortcut for Plan/Act toggle
 	const handleModeToggleWithInput = useCallback(() => {
@@ -139,13 +138,12 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 			<div
 				className={cn(
 					"relative rounded-(--radius-input) transition-all duration-200",
-					context.isFocused 
-						? "border border-(--vscode-focusBorder) bg-(--vscode-input-background) shadow-[0_0_6px_1px_var(--color-glow-act)]" 
-						: "border border-(--vscode-input-border) bg-(--vscode-input-background) hover:border-[color-mix(in_srgb,var(--vscode-input-border)_80%,transparent)]"
+					context.isFocused
+						? "border border-(--vscode-focusBorder) bg-(--vscode-input-background) shadow-[0_0_6px_1px_var(--color-glow-act)]"
+						: "border border-(--vscode-input-border) bg-(--vscode-input-background) hover:border-[color-mix(in_srgb,var(--vscode-input-border)_80%,transparent)]",
 				)}>
 				{/* Highlight Layer */}
-				<div
-					className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words p-[10px_32px_10px_12px] vscode-editor-font text-transparent">
+				<div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words p-[10px_32px_10px_12px] vscode-editor-font text-transparent">
 					{decorators.map((d) => (
 						<React.Fragment key={`highlight-${d.id}`}>
 							{d.renderHighlight?.(context.inputValue, context)}

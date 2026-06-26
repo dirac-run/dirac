@@ -37,7 +37,12 @@ export class MentionTelemetry {
 		})
 	}
 
-	captureMentionSearchResults(query: string, resultCount: number, searchType: "file" | "folder" | "all", isEmpty: boolean): void {
+	captureMentionSearchResults(
+		query: string,
+		resultCount: number,
+		searchType: "file" | "folder" | "all",
+		isEmpty: boolean,
+	): void {
 		this.emitter.capture({
 			event: MentionTelemetry.EVENTS.MENTION_SEARCH_RESULTS,
 			properties: {

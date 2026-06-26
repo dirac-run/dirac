@@ -155,11 +155,11 @@
 
 /* Diff: font color only, no backgrounds */
 .hljs-deletion {
-	color: var(--vscode-testing-iconFailed, #DD6B68);
+	color: var(--vscode-testing-iconFailed, #dd6b68);
 }
 
 .hljs-addition {
-	color: var(--vscode-testing-iconPassed, #52C97A);
+	color: var(--vscode-testing-iconPassed, #52c97a);
 }
 
 /* Section headers - slightly emphasized */

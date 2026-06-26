@@ -442,12 +442,7 @@ describe("shouldDoQuickAuth", () => {
 	})
 
 	it("returns false when no flags are provided, even if all fields are inferred", () => {
-		expect(
-			shouldDoQuickAuth(
-				{},
-				{ provider: "anthropic", apikey: "key", modelid: "claude-3-5-sonnet" },
-			),
-		).toBe(false)
+		expect(shouldDoQuickAuth({}, { provider: "anthropic", apikey: "key", modelid: "claude-3-5-sonnet" })).toBe(false)
 	})
 
 	it("returns false when required fields are missing", () => {
@@ -461,22 +456,14 @@ describe("shouldDoQuickAuth", () => {
 
 	it("returns true when only apikey is provided as flag and others are inferred", () => {
 		expect(
-			shouldDoQuickAuth(
-				{ apikey: "new-key" },
-				{ provider: "anthropic", apikey: "new-key", modelid: "claude-3-5-sonnet" },
-			),
+			shouldDoQuickAuth({ apikey: "new-key" }, { provider: "anthropic", apikey: "new-key", modelid: "claude-3-5-sonnet" }),
 		).toBe(true)
 	})
 
 	it("returns false when only non-auth flags are provided", () => {
 		// Note: shouldDoQuickAuth doesn't see 'verbose' or 'config' because they aren't in its options type
 		// but we should ensure it behaves correctly if they were passed (they would be undefined)
-		expect(
-			shouldDoQuickAuth(
-				{} as any,
-				{ provider: "anthropic", apikey: "key", modelid: "claude-3-5-sonnet" },
-			),
-		).toBe(false)
+		expect(shouldDoQuickAuth({} as any, { provider: "anthropic", apikey: "key", modelid: "claude-3-5-sonnet" })).toBe(false)
 	})
 })
 
@@ -520,7 +507,6 @@ describe("getProviderModelIdKey", () => {
 	it("should return correct key for openai", () => {
 		expect(getProviderModelIdKey("openai", "act")).toBe("actModeOpenAiModelId")
 	})
-
 
 	it("should return null for anthropic (uses generic key)", () => {
 		expect(getProviderModelIdKey("anthropic", "act")).toBeNull()

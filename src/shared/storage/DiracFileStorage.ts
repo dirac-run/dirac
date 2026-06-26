@@ -114,7 +114,9 @@ function atomicWriteFileSync(filePath: string, data: string, mode?: fs.Mode | un
 		// Clean up temp file if it exists; failure here is safe, real error re-thrown below
 		try {
 			fs.unlinkSync(tmpPath)
-		} catch { /* best-effort cleanup */ }
+		} catch {
+			/* best-effort cleanup */
+		}
 		throw error
 	}
 }

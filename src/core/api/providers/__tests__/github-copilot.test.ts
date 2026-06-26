@@ -46,7 +46,9 @@ describe("GithubCopilotHandler", () => {
 		})
 
 		it("should always set the GitHub Copilot description", () => {
-			new GithubCopilotHandler({ apiModelId: "gpt-5" } as any).getModel().info.description!.should.equal("GitHub Copilot Native API")
+			new GithubCopilotHandler({ apiModelId: "gpt-5" } as any)
+				.getModel()
+				.info.description!.should.equal("GitHub Copilot Native API")
 		})
 	})
 

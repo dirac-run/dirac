@@ -58,7 +58,9 @@ describe("OpenAiCodexOAuthManager device auth", () => {
 			}),
 		)
 
-		const result = await mockFetchForTesting(fetchStub as unknown as typeof globalThis.fetch, () => manager.initiateDeviceFlow())
+		const result = await mockFetchForTesting(fetchStub as unknown as typeof globalThis.fetch, () =>
+			manager.initiateDeviceFlow(),
+		)
 
 		result.device_code.should.equal("device-123")
 		result.user_code.should.equal("ABCD-EFGH")
@@ -177,9 +179,11 @@ describe("OpenAiCodexOAuthManager device auth", () => {
 		const fetchStub = sinon.stub().resolves(jsonResponse({}, 404))
 
 		await mockFetchForTesting(fetchStub as unknown as typeof globalThis.fetch, async () => {
-			await manager.initiateDeviceFlow().should.be.rejectedWith(
-				"Device code authentication is not available. Enable device-code login in ChatGPT settings or use browser sign-in.",
-			)
+			await manager
+				.initiateDeviceFlow()
+				.should.be.rejectedWith(
+					"Device code authentication is not available. Enable device-code login in ChatGPT settings or use browser sign-in.",
+				)
 		})
 	})
 })

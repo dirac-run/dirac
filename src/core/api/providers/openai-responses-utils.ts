@@ -65,7 +65,9 @@ export function mapResponseTools(tools: ChatCompletionTool[], strict = false): O
 		if (isWebSearchTool(tool)) {
 			return {
 				type: "web_search",
-				...(tool.search_context_size ? { search_context_size: tool.search_context_size as "low" | "medium" | "high" } : {}),
+				...(tool.search_context_size
+					? { search_context_size: tool.search_context_size as "low" | "medium" | "high" }
+					: {}),
 				...(tool.filters ? { filters: tool.filters } : {}),
 				...(tool.user_location ? { user_location: tool.user_location } : {}),
 				...(tool.external_web_access !== undefined ? { external_web_access: tool.external_web_access } : {}),
@@ -194,10 +196,17 @@ async function* processResponseEvent(
 }
 
 // Handles response.output_item.added: function_call, reasoning (redacted), web_search_call.
-function* handleOutputItemAdded(item: any, functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>): Generator<any> {
+function* handleOutputItemAdded(
+	item: any,
+	functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>,
+): Generator<any> {
 	if (item.type === "function_call" && item.id) {
 		functionCallByItemId.set(item.id, { call_id: item.call_id, name: item.name, id: item.id })
-		yield { id: item.id, type: "tool_calls", tool_call: { call_id: item.call_id, function: { id: item.id, name: item.name, arguments: item.arguments } } }
+		yield {
+			id: item.id,
+			type: "tool_calls",
+			tool_call: { call_id: item.call_id, function: { id: item.id, name: item.name, arguments: item.arguments } },
+		}
 	}
 	if (item.type === "reasoning" && item.encrypted_content && item.id) {
 		yield { type: "reasoning", id: item.id, reasoning: "", redacted_data: item.encrypted_content }
@@ -208,10 +217,17 @@ function* handleOutputItemAdded(item: any, functionCallByItemId: Map<string, { c
 }
 
 // Handles response.output_item.done: function_call (final), reasoning (summary).
-function* handleOutputItemDone(item: any, functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>): Generator<any> {
+function* handleOutputItemDone(
+	item: any,
+	functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>,
+): Generator<any> {
 	if (item.type === "function_call") {
 		if (item.id) functionCallByItemId.set(item.id, { call_id: item.call_id, name: item.name, id: item.id })
-		yield { type: "tool_calls", id: item.id || item.call_id, tool_call: { call_id: item.call_id, function: { id: item.id, name: item.name, arguments: item.arguments } } }
+		yield {
+			type: "tool_calls",
+			id: item.id || item.call_id,
+			tool_call: { call_id: item.call_id, function: { id: item.id, name: item.name, arguments: item.arguments } },
+		}
 	}
 	if (item.type === "reasoning") {
 		yield { type: "reasoning", id: item.id, details: item.summary, reasoning: "" }
@@ -219,18 +235,35 @@ function* handleOutputItemDone(item: any, functionCallByItemId: Map<string, { ca
 }
 
 // Handles streaming function call argument deltas.
-function* handleFunctionCallArgumentsDelta(chunk: any, functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>): Generator<any> {
+function* handleFunctionCallArgumentsDelta(
+	chunk: any,
+	functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>,
+): Generator<any> {
 	const pendingCall = functionCallByItemId.get(chunk.item_id)
 	const functionId = pendingCall?.id || chunk.item_id
-	yield { id: functionId, type: "tool_calls", tool_call: { call_id: pendingCall?.call_id, function: { id: functionId, name: pendingCall?.name, arguments: chunk.delta } } }
+	yield {
+		id: functionId,
+		type: "tool_calls",
+		tool_call: {
+			call_id: pendingCall?.call_id,
+			function: { id: functionId, name: pendingCall?.name, arguments: chunk.delta },
+		},
+	}
 }
 
 // Handles completed function call arguments.
-function* handleFunctionCallArgumentsDone(chunk: any, functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>): Generator<any> {
+function* handleFunctionCallArgumentsDone(
+	chunk: any,
+	functionCallByItemId: Map<string, { call_id?: string; name?: string; id?: string }>,
+): Generator<any> {
 	if (!chunk.item_id || !chunk.name || !chunk.arguments) return
 	const pendingCall = functionCallByItemId.get(chunk.item_id)
 	const functionId = pendingCall?.id || chunk.item_id
-	yield { id: functionId, type: "tool_calls", tool_call: { call_id: pendingCall?.call_id, function: { id: functionId, name: chunk.name, arguments: chunk.arguments } } }
+	yield {
+		id: functionId,
+		type: "tool_calls",
+		tool_call: { call_id: pendingCall?.call_id, function: { id: functionId, name: chunk.name, arguments: chunk.arguments } },
+	}
 }
 
 export class ResponsesWebsocketManager {
@@ -455,7 +488,10 @@ export function shouldRetryWithFullContext(error: unknown, hadPreviousResponseId
 	// Codex seems to return 404 for missing previous_response_id
 	if (status === 404 || message.includes("404")) {
 		// Only retry if the 404 is NOT about an item in the input
-		const details = typeof error === "object" && error && "details" in error ? (error as { details?: { param?: string } }).details : undefined
+		const details =
+			typeof error === "object" && error && "details" in error
+				? (error as { details?: { param?: string } }).details
+				: undefined
 		if (details?.param === "input") {
 			return false
 		}

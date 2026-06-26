@@ -55,10 +55,9 @@ export class LinterFeedbackProvider implements IDiagnosticsProvider {
 		}
 	}
 
-
 	async getDiagnosticsFeedbackForFiles(
 		files: Array<{ filePath: string; content: string; hashes?: string[] }>,
-		preSaveDiagnostics: FileDiagnostics[]
+		preSaveDiagnostics: FileDiagnostics[],
 	): Promise<DiagnosticsFeedbackResult[]> {
 		const postDiagnostics = await pollForNewDiagnostics(
 			async () => await this.getDiagnosticsSafe(files.map((f) => f.filePath)),
@@ -66,7 +65,7 @@ export class LinterFeedbackProvider implements IDiagnosticsProvider {
 			files.map((f) => f.filePath),
 			this.diagnosticsTimeoutMs,
 			this.diagnosticsDelayMs,
-			Math.min(this.diagnosticsTimeoutMs / 2, 500)
+			Math.min(this.diagnosticsTimeoutMs / 2, 500),
 		)
 
 		const newDiagnostics = getNewDiagnostics(preSaveDiagnostics, postDiagnostics)
@@ -88,14 +87,14 @@ export class LinterFeedbackProvider implements IDiagnosticsProvider {
 					newDiagnostics.filter((d) => arePathsEqual(d.filePath, f.filePath)),
 					[DiagnosticSeverity.DIAGNOSTIC_ERROR],
 					new Map([[f.filePath, { lines: f.content.split(/\r?\n/), hashes: f.hashes }]]),
-					5
+					5,
 				)
 
 				return {
 					newProblemsMessage,
 					fixedCount,
 				}
-			})
+			}),
 		)
 	}
 

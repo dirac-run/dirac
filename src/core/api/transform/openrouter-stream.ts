@@ -1,20 +1,16 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import {
-    CLAUDE_SONNET_1M_SUFFIX,
-    ModelInfo,
-    OPENROUTER_PROVIDER_PREFERENCES,
-    openRouterClaudeOpus461mModelId,
-    openRouterClaudeSonnet41mModelId,
-    openRouterClaudeSonnet451mModelId,
-    openRouterClaudeSonnet461mModelId,
-    stripOpenRouterPreset,
+	CLAUDE_SONNET_1M_SUFFIX,
+	ModelInfo,
+	OPENROUTER_PROVIDER_PREFERENCES,
+	openRouterClaudeOpus461mModelId,
+	openRouterClaudeSonnet41mModelId,
+	openRouterClaudeSonnet451mModelId,
+	openRouterClaudeSonnet461mModelId,
+	stripOpenRouterPreset,
 } from "@shared/api"
 import { normalizeOpenaiReasoningEffort } from "@shared/storage/types"
-import {
-    GEMINI_MAX_OUTPUT_TOKENS,
-    shouldSkipReasoningForModel,
-    supportsReasoningEffortForModel,
-} from "@utils/model-utils"
+import { GEMINI_MAX_OUTPUT_TOKENS, shouldSkipReasoningForModel, supportsReasoningEffortForModel } from "@utils/model-utils"
 import OpenAI from "openai"
 import { ChatCompletionTool } from "openai/resources/chat/completions"
 import { convertToOpenAiMessages, sanitizeGeminiMessages } from "./openai-format"

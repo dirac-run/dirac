@@ -20,11 +20,8 @@ export const ModularDiffView = memo(({ diff }: ModularDiffViewProps) => {
 		"[&_.hljs-meta]:font-bold",
 	)
 
-
 	return (
-		<div
-			className={diffViewClasses}
-			>
+		<div className={diffViewClasses}>
 			<ReactMarkdown
 				components={{
 					pre: ({ children }) => <pre>{children}</pre>,

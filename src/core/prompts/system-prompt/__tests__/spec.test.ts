@@ -6,160 +6,159 @@ import { toolSpecFunctionDeclarations, toolSpecFunctionDefinition, toolSpecInput
 import type { SystemPromptContext } from "../types"
 
 const mockContext: SystemPromptContext = {
-    cwd: "/test/project",
-    ide: "TestIde",
-    supportsBrowserUse: true,
-    diracWebToolsEnabled: true,
-    subagentsEnabled: true,
-    providerInfo: { providerId: "test", model: { id: "test-model", info: { supportsPromptCache: false } }, mode: "act" },
-    isTesting: true,
+	cwd: "/test/project",
+	ide: "TestIde",
+	supportsBrowserUse: true,
+	diracWebToolsEnabled: true,
+	subagentsEnabled: true,
+	providerInfo: { providerId: "test", model: { id: "test-model", info: { supportsPromptCache: false } }, mode: "act" },
+	isTesting: true,
 }
 
 const makeTool = (overrides?: Partial<DiracToolSpec>): DiracToolSpec => ({
-    id: DiracDefaultTool.FILE_READ,
-    name: "read_file",
-    description: "Read a file",
-    parameters: [
-        {
-            name: "path",
-            required: true,
-            instruction: "The path of the file to read relative to {{CWD}}",
-        },
-        {
-            name: "optional_param",
-            required: false,
-            instruction: "An optional parameter",
-        },
-    ],
-    ...overrides,
+	id: DiracDefaultTool.FILE_READ,
+	name: "read_file",
+	description: "Read a file",
+	parameters: [
+		{
+			name: "path",
+			required: true,
+			instruction: "The path of the file to read relative to {{CWD}}",
+		},
+		{
+			name: "optional_param",
+			required: false,
+			instruction: "An optional parameter",
+		},
+	],
+	...overrides,
 })
 
 describe("toolSpecFunctionDeclarations (Gemini)", () => {
-    it("includes parameter descriptions from instruction field", () => {
-        const result = toolSpecFunctionDeclarations(makeTool(), mockContext)
+	it("includes parameter descriptions from instruction field", () => {
+		const result = toolSpecFunctionDeclarations(makeTool(), mockContext)
 
-        const pathParam = result.parameters?.properties?.["path"] as any
-        expect(pathParam).to.exist
-        expect(pathParam.description).to.be.a("string")
-        expect(pathParam.description).to.include("path of the file to read")
-    })
+		const pathParam = result.parameters?.properties?.["path"] as any
+		expect(pathParam).to.exist
+		expect(pathParam.description).to.be.a("string")
+		expect(pathParam.description).to.include("path of the file to read")
+	})
 
-    it("includes descriptions for all parameters", () => {
-        const result = toolSpecFunctionDeclarations(makeTool(), mockContext)
+	it("includes descriptions for all parameters", () => {
+		const result = toolSpecFunctionDeclarations(makeTool(), mockContext)
 
-        const props = result.parameters?.properties as any
-        expect(props["path"].description).to.be.a("string").and.not.be.empty
-        expect(props["optional_param"].description).to.be.a("string").and.not.be.empty
-    })
+		const props = result.parameters?.properties as any
+		expect(props["path"].description).to.be.a("string").and.not.be.empty
+		expect(props["optional_param"].description).to.be.a("string").and.not.be.empty
+	})
 
-    it("handles function-type instructions", () => {
-        const tool = makeTool({
-            parameters: [
-                {
-                    name: "dynamic",
-                    required: true,
-                    instruction: (ctx: SystemPromptContext) => `Dynamic value: ${ctx.cwd}`,
-                },
-            ],
-        })
-        const result = toolSpecFunctionDeclarations(tool, mockContext)
+	it("handles function-type instructions", () => {
+		const tool = makeTool({
+			parameters: [
+				{
+					name: "dynamic",
+					required: true,
+					instruction: (ctx: SystemPromptContext) => `Dynamic value: ${ctx.cwd}`,
+				},
+			],
+		})
+		const result = toolSpecFunctionDeclarations(tool, mockContext)
 
-        const param = result.parameters?.properties?.["dynamic"] as any
-        expect(param.description).to.equal("Dynamic value: /test/project")
-    })
+		const param = result.parameters?.properties?.["dynamic"] as any
+		expect(param.description).to.equal("Dynamic value: /test/project")
+	})
 
-    it("omits description when instruction is empty", () => {
-        const tool = makeTool({
-            parameters: [{ name: "empty", required: false, instruction: "" }],
-        })
-        const result = toolSpecFunctionDeclarations(tool, mockContext)
+	it("omits description when instruction is empty", () => {
+		const tool = makeTool({
+			parameters: [{ name: "empty", required: false, instruction: "" }],
+		})
+		const result = toolSpecFunctionDeclarations(tool, mockContext)
 
-        const param = result.parameters?.properties?.["empty"] as any
-        expect(param.description).to.be.undefined
-    })
+		const param = result.parameters?.properties?.["empty"] as any
+		expect(param.description).to.be.undefined
+	})
 })
 
 describe("Gemini and Anthropic parameter descriptions match", () => {
-    it("both converters produce the same description text", () => {
-        const tool = makeTool()
-        const gemini = toolSpecFunctionDeclarations(tool, mockContext)
-        const anthropic = toolSpecInputSchema(tool, mockContext)
+	it("both converters produce the same description text", () => {
+		const tool = makeTool()
+		const gemini = toolSpecFunctionDeclarations(tool, mockContext)
+		const anthropic = toolSpecInputSchema(tool, mockContext)
 
-        const geminiDesc = (gemini.parameters?.properties?.["path"] as any)?.description
-        const anthropicDesc = (anthropic.input_schema as any).properties["path"]?.description
+		const geminiDesc = (gemini.parameters?.properties?.["path"] as any)?.description
+		const anthropicDesc = (anthropic.input_schema as any).properties["path"]?.description
 
-        expect(geminiDesc).to.equal(anthropicDesc)
-    })
+		expect(geminiDesc).to.equal(anthropicDesc)
+	})
 })
 
 describe("native tool placeholder replacement", () => {
-    it("replaces CWD and MULTI_ROOT_HINT placeholders in descriptions", () => {
-        const context: SystemPromptContext = {
-            ...mockContext,
-            isMultiRootEnabled: true,
-        }
-        const tool = makeTool({
-            parameters: [
-                {
-                    name: "path",
-                    required: true,
-                    instruction: "Path (relative to {{CWD}}){{MULTI_ROOT_HINT}}",
-                },
-            ],
-        })
+	it("replaces CWD and MULTI_ROOT_HINT placeholders in descriptions", () => {
+		const context: SystemPromptContext = {
+			...mockContext,
+			isMultiRootEnabled: true,
+		}
+		const tool = makeTool({
+			parameters: [
+				{
+					name: "path",
+					required: true,
+					instruction: "Path (relative to {{CWD}}){{MULTI_ROOT_HINT}}",
+				},
+			],
+		})
 
-        const openAI = toolSpecFunctionDefinition(tool, context)
-        const anthropic = toolSpecInputSchema(tool, context)
-        const gemini = toolSpecFunctionDeclarations(tool, context)
+		const openAI = toolSpecFunctionDefinition(tool, context)
+		const anthropic = toolSpecInputSchema(tool, context)
+		const gemini = toolSpecFunctionDeclarations(tool, context)
 
-        const openAIDesc = ((openAI as any).function.parameters.properties.path as any).description as string
-        const anthropicDesc = ((anthropic as any).input_schema.properties.path as any).description as string
-        const geminiDesc = (gemini.parameters?.properties?.["path"] as any)?.description as string
+		const openAIDesc = ((openAI as any).function.parameters.properties.path as any).description as string
+		const anthropicDesc = ((anthropic as any).input_schema.properties.path as any).description as string
+		const geminiDesc = (gemini.parameters?.properties?.["path"] as any)?.description as string
 
-        for (const desc of [openAIDesc, anthropicDesc, geminiDesc]) {
-            expect(desc).to.include("/test/project")
-            expect(desc).to.include("Use @workspace:path syntax")
-            expect(desc).to.not.include("{{CWD}}")
-            expect(desc).to.not.include("{{MULTI_ROOT_HINT}}")
-        }
-    })
+		for (const desc of [openAIDesc, anthropicDesc, geminiDesc]) {
+			expect(desc).to.include("/test/project")
+			expect(desc).to.include("Use @workspace:path syntax")
+			expect(desc).to.not.include("{{CWD}}")
+			expect(desc).to.not.include("{{MULTI_ROOT_HINT}}")
+		}
+	})
 })
 
-
 describe("tools without parameters", () => {
-    const noParamTool: DiracToolSpec = {
-        id: DiracDefaultTool.LIST_SKILLS,
-        name: "list_skills",
-        description: "List skills",
-    }
+	const noParamTool: DiracToolSpec = {
+		id: DiracDefaultTool.LIST_SKILLS,
+		name: "list_skills",
+		description: "List skills",
+	}
 
-    it("OpenAI: includes empty parameters object", () => {
-        const result = toolSpecFunctionDefinition(noParamTool, mockContext) as any
-        expect(result.function.parameters).to.exist
-        expect(result.function.parameters).to.deep.equal({
-            type: "object",
-            properties: {},
-            required: [],
-            additionalProperties: false,
-        })
-    })
+	it("OpenAI: includes empty parameters object", () => {
+		const result = toolSpecFunctionDefinition(noParamTool, mockContext) as any
+		expect(result.function.parameters).to.exist
+		expect(result.function.parameters).to.deep.equal({
+			type: "object",
+			properties: {},
+			required: [],
+			additionalProperties: false,
+		})
+	})
 
-    it("Anthropic: includes empty properties and required in input_schema", () => {
-        const result = toolSpecInputSchema(noParamTool, mockContext)
-        expect(result.input_schema).to.deep.equal({
-            type: "object",
-            properties: {},
-            required: [],
-        })
-    })
+	it("Anthropic: includes empty properties and required in input_schema", () => {
+		const result = toolSpecInputSchema(noParamTool, mockContext)
+		expect(result.input_schema).to.deep.equal({
+			type: "object",
+			properties: {},
+			required: [],
+		})
+	})
 
-    it("Gemini: includes empty parameters object", () => {
-        const result = toolSpecFunctionDeclarations(noParamTool, mockContext)
-        expect(result.parameters).to.exist
-        expect(result.parameters).to.deep.equal({
-            type: "OBJECT",
-            properties: {},
-            required: [],
-        })
-    })
+	it("Gemini: includes empty parameters object", () => {
+		const result = toolSpecFunctionDeclarations(noParamTool, mockContext)
+		expect(result.parameters).to.exist
+		expect(result.parameters).to.deep.equal({
+			type: "OBJECT",
+			properties: {},
+			required: [],
+		})
+	})
 })

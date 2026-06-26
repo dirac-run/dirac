@@ -7,8 +7,8 @@ import { refreshToolRegistryForWorkspace } from "../../../task/tools/registry/re
  * prompt build time, not registered into DiracToolSet here.
  */
 export function registerDiracToolSets(): void {
-    void refreshToolRegistryForWorkspace({
-        includeUserTools: false,
-        toggles: StateManager.get().getGlobalSettingsKey("toolToggles") || {},
-    })
+	void refreshToolRegistryForWorkspace({
+		includeUserTools: false,
+		toggles: StateManager.get().getGlobalSettingsKey("toolToggles") || {},
+	})
 }

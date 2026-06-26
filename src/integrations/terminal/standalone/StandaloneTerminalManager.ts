@@ -10,11 +10,11 @@
 
 import { DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT } from "../constants"
 import type {
-    BackgroundCommand,
-    ITerminalManager,
-    TerminalInfo,
-    TerminalProcessResultPromise,
-    TerminalProfileChangeResult,
+	BackgroundCommand,
+	ITerminalManager,
+	TerminalInfo,
+	TerminalProcessResultPromise,
+	TerminalProfileChangeResult,
 } from "../types"
 import { StandaloneTerminalRegistry } from "./StandaloneTerminalRegistry"
 import { TerminalProcessManager } from "./TerminalProcessManager"
@@ -236,10 +236,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Handle terminal management when the terminal profile changes. */
 	handleTerminalProfileChange(newShellPath: string | undefined): TerminalProfileChangeResult {
-		const closedCount = this.closeTerminals(
-			(terminal) => !terminal.busy && terminal.shellPath !== newShellPath,
-			false,
-		)
+		const closedCount = this.closeTerminals((terminal) => !terminal.busy && terminal.shellPath !== newShellPath, false)
 		const busyTerminals = this.filterTerminals((terminal) => terminal.busy && terminal.shellPath !== newShellPath)
 		return { closedCount, busyTerminals }
 	}

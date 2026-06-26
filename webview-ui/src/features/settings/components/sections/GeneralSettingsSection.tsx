@@ -43,7 +43,8 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 					</Tooltip>
 
 					<p className="text-sm mt-[5px] text-description">
-						Help improve Dirac by sending usage data and error reports. No code, prompts, or personal information are ever sent. 
+						Help improve Dirac by sending usage data and error reports. No code, prompts, or personal information are
+						ever sent.
 					</p>
 				</div>
 

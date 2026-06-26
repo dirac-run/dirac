@@ -1,7 +1,6 @@
 import path from "node:path"
 import { PATH_REGEX, extractFirstPath } from "@shared/string"
 
-
 /**
  * Wraps text in OSC 8 escape sequences to create a terminal link.
  */
@@ -46,4 +45,3 @@ export function getPathUrl(filePath: string): string {
 }
 
 export { extractFirstPath }
-

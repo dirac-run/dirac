@@ -6,11 +6,11 @@
 import type { TelemetryEventEmitter } from "./TelemetryEventEmitter"
 import { TELEMETRY_EVENTS } from "./TelemetryEvents"
 import type {
-    TerminalHangStage,
-    TerminalOutputFailureReason,
-    TerminalOutputMethod,
-    TerminalType,
-    TerminalUserInterventionAction
+	TerminalHangStage,
+	TerminalOutputFailureReason,
+	TerminalOutputMethod,
+	TerminalType,
+	TerminalUserInterventionAction,
 } from "./TelemetryTypes"
 
 export class TerminalTelemetry {

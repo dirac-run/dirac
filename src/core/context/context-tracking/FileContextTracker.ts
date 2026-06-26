@@ -32,7 +32,11 @@ export class FileContextTracker {
 	private recentlyModifiedFiles = new Set<string>()
 	private recentlyEditedByDirac = new Set<string>()
 
-	constructor(controller: Controller, taskId: string, private watcherFactory: WatcherFactory = chokidar.watch) {
+	constructor(
+		controller: Controller,
+		taskId: string,
+		private watcherFactory: WatcherFactory = chokidar.watch,
+	) {
 		this.controller = controller
 		this.taskId = taskId
 	}

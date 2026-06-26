@@ -81,11 +81,11 @@ const ToolTogglePanel = ({ renderSectionHeader }: ToolTogglePanelProps) => {
 	const handleToggle = useCallback(
 		(toolId: string, enabled: boolean) => {
 			const newToggles = { ...toolToggles, [toolId]: enabled }
-			StateServiceClient.updateSettings(
-				UpdateSettingsRequest.create({ toolToggles: JSON.stringify(newToggles) }),
-			).catch((error: unknown) => {
-				console.error("Failed to toggle tool:", error)
-			})
+			StateServiceClient.updateSettings(UpdateSettingsRequest.create({ toolToggles: JSON.stringify(newToggles) })).catch(
+				(error: unknown) => {
+					console.error("Failed to toggle tool:", error)
+				},
+			)
 		},
 		[toolToggles],
 	)

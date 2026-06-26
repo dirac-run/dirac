@@ -152,7 +152,6 @@ describe("parser", () => {
 			expect(result.prompt).toBe("analyze")
 		})
 
-
 		it("should not extract image paths that do not exist", () => {
 			vi.mocked(fs.existsSync).mockReturnValue(false)
 			const input = "analyze this image @/nonexistent/image.png"
@@ -188,7 +187,6 @@ describe("parser", () => {
 			expect(result.imagePaths).toContain("./image.png")
 			expect(result.prompt).toBe("this is a path:")
 		})
-
 	})
 
 	describe("imageFileToDataUrl", () => {

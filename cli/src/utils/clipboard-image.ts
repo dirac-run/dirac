@@ -54,7 +54,9 @@ export async function readImageFromClipboard(): Promise<string | null> {
 					return "ERR_NO_IMAGE"
 				end if
 			`
-			const result = execSync(`osascript -e '${script.replace(/\n/g, " ")}'`).toString().trim()
+			const result = execSync(`osascript -e '${script.replace(/\n/g, " ")}'`)
+				.toString()
+				.trim()
 			if (result === "OK" && fs.existsSync(tmpPath)) {
 				return tmpPath
 			}

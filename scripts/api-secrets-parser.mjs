@@ -257,7 +257,6 @@ function applySpecialCaseMappings(providerApiKeyMap, apiSecretsFields, assignedF
 		// but requires project ID and region configuration
 		// These are already captured if they exist in ApiHandlerSecrets
 	}
-
 }
 /**
  * Generates display name for an API key field

@@ -61,22 +61,22 @@ export const OpenAiCodexProvider = ({ showModelOptions, isPopup, currentMode }: 
 				</p>
 			</div>
 
-				<div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-					{openAiCodexIsAuthenticated ? (
-						<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-							<span style={{ fontSize: "12px" }}>
-								Authenticated as <strong>{openAiCodexEmail || "ChatGPT User"}</strong>
-							</span>
-							<VSCodeButton appearance="secondary" onClick={handleSignOut} style={{ height: "24px" }}>
-								Sign Out
-							</VSCodeButton>
-						</div>
-					) : (
-						<VSCodeButton disabled={isAuthenticating} onClick={handleSignIn}>
-							{isAuthenticating ? "Authenticating..." : "Sign in with ChatGPT"}
+			<div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+				{openAiCodexIsAuthenticated ? (
+					<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+						<span style={{ fontSize: "12px" }}>
+							Authenticated as <strong>{openAiCodexEmail || "ChatGPT User"}</strong>
+						</span>
+						<VSCodeButton appearance="secondary" onClick={handleSignOut} style={{ height: "24px" }}>
+							Sign Out
 						</VSCodeButton>
-					)}
-				</div>
+					</div>
+				) : (
+					<VSCodeButton disabled={isAuthenticating} onClick={handleSignIn}>
+						{isAuthenticating ? "Authenticating..." : "Sign in with ChatGPT"}
+					</VSCodeButton>
+				)}
+			</div>
 
 			{showModelOptions && (
 				<>

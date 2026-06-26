@@ -1,23 +1,23 @@
 import {
-    LiteLLMModelInfo,
-    OpenAiCompatibleModelInfo,
-    OpenRouterModelInfo,
-    ModelsApiConfiguration as ProtoApiConfiguration,
-    ApiProvider as ProtoApiProvider,
-    OcaModelInfo as ProtoOcaModelInfo,
-    ThinkingConfig,
-    OpenAiCompatibleProfile,
+	LiteLLMModelInfo,
+	OpenAiCompatibleModelInfo,
+	OpenRouterModelInfo,
+	ModelsApiConfiguration as ProtoApiConfiguration,
+	ApiProvider as ProtoApiProvider,
+	OcaModelInfo as ProtoOcaModelInfo,
+	ThinkingConfig,
+	OpenAiCompatibleProfile,
 } from "@shared/proto/dirac/models"
 import {
-    ApiConfiguration,
-    ApiProvider,
-    LiteLLMModelInfo as AppLiteLLMModelInfo,
-    OpenAiCompatibleModelInfo as AppOpenAiCompatibleModelInfo,
-    OpenAiCompatibleProfile as AppOpenAiCompatibleProfile,
-    BedrockModelId,
-    ModelInfo,
-    openAiModelInfoSaneDefaults,
-    OcaModelInfo,
+	ApiConfiguration,
+	ApiProvider,
+	LiteLLMModelInfo as AppLiteLLMModelInfo,
+	OpenAiCompatibleModelInfo as AppOpenAiCompatibleModelInfo,
+	OpenAiCompatibleProfile as AppOpenAiCompatibleProfile,
+	BedrockModelId,
+	ModelInfo,
+	openAiModelInfoSaneDefaults,
+	OcaModelInfo,
 } from "../../api"
 import { OpenaiReasoningEffort } from "../../storage/types"
 
@@ -220,9 +220,7 @@ function convertOpenAiCompatibleModelInfoToProto(
 
 // Convert proto OpenAiCompatibleModelInfo to application OpenAiCompatibleModelInfo
 // Convert application OpenAiCompatibleProfile to proto OpenAiCompatibleProfile
-function convertOpenAiCompatibleProfileToProto(
-	profile: AppOpenAiCompatibleProfile,
-): OpenAiCompatibleProfile {
+function convertOpenAiCompatibleProfileToProto(profile: AppOpenAiCompatibleProfile): OpenAiCompatibleProfile {
 	return {
 		name: profile.name,
 		baseUrl: profile.baseUrl,
@@ -235,9 +233,7 @@ function convertOpenAiCompatibleProfileToProto(
 }
 
 // Convert proto OpenAiCompatibleProfile to application OpenAiCompatibleProfile
-function convertProtoToOpenAiCompatibleProfile(
-	profile: OpenAiCompatibleProfile,
-): AppOpenAiCompatibleProfile {
+function convertProtoToOpenAiCompatibleProfile(profile: OpenAiCompatibleProfile): AppOpenAiCompatibleProfile {
 	return {
 		name: profile.name,
 		baseUrl: profile.baseUrl,
@@ -248,7 +244,6 @@ function convertProtoToOpenAiCompatibleProfile(
 		azureApiVersion: profile.azureApiVersion,
 	}
 }
-
 
 function convertProtoToOpenAiCompatibleModelInfo(
 	info: OpenAiCompatibleModelInfo | undefined,

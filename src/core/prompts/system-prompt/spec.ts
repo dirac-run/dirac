@@ -384,7 +384,7 @@ export function openAIToolToAnthropic(openAITool: OpenAITool): AnthropicTool {
 					? {
 							properties: func.parameters?.properties,
 							required: (func.parameters as any)?.required || [],
-					  }
+						}
 					: {}),
 			},
 		}

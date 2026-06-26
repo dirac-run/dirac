@@ -24,7 +24,8 @@ export const formatResponse = {
 
 	toolDenied: () => `The user denied this operation.`,
 
-	toolDeniedWithFeedback: (feedback: string) => `The user denied this operation and provided the following feedback:\n<feedback>\n${feedback}\n</feedback>`,
+	toolDeniedWithFeedback: (feedback: string) =>
+		`The user denied this operation and provided the following feedback:\n<feedback>\n${feedback}\n</feedback>`,
 
 	toolError: (error?: string) => `The tool execution failed with the following error:\n<error>\n${error}\n</error>`,
 
@@ -37,8 +38,7 @@ export const formatResponse = {
 	filePermissionError: (path: string, operation: string) =>
 		`Cannot ${operation} '${path}': Permission denied. You may need to ask the user to check file permissions or try a different path.`,
 
-	readOnlyError: (path: string) =>
-		`Cannot write to '${path}': Read-only file system.`,
+	readOnlyError: (path: string) => `Cannot write to '${path}': Read-only file system.`,
 
 	permissionDeniedError: (reason: string) =>
 		`Command execution blocked by DIRAC_COMMAND_PERMISSIONS: ${reason}. You must try a different approach or ask the user to update the permission settings.`,
@@ -173,20 +173,14 @@ export const formatResponse = {
 			return aParts.length - bParts.length
 		})
 
-		const filtered = diracIgnoreController
-			? sorted.filter((file) => diracIgnoreController.validateAccess(file.path))
-			: sorted
+		const filtered = diracIgnoreController ? sorted.filter((file) => diracIgnoreController.validateAccess(file.path)) : sorted
 
 		const formatted = filtered.map((file) => {
 			let relativePath = path.relative(absolutePath, file.path).toPosix()
 			if (relativePath === "" && !file.isDirectory) {
 				relativePath = path.basename(file.path)
 			}
-			const displayPath = file.isDirectory
-				? relativePath.endsWith("/")
-					? relativePath
-					: `${relativePath}/`
-				: relativePath
+			const displayPath = file.isDirectory ? (relativePath.endsWith("/") ? relativePath : `${relativePath}/`) : relativePath
 			const lineCountSuffix = file.lineCount !== undefined ? ` ${file.lineCount} lines` : ""
 			return `${displayPath}${lineCountSuffix}`
 		})

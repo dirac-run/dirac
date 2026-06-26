@@ -5,5 +5,5 @@ import { use_skill_spec, UseSkillTool } from "./UseSkillTool"
 export const spec: DiracToolSpec = use_skill_spec
 
 export function create(): IDiracTool {
-    return new UseSkillTool()
+	return new UseSkillTool()
 }

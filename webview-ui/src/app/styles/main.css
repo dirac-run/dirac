@@ -160,7 +160,6 @@ vscode-dropdown::part(listbox) {
 	display: none;
 }
 
-
 /* Context mentions */
 
 /* Needs to match the highlightLayerRef in ChatTextArea for proper positioning */
@@ -245,7 +244,6 @@ vscode-dropdown::part(listbox) {
 	line-height: var(--vscode-editor-line-height);
 }
 
-
 @utility chkpt-dotted-line {
 	background-image: linear-gradient(to right, var(--chkpt-color) 50%, transparent 50%);
 	background-size: 4px 1px;
@@ -258,7 +256,15 @@ vscode-dropdown::part(listbox) {
 		linear-gradient(to bottom, var(--chkpt-color) 50%, transparent 50%),
 		linear-gradient(to right, var(--chkpt-color) 50%, transparent 50%),
 		linear-gradient(to bottom, var(--chkpt-color) 50%, transparent 50%);
-	background-size: 4px 1px, 1px 4px, 4px 1px, 1px 4px;
+	background-size:
+		4px 1px,
+		1px 4px,
+		4px 1px,
+		1px 4px;
 	background-repeat: repeat-x, repeat-y, repeat-x, repeat-y;
-	background-position: 0 0, 100% 0, 0 100%, 0 0;
+	background-position:
+		0 0,
+		100% 0,
+		0 100%,
+		0 0;
 }

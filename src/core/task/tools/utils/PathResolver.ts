@@ -1,6 +1,6 @@
-import { resolveWorkspacePath } from "@/core/workspace";
-import type { ToolValidator } from "../ToolValidator";
-import type { TaskConfig } from "../types/TaskConfig";
+import { resolveWorkspacePath } from "@/core/workspace"
+import type { ToolValidator } from "../ToolValidator"
+import type { TaskConfig } from "../types/TaskConfig"
 
 /**
  * Utility class for resolving and validating file paths within a task context

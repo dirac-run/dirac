@@ -21,10 +21,7 @@ const FILE_READING_COMMANDS = [
  * Validates terminal commands against an access checker.
  * Returns the first file argument that is blocked, or undefined when the command is allowed.
  */
-export function findBlockedCommandArgument(
-	command: string,
-	validateAccess: (filePath: string) => boolean,
-): string | undefined {
+export function findBlockedCommandArgument(command: string, validateAccess: (filePath: string) => boolean): string | undefined {
 	const parts = command.trim().split(/\s+/)
 	const baseCommand = parts[0].toLowerCase()
 	if (!FILE_READING_COMMANDS.includes(baseCommand)) {

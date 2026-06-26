@@ -167,11 +167,16 @@ describe("DiffContentProvider", () => {
 		it("computeDiffCount count matches computeDiffSet non-excluded file count", async () => {
 			// 3 files: 1 excluded (node_modules), 1 with whitespace-only diff, 1 real diff
 			gitDiffSummaryFiles = [{ file: "src/app.ts" }, { file: "src/util.ts" }, { file: "node_modules/pkg/index.js" }]
-			mockGit.show = sandbox.stub()
-				.onFirstCall().resolves("const x = 1")  // src/app.ts before
-				.onSecondCall().resolves("const x = 2")  // src/app.ts after (real diff)
-				.onThirdCall().resolves("const y = 1")   // src/util.ts before
-				.onCall(3).resolves("  const y = 1  ")   // src/util.ts after (whitespace-only)
+			mockGit.show = sandbox
+				.stub()
+				.onFirstCall()
+				.resolves("const x = 1") // src/app.ts before
+				.onSecondCall()
+				.resolves("const x = 2") // src/app.ts after (real diff)
+				.onThirdCall()
+				.resolves("const y = 1") // src/util.ts before
+				.onCall(3)
+				.resolves("  const y = 1  ") // src/util.ts after (whitespace-only)
 
 			const provider = new DiffContentProvider("/mock/cwd", "task-123")
 			const diffSet = await provider.computeDiffSet(mockGit as unknown as SimpleGit, "abc123", "def456")

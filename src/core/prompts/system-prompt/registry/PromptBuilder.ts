@@ -71,7 +71,6 @@ export class PromptBuilder {
 			.trim() // Final trim
 	}
 
-
 	private formatSkillsSection(skills: SkillMetadata[]): string {
 		if (skills.length === 0) return ""
 

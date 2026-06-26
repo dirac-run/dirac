@@ -132,9 +132,7 @@ export async function listFiles(dirPath: string, recursive: boolean, limit: numb
 		stats: true,
 	}
 
-	const entries = recursive
-		? await globbyLevelByLevel(limit, options)
-		: (await globby("*", options as any)).slice(0, limit)
+	const entries = recursive ? await globbyLevelByLevel(limit, options) : (await globby("*", options as any)).slice(0, limit)
 
 	const fileInfos: FileInfo[] = await Promise.all(
 		(entries as any).map(async (entry: any) => {

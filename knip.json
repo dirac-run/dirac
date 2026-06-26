@@ -1,5 +1,7 @@
 {
-	"ignoreWorkspaces": ["cli"],
+	"ignoreWorkspaces": [
+		"cli"
+	],
 	"entry": [
 		"src/extension.ts",
 		"src/standalone/dirac-core.ts",

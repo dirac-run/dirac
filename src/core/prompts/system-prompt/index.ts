@@ -15,9 +15,9 @@ export * from "./types"
  * Get the system prompt
  */
 export async function getSystemPrompt(context: SystemPromptContext, toolSnapshot: ToolRequestSnapshot) {
-    const registry = PromptRegistry.getInstance()
-    const systemPrompt = await registry.get(context, toolSnapshot)
-    Logger.log(`[DEBUG] System prompt char length: ${systemPrompt.length}`)
+	const registry = PromptRegistry.getInstance()
+	const systemPrompt = await registry.get(context, toolSnapshot)
+	Logger.log(`[DEBUG] System prompt char length: ${systemPrompt.length}`)
 
-    return { systemPrompt }
+	return { systemPrompt }
 }

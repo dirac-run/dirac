@@ -25,43 +25,41 @@ const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: n
 }
 
 export const useFileHandlingTrait = (): InputTrait => {
-	const readImageFiles = useCallback(
-		async (imageFiles: File[], context: ModularInputContext): Promise<(string | null)[]> => {
-			return Promise.all(
-				imageFiles.map(
-					(file) =>
-						new Promise<string | null>((resolve) => {
-							const reader = new FileReader()
-							reader.onloadend = async () => {
-								if (reader.error) {
-									console.error("Error reading file:", reader.error)
-									resolve(null)
-								} else {
-									const result = reader.result
-									if (typeof result === "string") {
-										try {
-											await getImageDimensions(result)
-											resolve(result)
-										} catch (error) {
-											console.warn((error as Error).message)
-											// In a real implementation, we would show an error message to the user
-											resolve(null)
-										}
-									} else {
+	const readImageFiles = useCallback(async (imageFiles: File[], context: ModularInputContext): Promise<(string | null)[]> => {
+		return Promise.all(
+			imageFiles.map(
+				(file) =>
+					new Promise<string | null>((resolve) => {
+						const reader = new FileReader()
+						reader.onloadend = async () => {
+							if (reader.error) {
+								console.error("Error reading file:", reader.error)
+								resolve(null)
+							} else {
+								const result = reader.result
+								if (typeof result === "string") {
+									try {
+										await getImageDimensions(result)
+										resolve(result)
+									} catch (error) {
+										console.warn((error as Error).message)
+										// In a real implementation, we would show an error message to the user
 										resolve(null)
 									}
+								} else {
+									resolve(null)
 								}
 							}
-							reader.readAsDataURL(file)
-						})
-				)
-			)
-		},
-		[]
-	)
+						}
+						reader.readAsDataURL(file)
+					}),
+			),
+		)
+	}, [])
 
 	const onPaste = async (e: React.ClipboardEvent, context: ModularInputContext) => {
-		const { inputValue, setInputValue, cursorPosition, setCursorPosition, selectedImages, setSelectedImages, selectedFiles } = context
+		const { inputValue, setInputValue, cursorPosition, setCursorPosition, selectedImages, setSelectedImages, selectedFiles } =
+			context
 		const items = e.clipboardData.items
 		const acceptedTypes = ["png", "jpeg", "webp", "gif"]
 		const imageItems = Array.from(items).filter((item) => {
@@ -131,7 +129,8 @@ export const useFileHandlingTrait = (): InputTrait => {
 
 	const onDrop = async (e: React.DragEvent, context: ModularInputContext) => {
 		e.preventDefault()
-		const { inputValue, setInputValue, cursorPosition, setCursorPosition, selectedImages, setSelectedImages, selectedFiles } = context
+		const { inputValue, setInputValue, cursorPosition, setCursorPosition, selectedImages, setSelectedImages, selectedFiles } =
+			context
 
 		// VSCode Explorer Drop Handling
 		let uris: string[] = []
@@ -152,7 +151,7 @@ export const useFileHandlingTrait = (): InputTrait => {
 		}
 
 		const validUris = uris.filter(
-			(uri) => uri && (uri.startsWith("vscode-file:") || uri.startsWith("file:") || uri.startsWith("vscode-remote:"))
+			(uri) => uri && (uri.startsWith("vscode-file:") || uri.startsWith("file:") || uri.startsWith("vscode-remote:")),
 		)
 
 		if (validUris.length > 0) {

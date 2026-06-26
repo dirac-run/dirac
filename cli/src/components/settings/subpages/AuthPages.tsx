@@ -33,9 +33,7 @@ export const CodexAuthPage: React.FC<CodexAuthPageProps> = ({ codexAuthUrl, copi
 					)}
 				</Box>
 				<Box marginTop={1}>
-					<Text color="yellow">
-						Note: If you are on a remote machine, you may need to set up SSH port forwarding:
-					</Text>
+					<Text color="yellow">Note: If you are on a remote machine, you may need to set up SSH port forwarding:</Text>
 				</Box>
 				<Text color="gray">ssh -L 1455:localhost:1455 your-remote-host</Text>
 			</Box>

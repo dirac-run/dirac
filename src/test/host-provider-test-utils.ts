@@ -25,7 +25,7 @@ export function setVscodeHostProviderMock(options?: {
 	getCallbackUri?: (path: string) => Promise<string>
 	getBinaryLocation?: (name: string) => Promise<string>
 	extensionFsPath?: string
-	globalStorageFsPath?: string,
+	globalStorageFsPath?: string
 	getEnvironmentVariables?: (cwd: string) => Promise<{ [key: string]: string | undefined } | undefined>
 }) {
 	HostProvider.reset()
@@ -41,6 +41,6 @@ export function setVscodeHostProviderMock(options?: {
 		options?.getBinaryLocation ?? (async (n: string) => `/mock/path/to/binary/${n}`),
 		options?.extensionFsPath ?? "/mock/path/to/extension",
 		options?.globalStorageFsPath ?? "/mock/path/to/globalstorage",
-		options?.getEnvironmentVariables ?? (async (_cwd: string) => undefined)
+		options?.getEnvironmentVariables ?? (async (_cwd: string) => undefined),
 	)
 }

@@ -1,7 +1,6 @@
 import { ChevronDownIcon, ChevronRightIcon, ArrowUpIcon, ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon } from "lucide-react"
 import { DiracMessageType } from "@shared/ExtensionMessage"
 
-
 import React, { memo, useCallback, useMemo, useState } from "react"
 import { useChatStore } from "@/features/chat/store/chatStore"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
@@ -18,7 +17,6 @@ interface TokenDetail {
 	title: string
 	value?: number
 	icon: any
-
 }
 
 interface TaskContextWindowButtonsProps {
@@ -70,8 +68,6 @@ const TOKEN_DETAILS_CONFIG: Omit<TokenDetail, "value">[] = [
 	{ title: "Completion Tokens", icon: ArrowDownIcon },
 	{ title: "Cache Writes", icon: ArrowLeftIcon },
 	{ title: "Cache Reads", icon: ArrowRightIcon },
-
-
 ]
 
 const TokenUsageDetails = memo<TokenUsageInfoProps>(({ tokensIn, tokensOut, cacheWrites, cacheReads }) => {

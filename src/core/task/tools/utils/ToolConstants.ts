@@ -10,28 +10,27 @@ import type { ToolParamName, ToolUse } from "@core/assistant-message"
  * Keep this in sync with the TaskConfig interface
  */
 export const TASK_CONFIG_KEYS = [
-    "taskId",
-    "ulid",
-    "cwd",
-    "mode",
-    "strictPlanModeEnabled",
-    "yoloModeToggled",
-    "doubleCheckCompletionEnabled",
-    "vscodeTerminalExecutionMode",
-    "enableParallelToolCalling",
-    "isSubagentExecution",
-    "backgroundEditEnabled",
-    "taskState",
-    "messageState",
-    "api",
-    "services",
-    "autoApprovalSettings",
-    "autoApprover",
-    "browserSettings",
-    "callbacks",
-    "coordinator",
-    "context",
-
+	"taskId",
+	"ulid",
+	"cwd",
+	"mode",
+	"strictPlanModeEnabled",
+	"yoloModeToggled",
+	"doubleCheckCompletionEnabled",
+	"vscodeTerminalExecutionMode",
+	"enableParallelToolCalling",
+	"isSubagentExecution",
+	"backgroundEditEnabled",
+	"taskState",
+	"messageState",
+	"api",
+	"services",
+	"autoApprovalSettings",
+	"autoApprover",
+	"browserSettings",
+	"callbacks",
+	"coordinator",
+	"context",
 ] as const
 
 /**
@@ -39,14 +38,14 @@ export const TASK_CONFIG_KEYS = [
  * Keep this in sync with the TaskServices interface
  */
 export const TASK_SERVICES_KEYS = [
-    "browserSession",
-    "urlContentFetcher",
-    "diffViewProvider",
-    "fileContextTracker",
-    "diracIgnoreController",
-    "commandPermissionController",
-    "contextManager",
-    "stateManager",
+	"browserSession",
+	"urlContentFetcher",
+	"diffViewProvider",
+	"fileContextTracker",
+	"diracIgnoreController",
+	"commandPermissionController",
+	"contextManager",
+	"stateManager",
 ] as const
 
 /**
@@ -54,19 +53,18 @@ export const TASK_SERVICES_KEYS = [
  * Keep this in sync with the TaskCallbacks interface
  */
 export const TASK_CALLBACKS_KEYS = [
-    "saveCheckpoint",
-    "executeCommandTool",
-    "doesLatestTaskCompletionHaveNewChanges",
-    "shouldAutoApproveToolWithPath",
-    "postStateToWebview",
-    "cancelTask",
-    "switchToActMode",
-    "setActiveHookExecution",
-    "clearActiveHookExecution",
-    "getActiveHookExecution",
-    "runUserPromptSubmitHook",
-    "resetTransientState",
-
+	"saveCheckpoint",
+	"executeCommandTool",
+	"doesLatestTaskCompletionHaveNewChanges",
+	"shouldAutoApproveToolWithPath",
+	"postStateToWebview",
+	"cancelTask",
+	"switchToActMode",
+	"setActiveHookExecution",
+	"clearActiveHookExecution",
+	"getActiveHookExecution",
+	"runUserPromptSubmitHook",
+	"resetTransientState",
 ] as const
 
 /**
@@ -74,12 +72,12 @@ export const TASK_CALLBACKS_KEYS = [
  * Used for validation in ToolErrorHandler
  */
 export const PATH_REQUIRED_TOOLS = [
-    "read_file",
-    "write_to_file",
+	"read_file",
+	"write_to_file",
 
-    "new_rule",
-    "list_files",
-    "search_files",
+	"new_rule",
+	"list_files",
+	"search_files",
 ] as const
 
 /**
@@ -110,17 +108,17 @@ export type BrowserAction = (typeof BROWSER_ACTIONS)[number]
  * - Matches '<' or '</' optionally followed by any subset of characters from the tag name
  */
 export function removeClosingTag(block: ToolUse, tag: ToolParamName, text?: any): string {
-    const stringText = text === undefined || text === null ? "" : String(text)
-    if (!stringText) {
-        return ""
-    }
+	const stringText = text === undefined || text === null ? "" : String(text)
+	if (!stringText) {
+		return ""
+	}
 
-    const tagRegex = new RegExp(
-        `\\s?</?${tag
-            .split("")
-            .map((char) => `(?:${char})?`)
-            .join("")}$`,
-        "g",
-    )
-    return stringText.replace(tagRegex, "")
+	const tagRegex = new RegExp(
+		`\\s?</?${tag
+			.split("")
+			.map((char) => `(?:${char})?`)
+			.join("")}$`,
+		"g",
+	)
+	return stringText.replace(tagRegex, "")
 }

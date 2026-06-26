@@ -73,7 +73,7 @@ export class DiracSessionEmitter {
 		return this
 	}
 
-		once<K extends keyof DiracSessionEvents>(event: K, listener: DiracSessionEvents[K]): this {
+	once<K extends keyof DiracSessionEvents>(event: K, listener: DiracSessionEvents[K]): this {
 		// For once: if we have a last payload, fire immediately and don't register
 		const last = this.lastPayload.get(event as string)
 		if (last) {

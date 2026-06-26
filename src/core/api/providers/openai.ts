@@ -115,8 +115,7 @@ export class OpenAiHandler implements ApiHandler {
 			finalTools.push({ type: "web_search" } as any)
 		}
 		const modelId = this.options.openAiModelId ?? ""
-		const isDeepseek =
-			modelId.toLowerCase().includes("deepseek")
+		const isDeepseek = modelId.toLowerCase().includes("deepseek")
 		const isR1FormatRequired = this.options.openAiModelInfo?.isR1FormatRequired ?? false
 		const isReasoningModelFamily =
 			["o1", "o3", "o4", "gpt-5"].some((prefix) => modelId.includes(prefix)) && !modelId.includes("chat")
@@ -166,7 +165,6 @@ export class OpenAiHandler implements ApiHandler {
 		if (requestedEffort !== "none") {
 			reasoningEffort = requestedEffort as ChatCompletionReasoningEffort
 		}
-
 
 		if (isReasoningModelFamily) {
 			openAiMessages = [

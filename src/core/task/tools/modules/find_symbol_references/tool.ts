@@ -5,5 +5,5 @@ import { find_symbol_references_spec, FindSymbolReferencesTool } from "./FindSym
 export const spec: DiracToolSpec = find_symbol_references_spec
 
 export function create(): IDiracTool {
-    return new FindSymbolReferencesTool()
+	return new FindSymbolReferencesTool()
 }

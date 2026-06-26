@@ -49,7 +49,11 @@ class TestBoundaryDiffViewProvider extends DiffViewProvider {
 		}
 	}
 
-	async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<Map<string, { finalContent: string | undefined; autoFormattingEdits: string | undefined; userEdits: string | undefined }>> {
+	async applyAndSaveBatchSilently(
+		files: { path: string; content: string }[],
+	): Promise<
+		Map<string, { finalContent: string | undefined; autoFormattingEdits: string | undefined; userEdits: string | undefined }>
+	> {
 		const results = new Map()
 		for (const file of files) {
 			results.set(file.path, await this.applyAndSaveSilently(file.path, file.content))
@@ -57,7 +61,9 @@ class TestBoundaryDiffViewProvider extends DiffViewProvider {
 		return results
 	}
 	async resetDiffView(): Promise<void> {}
-	async format(_path: string): Promise<string> { return "" }
+	async format(_path: string): Promise<string> {
+		return ""
+	}
 
 	async replaceText(
 		content: string,
@@ -247,7 +253,9 @@ describe("DiffViewProvider Update Throttling", () => {
 		}
 		async closeAllDiffViews(): Promise<void> {}
 		async resetDiffView(): Promise<void> {}
-		async format(_path: string): Promise<string> { return "" }
+		async format(_path: string): Promise<string> {
+			return ""
+		}
 
 		async applyAndSaveSilently(
 			absolutePath: string,
@@ -267,7 +275,14 @@ describe("DiffViewProvider Update Throttling", () => {
 			}
 		}
 
-		async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<Map<string, { finalContent: string | undefined; autoFormattingEdits: string | undefined; userEdits: string | undefined }>> {
+		async applyAndSaveBatchSilently(
+			files: { path: string; content: string }[],
+		): Promise<
+			Map<
+				string,
+				{ finalContent: string | undefined; autoFormattingEdits: string | undefined; userEdits: string | undefined }
+			>
+		> {
 			const results = new Map()
 			for (const file of files) {
 				results.set(file.path, await this.applyAndSaveSilently(file.path, file.content))

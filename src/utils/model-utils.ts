@@ -1,8 +1,5 @@
 import { ApiHandlerModel, ApiProviderInfo } from "@core/api"
-import {
-    AnthropicModelId,
-    anthropicModels, getProviderForModel
-} from "@/shared/api"
+import { AnthropicModelId, anthropicModels, getProviderForModel } from "@/shared/api"
 
 export { supportsReasoningEffortForModel } from "@shared/utils/reasoning-support"
 
@@ -63,7 +60,6 @@ export function parsePrice(priceString: string | undefined): number {
 	return parsed * 1_000_000
 }
 
-
 /**
  * Check if parallel tool calling is enabled.
  * For this fork, we always enable parallel tool calling to support multiple tool uses per turn.
@@ -75,4 +71,3 @@ export function isParallelToolCallingEnabled(enableParallelSetting: boolean, pro
 function normalize(text: string): string {
 	return text.trim().toLowerCase()
 }
-

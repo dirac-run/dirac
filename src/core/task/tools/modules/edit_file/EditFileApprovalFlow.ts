@@ -9,7 +9,11 @@ import { PreparedFileBatch } from "./types"
 
 // Manages the user approval flow: auto-approval checks, manual review, and interaction loop.
 export class EditFileApprovalFlow {
-	async handle(env: IToolEnvironment, preparedBatches: PreparedFileBatch[], cards: Record<string, any>): Promise<{ approved: boolean; userEdits?: Record<string, string>; feedback?: string }> {
+	async handle(
+		env: IToolEnvironment,
+		preparedBatches: PreparedFileBatch[],
+		cards: Record<string, any>,
+	): Promise<{ approved: boolean; userEdits?: Record<string, string>; feedback?: string }> {
 		if (await this.shouldAutoApprove(env, preparedBatches)) return { approved: true }
 
 		// Manual approval path — show review first
@@ -18,8 +22,12 @@ export class EditFileApprovalFlow {
 
 		while (true) {
 			const totalRequestedEdits = preparedBatches.reduce((acc, b) => acc + b.prepared!.resolvedEdits.length, 0)
-			const fileSummary = preparedBatches.length === 1 ? `file ${preparedBatches[0].displayPath}` : `${preparedBatches.length} files`
-			const aggregatedDiffs = preparedBatches.map((b) => stripHashesFromDiff(b.prepared!.diff)).filter((d) => d.trim().length > 0).join("\n\n")
+			const fileSummary =
+				preparedBatches.length === 1 ? `file ${preparedBatches[0].displayPath}` : `${preparedBatches.length} files`
+			const aggregatedDiffs = preparedBatches
+				.map((b) => stripHashesFromDiff(b.prepared!.diff))
+				.filter((d) => d.trim().length > 0)
+				.join("\n\n")
 
 			const card = await env.ui.createCard({
 				header: `Apply ${totalRequestedEdits} edit(s) to ${fileSummary}?`,
@@ -74,19 +82,24 @@ export class EditFileApprovalFlow {
 		if (env.config.isSubagentExecution) return true
 		if (env.config.autoApprover.isUnrestrictedAutoApprove()) return true
 		for (const batch of batches) {
-			const allowed = await env.config.callbacks.shouldAutoApproveToolWithPath(DiracDefaultTool.EDIT_FILE, batch.displayPath)
+			const allowed = await env.config.callbacks.shouldAutoApproveToolWithPath(
+				DiracDefaultTool.EDIT_FILE,
+				batch.displayPath,
+			)
 			if (!allowed) return false
 		}
 		return true
 	}
 
 	private async showReview(env: IToolEnvironment, batches: PreparedFileBatch[]): Promise<void> {
-		await env.editor.showReview(batches.map((b) => ({
-			absolutePath: b.absolutePath,
-			displayPath: b.displayPath,
-			content: b.prepared!.finalContent,
-			originalContent: b.prepared!.content,
-		})))
+		await env.editor.showReview(
+			batches.map((b) => ({
+				absolutePath: b.absolutePath,
+				displayPath: b.displayPath,
+				content: b.prepared!.finalContent,
+				originalContent: b.prepared!.content,
+			})),
+		)
 	}
 
 	private async finalizeBatchCards(cards: Record<string, any>, status: CardStatus, body: string): Promise<void> {

@@ -50,15 +50,15 @@ rel/path/to/helper.ts
 */
 
 interface SearchResultLine {
-    lineNum: number
-    content: string
-    isMatch: boolean
-    column?: number
+	lineNum: number
+	content: string
+	isMatch: boolean
+	column?: number
 }
 
 interface FileSearchResult {
-    filePath: string
-    lines: SearchResultLine[]
+	filePath: string
+	lines: SearchResultLine[]
 }
 
 const MAX_RESULTS = 30
@@ -66,340 +66,341 @@ const MAX_RESULTS = 30
 type RipgrepDebugLog = (info: Record<string, any>) => Promise<void>
 
 async function execRipgrep(args: string[], debugLog?: RipgrepDebugLog): Promise<string> {
-    const binPath: string = await getBinaryLocation("rg")
-    await debugLog?.({ info: "execRipgrep start", binPath, args })
+	const binPath: string = await getBinaryLocation("rg")
+	await debugLog?.({ info: "execRipgrep start", binPath, args })
 
-    return new Promise((resolve, reject) => {
-        const rgProcess = childProcess.spawn(binPath, args, { stdio: ["ignore", "pipe", "pipe"] })
-        // cross-platform alternative to head, which is ripgrep author's recommendation for limiting output.
-        const rl = readline.createInterface({
-            input: rgProcess.stdout,
-            crlfDelay: Number.POSITIVE_INFINITY, // treat \r\n as a single line break even if it's split across chunks. This ensures consistent behavior across different operating systems.
-        })
+	return new Promise((resolve, reject) => {
+		const rgProcess = childProcess.spawn(binPath, args, { stdio: ["ignore", "pipe", "pipe"] })
+		// cross-platform alternative to head, which is ripgrep author's recommendation for limiting output.
+		const rl = readline.createInterface({
+			input: rgProcess.stdout,
+			crlfDelay: Number.POSITIVE_INFINITY, // treat \r\n as a single line break even if it's split across chunks. This ensures consistent behavior across different operating systems.
+		})
 
-        let output = ""
-        let lineCount = 0
-        let errorOutput = ""
-        let settled = false
-        let killedAfterOutputLimit = false
-        const maxLines = MAX_RESULTS * 5 // limiting ripgrep output with max lines since there's no other way to limit results. it's okay that we're outputting as json, since we're parsing it line by line and ignore anything that's not part of a match. This assumes each result is at most 5 lines.
+		let output = ""
+		let lineCount = 0
+		let errorOutput = ""
+		let settled = false
+		let killedAfterOutputLimit = false
+		const maxLines = MAX_RESULTS * 5 // limiting ripgrep output with max lines since there's no other way to limit results. it's okay that we're outputting as json, since we're parsing it line by line and ignore anything that's not part of a match. This assumes each result is at most 5 lines.
 
-        const finish = (error: Error | undefined, value?: string) => {
-            if (settled) return
-            settled = true
-            if (error) {
-                reject(error)
-                return
-            }
-            resolve(value || "")
-        }
+		const finish = (error: Error | undefined, value?: string) => {
+			if (settled) return
+			settled = true
+			if (error) {
+				reject(error)
+				return
+			}
+			resolve(value || "")
+		}
 
-        const buildFailureMessage = (reason: string) => {
-            const stderr = errorOutput.trim()
-            return [
-                reason,
-                `binary: ${binPath}`,
-                `args: ${args.join(" ")}`,
-                stderr ? `stderr: ${stderr}` : undefined,
-            ]
-                .filter(Boolean)
-                .join("\n")
-        }
+		const buildFailureMessage = (reason: string) => {
+			const stderr = errorOutput.trim()
+			return [reason, `binary: ${binPath}`, `args: ${args.join(" ")}`, stderr ? `stderr: ${stderr}` : undefined]
+				.filter(Boolean)
+				.join("\n")
+		}
 
-        rl.on("line", (line) => {
-            if (lineCount < maxLines) {
-                output += line + "\n"
-                lineCount++
-                return
-            }
+		rl.on("line", (line) => {
+			if (lineCount < maxLines) {
+				output += line + "\n"
+				lineCount++
+				return
+			}
 
-            killedAfterOutputLimit = true
-            rl.close()
-            rgProcess.kill()
-        })
+			killedAfterOutputLimit = true
+			rl.close()
+			rgProcess.kill()
+		})
 
-        rgProcess.stderr.on("data", (data) => {
-            errorOutput += data.toString()
-        })
+		rgProcess.stderr.on("data", (data) => {
+			errorOutput += data.toString()
+		})
 
-        rgProcess.on("error", (error) => {
-            void debugLog?.({
-                info: "execRipgrep process error",
-                binPath,
-                args,
-                errorMessage: error.message,
-                stack: error.stack,
-            })
-            finish(new Error(buildFailureMessage(`ripgrep spawn failed: ${error.message}`)))
-        })
+		rgProcess.on("error", (error) => {
+			void debugLog?.({
+				info: "execRipgrep process error",
+				binPath,
+				args,
+				errorMessage: error.message,
+				stack: error.stack,
+			})
+			finish(new Error(buildFailureMessage(`ripgrep spawn failed: ${error.message}`)))
+		})
 
-        rgProcess.on("close", (code, signal) => {
-            const finishDetails = {
-                info: "execRipgrep finished",
-                binPath,
-                args,
-                lineCount,
-                stderrOutput: errorOutput || "(none)",
-                exitCode: code,
-                signal,
-                killedAfterOutputLimit,
-                outputLength: output.length,
-                outputPreview: output.substring(0, 300),
-            }
-            void debugLog?.(finishDetails)
+		rgProcess.on("close", (code, signal) => {
+			const finishDetails = {
+				info: "execRipgrep finished",
+				binPath,
+				args,
+				lineCount,
+				stderrOutput: errorOutput || "(none)",
+				exitCode: code,
+				signal,
+				killedAfterOutputLimit,
+				outputLength: output.length,
+				outputPreview: output.substring(0, 300),
+			}
+			void debugLog?.(finishDetails)
 
-            if (killedAfterOutputLimit) {
-                finish(undefined, output)
-                return
-            }
+			if (killedAfterOutputLimit) {
+				finish(undefined, output)
+				return
+			}
 
-            if (code !== 0 && code !== 1) {
-                finish(new Error(buildFailureMessage(`ripgrep exited with code ${code}${signal ? ` and signal ${signal}` : ""}`)))
-                return
-            }
+			if (code !== 0 && code !== 1) {
+				finish(new Error(buildFailureMessage(`ripgrep exited with code ${code}${signal ? ` and signal ${signal}` : ""}`)))
+				return
+			}
 
-            if (errorOutput) {
-                void debugLog?.({ info: "execRipgrep stderr (non-fatal)", stderr: errorOutput })
-            }
-            finish(undefined, output)
-        })
-    })
+			if (errorOutput) {
+				void debugLog?.({ info: "execRipgrep stderr (non-fatal)", stderr: errorOutput })
+			}
+			finish(undefined, output)
+		})
+	})
 }
 
 export async function regexSearchFiles(
-    cwd: string,
-    directoryPath: string,
-    regex: string,
-    filePattern?: string,
-    diracIgnoreController?: DiracIgnoreController,
-    anchorTaskId?: string,
-    contextLines?: number,
-    excludeFilePatterns?: string[],
-    debugLog?: RipgrepDebugLog,
-    includeAnchors?: boolean,
+	cwd: string,
+	directoryPath: string,
+	regex: string,
+	filePattern?: string,
+	diracIgnoreController?: DiracIgnoreController,
+	anchorTaskId?: string,
+	contextLines?: number,
+	excludeFilePatterns?: string[],
+	debugLog?: RipgrepDebugLog,
+	includeAnchors?: boolean,
 ): Promise<string> {
-    // Limit context lines to 10
-    const cappedContextLines = Math.max(0, Math.min(10, contextLines || 0))
-    const args = ["--json", "-e", regex, "--glob", filePattern || "*", "--context", cappedContextLines.toString()]
-    if (excludeFilePatterns) {
-        for (const pattern of excludeFilePatterns) {
-            args.push("--glob", pattern)
-        }
-    }
-    args.push(directoryPath)
-    const argsDetails = {
-        info: "regexSearchFiles args",
-        args,
-        cwd,
-        directoryPath,
-        filePattern,
-        contextLines: cappedContextLines,
-        hasDiracIgnore: !!diracIgnoreController,
-    }
-    await debugLog?.(argsDetails)
+	// Limit context lines to 10
+	const cappedContextLines = Math.max(0, Math.min(10, contextLines || 0))
+	const args = ["--json", "-e", regex, "--glob", filePattern || "*", "--context", cappedContextLines.toString()]
+	if (excludeFilePatterns) {
+		for (const pattern of excludeFilePatterns) {
+			args.push("--glob", pattern)
+		}
+	}
+	args.push(directoryPath)
+	const argsDetails = {
+		info: "regexSearchFiles args",
+		args,
+		cwd,
+		directoryPath,
+		filePattern,
+		contextLines: cappedContextLines,
+		hasDiracIgnore: !!diracIgnoreController,
+	}
+	await debugLog?.(argsDetails)
 
-    let output: string
-    try {
-        output = await execRipgrep(args, debugLog)
-    } catch (error) {
-        await debugLog?.({
-            info: "regexSearchFiles execRipgrep error",
-            errorMessage: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined,
-        })
-        const causeMessage = error instanceof Error ? error.message : String(error)
-        throw new Error(`Error calling ripgrep: ${causeMessage}`, { cause: error })
-    }
-    const outputDetails = {
-        info: "regexSearchFiles ripgrep output",
-        outputLength: output.length,
-        outputPreview: output.substring(0, 500),
-        totalLines: output.split("\n").length,
-    }
-    await debugLog?.(outputDetails)
+	let output: string
+	try {
+		output = await execRipgrep(args, debugLog)
+	} catch (error) {
+		await debugLog?.({
+			info: "regexSearchFiles execRipgrep error",
+			errorMessage: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+		})
+		const causeMessage = error instanceof Error ? error.message : String(error)
+		throw new Error(`Error calling ripgrep: ${causeMessage}`, { cause: error })
+	}
+	const outputDetails = {
+		info: "regexSearchFiles ripgrep output",
+		outputLength: output.length,
+		outputPreview: output.substring(0, 500),
+		totalLines: output.split("\n").length,
+	}
+	await debugLog?.(outputDetails)
 
-    const resultsByFile: Map<string, Map<number, SearchResultLine>> = new Map()
+	const resultsByFile: Map<string, Map<number, SearchResultLine>> = new Map()
 
-    output.split("\n").forEach((line) => {
-        if (line) {
-            try {
-                const parsed = JSON.parse(line)
-                if (parsed.type === "match" || parsed.type === "context") {
-                    const filePath = parsed.data.path.text
-                    const lineNum = parsed.data.line_number
-                    const isMatch = parsed.type === "match"
-                    const content = parsed.data.lines.text
-                    const column = isMatch ? parsed.data.submatches[0].start : undefined
+	output.split("\n").forEach((line) => {
+		if (line) {
+			try {
+				const parsed = JSON.parse(line)
+				if (parsed.type === "match" || parsed.type === "context") {
+					const filePath = parsed.data.path.text
+					const lineNum = parsed.data.line_number
+					const isMatch = parsed.type === "match"
+					const content = parsed.data.lines.text
+					const column = isMatch ? parsed.data.submatches[0].start : undefined
 
-                    if (!resultsByFile.has(filePath)) {
-                        resultsByFile.set(filePath, new Map())
-                    }
-                    const fileLines = resultsByFile.get(filePath)!
+					if (!resultsByFile.has(filePath)) {
+						resultsByFile.set(filePath, new Map())
+					}
+					const fileLines = resultsByFile.get(filePath)!
 
-                    // Don't overwrite match with context if they somehow overlap
-                    if (isMatch || !fileLines.has(lineNum)) {
-                        fileLines.set(lineNum, { lineNum, content, isMatch, column })
-                    }
-                }
-            } catch (error) {
-                Logger.error("Error parsing ripgrep output:", error)
-                void debugLog?.({
-                    info: "regexSearchFiles parse line error",
-                    linePreview: line.substring(0, 300),
-                    errorMessage: error instanceof Error ? error.message : String(error),
-                })
-            }
-        }
-    })
-    const parsedDetails = {
-        info: "regexSearchFiles parsed",
-        totalFilesParsed: resultsByFile.size,
-        files: Array.from(resultsByFile.entries()).map(([file, lines]) => ({
-            file,
-            lineCount: lines.size,
-            matchCount: Array.from(lines.values()).filter((line) => line.isMatch).length,
-        })),
-    }
-    await debugLog?.(parsedDetails)
+					// Don't overwrite match with context if they somehow overlap
+					if (isMatch || !fileLines.has(lineNum)) {
+						fileLines.set(lineNum, { lineNum, content, isMatch, column })
+					}
+				}
+			} catch (error) {
+				Logger.error("Error parsing ripgrep output:", error)
+				void debugLog?.({
+					info: "regexSearchFiles parse line error",
+					linePreview: line.substring(0, 300),
+					errorMessage: error instanceof Error ? error.message : String(error),
+				})
+			}
+		}
+	})
+	const parsedDetails = {
+		info: "regexSearchFiles parsed",
+		totalFilesParsed: resultsByFile.size,
+		files: Array.from(resultsByFile.entries()).map(([file, lines]) => ({
+			file,
+			lineCount: lines.size,
+			matchCount: Array.from(lines.values()).filter((line) => line.isMatch).length,
+		})),
+	}
+	await debugLog?.(parsedDetails)
 
-    const fileResults: FileSearchResult[] = []
-    let finalMatchCount = 0
-    for (const [filePath, lineMap] of resultsByFile.entries()) {
-        // Filter by diracIgnoreController if provided
-        if (diracIgnoreController && !diracIgnoreController.validateAccess(filePath)) {
-            await debugLog?.({
-                info: "regexSearchFiles diracIgnore filtered file",
-                filePath,
-            })
-            continue
-        }
+	const fileResults: FileSearchResult[] = []
+	let finalMatchCount = 0
+	for (const [filePath, lineMap] of resultsByFile.entries()) {
+		// Filter by diracIgnoreController if provided
+		if (diracIgnoreController && !diracIgnoreController.validateAccess(filePath)) {
+			await debugLog?.({
+				info: "regexSearchFiles diracIgnore filtered file",
+				filePath,
+			})
+			continue
+		}
 
-        const sortedLines = Array.from(lineMap.values()).sort((a, b) => a.lineNum - b.lineNum)
-        fileResults.push({ filePath, lines: sortedLines })
-        finalMatchCount += sortedLines.filter((line) => line.isMatch).length
-    }
-    const finalDetails = {
-        info: "regexSearchFiles final",
-        filesBeforeIgnoreFilter: resultsByFile.size,
-        filesAfterIgnoreFilter: fileResults.length,
-        finalMatchCount,
-    }
-    await debugLog?.(finalDetails)
+		const sortedLines = Array.from(lineMap.values()).sort((a, b) => a.lineNum - b.lineNum)
+		fileResults.push({ filePath, lines: sortedLines })
+		finalMatchCount += sortedLines.filter((line) => line.isMatch).length
+	}
+	const finalDetails = {
+		info: "regexSearchFiles final",
+		filesBeforeIgnoreFilter: resultsByFile.size,
+		filesAfterIgnoreFilter: fileResults.length,
+		finalMatchCount,
+	}
+	await debugLog?.(finalDetails)
 
-    return await formatResults(fileResults, finalMatchCount, cwd, anchorTaskId, includeAnchors)
+	return await formatResults(fileResults, finalMatchCount, cwd, anchorTaskId, includeAnchors)
 }
 
 const MAX_RIPGREP_MB = 0.1
 const MAX_BYTE_SIZE = MAX_RIPGREP_MB * 1024 * 1024 // 0.25MB in bytes
 const MAX_LINE_LENGTH = 300
 
-async function formatResults(results: FileSearchResult[], matchCount: number, cwd: string, anchorTaskId?: string, includeAnchors?: boolean): Promise<string> {
-    let output = ""
-    if (matchCount >= MAX_RESULTS) {
-        output += `Showing first ${MAX_RESULTS} of ${matchCount.toLocaleString()}+ results. Use a more specific search if necessary.\n\n`
-    } else {
-        output += `Found ${matchCount === 1 ? "1 result" : `${matchCount.toLocaleString()} results`}.\n\n`
-    }
+async function formatResults(
+	results: FileSearchResult[],
+	matchCount: number,
+	cwd: string,
+	anchorTaskId?: string,
+	includeAnchors?: boolean,
+): Promise<string> {
+	let output = ""
+	if (matchCount >= MAX_RESULTS) {
+		output += `Showing first ${MAX_RESULTS} of ${matchCount.toLocaleString()}+ results. Use a more specific search if necessary.\n\n`
+	} else {
+		output += `Found ${matchCount === 1 ? "1 result" : `${matchCount.toLocaleString()} results`}.\n\n`
+	}
 
-    let byteSize = Buffer.byteLength(output, "utf8")
-    let wasLimitReached = false
+	let byteSize = Buffer.byteLength(output, "utf8")
+	let wasLimitReached = false
 
-    // results are already sorted by file and then lineNum
-    for (const fileResult of results) {
-        const absoluteFilePath = fileResult.filePath
-        const relPath = path.relative(cwd, absoluteFilePath)
-        let anchors: string[] = []
+	// results are already sorted by file and then lineNum
+	for (const fileResult of results) {
+		const absoluteFilePath = fileResult.filePath
+		const relPath = path.relative(cwd, absoluteFilePath)
+		let anchors: string[] = []
 
-        try {
-            if (AnchorStateManager.isTracking(absoluteFilePath, anchorTaskId)) {
-                anchors = AnchorStateManager.getAnchors(absoluteFilePath, anchorTaskId)!
-            } else {
-                const content = await fs.readFile(absoluteFilePath, "utf8")
-                const lines = content.split(/\r?\n/)
-                anchors = AnchorStateManager.reconcile(absoluteFilePath, lines, anchorTaskId)
-            }
-        } catch (error) {
-            Logger.error(`Error reading file for search anchors: ${absoluteFilePath}`, error)
-        }
+		try {
+			if (AnchorStateManager.isTracking(absoluteFilePath, anchorTaskId)) {
+				anchors = AnchorStateManager.getAnchors(absoluteFilePath, anchorTaskId)!
+			} else {
+				const content = await fs.readFile(absoluteFilePath, "utf8")
+				const lines = content.split(/\r?\n/)
+				anchors = AnchorStateManager.reconcile(absoluteFilePath, lines, anchorTaskId)
+			}
+		} catch (error) {
+			Logger.error(`Error reading file for search anchors: ${absoluteFilePath}`, error)
+		}
 
-        const filePathHeader = `${relPath.toPosix()}\n│----\n`
-        const headerBytes = Buffer.byteLength(filePathHeader, "utf8")
+		const filePathHeader = `${relPath.toPosix()}\n│----\n`
+		const headerBytes = Buffer.byteLength(filePathHeader, "utf8")
 
-        if (byteSize + headerBytes >= MAX_BYTE_SIZE) {
-            wasLimitReached = true
-            break
-        }
+		if (byteSize + headerBytes >= MAX_BYTE_SIZE) {
+			wasLimitReached = true
+			break
+		}
 
-        output += filePathHeader
-        byteSize += headerBytes
+		output += filePathHeader
+		byteSize += headerBytes
 
-        let fileSkippedResults = 0
-        let lastLineNum = -1
+		let fileSkippedResults = 0
+		let lastLineNum = -1
 
-        for (let i = 0; i < fileResult.lines.length; i++) {
-            const line = fileResult.lines[i]
+		for (let i = 0; i < fileResult.lines.length; i++) {
+			const line = fileResult.lines[i]
 
-            if (line.content.length > MAX_LINE_LENGTH) {
-                if (line.isMatch) fileSkippedResults++
-                continue
-            }
+			if (line.content.length > MAX_LINE_LENGTH) {
+				if (line.isMatch) fileSkippedResults++
+				continue
+			}
 
-            // Add separator if there's a gap in line numbers
-            if (lastLineNum !== -1 && line.lineNum !== lastLineNum + 1) {
-                const separator = "│----\n"
-                const separatorBytes = Buffer.byteLength(separator, "utf8")
-                if (byteSize + separatorBytes >= MAX_BYTE_SIZE) {
-                    wasLimitReached = true
-                    break
-                }
-                output += separator
-                byteSize += separatorBytes
-            }
+			// Add separator if there's a gap in line numbers
+			if (lastLineNum !== -1 && line.lineNum !== lastLineNum + 1) {
+				const separator = "│----\n"
+				const separatorBytes = Buffer.byteLength(separator, "utf8")
+				if (byteSize + separatorBytes >= MAX_BYTE_SIZE) {
+					wasLimitReached = true
+					break
+				}
+				output += separator
+				byteSize += separatorBytes
+			}
 
-            const anchor = anchors[line.lineNum - 1] || `L${line.lineNum}`
-            const strippedLine = line.content.replace(/\r?\n$/, "")
-            const displayLine = includeAnchors ? formatLineWithHash(strippedLine, anchor) : strippedLine
-            const lineString = `│${displayLine}\n`
-            const lineBytes = Buffer.byteLength(lineString, "utf8")
+			const anchor = anchors[line.lineNum - 1] || `L${line.lineNum}`
+			const strippedLine = line.content.replace(/\r?\n$/, "")
+			const displayLine = includeAnchors ? formatLineWithHash(strippedLine, anchor) : strippedLine
+			const lineString = `│${displayLine}\n`
+			const lineBytes = Buffer.byteLength(lineString, "utf8")
 
-            if (byteSize + lineBytes >= MAX_BYTE_SIZE) {
-                wasLimitReached = true
-                break
-            }
+			if (byteSize + lineBytes >= MAX_BYTE_SIZE) {
+				wasLimitReached = true
+				break
+			}
 
-            output += lineString
-            byteSize += lineBytes
-            lastLineNum = line.lineNum
-        }
+			output += lineString
+			byteSize += lineBytes
+			lastLineNum = line.lineNum
+		}
 
-        if (wasLimitReached) break
+		if (wasLimitReached) break
 
-        if (fileSkippedResults > 0) {
-            const note = `│ (${fileSkippedResults} result${fileSkippedResults > 1 ? "s" : ""} skipped due to line length limits)\n`
-            const noteBytes = Buffer.byteLength(note, "utf8")
-            if (byteSize + noteBytes < MAX_BYTE_SIZE) {
-                output += note
-                byteSize += noteBytes
-            }
-        }
+		if (fileSkippedResults > 0) {
+			const note = `│ (${fileSkippedResults} result${fileSkippedResults > 1 ? "s" : ""} skipped due to line length limits)\n`
+			const noteBytes = Buffer.byteLength(note, "utf8")
+			if (byteSize + noteBytes < MAX_BYTE_SIZE) {
+				output += note
+				byteSize += noteBytes
+			}
+		}
 
-        const closing = "│----\n\n"
-        const closingBytes = Buffer.byteLength(closing, "utf8")
-        if (byteSize + closingBytes < MAX_BYTE_SIZE) {
-            output += closing
-            byteSize += closingBytes
-        } else {
-            wasLimitReached = true
-            break
-        }
-    }
+		const closing = "│----\n\n"
+		const closingBytes = Buffer.byteLength(closing, "utf8")
+		if (byteSize + closingBytes < MAX_BYTE_SIZE) {
+			output += closing
+			byteSize += closingBytes
+		} else {
+			wasLimitReached = true
+			break
+		}
+	}
 
-    if (wasLimitReached) {
-        const truncationMessage = `\n[Results truncated due to exceeding the ${MAX_RIPGREP_MB}MB size limit. Please use a more specific search pattern.]`
-        if (byteSize + Buffer.byteLength(truncationMessage, "utf8") < MAX_BYTE_SIZE) {
-            output += truncationMessage
-        }
-    }
+	if (wasLimitReached) {
+		const truncationMessage = `\n[Results truncated due to exceeding the ${MAX_RIPGREP_MB}MB size limit. Please use a more specific search pattern.]`
+		if (byteSize + Buffer.byteLength(truncationMessage, "utf8") < MAX_BYTE_SIZE) {
+			output += truncationMessage
+		}
+	}
 
-    return output.trim()
+	return output.trim()
 }

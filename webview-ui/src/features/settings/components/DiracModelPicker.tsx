@@ -49,13 +49,9 @@ export interface DiracModelPickerProps {
 	showProviderRouting?: boolean
 }
 
-
-
 function normalizeModelId(modelId: string): string {
 	return modelId.trim().toLowerCase()
 }
-
-
 
 const DiracModelPicker: React.FC<DiracModelPickerProps> = ({ isPopup, currentMode, showProviderRouting }) => {
 	const { handleModeFieldsChange, handleFieldChange } = useApiConfigurationHandlers()
@@ -66,7 +62,6 @@ const DiracModelPicker: React.FC<DiracModelPickerProps> = ({ isPopup, currentMod
 	const [selectedIndex, setSelectedIndex] = useState(-1)
 	const freeDiracModelIds: string[] = useMemo(() => [], [])
 	const freeDiracModelIdSet = useMemo(() => new Set<string>(), [])
-
 
 	const dropdownRef = useRef<HTMLDivElement>(null)
 	const itemRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -108,7 +103,6 @@ const DiracModelPicker: React.FC<DiracModelPickerProps> = ({ isPopup, currentMod
 	useMount(() => {
 		refreshDiracModels()
 	})
-
 
 	// Sync external changes when the modelId changes
 	useEffect(() => {
@@ -261,7 +255,6 @@ const DiracModelPicker: React.FC<DiracModelPickerProps> = ({ isPopup, currentMod
 				<label htmlFor="model-search">
 					<span style={{ fontWeight: 500 }}>Model</span>
 				</label>
-
 
 				<DropdownWrapper ref={dropdownRef}>
 					<VSCodeTextField
@@ -433,4 +426,3 @@ const DropdownItem = styled.div<{ isSelected: boolean }>`
 		background-color: var(--vscode-list-activeSelectionBackground);
 	}
 `
-

@@ -4,7 +4,6 @@ export const truncateHeader = (header: string) => {
 	return header
 }
 
-
 export const getStatusTextColorClass = (status: CardStatus) => {
 	switch (status) {
 		case CardStatus.SUCCESS:

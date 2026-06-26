@@ -189,7 +189,9 @@ describe("convertToOpenAiMessages", () => {
 						{
 							type: "text",
 							text: "answer",
-							reasoning_details: [{ type: "reasoning.text", text: "because", format: "text", index: 0, signature: "sig" }],
+							reasoning_details: [
+								{ type: "reasoning.text", text: "because", format: "text", index: 0, signature: "sig" },
+							],
 						},
 					],
 				},

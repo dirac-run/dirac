@@ -292,16 +292,31 @@ export async function ensureLocalDiracDirExists(diracrulePath: string, defaultRu
 			try {
 				await fs.mkdir(diracrulePath, { recursive: true })
 				await fs.writeFile(path.join(diracrulePath, defaultRuleFilename), content, "utf8")
-				await fs.unlink(tempPath).catch((err) => Logger.warn("Failed to delete backup file during rule conversion", { path: tempPath, error: err })) // delete backup
+				await fs
+					.unlink(tempPath)
+					.catch((err) =>
+						Logger.warn("Failed to delete backup file during rule conversion", { path: tempPath, error: err }),
+					) // delete backup
 
 				return false // conversion successful with no errors
 			} catch (_conversionError) {
 				// attempt to restore backup on conversion failure
 				try {
-					await fs.rm(diracrulePath, { recursive: true, force: true }).catch((err) => Logger.warn("Failed to remove directory during rule conversion rollback", { path: diracrulePath, error: err }))
+					await fs
+						.rm(diracrulePath, { recursive: true, force: true })
+						.catch((err) =>
+							Logger.warn("Failed to remove directory during rule conversion rollback", {
+								path: diracrulePath,
+								error: err,
+							}),
+						)
 					await fs.rename(tempPath, diracrulePath) // restore backup
 				} catch (restoreError) {
-					Logger.error("Failed to restore rule backup after conversion failure — rules file may be corrupted", { path: diracrulePath, backupPath: tempPath, error: restoreError })
+					Logger.error("Failed to restore rule backup after conversion failure — rules file may be corrupted", {
+						path: diracrulePath,
+						backupPath: tempPath,
+						error: restoreError,
+					})
 				}
 				return true // in either case here we consider this an error
 			}

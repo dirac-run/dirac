@@ -104,75 +104,195 @@ export class TelemetryService {
 	// ── Domain delegation — explicit one-line methods, statically verified via Parameters<> ──
 
 	// User
-	public captureUserOptOut(...a: Parameters<UserTelemetry["captureUserOptOut"]>) { return this.user.captureUserOptOut(...a) }
-	public captureUserOptIn(...a: Parameters<UserTelemetry["captureUserOptIn"]>) { return this.user.captureUserOptIn(...a) }
-	public captureExtensionActivated(...a: Parameters<UserTelemetry["captureExtensionActivated"]>) { return this.user.captureExtensionActivated(...a) }
-	public captureExtensionStorageError(...a: Parameters<UserTelemetry["captureExtensionStorageError"]>) { return this.user.captureExtensionStorageError(...a) }
-	public captureAuthStarted(...a: Parameters<UserTelemetry["captureAuthStarted"]>) { return this.user.captureAuthStarted(...a) }
-	public captureAuthSucceeded(...a: Parameters<UserTelemetry["captureAuthSucceeded"]>) { return this.user.captureAuthSucceeded(...a) }
-	public captureAuthFailed(...a: Parameters<UserTelemetry["captureAuthFailed"]>) { return this.user.captureAuthFailed(...a) }
-	public captureAuthLoggedOut(...a: Parameters<UserTelemetry["captureAuthLoggedOut"]>) { return this.user.captureAuthLoggedOut(...a) }
-	public captureOnboardingProgress(...a: Parameters<UserTelemetry["captureOnboardingProgress"]>) { return this.user.captureOnboardingProgress(...a) }
-	public identifyAccount(...a: Parameters<UserTelemetry["identifyAccount"]>) { return this.user.identifyAccount(...a) }
+	public captureUserOptOut(...a: Parameters<UserTelemetry["captureUserOptOut"]>) {
+		return this.user.captureUserOptOut(...a)
+	}
+	public captureUserOptIn(...a: Parameters<UserTelemetry["captureUserOptIn"]>) {
+		return this.user.captureUserOptIn(...a)
+	}
+	public captureExtensionActivated(...a: Parameters<UserTelemetry["captureExtensionActivated"]>) {
+		return this.user.captureExtensionActivated(...a)
+	}
+	public captureExtensionStorageError(...a: Parameters<UserTelemetry["captureExtensionStorageError"]>) {
+		return this.user.captureExtensionStorageError(...a)
+	}
+	public captureAuthStarted(...a: Parameters<UserTelemetry["captureAuthStarted"]>) {
+		return this.user.captureAuthStarted(...a)
+	}
+	public captureAuthSucceeded(...a: Parameters<UserTelemetry["captureAuthSucceeded"]>) {
+		return this.user.captureAuthSucceeded(...a)
+	}
+	public captureAuthFailed(...a: Parameters<UserTelemetry["captureAuthFailed"]>) {
+		return this.user.captureAuthFailed(...a)
+	}
+	public captureAuthLoggedOut(...a: Parameters<UserTelemetry["captureAuthLoggedOut"]>) {
+		return this.user.captureAuthLoggedOut(...a)
+	}
+	public captureOnboardingProgress(...a: Parameters<UserTelemetry["captureOnboardingProgress"]>) {
+		return this.user.captureOnboardingProgress(...a)
+	}
+	public identifyAccount(...a: Parameters<UserTelemetry["identifyAccount"]>) {
+		return this.user.identifyAccount(...a)
+	}
 	// Task
-	public captureTaskCreated(...a: Parameters<TaskTelemetry["captureTaskCreated"]>) { return this.task.captureTaskCreated(...a) }
-	public captureTaskRestarted(...a: Parameters<TaskTelemetry["captureTaskRestarted"]>) { return this.task.captureTaskRestarted(...a) }
-	public captureTaskCompleted(...a: Parameters<TaskTelemetry["captureTaskCompleted"]>) { return this.task.captureTaskCompleted(...a) }
-	public captureConversationTurnEvent(...a: Parameters<TaskTelemetry["captureConversationTurnEvent"]>) { return this.task.captureConversationTurnEvent(...a) }
-	public captureTokenUsage(...a: Parameters<TaskTelemetry["captureTokenUsage"]>) { return this.task.captureTokenUsage(...a) }
-	public captureModeSwitch(...a: Parameters<TaskTelemetry["captureModeSwitch"]>) { return this.task.captureModeSwitch(...a) }
-	public captureSummarizeTask(...a: Parameters<TaskTelemetry["captureSummarizeTask"]>) { return this.task.captureSummarizeTask(...a) }
-	public captureTaskFeedback(...a: Parameters<TaskTelemetry["captureTaskFeedback"]>) { return this.task.captureTaskFeedback(...a) }
-	public captureTaskInitialization(...a: Parameters<TaskTelemetry["captureTaskInitialization"]>) { return this.task.captureTaskInitialization(...a) }
-	public captureOptionSelected(...a: Parameters<TaskTelemetry["captureOptionSelected"]>) { return this.task.captureOptionSelected(...a) }
-	public captureOptionsIgnored(...a: Parameters<TaskTelemetry["captureOptionsIgnored"]>) { return this.task.captureOptionsIgnored(...a) }
-	public captureSlashCommandUsed(...a: Parameters<TaskTelemetry["captureSlashCommandUsed"]>) { return this.task.captureSlashCommandUsed(...a) }
-	public captureFeatureToggle(...a: Parameters<TaskTelemetry["captureFeatureToggle"]>) { return this.task.captureFeatureToggle(...a) }
-	public captureDiracRuleToggled(...a: Parameters<TaskTelemetry["captureDiracRuleToggled"]>) { return this.task.captureDiracRuleToggled(...a) }
-	public captureAutoCondenseToggle(...a: Parameters<TaskTelemetry["captureAutoCondenseToggle"]>) { return this.task.captureAutoCondenseToggle(...a) }
-	public captureYoloModeToggle(...a: Parameters<TaskTelemetry["captureYoloModeToggle"]>) { return this.task.captureYoloModeToggle(...a) }
-	public captureDiracWebToolsToggle(...a: Parameters<TaskTelemetry["captureDiracWebToolsToggle"]>) { return this.task.captureDiracWebToolsToggle(...a) }
+	public captureTaskCreated(...a: Parameters<TaskTelemetry["captureTaskCreated"]>) {
+		return this.task.captureTaskCreated(...a)
+	}
+	public captureTaskRestarted(...a: Parameters<TaskTelemetry["captureTaskRestarted"]>) {
+		return this.task.captureTaskRestarted(...a)
+	}
+	public captureTaskCompleted(...a: Parameters<TaskTelemetry["captureTaskCompleted"]>) {
+		return this.task.captureTaskCompleted(...a)
+	}
+	public captureConversationTurnEvent(...a: Parameters<TaskTelemetry["captureConversationTurnEvent"]>) {
+		return this.task.captureConversationTurnEvent(...a)
+	}
+	public captureTokenUsage(...a: Parameters<TaskTelemetry["captureTokenUsage"]>) {
+		return this.task.captureTokenUsage(...a)
+	}
+	public captureModeSwitch(...a: Parameters<TaskTelemetry["captureModeSwitch"]>) {
+		return this.task.captureModeSwitch(...a)
+	}
+	public captureSummarizeTask(...a: Parameters<TaskTelemetry["captureSummarizeTask"]>) {
+		return this.task.captureSummarizeTask(...a)
+	}
+	public captureTaskFeedback(...a: Parameters<TaskTelemetry["captureTaskFeedback"]>) {
+		return this.task.captureTaskFeedback(...a)
+	}
+	public captureTaskInitialization(...a: Parameters<TaskTelemetry["captureTaskInitialization"]>) {
+		return this.task.captureTaskInitialization(...a)
+	}
+	public captureOptionSelected(...a: Parameters<TaskTelemetry["captureOptionSelected"]>) {
+		return this.task.captureOptionSelected(...a)
+	}
+	public captureOptionsIgnored(...a: Parameters<TaskTelemetry["captureOptionsIgnored"]>) {
+		return this.task.captureOptionsIgnored(...a)
+	}
+	public captureSlashCommandUsed(...a: Parameters<TaskTelemetry["captureSlashCommandUsed"]>) {
+		return this.task.captureSlashCommandUsed(...a)
+	}
+	public captureFeatureToggle(...a: Parameters<TaskTelemetry["captureFeatureToggle"]>) {
+		return this.task.captureFeatureToggle(...a)
+	}
+	public captureDiracRuleToggled(...a: Parameters<TaskTelemetry["captureDiracRuleToggled"]>) {
+		return this.task.captureDiracRuleToggled(...a)
+	}
+	public captureAutoCondenseToggle(...a: Parameters<TaskTelemetry["captureAutoCondenseToggle"]>) {
+		return this.task.captureAutoCondenseToggle(...a)
+	}
+	public captureYoloModeToggle(...a: Parameters<TaskTelemetry["captureYoloModeToggle"]>) {
+		return this.task.captureYoloModeToggle(...a)
+	}
+	public captureDiracWebToolsToggle(...a: Parameters<TaskTelemetry["captureDiracWebToolsToggle"]>) {
+		return this.task.captureDiracWebToolsToggle(...a)
+	}
 	// Tool
-	public captureToolUsage(...a: Parameters<ToolTelemetry["captureToolUsage"]>) { return this.tool.captureToolUsage(...a) }
-	public captureSkillUsed(...a: Parameters<ToolTelemetry["captureSkillUsed"]>) { return this.tool.captureSkillUsed(...a) }
-	public captureCheckpointUsage(...a: Parameters<ToolTelemetry["captureCheckpointUsage"]>) { return this.tool.captureCheckpointUsage(...a) }
-	public captureProviderApiError(...a: Parameters<ToolTelemetry["captureProviderApiError"]>) { return this.tool.captureProviderApiError(...a) }
-	public captureGeminiApiPerformance(...a: Parameters<ToolTelemetry["captureGeminiApiPerformance"]>) { return this.tool.captureGeminiApiPerformance(...a) }
-	public captureAiOutputAccepted(...a: Parameters<ToolTelemetry["captureAiOutputAccepted"]>) { return this.tool.captureAiOutputAccepted(...a) }
-	public captureAiOutputRejected(...a: Parameters<ToolTelemetry["captureAiOutputRejected"]>) { return this.tool.captureAiOutputRejected(...a) }
+	public captureToolUsage(...a: Parameters<ToolTelemetry["captureToolUsage"]>) {
+		return this.tool.captureToolUsage(...a)
+	}
+	public captureSkillUsed(...a: Parameters<ToolTelemetry["captureSkillUsed"]>) {
+		return this.tool.captureSkillUsed(...a)
+	}
+	public captureCheckpointUsage(...a: Parameters<ToolTelemetry["captureCheckpointUsage"]>) {
+		return this.tool.captureCheckpointUsage(...a)
+	}
+	public captureProviderApiError(...a: Parameters<ToolTelemetry["captureProviderApiError"]>) {
+		return this.tool.captureProviderApiError(...a)
+	}
+	public captureGeminiApiPerformance(...a: Parameters<ToolTelemetry["captureGeminiApiPerformance"]>) {
+		return this.tool.captureGeminiApiPerformance(...a)
+	}
+	public captureAiOutputAccepted(...a: Parameters<ToolTelemetry["captureAiOutputAccepted"]>) {
+		return this.tool.captureAiOutputAccepted(...a)
+	}
+	public captureAiOutputRejected(...a: Parameters<ToolTelemetry["captureAiOutputRejected"]>) {
+		return this.tool.captureAiOutputRejected(...a)
+	}
 	// UI
-	public captureModelSelected(...a: Parameters<UiTelemetry["captureModelSelected"]>) { return this.ui.captureModelSelected(...a) }
-	public captureModelFavoritesUsage(...a: Parameters<UiTelemetry["captureModelFavoritesUsage"]>) { return this.ui.captureModelFavoritesUsage(...a) }
-	public captureButtonClick(...a: Parameters<UiTelemetry["captureButtonClick"]>) { return this.ui.captureButtonClick(...a) }
-	public captureRulesMenuOpened(...a: Parameters<UiTelemetry["captureRulesMenuOpened"]>) { return this.ui.captureRulesMenuOpened(...a) }
+	public captureModelSelected(...a: Parameters<UiTelemetry["captureModelSelected"]>) {
+		return this.ui.captureModelSelected(...a)
+	}
+	public captureModelFavoritesUsage(...a: Parameters<UiTelemetry["captureModelFavoritesUsage"]>) {
+		return this.ui.captureModelFavoritesUsage(...a)
+	}
+	public captureButtonClick(...a: Parameters<UiTelemetry["captureButtonClick"]>) {
+		return this.ui.captureButtonClick(...a)
+	}
+	public captureRulesMenuOpened(...a: Parameters<UiTelemetry["captureRulesMenuOpened"]>) {
+		return this.ui.captureRulesMenuOpened(...a)
+	}
 	// Browser
-	public captureBrowserToolStart(...a: Parameters<BrowserTelemetry["captureBrowserToolStart"]>) { return this.browser.captureBrowserToolStart(...a) }
-	public captureBrowserToolEnd(...a: Parameters<BrowserTelemetry["captureBrowserToolEnd"]>) { return this.browser.captureBrowserToolEnd(...a) }
-	public captureBrowserError(...a: Parameters<BrowserTelemetry["captureBrowserError"]>) { return this.browser.captureBrowserError(...a) }
+	public captureBrowserToolStart(...a: Parameters<BrowserTelemetry["captureBrowserToolStart"]>) {
+		return this.browser.captureBrowserToolStart(...a)
+	}
+	public captureBrowserToolEnd(...a: Parameters<BrowserTelemetry["captureBrowserToolEnd"]>) {
+		return this.browser.captureBrowserToolEnd(...a)
+	}
+	public captureBrowserError(...a: Parameters<BrowserTelemetry["captureBrowserError"]>) {
+		return this.browser.captureBrowserError(...a)
+	}
 	// Mention
-	public captureMentionUsed(...a: Parameters<MentionTelemetry["captureMentionUsed"]>) { return this.mention.captureMentionUsed(...a) }
-	public captureMentionFailed(...a: Parameters<MentionTelemetry["captureMentionFailed"]>) { return this.mention.captureMentionFailed(...a) }
-	public captureMentionSearchResults(...a: Parameters<MentionTelemetry["captureMentionSearchResults"]>) { return this.mention.captureMentionSearchResults(...a) }
+	public captureMentionUsed(...a: Parameters<MentionTelemetry["captureMentionUsed"]>) {
+		return this.mention.captureMentionUsed(...a)
+	}
+	public captureMentionFailed(...a: Parameters<MentionTelemetry["captureMentionFailed"]>) {
+		return this.mention.captureMentionFailed(...a)
+	}
+	public captureMentionSearchResults(...a: Parameters<MentionTelemetry["captureMentionSearchResults"]>) {
+		return this.mention.captureMentionSearchResults(...a)
+	}
 	// Workspace
-	public captureWorkspaceInitialized(...a: Parameters<WorkspaceTelemetry["captureWorkspaceInitialized"]>) { return this.workspace.captureWorkspaceInitialized(...a) }
-	public captureWorkspaceInitError(...a: Parameters<WorkspaceTelemetry["captureWorkspaceInitError"]>) { return this.workspace.captureWorkspaceInitError(...a) }
-	public captureMultiRootCheckpoint(...a: Parameters<WorkspaceTelemetry["captureMultiRootCheckpoint"]>) { return this.workspace.captureMultiRootCheckpoint(...a) }
-	public captureWorkspacePathResolved(...a: Parameters<WorkspaceTelemetry["captureWorkspacePathResolved"]>) { return this.workspace.captureWorkspacePathResolved(...a) }
-	public captureWorkspaceSearchPattern(...a: Parameters<WorkspaceTelemetry["captureWorkspaceSearchPattern"]>) { return this.workspace.captureWorkspaceSearchPattern(...a) }
-	public captureWorktreeViewOpened(...a: Parameters<WorkspaceTelemetry["captureWorktreeViewOpened"]>) { return this.workspace.captureWorktreeViewOpened(...a) }
-	public captureWorktreeCreated(...a: Parameters<WorkspaceTelemetry["captureWorktreeCreated"]>) { return this.workspace.captureWorktreeCreated(...a) }
-	public captureWorktreeMergeAttempted(...a: Parameters<WorkspaceTelemetry["captureWorktreeMergeAttempted"]>) { return this.workspace.captureWorktreeMergeAttempted(...a) }
+	public captureWorkspaceInitialized(...a: Parameters<WorkspaceTelemetry["captureWorkspaceInitialized"]>) {
+		return this.workspace.captureWorkspaceInitialized(...a)
+	}
+	public captureWorkspaceInitError(...a: Parameters<WorkspaceTelemetry["captureWorkspaceInitError"]>) {
+		return this.workspace.captureWorkspaceInitError(...a)
+	}
+	public captureMultiRootCheckpoint(...a: Parameters<WorkspaceTelemetry["captureMultiRootCheckpoint"]>) {
+		return this.workspace.captureMultiRootCheckpoint(...a)
+	}
+	public captureWorkspacePathResolved(...a: Parameters<WorkspaceTelemetry["captureWorkspacePathResolved"]>) {
+		return this.workspace.captureWorkspacePathResolved(...a)
+	}
+	public captureWorkspaceSearchPattern(...a: Parameters<WorkspaceTelemetry["captureWorkspaceSearchPattern"]>) {
+		return this.workspace.captureWorkspaceSearchPattern(...a)
+	}
+	public captureWorktreeViewOpened(...a: Parameters<WorkspaceTelemetry["captureWorktreeViewOpened"]>) {
+		return this.workspace.captureWorktreeViewOpened(...a)
+	}
+	public captureWorktreeCreated(...a: Parameters<WorkspaceTelemetry["captureWorktreeCreated"]>) {
+		return this.workspace.captureWorktreeCreated(...a)
+	}
+	public captureWorktreeMergeAttempted(...a: Parameters<WorkspaceTelemetry["captureWorktreeMergeAttempted"]>) {
+		return this.workspace.captureWorktreeMergeAttempted(...a)
+	}
 	// Terminal
-	public captureTerminalOutputFailure(...a: Parameters<TerminalTelemetry["captureTerminalOutputFailure"]>) { return this.terminal.captureTerminalOutputFailure(...a) }
-	public captureTerminalUserIntervention(...a: Parameters<TerminalTelemetry["captureTerminalUserIntervention"]>) { return this.terminal.captureTerminalUserIntervention(...a) }
-	public captureTerminalHang(...a: Parameters<TerminalTelemetry["captureTerminalHang"]>) { return this.terminal.captureTerminalHang(...a) }
+	public captureTerminalOutputFailure(...a: Parameters<TerminalTelemetry["captureTerminalOutputFailure"]>) {
+		return this.terminal.captureTerminalOutputFailure(...a)
+	}
+	public captureTerminalUserIntervention(...a: Parameters<TerminalTelemetry["captureTerminalUserIntervention"]>) {
+		return this.terminal.captureTerminalUserIntervention(...a)
+	}
+	public captureTerminalHang(...a: Parameters<TerminalTelemetry["captureTerminalHang"]>) {
+		return this.terminal.captureTerminalHang(...a)
+	}
 	// Subagent
-	public captureSubagentToggle(...a: Parameters<SubagentTelemetry["captureSubagentToggle"]>) { return this.subagents.captureSubagentToggle(...a) }
-	public captureSubagentExecution(...a: Parameters<SubagentTelemetry["captureSubagentExecution"]>) { return this.subagents.captureSubagentExecution(...a) }
+	public captureSubagentToggle(...a: Parameters<SubagentTelemetry["captureSubagentToggle"]>) {
+		return this.subagents.captureSubagentToggle(...a)
+	}
+	public captureSubagentExecution(...a: Parameters<SubagentTelemetry["captureSubagentExecution"]>) {
+		return this.subagents.captureSubagentExecution(...a)
+	}
 	// Hook
-	public captureHookCacheAccess(...a: Parameters<HookTelemetry["captureHookCacheAccess"]>) { return this.hooks.captureHookCacheAccess(...a) }
-	public captureHookExecution(...a: Parameters<HookTelemetry["captureHookExecution"]>) { return this.hooks.captureHookExecution(...a) }
-	public captureHookDiscovery(...a: Parameters<HookTelemetry["captureHookDiscovery"]>) { return this.hooks.captureHookDiscovery(...a) }
+	public captureHookCacheAccess(...a: Parameters<HookTelemetry["captureHookCacheAccess"]>) {
+		return this.hooks.captureHookCacheAccess(...a)
+	}
+	public captureHookExecution(...a: Parameters<HookTelemetry["captureHookExecution"]>) {
+		return this.hooks.captureHookExecution(...a)
+	}
+	public captureHookDiscovery(...a: Parameters<HookTelemetry["captureHookDiscovery"]>) {
+		return this.hooks.captureHookDiscovery(...a)
+	}
 
 	// ── Core infrastructure ──────────────────────────────────────────
 
@@ -195,7 +315,8 @@ export class TelemetryService {
 				options: { items: ["Open Settings"] },
 			})
 			.then((r: { selectedOption?: string }) => {
-				if (r.selectedOption === "Open Settings") void HostProvider.window.openSettings({ query: "telemetry.telemetryLevel" })
+				if (r.selectedOption === "Open Settings")
+					void HostProvider.window.openSettings({ query: "telemetry.telemetryLevel" })
 			})
 	}
 
@@ -259,8 +380,18 @@ export class TelemetryService {
 	// ── Terminal execution (overloaded — cannot use declare) ─────────
 
 	public captureTerminalExecution(success: boolean, terminalType: "vscode", method: VscodeOutputMethod): void
-	public captureTerminalExecution(success: boolean, terminalType: "standalone", method: StandaloneOutputMethod, exitCode?: number | null): void
-	public captureTerminalExecution(success: boolean, terminalType: TerminalType, method: TerminalOutputMethod, exitCode?: number | null): void {
+	public captureTerminalExecution(
+		success: boolean,
+		terminalType: "standalone",
+		method: StandaloneOutputMethod,
+		exitCode?: number | null,
+	): void
+	public captureTerminalExecution(
+		success: boolean,
+		terminalType: TerminalType,
+		method: TerminalOutputMethod,
+		exitCode?: number | null,
+	): void {
 		this.terminal.captureTerminalExecution(success, terminalType, method, exitCode)
 	}
 }

@@ -32,6 +32,6 @@ export interface IDiagnosticsProvider {
 	 */
 	getDiagnosticsFeedbackForFiles(
 		files: Array<{ filePath: string; content: string; hashes?: string[] }>,
-		preSaveDiagnostics: FileDiagnostics[]
+		preSaveDiagnostics: FileDiagnostics[],
 	): Promise<DiagnosticsFeedbackResult[]>
 }

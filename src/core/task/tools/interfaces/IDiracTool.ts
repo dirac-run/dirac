@@ -18,7 +18,7 @@ export interface IDiracTool<TArgs = any, TResult = any> {
 
 	/**
 	 * 3. EXECUTION
-	 * The core logic of the tool. 
+	 * The core logic of the tool.
 	 * The tool is responsible for its own validation, security (permissions), and UI updates.
 	 */
 	processCall(args: TArgs, env: IToolEnvironment): Promise<TResult>

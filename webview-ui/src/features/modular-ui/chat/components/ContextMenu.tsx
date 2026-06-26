@@ -120,11 +120,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 				if (option.value) {
 					return (
 						<div className="flex flex-col gap-0">
-								<span className="ph-no-capture leading-[1.2]">
-								{option.label}
-							</span>
-							<span
-									className="ph-no-capture text-[0.85em] opacity-70 whitespace-nowrap overflow-hidden text-ellipsis leading-[1.2]">
+							<span className="ph-no-capture leading-[1.2]">{option.label}</span>
+							<span className="ph-no-capture text-[0.85em] opacity-70 whitespace-nowrap overflow-hidden text-ellipsis leading-[1.2]">
 								{option.description}
 							</span>
 						</div>
@@ -139,9 +136,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
 					return (
 						<>
-							<span className="ph-no-capture whitespace-nowrap overflow-hidden text-ellipsis">
-								{displayText}
-							</span>
+							<span className="ph-no-capture whitespace-nowrap overflow-hidden text-ellipsis">{displayText}</span>
 							{option.description && (
 								<span className="ph-no-capture text-[0.85em] opacity-70 whitespace-nowrap overflow-hidden text-ellipsis">
 									{option.description}
@@ -244,25 +239,19 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 							onMouseEnter={() => isSelectable && setSelectedIndex(index)}
 							role="option">
 							<div className="flex items-center flex-1 min-w-0 overflow-hidden">
-								<i
-									className={`codicon codicon-${getIconForOption(option)} mr-2 flex-shrink-0 text-[14px]`}
-								/>
+								<i className={`codicon codicon-${getIconForOption(option)} mr-2 flex-shrink-0 text-[14px]`} />
 								{renderOptionContent(option)}
 							</div>
 							{(option.type === ContextMenuOptionType.File ||
 								option.type === ContextMenuOptionType.Folder ||
 								option.type === ContextMenuOptionType.Git) &&
-								!option.value && (
-									<i className="codicon codicon-chevron-right text-[14px] flex-shrink-0 ml-2" />
-								)}
+								!option.value && <i className="codicon codicon-chevron-right text-[14px] flex-shrink-0 ml-2" />}
 							{(option.type === ContextMenuOptionType.Problems ||
 								option.type === ContextMenuOptionType.Terminal ||
 								((option.type === ContextMenuOptionType.File ||
 									option.type === ContextMenuOptionType.Folder ||
 									option.type === ContextMenuOptionType.Git) &&
-									option.value)) && (
-								<i className="codicon codicon-add text-[14px] flex-shrink-0 ml-2" />
-							)}
+									option.value)) && <i className="codicon codicon-add text-[14px] flex-shrink-0 ml-2" />}
 						</div>
 					)
 				})}

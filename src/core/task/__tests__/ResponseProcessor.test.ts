@@ -198,7 +198,7 @@ describe("ResponseProcessor", () => {
 			const toolBlocks = taskState.assistantMessageContent.filter((b: any) => b.type === "tool_use")
 			toolBlocks.should.have.length(1)
 			const toolBlock = toolBlocks[0] as any
-			toolBlock.name.should.equal("read_file")  // eslint-disable-line
+			toolBlock.name.should.equal("read_file") // eslint-disable-line
 		})
 	})
 

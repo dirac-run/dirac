@@ -13,25 +13,55 @@ import { MinimaxHandler } from "../minimax"
 
 // --- Typed stream-event builders: catch SDK fixture drift at compile time ---
 // Minimal valid Message for message_start events — only usage is read by minimax code.
-function msgStart(usage: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null }): Anthropic.RawMessageStartEvent {
-	return { type: "message_start", message: {
-		id: "msg_test", container: null, content: [], model: "minimax-m2",
-		role: "assistant", stop_details: null, stop_reason: null, stop_sequence: null, type: "message",
-		usage: {
-			cache_creation: null, cache_creation_input_tokens: usage.cache_creation_input_tokens ?? null,
-			cache_read_input_tokens: usage.cache_read_input_tokens ?? null, inference_geo: null,
-			input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0,
-			server_tool_use: null, service_tier: null,
+function msgStart(usage: {
+	input_tokens?: number
+	output_tokens?: number
+	cache_creation_input_tokens?: number | null
+	cache_read_input_tokens?: number | null
+}): Anthropic.RawMessageStartEvent {
+	return {
+		type: "message_start",
+		message: {
+			id: "msg_test",
+			container: null,
+			content: [],
+			model: "minimax-m2",
+			role: "assistant",
+			stop_details: null,
+			stop_reason: null,
+			stop_sequence: null,
+			type: "message",
+			usage: {
+				cache_creation: null,
+				cache_creation_input_tokens: usage.cache_creation_input_tokens ?? null,
+				cache_read_input_tokens: usage.cache_read_input_tokens ?? null,
+				inference_geo: null,
+				input_tokens: usage.input_tokens ?? 0,
+				output_tokens: usage.output_tokens ?? 0,
+				server_tool_use: null,
+				service_tier: null,
+			},
 		},
-	} }
+	}
 }
 function msgDelta(usage: { input_tokens?: number; output_tokens?: number }): Anthropic.RawMessageDeltaEvent {
-	return { type: "message_delta", delta: { container: null, stop_details: null, stop_reason: null, stop_sequence: null },
-		usage: { cache_creation_input_tokens: null, cache_read_input_tokens: null,
-			input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0, server_tool_use: null } }
+	return {
+		type: "message_delta",
+		delta: { container: null, stop_details: null, stop_reason: null, stop_sequence: null },
+		usage: {
+			cache_creation_input_tokens: null,
+			cache_read_input_tokens: null,
+			input_tokens: usage.input_tokens ?? 0,
+			output_tokens: usage.output_tokens ?? 0,
+			server_tool_use: null,
+		},
+	}
 }
 const msgStop = (): Anthropic.RawMessageStopEvent => ({ type: "message_stop" })
-function blockStart(index: number, block: Anthropic.RawContentBlockStartEvent["content_block"]): Anthropic.RawContentBlockStartEvent {
+function blockStart(
+	index: number,
+	block: Anthropic.RawContentBlockStartEvent["content_block"],
+): Anthropic.RawContentBlockStartEvent {
 	return { type: "content_block_start", index, content_block: block }
 }
 function blockDelta(index: number, delta: Anthropic.RawContentBlockDelta): Anthropic.RawContentBlockDeltaEvent {
@@ -41,9 +71,19 @@ const blockStop = (index: number): Anthropic.RawContentBlockStopEvent => ({ type
 
 // --- Content-block builders ---
 const textBlock = (text: string): Anthropic.TextBlock => ({ type: "text", text, citations: null })
-const thinkingBlock = (thinking: string, signature: string): Anthropic.ThinkingBlock => ({ type: "thinking", thinking, signature })
+const thinkingBlock = (thinking: string, signature: string): Anthropic.ThinkingBlock => ({
+	type: "thinking",
+	thinking,
+	signature,
+})
 const redactedThinkingBlock = (data: string): Anthropic.RedactedThinkingBlock => ({ type: "redacted_thinking", data })
-const toolUseBlock = (id: string, name: string): Anthropic.ToolUseBlock => ({ type: "tool_use", id, name, caller: { type: "direct" }, input: {} })
+const toolUseBlock = (id: string, name: string): Anthropic.ToolUseBlock => ({
+	type: "tool_use",
+	id,
+	name,
+	caller: { type: "direct" },
+	input: {},
+})
 
 // --- Delta builders ---
 const textDelta = (text: string): Anthropic.TextDelta => ({ type: "text_delta", text })
@@ -53,7 +93,11 @@ const inputJsonDelta = (partial_json: string): Anthropic.InputJSONDelta => ({ ty
 
 // --- Helpers ---
 function fakeStream(chunks: Anthropic.RawMessageStreamEvent[]): AsyncIterable<Anthropic.RawMessageStreamEvent> {
-	return { [Symbol.asyncIterator]: async function* () { yield* chunks } }
+	return {
+		[Symbol.asyncIterator]: async function* () {
+			yield* chunks
+		},
+	}
 }
 async function collect<T>(gen: AsyncIterable<T>): Promise<T[]> {
 	const out: T[] = []
@@ -101,16 +145,30 @@ describe("MinimaxHandler", () => {
 
 		it("emits usage chunk on message_start with cache tokens", async () => {
 			const h = new MinimaxHandler({ minimaxApiKey: "k" })
-			stubStream(h, [msgStart({ input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 30, cache_read_input_tokens: 20 })])
+			stubStream(h, [
+				msgStart({ input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 30, cache_read_input_tokens: 20 }),
+			])
 			const out = await collect(h.createMessage("sys", [{ role: "user", content: "hi" }]))
-			out[0].should.deepEqual({ type: "usage", inputTokens: 100, outputTokens: 50, cacheWriteTokens: 30, cacheReadTokens: 20 })
+			out[0].should.deepEqual({
+				type: "usage",
+				inputTokens: 100,
+				outputTokens: 50,
+				cacheWriteTokens: 30,
+				cacheReadTokens: 20,
+			})
 		})
 
 		it("emits usage chunk on message_start with zero tokens defaulting to 0", async () => {
 			const h = new MinimaxHandler({ minimaxApiKey: "k" })
 			stubStream(h, [msgStart({ input_tokens: 0, output_tokens: 0 })])
 			const out = await collect(h.createMessage("sys", [{ role: "user", content: "hi" }]))
-			out[0].should.deepEqual({ type: "usage", inputTokens: 0, outputTokens: 0, cacheWriteTokens: undefined, cacheReadTokens: undefined })
+			out[0].should.deepEqual({
+				type: "usage",
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+			})
 		})
 
 		it("emits usage chunk on message_delta", async () => {
@@ -147,7 +205,11 @@ describe("MinimaxHandler", () => {
 			const h = new MinimaxHandler({ minimaxApiKey: "k" })
 			stubStream(h, [blockStart(0, redactedThinkingBlock("encrypted-bytes"))])
 			const out = await collect(h.createMessage("sys", [{ role: "user", content: "hi" }]))
-			out[0].should.deepEqual({ type: "reasoning", reasoning: "[Redacted thinking block]", redacted_data: "encrypted-bytes" })
+			out[0].should.deepEqual({
+				type: "reasoning",
+				reasoning: "[Redacted thinking block]",
+				redacted_data: "encrypted-bytes",
+			})
 		})
 
 		it("inserts newline before second text block (index > 0)", async () => {
@@ -173,8 +235,12 @@ describe("MinimaxHandler", () => {
 			const out = await collect(h.createMessage("sys", [{ role: "user", content: "hi" }]))
 			out[0].should.deepEqual({
 				type: "tool_calls",
-				tool_call: { id: "tool-1", name: "search", arguments: "", // outer spread keeps initial empty state
-					function: { id: "tool-1", name: "search", arguments: '{"q":"hi"}' } },
+				tool_call: {
+					id: "tool-1",
+					name: "search",
+					arguments: "", // outer spread keeps initial empty state
+					function: { id: "tool-1", name: "search", arguments: '{"q":"hi"}' },
+				},
 			})
 		})
 
@@ -238,7 +304,9 @@ describe("MinimaxHandler", () => {
 		// Intentionally invalid: testing graceful handling of unknown content block types.
 		it("ignores unknown content_block types", async () => {
 			const h = new MinimaxHandler({ minimaxApiKey: "k" })
-			const malformed = blockStart(0, { type: "unknown_block" } as unknown as Anthropic.RawContentBlockStartEvent["content_block"])
+			const malformed = blockStart(0, {
+				type: "unknown_block",
+			} as unknown as Anthropic.RawContentBlockStartEvent["content_block"])
 			stubStream(h, [malformed])
 			const out = await collect(h.createMessage("sys", [{ role: "user", content: "hi" }]))
 			out.should.have.length(0)

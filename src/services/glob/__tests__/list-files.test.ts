@@ -35,6 +35,9 @@ describe("listFiles", () => {
 
 		const [files] = await listFiles(tmpDir, false, 200)
 
-		files.map((f) => f.path).map(normalizeForComparison).should.containEql(normalizeForComparison(nestedFile))
+		files
+			.map((f) => f.path)
+			.map(normalizeForComparison)
+			.should.containEql(normalizeForComparison(nestedFile))
 	})
 })

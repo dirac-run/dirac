@@ -39,7 +39,11 @@ export class TaskAbortManager {
 
 	private async cancelBackgroundCommand() {
 		if (!this.deps.commandExecutor.hasActiveBackgroundCommand()) return
-		try { await this.deps.commandExecutor.cancelBackgroundCommand() } catch (error) { Logger.error("Failed to cancel background command during task abort", error) }
+		try {
+			await this.deps.commandExecutor.cancelBackgroundCommand()
+		} catch (error) {
+			Logger.error("Failed to cancel background command during task abort", error)
+		}
 	}
 
 	private async runTaskCancelHook(shouldRun: boolean) {
@@ -48,7 +52,15 @@ export class TaskAbortManager {
 		try {
 			await executeHook({
 				hookName: "TaskCancel",
-				hookInput: { taskCancel: { taskMetadata: { taskId: this.deps.taskId, ulid: this.deps.ulid, completionStatus: this.deps.taskState.abandoned ? "abandoned" : "cancelled" } } },
+				hookInput: {
+					taskCancel: {
+						taskMetadata: {
+							taskId: this.deps.taskId,
+							ulid: this.deps.ulid,
+							completionStatus: this.deps.taskState.abandoned ? "abandoned" : "cancelled",
+						},
+					},
+				},
 				isCancellable: false,
 				messenger: this.deps.taskMessenger,
 				messageStateHandler: this.deps.messageStateHandler,
@@ -56,14 +68,18 @@ export class TaskAbortManager {
 				hooksEnabled,
 				model: getHookModelContext(this.deps.api, this.deps.stateManager),
 			})
-		} catch (error) { Logger.error("[TaskCancel Hook] Failed (non-fatal):", error) }
+		} catch (error) {
+			Logger.error("[TaskCancel Hook] Failed (non-fatal):", error)
+		}
 	}
 
 	private async saveStateAndPost() {
 		try {
 			await this.deps.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 			await this.deps.postStateToWebview()
-		} catch (error) { Logger.error("Failed to post state after setting abort flag", error) }
+		} catch (error) {
+			Logger.error("Failed to post state after setting abort flag", error)
+		}
 	}
 
 	private disposeResources() {
@@ -82,10 +98,16 @@ export class TaskAbortManager {
 			await releaseTaskLock(this.deps.taskId)
 			this.deps.taskState.taskLockAcquired = false
 			Logger.info(`[Task ${this.deps.taskId}] Task lock released`)
-		} catch (error) { Logger.error(`[Task ${this.deps.taskId}] Failed to release task lock:`, error) }
+		} catch (error) {
+			Logger.error(`[Task ${this.deps.taskId}] Failed to release task lock:`, error)
+		}
 	}
 
 	private async postFinalState() {
-		try { await this.deps.postStateToWebview() } catch (error) { Logger.error("Failed to post final state after abort", error) }
+		try {
+			await this.deps.postStateToWebview()
+		} catch (error) {
+			Logger.error("Failed to post final state after abort", error)
+		}
 	}
 }

@@ -1,5 +1,5 @@
-import type { ToolParamName, ToolUse } from "@core/assistant-message";
-import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController";
+import type { ToolParamName, ToolUse } from "@core/assistant-message"
+import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 
 export type ValidationResult = { ok: true } | { ok: false; error: string }
 

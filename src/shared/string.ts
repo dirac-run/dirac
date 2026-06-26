@@ -76,7 +76,6 @@ export function preserveEscaping(originalText: string, newText: string): string 
 	return result
 }
 
-
 /**
  * Regex for detecting file paths:
  * - Optional ./ or ../ or / or [A-Z]:\

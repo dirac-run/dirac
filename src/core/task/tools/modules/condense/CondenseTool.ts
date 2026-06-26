@@ -23,7 +23,6 @@ export const condense_spec: DiracToolSpec = {
 	],
 }
 
-
 export class CondenseTool implements IDiracTool {
 	spec(): DiracToolSpec {
 		return condense_spec
@@ -37,7 +36,10 @@ export class CondenseTool implements IDiracTool {
 		const { context } = args
 
 		if (!context) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
+			env.orchestration.setTaskState(
+				"consecutiveMistakeCount",
+				env.orchestration.getTaskState("consecutiveMistakeCount") + 1,
+			)
 			return formatResponse.toolError("Missing required parameter: context")
 		}
 		// Show notification if enabled
@@ -70,7 +72,7 @@ export class CondenseTool implements IDiracTool {
 
 		env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 		const interaction = await card.waitForInteraction()
-		const text = interaction.action === DiracAskResponse.APPROVE ? "" : (interaction.text || "cancel")
+		const text = interaction.action === DiracAskResponse.APPROVE ? "" : interaction.text || "cancel"
 		const images: string[] = []
 		const condenseFiles: string[] = []
 
@@ -101,7 +103,7 @@ export class CondenseTool implements IDiracTool {
 			return formatResponse.toolResult(
 				`The user provided feedback on the condensed conversation summary:\n<feedback>\n${text}\n</feedback>`,
 				images,
-				fileContentString
+				fileContentString,
 			)
 		}
 

@@ -29,7 +29,7 @@ export interface ApiConversationManagerDependencies {
 	loadContext: (
 		userContent: DiracContent[],
 		includeFileDetails?: boolean,
-		useCompactPrompt?: boolean
+		useCompactPrompt?: boolean,
 	) => Promise<[DiracContent[], string, boolean, SkillMetadata[], boolean, string?]>
 	getCurrentProviderInfo: () => ApiProviderInfo
 	getEnvironmentDetails: (includeFileDetails?: boolean) => Promise<string>
