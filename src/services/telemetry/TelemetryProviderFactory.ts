@@ -139,10 +139,10 @@ export class NoOpTelemetryProvider implements ITelemetryProvider {
 	private isOptIn = true
 
 	log(_event: string, _properties?: TelemetryProperties): void {
-		Logger.log(`[NoOpTelemetryProvider] ${_event}: ${JSON.stringify(_properties)}`)
+		// intentionally empty — this is a no-op provider
 	}
 	logRequired(_event: string, _properties?: TelemetryProperties): void {
-		Logger.log(`[NoOpTelemetryProvider] REQUIRED ${_event}: ${JSON.stringify(_properties)}`)
+		// intentionally empty — this is a no-op provider
 	}
 	identifyUser(_userInfo: any, _properties?: TelemetryProperties): void {
 		Logger.info(`[NoOpTelemetryProvider] identifyUser - ${JSON.stringify(_userInfo)} - ${JSON.stringify(_properties)}`)
