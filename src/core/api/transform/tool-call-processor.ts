@@ -1,10 +1,18 @@
 import type {
-    ChatCompletionChunk,
     ChatCompletionToolChoiceOption,
-    ChatCompletionTool as OpenAITool,
+    ChatCompletionTool as OpenAITool
 } from "openai/resources/chat/completions";
 import { Logger } from "@/shared/services/Logger";
 import type { ApiStreamToolCallsChunk } from "./stream";
+
+// Generalized tool call delta that accepts null for id/index (Cerebras SDK returns null)
+interface ToolCallDelta {
+	index?: number | null
+	id?: string | null
+	function?: { name?: string | null; arguments?: string | null }
+	type?: string
+	web_search?: { query?: string }
+}
 
 /**
  * Helper class to process tool call deltas from OpenAI-compatible streaming responses.
@@ -24,7 +32,7 @@ export class ToolCallProcessor {
 	 * @yields Formatted tool call chunks ready to be yielded in the API stream
 	 */
 	*processToolCallDeltas(
-		toolCallDeltas: ChatCompletionChunk.Choice.Delta.ToolCall[] | undefined,
+		toolCallDeltas: ToolCallDelta[] | undefined,
 	): Generator<ApiStreamToolCallsChunk> {
 		if (!toolCallDeltas) {
 			return
@@ -41,7 +49,7 @@ export class ToolCallProcessor {
 			}
 
 			// Accumulate web_search type
-			if ((toolCallDelta as any).type === "web_search") {
+			if (toolCallDelta.type === "web_search") {
 				toolCallState.name = "web_search"
 			}
 
@@ -51,20 +59,20 @@ export class ToolCallProcessor {
 				toolCallState.name = toolCallDelta.function.name
 			}
 
-			// Only yield when we have all required fields: id, name, and arguments
 			// Only yield when we have all required fields: id, name, and arguments (or web_search query)
 			const hasFunctionArgs = toolCallDelta.function?.arguments !== undefined
-			const hasWebSearchQuery = (toolCallDelta as any).web_search?.query !== undefined
+			const hasWebSearchQuery = toolCallDelta.web_search?.query !== undefined
 
 			if (toolCallState.id && toolCallState.name && (hasFunctionArgs || hasWebSearchQuery)) {
 				yield {
 					type: "tool_calls",
 					tool_call:
-						(toolCallState.name === "web_search"
+						toolCallState.name === "web_search"
 							? {
 									call_id: toolCallState.id,
 									type: "web_search",
-									web_search: (toolCallDelta as any).web_search || { query: "" },
+									web_search: toolCallDelta.web_search || { query: "" },
+									function: { id: toolCallState.id, name: "web_search", arguments: toolCallDelta.web_search?.query || "" },
 							  }
 							: {
 									...toolCallDelta,
@@ -74,7 +82,7 @@ export class ToolCallProcessor {
 										id: toolCallState.id,
 										name: toolCallState.name,
 									},
-							  }) as any,
+							  },
 				}
 			}
 		}
@@ -106,6 +114,20 @@ export class ToolCallProcessor {
 	}
 }
 
+// ChatCompletionTool doesn't include web_search; define the shape we use
+interface WebSearchChatTool {
+	type: "web_search"
+	search_context_size?: string
+	filters?: object
+	user_location?: object
+	external_web_access?: boolean
+}
+
+// Type guard for web_search tools that may be mixed into a ChatCompletionTool array
+function isWebSearchTool(tool: OpenAITool | WebSearchChatTool): tool is WebSearchChatTool {
+	return tool.type === "web_search"
+}
+
 export function getOpenAIToolParams(tools?: OpenAITool[], enableParallelToolCalls = false) {
 	if (!tools?.length) {
 		return {
@@ -113,30 +135,24 @@ export function getOpenAIToolParams(tools?: OpenAITool[], enableParallelToolCall
 		}
 	}
 
-	const mappedTools = tools.map((tool) => {
+	const mappedTools = (tools as (OpenAITool | WebSearchChatTool)[]).map((tool) => {
 		if (tool.type === "function") {
 			return tool
 		}
-		if ((tool as any).type === "web_search") {
+		if (isWebSearchTool(tool)) {
 			return {
-				type: "web_search" as any,
-				...((tool as any).search_context_size ? { search_context_size: (tool as any).search_context_size } : {}),
-				...((tool as any).filters ? { filters: (tool as any).filters } : {}),
-				...((tool as any).user_location ? { user_location: (tool as any).user_location } : {}),
-				...((tool as any).external_web_access !== undefined
-					? { external_web_access: (tool as any).external_web_access }
-					: {}),
+				type: "web_search" as const,
+				...(tool.search_context_size ? { search_context_size: tool.search_context_size } : {}),
+				...(tool.filters ? { filters: tool.filters } : {}),
+				...(tool.user_location ? { user_location: tool.user_location } : {}),
+				...(tool.external_web_access !== undefined ? { external_web_access: tool.external_web_access } : {}),
 			}
 		}
 		return tool
 	})
 
-	// Cast to any to support web_search tool type which is not yet in the official OpenAI SDK types
-	const finalTools = mappedTools as any[]
-
-
 	return {
-		tools: finalTools,
+		tools: mappedTools as OpenAITool[],
 		tool_choice: "auto" as ChatCompletionToolChoiceOption,
 		parallel_tool_calls: enableParallelToolCalls,
 	}

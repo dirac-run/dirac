@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
-import { getHookLaunchConfig, resetHookLaunchConfigCacheForTesting } from "../HookProcess"
+import { getHookLaunchConfig, HookProcess, resetHookLaunchConfigCacheForTesting } from "../HookProcess"
 import { withPlatform } from "./test-utils"
 
 function createDeferred<T>() {
@@ -172,6 +172,22 @@ describe("HookProcess", () => {
 			} finally {
 				Date.now = originalDateNow
 			}
+		})
+	})
+
+	describe("output parsing", () => {
+		it("forwards line events from the output parser", () => {
+			const hook = new HookProcess("dummy")
+			const lines: Array<{ line: string; stream: string }> = []
+			hook.on("line", (line, stream) => lines.push({ line, stream }))
+
+			const parser = (hook as any).outputParser
+			parser.parseOutput("hello\nworld\n", "stdout")
+
+			lines.should.deepEqual([
+				{ line: "hello", stream: "stdout" },
+				{ line: "world", stream: "stdout" },
+			])
 		})
 	})
 })

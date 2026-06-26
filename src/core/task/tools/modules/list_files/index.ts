@@ -3,7 +3,7 @@ import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { DiracIcon } from "@/shared/icons"
 import { SurfaceType } from "../../interfaces/SurfaceType"
 import { DiracToolSpec, DiracDefaultTool } from "../../../../../shared/tools"
-import { formatResponse } from "../../../../prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { CardStatus } from "../../../../../shared/ExtensionMessage"
 
 export interface ListFilesArgs {

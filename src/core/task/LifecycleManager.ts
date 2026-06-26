@@ -1,7 +1,7 @@
 import { executeHook } from "@core/hooks/hook-executor"
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { ensureTaskDirectoryExists, getSavedApiConversationHistory, getSavedDiracMessages } from "@core/storage/disk"
 import { HostProvider } from "@hosts/host-provider"
 import { ensureCheckpointInitialized } from "@integrations/checkpoints/initializer"

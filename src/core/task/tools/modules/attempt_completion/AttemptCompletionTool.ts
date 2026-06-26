@@ -2,7 +2,7 @@ import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 import { DiracIcon } from "@/shared/icons"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import {
 	DiracMessageType,
 	CardStatus

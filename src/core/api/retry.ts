@@ -1,3 +1,4 @@
+import { isRateLimited } from "@shared/net"
 import { Logger } from "@/shared/services/Logger"
 
 interface RetryOptions {
@@ -38,7 +39,7 @@ export function withRetry(options: RetryOptions = {}) {
 					yield* originalMethod.apply(this, args)
 					return
 				} catch (error: any) {
-					const isRateLimit = error?.status === 429 || error instanceof RetriableError
+					const isRateLimit = isRateLimited(error?.status) || error instanceof RetriableError
 					const isLastAttempt = attempt === maxRetries - 1
 
 					if ((!isRateLimit && !retryAllErrors) || isLastAttempt) {
@@ -69,7 +70,9 @@ export function withRetry(options: RetryOptions = {}) {
 						delay = Math.min(maxDelay, baseDelay * 2 ** attempt)
 					}
 
-					const handlerInstance = this as any
+					const handlerInstance = this as {
+						options?: { onRetryAttempt?: (attempt: number, maxRetries: number, delay: number, error: any) => void }
+					}
 					if (handlerInstance.options?.onRetryAttempt) {
 						try {
 							await handlerInstance.options.onRetryAttempt(attempt + 1, maxRetries, delay, error)

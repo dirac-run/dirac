@@ -16,12 +16,12 @@ import type { Controller } from "../index"
 export async function refreshRules(controller: Controller, _request: EmptyRequest): Promise<RefreshedRules> {
 	try {
 		const cwd = await getCwd(getDesktopDir())
-		const { globalToggles, localToggles } = await refreshDiracRulesToggles(controller, cwd)
+		const { globalToggles, localToggles } = await refreshDiracRulesToggles(controller.stateManager, cwd)
 		const { cursorLocalToggles, windsurfLocalToggles, agentsLocalToggles } = await refreshExternalRulesToggles(
-			controller,
+			controller.stateManager,
 			cwd,
 		)
-		const { localWorkflowToggles, globalWorkflowToggles } = await refreshWorkflowToggles(controller, cwd)
+		const { localWorkflowToggles, globalWorkflowToggles } = await refreshWorkflowToggles(controller.stateManager, cwd)
 
 		return RefreshedRules.create({
 			globalDiracRulesToggles: { toggles: globalToggles },

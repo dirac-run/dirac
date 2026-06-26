@@ -2,9 +2,9 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { hashLines } from "@utils/line-hashing"
 import * as diff from "diff"
 import * as path from "path"
-import { Mode } from "../../shared/storage/types"
-import { DiracIgnoreController, LOCK_TEXT_SYMBOL } from "../ignore/DiracIgnoreController"
-import type { FileInfo } from "../../services/glob/list-files"
+import { Mode } from "@shared/storage/types"
+import { DiracIgnoreController, LOCK_TEXT_SYMBOL } from "@core/ignore/DiracIgnoreController"
+import type { FileInfo } from "@services/glob/list-files"
 
 const CONTEXT_WINDOW_WARNING_THRESHOLD_PERCENT = 50
 

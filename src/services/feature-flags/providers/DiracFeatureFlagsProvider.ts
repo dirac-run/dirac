@@ -3,6 +3,7 @@ import { fetch } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import { diracTelemetryConfig } from "../../../shared/services/config/dirac-telemetry-config"
 import type { FeatureFlagsAndPayloads, FeatureFlagsSettings, IFeatureFlagsProvider } from "./IFeatureFlagsProvider"
+import { jsonHeaders } from "@shared/net"
 
 /**
  * Dirac implementation of the feature flags provider interface
@@ -32,7 +33,7 @@ export class DiracFeatureFlagsProvider implements IFeatureFlagsProvider {
 			const response = await fetch(`${diracTelemetryConfig.host}/decide`, {
 				method: "POST",
 				headers: {
-					"Content-Type": "application/json",
+					...jsonHeaders(),
 					"X-Dirac-API-Key": diracTelemetryConfig.apiKey,
 				},
 				body: JSON.stringify({

@@ -1,148 +1,18 @@
-import { searchWorkspaceFiles, searchWorkspaceFilesMultiroot } from "@services/search/file-search"
-import { telemetryService } from "@services/telemetry"
-import { FileSearchRequest, FileSearchResults, FileSearchType } from "@shared/proto/dirac/file"
+import { FileSearchRequest, FileSearchResults } from "@shared/proto/dirac/file"
 import { convertSearchResultsToProtoFileInfos } from "@shared/proto-conversions/file/search-result-conversion"
-import { getWorkspacePath } from "@utils/path"
-import { Logger } from "@/shared/services/Logger"
 import { Controller } from ".."
-import { HostProvider } from "@/hosts/host-provider"
-import * as path from "path"
-import { workspaceResolver } from "@core/workspace"
+import { captureResultTelemetry, handleSearchError, mapSelectedType, prioritizeActiveFile, runSearch } from "./searchFilesHelpers"
 
-/**
- * Searches for files in the workspace with fuzzy matching
- * @param controller The controller instance
- * @param request The request containing search query, and optionally a mentionsRequestId and workspace_hint
- * @returns Results containing matching files/folders
- */
+/** Searches for files in the workspace with fuzzy matching. */
 export async function searchFiles(controller: Controller, request: FileSearchRequest): Promise<FileSearchResults> {
 	try {
-		// Map enum to string for the search service
-		let selectedTypeString: "file" | "folder" | undefined
-		if (request.selectedType === FileSearchType.FILE) {
-			selectedTypeString = "file"
-		} else if (request.selectedType === FileSearchType.FOLDER) {
-			selectedTypeString = "folder"
-		}
-
-		// Extract hint, ensure workspaceManager is ready, check for multiroot
-		const workspaceHint = request.workspaceHint
-		const workspaceManager = await controller.ensureWorkspaceManager()
-		const hasMultirootSupport = workspaceManager && workspaceManager.getRoots()?.length > 0
-
-		let searchResults: Array<{
-			path: string
-			type: "file" | "folder"
-			label?: string
-			workspaceName?: string
-		}>
-
-		if (hasMultirootSupport) {
-			searchResults = await searchWorkspaceFilesMultiroot(
-				request.query || "",
-				workspaceManager,
-				request.limit || 20,
-				selectedTypeString,
-				workspaceHint,
-			)
-		} else {
-			// Legacy single workspace search
-			const workspacePath = await getWorkspacePath()
-
-			if (!workspacePath) {
-				Logger.error("Error in searchFiles: No workspace path available")
-				telemetryService.captureMentionFailed("folder", "not_found", "No workspace path available")
-				return { results: [], mentionsRequestId: request.mentionsRequestId }
-			}
-
-			// Call file search service with query from request
-			searchResults = await searchWorkspaceFiles(
-				request.query || "",
-				workspacePath,
-				request.limit || 20, // Use default limit of 20 if not specified
-				selectedTypeString,
-			)
-		}
-
-		// If prioritize_active_file is set, place the active editor file at position 0
-		if (request.prioritizeActiveFile && searchResults.length > 0) {
-			try {
-				const activeEditorResponse = await HostProvider.window.getActiveEditor({})
-				const activeFilePath = activeEditorResponse.filePath
-				if (activeFilePath) {
-					// Convert absolute path to workspace-relative
-					const workspacePath = await getWorkspacePath()
-					if (workspacePath) {
-						const resolvedWs = workspaceResolver.resolveWorkspacePath(workspacePath, "", "searchFiles.prioritize")
-						const wsAbsPath = typeof resolvedWs === "string" ? resolvedWs : resolvedWs.absolutePath
-						const resolvedActive = workspaceResolver.resolveWorkspacePath(
-							activeFilePath,
-							"",
-							"searchFiles.prioritize",
-						)
-						const activeAbsPath = typeof resolvedActive === "string" ? resolvedActive : resolvedActive.absolutePath
-						let relativeActivePath = path.relative(wsAbsPath, activeAbsPath)
-						if (path.sep === "\\") {
-							relativeActivePath = relativeActivePath.replace(/\\/g, "/")
-						}
-						// Find and move the active file to position 0
-						const activeIndex = searchResults.findIndex(
-							(r) => r.path === relativeActivePath || r.path === `/${relativeActivePath}`,
-						)
-						if (activeIndex > 0) {
-							const [activeItem] = searchResults.splice(activeIndex, 1)
-							searchResults.unshift(activeItem)
-						}
-					}
-				}
-			} catch (err) {
-				Logger.error("Error prioritizing active file:", err)
-			}
-		}
-
-		// Convert search results to proto FileInfo objects using the conversion function
-		const protoResults = convertSearchResultsToProtoFileInfos(searchResults)
-
-		// Track search results telemetry
-		// Determine search type for telemetry
-		let searchType: "file" | "folder" | "all" = "all"
-		if (request.selectedType === FileSearchType.FILE) {
-			searchType = "file"
-		} else if (request.selectedType === FileSearchType.FOLDER) {
-			searchType = "folder"
-		}
-
-		await telemetryService.captureMentionSearchResults(
-			request.query || "",
-			protoResults.length,
-			searchType,
-			protoResults.length === 0,
-		)
-
-		// Return successful results
-		return {
-			results: protoResults,
-			mentionsRequestId: request.mentionsRequestId,
-		}
+		const results = await runSearch(controller, request, mapSelectedType(request.selectedType))
+		if (!results) return { results: [], mentionsRequestId: request.mentionsRequestId }
+		const prioritized = await prioritizeActiveFile(request, results)
+		const protoResults = convertSearchResultsToProtoFileInfos(prioritized)
+		await captureResultTelemetry(request, protoResults.length)
+		return { results: protoResults, mentionsRequestId: request.mentionsRequestId }
 	} catch (error) {
-		// Log the error but don't include it in the response, following the pattern in searchCommits
-		Logger.error("Error in searchFiles:", error)
-
-		// Track as a search execution error with appropriate error type
-		const errorMessage = error instanceof Error ? error.message : String(error)
-		const errorType = error instanceof Error && error.message.includes("permission") ? "permission_denied" : "unknown"
-
-		// Determine mention type based on the search request
-		const mentionType =
-			request.selectedType === FileSearchType.FILE
-				? "file"
-				: request.selectedType === FileSearchType.FOLDER
-					? "folder"
-					: "folder" // Default to folder for "all" searches
-
-		await telemetryService.captureMentionFailed(mentionType, errorType, errorMessage)
-
-		// Return empty results without error message
-		return { results: [], mentionsRequestId: request.mentionsRequestId }
+		return handleSearchError(request, error)
 	}
 }

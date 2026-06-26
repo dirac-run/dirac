@@ -1,16 +1,17 @@
 import { expect } from "chai"
 import { applyModelContentFixes } from "../ModelContentProcessor"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("ModelContentProcessor", () => {
 	// Test data constants
 	const MODELS = {
-		CLAUDE: "claude-3-5-sonnet-20241022",
+		CLAUDE: TEST_MODEL_IDS.ANTHROPIC_FULL,
 		CLAUDE_OPUS: "claude-opus",
 		CLAUDE_V2: "anthropic.claude-v2",
 		GEMINI: "gemini-pro",
 		GEMINI_FLASH: "gemini-2.0-flash-exp",
 		DEEPSEEK: "deepseek-chat",
-		GPT4: "gpt-4",
+		GPT4: TEST_MODEL_IDS.OPENAI,
 	} as const
 
 	const FILES = {

@@ -7,7 +7,7 @@ import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { formatLineForModel } from "@utils/line-hashing"
 import { CardStatus } from "@/shared/ExtensionMessage"
 import * as path from "path"
-import { formatResponse } from "@/core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 
 export interface FindSymbolReferencesArgs {
     symbols: string | string[]

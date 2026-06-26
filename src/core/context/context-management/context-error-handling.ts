@@ -1,4 +1,4 @@
-import LengthFinishReasonError, { APIError } from "openai"
+import { APIError } from "openai"
 
 export function checkContextWindowExceededError(error: unknown): boolean {
 	return (
@@ -39,12 +39,10 @@ function checkIsOpenRouterContextWindowError(error: any): boolean {
 }
 
 // Docs: https://platform.openai.com/docs/guides/error-codes/api-errors
+// LengthFinishReasonError is internal to openai/core/error and not re-exported from the package entry,
+// so we rely on the APIError + status 400 + message-substring check below.
 function checkIsOpenAIContextWindowError(error: unknown): boolean {
 	try {
-		if (error instanceof LengthFinishReasonError) {
-			return true
-		}
-
 		const KNOWN_CONTEXT_ERROR_SUBSTRINGS = ["token", "context length"] as const
 
 		return (

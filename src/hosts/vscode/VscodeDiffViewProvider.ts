@@ -1,66 +1,24 @@
 import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
-import pTimeout from "p-timeout"
-import * as path from "path"
 import * as vscode from "vscode"
-import { DecorationController } from "@/hosts/vscode/DecorationController"
-import { NotebookDiffView } from "@/hosts/vscode/NotebookDiffView"
-import { Logger } from "@/shared/services/Logger"
-import { arePathsEqual } from "@/utils/path"
-import { createDirectoriesForFile } from "@/utils/fs"
+import { DecorationControllerManager } from "@/hosts/vscode/DecorationControllerManager"
+import { DocumentOperationManager } from "@/hosts/vscode/DocumentOperationManager"
+import { NotebookDiffManager } from "@/hosts/vscode/NotebookDiffManager"
+import { ReviewContextManager } from "@/hosts/vscode/ReviewContextManager"
+import { StreamingTextUpdater } from "@/hosts/vscode/StreamingTextUpdater"
+import { TabManager } from "@/hosts/vscode/TabManager"
+import { DIFF_VIEW_URI_SCHEME } from "./diff-view-constants"
 
-export const DIFF_VIEW_URI_SCHEME = "dirac-diff"
+export { DIFF_VIEW_URI_SCHEME }
 
 export class VscodeDiffViewProvider extends DiffViewProvider {
-	private activeDiffEditor?: vscode.TextEditor
-
-	private fadedOverlayController?: DecorationController
-	private activeLineController?: DecorationController
-	private notebookDiffView?: NotebookDiffView
-
-	private static reviewingFiles: Map<string, string> = new Map()
-	private static contextKeyDisposables: vscode.Disposable[] = []
-	private static isInitialized = false
+	private decorationManager?: DecorationControllerManager
+	private streamingUpdater?: StreamingTextUpdater
+	private notebookManager = new NotebookDiffManager()
+	private documentOpManager = new DocumentOperationManager()
 
 	constructor() {
 		super()
-		if (!VscodeDiffViewProvider.isInitialized) {
-			VscodeDiffViewProvider.contextKeyDisposables.push(
-				vscode.window.onDidChangeActiveTextEditor((editor) => VscodeDiffViewProvider.updateContextKeys(editor)),
-				vscode.workspace.onDidChangeTextDocument((event) => {
-					const activeEditor = vscode.window.activeTextEditor
-					if (activeEditor && event.document === activeEditor.document) {
-						VscodeDiffViewProvider.updateContextKeys(activeEditor)
-					}
-				}),
-			)
-			VscodeDiffViewProvider.isInitialized = true
-		}
-	}
-
-	private static updateContextKeys(editor: vscode.TextEditor | undefined) {
-		if (!editor || editor.document.uri.scheme === DIFF_VIEW_URI_SCHEME) {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
-			return
-		}
-
-		const fsPath = editor.document.uri.fsPath
-		let proposedContent: string | undefined
-		for (const [path, content] of VscodeDiffViewProvider.reviewingFiles.entries()) {
-			if (arePathsEqual(path, fsPath)) {
-				proposedContent = content
-				break
-			}
-		}
-
-		if (proposedContent === undefined) {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
-		} else {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", true)
-			const isModified = editor.document.getText() !== proposedContent
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", isModified)
-		}
+		ReviewContextManager.initialize()
 	}
 
 	override async openDiffEditor(): Promise<void> {
@@ -68,73 +26,20 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 			throw new Error("No file path set")
 		}
 
-		// if the file was already open, close it (must happen after showing the diff view since if it's the only tab the column will close)
 		this.documentWasOpen = false
-		// close the tab if it's open (it's already been saved)
-		const tabs = vscode.window.tabGroups.all
-			.flatMap((tg) => tg.tabs)
-			.filter((tab) => tab.input instanceof vscode.TabInputText && arePathsEqual(tab.input.uri.fsPath, this.absolutePath))
-		for (const tab of tabs) {
-			if (!tab.isDirty) {
-				try {
-					await vscode.window.tabGroups.close(tab)
-				} catch (error) {
-					Logger.warn("Tab close retry failed:", error.message)
-				}
-			}
-			this.documentWasOpen = true
-		}
 
-		const uri = vscode.Uri.file(this.absolutePath)
-		// If this diff editor is already open (ie if a previous write file was interrupted) then we should activate that instead of opening a new diff
-		const diffTab = vscode.window.tabGroups.all
-			.flatMap((group) => group.tabs)
-			.find(
-				(tab) =>
-					tab.input instanceof vscode.TabInputTextDiff &&
-					tab.input?.original?.scheme === DIFF_VIEW_URI_SCHEME &&
-					arePathsEqual(tab.input.modified.fsPath, uri.fsPath),
-			)
+		const { editor, documentWasOpen } = await TabManager.openDiffEditor(
+			this.absolutePath,
+			this.editType,
+			this.originalContent,
+			{ preserveFocus: true },
+		)
+		this.documentWasOpen = documentWasOpen
 
-		if (diffTab && diffTab.input instanceof vscode.TabInputTextDiff) {
-			// Close the existing diff tab so we can open a fresh one with the correct original content
-			try {
-				await vscode.window.tabGroups.close(diffTab)
-			} catch (e) {}
-		}
+		this.decorationManager = new DecorationControllerManager(editor)
+		this.decorationManager.initialize()
 
-		// Open new diff editor.
-		this.activeDiffEditor = await new Promise<vscode.TextEditor>((resolve, reject) => {
-			const fileName = path.basename(uri.fsPath)
-			const fileExists = this.editType === "modify"
-			const disposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
-				if (editor && arePathsEqual(editor.document.uri.fsPath, uri.fsPath)) {
-					disposable.dispose()
-					resolve(editor)
-				}
-			})
-			vscode.commands.executeCommand(
-				"vscode.diff",
-				uri.with({
-					scheme: DIFF_VIEW_URI_SCHEME,
-					query: Buffer.from(this.originalContent ?? "").toString("base64"),
-				}),
-				uri,
-				`${fileName}: ${fileExists ? "Original ↔ Dirac's Changes" : "New File"} (Editable)`,
-				{
-					preserveFocus: true,
-				},
-			)
-			// This may happen on very slow machines ie project idx
-			setTimeout(() => {
-				disposable.dispose()
-				reject(new Error("Failed to open diff editor, please try again..."))
-			}, 10_000)
-		})
-		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
-		this.activeLineController = new DecorationController("activeLine", this.activeDiffEditor)
-		// Apply faded overlay to all lines initially
-		this.fadedOverlayController.addLines(0, this.activeDiffEditor.document.lineCount)
+		this.streamingUpdater = new StreamingTextUpdater(editor)
 	}
 
 	override async replaceText(
@@ -142,167 +47,83 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 		rangeToReplace: { startLine: number; endLine: number },
 		currentLine: number | undefined,
 	): Promise<void> {
-		if (!this.activeDiffEditor || !this.activeDiffEditor.document) {
+		if (!this.streamingUpdater) {
 			throw new Error("User closed text editor, unable to edit file...")
 		}
 
-		// Place cursor at the beginning of the diff editor to keep it out of the way of the stream animation
-		const beginningOfDocument = new vscode.Position(0, 0)
-		this.activeDiffEditor.selection = new vscode.Selection(beginningOfDocument, beginningOfDocument)
+		await this.streamingUpdater.replaceText(content, rangeToReplace, currentLine)
 
-		// Replace the text in the diff editor document.
-		const document = this.activeDiffEditor?.document
-		const replacingToEnd = rangeToReplace.endLine >= document.lineCount
-		const edit = new vscode.WorkspaceEdit()
-		const range = new vscode.Range(rangeToReplace.startLine, 0, rangeToReplace.endLine, 0)
-		edit.replace(document.uri, range, content)
-		const success = await vscode.workspace.applyEdit(edit)
-
-		// VS Code can normalize trailing newlines on full-document replacements.
-		// Only fix up when replacing to the end to avoid touching untouched content.
-		if (replacingToEnd) {
-			const desiredTrailingNewlines = countTrailingNewlines(content)
-			const actualTrailingNewlines = countTrailingNewlines(document.getText())
-			const newlineDelta = desiredTrailingNewlines - actualTrailingNewlines
-
-			if (newlineDelta > 0) {
-				const fixEdit = new vscode.WorkspaceEdit()
-				fixEdit.insert(document.uri, document.lineAt(document.lineCount - 1).range.end, "\n".repeat(newlineDelta))
-				await vscode.workspace.applyEdit(fixEdit)
-			} else if (newlineDelta < 0) {
-				const fixEdit = new vscode.WorkspaceEdit()
-				const startLine = Math.max(0, document.lineCount + newlineDelta)
-				fixEdit.delete(document.uri, new vscode.Range(startLine, 0, document.lineCount, 0))
-				await vscode.workspace.applyEdit(fixEdit)
-			}
-		}
-
-		if (currentLine !== undefined) {
-			// Update decorations for the entire changed section
-			this.activeLineController?.setActiveLine(currentLine)
-			this.fadedOverlayController?.updateOverlayAfterLine(currentLine, document.lineCount)
+		if (currentLine !== undefined && this.decorationManager) {
+			this.decorationManager.updateAfterReplace(currentLine)
 		}
 	}
 
 	override async scrollEditorToLine(line: number): Promise<void> {
-		if (!this.activeDiffEditor) {
-			return
-		}
-		const scrollLine = line + 4
-		this.activeDiffEditor.revealRange(new vscode.Range(scrollLine, 0, scrollLine, 0), vscode.TextEditorRevealType.InCenter)
+		await this.streamingUpdater?.scrollEditorToLine(line)
 	}
 
 	override async scrollAnimation(startLine: number, endLine: number): Promise<void> {
-		if (!this.activeDiffEditor) {
-			return
-		}
-		const totalLines = endLine - startLine
-		const numSteps = 10 // Adjust this number to control animation speed
-		const stepSize = Math.max(1, Math.floor(totalLines / numSteps))
-
-		// Create and await the smooth scrolling animation
-		for (let line = startLine; line <= endLine; line += stepSize) {
-			this.activeDiffEditor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter)
-			await new Promise((resolve) => setTimeout(resolve, 16)) // ~60fps
-		}
+		await this.streamingUpdater?.scrollAnimation(startLine, endLine)
 	}
 
 	override async truncateDocument(lineNumber: number): Promise<void> {
-		if (!this.activeDiffEditor) {
-			return
-		}
-		const document = this.activeDiffEditor.document
-		if (lineNumber < document.lineCount) {
-			const edit = new vscode.WorkspaceEdit()
-			edit.delete(document.uri, new vscode.Range(lineNumber, 0, document.lineCount, 0))
-			await vscode.workspace.applyEdit(edit)
-		}
+		await this.streamingUpdater?.truncateDocument(lineNumber)
 	}
 
 	protected override async onFinalUpdate(): Promise<void> {
-		// Clear all decorations at the end of streaming
-		this.fadedOverlayController?.clear()
-		this.activeLineController?.clear()
+		this.decorationManager?.clearAll()
 	}
 
 	protected override async getDocumentLineCount(): Promise<number> {
-		return this.activeDiffEditor?.document.lineCount ?? 0
+		return this.streamingUpdater?.lineCount ?? 0
 	}
 
 	protected override async getDocumentText(): Promise<string | undefined> {
-		if (!this.activeDiffEditor || !this.activeDiffEditor.document) {
+		const editor = vscode.window.activeTextEditor
+		if (!editor || editor.document.uri.scheme === DIFF_VIEW_URI_SCHEME) {
 			return undefined
 		}
-		return this.activeDiffEditor.document.getText()
+		return editor.document.getText()
 	}
 
 	protected override async saveDocument(): Promise<boolean> {
-		if (!this.activeDiffEditor) {
+		const editor = vscode.window.activeTextEditor
+		if (!editor) {
 			return false
 		}
-		if (!this.activeDiffEditor.document.isDirty) {
-			return true
-		}
-		return await pTimeout(this.activeDiffEditor.document.save(), {
-			milliseconds: 10_000,
-			message: "Failed to save document in VS Code within 10 seconds",
-		})
+		return this.documentOpManager.saveDocument(editor)
 	}
 
 	protected async closeAllDiffViews(): Promise<void> {
-		// Close all the dirac diff views.
-		const tabs = vscode.window.tabGroups.all
-			.flatMap((tg) => tg.tabs)
-			.filter((tab) => tab.input instanceof vscode.TabInputTextDiff && tab.input?.original?.scheme === DIFF_VIEW_URI_SCHEME)
-		for (const tab of tabs) {
-			// trying to close dirty views results in save popup
-			if (!tab.isDirty) {
-				try {
-					await vscode.window.tabGroups.close(tab)
-				} catch (error) {
-					Logger.warn("Tab close retry failed:", error.message)
-				}
-			}
-		}
+		await TabManager.closeAllDiffViews(DIFF_VIEW_URI_SCHEME)
 	}
 
 	protected override async resetDiffView(): Promise<void> {
-		if (this.notebookDiffView) {
-			await this.notebookDiffView.cleanup()
-			this.notebookDiffView = undefined
+		if (this.notebookManager) {
+			await this.notebookManager.cleanup()
 		}
 
-		this.activeDiffEditor = undefined
-		this.fadedOverlayController = undefined
-		this.activeLineController = undefined
+		this.streamingUpdater = undefined
+		this.decorationManager = undefined
 	}
 
 	protected override async switchToSpecializedEditor(): Promise<void> {
-		if (!this.isNotebookFile() || !this.activeDiffEditor || !this.absolutePath) {
+		const editor = vscode.window.activeTextEditor
+		if (!this.isNotebookFile() || !editor || !this.absolutePath) {
 			return
 		}
 
-		try {
-			this.notebookDiffView = new NotebookDiffView()
-			await this.notebookDiffView.open(this.absolutePath, this.activeDiffEditor)
-		} catch (error) {
-			Logger.error("Failed to create notebook diff view:", error)
-		}
+		await this.notebookManager.switchToSpecializedEditor(this.absolutePath, editor)
 	}
 
 	override async showFile(absolutePath: string): Promise<void> {
 		const uri = vscode.Uri.file(absolutePath)
 
 		if (this.isNotebookFile()) {
-			// Open with Jupyter notebook editor if available
-			const jupyterExtension = vscode.extensions.getExtension("ms-toolsai.jupyter")
-			if (jupyterExtension) {
-				await vscode.commands.executeCommand("vscode.openWith", uri, "jupyter-notebook")
-				return
-			}
+			await this.notebookManager.showFileForNotebook(uri)
+			return
 		}
 
-		// Default: open as text
 		await vscode.window.showTextDocument(uri, { preview: false })
 	}
 
@@ -314,194 +135,30 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 		autoFormattingEdits: string | undefined
 		userEdits: string | undefined
 	}> {
-		const uri = vscode.Uri.file(absolutePath)
-
-		// Ensure parent directories exist
-		await createDirectoriesForFile(absolutePath)
-
-		// Ensure file exists before opening
-		try {
-			await vscode.workspace.fs.stat(uri)
-		} catch (error) {
-			await vscode.workspace.fs.writeFile(uri, new Uint8Array())
-		}
-
-		const document = await vscode.workspace.openTextDocument(uri)
-
-		const edit = new vscode.WorkspaceEdit()
-		const range = new vscode.Range(0, 0, document.lineCount, 0)
-		edit.replace(uri, range, content)
-		await vscode.workspace.applyEdit(edit)
-
-		await pTimeout(document.save(), {
-			milliseconds: 10_000,
-			message: "Failed to save document in VS Code within 10 seconds",
-		})
-
-		const postSaveContent = document.getText()
-		const newContentEOL = content.includes("\r\n") ? "\r\n" : "\n"
-		const normalizedNewContent = content.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
-		const normalizedPostSaveContent = postSaveContent.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
-
-		let autoFormattingEdits: string | undefined
-		if (normalizedNewContent !== normalizedPostSaveContent) {
-			autoFormattingEdits = (await import("@core/prompts/responses")).formatResponse.createPrettyPatch(
-				path.relative(await (await import("@utils/path")).getCwd(), absolutePath).replace(/\\/g, "/"),
-				normalizedNewContent,
-				normalizedPostSaveContent,
-			)
-		}
-
-		return {
-			finalContent: normalizedPostSaveContent,
-			autoFormattingEdits,
-			userEdits: undefined,
-		}
+		return this.documentOpManager.applyAndSaveSilently(absolutePath, content)
 	}
 
 	override async showReview(
 		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
 	): Promise<void> {
-		VscodeDiffViewProvider.reviewingFiles = new Map(files.map((f) => [f.absolutePath, f.content]))
-		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)
-
-		await vscode.commands.executeCommand(
-			"vscode.changes",
-			"Review Dirac Edits",
-			files.map((file) => {
-				const absolutePath = file.absolutePath.toPosix()
-				return [
-					vscode.Uri.file(file.absolutePath),
-					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
-						query: Buffer.from(file.originalContent ?? "").toString("base64"), // original content
-					}),
-					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
-						query: Buffer.from(file.content).toString("base64"), // new content
-					}),
-				]
-			}),
-		)
-		vscode.commands.executeCommand("workbench.action.closePanel")
+		await ReviewContextManager.showReview(files)
 	}
 
-	override async applyAndSaveBatchSilently(files: { path: string; content: string }[]): Promise<
-		Map<
-			string,
-			{
-				finalContent: string | undefined
-				autoFormattingEdits: string | undefined
-				userEdits: string | undefined
-			}
-		>
+	override async applyAndSaveBatchSilently(
+		files: { path: string; content: string }[],
+	): Promise<
+		Map<string, { finalContent: string | undefined; autoFormattingEdits: string | undefined; userEdits: string | undefined }>
 	> {
-		const results = new Map<
-			string,
-			{
-				finalContent: string | undefined
-				autoFormattingEdits: string | undefined
-				userEdits: string | undefined
-			}
-		>()
-
-		const edit = new vscode.WorkspaceEdit()
-		const documents: vscode.TextDocument[] = []
-
-		for (const file of files) {
-			const uri = vscode.Uri.file(file.path)
-			await createDirectoriesForFile(file.path)
-			try {
-				await vscode.workspace.fs.stat(uri)
-			} catch (error) {
-				await vscode.workspace.fs.writeFile(uri, new Uint8Array())
-			}
-
-			const document = await vscode.workspace.openTextDocument(uri)
-			documents.push(document)
-			const range = new vscode.Range(0, 0, document.lineCount, 0)
-			edit.replace(uri, range, file.content)
-		}
-
-		await vscode.workspace.applyEdit(edit)
-
-		await Promise.all(
-			documents.map((doc) =>
-				pTimeout(doc.save(), {
-					milliseconds: 10_000,
-					message: `Failed to save document ${doc.uri.fsPath} in VS Code within 10 seconds`,
-				}),
-			),
-		)
-
-		const cwd = await (await import("@utils/path")).getCwd()
-		const { formatResponse } = await import("@core/prompts/responses")
-
-		for (let i = 0; i < files.length; i++) {
-			const file = files[i]
-			const document = documents[i]
-			const postSaveContent = document.getText()
-			const newContentEOL = file.content.includes("\r\n") ? "\r\n" : "\n"
-			const normalizedNewContent = file.content.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
-			const normalizedPostSaveContent = postSaveContent.replace(/\r\n|\n/g, newContentEOL).trimEnd() + newContentEOL
-
-			let autoFormattingEdits: string | undefined
-			if (normalizedNewContent !== normalizedPostSaveContent) {
-				autoFormattingEdits = formatResponse.createPrettyPatch(
-					path.relative(cwd, file.path).replace(/\\/g, "/"),
-					normalizedNewContent,
-					normalizedPostSaveContent,
-				)
-			}
-
-			results.set(file.path, {
-				finalContent: normalizedPostSaveContent,
-				autoFormattingEdits,
-				userEdits: undefined,
-			})
-		}
-
-		return results
+		return this.documentOpManager.applyAndSaveBatchSilently(files)
 	}
 
 	override async format(filePath: string): Promise<string> {
-		const uri = vscode.Uri.file(filePath)
-		try {
-			const document = await vscode.workspace.openTextDocument(uri)
-			const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", uri, {
-				insertSpaces: true,
-				tabSize: 4,
-			})
-			if (edits && edits.length > 0) {
-				const edit = new vscode.WorkspaceEdit()
-				edit.set(uri, edits)
-				await vscode.workspace.applyEdit(edit)
-				const editor = vscode.window.visibleTextEditors.find((e) => arePathsEqual(e.document.uri.fsPath, filePath))
-				if (editor) {
-					await editor.document.save()
-				} else {
-					await document.save()
-				}
-			}
-			return document.getText()
-		} catch (error) {
-			Logger.warn(`[VscodeDiffViewProvider] Format failed for ${filePath}: ${error}`)
-			const document = await vscode.workspace.openTextDocument(uri)
-			return document.getText()
-		}
+		return this.documentOpManager.format(filePath)
 	}
-	override async hideReview(): Promise<void> {
-		VscodeDiffViewProvider.reviewingFiles.clear()
-		VscodeDiffViewProvider.updateContextKeys(vscode.window.activeTextEditor)
 
-		// Close diff views (if not dirty) and reset state
+	override async hideReview(): Promise<void> {
+		ReviewContextManager.hideReview()
 		await this.closeAllDiffViews()
 		await this.reset()
 	}
-}
-
-function countTrailingNewlines(text: string): number {
-	let count = 0
-	for (let i = text.length - 1; i >= 0 && text[i] === "\n"; i -= 1) {
-		count += 1
-	}
-	return count
 }

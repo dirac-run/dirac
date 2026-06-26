@@ -93,6 +93,7 @@
  * ```
  */
 
+import type { AxiosRequestConfig } from "axios"
 import OpenAI, { ClientOptions as OpenAIClientOptions } from "openai"
 import { EnvHttpProxyAgent, setGlobalDispatcher, fetch as undiciFetch } from "undici"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
@@ -120,7 +121,8 @@ export const fetch: typeof globalThis.fetch = (() => {
 		// Configure undici with ProxyAgent
 		const agent = new EnvHttpProxyAgent({})
 		setGlobalDispatcher(agent)
-		baseFetch = undiciFetch as any as typeof globalThis.fetch
+		// undici's fetch has extra undici-specific fields; signature is compatible for our usage
+		baseFetch = undiciFetch as unknown as typeof globalThis.fetch
 	}
 
 	return (input: string | URL | Request, init?: RequestInit): Promise<Response> => (mockFetch || baseFetch)(input, init)
@@ -170,11 +172,29 @@ export function mockFetchForTesting<T>(theFetch: typeof globalThis.fetch, callba
  * })
  * ```
  */
-export function getAxiosSettings(): { adapter?: any; fetch?: typeof globalThis.fetch } {
+export function getAxiosSettings(): Pick<AxiosRequestConfig, "adapter"> & { fetch?: typeof globalThis.fetch } {
 	return {
-		adapter: "fetch" as any,
+		adapter: "fetch",
 		fetch, // Use our configured fetch
 	}
+}
+
+/**
+ * HTTP status code classification helpers.
+ * Standardizes status code checks across the codebase — replaces scattered
+ * 'status === 429' and 'String(status) === "400"' patterns with intent-encoding names.
+ */
+export const isRateLimited = (status: number): boolean => status === 429
+export const isAuthError = (status: number): boolean => status === 401 || status === 403
+export const isClientError = (status: number): boolean => status >= 400 && status < 500
+export const isServerError = (status: number): boolean => status >= 500 && status < 600
+
+/**
+ * Standard JSON content type headers for fetch/axios calls.
+ * Use this instead of inline { "Content-Type": "application/json" } objects.
+ */
+export function jsonHeaders(): Record<string, string> {
+	return { "Content-Type": "application/json" }
 }
 
 /**

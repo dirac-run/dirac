@@ -1,15 +1,14 @@
+import { formatResponse } from "@core/formatResponse"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+import { stripHashes } from "@utils/line-hashing"
+import { CardStatus } from "@/shared/ExtensionMessage"
+import { DiracIcon } from "@/shared/icons"
+import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
-import { DiracIcon } from "@/shared/icons"
-import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 import { SurfaceType } from "../../interfaces/SurfaceType"
-import { stripHashes } from "@utils/line-hashing"
+import { captureAccepted, captureRejected, getModelInfo } from "../../utils/AiOutputTelemetry"
 import { applyModelContentFixes } from "../../utils/ModelContentProcessor"
-import { formatResponse } from "@core/prompts/responses"
-import { CardStatus } from "@/shared/ExtensionMessage"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-import { getModelInfo } from "../../utils/AiOutputTelemetry"
-import { captureAccepted, captureRejected } from "../../utils/AiOutputTelemetry"
 
 export interface WriteFileArgs {
 	path: string
@@ -50,14 +49,14 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 
 			// 4. Handle approval and save
 			const shouldAutoApprove = await env.config.callbacks.shouldAutoApproveToolWithPath(toolId, relPath)
-			const saveResult = await this.handleApprovalAndSave(
+			const saveResult = await this.awaitApprovalThenWriteFile(
 				env,
 				absolutePath,
 				displayPath,
 				content,
 				fileExists,
 				shouldAutoApprove,
-				card
+				card,
 			)
 
 			if (typeof saveResult === "string") return saveResult // Denied with feedback or error
@@ -65,7 +64,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			// 5. Finalize results
 			return await this.finalizeResults(env, absolutePath, relPath, fileExists, saveResult, shouldAutoApprove)
 		} catch (error) {
-			return await this.handleError(error, env, card)
+			return await this.finalizeCardWithError(error, env, card)
 		}
 	}
 
@@ -85,17 +84,13 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
 			if (toolId === DiracDefaultTool.FILE_NEW) {
 				return {
-					error: formatResponse.writeToFileMissingContentError(
-						relPath,
-						env.config.taskState.consecutiveMistakeCount
-					),
+					error: formatResponse.writeToFileMissingContentError(relPath, env.config.taskState.consecutiveMistakeCount),
 				}
-			} else {
-				if (!env.config.isSubagentExecution) {
-					await env.ui.upsertText("Missing value for required parameter 'content'.")
-				}
-				return { error: formatResponse.missingToolParameterError("content") }
 			}
+			if (!env.config.isSubagentExecution) {
+				await env.ui.upsertText("Missing value for required parameter 'content'.")
+			}
+			return { error: formatResponse.missingToolParameterError("content") }
 		}
 
 		const { absolutePath, displayPath } = await env.workspace.resolvePath(relPath)
@@ -134,14 +129,14 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		return content
 	}
 
-	private async handleApprovalAndSave(
+	private async awaitApprovalThenWriteFile(
 		env: IToolEnvironment,
 		absolutePath: string,
 		displayPath: string,
 		content: string,
 		fileExists: boolean,
 		shouldAutoApprove: boolean,
-		card?: any
+		card?: any,
 	): Promise<any | string> {
 		const toolId = this.spec().id
 		const { modelId, providerId } = getModelInfo(env.config)
@@ -260,14 +255,13 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		relPath: string,
 		fileExists: boolean,
 		saveResult: any,
-		shouldAutoApprove: boolean
+		shouldAutoApprove: boolean,
 	) {
 		const toolId = this.spec().id
 		await env.editor.reset()
 		await env.diagnostics.prepare([absolutePath])
 		const diagnostics = await env.diagnostics.getRaw([absolutePath])
-		const newProblemsMessage =
-			diagnostics.length > 0 ? `Found ${diagnostics.length} problems in ${relPath}` : undefined
+		const newProblemsMessage = diagnostics.length > 0 ? `Found ${diagnostics.length} problems in ${relPath}` : undefined
 
 		env.telemetry.captureCustomMetadata({
 			toolId,
@@ -283,31 +277,29 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				relPath,
 				"User made manual changes in the editor.",
 				saveResult.autoFormatting ? "Auto-formatting applied." : undefined,
-				newProblemsMessage
+				newProblemsMessage,
 			)
 		}
 
 		return formatResponse.fileEditWithoutUserChanges(
 			relPath,
 			saveResult.autoFormatting ? "Auto-formatting applied." : undefined,
-			newProblemsMessage
+			newProblemsMessage,
 		)
 	}
 
-	private async handleError(error: any, env: IToolEnvironment, card?: any): Promise<string> {
+	private async finalizeCardWithError(error: any, env: IToolEnvironment, card?: any): Promise<string> {
 		env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
-		
+
 		if (card) {
 			await card.update({
-				body: `✕ Error: ${error.message || String(error)}`
+				body: `✕ Error: ${error.message || String(error)}`,
 			})
 			await card.finalize(CardStatus.ERROR)
 		}
 
 		return formatResponse.toolError(error.message || String(error))
 	}
-
-
 }
 
 export const write_to_file_spec: DiracToolSpec = {

@@ -1,4 +1,4 @@
-import { DiracDefaultTool } from "../../shared/tools"
+import { DiracDefaultTool } from "@shared/tools"
 
 export const TOOL_EXAMPLES: Partial<Record<DiracDefaultTool, string>> = {
 	[DiracDefaultTool.ASK]: '{"question": "What should I do next?"}',

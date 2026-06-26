@@ -1,12 +1,12 @@
-import { IDiracTool } from "../../interfaces/IDiracTool"
-import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
-import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
-import { formatResponse } from "@core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { showSystemNotification } from "@integrations/notifications"
+import { DiracIcon } from "@shared/icons"
 import { telemetryService } from "@/services/telemetry"
 import { CardStatus } from "@/shared/ExtensionMessage"
-import { DiracIcon } from "@shared/icons"
+import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
+import { IDiracTool } from "../../interfaces/IDiracTool"
+import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 
 export const new_task_spec: DiracToolSpec = {
 	id: DiracDefaultTool.NEW_TASK,
@@ -22,7 +22,6 @@ export const new_task_spec: DiracToolSpec = {
 	],
 }
 
-
 export class NewTaskTool implements IDiracTool {
 	spec(): DiracToolSpec {
 		return new_task_spec
@@ -36,7 +35,10 @@ export class NewTaskTool implements IDiracTool {
 		const { context } = args
 
 		if (!context) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
+			env.orchestration.setTaskState(
+				"consecutiveMistakeCount",
+				env.orchestration.getTaskState("consecutiveMistakeCount") + 1,
+			)
 			return formatResponse.toolError("Missing required parameter: context")
 		}
 
@@ -56,7 +58,7 @@ export class NewTaskTool implements IDiracTool {
 			requireFeedback: true,
 			collapsed: false,
 		})
-		const { text, images, files: newTaskFiles } = await cardHandle.waitForInteraction() as any
+		const { text, images, files: newTaskFiles } = await cardHandle.waitForInteraction()
 
 		const apiConfig = env.config.services.stateManager.getApiConfiguration()
 		const provider = (env.config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
@@ -82,7 +84,7 @@ export class NewTaskTool implements IDiracTool {
 			return formatResponse.toolResult(
 				`The user provided feedback instead of creating a new task:\n<feedback>\n${text}\n</feedback>`,
 				images,
-				fileContentString
+				fileContentString,
 			)
 		}
 

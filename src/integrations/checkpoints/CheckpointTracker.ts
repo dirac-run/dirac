@@ -528,3 +528,5 @@ class CheckpointTracker {
 }
 
 export default CheckpointTracker
+
+export { DiffContentProvider, type DiffEntry } from "./DiffContentProvider"

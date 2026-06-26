@@ -2,6 +2,7 @@ import { ApiFormat } from "@shared/proto/dirac/models"
 import * as assert from "assert"
 import type { ITelemetryProvider, TelemetryProperties, TelemetrySettings } from "../providers/ITelemetryProvider"
 import { TelemetryMetadata, TelemetryService } from "../TelemetryService"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 class FakeProvider implements ITelemetryProvider {
 	readonly name = "FakeProvider"
@@ -199,7 +200,7 @@ describe("TelemetryService metrics", () => {
 		const service = createTelemetryService(provider)
 		service.identifyAccount({ id: "user-1" } as any)
 
-		service.captureConversationTurnEvent("task-2", "openai", "gpt-4", "assistant", "plan", {
+		service.captureConversationTurnEvent("task-2", "openai", TEST_MODEL_IDS.OPENAI, "assistant", "plan", {
 			tokensIn: 150,
 			tokensOut: 200,
 			cacheWriteTokens: 40,
@@ -220,7 +221,7 @@ describe("TelemetryService metrics", () => {
 		assert.ok(costEntry)
 		assert.strictEqual(costEntry?.attributes.ulid, "task-2")
 		assert.strictEqual(costEntry?.attributes.provider, "openai")
-		assert.strictEqual(costEntry?.attributes.model, "gpt-4")
+		assert.strictEqual(costEntry?.attributes.model, TEST_MODEL_IDS.OPENAI)
 		assert.strictEqual(costEntry?.attributes.mode, "plan")
 		assert.strictEqual(costEntry?.attributes.currency, "USD")
 		assert.deepStrictEqual(
@@ -237,7 +238,7 @@ describe("TelemetryService metrics", () => {
 		assert.strictEqual(turnEntry?.value, 1)
 		assert.strictEqual(turnEntry?.attributes.ulid, "task-2")
 		assert.strictEqual(turnEntry?.attributes.provider, "openai")
-		assert.strictEqual(turnEntry?.attributes.model, "gpt-4")
+		assert.strictEqual(turnEntry?.attributes.model, TEST_MODEL_IDS.OPENAI)
 		assert.strictEqual(turnEntry?.attributes.source, "assistant")
 		assert.strictEqual(turnEntry?.attributes.mode, "plan")
 	})

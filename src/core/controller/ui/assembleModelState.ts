@@ -1,0 +1,64 @@
+import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
+import type { StateManager } from "@core/storage/StateManager"
+import { featureFlagsService } from "@/services/feature-flags"
+
+/** Reads persisted settings/state and shapes them into ExtensionState fields. */
+export function assembleModelState(stateManager: StateManager) {
+	const enableCheckpointsSetting = stateManager.getGlobalSettingsKey("enableCheckpointsSetting")
+	return {
+		apiConfiguration: stateManager.getApiConfiguration(),
+		autoApprovalSettings: stateManager.getGlobalSettingsKey("autoApprovalSettings"),
+		browserSettings: stateManager.getGlobalSettingsKey("browserSettings"),
+		preferredLanguage: stateManager.getGlobalSettingsKey("preferredLanguage"),
+		mode: stateManager.getGlobalSettingsKey("mode"),
+		strictPlanModeEnabled: stateManager.getGlobalSettingsKey("strictPlanModeEnabled"),
+		yoloModeToggled: stateManager.getGlobalSettingsKey("yoloModeToggled"),
+		autoApproveAllToggled: stateManager.getGlobalSettingsKey("autoApproveAllToggled"),
+		useAutoCondense: stateManager.getGlobalSettingsKey("useAutoCondense"),
+		subagentsEnabled: stateManager.getGlobalSettingsKey("subagentsEnabled"),
+		telemetrySetting: stateManager.getGlobalSettingsKey("telemetrySetting"),
+		planActSeparateModelsSetting: stateManager.getGlobalSettingsKey("planActSeparateModelsSetting"),
+		enableCheckpointsSetting: enableCheckpointsSetting ?? true,
+		globalDiracRulesToggles: stateManager.getGlobalSettingsKey("globalDiracRulesToggles") || {},
+		localDiracRulesToggles: stateManager.getWorkspaceStateKey("localDiracRulesToggles") || {},
+		localWindsurfRulesToggles: stateManager.getWorkspaceStateKey("localWindsurfRulesToggles") || {},
+		localCursorRulesToggles: stateManager.getWorkspaceStateKey("localCursorRulesToggles") || {},
+		localAgentsRulesToggles: stateManager.getWorkspaceStateKey("localAgentsRulesToggles") || {},
+		localWorkflowToggles: stateManager.getWorkspaceStateKey("workflowToggles") || {},
+		globalWorkflowToggles: stateManager.getGlobalSettingsKey("globalWorkflowToggles") || {},
+		globalSkillsToggles: stateManager.getGlobalSettingsKey("globalSkillsToggles") || {},
+		localSkillsToggles: stateManager.getWorkspaceStateKey("localSkillsToggles") || {},
+		remoteRulesToggles: stateManager.getGlobalStateKey("remoteRulesToggles"),
+		remoteWorkflowToggles: stateManager.getGlobalStateKey("remoteWorkflowToggles"),
+		shellIntegrationTimeout: stateManager.getGlobalSettingsKey("shellIntegrationTimeout"),
+		terminalReuseEnabled: stateManager.getGlobalStateKey("terminalReuseEnabled"),
+		vscodeTerminalExecutionMode: stateManager.getGlobalStateKey("vscodeTerminalExecutionMode"),
+		defaultTerminalProfile: stateManager.getGlobalSettingsKey("defaultTerminalProfile"),
+		isNewUser: stateManager.getGlobalStateKey("isNewUser"),
+		welcomeViewCompleted: !!stateManager.getGlobalStateKey("welcomeViewCompleted"),
+		terminalOutputLineLimit: stateManager.getGlobalSettingsKey("terminalOutputLineLimit"),
+		maxConsecutiveMistakes: stateManager.getGlobalSettingsKey("maxConsecutiveMistakes"),
+		customPrompt: stateManager.getGlobalSettingsKey("customPrompt"),
+		favoritedModelIds: stateManager.getGlobalStateKey("favoritedModelIds"),
+		lastDismissedInfoBannerVersion: stateManager.getGlobalStateKey("lastDismissedInfoBannerVersion") || 0,
+		lastDismissedModelBannerVersion: stateManager.getGlobalStateKey("lastDismissedModelBannerVersion") || 0,
+		lastDismissedCliBannerVersion: stateManager.getGlobalStateKey("lastDismissedCliBannerVersion") || 0,
+		dismissedBanners: stateManager.getGlobalStateKey("dismissedBanners"),
+		doubleCheckCompletionEnabled: stateManager.getGlobalSettingsKey("doubleCheckCompletionEnabled"),
+		multiRootSetting: { user: stateManager.getGlobalStateKey("multiRootEnabled"), featureFlag: true },
+		diracWebToolsEnabled: {
+			user: stateManager.getGlobalSettingsKey("diracWebToolsEnabled"),
+			featureFlag: featureFlagsService.getWebtoolsEnabled(),
+		},
+		worktreesEnabled: {
+			user: stateManager.getGlobalSettingsKey("worktreesEnabled"),
+			featureFlag: featureFlagsService.getWorktreesEnabled(),
+		},
+		hooksEnabled: getHooksEnabledSafe(stateManager.getGlobalSettingsKey("hooksEnabled")),
+		enableParallelToolCalling: stateManager.getGlobalSettingsKey("enableParallelToolCalling"),
+		backgroundEditEnabled: stateManager.getGlobalSettingsKey("backgroundEditEnabled"),
+		optOutOfRemoteConfig: stateManager.getGlobalSettingsKey("optOutOfRemoteConfig"),
+		writePromptMetadataEnabled: stateManager.getGlobalSettingsKey("writePromptMetadataEnabled"),
+		writePromptMetadataDirectory: stateManager.getGlobalSettingsKey("writePromptMetadataDirectory"),
+	}
+}

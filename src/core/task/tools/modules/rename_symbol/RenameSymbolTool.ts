@@ -1,7 +1,7 @@
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { DiracIcon } from "@/shared/icons"
-import { formatResponse } from "@/core/prompts/responses"
+import { formatResponse } from "@core/formatResponse"
 import * as path from "path"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 import { SurfaceType } from "../../interfaces/SurfaceType"

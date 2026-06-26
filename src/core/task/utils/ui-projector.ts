@@ -1,29 +1,30 @@
 import {
-    TaskStatus,
     ActionButton,
     DiracMessage,
     DiracMessageType,
+    TaskStatus,
     UIActionButton,
     UIActionButtonType,
     UIActionState,
 } from "@shared/ExtensionMessage"
-import { DiracAskResponse } from "@shared/WebviewMessage"
 import { isBusyTaskStatus } from "@shared/taskStatusProjection"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { TaskState } from "../TaskState"
 
-export function projectUIActionState(state: TaskState, messages: DiracMessage[], maxConsecutiveMistakes: number): UIActionState {
-    const taskStatus = state?.status ?? TaskStatus.IDLE
+export function projectUIActionState(
+    state: TaskState | undefined,
+    messages: DiracMessage[],
+    maxConsecutiveMistakes: number,
+): UIActionState {
     const uiState: UIActionState = {
         globalButtons: [],
         cardButtons: [],
         sendingDisabled:
-            taskStatus !== TaskStatus.IDLE &&
-            taskStatus !== TaskStatus.COMPLETED &&
-            taskStatus !== TaskStatus.AWAITING_USER_INPUT &&
-            taskStatus !== TaskStatus.CANCELLED,
-
+            state?.status !== TaskStatus.IDLE &&
+            state?.status !== TaskStatus.COMPLETED &&
+            state?.status !== TaskStatus.AWAITING_USER_INPUT &&
+            state?.status !== TaskStatus.CANCELLED,
     }
-
 
     // Active card interactions must take precedence over busy task states.
     // Tools can create a waiting card before the task status is projected as AWAITING_USER_INPUT.
@@ -33,10 +34,14 @@ export function projectUIActionState(state: TaskState, messages: DiracMessage[],
         if (cardMsg?.content.type === DiracMessageType.CARD) {
             const card = cardMsg.content.card
             uiState.activeCardId = activeCardId
-            uiState.cardButtons = card.actions?.map(mapCardActionToUIButton) || (card.requireApproval ? [
-                { label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-                { label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-            ] : [])
+            uiState.cardButtons =
+                card.actions?.map(mapCardActionToUIButton) ||
+                (card.requireApproval
+                    ? [
+                        { label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+                        { label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+                    ]
+                    : [])
             return uiState
         }
     }
@@ -76,10 +81,10 @@ export function projectUIActionState(state: TaskState, messages: DiracMessage[],
 
     // 3. Error Recovery State (Mistake Limit)
 
-    if (state?.consecutiveMistakeCount >= maxConsecutiveMistakes) {
+    if (state && state.consecutiveMistakeCount >= maxConsecutiveMistakes) {
         uiState.globalButtons.push(
             { label: "Proceed Anyways", action: UIActionButtonType.PROCEED, primary: true },
-            { label: "Start New Task", action: UIActionButtonType.NEW_TASK, style: "secondary" }
+            { label: "Start New Task", action: UIActionButtonType.NEW_TASK, style: "secondary" },
         )
         return uiState
     }

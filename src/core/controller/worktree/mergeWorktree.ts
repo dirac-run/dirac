@@ -5,211 +5,71 @@ import simpleGit from "simple-git"
 import { telemetryService } from "@/services/telemetry"
 import { Controller } from ".."
 
-/**
- * Merges a worktree's branch into the target branch and optionally deletes the worktree
- * @param controller The controller instance
- * @param request The merge worktree request
- * @returns MergeWorktreeResult indicating success, failure, or conflicts
- */
+const result = (success: boolean, message: string, extra: Partial<MergeWorktreeResult> = {}): MergeWorktreeResult =>
+	MergeWorktreeResult.create({ success, message, hasConflicts: false, conflictingFiles: [], ...extra })
+
 export async function mergeWorktree(_controller: Controller, request: MergeWorktreeRequest): Promise<MergeWorktreeResult> {
 	const cwd = await getWorkspacePath()
-	if (!cwd) {
-		return MergeWorktreeResult.create({
-			success: false,
-			message: "No workspace folder found",
-			hasConflicts: false,
-			conflictingFiles: [],
-		})
-	}
-
 	const { worktreePath, targetBranch, deleteAfterMerge } = request
-
-	if (!worktreePath) {
-		return MergeWorktreeResult.create({
-			success: false,
-			message: "Worktree path is required",
-			hasConflicts: false,
-			conflictingFiles: [],
-		})
-	}
-
-	if (!targetBranch) {
-		return MergeWorktreeResult.create({
-			success: false,
-			message: "Target branch is required",
-			hasConflicts: false,
-			conflictingFiles: [],
-		})
-	}
-
+	if (!cwd) return result(false, "No workspace folder found")
+	if (!worktreePath) return result(false, "Worktree path is required")
+	if (!targetBranch) return result(false, "Target branch is required")
 	try {
-		// Find the worktree that has the target branch checked out
-		// This is where we need to perform the merge
 		const { worktrees } = await listWorktrees(cwd)
-		const targetWorktree = worktrees.find((w) => w.branch === targetBranch)
-
-		if (!targetWorktree) {
-			return MergeWorktreeResult.create({
-				success: false,
-				message: `Target branch '${targetBranch}' is not checked out in any worktree. Please checkout the branch first.`,
-				hasConflicts: false,
-				conflictingFiles: [],
-			})
-		}
-
-		// Use the target worktree's path for merge operations
-		const targetWorktreePath = targetWorktree.path
-		const git = simpleGit(targetWorktreePath)
+		const targetPath = worktrees.find((w) => w.branch === targetBranch)?.path
+		if (!targetPath)
+			return result(
+				false,
+				`Target branch '${targetBranch}' is not checked out in any worktree. Please checkout the branch first.`,
+			)
+		const git = simpleGit(targetPath)
 		const worktreeGit = simpleGit(worktreePath)
-
-		// Get the branch name of the worktree
-		let sourceBranch: string
-		try {
-			sourceBranch = await worktreeGit.revparse(["--abbrev-ref", "HEAD"])
-			sourceBranch = sourceBranch.trim()
-		} catch {
-			return MergeWorktreeResult.create({
-				success: false,
-				message: "Failed to get branch name from worktree",
-				hasConflicts: false,
-				conflictingFiles: [],
-			})
-		}
-
-		if (sourceBranch === "HEAD") {
-			return MergeWorktreeResult.create({
-				success: false,
-				message: "Cannot merge a detached HEAD worktree",
-				hasConflicts: false,
-				conflictingFiles: [],
-				sourceBranch,
-				targetBranch,
-			})
-		}
-
-		// Check for uncommitted changes in the source worktree
-		try {
-			const status = await worktreeGit.status()
-			if (!status.isClean()) {
-				return MergeWorktreeResult.create({
-					success: false,
-					message: `Worktree has uncommitted changes. Please commit or stash them first.`,
-					hasConflicts: false,
-					conflictingFiles: [],
-					sourceBranch,
-					targetBranch,
-				})
-			}
-		} catch {
-			// If status check fails, continue anyway
-		}
-
-		// Check for uncommitted changes in the target worktree
-		try {
-			const targetStatus = await git.status()
-			if (!targetStatus.isClean()) {
-				return MergeWorktreeResult.create({
-					success: false,
-					message: `Target worktree (${targetBranch}) has uncommitted changes. Please commit or stash them first.`,
-					hasConflicts: false,
-					conflictingFiles: [],
-					sourceBranch,
-					targetBranch,
-				})
-			}
-		} catch {
-			// If status check fails, continue anyway
-		}
-
-		// Attempt the merge in the target worktree (which already has targetBranch checked out)
+		const sourceBranch = (await worktreeGit.revparse(["--abbrev-ref", "HEAD"]).catch(() => ""))?.trim() || null
+		if (!sourceBranch) return result(false, "Failed to get branch name from worktree")
+		if (sourceBranch === "HEAD") return result(false, "Cannot merge a detached HEAD worktree", { sourceBranch, targetBranch })
+		const branchInfo = { sourceBranch, targetBranch }
+		const sourceStatus = await worktreeGit.status().catch(() => null)
+		const sourceDirty = sourceStatus && !sourceStatus.isClean()
+		if (sourceDirty) return result(false, "Worktree has uncommitted changes. Please commit or stash them first.", branchInfo)
+		const targetStatus = await git.status().catch(() => null)
+		const targetDirty = targetStatus && !targetStatus.isClean()
+		if (targetDirty)
+			return result(
+				false,
+				`Target worktree (${targetBranch}) has uncommitted changes. Please commit or stash them first.`,
+				branchInfo,
+			)
+		// Attempt merge
 		try {
 			await git.merge([sourceBranch, "--no-edit"])
 		} catch (error) {
-			// Check if it's a merge conflict
-			try {
-				const diffResult = await git.diff(["--name-only", "--diff-filter=U"])
-				const conflictingFiles = diffResult
-					.trim()
-					.split("\n")
-					.filter((f) => f)
-
-				if (conflictingFiles.length > 0) {
-					// Abort the merge so we don't leave the repo in a conflicted state
-					try {
-						await git.merge(["--abort"])
-					} catch {
-						// Ignore abort errors
-					}
-
-					telemetryService.captureWorktreeMergeAttempted(false, true, deleteAfterMerge)
-					return MergeWorktreeResult.create({
-						success: false,
-						message: `Merge conflict detected. ${conflictingFiles.length} file(s) have conflicts.`,
-						hasConflicts: true,
-						conflictingFiles,
-						sourceBranch,
-						targetBranch,
-					})
-				}
-			} catch {
-				// If conflict check fails, return the original error
+			const diffResult = await git.diff(["--name-only", "--diff-filter=U"]).catch(() => "")
+			const conflicts = diffResult.trim().split("\n").filter(Boolean)
+			if (conflicts.length > 0) {
+				await git.merge(["--abort"]).catch(() => {})
+				telemetryService.captureWorktreeMergeAttempted(false, true, deleteAfterMerge)
+				const extra = { hasConflicts: true, conflictingFiles: conflicts, ...branchInfo }
+				return result(false, `Merge conflict detected. ${conflicts.length} file(s) have conflicts.`, extra)
 			}
-
-			const errorMessage = error instanceof Error ? error.message : String(error)
 			telemetryService.captureWorktreeMergeAttempted(false, false, deleteAfterMerge)
-			return MergeWorktreeResult.create({
-				success: false,
-				message: `Merge failed: ${errorMessage}`,
-				hasConflicts: false,
-				conflictingFiles: [],
-				sourceBranch,
-				targetBranch,
-			})
+			return result(false, `Merge failed: ${error instanceof Error ? error.message : String(error)}`, branchInfo)
 		}
-
 		// Delete worktree if requested
 		if (deleteAfterMerge) {
 			try {
 				await git.raw(["worktree", "remove", worktreePath, "--force"])
 			} catch (error) {
-				// Merge succeeded but deletion failed - still return success
-				const errorMessage = error instanceof Error ? error.message : String(error)
-				return MergeWorktreeResult.create({
-					success: true,
-					message: `Merged '${sourceBranch}' into '${targetBranch}' successfully, but failed to delete worktree: ${errorMessage}`,
-					hasConflicts: false,
-					conflictingFiles: [],
-					sourceBranch,
-					targetBranch,
-				})
+				const msg = `failed to delete worktree: ${error instanceof Error ? error.message : String(error)}`
+				return result(true, `Merged '${sourceBranch}' into '${targetBranch}' successfully, but ${msg}`, branchInfo)
 			}
-
-			// Optionally delete the branch too
-			try {
-				await git.deleteLocalBranch(sourceBranch)
-			} catch {
-				// Branch deletion is optional, don't fail if it doesn't work
-			}
+			await git.deleteLocalBranch(sourceBranch).catch(() => {})
 		}
-
 		telemetryService.captureWorktreeMergeAttempted(true, false, deleteAfterMerge)
-		return MergeWorktreeResult.create({
-			success: true,
-			message: deleteAfterMerge
-				? `Successfully merged '${sourceBranch}' into '${targetBranch}' and removed worktree`
-				: `Successfully merged '${sourceBranch}' into '${targetBranch}'`,
-			hasConflicts: false,
-			conflictingFiles: [],
-			sourceBranch,
-			targetBranch,
-		})
+		const message = deleteAfterMerge
+			? `Successfully merged '${sourceBranch}' into '${targetBranch}' and removed worktree`
+			: `Successfully merged '${sourceBranch}' into '${targetBranch}'`
+		return result(true, message, branchInfo)
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error)
-		return MergeWorktreeResult.create({
-			success: false,
-			message: `Unexpected error: ${errorMessage}`,
-			hasConflicts: false,
-			conflictingFiles: [],
-		})
+		return result(false, `Unexpected error: ${error instanceof Error ? error.message : String(error)}`)
 	}
 }
