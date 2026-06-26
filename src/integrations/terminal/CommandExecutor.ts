@@ -19,12 +19,12 @@ import { Logger } from "@/shared/services/Logger"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
 import type {
-    CommandExecutionOptions,
-    CommandExecutorCallbacks,
-    CommandExecutorConfig,
-    ITerminalManager,
-    ShellIntegrationWarningTracker,
-    TerminalProcessResultPromise,
+	CommandExecutionOptions,
+	CommandExecutorCallbacks,
+	CommandExecutorConfig,
+	ITerminalManager,
+	ShellIntegrationWarningTracker,
+	TerminalProcessResultPromise,
 } from "./types"
 
 /**
@@ -101,8 +101,6 @@ export class CommandExecutor {
 
 		// Fetch environment variables
 		const env = await this.callbacks.getEnvironmentVariables(this.cwd)
-		Logger.info(`[CommandExecutor] Environment variables for ${this.cwd}: ${JSON.stringify(env)}`)
-
 		Logger.info(`Executing command in ${useStandalone ? "standalone" : "VSCode"} terminal: ${command}`)
 
 		// Get terminal and run command
