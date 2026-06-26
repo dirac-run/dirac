@@ -75,7 +75,7 @@ export class SymbolContextResolver {
 						(class_declaration) @class
 						(class_heritage) @class.heritage
 						(public_field_definition) @property
-						(private_property_definition) @property
+						(field__definition) @property
 						(method_definition) @method
 						(identifier) @ref
 						(property_identifier) @ref
