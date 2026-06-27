@@ -14,8 +14,8 @@ This is the codebase of our coding agent Dirac. It supports cli and vscode exten
 - `src/core/api/providers/` : Per-provider API handlers (anthropic, gemini, openai, bedrock…)
 - `src/core/api/transform/` : Provider stream → internal `ApiStream`
 - `src/shared/api.ts` : Model IDs, pricing, capability flags
-- `src/integrations/` : Terminal, Browser, Editor wrappers
-- `src/services/` : Logging, Telemetry, Tree-sitter
+- `src/integrations/` : Terminal, Editor, Browser, and external service integrations
+- `src/services/` : Shared services (logging, telemetry, tree-sitter, ripgrep, search, etc.)
 - `src/shared/` : Cross-component types and utilities
 - `webview-ui/` : React frontend (`Card` is the UI primitive for tools)
 - `cli/` : TypeScript/Ink CLI
