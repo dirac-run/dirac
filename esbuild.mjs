@@ -291,7 +291,7 @@ async function main() {
 	} else {
 		await extensionCtx.rebuild()
 		await extensionCtx.dispose()
-		patchNavigatorDefineProperty(`${destDir}/extension.js`)
+		patchNavigatorDefineProperty(config.outfile)
 	}
 }
 
