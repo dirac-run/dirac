@@ -3,9 +3,19 @@ import { MODEL_CAPABILITIES } from "./capabilities"
 
 export type internationalZAiModelId = keyof typeof internationalZAiModels
 
-export const internationalZAiDefaultModelId: internationalZAiModelId = "glm-5"
+export const internationalZAiDefaultModelId: internationalZAiModelId = "glm-5.2"
 
 export const internationalZAiModels = {
+	"glm-5.2": {
+		...MODEL_CAPABILITIES["glm-5.2"],
+		supportsPromptCache: true,
+		thinkingConfig: {
+			maxBudget: 128_000,
+		},
+		cacheReadsPrice: 0.26,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+	},
 	"glm-5.1": {
 		...MODEL_CAPABILITIES["glm-5.1"],
 		supportsPromptCache: true,

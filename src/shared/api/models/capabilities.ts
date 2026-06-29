@@ -260,6 +260,16 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 			maxBudget: 128_000,
 		},
 	},
+	"glm-5.2": {
+		supportsTools: true,
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsReasoning: true,
+		thinkingConfig: {
+			maxBudget: 128_000,
+		},
+	},
 	"gpt-5.4": {
 		name: "GPT-5.4",
 		maxTokens: 128_000,
