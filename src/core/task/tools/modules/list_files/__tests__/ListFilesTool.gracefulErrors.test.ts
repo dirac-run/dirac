@@ -30,7 +30,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 	afterEach(async () => {
 		sandbox.restore()
-		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { })
 	})
 
 	function makeBlock(paths?: string | string[], recursive?: string) {
@@ -211,5 +211,84 @@ describe("ListFilesTool.execute – error recovery", () => {
 		assert.ok((result as string).includes("blocked-dir"))
 		assert.ok((result as string).includes("file.txt"))
 		assert.equal(taskState.consecutiveMistakeCount, 0)
+	})
+})
+
+
+describe("ListFilesTool.execute – path deduplication", () => {
+	let sandbox: sinon.SinonSandbox
+
+	beforeEach(async () => {
+		sandbox = sinon.createSandbox()
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-listfiles-dedup-test-"))
+		sandbox.stub(pathUtils, "isLocatedInWorkspace").resolves(true)
+		AnchorStateManager.reset("ulid-1")
+	})
+
+	afterEach(async () => {
+		sandbox.restore()
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { })
+	})
+
+	function makeBlock(paths?: string | string[], recursive?: string) {
+		const params: any = {}
+		if (paths !== undefined) {
+			if (Array.isArray(paths)) {
+				params.paths = paths
+			} else {
+				params.paths = [paths]
+			}
+		}
+		if (recursive !== undefined) params.recursive = recursive
+		return {
+			type: "tool_use" as const,
+			name: DiracDefaultTool.LIST_FILES,
+			params,
+		}
+	}
+
+	it("deduplicates identical paths so they are only listed once", async () => {
+		const { config } = createConfig()
+		const handler = new ListFilesTool()
+
+		const listFilesModule = await import("@services/glob/list-files")
+		const listFilesSpy = sandbox.spy(listFilesModule, "listFiles")
+
+		const coordinator = new ToolExecutorCoordinator()
+		coordinator.registerModularTool(handler)
+		const result = await coordinator.execute(config, makeBlock(["subdir", "subdir", "subdir"]))
+
+		assert.equal(typeof result, "string")
+		// listFiles should be called exactly once, not three times
+		assert.equal(listFilesSpy.callCount, 1)
+	})
+
+	it("deduplicates '.' and './' which resolve to the same path", async () => {
+		const { config } = createConfig()
+		const handler = new ListFilesTool()
+
+		const listFilesModule = await import("@services/glob/list-files")
+		const listFilesSpy = sandbox.spy(listFilesModule, "listFiles")
+
+		const coordinator = new ToolExecutorCoordinator()
+		coordinator.registerModularTool(handler)
+		const result = await coordinator.execute(config, makeBlock([".", "./"]))
+
+		assert.equal(typeof result, "string")
+		assert.equal(listFilesSpy.callCount, 1)
+	})
+
+	it("does not deduplicate distinct paths", async () => {
+		const { config } = createConfig()
+		const handler = new ListFilesTool()
+		const listFilesModule = await import("@services/glob/list-files")
+		const listFilesSpy = sandbox.spy(listFilesModule, "listFiles")
+
+		const coordinator = new ToolExecutorCoordinator()
+		coordinator.registerModularTool(handler)
+		const result = await coordinator.execute(config, makeBlock(["dir-a", "dir-b"]))
+
+		assert.equal(typeof result, "string")
+		assert.equal(listFilesSpy.callCount, 2)
 	})
 })

@@ -59,6 +59,17 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 			return formatResponse.toolError("Missing required parameter: paths")
 		}
 
+		// Resolve paths upfront and dedupe by absolute path to avoid
+		// repeated listing of the same directory (e.g. [".", ".", "./"]).
+		const resolvedPaths: { relPath: string; absolutePath: string; displayPath: string }[] = []
+		const seenAbsPaths = new Set<string>()
+		for (const relPath of paths) {
+			const { absolutePath, displayPath } = await env.workspace.resolvePath(relPath)
+			if (seenAbsPaths.has(absolutePath)) continue
+			seenAbsPaths.add(absolutePath)
+			resolvedPaths.push({ relPath, absolutePath, displayPath })
+		}
+
 		const card = !env.config.isSubagentExecution ? new Map<string, { card: any; displayPath: string }>() : undefined
 		const results: string[] = []
 		const displayPaths: string[] = []
@@ -68,9 +79,8 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 		let anyUsedWorkspaceHint = false
 		let anyResolvedToNonPrimary = false
 
-		for (const relPath of paths) {
+		for (const { relPath, absolutePath, displayPath } of resolvedPaths) {
 			if (card) {
-				const { displayPath } = await env.workspace.resolvePath(relPath)
 				const fileCard = await env.ui.createCard({
 					header: `Listing files in ${displayPath}`,
 					icon: DiracIcon.FILE_LIST,
@@ -86,7 +96,6 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 			}
 
 			try {
-				const { absolutePath, displayPath } = await env.workspace.resolvePath(relPath)
 				const [fileInfos, didHitLimit] = await env.workspace.listFiles(
 					absolutePath,
 					recursive,
