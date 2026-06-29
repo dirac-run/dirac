@@ -41,8 +41,6 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 				finalMessage = `${prefix} ${formattedQuote} ${suffix} ${messageToSend}`
 			}
 
-			console.log(`[ChatView] handleSendMessage - State: ${interactionState}, Sending:`, finalMessage)
-
 			try {
 				setExpandTaskHeader(false)
 				if (interactionState === "IDLE") {
