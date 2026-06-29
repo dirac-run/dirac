@@ -46,8 +46,8 @@ export class MentionContextLoader {
 		// Handle /reloadtools direct response: trigger tool registry refresh
 		if (isDirectResponse && directResponseText === "__RELOAD_TOOLS__") return await this.handleReloadTools()
 
-		// Skip automatic path and symbol detection for subsequent turns
-		if (!includePathContext)
+		// Skip automatic path and symbol detection for subsequent turns or very long prompts
+		if (!includePathContext || text.length > 1000)
 			return { enrichedText: processedText, needsDiracrulesFileCheck, isDirectResponse, directResponseText }
 
 		const { filePaths, directoryPaths, symbols } = await this.fileContextLoader.extractContext(text, cwd)
@@ -73,11 +73,11 @@ export class MentionContextLoader {
 		const userToolSummary =
 			userTools.length > 0
 				? userTools
-						.map(
-							(t) =>
-								`  - ${t.id} (${t.source}) — ${enabledTools.some((e) => e.id === t.id) ? "enabled" : "disabled"}`,
-						)
-						.join("\n")
+					.map(
+						(t) =>
+							`  - ${t.id} (${t.source}) — ${enabledTools.some((e) => e.id === t.id) ? "enabled" : "disabled"}`,
+					)
+					.join("\n")
 				: "  (none found)"
 		const reloadResponse = [
 			`Tools reloaded. Found ${allTools.length} total tools (${userTools.length} user tools).`,

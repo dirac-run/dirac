@@ -6,6 +6,8 @@ import { listFiles } from "@services/glob/list-files"
 import { mentionRegexGlobal } from "@shared/context-mentions"
 import { ASTAnchorBridge } from "@utils/ASTAnchorBridge"
 import * as fs from "fs/promises"
+import * as fsSync from "fs"
+import * as readline from "readline"
 import * as path from "path"
 import { SymbolIndexService, SymbolLocation } from "../../../services/symbol-index/SymbolIndexService"
 import { ContextLoaderDependencies } from "../types/context-loader"
@@ -14,6 +16,7 @@ import { ContextLoaderDependencies } from "../types/context-loader"
 const MAX_AUTO_SYMBOL_MATCHES = 3
 const MAX_AUTO_SYMBOL_TOTAL_LINES = 20
 const MAX_AUTO_SYMBOL_LINE_LENGTH_BYTES = 200
+const MAX_AUTO_FILE_MATCHES = 3
 
 // Regex matching path-like strings in text, preceded by whitespace/punctuation and followed by whitespace/punctuation
 const pathRegex =
@@ -50,7 +53,9 @@ export class FileContextLoader {
 		cwd: string,
 	): Promise<{ skeletons: string[]; directoryLists: string[] }> {
 		if (filePaths.length === 0 && directoryPaths.length === 0) return { skeletons: [], directoryLists: [] }
-		const skeletons = await this.collectSkeletons(filePaths, cwd)
+		const skeletons = filePaths.length <= MAX_AUTO_FILE_MATCHES
+			? await this.collectSkeletons(filePaths, cwd)
+			: []
 		const directoryLists = await this.collectDirectoryLists(directoryPaths, cwd)
 		return { skeletons, directoryLists }
 	}
@@ -104,8 +109,12 @@ export class FileContextLoader {
 	): Promise<{ paths: string[]; text: string }> {
 		const candidates = this.getPathMatches(text)
 		const paths: string[] = []
+		const seen = new Set<string>()
 		let consumedText = text
 		for (const pc of candidates) {
+			if (seen.has(pc.relPath)) continue
+			seen.add(pc.relPath)
+			if (type === "file" && paths.length >= MAX_AUTO_FILE_MATCHES) break
 			try {
 				const absolutePath = this.resolveAbsolute(pc.relPath, cwd)
 				const stats = await fs.stat(absolutePath)
@@ -159,13 +168,10 @@ export class FileContextLoader {
 		return matches
 	}
 
-	// Collect AST skeletons for unique file paths
+	// Collect AST skeletons for file paths
 	private async collectSkeletons(filePaths: string[], cwd: string): Promise<string[]> {
 		const skeletons: string[] = []
-		const seen = new Set<string>()
 		for (const relPath of filePaths) {
-			if (seen.has(relPath)) continue
-			seen.add(relPath)
 			try {
 				const absolutePath = this.resolveAbsolute(relPath, cwd)
 				const skeleton = await ASTAnchorBridge.getFileSkeleton(
@@ -187,11 +193,9 @@ export class FileContextLoader {
 	// Collect directory listings, capped at 3 directories
 	private async collectDirectoryLists(directoryPaths: string[], cwd: string): Promise<string[]> {
 		const directoryLists: string[] = []
-		const seen = new Set<string>()
 		let count = 0
 		for (const relPath of directoryPaths) {
-			if (seen.has(relPath) || count >= 3) continue
-			seen.add(relPath)
+			if (count >= 3) break
 			try {
 				const absolutePath = this.resolveAbsolute(relPath, cwd)
 				const [fileInfos, didHitLimit] = await listFiles(absolutePath, false, 30)
@@ -259,20 +263,34 @@ export class FileContextLoader {
 		if (data.seenLocations.has(locKey)) return false
 		try {
 			const absLocPath = path.isAbsolute(loc.path) ? loc.path : path.join(projectRoot, loc.path)
-			const fileContent = await fs.readFile(absLocPath, "utf8")
-			const lines = fileContent.split(/\r?\n/)
-			const lineIndex = loc.startLine
-			if (lineIndex < 0 || lineIndex >= lines.length) return false
-			let lineContent = lines[lineIndex].trim()
+			let lineContent = await this.readLineAt(absLocPath, loc.startLine)
+			if (lineContent === "") return false
 			if (Buffer.byteLength(lineContent, "utf8") > MAX_AUTO_SYMBOL_LINE_LENGTH_BYTES)
 				lineContent = "(line too long, skipped)"
 			const relLocPath = path.relative(cwd, absLocPath)
-			data.addedLines.push(`    - ${relLocPath}:${lineIndex + 1} [${loc.type}] \`${lineContent}\``)
+			data.addedLines.push(`    - ${relLocPath}:${loc.startLine + 1} [${loc.type}] \`${lineContent}\``)
 			data.seenLocations.add(locKey)
 			return true
 		} catch {
 			return false
 		}
+	}
+
+	// Read a single line from a file at the given line number without loading the entire file
+	private async readLineAt(filePath: string, targetLine: number): Promise<string> {
+		const stream = fsSync.createReadStream(filePath, { encoding: "utf8" })
+		const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+		let lineNum = 0
+		for await (const line of rl) {
+			if (lineNum === targetLine) {
+				rl.close()
+				stream.destroy()
+				return line.trim()
+			}
+			lineNum++
+		}
+		stream.destroy()
+		return ""
 	}
 
 	// Assemble final symbol context strings from collected results
