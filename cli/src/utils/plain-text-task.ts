@@ -50,6 +50,8 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 	let hasEmittedTaskStarted = false
 	// Track which messages have been processed (by ID)
 	const processedMessages = new Set<string>()
+	const streamedApiStatusIds = new Set<string>()
+	const completedApiStatusIds = new Set<string>()
 	const lastPrintedCardState = new Map<string, string>()
 	const autoApprovedCards = new Set<string>()
 
@@ -79,9 +81,9 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 		if (isStreaming) {
 			// Special case: allow printing the initial api_req_started message even if it's partial
 			// so the user knows the request has begun. Subsequent updates will be skipped until complete.
-			if (content.type === DiracMessageType.API_STATUS && !processedMessages.has(message.id)) {
+			if (content.type === DiracMessageType.API_STATUS && !streamedApiStatusIds.has(message.id)) {
 				handleMessageForPipeMode(message, state, verbose || false, yolo || false, false)
-				processedMessages.add(message.id)
+				streamedApiStatusIds.add(message.id)
 				return
 			}
 
@@ -89,8 +91,18 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 		}
 
 		// Message is complete (or is a partial interaction card)
-		// Skip if already processed as a complete message
-		if (processedMessages.has(message.id)) {
+		// Skip if already processed as a complete message.
+		// API_STATUS messages may arrive multiple times as they transition from "started"
+		// to "finished" with metrics. We let them through until the metrics version prints.
+		if (content.type === DiracMessageType.API_STATUS) {
+			if (completedApiStatusIds.has(message.id)) {
+				return
+			}
+			const hasMetrics = content.status.cost !== undefined || content.status.tokensIn !== undefined
+			if (processedMessages.has(message.id) && !hasMetrics) {
+				return
+			}
+		} else if (processedMessages.has(message.id)) {
 			return
 		}
 
@@ -114,6 +126,10 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 		// Mark as processed if it's a complete message
 		if (!isStreaming) {
 			processedMessages.add(message.id)
+			// For API_STATUS, once metrics are present, mark as completed to stop re-printing
+			if (content.type === DiracMessageType.API_STATUS && (content.status.cost !== undefined || content.status.tokensIn !== undefined)) {
+				completedApiStatusIds.add(message.id)
+			}
 		}
 
 		// Auto-approve if yolo mode is on and it's an approval request
@@ -319,7 +335,7 @@ function handleMessageForPipeMode(
 		const statusStr = card.status !== CardStatus.RUNNING ? ` (${card.status})` : ""
 		process.stderr.write(`${timestamp}${statusPrefix}${card.header}${statusStr}${extra}\n`)
 
-		if (verbose && card.body) {
+		if (verbose && card.body && card.header !== "Task Completed") {
 			process.stderr.write(`${card.body}\n`)
 		}
 		return
@@ -350,9 +366,8 @@ function handleApiReqMessage(message: DiracMessage, statusPrefix: string, isUpda
 		const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
 		const tokensStr =
 			info.tokensIn !== undefined
-				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${
-						info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
-					}`
+				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
+				}`
 				: ""
 		const cacheStr =
 			info.cacheReads !== undefined || info.cacheWrites !== undefined
