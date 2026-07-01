@@ -488,13 +488,13 @@ describe("AnthropicHandler", () => {
 		it("returns default model when apiModelId is undefined", () => {
 			const h = new AnthropicHandler({ apiKey: "k" })
 			const result = h.getModel()
-			expect(result.id).to.equal("claude-sonnet-4-6")
+			expect(result.id).to.equal("claude-sonnet-5")
 		})
 
 		it("returns default model when apiModelId is not in anthropicModels", () => {
 			const h = new AnthropicHandler({ apiKey: "k", apiModelId: "gpt-4" })
 			const result = h.getModel()
-			expect(result.id).to.equal("claude-sonnet-4-6")
+			expect(result.id).to.equal("claude-sonnet-5")
 		})
 	})
 })
