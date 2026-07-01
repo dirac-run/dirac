@@ -1,23 +1,27 @@
 import { expect } from "chai"
 import * as path from "path"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 const srcDir = path.join(__dirname, "..", "..", "..")
 
 describe("Search file-search", () => {
 	describe("searchWorkspaceFiles", () => {
 		it("should return files when query is empty", async () => {
+			expectLoggerErrors()
 			const { searchWorkspaceFiles } = await import(path.join(srcDir, "services", "search", "file-search.ts"))
 			const result = await searchWorkspaceFiles("", srcDir)
 			expect(Array.isArray(result)).to.be.true
 		})
 
 		it("should return files matching a query string", async () => {
+			expectLoggerErrors()
 			const { searchWorkspaceFiles } = await import(path.join(srcDir, "services", "search", "file-search.ts"))
 			const result = await searchWorkspaceFiles("test", srcDir)
 			expect(Array.isArray(result)).to.be.true
 		})
 
 		it("should include folder results for directory matches", async () => {
+			expectLoggerErrors()
 			const { searchWorkspaceFiles } = await import(path.join(srcDir, "services", "search", "file-search.ts"))
 			const result = await searchWorkspaceFiles("", srcDir)
 			const folders = result.filter((item: any) => item.type === "folder")
@@ -25,6 +29,7 @@ describe("Search file-search", () => {
 		})
 
 		it("should include workspaceName when provided", async () => {
+			expectLoggerErrors()
 			const { searchWorkspaceFiles } = await import(path.join(srcDir, "services", "search", "file-search.ts"))
 			const result = await searchWorkspaceFiles("", srcDir, "test-workspace")
 			const items = result.filter((item: any) => item.workspaceName)

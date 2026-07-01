@@ -297,8 +297,12 @@ export class StatePersistenceManager {
 			}
 
 			this.taskHistoryWatcher
-				.on("add", () => syncTaskHistoryFromDisk())
-				.on("change", () => syncTaskHistoryFromDisk())
+				.on("add", () => {
+					syncTaskHistoryFromDisk()
+				})
+				.on("change", () => {
+					syncTaskHistoryFromDisk()
+				})
 				.on("unlink", async () => {
 					this.accessors.setTaskHistoryInCache([])
 					await onSyncExternalChange()

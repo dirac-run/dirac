@@ -5,6 +5,7 @@ import { expect } from "chai"
 import sinon from "sinon"
 import { ResponseProcessor } from "../ResponseProcessor"
 import { StreamResponseHandler } from "../StreamResponseHandler"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../TaskState"
 
 const baseMetrics = { inputTokens: 10, outputTokens: 20, cacheWriteTokens: 5, cacheReadTokens: 3, totalCost: 0.01 }
@@ -28,7 +29,7 @@ describe("ResponseProcessor", () => {
 		// Stub Session.updateToolCall
 		sessionModule = require("@shared/services/Session")
 		origUpdateToolCall = sessionModule.Session.get
-		sessionModule.Session.get = () => ({ updateToolCall: () => {} }) as any
+		sessionModule.Session.get = () => ({ updateToolCall: () => { } }) as any
 	})
 
 	afterEach(() => {
@@ -243,6 +244,7 @@ describe("ResponseProcessor", () => {
 
 	describe("consumeStream — abort handling", () => {
 		it("interrupts stream and calls apiAbort when abort is set", async () => {
+			expectLoggerErrors()
 			const chunks = [{ type: "text", id: "t1", text: "partial", signature: undefined }]
 			const coordinator = createCoordinator(chunks, () => {
 				taskState.abort = true
@@ -256,6 +258,7 @@ describe("ResponseProcessor", () => {
 		})
 
 		it("does not call abortStream when abandoned is true", async () => {
+			expectLoggerErrors()
 			const chunks = [{ type: "text", id: "t1", text: "partial", signature: undefined }]
 			const coordinator = createCoordinator(chunks, () => {
 				taskState.abort = true
@@ -270,6 +273,7 @@ describe("ResponseProcessor", () => {
 		})
 
 		it("appends interrupt marker and sets shouldInterruptStream when didRejectTool", async () => {
+			expectLoggerErrors()
 			const chunks = [{ type: "text", id: "t1", text: "partial", signature: undefined }]
 			const coordinator = createCoordinator(chunks, () => {
 				taskState.didRejectTool = true
@@ -337,7 +341,7 @@ describe("ResponseProcessor", () => {
 
 		it("throws pending presentation error if one occurred during streaming", async () => {
 			// Simulate a pending error
-			;(processor as any).pendingPresentationError = new Error("presentation failed")
+			; (processor as any).pendingPresentationError = new Error("presentation failed")
 			try {
 				await processor.routeAssistantResponse(createRouteParams({ assistantMessage: "x", assistantTextOnly: "x" }))
 				expect.fail("should have thrown")
@@ -354,7 +358,7 @@ describe("ResponseProcessor", () => {
 			// Stub setTimeout to avoid real delay
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => {}
+			timersModule.setTimeout = async () => { }
 			try {
 				const result = await processor.handleEmptyAssistantResponse(createEmptyParams())
 				result.should.be.false() // retry requested
@@ -368,7 +372,7 @@ describe("ResponseProcessor", () => {
 		it("increments retry attempts exponentially", async () => {
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => {}
+			timersModule.setTimeout = async () => { }
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				taskState.emptyResponseRetryAttempts.should.equal(1)
@@ -408,7 +412,7 @@ describe("ResponseProcessor", () => {
 			// Telemetry is fire-and-forget — verify error card was created (proves error path entered)
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => {}
+			timersModule.setTimeout = async () => { }
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				const errorCardCall = deps.taskMessenger.createCard.firstCall.args[0]
@@ -423,7 +427,7 @@ describe("ResponseProcessor", () => {
 			deps.getApiRequestIdSafe = () => "req-123"
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => {}
+			timersModule.setTimeout = async () => { }
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				const cardCall = deps.taskMessenger.createCard.firstCall.args[0]
@@ -464,6 +468,7 @@ describe("ResponseProcessor", () => {
 
 	describe("presentAssistantMessage — locking", () => {
 		it("throws when abort is set during presentation", async () => {
+			expectLoggerErrors()
 			taskState.assistantMessageContent = [{ type: "text", content: "hello", isComplete: true } as any]
 			taskState.abort = true
 			try {
@@ -585,7 +590,7 @@ describe("ResponseProcessor", () => {
 			await processor.syncStreamState("hello world")
 			taskState.assistantMessageContent.should.have.length(1)
 			taskState.assistantMessageContent[0].type.should.equal("text")
-			;(taskState.assistantMessageContent[0] as any).content.should.equal("hello world")
+				; (taskState.assistantMessageContent[0] as any).content.should.equal("hello world")
 		})
 
 		it("parses reasoning tags embedded in text", async () => {
@@ -599,7 +604,7 @@ describe("ResponseProcessor", () => {
 		it("marks blocks as complete when isStreamComplete is true", async () => {
 			streamHandler.processTextDelta({ id: "t1", text: "hello" })
 			await processor.syncStreamState("hello", [], true)
-			;(taskState.assistantMessageContent[0] as any).isComplete.should.be.true()
+				; (taskState.assistantMessageContent[0] as any).isComplete.should.be.true()
 		})
 
 		it("creates tool_use block from tool_use ordered block", async () => {

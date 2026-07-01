@@ -1,3 +1,4 @@
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 import { DiracFileStorage } from "@shared/storage/DiracFileStorage"
@@ -296,6 +297,7 @@ describe("vscode-to-file-migration", () => {
 		})
 
 		it("should continue even if a single secret read fails", async () => {
+			expectLoggerErrors()
 			const mockCtx = createMockVSCodeContext()
 			mockCtx._secretsStore.set("openRouterApiKey", "or-key-123")
 
@@ -349,6 +351,7 @@ describe("vscode-to-file-migration", () => {
 
 	describe("error handling", () => {
 		it("should NOT write sentinel if migration throws", async () => {
+			expectLoggerErrors()
 			const mockCtx = createMockVSCodeContext()
 
 			// Stub setBatch to throw an error

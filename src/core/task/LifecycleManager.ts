@@ -19,7 +19,7 @@ import { LifecycleManagerDependencies } from "./types/lifecycle-manager"
 import { buildUserFeedbackContent } from "./utils/buildUserFeedbackContent"
 
 export class LifecycleManager {
-	constructor(private dependencies: LifecycleManagerDependencies) {}
+	constructor(private dependencies: LifecycleManagerDependencies) { }
 
 	public async initializeCheckpoints(isFirstRequest: boolean): Promise<void> {
 		if (

@@ -6,6 +6,7 @@ import * as copilotApi from "@/integrations/github-copilot/api"
 import { githubCopilotAuthManager } from "@/integrations/github-copilot/auth"
 import * as netModule from "@/shared/net"
 import { GithubCopilotHandler } from "../github-copilot"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 // Build a ReadableStream body from raw string chunks.
 function makeStream(chunks: string[]): ReadableStream<Uint8Array> {
@@ -85,6 +86,7 @@ describe("GithubCopilotHandler", () => {
 		})
 
 		it("should fall back to OpenAI format when fetchCopilotModels throws", async () => {
+			expectLoggerErrors()
 			const handler = new GithubCopilotHandler({} as any)
 			stubAuthAndToken()
 			sinon.stub(copilotApi, "fetchCopilotModels").rejects(new Error("network down"))

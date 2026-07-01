@@ -158,16 +158,16 @@ export enum DiracMessageType {
 export type DiracMessageContent =
 	/** Stateless conversational content (speech, reasoning, info) */
 	| {
-			type: DiracMessageType.MARKDOWN
-			content: string
-			isReasoning?: boolean
-			images?: string[]
-			files?: string[]
-			isCompletion?: boolean
-			completionType?: "act" | "plan"
-			showFeedback?: boolean
-			role?: "user" | "assistant"
-	  }
+		type: DiracMessageType.MARKDOWN
+		content: string
+		isReasoning?: boolean
+		images?: string[]
+		files?: string[]
+		isCompletion?: boolean
+		completionType?: "act" | "plan"
+		showFeedback?: boolean
+		role?: "user" | "assistant"
+	}
 	/** Stateful tool-mediated unit of work */
 	| { type: DiracMessageType.CARD; card: Card }
 	/** System telemetry and vitals (tokens, cost, latency) */

@@ -3,6 +3,11 @@ import { describe, it } from "mocha"
 import { MessageStateHandler } from "../core/task/message-state"
 import { TaskState } from "../core/task/TaskState"
 import { DiracMessage, DiracMessageType } from "../shared/ExtensionMessage"
+import { setVscodeHostProviderMock } from "./host-provider-test-utils"
+import { HostProvider } from "@/hosts/host-provider"
+import * as os from "os"
+import * as path from "path"
+import * as fs from "fs"
 
 /**
  * Unit tests for MessageStateHandler's mutex protection (RC-4)
@@ -10,6 +15,18 @@ import { DiracMessage, DiracMessageType } from "../shared/ExtensionMessage"
  * to prevent race conditions, particularly the TOCTOU bug in addToDiracMessages
  */
 describe("MessageStateHandler Mutex Protection", () => {
+	let tmpDir: string
+
+	before(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-msh-test-"))
+		setVscodeHostProviderMock({ globalStorageFsPath: tmpDir })
+	})
+
+	after(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true })
+		HostProvider.reset()
+	})
+
 	/**
 	 * Helper to create a minimal MessageStateHandler for testing
 	 */

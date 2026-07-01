@@ -1,5 +1,6 @@
 import { expect } from "chai"
 import * as path from "path"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 const srcDir = path.join(__dirname, "..", "..", "..")
 
@@ -9,13 +10,13 @@ describe("API Retry Logic", () => {
 			const { withRetry, RetriableError } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
 					if (attempts < 2) {
 						const err = new Error("rate limited")
-						;(err as any).status = 429
+							; (err as any).status = 429
 						throw err
 					}
 					yield "success"
@@ -31,12 +32,12 @@ describe("API Retry Logic", () => {
 			const { withRetry, RetriableError } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
 					const err = new Error("rate limited")
-					;(err as any).status = 429
+						; (err as any).status = 429
 					throw err
 				}
 			}
@@ -53,12 +54,12 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 3, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
 					const err = new Error("server error")
-					;(err as any).status = 500
+						; (err as any).status = 500
 					throw err
 				}
 			}
@@ -76,13 +77,13 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10, retryAllErrors: true })
 				async *testMethod() {
 					attempts++
 					if (attempts < 2) {
 						const err = new Error("server error")
-						;(err as any).status = 500
+							; (err as any).status = 500
 						throw err
 					}
 					yield "success"
@@ -101,14 +102,14 @@ describe("API Retry Logic", () => {
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					const err = new Error("rate limited")
-					;(err as any).status = 429
+						; (err as any).status = 429
 					throw err
 				}
 			}
 			const handler = new TestHandler()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 			expect(retryAttempts).to.have.length(1)
 			expect(retryAttempts[0]).to.equal(1)
 		})
@@ -117,13 +118,13 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
 					const err = new Error("rate limited")
-					;(err as any).status = 429
-					;(err as any).headers = { "retry-after": "0.01" }
+						; (err as any).status = 429
+						; (err as any).headers = { "retry-after": "0.01" }
 					throw err
 				}
 			}
@@ -131,7 +132,7 @@ describe("API Retry Logic", () => {
 			const start = Date.now()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 			const elapsed = Date.now() - start
 			expect(elapsed).to.be.lessThan(200)
 		})
@@ -140,12 +141,12 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10, maxDelay: 100 })
 				async *testMethod() {
 					attempts++
 					const err = new Error("rate limited")
-					;(err as any).status = 429
+						; (err as any).status = 429
 					throw err
 				}
 			}
@@ -153,7 +154,7 @@ describe("API Retry Logic", () => {
 			const start = Date.now()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 			const elapsed = Date.now() - start
 			expect(elapsed).to.be.lessThan(500)
 		})
@@ -162,12 +163,12 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 3, baseDelay: 1000, maxDelay: 50 })
 				async *testMethod() {
 					attempts++
 					const err = new Error("rate limited")
-					;(err as any).status = 429
+						; (err as any).status = 429
 					throw err
 				}
 			}
@@ -175,7 +176,7 @@ describe("API Retry Logic", () => {
 			const start = Date.now()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 			const elapsed = Date.now() - start
 			expect(elapsed).to.be.lessThan(200)
 		})
@@ -184,7 +185,7 @@ describe("API Retry Logic", () => {
 			const { withRetry, RetriableError } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
@@ -203,14 +204,14 @@ describe("API Retry Logic", () => {
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			let attempts = 0
 			class TestHandler {
-				options = { onRetryAttempt: async () => {} }
+				options = { onRetryAttempt: async () => { } }
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					attempts++
 					const futureTime = Date.now() / 1000 + 0.01
 					const err = new Error("rate limited")
-					;(err as any).status = 429
-					;(err as any).headers = { "retry-after": String(Math.floor(futureTime)) }
+						; (err as any).status = 429
+						; (err as any).headers = { "retry-after": String(Math.floor(futureTime)) }
 					throw err
 				}
 			}
@@ -218,12 +219,13 @@ describe("API Retry Logic", () => {
 			const start = Date.now()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 			const elapsed = Date.now() - start
 			expect(elapsed).to.be.lessThan(200)
 		})
 
 		it("should log error when onRetryAttempt callback throws", async () => {
+			expectLoggerErrors()
 			const { withRetry } = await import(path.join(srcDir, "core", "api", "retry.ts"))
 			class TestHandler {
 				options = {
@@ -234,14 +236,14 @@ describe("API Retry Logic", () => {
 				@withRetry({ maxRetries: 2, baseDelay: 10 })
 				async *testMethod() {
 					const err = new Error("rate limited")
-					;(err as any).status = 429
+						; (err as any).status = 429
 					throw err
 				}
 			}
 			const handler = new TestHandler()
 			try {
 				await handler.testMethod().next()
-			} catch (e) {}
+			} catch (e) { }
 		})
 	})
 })

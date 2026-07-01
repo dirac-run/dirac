@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 import { CommandPermissionController } from "./CommandPermissionController"
 import { COMMAND_PERMISSIONS_ENV_VAR } from "./types"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("CommandPermissionController", () => {
 	let originalEnvValue: string | undefined
@@ -33,6 +34,7 @@ describe("CommandPermissionController", () => {
 
 	describe("Invalid Configuration", () => {
 		it("should allow all commands when env var contains invalid JSON", () => {
+			expectLoggerErrors()
 			process.env[COMMAND_PERMISSIONS_ENV_VAR] = "not valid json"
 			const controller = new CommandPermissionController()
 

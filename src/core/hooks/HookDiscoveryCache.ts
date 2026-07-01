@@ -70,7 +70,7 @@ export class HookDiscoveryCache {
 	// Debug logging (enabled via DEBUG_HOOKS env var)
 	private debug = process.env.DEBUG_HOOKS === "true"
 
-	private constructor() {}
+	private constructor() { }
 
 	static getInstance(): HookDiscoveryCache {
 		if (!HookDiscoveryCache.instance) {
@@ -232,7 +232,6 @@ export class HookDiscoveryCache {
 
 			// Invalidate cache on any change
 			const invalidate = () => {
-				this.log(`File change detected in ${dir}, invalidating cache`)
 				this.invalidateDirectory(dir)
 			}
 

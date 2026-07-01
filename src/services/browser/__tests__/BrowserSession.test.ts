@@ -8,6 +8,7 @@ import "should"
 import type { BrowserSettings } from "@shared/BrowserSettings"
 import { DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettings"
 import { BrowserConnectionInfo, BrowserSession } from "../BrowserSession"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 // Minimal StateManager stub — only getGlobalSettingsKey is used by BrowserSession
 function makeStateManager(settings: BrowserSettings = DEFAULT_BROWSER_SETTINGS) {
@@ -41,7 +42,7 @@ describe("BrowserSession", () => {
 
 	describe("executePageAction", () => {
 		it("throws when no page is launched", async () => {
-			await session.executePageAction(async () => {}).should.be.rejectedWith(/Browser is not launched/)
+			await session.executePageAction(async () => { }).should.be.rejectedWith(/Browser is not launched/)
 		})
 	})
 
@@ -61,6 +62,7 @@ describe("BrowserSession", () => {
 
 	describe("testConnection", () => {
 		it("returns a failure result for an unreachable host", async () => {
+			expectLoggerErrors()
 			// Guaranteed-unreachable port exercises the failure path without throwing
 			const result = await session.testConnection("http://127.0.0.1:1")
 			result.success.should.be.false()

@@ -21,6 +21,7 @@ import { Session } from "@/shared/services/Session"
 import * as pathUtils from "@/utils/path"
 import { StateManager } from "../../storage/StateManager"
 import { Controller } from "../index"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("Controller (original)", () => {
 	let sandbox: sinon.SinonSandbox
@@ -193,18 +194,22 @@ describe("Controller (original)", () => {
 	}
 
 	it("creates a Controller instance", () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		c.should.be.instanceOf(Controller)
 	})
 	it("has a stateManager property", () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		c.stateManager.should.not.be.undefined()
 	})
 	it("has no task initially", () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		;(c.task === undefined).should.be.true()
 	})
 	it("initTask returns a string taskId", async () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		const tid = await initTask(c, "test")
 		tid.should.be.a.String()
@@ -216,6 +221,7 @@ describe("Controller (original)", () => {
 		;(c.task !== undefined).should.be.true()
 	})
 	it("dispose clears task", async () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		await c.dispose()

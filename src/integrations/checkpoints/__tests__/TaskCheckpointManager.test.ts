@@ -8,6 +8,7 @@ import { expect } from "chai"
 import sinon from "sinon"
 import { HostProvider } from "../../../hosts/host-provider"
 import { TaskCheckpointManager } from "../index"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 // Minimal mock factory for DiracMessage
 function makeMessage(overrides: Partial<DiracMessage> = {}): DiracMessage {
@@ -152,6 +153,7 @@ describe("TaskCheckpointManager", () => {
 		})
 
 		it("returns false when no completion result message exists", async () => {
+			expectLoggerErrors()
 			const { manager } = makeManager(sandbox, { messages: [makeMessage()] })
 			manager.setCheckpointTracker({ getDiffCount: sandbox.stub() } as any)
 			const result = await manager.doesLatestTaskCompletionHaveNewChanges()
@@ -202,6 +204,7 @@ describe("TaskCheckpointManager", () => {
 
 	describe("restoreCheckpoint", () => {
 		it("returns empty object when message not found", async () => {
+			expectLoggerErrors()
 			const { manager } = makeManager(sandbox, { messages: [makeMessage({ id: "msg-1" })] })
 			const result = await manager.restoreCheckpoint("nonexistent", "task")
 			expect(result).to.deep.equal({})

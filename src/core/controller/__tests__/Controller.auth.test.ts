@@ -16,6 +16,7 @@ import type { DiracExtensionContext } from "@/shared/dirac"
 import * as pathUtils from "@/utils/path"
 import { StateManager } from "../../storage/StateManager"
 import { Controller } from "../index"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("Controller — Auth delegate", () => {
 	let sandbox: sinon.SinonSandbox
@@ -114,12 +115,13 @@ describe("Controller — Auth delegate", () => {
 		sandbox.restore()
 		try {
 			await require("fs/promises").rm(tempDir, { recursive: true, force: true })
-		} catch {}
+		} catch { }
 	})
 
 	it("completeOpenRouterAuth exchanges code for API key and updates configuration", async () => {
+		expectLoggerErrors()
 		const currentConfig = { apiKey: "old-key" } as ApiConfiguration
-		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		sandbox.stub(axios, "post").resolves({ data: { key: "new-openrouter-key-123" } })
 		await controller.completeOpenRouterAuth("auth-code-xyz")
 		sandbox.assert.calledWith(
@@ -134,13 +136,15 @@ describe("Controller — Auth delegate", () => {
 	})
 
 	it("completeOpenRouterAuth throws on invalid API response", async () => {
+		expectLoggerErrors()
 		sandbox.stub(axios, "post").resolves({ data: {} })
 		await controller.completeOpenRouterAuth("bad-code").should.be.rejected()
 	})
 
 	it("completeRequestyAuth sets requesty API key in configuration", async () => {
+		expectLoggerErrors()
 		const currentConfig = { apiKey: "old-key" } as ApiConfiguration
-		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		await controller.completeRequestyAuth("requesty-api-key-456")
 		sandbox.assert.calledWith(
 			(controller as any).stateManager.setApiConfiguration,
@@ -154,6 +158,7 @@ describe("Controller — Auth delegate", () => {
 	})
 
 	it("completeGithubLogin initiates device flow and starts polling", async () => {
+		expectLoggerErrors()
 		const stub = (githubCopilotAuthModule.githubCopilotAuthManager as any).initiateDeviceFlow
 		stub.resolves({ user_code: "XYZ789", verification_uri: "https://claim.example.com", device_code: "dc", interval: 10 })
 		await controller.completeGithubLogin()
@@ -163,6 +168,7 @@ describe("Controller — Auth delegate", () => {
 	})
 
 	it("completeGithubLogin shows error message on failure", async () => {
+		expectLoggerErrors()
 		const stub = (githubCopilotAuthModule.githubCopilotAuthManager as any).initiateDeviceFlow
 		stub.rejects(new Error("network error"))
 		await controller.completeGithubLogin()

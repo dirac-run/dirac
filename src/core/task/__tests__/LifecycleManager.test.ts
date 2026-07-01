@@ -1,4 +1,5 @@
 import "should"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import sinon from "sinon"
 import { LifecycleManager } from "../LifecycleManager"
@@ -48,7 +49,7 @@ describe("LifecycleManager", () => {
 			// Stub ensureCheckpointInitialized via module proxy
 			const initModule = require("@integrations/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
-			initModule.ensureCheckpointInitialized = async () => {}
+			initModule.ensureCheckpointInitialized = async () => { }
 			try {
 				await manager.initializeCheckpoints(true)
 				sinon.assert.calledOnce(deps.taskMessenger.createCheckpoint)
@@ -59,6 +60,7 @@ describe("LifecycleManager", () => {
 		})
 
 		it("stores error message on initialization failure", async () => {
+			expectLoggerErrors()
 			deps.stateManager.getGlobalSettingsKey = sinon.stub().withArgs("enableCheckpointsSetting").returns(true)
 			const initModule = require("@integrations/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
@@ -119,6 +121,7 @@ describe("LifecycleManager", () => {
 		})
 
 		it("continues even if environment recording fails", async () => {
+			expectLoggerErrors()
 			deps.recordEnvironment = sinon.stub().rejects(new Error("recording failed"))
 			await manager.startTask("task")
 			sinon.assert.calledOnce(deps.initiateTaskLoop)

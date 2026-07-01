@@ -1,3 +1,4 @@
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { Controller } from "@core/controller"
 import { serviceHandlers } from "@generated/hosts/vscode/protobus-services"
 import { GrpcCancel, GrpcRequest } from "@shared/WebviewMessage"
@@ -203,6 +204,7 @@ describe("grpc-handler", () => {
 			})
 
 			it("should handle errors in streaming requests", async () => {
+				expectLoggerErrors()
 				const request: GrpcRequest = {
 					service: serviceName,
 					method: "testStreamingFailing",
@@ -227,6 +229,7 @@ describe("grpc-handler", () => {
 			})
 
 			it("should handle streaming with message, error, then another message", async () => {
+				expectLoggerErrors()
 				// This test simulates a scenario where:
 				// 1. First message is sent successfully
 				// 2. An error occurs
@@ -349,6 +352,7 @@ describe("grpc-handler", () => {
 			})
 
 			it("should handle cleanup errors gracefully", async () => {
+				expectLoggerErrors()
 				// Register a request with a failing cleanup
 				const registry = getRequestRegistry()
 				const cleanupStub = sandbox.stub().throws(new Error("Cleanup failed"))

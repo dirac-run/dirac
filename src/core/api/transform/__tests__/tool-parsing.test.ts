@@ -11,6 +11,7 @@
 
 import { describe, it } from "mocha"
 import "should"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import OpenAI from "openai"
 import {
 	DiracAssistantToolUseBlock,
@@ -212,8 +213,8 @@ describe("Tool Call Parsing", () => {
 			const result = convertToOpenAiMessages(messages)
 
 			const msg = result[0] as any
-			// Content should be null, not undefined or empty string
-			;(msg.content === null).should.be.true()
+				// Content should be null, not undefined or empty string
+				; (msg.content === null).should.be.true()
 		})
 	})
 
@@ -302,6 +303,7 @@ describe("Tool Call Parsing", () => {
 		})
 
 		it("should handle malformed tool arguments gracefully", () => {
+			expectLoggerErrors()
 			const completion: OpenAI.Chat.Completions.ChatCompletion = {
 				id: "chatcmpl-789",
 				object: "chat.completion",
@@ -364,8 +366,8 @@ describe("Tool Call Parsing", () => {
 				}
 
 				const result = convertToAnthropicMessage(completion)
-				// Using equality check since should.be.true() doesn't accept message arg
-				;(result.stop_reason === expected).should.be.true()
+					// Using equality check since should.be.true() doesn't accept message arg
+					; (result.stop_reason === expected).should.be.true()
 			}
 		})
 	})

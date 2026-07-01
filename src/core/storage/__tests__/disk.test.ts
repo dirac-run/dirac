@@ -1,3 +1,4 @@
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
@@ -506,6 +507,7 @@ describe("disk - atomic writes", () => {
 
 	describe("atomic write failure scenarios", () => {
 		it("should leave original file intact if temp file write fails", async () => {
+			expectLoggerErrors()
 			// Write initial data
 			const initialItems = [createTestHistoryItem("original-1", "Original task")]
 			await writeTaskHistoryToState(initialItems)
@@ -539,6 +541,7 @@ describe("disk - atomic writes", () => {
 		})
 
 		it("should leave original file intact if rename fails", async () => {
+			expectLoggerErrors()
 			// Write initial data
 			const initialItems = [createTestHistoryItem("original-2", "Original task 2")]
 			await writeTaskHistoryToState(initialItems)
@@ -791,6 +794,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("saveApiConversationHistory does not throw on write failure (swallows error)", async () => {
+			expectLoggerErrors()
 			const taskId = `api-fail-${Date.now()}`
 			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
 			// Should not throw - error is logged and swallowed
@@ -814,6 +818,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("saveDiracMessages does not throw on write failure (swallows error)", async () => {
+			expectLoggerErrors()
 			const taskId = `dirac-fail-${Date.now()}`
 			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
 			await saveDiracMessages(taskId, [{ ask: "test" } as any])
@@ -839,6 +844,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("getTaskMetadata returns default on read error (swallows error)", async () => {
+			expectLoggerErrors()
 			const taskId = `meta-read-fail-${Date.now()}`
 			// Write valid metadata first
 			await saveTaskMetadata(taskId, { files_in_context: [], model_usage: [], environment_history: [] })
@@ -849,6 +855,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("saveTaskMetadata does not throw on write failure (swallows error)", async () => {
+			expectLoggerErrors()
 			const taskId = `meta-fail-${Date.now()}`
 			sandbox.stub(fs, "writeFile").rejects(new Error("disk full"))
 			await saveTaskMetadata(taskId, { files_in_context: [], model_usage: [], environment_history: [] })
@@ -879,6 +886,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("readTaskSettingsFromStorage throws on read error", async () => {
+			expectLoggerErrors()
 			const taskId = `settings-read-fail-${Date.now()}`
 			await writeTaskSettingsToStorage(taskId, { maxTokens: 1 } as any)
 			sandbox.stub(fs, "readFile").rejects(new Error("read error"))
@@ -907,6 +915,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("readRemoteConfigFromCache returns undefined on read error (swallows)", async () => {
+			expectLoggerErrors()
 			sandbox.stub(fs, "readFile").rejects(new Error("corrupt"))
 			const result = await readRemoteConfigFromCache(`corrupt-${Date.now()}`)
 			const isUndefined = result === undefined
@@ -990,6 +999,7 @@ describe("disk - core read/write/mkdir operations", () => {
 		})
 
 		it("cleanupConversationHistoryFile swallows errors silently", async () => {
+			expectLoggerErrors()
 			sandbox.stub(fs, "unlink").rejects(new Error("permission denied"))
 			// Should not throw
 			await cleanupConversationHistoryFile(path.join(testGlobalStorageDir, "any.json"))

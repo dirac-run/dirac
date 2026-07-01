@@ -8,6 +8,7 @@ import CheckpointTracker from "@/integrations/checkpoints/CheckpointTracker"
 import { DiracMessage, DiracMessageType } from "@/shared/ExtensionMessage"
 import { ShowMessageType } from "@/shared/proto/index.host"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("multifile-diff", () => {
 	let sandbox: sinon.SinonSandbox
@@ -169,6 +170,7 @@ describe("multifile-diff", () => {
 		})
 
 		it("should handle message not found error", async () => {
+			expectLoggerErrors()
 			// Arrange
 			messageStateHandlerStub.getDiracMessages.returns([])
 
@@ -181,6 +183,7 @@ describe("multifile-diff", () => {
 		})
 
 		it("should handle missing checkpoint hash", async () => {
+			expectLoggerErrors()
 			// Arrange
 			const messagesWithoutHash: DiracMessage[] = [
 				{

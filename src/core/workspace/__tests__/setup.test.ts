@@ -1,6 +1,7 @@
 import type { WorkspaceRoot } from "@shared/multi-root/types"
 import { VcsType } from "@shared/multi-root/types"
 import { expect } from "chai"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import * as path from "path"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
@@ -160,6 +161,7 @@ describe("setupWorkspaceManager", () => {
 	})
 
 	it("gracefully handles errors and falls back to fromLegacyCwd while warning user", async () => {
+		expectLoggerErrors()
 		// Multi-root enabled but detectRoots throws
 		const stateManager = makeStateManager({ multiRootEnabled: true })
 		const detectRoots = sandbox.stub().rejects(new Error("boom"))

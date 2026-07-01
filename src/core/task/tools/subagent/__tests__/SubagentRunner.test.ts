@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import * as coreApi from "@core/api"
 import * as skills from "@core/context/instructions/user-instructions/skills"
 import { DiracToolSet, PromptRegistry } from "@core/prompts/system-prompt"
@@ -64,7 +65,7 @@ function createTaskConfig(): TaskConfig {
 					supportsPromptCache: true,
 				},
 			}),
-			createMessage: sinon.stub().callsFake(async function* () {}),
+			createMessage: sinon.stub().callsFake(async function* () { }),
 		},
 		services: {
 			stateManager: {
@@ -189,7 +190,7 @@ describe("SubagentRunner", () => {
 		createMessage.onSecondCall().callsFake(async function* (_systemPrompt: string, conversation: unknown[]) {
 			const assistantMessage = conversation[1] as {
 				role: string
-				content: Array<{ type?: string; [key: string]: unknown }>
+				content: Array<{ type?: string;[key: string]: unknown }>
 			}
 			assert.equal(assistantMessage.role, "assistant")
 
@@ -198,7 +199,7 @@ describe("SubagentRunner", () => {
 			assert.equal(toolUse.id, "toolu_subagent_1")
 			assert.equal(toolUse.name, DiracDefaultTool.LIST_FILES)
 
-			const userMessage = conversation[2] as { role: string; content: Array<{ type?: string; [key: string]: unknown }> }
+			const userMessage = conversation[2] as { role: string; content: Array<{ type?: string;[key: string]: unknown }> }
 			assert.equal(userMessage.role, "user")
 			const toolResult = userMessage.content.find((block) => block.type === "tool_result")
 			assert.ok(toolResult)
@@ -226,7 +227,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(result.result, "done")
@@ -283,7 +284,7 @@ describe("SubagentRunner", () => {
 			return false
 		})
 
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(result.result, "done")
@@ -308,7 +309,7 @@ describe("SubagentRunner", () => {
 		createMessage.onSecondCall().callsFake(async function* (_systemPrompt: string, conversation: unknown[]) {
 			const lastMessage = conversation[conversation.length - 1] as {
 				role: string
-				content: Array<{ type?: string; [key: string]: unknown }>
+				content: Array<{ type?: string;[key: string]: unknown }>
 			}
 
 			assert.equal(lastMessage.role, "user")
@@ -340,7 +341,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(result.result, "done")
@@ -396,7 +397,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(result.result, "done")
@@ -404,6 +405,7 @@ describe("SubagentRunner", () => {
 	})
 
 	it("retries initial stream failures before failing", async () => {
+		expectLoggerErrors()
 		const createMessage = sinon.stub()
 		createMessage.onFirstCall().callsFake(async function* () {
 			yield* []
@@ -435,7 +437,7 @@ describe("SubagentRunner", () => {
 
 		const clock = sinon.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
 		const runner = new SubagentRunner(createTaskConfig())
-		const runPromise = runner.run("List files", () => {})
+		const runPromise = runner.run("List files", () => { })
 		await clock.runAllAsync()
 		const result = await runPromise
 		clock.restore()
@@ -446,11 +448,12 @@ describe("SubagentRunner", () => {
 	})
 
 	it("fails context window errors", async () => {
+		expectLoggerErrors()
 		const createMessage = sinon.stub()
 		createMessage.onFirstCall().callsFake(async function* () {
 			yield* []
 			const contextError = new Error("context length exceeded")
-			;(contextError as Error & { status: number }).status = 400
+				; (contextError as Error & { status: number }).status = 400
 			throw contextError
 		})
 
@@ -464,7 +467,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("Huge prompt", () => {})
+		const result = await runner.run("Huge prompt", () => { })
 
 		assert.equal(result.status, "failed")
 		assert.equal(createMessage.callCount, 1)
@@ -495,7 +498,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(createMessage.callCount, 1)
@@ -534,7 +537,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("Run task", () => {})
+		const result = await runner.run("Run task", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(createMessage.callCount, 1)
@@ -573,7 +576,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfig())
-		const result = await runner.run("Run task", () => {})
+		const result = await runner.run("Run task", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(createMessage.callCount, 1)
@@ -612,7 +615,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfig())
-		const result = await runner.run("Run task", () => {})
+		const result = await runner.run("Run task", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(createMessage.callCount, 1)
@@ -678,7 +681,7 @@ describe("SubagentRunner", () => {
 		initializeHostProvider()
 
 		const runner = new SubagentRunner(createTaskConfigWithListFilesSnapshot())
-		const result = await runner.run("List files", () => {})
+		const result = await runner.run("List files", () => { })
 
 		assert.equal(result.status, "completed")
 		assert.equal(result.result, "done")

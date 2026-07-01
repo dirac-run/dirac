@@ -12,6 +12,7 @@ import { ErrorProviderFactory } from "../ErrorProviderFactory"
 import { ErrorService } from "../ErrorService"
 import type { IErrorProvider } from "../providers/IErrorProvider"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("ErrorService", () => {
 	let sandbox: sinon.SinonSandbox
@@ -32,7 +33,7 @@ describe("ErrorService", () => {
 		sandbox.stub(ErrorProviderFactory, "getDefaultConfig").returns({ type: "no-op", config: {} as any })
 		service = new ErrorService(mockProvider)
 			// Reset singleton for static tests
-			;(ErrorService as any).instance = null
+			; (ErrorService as any).instance = null
 	})
 
 	afterEach(() => {
@@ -48,7 +49,7 @@ describe("ErrorService", () => {
 
 		it("returns existing instance if already initialized", async () => {
 			const fake = {} as any
-				;(ErrorService as any).instance = fake
+				; (ErrorService as any).instance = fake
 			const result = await ErrorService.initialize()
 			result.should.equal(fake)
 		})
@@ -62,8 +63,8 @@ describe("ErrorService", () => {
 		})
 
 		it("throws if not initialized", () => {
-			;(ErrorService as any).instance = null
-				;(() => ErrorService.get()).should.throw()
+			; (ErrorService as any).instance = null
+				; (() => ErrorService.get()).should.throw()
 		})
 	})
 
@@ -85,12 +86,14 @@ describe("ErrorService", () => {
 	// ---------------------------------------------------------------
 	describe("logException", () => {
 		it("delegates to provider and logs", () => {
+			expectLoggerErrors()
 			const err = new Error("test")
 			service.logException(err)
 			sinon.assert.calledOnce(mockProvider.logException as any)
 		})
 
 		it("accepts properties", () => {
+			expectLoggerErrors()
 			service.logException(new Error("test"), { ctx: "test" })
 			sinon.assert.calledWithMatch(mockProvider.logException as any, sinon.match.any, { ctx: "test" })
 		})
@@ -117,16 +120,19 @@ describe("ErrorService", () => {
 	// ---------------------------------------------------------------
 	describe("toDiracError", () => {
 		it("transforms raw error to DiracError", () => {
+			expectLoggerErrors()
 			const result = service.toDiracError(new Error("raw"))
 			result.should.be.instanceOf(DiracError)
 		})
 
 		it("logs the transformed error", () => {
+			expectLoggerErrors()
 			service.toDiracError(new Error("raw"), TEST_MODEL_IDS.OPENAI, "openai")
 			sinon.assert.calledOnce(mockProvider.logException as any)
 		})
 
 		it("passes modelId and providerId", () => {
+			expectLoggerErrors()
 			const result = service.toDiracError("string error", "claude", "anthropic")
 			result.should.be.instanceOf(DiracError)
 		})

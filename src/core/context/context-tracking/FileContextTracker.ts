@@ -71,7 +71,8 @@ export class FileContextTracker {
 
 		// Track file changes
 		watcher.on("change", () => {
-			if (this.recentlyEditedByDirac.has(filePath)) {
+			const isDiracEdit = this.recentlyEditedByDirac.has(filePath)
+			if (isDiracEdit) {
 				this.recentlyEditedByDirac.delete(filePath) // This was an edit by Dirac, no need to inform Dirac
 			} else {
 				this.recentlyModifiedFiles.add(filePath) // This was a user edit, we will inform Dirac

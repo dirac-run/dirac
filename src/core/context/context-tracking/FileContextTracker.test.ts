@@ -57,8 +57,9 @@ describe("FileContextTracker", () => {
 		tracker = new FileContextTracker({} as Controller, taskId)
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		sandbox.restore()
+		await tracker.dispose()
 	})
 
 	it("should add a record when a file is read by a tool", async () => {

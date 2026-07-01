@@ -1,5 +1,7 @@
 sample.ts::outerFunction.NestedClass.nestedMethod
 [Function Hash: 3142f2b9]
+	class NestedClass {
+...
 /**
 		 * Nested method.
 		 */

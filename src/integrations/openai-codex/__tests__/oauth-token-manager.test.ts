@@ -14,6 +14,7 @@ import {
 	OpenAiCodexOAuthManager,
 	refreshAccessToken,
 } from "../oauth"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 
 class TestStateManager {
 	private secrets = new Map<string, string | undefined>()
@@ -30,7 +31,7 @@ class TestStateManager {
 		this.secrets.set(key, value)
 	}
 
-	async flushPendingState(): Promise<void> {}
+	async flushPendingState(): Promise<void> { }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -87,6 +88,7 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		})
 
 		it("returns null when stored credentials are corrupt", async () => {
+			expectLoggerErrors()
 			stateManager.setSecret("openai-codex-oauth-credentials", "{not json")
 			const manager = new OpenAiCodexOAuthManager()
 			const creds = await manager.loadCredentials()
@@ -122,24 +124,24 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		it("isAuthenticated reflects stored credentials without attempting refresh", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials())
 			const manager = new OpenAiCodexOAuthManager()
-			;(await manager.isAuthenticated()).should.be.true()
+				; (await manager.isAuthenticated()).should.be.true()
 		})
 
 		it("isAuthenticated is false when nothing is stored", async () => {
 			const manager = new OpenAiCodexOAuthManager()
-			;(await manager.isAuthenticated()).should.be.false()
+				; (await manager.isAuthenticated()).should.be.false()
 		})
 
 		it("getEmail returns the stored email", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ email: "hello@example.com" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;((await manager.getEmail()) as string).should.equal("hello@example.com")
+				; ((await manager.getEmail()) as string).should.equal("hello@example.com")
 		})
 
 		it("getAccountId returns the stored accountId", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ accountId: "acct-xyz" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;((await manager.getAccountId()) as string).should.equal("acct-xyz")
+				; ((await manager.getAccountId()) as string).should.equal("acct-xyz")
 		})
 
 		it("getEmail returns null when no email is present", async () => {
@@ -156,7 +158,7 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		it("returns the stored access token when it is not expired", async () => {
 			stateManager.setSecret("openai-codex-oauth-credentials", validCredentials({ access_token: "fresh-token" }))
 			const manager = new OpenAiCodexOAuthManager()
-			;((await manager.getAccessToken()) as string).should.equal("fresh-token")
+				; ((await manager.getAccessToken()) as string).should.equal("fresh-token")
 		})
 
 		it("refreshes an expired token and persists the new one", async () => {
@@ -191,6 +193,7 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		})
 
 		it("returns null and clears credentials when refresh fails with invalid_grant", async () => {
+			expectLoggerErrors()
 			stateManager.setSecret(
 				"openai-codex-oauth-credentials",
 				validCredentials({ refresh_token: "bad", expires: Date.now() - 1000 }),
@@ -207,6 +210,7 @@ describe("OpenAiCodexOAuthManager token management", () => {
 		})
 
 		it("returns null but keeps credentials when refresh fails with a transient error", async () => {
+			expectLoggerErrors()
 			stateManager.setSecret(
 				"openai-codex-oauth-credentials",
 				validCredentials({ refresh_token: "rt", expires: Date.now() - 1000 }),
@@ -359,7 +363,7 @@ describe("OpenAiCodexOAuthManager authorization code flow", () => {
 
 			const [url, init] = fetchStub.firstCall.args as [string, RequestInit]
 			url.should.equal(OPENAI_CODEX_OAUTH_CONFIG.tokenEndpoint)
-			;(init.headers as Record<string, string>)["Content-Type"].should.equal("application/x-www-form-urlencoded")
+				; (init.headers as Record<string, string>)["Content-Type"].should.equal("application/x-www-form-urlencoded")
 			const body = new URLSearchParams(init.body as string)
 			body.get("grant_type")?.should.equal("authorization_code")
 			body.get("code")?.should.equal("code-1")
@@ -401,6 +405,7 @@ describe("OpenAiCodexOAuthManager authorization code flow", () => {
 		})
 
 		it("throws OpenAiCodexOAuthTokenError-like message on a 400 invalid_grant", async () => {
+			expectLoggerErrors()
 			const fetchStub = sinon.stub().resolves(jsonResponse({ error: "invalid_grant", error_description: "revoked" }, 400))
 			await mockFetchForTesting(fetchStub as unknown as typeof globalThis.fetch, () =>
 				refreshAccessToken({ type: "openai-codex", access_token: "a", refresh_token: "r", expires: 0 }),

@@ -36,12 +36,12 @@ describe("SubagentBuilder", () => {
 			getCachedConfig: (subagentName?: string) =>
 				subagentName === "cached-agent"
 					? {
-							name: "cached-agent",
-							description: "cached description",
-							tools: [DiracDefaultTool.LIST_FILES],
-							modelId: "gpt-5",
-							systemPrompt: "cached system prompt",
-						}
+						name: "cached-agent",
+						description: "cached description",
+						tools: [DiracDefaultTool.LIST_FILES],
+						modelId: "gpt-5",
+						systemPrompt: "cached system prompt",
+					}
 					: undefined,
 		} as unknown as AgentConfigLoader)
 
@@ -84,12 +84,12 @@ describe("SubagentBuilder", () => {
 			getCachedConfig: (subagentName?: string) =>
 				subagentName === "openrouter-agent"
 					? {
-							name: "openrouter-agent",
-							description: "openrouter plan agent",
-							tools: [DiracDefaultTool.FILE_READ],
-							modelId: "openrouter/custom-model",
-							systemPrompt: "plan system",
-						}
+						name: "openrouter-agent",
+						description: "openrouter plan agent",
+						tools: [DiracDefaultTool.FILE_READ],
+						modelId: "openrouter/custom-model",
+						systemPrompt: "plan system",
+					}
 					: undefined,
 		} as unknown as AgentConfigLoader)
 

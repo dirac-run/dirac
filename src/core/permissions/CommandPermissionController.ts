@@ -60,7 +60,7 @@ export class CommandPermissionController {
 			atomic: true,
 		})
 
-		this.fileWatcher.on("all", () => {
+		this.fileWatcher.on("all", (event) => {
 			this.loadConfig()
 		})
 	}
