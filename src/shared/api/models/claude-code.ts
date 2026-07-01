@@ -3,7 +3,7 @@ import { anthropicModels } from "./anthropic"
 
 export type ClaudeCodeModelId = keyof typeof claudeCodeModels
 
-export const claudeCodeDefaultModelId: ClaudeCodeModelId = "claude-sonnet-4-6"
+export const claudeCodeDefaultModelId: ClaudeCodeModelId = "claude-sonnet-5"
 
 export const claudeCodeModels = {
 	"opus[1m]": {
@@ -43,6 +43,11 @@ export const claudeCodeModels = {
 	},
 	"claude-opus-4-8[1m]": {
 		...anthropicModels["claude-opus-4-8:1m"],
+		supportsImages: false,
+		supportsPromptCache: false,
+	},
+	"claude-sonnet-5": {
+		...anthropicModels["claude-sonnet-5"],
 		supportsImages: false,
 		supportsPromptCache: false,
 	},

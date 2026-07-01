@@ -24,6 +24,7 @@ import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandler
 export const SUPPORTED_BEDROCK_THINKING_MODELS = [
 	"anthropic.claude-opus-4-6-v1",
 	`anthropic.claude-opus-4-6-v1${CLAUDE_SONNET_1M_SUFFIX}`,
+	"anthropic.claude-sonnet-5",
 	"anthropic.claude-sonnet-4-6",
 	`anthropic.claude-sonnet-4-6${CLAUDE_SONNET_1M_SUFFIX}`,
 	"anthropic.claude-3-7-sonnet-20250219-v1:0",
@@ -170,7 +171,7 @@ export const BedrockProvider = ({ showModelOptions, isPopup, currentMode }: Bedr
 			</VSCodeRadioGroup>
 
 			{(apiConfiguration?.awsAuthentication === undefined && apiConfiguration?.awsUseProfile) ||
-			apiConfiguration?.awsAuthentication === "profile" ? (
+				apiConfiguration?.awsAuthentication === "profile" ? (
 				<DebouncedTextField
 					className="w-full"
 					initialValue={apiConfiguration?.awsProfile ?? ""}
@@ -528,8 +529,8 @@ export const BedrockProvider = ({ showModelOptions, isPopup, currentMode }: Bedr
 						(modeFields.awsBedrockCustomSelected &&
 							modeFields.awsBedrockCustomModelBaseId &&
 							SUPPORTED_BEDROCK_THINKING_MODELS.includes(modeFields.awsBedrockCustomModelBaseId))) && (
-						<ThinkingBudgetSlider currentMode={currentMode} />
-					)}
+							<ThinkingBudgetSlider currentMode={currentMode} />
+						)}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

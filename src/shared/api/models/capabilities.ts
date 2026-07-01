@@ -107,6 +107,13 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 		supportsReasoning: true,
 		supportsAdaptiveThinking: true,
 	},
+	"claude-sonnet-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsReasoning: true,
+		supportsAdaptiveThinking: true,
+	},
 	"codestral-2501": {
 		maxTokens: 256_000,
 		contextWindow: 256_000,

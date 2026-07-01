@@ -16,7 +16,7 @@ export const ANTHROPIC_BETAS = {
 
 export type AnthropicModelId = keyof typeof anthropicModels
 
-export const anthropicDefaultModelId: AnthropicModelId = "claude-sonnet-4-6"
+export const anthropicDefaultModelId: AnthropicModelId = "claude-sonnet-5"
 
 export const anthropicModels = {
 	"claude-sonnet-4-6": {
@@ -35,6 +35,14 @@ export const anthropicModels = {
 		cacheWritesPrice: 3.75,
 		cacheReadsPrice: 0.3,
 		tiers: CLAUDE_SONNET_1M_TIERS,
+	},
+	"claude-sonnet-5": {
+		...MODEL_CAPABILITIES["claude-sonnet-5"],
+		supportsPromptCache: true,
+		inputPrice: 3.0,
+		outputPrice: 15.0,
+		cacheWritesPrice: 3.75,
+		cacheReadsPrice: 0.3,
 	},
 	"claude-haiku-4-5-20251001": {
 		...MODEL_CAPABILITIES["claude-haiku-4-5-20251001"],

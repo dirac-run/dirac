@@ -9,6 +9,7 @@ export const openRouterClaudeOpus461mModelId = `anthropic/claude-opus-4.6${CLAUD
 export const openRouterClaudeOpus48ModelId = "anthropic/claude-opus-4.8"
 export const openRouterClaudeOpus481mModelId = `anthropic/claude-opus-4.8${CLAUDE_SONNET_1M_SUFFIX}`
 export const openRouterClaudeFable5ModelId = "anthropic/claude-fable-5"
+export const openRouterClaudeSonnet5ModelId = "anthropic/claude-sonnet-5"
 export const openRouterDefaultModelInfo: ModelInfo = {
 	maxTokens: 64_000,
 	contextWindow: 200_000,

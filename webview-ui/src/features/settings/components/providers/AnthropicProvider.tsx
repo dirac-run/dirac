@@ -17,6 +17,7 @@ export const SUPPORTED_ANTHROPIC_THINKING_MODELS = [
 	`claude-opus-4-6${ANTHROPIC_FAST_MODE_SUFFIX}`,
 	`claude-opus-4-6${CLAUDE_SONNET_1M_SUFFIX}`,
 	`claude-opus-4-6${CLAUDE_SONNET_1M_SUFFIX}${ANTHROPIC_FAST_MODE_SUFFIX}`,
+	"claude-sonnet-5",
 	"claude-sonnet-4-6",
 	`claude-sonnet-4-6${CLAUDE_SONNET_1M_SUFFIX}`,
 	"claude-3-7-sonnet-20250219",

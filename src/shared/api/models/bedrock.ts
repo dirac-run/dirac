@@ -4,11 +4,20 @@ import { CLAUDE_SONNET_1M_TIERS, CLAUDE_OPUS_1M_TIERS } from "./shared-tiers"
 
 export type BedrockModelId = keyof typeof bedrockModels
 
-export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-4-6"
+export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-5"
 
 export const bedrockModels = {
 	"anthropic.claude-sonnet-4-6": {
 		...MODEL_CAPABILITIES["claude-sonnet-4-6"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 3.0,
+		outputPrice: 15.0,
+		cacheWritesPrice: 3.75,
+		cacheReadsPrice: 0.3,
+	},
+	"anthropic.claude-sonnet-5": {
+		...MODEL_CAPABILITIES["claude-sonnet-5"],
 		supportsPromptCache: true,
 		supportsGlobalEndpoint: true,
 		inputPrice: 3.0,

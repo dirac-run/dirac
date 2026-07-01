@@ -163,6 +163,7 @@ const JP_SUPPORTED_CRIS_MODELS = [
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
 	"anthropic.claude-haiku-4-5-20251001-v1:0",
+	"anthropic.claude-sonnet-5",
 ]
 
 // Parses Bedrock ConverseStream events into Dirac ApiStreamChunk objects.
@@ -906,8 +907,8 @@ export class AwsBedrockHandler implements ApiHandler {
 				}),
 				...(reasoningOn &&
 					useAdaptive && {
-						output_config: { effort: this.options.reasoningEffort || "high" },
-					}),
+					output_config: { effort: this.options.reasoningEffort || "high" },
+				}),
 				...(enable1mContextWindow && {
 					anthropic_beta: [ANTHROPIC_BETAS.CONTEXT_1M],
 				}),
