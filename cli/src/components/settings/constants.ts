@@ -10,6 +10,13 @@ export const TABS: PanelTab[] = [
 
 // Settings configuration for simple boolean toggles
 export const FEATURE_SETTINGS = {
+	yolo: {
+		stateKey: "yoloModeToggled",
+		default: false,
+		label: "Yolo Mode",
+		description:
+			"Execute tasks without user's confirmation. Auto-switches from Plan to Act mode and disables the ask question tool. Use with extreme caution.",
+	},
 	subagents: {
 		stateKey: "subagentsEnabled",
 		default: false,
