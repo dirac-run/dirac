@@ -525,6 +525,7 @@ export class Task {
 			sourceDir: getExtensionSourceDir(),
 			getEnvironmentDetails: this.getEnvironmentDetails.bind(this),
 			commandPermissionController: this.commandPermissionController,
+			yoloModeToggled: !!this.stateManager.getGlobalSettingsKey("yoloModeToggled"),
 			postStateToWebview: () => this.postStateToWebview(),
 		})
 
@@ -960,7 +961,7 @@ export class Task {
 			}
 			// Ensure the artifact dir is git-ignored so debug dumps don't get committed.
 			const gitignorePath = path.join(writeDir, ".gitignore")
-			await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => {})
+			await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => { })
 
 			const debugPath = path.join(writeDir, `task-${this.taskId}-debug.md`)
 
@@ -1185,7 +1186,7 @@ export class Task {
 		if (!useAutoCondense) {
 			const lastMessage =
 				contextManagementMetadata.truncatedConversationHistory[
-					contextManagementMetadata.truncatedConversationHistory.length - 1
+				contextManagementMetadata.truncatedConversationHistory.length - 1
 				]
 			if (lastMessage && lastMessage.role === "user") {
 				const notice = formatResponse.contextTruncationNotice()
@@ -1580,7 +1581,7 @@ export class Task {
 		if (providerId && model.id) {
 			try {
 				await this.modelContextTracker.recordModelUsage(providerId, model.id, mode)
-			} catch {}
+			} catch { }
 		}
 
 		const modelInfo: DiracMessageModelInfo = {
@@ -1703,10 +1704,9 @@ export class Task {
 							type: "text",
 							text:
 								assistantMessage +
-								`\n\n[${
-									cancelReason === "streaming_failed"
-										? "Response interrupted by API Error"
-										: "Response interrupted by user"
+								`\n\n[${cancelReason === "streaming_failed"
+									? "Response interrupted by API Error"
+									: "Response interrupted by user"
 								}]`,
 						},
 					],

@@ -106,4 +106,25 @@ describe("SubagentBuilder", () => {
 		assert.equal((effectiveApiConfig as Record<string, unknown>).planModeApiModelId, "plan-default")
 		assert.equal((effectiveApiConfig as Record<string, unknown>).actModeApiModelId, "act-default")
 	})
+
+	it("supports explicit runtime tool allowlist and system suffix overrides", () => {
+		sinon.stub(AgentConfigLoader, "getInstance").returns({
+			getCachedConfig: () => ({
+				name: "configured-agent",
+				description: "configured description",
+				tools: [DiracDefaultTool.FILE_NEW],
+				systemPrompt: "configured system",
+			}),
+		} as unknown as AgentConfigLoader)
+		sinon.stub(api, "buildApiHandler").returns({ getModel: sinon.stub(), createMessage: sinon.stub() } as never)
+
+		const builder = new SubagentBuilder(createTaskConfig("act", "anthropic"), "configured-agent", {
+			allowedTools: [],
+			systemSuffix: "\n\n# Custom Builder Mode",
+		})
+
+		assert.deepEqual(builder.getAllowedTools(), [DiracDefaultTool.ATTEMPT])
+		assert.equal(builder.buildSystemPrompt("generated prompt"), "configured system# Agent Profile\nName: configured-agent\nDescription: configured description\n\n\n\n# Custom Builder Mode")
+	})
+
 })

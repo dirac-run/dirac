@@ -84,186 +84,186 @@ export function useSettingsItems({
 					},
 					...(ProviderToBaseUrlKeyMap[provider as ApiProvider]
 						? [
-								{
-									key: "baseUrl",
-									label: "Base URL",
-									type: "editable" as const,
-									value:
-										(stateManager.getGlobalSettingsKey(
-											ProviderToBaseUrlKeyMap[provider as ApiProvider]!,
-										) as string) || "",
-								},
-							]
+							{
+								key: "baseUrl",
+								label: "Base URL",
+								type: "editable" as const,
+								value:
+									(stateManager.getGlobalSettingsKey(
+										ProviderToBaseUrlKeyMap[provider as ApiProvider]!,
+									) as string) || "",
+							},
+						]
 						: []),
 					...(provider === "openai"
 						? [
-								{
-									key: "openAiHeaders",
-									label: "Custom Headers",
-									type: "object" as const,
-									value: openAiHeaders,
-								},
-							]
+							{
+								key: "openAiHeaders",
+								label: "Custom Headers",
+								type: "object" as const,
+								value: openAiHeaders,
+							},
+						]
 						: []),
 					...(provider === "openai-codex" && openAiCodexIsAuthenticated
 						? [
-								{
-									key: "codexEmail",
-									label: "Authenticated as",
-									type: "readonly" as const,
-									value: openAiCodexEmail || "ChatGPT User",
-								},
-								{
-									key: "codexSignOut",
-									label: "Sign Out",
-									type: "action" as const,
-									value: "",
-								},
-							]
+							{
+								key: "codexEmail",
+								label: "Authenticated as",
+								type: "readonly" as const,
+								value: openAiCodexEmail || "ChatGPT User",
+							},
+							{
+								key: "codexSignOut",
+								label: "Sign Out",
+								type: "action" as const,
+								value: "",
+							},
+						]
 						: []),
 					...(provider === "github-copilot" && githubIsAuthenticated
 						? [
-								{
-									key: "githubEmail",
-									label: "Authenticated as",
-									type: "readonly" as const,
-									value: githubEmail || "GitHub User",
-								},
-								{
-									key: "githubSignOut",
-									label: "Sign Out",
-									type: "action" as const,
-									value: "",
-								},
-							]
+							{
+								key: "githubEmail",
+								label: "Authenticated as",
+								type: "readonly" as const,
+								value: githubEmail || "GitHub User",
+							},
+							{
+								key: "githubSignOut",
+								label: "Sign Out",
+								type: "action" as const,
+								value: "",
+							},
+						]
 						: []),
 					...(provider === "github-copilot" && !githubIsAuthenticated
 						? [
-								{
-									key: "githubSignIn",
-									label: "Sign In to GitHub Copilot",
-									type: "action" as const,
-									value: "",
-								},
-							]
+							{
+								key: "githubSignIn",
+								label: "Sign In to GitHub Copilot",
+								type: "action" as const,
+								value: "",
+							},
+						]
 						: []),
 					...(separateModels
 						? [
-								{ key: "spacer0", label: "", type: "spacer" as const, value: "" },
-								{ key: "actHeader", label: "Act Mode", type: "header" as const, value: "" },
-								{
-									key: "actModelId",
-									label: "Model ID",
-									type: "editable" as const,
-									value: isActCustom ? "Custom" : actModelId || "not set",
-								},
-								...(isActCustom
-									? [
-											{
-												key: "actCustomModelId",
-												label: "Preset/Model",
-												type: "editable" as const,
-												value: actModelId === CUSTOM_MODEL_ID ? "" : actModelId,
-											},
-										]
-									: []),
-								...(showActThinkingOption
-									? [
-											{
-												key: "actThinkingEnabled",
-												label: "Enable thinking",
-												type: "checkbox" as const,
-												value: actThinkingEnabled,
-											},
-										]
-									: []),
-								...(showActReasoningEffort
-									? [
-											{
-												key: "actReasoningEffort",
-												label: "Reasoning effort",
-												type: "cycle" as const,
-												value: actReasoningEffort,
-											},
-										]
-									: []),
-								{ key: "planHeader", label: "Plan Mode", type: "header" as const, value: "" },
-								{
-									key: "planModelId",
-									label: "Model ID",
-									type: "editable" as const,
-									value: isPlanCustom ? "Custom" : planModelId || "not set",
-								},
-								...(isPlanCustom
-									? [
-											{
-												key: "planCustomModelId",
-												label: "Preset/Model",
-												type: "editable" as const,
-												value: planModelId === CUSTOM_MODEL_ID ? "" : planModelId,
-											},
-										]
-									: []),
-								...(showPlanThinkingOption
-									? [
-											{
-												key: "planThinkingEnabled",
-												label: "Enable thinking",
-												type: "checkbox" as const,
-												value: planThinkingEnabled,
-											},
-										]
-									: []),
-								...(showPlanReasoningEffort
-									? [
-											{
-												key: "planReasoningEffort",
-												label: "Reasoning effort",
-												type: "cycle" as const,
-												value: planReasoningEffort,
-											},
-										]
-									: []),
-								{ key: "spacer1", label: "", type: "spacer" as const, value: "" },
-							]
+							{ key: "spacer0", label: "", type: "spacer" as const, value: "" },
+							{ key: "actHeader", label: "Act Mode", type: "header" as const, value: "" },
+							{
+								key: "actModelId",
+								label: "Model ID",
+								type: "editable" as const,
+								value: isActCustom ? "Custom" : actModelId || "not set",
+							},
+							...(isActCustom
+								? [
+									{
+										key: "actCustomModelId",
+										label: "Preset/Model",
+										type: "editable" as const,
+										value: actModelId === CUSTOM_MODEL_ID ? "" : actModelId,
+									},
+								]
+								: []),
+							...(showActThinkingOption
+								? [
+									{
+										key: "actThinkingEnabled",
+										label: "Enable thinking",
+										type: "checkbox" as const,
+										value: actThinkingEnabled,
+									},
+								]
+								: []),
+							...(showActReasoningEffort
+								? [
+									{
+										key: "actReasoningEffort",
+										label: "Reasoning effort",
+										type: "cycle" as const,
+										value: actReasoningEffort,
+									},
+								]
+								: []),
+							{ key: "planHeader", label: "Plan Mode", type: "header" as const, value: "" },
+							{
+								key: "planModelId",
+								label: "Model ID",
+								type: "editable" as const,
+								value: isPlanCustom ? "Custom" : planModelId || "not set",
+							},
+							...(isPlanCustom
+								? [
+									{
+										key: "planCustomModelId",
+										label: "Preset/Model",
+										type: "editable" as const,
+										value: planModelId === CUSTOM_MODEL_ID ? "" : planModelId,
+									},
+								]
+								: []),
+							...(showPlanThinkingOption
+								? [
+									{
+										key: "planThinkingEnabled",
+										label: "Enable thinking",
+										type: "checkbox" as const,
+										value: planThinkingEnabled,
+									},
+								]
+								: []),
+							...(showPlanReasoningEffort
+								? [
+									{
+										key: "planReasoningEffort",
+										label: "Reasoning effort",
+										type: "cycle" as const,
+										value: planReasoningEffort,
+									},
+								]
+								: []),
+							{ key: "spacer1", label: "", type: "spacer" as const, value: "" },
+						]
 						: [
-								{
-									key: "actModelId",
-									label: "Model ID",
-									type: "editable" as const,
-									value: isActCustom ? "Custom" : actModelId || "not set",
-								},
-								...(isActCustom
-									? [
-											{
-												key: "actCustomModelId",
-												label: "Preset/Model",
-												type: "editable" as const,
-												value: actModelId === CUSTOM_MODEL_ID ? "" : actModelId,
-											},
-										]
-									: []),
-								...(showActThinkingOption
-									? [
-											{
-												key: "actThinkingEnabled",
-												label: "Enable thinking",
-												type: "checkbox" as const,
-												value: actThinkingEnabled,
-											},
-										]
-									: []),
-								...(showActReasoningEffort
-									? [
-											{
-												key: "actReasoningEffort",
-												label: "Reasoning effort",
-												type: "cycle" as const,
-												value: actReasoningEffort,
-											},
-										]
-									: []),
-							]),
+							{
+								key: "actModelId",
+								label: "Model ID",
+								type: "editable" as const,
+								value: isActCustom ? "Custom" : actModelId || "not set",
+							},
+							...(isActCustom
+								? [
+									{
+										key: "actCustomModelId",
+										label: "Preset/Model",
+										type: "editable" as const,
+										value: actModelId === CUSTOM_MODEL_ID ? "" : actModelId,
+									},
+								]
+								: []),
+							...(showActThinkingOption
+								? [
+									{
+										key: "actThinkingEnabled",
+										label: "Enable thinking",
+										type: "checkbox" as const,
+										value: actThinkingEnabled,
+									},
+								]
+								: []),
+							...(showActReasoningEffort
+								? [
+									{
+										key: "actReasoningEffort",
+										label: "Reasoning effort",
+										type: "cycle" as const,
+										value: actReasoningEffort,
+									},
+								]
+								: []),
+						]),
 					{
 						key: "separateModels",
 						label: "Use separate models for Plan and Act",
@@ -359,11 +359,12 @@ export function useSettingsItems({
 				}))
 
 			case "tools": {
-				const SOURCE_ORDER: Array<ToolMetadata["source"]> = ["builtin", "global", "workspace"]
+				const SOURCE_ORDER: Array<ToolMetadata["source"]> = ["builtin", "global", "workspace", "task"]
 				const SOURCE_LABELS: Record<string, string> = {
 					builtin: "Built-in",
 					global: "Global",
 					workspace: "Workspace",
+						task: "Task",
 				}
 				const result: ListItem[] = []
 				for (const source of SOURCE_ORDER) {

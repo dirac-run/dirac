@@ -18,24 +18,29 @@ describe("new-tool skill template", () => {
 		["embedded", getEmbeddedInstructions],
 		["canonical", getCanonicalInstructions],
 	] as const) {
-		it(`${label} template describes manifest-backed alias-free tools`, async () => {
+		it(`${label} template describes upsert_tool-based workflow`, async () => {
 			const instructions = await loadInstructions()
 
-			assert.match(instructions, /dirac-tool\.json/)
-			assert.match(instructions, /<workspace>\/\.dirac\/tools/)
-			assert.match(instructions, /createdBy/)
-			assert.match(instructions, /"entry": "tool\.ts"/)
-			assert.match(instructions, /schemaVersion === 1/)
-			assert.match(instructions, /entry === "tool\.ts"/)
-			assert.match(instructions, /createdBy === "dirac"/)
-			assert.match(instructions, /manifest\.id === spec\.id/)
-			assert.match(instructions, /manifest\.name === spec\.name/)
-			assert.match(instructions, /real user-tool loader path/)
-			assert.match(instructions, /Do not tell the user the tool is ready until validation passes/)
+			// References the upsert_tool for creating tools
+			assert.match(instructions, /upsert_tool/)
+			// Mentions all three scopes
+			assert.match(instructions, /global/)
+			assert.match(instructions, /workspace/)
+			assert.match(instructions, /task/)
+			// Mentions the requirements parameter (subagent-based generation)
+			assert.match(instructions, /requirements/)
+			// No deprecated patterns
 			assert.doesNotMatch(instructions, /\.diracrules\/tools/)
 			assert.doesNotMatch(instructions, /@core\//)
 			assert.doesNotMatch(instructions, /@\/shared\/tools/)
 			assert.doesNotMatch(instructions, /tool\.js\b/)
+			// No manual validation steps — upsert_tool handles that
+			assert.doesNotMatch(instructions, /schemaVersion === 1/)
+			assert.doesNotMatch(instructions, /entry === "tool\.ts"/)
+			assert.doesNotMatch(instructions, /createdBy === "dirac"/)
+			// No TypeScript source generation in skill — upsert_tool generates code internally
+			assert.doesNotMatch(instructions, /export const spec/)
+			assert.doesNotMatch(instructions, /export function create/)
 		})
 	}
 })

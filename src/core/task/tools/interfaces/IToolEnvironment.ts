@@ -266,6 +266,8 @@ export interface IOrchestrationTrait {
 			timeout?: number
 			maxTurns?: number
 			includeHistory?: boolean
+			allowedTools?: string[]
+			systemSuffix?: string
 			onUpdate?: (update: SubagentProgressUpdate) => void
 		},
 	): Promise<SubagentRunResult>

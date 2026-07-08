@@ -201,6 +201,12 @@ export async function applyTaskOptions(options: TaskOptions): Promise<void> {
 		stateManager.setSessionOverride("useAutoCondense", true)
 	}
 
+	if (options.customTools !== undefined) {
+		const currentToggles = stateManager.getGlobalSettingsKey("toolToggles") || {}
+		stateManager.setSessionOverride("toolToggles", { ...currentToggles, upsert_tool: options.customTools })
+		telemetryService.captureHostEvent("custom_tools_flag", String(options.customTools))
+	}
+
 	if (options.noEmoji || process.env.DIRAC_NO_EMOJI) {
 		const { setIconMode } = await import("./icon-mapping")
 		setIconMode("unicode")

@@ -37,8 +37,9 @@ describe("CLI Commands", () => {
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
 			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
+			.option("--custom-tools", "Enable custom tool building (use --no-custom-tools to disable)")
 			.option("--hooks-dir <path>", "Additional hooks directory")
-			.action(() => {})
+			.action(() => { })
 
 		program
 			.command("history")
@@ -47,13 +48,13 @@ describe("CLI Commands", () => {
 			.option("-n, --limit <number>", "Number of tasks to show", "10")
 			.option("-p, --page <number>", "Page number", "1")
 			.option("--config <path>", "Configuration directory")
-			.action(() => {})
+			.action(() => { })
 
 		program
 			.command("config")
 			.description("Show current configuration")
 			.option("--config <path>", "Configuration directory")
-			.action(() => {})
+			.action(() => { })
 
 		program
 			.command("auth")
@@ -65,12 +66,12 @@ describe("CLI Commands", () => {
 			.option("-v, --verbose", "Verbose output")
 			.option("-c, --cwd <path>", "Working directory")
 			.option("--config <path>", "Configuration directory")
-			.action(() => {})
+			.action(() => { })
 
 		program
 			.command("kanban")
 			.description("Run npx kanban --agent dirac")
-			.action(() => {})
+			.action(() => { })
 
 		// Default command for interactive mode
 		program
@@ -84,10 +85,11 @@ describe("CLI Commands", () => {
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
 			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
+			.option("--custom-tools", "Enable custom tool building (use --no-custom-tools to disable)")
 			.option("--hooks-dir <path>", "Additional hooks directory")
 			.option("--auto-approve-all", "Enable auto-approve all")
 			.option("--kanban", "Run npx kanban --agent dirac")
-			.action(() => {})
+			.action(() => { })
 	})
 
 	describe("task command", () => {

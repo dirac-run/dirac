@@ -9,6 +9,8 @@ import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { ToolInventorySnapshot, ToolRequestSnapshot, ToolSnapshotDirtyReason, validateToolRequestSnapshot } from "./ToolSnapshot"
 
+import { Logger } from "@/shared/services/Logger"
+
 interface ToolSnapshotManagerOptions {
 	createTaskConfig: (coordinator: ToolExecutorCoordinator) => TaskConfig
 	getWorkspaceRoot: () => string | undefined
@@ -17,12 +19,13 @@ interface ToolSnapshotManagerOptions {
 
 export class ToolSnapshotManager {
 	private inventoryDirty = true
+	private cachedRegistryVersion = -1
 	private togglesDirty = true
 	private inventoryVersion = 0
 	private inventorySnapshot?: ToolInventorySnapshot
 	private activeRequestSnapshot?: ToolRequestSnapshot
 
-	constructor(private readonly options: ToolSnapshotManagerOptions) {}
+	constructor(private readonly options: ToolSnapshotManagerOptions) { }
 
 	markDirty(reason: ToolSnapshotDirtyReason): void {
 		if (reason === "tool_toggles_changed") {
@@ -69,7 +72,8 @@ export class ToolSnapshotManager {
 	}
 
 	private async getInventorySnapshot(): Promise<ToolInventorySnapshot> {
-		if (!this.inventoryDirty && !this.togglesDirty && this.inventorySnapshot) {
+		const registryVersion = ToolRegistry.getInstance().getVersion()
+		if (!this.inventoryDirty && !this.togglesDirty && this.inventorySnapshot && registryVersion === this.cachedRegistryVersion) {
 			return this.inventorySnapshot
 		}
 
@@ -101,7 +105,12 @@ export class ToolSnapshotManager {
 		}
 
 		this.inventoryDirty = false
+		this.cachedRegistryVersion = registryVersion
 		this.togglesDirty = false
+
+		const toolIds = enabledTools.map((t) => `${t.id}(${t.source})`).join(", ")
+		Logger.info(`[ToolSnapshotManager] Inventory rebuilt (v${this.inventoryVersion}): [${toolIds}]`)
+
 		return this.inventorySnapshot
 	}
 

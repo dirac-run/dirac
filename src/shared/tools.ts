@@ -64,6 +64,8 @@ export enum DiracDefaultTool {
 	GET_FILE_SKELETON = "get_file_skeleton",
 	FIND_SYMBOL_REFERENCES = "find_symbol_references",
 
+	UPSERT_TOOL = "upsert_tool",
+
 	EDIT_FILE = "edit_file",
 	DIAGNOSTICS_SCAN = "diagnostics_scan",
 	REPLACE_SYMBOL = "replace_symbol",

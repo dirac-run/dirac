@@ -9,6 +9,11 @@ import { Logger } from "@/shared/services/Logger"
 import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { DiscoveredTool, ToolSource } from "./DiscoveredTool"
 
+export interface UserToolLoadResult {
+	tool?: DiscoveredTool
+	error?: string
+}
+
 const LOADER_VERSION = "user-tool-loader-v1"
 const TOOL_ID_PATTERN = /^[a-z][a-z0-9_]*$/
 
@@ -16,7 +21,7 @@ interface UserToolManifest {
 	schemaVersion: number
 	id: string
 	name: string
-	scope: "global" | "workspace"
+	scope: "global" | "workspace" | "task"
 	entry: "tool.ts"
 	createdBy: "dirac"
 	createdAt?: string
@@ -29,6 +34,11 @@ interface UserToolModule {
 
 export class UserToolLoader {
 	static async load(toolDir: string, source: ToolSource): Promise<DiscoveredTool | undefined> {
+		const result = await this.loadWithDiagnostics(toolDir, source)
+		return result.tool
+	}
+
+	static async loadWithDiagnostics(toolDir: string, source: ToolSource): Promise<UserToolLoadResult> {
 		try {
 			const manifest = await this.readManifest(toolDir, source)
 
@@ -36,23 +46,42 @@ export class UserToolLoader {
 			const sourceCode = await fs.readFile(sourcePath, "utf8")
 			const compiledPath = await this.compileTool(manifest.id, sourcePath, sourceCode)
 
-			const mod = await this.importCompiledTool(compiledPath)
+			let mod: Required<UserToolModule>
+			try {
+				mod = await this.importCompiledTool(compiledPath)
+			} catch (importError) {
+				if (importError instanceof SyntaxError) {
+					try {
+						const compiledContent = await fs.readFile(compiledPath, "utf8")
+						const nonAscii = [...compiledContent].filter((c) => c.charCodeAt(0) > 127)
+						Logger.warn(`[UserToolLoader] SyntaxError importing compiled tool. Non-ASCII chars: ${nonAscii.length}`)
+						if (nonAscii.length > 0) {
+							Logger.warn(`[UserToolLoader] Non-ASCII codepoints: ${nonAscii.map((c) => `U+${c.charCodeAt(0).toString(16).padStart(4, "0")}`).join(", ")}`)
+						}
+						Logger.verbose(`[UserToolLoader] Compiled output (first 500 chars):\n${compiledContent.substring(0, 500)}`)
+					} catch {
+						// Best-effort logging; swallow if we can't read the file
+					}
+				}
+				throw importError
+			}
 
 			this.validateModule(manifest, mod)
 
 			return {
-				id: manifest.id,
-				name: manifest.name,
-				source,
-				spec: mod.spec,
-				factory: mod.create,
-				modulePath: sourcePath,
+				tool: {
+					id: manifest.id,
+					name: manifest.name,
+					source,
+					spec: mod.spec,
+					factory: mod.create,
+					modulePath: sourcePath,
+				},
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
-			const stack = error instanceof Error ? error.stack : undefined
 			Logger.warn(`[UserToolLoader] Skipping invalid user tool at '${toolDir}'.`, error)
-			return undefined
+			return { error: message }
 		}
 	}
 
@@ -61,8 +90,11 @@ export class UserToolLoader {
 		const raw = await fs.readFile(manifestPath, "utf8")
 		const parsed = JSON.parse(raw) as Partial<UserToolManifest>
 
-		if (parsed.schemaVersion !== 1) {
+		if (!parsed.schemaVersion || typeof parsed.schemaVersion !== "number" || parsed.schemaVersion < 1) {
 			throw new Error("Unsupported or missing schemaVersion. Expected 1.")
+		}
+		if (parsed.schemaVersion > 1) {
+			Logger.warn(`[UserToolLoader] Tool at '${toolDir}' declares schemaVersion ${parsed.schemaVersion}. Expected 1. Proceeding with caution.`)
 		}
 		if (parsed.createdBy !== "dirac") {
 			throw new Error("User tool manifest must include createdBy: 'dirac'.")
@@ -70,7 +102,12 @@ export class UserToolLoader {
 		if (parsed.entry !== "tool.ts") {
 			throw new Error("User tool manifest entry must be 'tool.ts'.")
 		}
-		if (parsed.scope !== source) {
+		const validScopes: Record<string, string[]> = {
+			global: ["global"],
+			workspace: ["workspace"],
+			task: ["task"]
+		}
+		if (!validScopes[parsed.scope!]?.includes(source)) {
 			throw new Error(`Manifest scope '${parsed.scope}' does not match discovered source '${source}'.`)
 		}
 		if (!this.isValidToolName(parsed.id)) {
@@ -103,7 +140,15 @@ export class UserToolLoader {
 				moduleResolution: ts.ModuleResolutionKind.Node10,
 			},
 			fileName: path.basename(sourcePath),
+			reportDiagnostics: true,
 		})
+
+		// Reject output that would produce invalid JavaScript
+		const diagnostics = result.diagnostics?.filter((d) => d.category === ts.DiagnosticCategory.Error) ?? []
+		if (diagnostics.length > 0) {
+			const messages = diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
+			throw new Error(`TypeScript transpile produced ${diagnostics.length} error(s): ${messages.join("; ")}`)
+		}
 		await fs.writeFile(compiledPath, result.outputText, "utf8")
 
 		// Evict stale cache entries for this tool (different hash, same id)
@@ -111,7 +156,7 @@ export class UserToolLoader {
 		const cacheEntries = await fs.readdir(cacheDir)
 		for (const entry of cacheEntries) {
 			if (entry.startsWith(stalePrefix) && entry.endsWith(".mjs") && entry !== path.basename(compiledPath)) {
-				await fs.unlink(path.join(cacheDir, entry)).catch(() => {})
+				await fs.unlink(path.join(cacheDir, entry)).catch(() => { })
 			}
 		}
 		return compiledPath
@@ -179,7 +224,7 @@ export class UserToolLoader {
 			const dashIndex = entry.lastIndexOf("-")
 			const toolId = dashIndex > 0 ? entry.slice(0, dashIndex) : entry.replace(/\.mjs$/, "")
 			if (!activeSet.has(toolId)) {
-				await fs.unlink(path.join(cacheDir, entry)).catch(() => {})
+				await fs.unlink(path.join(cacheDir, entry)).catch(() => { })
 			}
 		}
 	}

@@ -43,7 +43,7 @@ export interface ToolMetadata {
 	id: string
 	name: string
 	description: string
-	source: "builtin" | "global" | "workspace"
+	source: "builtin" | "global" | "workspace" | "task"
 	modulePath: string
 }
 

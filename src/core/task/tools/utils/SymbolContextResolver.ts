@@ -67,6 +67,22 @@ export class SymbolContextResolver {
 		switch (ext) {
 			case "ts":
 			case "tsx":
+				return {
+					contextQuery: `
+						(import_statement) @import
+						(class_declaration) @class
+						(class_heritage) @class.heritage
+						(public_field_definition) @property
+						(method_definition) @method
+						(identifier) @ref
+						(property_identifier) @ref
+					`,
+					importCaptureName: "import",
+					classCaptureName: "class",
+					classNodeTypes: ["class_declaration"],
+					propertyCaptureNames: ["property"],
+					referenceCaptureNames: ["ref"],
+				}
 			case "js":
 			case "jsx":
 				return {
@@ -74,7 +90,6 @@ export class SymbolContextResolver {
 						(import_statement) @import
 						(class_declaration) @class
 						(class_heritage) @class.heritage
-						(public_field_definition) @property
 						(field_definition) @property
 						(method_definition) @method
 						(identifier) @ref

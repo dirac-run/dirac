@@ -22,5 +22,7 @@ export interface ContextLoaderDependencies {
 
 	getCurrentProviderInfo: () => ApiProviderInfo
 	getEnvironmentDetails: (includeFileDetails?: boolean) => Promise<string>
+	yoloModeToggled?: boolean
+
 	postStateToWebview: () => Promise<void>
 }

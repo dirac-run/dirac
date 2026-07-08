@@ -231,6 +231,10 @@ export class LifecycleManager {
 
 		await ensureTaskDirectoryExists(this.dependencies.taskId)
 
+		// Restore task-scoped tools from the task directory
+		const { refreshTaskTools } = await import("@core/task/tools/registry/refreshToolRegistry")
+		this.dependencies.taskState.taskScopedToolIds = await refreshTaskTools(this.dependencies.taskId)
+
 		const lastDiracMessage = this.dependencies.messageStateHandler
 			.getDiracMessages()
 			.slice()
@@ -515,6 +519,14 @@ export class LifecycleManager {
 			} catch (error) {
 				Logger.error("Failed to post state after setting abort flag", error)
 			}
+
+			// Remove task-scoped tools from registry
+			const { ToolRegistry } = await import("@core/task/tools/registry/ToolRegistry")
+			const registry = ToolRegistry.getInstance()
+			for (const toolId of this.dependencies.taskState.taskScopedToolIds) {
+				registry.removeUserTool(toolId)
+			}
+			this.dependencies.taskState.taskScopedToolIds = []
 
 			this.dependencies.terminalManager.disposeAll()
 			this.dependencies.urlContentFetcher.closeBrowser()

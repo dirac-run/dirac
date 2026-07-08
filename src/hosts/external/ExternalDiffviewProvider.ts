@@ -1,3 +1,5 @@
+import { getCwd } from "@utils/path"
+
 import { status } from "@grpc/grpc-js"
 import { HostProvider } from "@/hosts/host-provider"
 import { DiffViewProvider } from "@/integrations/editor/DiffViewProvider"
@@ -83,7 +85,7 @@ export class ExternalDiffViewProvider extends DiffViewProvider {
 		})
 	}
 
-	override async scrollAnimation(_startLine: number, _endLine: number): Promise<void> {}
+	override async scrollAnimation(_startLine: number, _endLine: number): Promise<void> { }
 
 	protected override async getDocumentText(): Promise<string | undefined> {
 		if (!this.activeDiffEditorId) {
@@ -145,14 +147,20 @@ export class ExternalDiffViewProvider extends DiffViewProvider {
 		return results
 	}
 	override async format(path: string): Promise<string> {
+		// Skip formatting for files outside the workspace (e.g. generated tools, .dirac data)
+		const fs = await import("fs/promises")
+		const cwd = await getCwd()
+		if (cwd && !path.startsWith(cwd)) {
+			return await fs.readFile(path, "utf-8")
+		}
+
 		const { exec } = await import("child_process")
 		const { promisify } = await import("util")
 		const execAsync = promisify(exec)
-		const fs = await import("fs/promises")
 
 		try {
 			await execAsync(`biome check --write "${path}"`, {
-				cwd: process.cwd(),
+				cwd,
 				timeout: 10_000,
 			})
 		} catch (error) {

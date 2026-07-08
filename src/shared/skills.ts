@@ -7,6 +7,7 @@ export interface SkillMetadata {
 	description: string
 	path: string
 	source: "global" | "project"
+	interactiveOnly?: boolean
 }
 
 /**

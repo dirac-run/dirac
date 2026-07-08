@@ -187,6 +187,9 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 	 * Get the current telemetry level from VS Code settings
 	 */
 	private async getTelemetryLevel(): Promise<TelemetrySettings["level"]> {
+		if (typeof HostProvider.env.getTelemetrySettings !== "function") {
+			return "all"
+		}
 		const hostSettings = await HostProvider.env.getTelemetrySettings({})
 		if (hostSettings.isEnabled === Setting.DISABLED) {
 			return "off"

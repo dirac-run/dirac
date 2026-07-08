@@ -92,6 +92,9 @@ export class TaskState {
 	availableSkills: SkillMetadata[] = []
 	discoveredSkillsCache?: SkillMetadata[]
 
+	// Task-scoped user tool ids (persisted across task resume)
+	taskScopedToolIds: string[] = []
+
 	// Cumulative metrics for the entire task
 	totalInputTokens = 0
 	totalOutputTokens = 0

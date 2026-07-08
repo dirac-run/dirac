@@ -5,6 +5,9 @@ import { isDev } from "@shared/config/environment"
 export class Logger {
 	private static isVerbose = isDev()
 
+	static setVerbose(flag: boolean) {
+		Logger.isVerbose = flag
+	}
 	private static subscribers: Set<(msg: string) => void> = new Set()
 
 	private static output(msg: string): void {
@@ -48,6 +51,13 @@ export class Logger {
 		Logger.#output("INFO", message, undefined, args)
 	}
 
+	/** Verbose-only output: only emits when verbose mode is enabled (via --verbose flag). */
+	static verbose(message: string, ...args: any[]) {
+		if (Logger.isVerbose) {
+			Logger.#output("VERBOSE", message, undefined, args)
+		}
+	}
+
 	static trace(message: string, ...args: any[]) {
 		Logger.#output("TRACE", message, undefined, args)
 	}
@@ -71,6 +81,6 @@ export class Logger {
 			}
 			const errorSuffix = error?.message ? ` ${error.message}${error.stack ? `\n${error.stack}` : ""}` : ""
 			Logger.output(`${level} ${fullMessage}${errorSuffix}`.trimEnd())
-		} catch {}
+		} catch { }
 	}
 }

@@ -266,7 +266,6 @@ export class AgentConfigLoader {
 				pollInterval: 100,
 			},
 		})
-
 		this.watcher
 			.on("add", (filePath) => {
 				if (isYamlFile(filePath)) {

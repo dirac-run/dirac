@@ -72,14 +72,17 @@ export class PromptBuilder {
 	}
 
 	private formatSkillsSection(skills: SkillMetadata[]): string {
-		if (skills.length === 0) return ""
+		const filtered = this.context.yoloModeToggled
+			? skills.filter((s) => !s.interactiveOnly)
+			: skills
+		if (filtered.length === 0) return ""
 
 		let section = "\n\n# AVAILABLE SKILLS\n"
 		section += "You have access to specialized skills. Use the 'use_skill' tool to activate one.\n\n"
 
 		// Prioritize Project skills
-		const projectSkills = skills.filter((s) => s.source === "project")
-		const globalSkills = skills.filter((s) => s.source === "global")
+		const projectSkills = filtered.filter((s) => s.source === "project")
+		const globalSkills = filtered.filter((s) => s.source === "global")
 
 		const displaySkills = [...projectSkills, ...globalSkills].slice(0, 10)
 
@@ -87,8 +90,8 @@ export class PromptBuilder {
 			section += `- ${skill.name}: ${skill.description}\n`
 		})
 
-		if (skills.length > 10) {
-			section += `\n... and ${skills.length - 10} more. Use the 'list_skills' tool to see the full list.\n`
+		if (filtered.length > 10) {
+			section += `\n... and ${filtered.length - 10} more. Use the 'list_skills' tool to see the full list.\n`
 		}
 
 		return section

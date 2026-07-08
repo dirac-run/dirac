@@ -4,7 +4,6 @@ import { DiracDefaultTool } from "@/shared/tools"
 import type { DiracToolSpec } from "../spec"
 import { toolSpecFunctionDeclarations, toolSpecFunctionDefinition, toolSpecInputSchema } from "../spec"
 import type { SystemPromptContext } from "../types"
-
 const mockContext: SystemPromptContext = {
 	cwd: "/test/project",
 	ide: "TestIde",
@@ -162,3 +161,4 @@ describe("tools without parameters", () => {
 		})
 	})
 })
+

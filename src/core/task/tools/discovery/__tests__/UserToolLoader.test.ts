@@ -129,6 +129,7 @@ export function create() { return { spec() { return spec }, supportedSurfaces() 
 describe("ToolDiscoveryService user tools", () => {
 	afterEach(async () => {
 		await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
+		await UserToolLoader.purgeStaleCache([])
 	})
 
 	it("ignores directories without a sidecar manifest", async () => {
@@ -144,7 +145,7 @@ describe("ToolDiscoveryService user tools", () => {
 	it("skips invalid tools without blocking valid tools", async () => {
 		const root = await makeTempDir()
 		await writeUserTool(root, { id: "valid_tool" })
-		await writeUserTool(root, { id: "invalid_tool", schemaVersion: 999 })
+		await writeUserTool(root, { id: "invalid_tool", schemaVersion: 0 })
 
 		const tools = await ToolDiscoveryService.scanUserToolDirectory(root, "workspace")
 

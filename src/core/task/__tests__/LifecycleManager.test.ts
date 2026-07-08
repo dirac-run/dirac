@@ -142,7 +142,7 @@ describe("LifecycleManager", () => {
 			const diskModule = require("@core/storage/disk")
 			sinon.stub(diskModule, "getSavedDiracMessages").resolves(messages)
 			sinon.stub(diskModule, "getSavedApiConversationHistory").resolves(history)
-			sinon.stub(diskModule, "ensureTaskDirectoryExists").resolves()
+			sinon.stub(diskModule, "ensureTaskDirectoryExists").resolves("/test/task")
 		}
 
 		// Helper: sets askResponse asynchronously after the manager resets it, to unblock pWaitFor.
@@ -259,7 +259,7 @@ describe("LifecycleManager", () => {
 
 function createMockDeps(): any {
 	return {
-		taskState: { isInitialized: false, abort: false, askResponse: undefined } as any,
+		taskState: { isInitialized: false, abort: false, askResponse: undefined, taskScopedToolIds: [] } as any,
 		messageStateHandler: {
 			setDiracMessages: sinon.stub(),
 			setApiConversationHistory: sinon.stub(),

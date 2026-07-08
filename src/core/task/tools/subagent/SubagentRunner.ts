@@ -19,7 +19,7 @@ import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import type { TaskConfig } from "../types/TaskConfig"
 import { SubagentAbortHandler } from "./SubagentAbortHandler"
-import { SubagentBuilder } from "./SubagentBuilder"
+import { SubagentBuilder, type SubagentBuilderOptions } from "./SubagentBuilder"
 import { SubagentContextBuilder } from "./SubagentContextBuilder"
 import { SubagentToolExecutor } from "./SubagentToolExecutor"
 
@@ -62,6 +62,7 @@ export interface SubagentProgressUpdate {
 	status?: "running" | "completed" | "failed"
 	result?: string
 	error?: string
+	textChunk?: string
 }
 
 export interface SubagentRunStats {
@@ -258,12 +259,15 @@ export class SubagentRunner {
 	private activeCommandExecutions = 0
 	private abortingCommands = false
 	private gaveTimeoutWrapUpChance = false
+	private readonly subagentName: string
 
 	constructor(
 		private baseConfig: TaskConfig,
 		subagentName = "subagent",
+		options: SubagentBuilderOptions = {},
 	) {
-		this.agent = new SubagentBuilder(baseConfig, subagentName)
+		this.agent = new SubagentBuilder(baseConfig, subagentName, options)
+		this.subagentName = subagentName
 		this.apiHandler = this.agent.getApiHandler()
 		this.allowedTools = this.agent.getAllowedTools()
 		this.contextBuilder = new SubagentContextBuilder(baseConfig, this.agent, this.allowedTools, this.apiHandler)
@@ -362,7 +366,18 @@ export class SubagentRunner {
 			contextUsagePercentage: 0,
 		}
 
-		onProgress({ status: "running", stats })
+		const logPrefix = `[SubagentRunner:${this.subagentName || "unnamed"}]`
+		const instrumentedOnProgress = (update: SubagentProgressUpdate) => {
+			if (update.latestToolCall) {
+				Logger.debug(`${logPrefix} Tool: ${update.latestToolCall}`)
+			}
+			if (update.status === "completed" || update.status === "failed") {
+				Logger.info(`${logPrefix} ${update.status}: ${(update.result || update.error || "").substring(0, 200)}`)
+			}
+			onProgress(update)
+		}
+
+		instrumentedOnProgress({ status: "running", stats })
 
 		try {
 			const api = this.apiHandler
@@ -399,11 +414,11 @@ export class SubagentRunner {
 					// initial user message of subagent runs.
 					...(workspaceMetadataEnvironmentBlock
 						? [
-								{
-									type: "text",
-									text: workspaceMetadataEnvironmentBlock,
-								} as DiracTextContentBlock,
-							]
+							{
+								type: "text",
+								text: workspaceMetadataEnvironmentBlock,
+							} as DiracTextContentBlock,
+						]
 						: []),
 				],
 			})
@@ -524,12 +539,15 @@ export class SubagentRunner {
 							stats.contextTokens = requestUsage.totalTokens
 							stats.contextUsagePercentage =
 								stats.contextWindow > 0 ? (stats.contextTokens / stats.contextWindow) * 100 : 0
-							onProgress({ stats: { ...stats } })
+							instrumentedOnProgress({ stats: { ...stats } })
 							break
 						case "text":
 							requestId = requestId ?? chunk.id
 							assistantText += chunk.text || ""
 							assistantTextSignature = chunk.signature || assistantTextSignature
+							if (chunk.text) {
+								instrumentedOnProgress({ textChunk: chunk.text })
+							}
 							break
 						case "tool_calls":
 							requestId = requestId ?? chunk.id
@@ -628,7 +646,7 @@ export class SubagentRunner {
 					emptyAssistantResponseRetries += 1
 					if (emptyAssistantResponseRetries > MAX_EMPTY_ASSISTANT_RETRIES) {
 						const error = `Subagent did not call attempt_completion. Last response: "${excerpt(assistantText, 200)}"`
-						onProgress({ status: "failed", error, stats: { ...stats } })
+						instrumentedOnProgress({ status: "failed", error, stats: { ...stats } })
 						return { status: "failed", error, stats }
 					}
 
@@ -686,7 +704,7 @@ export class SubagentRunner {
 
 			const errorText = (error as Error).message || "Subagent execution failed."
 			Logger.error("[SubagentRunner] run failed", error)
-			onProgress({ status: "failed", error: errorText, stats: { ...stats } })
+			instrumentedOnProgress({ status: "failed", error: errorText, stats: { ...stats } })
 			return { status: "failed", error: errorText, stats }
 		} finally {
 			if (typeof timeoutHandle !== "undefined") {

@@ -6,11 +6,14 @@ import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool, ToolSource } from "../discovery/DiscoveredTool"
 import { StateManager } from "@/core/storage/StateManager"
 
+const SOURCE_PRIORITY: Record<ToolSource, number> = { builtin: 0, global: 1, workspace: 2, task: 3 }
+
 export class ToolRegistry {
 	private static instance: ToolRegistry | undefined
 	private builtinTools: Map<string, DiscoveredTool> = new Map()
 	private userTools: Map<string, DiscoveredTool> = new Map()
 	private enabledOverrides: Map<string, boolean> = new Map()
+	private _version = 0
 
 	static getInstance(): ToolRegistry {
 		if (!this.instance) {
@@ -32,36 +35,44 @@ export class ToolRegistry {
 		this.registerUserTool(tool)
 	}
 
+	getVersion(): number {
+		return this._version
+	}
+
 	registerBuiltin(tool: DiscoveredTool): void {
 		this.builtinTools.set(tool.id, tool)
 	}
 
-	registerUserTool(tool: DiscoveredTool): void {
+	registerUserTool(tool: DiscoveredTool): boolean {
 		if (this.collidesWithBuiltin(tool)) {
 			Logger.warn(`[ToolRegistry] User tool '${tool.id}' conflicts with built-in tool id/name. Skipping.`)
-			return
+			return false
 		}
 
 		const existing = this.findUserToolByIdOrName(tool)
 		if (!existing) {
 			this.userTools.set(tool.id, tool)
-			return
+			this._version++
+			return true
 		}
 
 		if (existing.source === tool.source) {
-			// return if duplicate. this produces unnecessary log spam if printed, becuase of repeated scans
-			return
+			return false
 		}
-
-		if (existing.source === "global" && tool.source === "workspace") {
+		// Priority: task > workspace > global > builtin
+		const existingPri = SOURCE_PRIORITY[existing.source] ?? 0
+		const newPri = SOURCE_PRIORITY[tool.source] ?? 0
+		if (newPri > existingPri) {
 			this.userTools.delete(existing.id)
 			this.userTools.set(tool.id, tool)
-			return
+			this._version++
+			return true
 		}
 
 		Logger.warn(
-			`[ToolRegistry] Global user tool '${tool.id}' conflicts with workspace tool '${existing.id}'. Keeping workspace tool.`,
+			`[ToolRegistry] User tool '${tool.id}' conflicts with existing tool '${existing.id}' (source: ${existing.source}). Keeping existing.`,
 		)
+		return false
 	}
 
 	hasBuiltinTools(): boolean {
@@ -140,9 +151,17 @@ export class ToolRegistry {
 		return result
 	}
 
-	/** Remove all user tools from the registry. Built-ins are kept in a separate map and cannot be removed here. */
+	/**
+	 * Remove non-task user tools from the registry.
+	 * Task-scoped tools are runtime state and must survive workspace rescans.
+	 * Built-ins are kept in a separate map and cannot be removed here.
+	 */
 	clearUserTools(): void {
-		this.userTools.clear()
+		for (const [id, tool] of this.userTools) {
+			if (tool.source !== "task") {
+				this.userTools.delete(id)
+			}
+		}
 	}
 
 	/** Remove a single user tool from the registry by id. Returns true if the tool was found and removed. */
@@ -153,6 +172,7 @@ export class ToolRegistry {
 		}
 		this.userTools.delete(toolId)
 		this.enabledOverrides.delete(toolId)
+		this._version++
 		return true
 	}
 

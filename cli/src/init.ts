@@ -38,6 +38,11 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 
 	// Configure the shared Logging class early to capture all initialization logs
 	Logger.subscribe(logToChannel)
+	if (options.verbose) {
+		Logger.setVerbose(true)
+		// Also mirror Logger output to stderr so it's visible in CLI output
+		Logger.subscribe((msg) => process.stderr.write(`[dirac] ${msg}\n`))
+	}
 
 	// HostProvider must be initialized before StateManager (initCoreServices →
 	// StateManager.initialize → initializeDistinctId reaches into HostProvider.env).

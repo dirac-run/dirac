@@ -9,10 +9,13 @@ import type { TaskConfig } from "../../types/TaskConfig"
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
 		runSubagent: async (prompt, options) => {
-			const runner = new SubagentRunner(config, options?.subagentName)
+			const runner = new SubagentRunner(config, options?.subagentName, {
+				allowedTools: options?.allowedTools,
+				systemSuffix: options?.systemSuffix,
+			})
 			return await runner.run(
 				prompt,
-				options?.onUpdate || (() => {}),
+				options?.onUpdate || (() => { }),
 				options?.timeout,
 				options?.maxTurns,
 				options?.includeHistory,

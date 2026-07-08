@@ -274,6 +274,7 @@ describe("Controller (original)", () => {
 		r.should.have.property("taskDirPath")
 	})
 	it("deleteTaskFromState removes task", async () => {
+		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		const r = await c.deleteTaskFromState(c.task!.taskId)

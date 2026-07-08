@@ -160,7 +160,6 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
 	): Promise<void> {
-		Logger.debug("[TaskMessageBridge] handleDiracMessagesChanged:", change)
 		switch (change.type) {
 			case "add":
 				if (change.message) {

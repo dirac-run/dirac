@@ -15,7 +15,7 @@ import { DiracWebviewProvider } from "./core/webview"
 import { createDiracAPI } from "./exports"
 import { initializeTestMode } from "./services/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
-import "./utils/path" // necessary to have access to String.prototype.toPosix
+import "./utils/path"; // necessary to have access to String.prototype.toPosix
 import path from "node:path"
 import { isDev } from "@shared/config/environment"
 import type { ExtensionContext } from "vscode"
@@ -139,18 +139,18 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand(commands.WorktreesButton, () => sendWorktreesButtonClickedEvent()))
 
 	/*
-    We use the text document content provider API to show the left side for diff view by creating a
-    virtual document for the original content. This makes it readonly so users know to edit the right
-    side if they want to keep their changes.
+	We use the text document content provider API to show the left side for diff view by creating a
+	virtual document for the original content. This makes it readonly so users know to edit the right
+	side if they want to keep their changes.
 
-    - This API allows you to create readonly documents in VSCode from arbitrary sources, and works by
-    claiming an uri-scheme for which your provider then returns text contents. The scheme must be
-    provided when registering a provider and cannot change afterwards.
-    - Note how the provider doesn't create uris for virtual documents - its role is to provide contents
-     given such an uri. In return, content providers are wired into the open document logic so that
-     providers are always considered.
-    https://code.visualstudio.com/api/extension-guides/virtual-documents
-    */
+	- This API allows you to create readonly documents in VSCode from arbitrary sources, and works by
+	claiming an uri-scheme for which your provider then returns text contents. The scheme must be
+	provided when registering a provider and cannot change afterwards.
+	- Note how the provider doesn't create uris for virtual documents - its role is to provide contents
+	 given such an uri. In return, content providers are wired into the open document logic so that
+	 providers are always considered.
+	https://code.visualstudio.com/api/extension-guides/virtual-documents
+	*/
 	const diffContentProvider = new (class implements vscode.TextDocumentContentProvider {
 		provideTextDocumentContent(uri: vscode.Uri): string {
 			return Buffer.from(uri.query, "base64").toString("utf-8")

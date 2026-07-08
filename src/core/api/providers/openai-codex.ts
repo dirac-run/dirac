@@ -142,11 +142,11 @@ export class OpenAiCodexHandler implements ApiHandler {
 			...(includeReasoning ? { include: ["reasoning.encrypted_content"] } : {}),
 			...(includeReasoning
 				? {
-						reasoning: {
-							effort: reasoningEffort,
-							summary: "auto",
-						},
-					}
+					reasoning: {
+						effort: reasoningEffort,
+						summary: "auto",
+					},
+				}
 				: {}),
 		}
 
@@ -248,6 +248,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 
 			yield* processResponsesEvents(stream, model.info)
 		} catch (_sdkErr) {
+			Logger.error("OpenAI Codex SDK request failed, falling back to manual fetch:", _sdkErr)
 			// Fallback to manual SSE via fetch
 			yield* this.makeCodexRequest(requestBody, model, accessToken)
 		}
@@ -297,7 +298,9 @@ export class OpenAiCodexHandler implements ApiHandler {
 		})
 
 		if (!response.ok) {
-			throw new Error(`Codex API request failed: ${response.status}`)
+			const errorBody = await response.text().catch(() => "(unreadable)")
+			Logger.error(`Codex API ${response.status} error body:`, errorBody)
+			throw new Error(`Codex API request failed: ${response.status} - ${errorBody}`)
 		}
 
 		if (!response.body) {

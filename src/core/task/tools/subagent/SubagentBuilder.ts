@@ -8,6 +8,11 @@ import { AgentConfigLoader } from "./AgentConfigLoader"
 
 export type AgentConfig = Partial<AgentBaseConfig>
 
+export interface SubagentBuilderOptions {
+	allowedTools?: string[]
+	systemSuffix?: string
+}
+
 export const SUBAGENT_DEFAULT_ALLOWED_TOOLS: DiracDefaultTool[] = Object.values(DiracDefaultTool).filter(
 	(tool) => tool !== DiracDefaultTool.USE_SUBAGENTS,
 )
@@ -26,6 +31,7 @@ export class SubagentBuilder {
 	constructor(
 		private readonly baseConfig: TaskConfig,
 		subagentName?: string,
+		private readonly options: SubagentBuilderOptions = {},
 	) {
 		const subagentConfig = AgentConfigLoader.getInstance().getCachedConfig(subagentName)
 		this.agentConfig = subagentConfig ?? {}
@@ -56,11 +62,11 @@ export class SubagentBuilder {
 	buildSystemPrompt(generatedSystemPrompt: string): string {
 		const configuredSystemPrompt = this.agentConfig?.systemPrompt?.trim()
 		const systemPrompt = configuredSystemPrompt || generatedSystemPrompt
-		return `${systemPrompt}${this.buildAgentIdentitySystemPrefix()}${SUBAGENT_SYSTEM_SUFFIX}`
+		return `${systemPrompt}${this.buildAgentIdentitySystemPrefix()}${this.options.systemSuffix ?? SUBAGENT_SYSTEM_SUFFIX}`
 	}
 
 	private resolveAllowedTools(configuredTools?: string[]): string[] {
-		const sourceTools = configuredTools && configuredTools.length > 0 ? configuredTools : SUBAGENT_DEFAULT_ALLOWED_TOOLS
+		const sourceTools = this.options.allowedTools ?? (configuredTools && configuredTools.length > 0 ? configuredTools : SUBAGENT_DEFAULT_ALLOWED_TOOLS)
 		return Array.from(new Set([...sourceTools, DiracDefaultTool.ATTEMPT]))
 	}
 

@@ -1,3 +1,5 @@
+import { getCwd } from "@utils/path"
+
 import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 import * as fs from "fs/promises"
 import { Logger } from "@/shared/services/Logger"
@@ -171,13 +173,19 @@ export class FileEditProvider extends DiffViewProvider {
 	}
 
 	override async format(path: string): Promise<string> {
+		// Skip formatting for files outside the workspace (e.g. generated tools, .dirac data)
+		const cwd = await getCwd()
+		if (cwd && !path.startsWith(cwd)) {
+			return await fs.readFile(path, "utf-8")
+		}
+
 		const { exec } = await import("child_process")
 		const { promisify } = await import("util")
 		const execAsync = promisify(exec)
 
 		try {
 			await execAsync(`biome check --write "${path}"`, {
-				cwd: process.cwd(),
+				cwd,
 				timeout: 10_000,
 			})
 		} catch (error) {
