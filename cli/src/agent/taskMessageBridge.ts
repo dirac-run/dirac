@@ -297,27 +297,21 @@ export class TaskMessageBridge {
 				}
 
 				// Error cards — terminal failure signals
+				//
+				// Only ERROR cards that require user interaction are terminal.
+				// Cards with requireApproval (e.g. "API Request Failed") or
+				// requireFeedback (e.g. "Mistake Limit Reached") need the client
+				// to decide whether to retry — so end the turn.
+				//
+				// All other ERROR cards are non-terminal: tool-created error cards
+				// (e.g. "Listed files in…", "Diagnostics Scan"), individual tool
+				// failures, and informational retry-exhausted notices. The task
+				// loop handles recovery. Consecutive mistakes will eventually
+				// trigger the "Mistake Limit Reached" card (requireFeedback)
+				// which IS terminal.
 				if (card.status === CardStatus.ERROR) {
-					// Non-terminal auto-retry card finalized with ERROR after the
-					// retry delay. The task will either succeed on the next attempt
-					// or create a separate terminal error card. Don't resolve yet.
-					if (card.header === "API Error (Retrying)") {
+					if (!card.requireApproval && !card.requireFeedback) {
 						break
-					}
-					// `error_retry` fires once per retry attempt. The final attempt has
-					// `failed: true` in its JSON payload — that's the terminal signal for
-					// retry-exhausted requests (e.g. bedrock with bad creds), where no
-					// subsequent error or api_req_failed card is emitted.
-					if (card.body) {
-						try {
-							const parsed = JSON.parse(card.body)
-							if (parsed.failed !== true) {
-								// Non-terminal retry card ("API Error (Retrying)") — don't resolve
-								break
-							}
-						} catch {
-							// Unparseable payload — treat as terminal error (e.g. "Task Error")
-						}
 					}
 					promptResolved.value = true
 					resolvePrompt({ stopReason: "end_turn" })

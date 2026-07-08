@@ -115,13 +115,13 @@ describe("Controller — Auth delegate", () => {
 		sandbox.restore()
 		try {
 			await require("fs/promises").rm(tempDir, { recursive: true, force: true })
-		} catch { }
+		} catch {}
 	})
 
 	it("completeOpenRouterAuth exchanges code for API key and updates configuration", async () => {
 		expectLoggerErrors()
 		const currentConfig = { apiKey: "old-key" } as ApiConfiguration
-			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		sandbox.stub(axios, "post").resolves({ data: { key: "new-openrouter-key-123" } })
 		await controller.completeOpenRouterAuth("auth-code-xyz")
 		sandbox.assert.calledWith(
@@ -144,7 +144,7 @@ describe("Controller — Auth delegate", () => {
 	it("completeRequestyAuth sets requesty API key in configuration", async () => {
 		expectLoggerErrors()
 		const currentConfig = { apiKey: "old-key" } as ApiConfiguration
-			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		await controller.completeRequestyAuth("requesty-api-key-456")
 		sandbox.assert.calledWith(
 			(controller as any).stateManager.setApiConfiguration,
