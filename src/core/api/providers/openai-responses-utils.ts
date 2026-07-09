@@ -189,9 +189,17 @@ async function* processResponseEvent(
 		case "response.function_call_arguments.done":
 			yield* handleFunctionCallArgumentsDone(chunk, functionCallByItemId)
 			break
+		case "response.failed": {
+			const failMsg = chunk.response?.error?.message || chunk.response?.status || "Response failed"
+			throw new Error(`Codex API response failed: ${failMsg}`)
+		}
 		case "response.completed":
 			if (chunk.response?.usage) yield* yieldUsage(modelInfo, chunk.response.usage, chunk.response.id)
 			break
+		case "error": {
+			const errMsg = chunk.message || chunk.error?.message || "Unknown API error"
+			throw new Error(`Codex API stream error: ${errMsg}`)
+		}
 	}
 }
 
