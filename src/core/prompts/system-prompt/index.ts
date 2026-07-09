@@ -16,6 +16,5 @@ export * from "./types"
 export async function getSystemPrompt(context: SystemPromptContext, toolSnapshot: ToolRequestSnapshot) {
 	const registry = PromptRegistry.getInstance()
 	const systemPrompt = await registry.get(context, toolSnapshot)
-
 	return { systemPrompt }
 }
