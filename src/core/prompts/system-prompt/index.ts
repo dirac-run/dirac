@@ -1,4 +1,3 @@
-import { Logger } from "@/shared/services/Logger"
 import { PromptRegistry } from "./registry/PromptRegistry"
 import type { SystemPromptContext } from "./types"
 import type { ToolRequestSnapshot } from "@core/task/tools/runtime/ToolSnapshot"
@@ -17,7 +16,6 @@ export * from "./types"
 export async function getSystemPrompt(context: SystemPromptContext, toolSnapshot: ToolRequestSnapshot) {
 	const registry = PromptRegistry.getInstance()
 	const systemPrompt = await registry.get(context, toolSnapshot)
-	Logger.log(`[DEBUG] System prompt char length: ${systemPrompt.length}`)
 
 	return { systemPrompt }
 }
