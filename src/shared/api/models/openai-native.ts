@@ -5,7 +5,7 @@ import { GPT_5_5_TIERS, GPT_5_4_TIERS, GPT_5_4_PRO_TIERS } from "./shared-tiers"
 
 export type OpenAiNativeModelId = keyof typeof openAiNativeModels
 
-export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.4"
+export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-terra"
 
 export const openAiNativeModels = {
 	"gpt-5.5": {
@@ -56,4 +56,32 @@ export const openAiNativeModels = {
 		apiFormat: ApiFormat.OPENAI_RESPONSES,
 		tiers: GPT_5_4_PRO_TIERS,
 	},
+	"gpt-5.6-sol": {
+		...MODEL_CAPABILITIES["gpt-5.6-sol"],
+		supportsPromptCache: true,
+		inputPrice: 5.0,
+		outputPrice: 30.0,
+		cacheReadsPrice: 0.5,
+		cacheWritesPrice: 6.25,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+	},
+	"gpt-5.6-terra": {
+		...MODEL_CAPABILITIES["gpt-5.6-terra"],
+		supportsPromptCache: true,
+		inputPrice: 2.5,
+		outputPrice: 15.0,
+		cacheReadsPrice: 0.25,
+		cacheWritesPrice: 3.125,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+	},
+	"gpt-5.6-luna": {
+		...MODEL_CAPABILITIES["gpt-5.6-luna"],
+		supportsPromptCache: true,
+		inputPrice: 1.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.1,
+		cacheWritesPrice: 1.25,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+	},
+
 } as const satisfies Record<string, OpenAiCompatibleModelInfo>

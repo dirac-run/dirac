@@ -31,7 +31,7 @@ export async function* yieldUsage(info: ModelInfo, usage: any, id?: string): Asy
 	const inputTokens = usage.input_tokens || 0
 	const outputTokens = usage.output_tokens || 0
 	const cacheReadTokens = usage.input_tokens_details?.cached_tokens || 0
-	const cacheWriteTokens = 0
+	const cacheWriteTokens = usage.input_tokens_details?.cache_creation_tokens || 0
 	const reasoningTokens = usage.output_tokens_details?.reasoning_tokens || 0
 	const totalTokens = usage.total_tokens || 0
 
@@ -93,9 +93,9 @@ export function buildResponseCreateParams(args: {
 		requestedEffort === "none"
 			? undefined
 			: {
-					effort: requestedEffort as ChatCompletionReasoningEffort,
-					summary: "auto",
-				}
+				effort: requestedEffort as ChatCompletionReasoningEffort,
+				summary: "auto",
+			}
 
 	return {
 		model: args.modelId,
@@ -271,7 +271,7 @@ export class ResponsesWebsocketManager {
 	private readyPromise: Promise<UndiciWebSocket> | undefined
 	private requestInFlight = false
 
-	constructor(private options: ResponsesWebsocketOptions) {}
+	constructor(private options: ResponsesWebsocketOptions) { }
 
 	async ensureWebsocket(): Promise<UndiciWebSocket> {
 		if (this.ws && this.ws.readyState === UndiciWebSocket.OPEN) {

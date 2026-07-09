@@ -312,6 +312,27 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 		supportsImages: true,
 		supportsReasoning: true,
 	},
+	"gpt-5.6-sol": {
+		name: "GPT-5.6 Sol",
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsReasoning: true,
+	},
+	"gpt-5.6-terra": {
+		name: "GPT-5.6 Terra",
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsReasoning: true,
+	},
+	"gpt-5.6-luna": {
+		name: "GPT-5.6 Luna",
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsReasoning: true,
+	},
 	"gpt-oss-120b": {
 		maxTokens: 8192,
 		contextWindow: 128_000,

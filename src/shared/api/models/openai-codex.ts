@@ -4,7 +4,7 @@ import { ApiFormat } from "../../proto/dirac/models"
 
 export type OpenAiCodexModelId = keyof typeof openAiCodexModels
 
-export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.5"
+export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-terra"
 
 export const openAiCodexModels = {
 	"gpt-5.5": {
@@ -49,4 +49,29 @@ export const openAiCodexModels = {
 		outputPrice: 0,
 		description: "GPT-5.4 Pro Codex via ChatGPT subscription",
 	},
+	"gpt-5.6-sol": {
+		...MODEL_CAPABILITIES["gpt-5.6-sol"],
+		supportsPromptCache: true,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "GPT-5.6 Sol Codex via ChatGPT subscription",
+	},
+	"gpt-5.6-terra": {
+		...MODEL_CAPABILITIES["gpt-5.6-terra"],
+		supportsPromptCache: true,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "GPT-5.6 Terra Codex via ChatGPT subscription",
+	},
+	"gpt-5.6-luna": {
+		...MODEL_CAPABILITIES["gpt-5.6-luna"],
+		supportsPromptCache: true,
+		apiFormat: ApiFormat.OPENAI_RESPONSES,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "GPT-5.6 Luna Codex via ChatGPT subscription",
+	},
+
 } as const satisfies Record<string, ModelInfo>
