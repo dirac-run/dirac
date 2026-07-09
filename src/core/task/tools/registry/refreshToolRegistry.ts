@@ -20,6 +20,7 @@ export async function refreshToolRegistryForWorkspace(options: {
 	workspaceRoot?: string
 	includeUserTools: boolean
 	toggles?: Record<string, boolean>
+	forceRefresh?: boolean
 }): Promise<void> {
 	ensureBuiltinToolsRegistered()
 
@@ -30,15 +31,10 @@ export async function refreshToolRegistryForWorkspace(options: {
 		return
 	}
 
-	registry.clearUserTools()
-
 	const globalTools = await ToolDiscoveryService.scanGlobalUserTools()
 	const workspaceTools = options.workspaceRoot ? await ToolDiscoveryService.scanWorkspaceTools(options.workspaceRoot) : []
 	const userTools: DiscoveredTool[] = [...globalTools, ...workspaceTools]
-
-	for (const tool of userTools) {
-		registry.registerUserTool(tool)
-	}
+	registry.reconcileWorkspaceUserTools(userTools, options.forceRefresh)
 	// Purge compiled cache files for tools that no longer exist
 	await UserToolLoader.purgeStaleCache(userTools.map((t) => t.id))
 

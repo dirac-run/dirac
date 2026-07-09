@@ -105,7 +105,7 @@ export class ToolSnapshotManager {
 		}
 
 		this.inventoryDirty = false
-		this.cachedRegistryVersion = registryVersion
+		this.cachedRegistryVersion = registry.getVersion()
 		this.togglesDirty = false
 
 		const toolIds = enabledTools.map((t) => `${t.id}(${t.source})`).join(", ")

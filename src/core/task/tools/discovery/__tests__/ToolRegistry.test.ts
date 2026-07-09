@@ -32,6 +32,7 @@ function makeTool(overrides: Partial<DiscoveredTool> = {}): DiscoveredTool {
 				},
 			})),
 		modulePath: overrides.modulePath ?? `modules/${id}/tool.ts`,
+		sourceHash: overrides.sourceHash,
 	}
 }
 
@@ -335,4 +336,60 @@ describe("ToolRegistry", () => {
 			assert.deepStrictEqual(toggles, { a: false })
 		})
 	})
+
+	describe("reconcileWorkspaceUserTools", () => {
+		it("does not change the version for an unchanged disk inventory", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" })
+			registry.registerUserTool(existing)
+			const version = registry.getVersion()
+
+			const changed = registry.reconcileWorkspaceUserTools([
+				makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" }),
+			])
+
+			assert.strictEqual(changed, false)
+			assert.strictEqual(registry.getVersion(), version)
+			assert.strictEqual(registry.getToolsBySource("workspace")[0], existing)
+		})
+
+		it("updates the version when a discovered tool source changes", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerUserTool(makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" }))
+			const version = registry.getVersion()
+
+			const changed = registry.reconcileWorkspaceUserTools([
+				makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-2" }),
+			])
+
+			assert.strictEqual(changed, true)
+			assert.strictEqual(registry.getVersion(), version + 1)
+			assert.strictEqual(registry.getToolsBySource("workspace")[0].sourceHash, "hash-2")
+		})
+
+		it("removes stale disk tools while preserving task-scoped tools", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerUserTool(makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" }))
+			registry.registerUserTool(makeTool({ id: "task_tool", source: "task", sourceHash: "task-hash" }))
+
+			registry.reconcileWorkspaceUserTools([])
+
+			assert.deepStrictEqual(registry.getAllTools().map((tool) => tool.id), ["task_tool"])
+		})
+
+		it("allows a manual reload to invalidate an unchanged inventory", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerUserTool(makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" }))
+			const version = registry.getVersion()
+
+			const changed = registry.reconcileWorkspaceUserTools(
+				[makeTool({ id: "workspace_tool", source: "workspace", sourceHash: "hash-1" })],
+				true,
+			)
+
+			assert.strictEqual(changed, true)
+			assert.strictEqual(registry.getVersion(), version + 1)
+		})
+	})
+
 })

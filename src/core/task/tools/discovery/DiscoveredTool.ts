@@ -17,4 +17,6 @@ export interface DiscoveredTool {
 	factory: (config?: TaskConfig) => IDiracTool
 	/** Filesystem path to the tool.ts manifest */
 	modulePath: string
+	/** Content fingerprint for a user tool's manifest entrypoint. */
+	sourceHash?: string
 }

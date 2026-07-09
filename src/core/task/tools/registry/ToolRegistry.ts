@@ -75,6 +75,35 @@ export class ToolRegistry {
 		return false
 	}
 
+	/**
+	 * Reconcile global and workspace tools discovered from disk without invalidating
+	 * the registry when their effective inventory has not changed. Task tools are
+	 * runtime state and are retained as the highest-priority source.
+	 */
+	reconcileWorkspaceUserTools(discoveredTools: DiscoveredTool[], forceVersionBump = false): boolean {
+		const nextUserTools = new Map<string, DiscoveredTool>()
+
+		for (const tool of discoveredTools) {
+			this.registerUserToolInto(nextUserTools, tool)
+		}
+		for (const tool of this.userTools.values()) {
+			if (tool.source === "task") {
+				this.registerUserToolInto(nextUserTools, tool)
+			}
+		}
+
+		if (this.sameUserToolInventory(nextUserTools)) {
+			if (forceVersionBump) {
+				this._version++
+			}
+			return forceVersionBump
+		}
+
+		this.userTools = nextUserTools
+		this._version++
+		return true
+	}
+
 	hasBuiltinTools(): boolean {
 		return this.builtinTools.size > 0
 	}
@@ -185,6 +214,65 @@ export class ToolRegistry {
 		}
 		StateManager.get().setGlobalState("toolToggles", this.getToggles())
 	}
+
+	private registerUserToolInto(tools: Map<string, DiscoveredTool>, tool: DiscoveredTool): boolean {
+		if (this.collidesWithBuiltin(tool)) {
+			return false
+		}
+
+		const existing = Array.from(tools.values()).find((candidate) => this.toolsCollide(candidate, tool))
+		if (!existing) {
+			tools.set(tool.id, tool)
+			return true
+		}
+
+		if (existing.source === tool.source) {
+			return false
+		}
+
+		const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0
+		const newPriority = SOURCE_PRIORITY[tool.source] ?? 0
+		if (newPriority <= existingPriority) {
+			return false
+		}
+
+		tools.delete(existing.id)
+		tools.set(tool.id, tool)
+		return true
+	}
+
+	private sameUserToolInventory(nextUserTools: Map<string, DiscoveredTool>): boolean {
+		if (this.userTools.size !== nextUserTools.size) {
+			return false
+		}
+
+		for (const [id, currentTool] of this.userTools) {
+			const nextTool = nextUserTools.get(id)
+			if (!nextTool || !this.sameDiscoveredTool(currentTool, nextTool)) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	private sameDiscoveredTool(current: DiscoveredTool, next: DiscoveredTool): boolean {
+		if (
+			current.id !== next.id ||
+			current.name !== next.name ||
+			current.source !== next.source ||
+			current.modulePath !== next.modulePath
+		) {
+			return false
+		}
+
+		if (current.sourceHash !== undefined || next.sourceHash !== undefined) {
+			return current.sourceHash === next.sourceHash
+		}
+
+		return current.factory === next.factory && current.spec === next.spec
+	}
+
 
 	private getTool(toolId: string): DiscoveredTool | undefined {
 		return this.builtinTools.get(toolId) ?? this.userTools.get(toolId)

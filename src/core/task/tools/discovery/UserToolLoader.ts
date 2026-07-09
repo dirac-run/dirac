@@ -44,7 +44,8 @@ export class UserToolLoader {
 
 			const sourcePath = path.join(toolDir, manifest.entry)
 			const sourceCode = await fs.readFile(sourcePath, "utf8")
-			const compiledPath = await this.compileTool(manifest.id, sourcePath, sourceCode)
+			const sourceHash = this.hashToolSource(sourcePath, sourceCode)
+			const compiledPath = await this.compileTool(manifest.id, sourceCode, sourceHash)
 
 			let mod: Required<UserToolModule>
 			try {
@@ -76,6 +77,7 @@ export class UserToolLoader {
 					spec: mod.spec,
 					factory: mod.create,
 					modulePath: sourcePath,
+					sourceHash,
 				},
 			}
 		} catch (error) {
@@ -120,8 +122,8 @@ export class UserToolLoader {
 		return parsed as UserToolManifest
 	}
 
-	private static async compileTool(toolId: string, sourcePath: string, sourceCode: string): Promise<string> {
-		const hash = this.hashToolSource(sourcePath, sourceCode)
+	private static async compileTool(toolId: string, sourceCode: string, sourceHash: string): Promise<string> {
+		const hash = sourceHash
 		const cacheDir = path.join(this.getDiracHomePath(), "cache", "tools")
 		await fs.mkdir(cacheDir, { recursive: true })
 
@@ -139,7 +141,7 @@ export class UserToolLoader {
 				target: ts.ScriptTarget.ES2020,
 				moduleResolution: ts.ModuleResolutionKind.Node10,
 			},
-			fileName: path.basename(sourcePath),
+			fileName: `${toolId}.ts`,
 			reportDiagnostics: true,
 		})
 

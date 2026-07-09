@@ -17,7 +17,7 @@ export class MentionContextLoader {
 	constructor(
 		private dependencies: ContextLoaderDependencies,
 		private fileContextLoader: FileContextLoader,
-	) {}
+	) { }
 
 	// Parse mentions and slash commands, then optionally enrich with file/symbol context
 	async enrichContext(
@@ -64,7 +64,11 @@ export class MentionContextLoader {
 	// Refresh tool registry and build a summary response for /reloadtools
 	private async handleReloadTools(): Promise<EnrichContextResult> {
 		const primaryRootPath = this.workspaceManager?.getPrimaryRoot()?.path
-		await refreshToolRegistryForWorkspace({ workspaceRoot: primaryRootPath, includeUserTools: true })
+		await refreshToolRegistryForWorkspace({
+			workspaceRoot: primaryRootPath,
+			includeUserTools: true,
+			forceRefresh: true,
+		})
 		await this.dependencies.postStateToWebview()
 		const registry = ToolRegistry.getInstance()
 		const allTools = registry.getAllTools()
