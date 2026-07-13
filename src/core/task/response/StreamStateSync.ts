@@ -11,8 +11,16 @@ export class StreamStateSync {
 		private taskState: TaskState,
 	) {}
 
-	// Build AssistantMessageContent from ordered blocks and update taskState
+	// Build AssistantMessageContent from ordered blocks and update taskState.
+	// On completion, mark existing blocks complete without rebuilding —
+	// rebuilding drops whitespace-only text blocks and shifts tool_use indices,
+	// invalidating currentStreamingContentIndex in the presenter.
 	syncStreamState(assistantTextOnly: string, toolBlocks: ParsedToolUseState[] = [], isStreamComplete = false): void {
+		if (isStreamComplete) {
+			this.taskState.assistantMessageContent = this.taskState.assistantMessageContent.map(block => ({ ...block, isComplete: true }))
+			if (toolBlocks.length > 0) this.taskState.userMessageContentReady = false
+			return
+		}
 		const prevLength = this.taskState.assistantMessageContent.length
 		const orderedBlocks = this.streamHandler.getOrderedBlocks()
 		const assistantMessageContent = this.buildContent(orderedBlocks, isStreamComplete)
