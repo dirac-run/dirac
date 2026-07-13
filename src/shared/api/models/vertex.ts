@@ -49,9 +49,9 @@ export const vertexModels = {
 		...MODEL_CAPABILITIES["gemini-3.5-flash"],
 		supportsPromptCache: true,
 		supportsGlobalEndpoint: true,
-		inputPrice: 0.3,
-		outputPrice: 2.5,
-		cacheReadsPrice: 0.075,
+		inputPrice: 1.5,
+		outputPrice: 9.0,
+		cacheReadsPrice: 0.15,
 		cacheWritesPrice: 0.0,
 		temperature: 0.35,
 		thinkingConfig: {
