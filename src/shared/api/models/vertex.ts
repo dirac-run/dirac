@@ -45,6 +45,20 @@ export const vertexModels = {
 			supportsThinkingLevel: true,
 		},
 	},
+	"gemini-3.5-flash": {
+		...MODEL_CAPABILITIES["gemini-3.5-flash"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 1.5,
+		outputPrice: 9.0,
+		cacheReadsPrice: 0.15,
+		cacheWritesPrice: 0.0,
+		temperature: 1.0,
+		thinkingConfig: {
+			geminiThinkingLevel: "high" as const,
+			supportsThinkingLevel: true,
+		},
+	},
 	"claude-sonnet-4-6": {
 		...MODEL_CAPABILITIES["claude-sonnet-4-6"],
 		supportsPromptCache: true,

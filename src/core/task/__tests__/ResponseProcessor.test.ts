@@ -3,9 +3,9 @@ import { CardStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { expect } from "chai"
 import sinon from "sinon"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { ResponseProcessor } from "../ResponseProcessor"
 import { StreamResponseHandler } from "../StreamResponseHandler"
-import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../TaskState"
 
 const baseMetrics = { inputTokens: 10, outputTokens: 20, cacheWriteTokens: 5, cacheReadTokens: 3, totalCost: 0.01 }
@@ -29,7 +29,7 @@ describe("ResponseProcessor", () => {
 		// Stub Session.updateToolCall
 		sessionModule = require("@shared/services/Session")
 		origUpdateToolCall = sessionModule.Session.get
-		sessionModule.Session.get = () => ({ updateToolCall: () => { } }) as any
+		sessionModule.Session.get = () => ({ updateToolCall: () => {} }) as any
 	})
 
 	afterEach(() => {
@@ -341,7 +341,7 @@ describe("ResponseProcessor", () => {
 
 		it("throws pending presentation error if one occurred during streaming", async () => {
 			// Simulate a pending error
-			; (processor as any).pendingPresentationError = new Error("presentation failed")
+			;(processor as any).pendingPresentationError = new Error("presentation failed")
 			try {
 				await processor.routeAssistantResponse(createRouteParams({ assistantMessage: "x", assistantTextOnly: "x" }))
 				expect.fail("should have thrown")
@@ -358,7 +358,7 @@ describe("ResponseProcessor", () => {
 			// Stub setTimeout to avoid real delay
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => { }
+			timersModule.setTimeout = async () => {}
 			try {
 				const result = await processor.handleEmptyAssistantResponse(createEmptyParams())
 				result.should.be.false() // retry requested
@@ -372,7 +372,7 @@ describe("ResponseProcessor", () => {
 		it("increments retry attempts exponentially", async () => {
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => { }
+			timersModule.setTimeout = async () => {}
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				taskState.emptyResponseRetryAttempts.should.equal(1)
@@ -412,7 +412,7 @@ describe("ResponseProcessor", () => {
 			// Telemetry is fire-and-forget — verify error card was created (proves error path entered)
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => { }
+			timersModule.setTimeout = async () => {}
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				const errorCardCall = deps.taskMessenger.createCard.firstCall.args[0]
@@ -427,7 +427,7 @@ describe("ResponseProcessor", () => {
 			deps.getApiRequestIdSafe = () => "req-123"
 			const timersModule = require("node:timers/promises")
 			const origSetTimeout = timersModule.setTimeout
-			timersModule.setTimeout = async () => { }
+			timersModule.setTimeout = async () => {}
 			try {
 				await processor.handleEmptyAssistantResponse(createEmptyParams())
 				const cardCall = deps.taskMessenger.createCard.firstCall.args[0]
@@ -590,7 +590,7 @@ describe("ResponseProcessor", () => {
 			await processor.syncStreamState("hello world")
 			taskState.assistantMessageContent.should.have.length(1)
 			taskState.assistantMessageContent[0].type.should.equal("text")
-				; (taskState.assistantMessageContent[0] as any).content.should.equal("hello world")
+			;(taskState.assistantMessageContent[0] as any).content.should.equal("hello world")
 		})
 
 		it("parses reasoning tags embedded in text", async () => {
@@ -603,8 +603,24 @@ describe("ResponseProcessor", () => {
 
 		it("marks blocks as complete when isStreamComplete is true", async () => {
 			streamHandler.processTextDelta({ id: "t1", text: "hello" })
-			await processor.syncStreamState("hello", [], true)
-				; (taskState.assistantMessageContent[0] as any).isComplete.should.be.true()
+			await processor.syncStreamState("hello") // build during streaming
+			await processor.syncStreamState("hello", [], true) // mark complete
+			;(taskState.assistantMessageContent[0] as any).isComplete.should.be.true()
+		})
+
+		it("preserves tool_use index when whitespace text is dropped on completion", async () => {
+			// Simulate oMLX/Qwen stream: reasoning, whitespace text, tool_use
+			streamHandler.processReasoningDelta({ id: "r1", reasoning: "thinking" })
+			streamHandler.processTextDelta({ id: "t1", text: " " })
+			streamHandler.processToolUseDelta({ id: "tu1", name: "execute_command", input: '{"command":"pwd"}' }, "call-1")
+			await processor.syncStreamState(" ") // streaming build: [reasoning, text(" "), tool_use]
+			const streamingLen = taskState.assistantMessageContent.length
+			streamingLen.should.equal(3)
+			await processor.syncStreamState(" ", [], true) // completion: must not drop the text block
+			taskState.assistantMessageContent.should.have.length(streamingLen) // array structure preserved
+			const toolBlocks = taskState.assistantMessageContent.filter((b: any) => b.type === "tool_use")
+			toolBlocks.should.have.length(1)
+			;(toolBlocks[0] as any).isComplete.should.be.true() // tool marked complete, not lost
 		})
 
 		it("creates tool_use block from tool_use ordered block", async () => {

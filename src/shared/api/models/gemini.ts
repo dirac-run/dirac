@@ -74,6 +74,20 @@ export const geminiModels = {
 			supportsThinkingLevel: true,
 		},
 	},
+	"gemini-3.5-flash": {
+		...MODEL_CAPABILITIES["gemini-3.5-flash"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 1.5,
+		outputPrice: 9.0,
+		cacheReadsPrice: 0.15,
+		cacheWritesPrice: 0.0,
+		temperature: 1.0,
+		thinkingConfig: {
+			geminiThinkingLevel: "high" as const,
+			supportsThinkingLevel: true,
+		},
+	},
 	"gemini-2.5-pro": {
 		...MODEL_CAPABILITIES["gemini-2.5-pro"],
 		supportsPromptCache: true,
