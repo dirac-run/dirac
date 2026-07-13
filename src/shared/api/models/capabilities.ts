@@ -224,6 +224,16 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 			supportsThinkingLevel: true,
 		},
 	},
+	"gemini-3.5-flash": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsReasoning: true,
+		thinkingConfig: {
+			geminiThinkingLevel: "high",
+			supportsThinkingLevel: true,
+		},
+	},
 	"gemini-3-pro-preview": {
 		maxTokens: 8192,
 		contextWindow: 1_048_576,
