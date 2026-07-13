@@ -82,7 +82,7 @@ export const geminiModels = {
 		outputPrice: 9.0,
 		cacheReadsPrice: 0.15,
 		cacheWritesPrice: 0.0,
-		temperature: 0.35,
+		temperature: 1.0,
 		thinkingConfig: {
 			geminiThinkingLevel: "high" as const,
 			supportsThinkingLevel: true,
