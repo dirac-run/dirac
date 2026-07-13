@@ -116,4 +116,19 @@ describe("ExecuteCommandTool", () => {
 		assert.ok((env.ui.createCard as sinon.SinonStub).calledOnce)
 		assert.ok((env.system.executeCommand as sinon.SinonStub).calledOnce)
 	})
+
+
+	it("records structured command input and output on its card", async () => {
+		const { tool, env, mockCard } = createMocks()
+		;(env.system.executeCommand as sinon.SinonStub).resolves([false, "Command executed successfully (exit code 0).\nOutput:\nok"])
+
+		await tool.processCall({ commands: ["echo ok"] }, env as any)
+
+		assert.ok(
+			(env.ui.createCard as sinon.SinonStub).calledWithMatch({
+				rawInput: { command: "echo ok", displayName: "echo ok", language: "bash" },
+			}),
+		)
+		assert.ok(mockCard.update.calledWithMatch({ rawOutput: { output: sinon.match.string, exitCode: 0, userRejected: false } }))
+	})
 })

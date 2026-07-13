@@ -106,6 +106,29 @@ export class CommandPermissionController {
 		}
 	}
 
+	/** List project-scoped rules persisted in .dirac/permissions.json. */
+	async listRules(): Promise<ToolPermissionRule[]> {
+		const config = await this.loadConfigFromFile()
+		return config?.rules || []
+	}
+
+	/** Delete one project-scoped rule by its exact persisted value. */
+	async deleteRule(rule: ToolPermissionRule): Promise<void> {
+		const currentConfig = await this.loadConfigFromFile()
+		if (!currentConfig?.rules) {
+			return
+		}
+
+		const rules = currentConfig.rules.filter(
+			(candidate) => candidate.tool !== rule.tool || candidate.pattern !== rule.pattern || candidate.action !== rule.action,
+		)
+		if (rules.length === currentConfig.rules.length) {
+			return
+		}
+
+		await this.saveConfig({ ...currentConfig, rules })
+	}
+
 	async saveConfig(config: CommandPermissionConfig): Promise<void> {
 		if (!this.workspaceRoot) {
 			throw new Error("Workspace root not set. Cannot save permissions.")

@@ -1,37 +1,79 @@
-import type * as acp from "@agentclientprotocol/sdk"
-import type { DiracMessageChange } from "@core/task/message-state"
-import { CardStatus, DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-import { Controller } from "@/core/controller"
-import { Logger } from "@/shared/services/Logger.js"
-import { parseWebSearchMarkerText, translateMessage } from "./messageTranslator.js"
-import { handlePermissionResponse } from "./permissionHandler.js"
-import type { DiracAcpSession } from "./public-types.js"
-import type { AcpSessionState } from "./types.js"
+import type * as acp from "@agentclientprotocol/sdk";
+import type { DiracMessageChange } from "@core/task/message-state";
+import {
+	CardStatus,
+	DiracMessage,
+	DiracMessageType,
+} from "@shared/ExtensionMessage";
+import { DiracAskResponse } from "@shared/WebviewMessage";
+import { Controller } from "@/core/controller";
+import { Logger } from "@/shared/services/Logger.js";
+import {
+	parseWebSearchMarkerText,
+	translateMessage,
+} from "./messageTranslator.js";
+import { handlePermissionResponse } from "./permissionHandler.js";
+import type { DiracAcpSession } from "./public-types.js";
+import type { AcpSessionState } from "./types.js";
+import type {
+	ElicitationRequest,
+	ElicitationResponse,
+} from "./public-types.js";
 
-type PromptResolver = (response: acp.PromptResponse) => void
+type PromptResolver = (response: acp.PromptResponse) => void;
 
 type TaskMessageBridgeOptions = {
-	getSession: (sessionId: string) => DiracAcpSession | undefined
-	getController: (session: DiracAcpSession) => Controller | undefined
+	getSession: (sessionId: string) => DiracAcpSession | undefined;
+	getController: (session: DiracAcpSession) => Controller | undefined;
 	requestPermission: (
 		sessionId: string,
 		toolCall: unknown,
 		options?: acp.PermissionOption[],
-	) => Promise<acp.RequestPermissionResponse>
-	emitSessionUpdate: (sessionId: string, update: acp.SessionUpdate) => Promise<void>
-	getClientCapabilities: () => acp.ClientCapabilities | undefined
-}
+	) => Promise<acp.RequestPermissionResponse>;
+	emitSessionUpdate: (
+		sessionId: string,
+		update: acp.SessionUpdate,
+	) => Promise<void>;
+	emitUsageUpdate: (
+		sessionId: string,
+		usage: {
+			tokensIn: number;
+			tokensOut: number;
+			totalCost?: number;
+			contextTokens?: number;
+			contextWindow?: number;
+			contextUsagePercentage?: number;
+		},
+	) => void;
+	getClientCapabilities: () => acp.ClientCapabilities | undefined;
+	requestElicitation: (
+		request: ElicitationRequest,
+	) => Promise<ElicitationResponse>;
+
+	getWhispers: (sessionId: string) => string[];
+	clearWhispers: (sessionId: string) => void;
+	persistPermissionRule: (
+		sessionId: string,
+		toolCall: acp.ToolCall | acp.ToolCallUpdate,
+		action: "allow" | "deny",
+	) => Promise<void>;
+};
 
 export class TaskMessageBridge {
-	private readonly getSession: TaskMessageBridgeOptions["getSession"]
-	private readonly getController: TaskMessageBridgeOptions["getController"]
-	private readonly requestPermission: TaskMessageBridgeOptions["requestPermission"]
-	private readonly emitSessionUpdate: TaskMessageBridgeOptions["emitSessionUpdate"]
-	private readonly getClientCapabilities: TaskMessageBridgeOptions["getClientCapabilities"]
+	private readonly getSession: TaskMessageBridgeOptions["getSession"];
+	private readonly getController: TaskMessageBridgeOptions["getController"];
+	private readonly requestPermission: TaskMessageBridgeOptions["requestPermission"];
+	private readonly emitSessionUpdate: TaskMessageBridgeOptions["emitSessionUpdate"];
+	private readonly emitUsageUpdate: TaskMessageBridgeOptions["emitUsageUpdate"];
+	private readonly getClientCapabilities: TaskMessageBridgeOptions["getClientCapabilities"];
+	private readonly requestElicitation: TaskMessageBridgeOptions["requestElicitation"];
+
+	private readonly getWhispers: TaskMessageBridgeOptions["getWhispers"];
+	private readonly clearWhispers: TaskMessageBridgeOptions["clearWhispers"];
+	private readonly persistPermissionRule: TaskMessageBridgeOptions["persistPermissionRule"];
 
 	/** Track last sent content for partial messages to compute deltas */
-	private readonly partialMessageLastContent: Map<number, string> = new Map()
+	private readonly partialMessageLastContent: Map<number, string> = new Map();
 
 	/**
 	 * Accumulated streamed text for message subtypes whose final (non-partial)
@@ -49,27 +91,82 @@ export class TaskMessageBridge {
 	 * bridges the gap so the delta computes correctly. Keys: "completion_result",
 	 * "followup", "plan_mode_respond". Cleared at the start of each prompt cycle.
 	 */
-	private readonly tsUnstableStreamLastContent: Map<string, string> = new Map()
+	private readonly tsUnstableStreamLastContent: Map<string, string> = new Map();
 
 	/** Map message timestamps to toolCallIds to avoid creating duplicate tool calls during streaming */
-	private readonly messageToToolCallId: Map<number, string> = new Map()
+	private readonly messageToToolCallId: Map<number, string> = new Map();
 
 	/** Track waiting cards already delivered to ACP interaction IO during the active prompt turn. */
-	private readonly processedInteractionCardKeys: Set<string> = new Set()
+	private readonly processedInteractionCardKeys: Set<string> = new Set();
+	/** Terminal card updates may be delivered repeatedly; incorporate guidance once per card. */
+	private readonly whisperBoundaryCardKeys: Set<string> = new Set();
 
 	constructor(options: TaskMessageBridgeOptions) {
-		this.getSession = options.getSession
-		this.getController = options.getController
-		this.requestPermission = options.requestPermission
-		this.emitSessionUpdate = options.emitSessionUpdate
-		this.getClientCapabilities = options.getClientCapabilities
+		this.getSession = options.getSession;
+		this.getController = options.getController;
+		this.requestPermission = options.requestPermission;
+		this.emitSessionUpdate = options.emitSessionUpdate;
+		this.emitUsageUpdate = options.emitUsageUpdate;
+		this.getClientCapabilities = options.getClientCapabilities;
+		this.requestElicitation = options.requestElicitation;
+
+		this.getWhispers = options.getWhispers;
+		this.clearWhispers = options.clearWhispers;
+		this.persistPermissionRule = options.persistPermissionRule;
+	}
+
+	/** Translate persisted provider finish reasons into ACP turn stop reasons. */
+	private stopReasonFromApiStatus(
+		message: DiracMessage,
+	): acp.StopReason | undefined {
+		if (message.content.type !== DiracMessageType.API_STATUS) return undefined;
+
+		switch (message.content.status.stopReason) {
+			case "MAX_TOKENS":
+			case "max_tokens":
+			case "length":
+				return "max_tokens";
+			case "refusal":
+			case "content_filter":
+				return "refusal";
+			default:
+				return undefined;
+		}
 	}
 
 	clearPromptState(): void {
-		this.partialMessageLastContent.clear()
-		this.tsUnstableStreamLastContent.clear()
-		this.messageToToolCallId.clear()
-		this.processedInteractionCardKeys.clear()
+		this.partialMessageLastContent.clear();
+		this.tsUnstableStreamLastContent.clear();
+		this.messageToToolCallId.clear();
+		this.processedInteractionCardKeys.clear();
+		this.whisperBoundaryCardKeys.clear();
+	}
+
+	/** Finalize every non-terminal tool call when the client cancels its turn. */
+	async cancelInFlightToolCalls(
+		sessionId: string,
+		sessionState: AcpSessionState,
+	): Promise<void> {
+		const toolCallIds = new Set(sessionState.pendingToolCalls.keys());
+		if (sessionState.currentToolCallId) {
+			toolCallIds.add(sessionState.currentToolCallId);
+		}
+		if (sessionState.retryToolCallId) {
+			toolCallIds.add(sessionState.retryToolCallId);
+		}
+
+		for (const toolCallId of toolCallIds) {
+			await this.emitSessionUpdate(sessionId, {
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				status: "failed",
+				rawOutput: { reason: "cancelled" },
+			});
+		}
+
+		sessionState.pendingToolCalls.clear();
+		sessionState.currentToolCallId = undefined;
+		sessionState.retryToolCallId = undefined;
 	}
 
 	subscribeToTaskMessages(
@@ -86,17 +183,33 @@ export class TaskMessageBridge {
 		// new Task instance), our cleanup still removes the listener from the
 		// *original* task — not from whatever controller.task points to at
 		// cleanup time.
-		const task = controller.task
-		if (!task) return
+		const task = controller.task;
+		if (!task) return;
 
 		const onDiracMessagesChanged = (change: DiracMessageChange) => {
-			this.handleDiracMessagesChanged(sessionId, sessionState, change, resolvePrompt, promptResolved).catch((error) =>
-				this.handleUnhandledHandlerError(sessionId, promptResolved, resolvePrompt, error),
-			)
-		}
+			this.handleDiracMessagesChanged(
+				sessionId,
+				sessionState,
+				change,
+				resolvePrompt,
+				promptResolved,
+			).catch((error) =>
+				this.handleUnhandledHandlerError(
+					sessionId,
+					promptResolved,
+					resolvePrompt,
+					error,
+				),
+			);
+		};
 
-		task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged)
-		cleanupFunctions.push(() => task.messageStateHandler.off("diracMessagesChanged", onDiracMessagesChanged))
+		task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged);
+		cleanupFunctions.push(() =>
+			task.messageStateHandler.off(
+				"diracMessagesChanged",
+				onDiracMessagesChanged,
+			),
+		);
 
 		// Safety net: Task.startTask/resumeTaskFromHistory are kicked off
 		// detached by Controller.initTask, so any uncaught throw inside the
@@ -104,8 +217,13 @@ export class TaskMessageBridge {
 		// ensures task errors surface as failures rather than hanging.
 		if (taskRunPromise) {
 			taskRunPromise.catch((error) => {
-				this.handleUnhandledHandlerError(sessionId, promptResolved, resolvePrompt, error)
-			})
+				this.handleUnhandledHandlerError(
+					sessionId,
+					promptResolved,
+					resolvePrompt,
+					error,
+				);
+			});
 		}
 	}
 
@@ -117,12 +235,19 @@ export class TaskMessageBridge {
 		promptResolved: { value: boolean },
 		startIndex = 0,
 	): Promise<void> {
-		const messages = controller.task?.messageStateHandler.getDiracMessages().slice(startIndex) ?? []
+		const messages =
+			controller.task?.messageStateHandler
+				.getDiracMessages()
+				.slice(startIndex) ?? [];
 
 		for (const message of messages) {
-			await this.processMessageWithDelta(sessionId, sessionState, message)
-			this.checkMessageForPromptResolution(message, resolvePrompt, promptResolved)
-			if (promptResolved.value) return
+			await this.processMessageWithDelta(sessionId, sessionState, message);
+			this.checkMessageForPromptResolution(
+				message,
+				resolvePrompt,
+				promptResolved,
+			);
+			if (promptResolved.value) return;
 		}
 	}
 
@@ -141,16 +266,69 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		error: unknown,
 	): void {
-		Logger.error("[TaskMessageBridge] Unhandled error in message handler:", error)
-		if (promptResolved.value) return
-		promptResolved.value = true
-		const message = error instanceof Error ? error.message : String(error)
+		Logger.error(
+			"[TaskMessageBridge] Unhandled error in message handler:",
+			error,
+		);
+		if (promptResolved.value) return;
+		promptResolved.value = true;
+		const message = error instanceof Error ? error.message : String(error);
 		this.emitSessionUpdate(sessionId, {
 			sessionUpdate: "agent_message_chunk",
 			content: { type: "text", text: `Error: ${message}` },
 		})
-			.catch((emitError) => Logger.error("[TaskMessageBridge] Failed to emit error update:", emitError))
-			.finally(() => resolvePrompt({ stopReason: "end_turn" }))
+			.catch((emitError) =>
+				Logger.error(
+					"[TaskMessageBridge] Failed to emit error update:",
+					emitError,
+				),
+			)
+			.finally(() => resolvePrompt({ stopReason: "end_turn" }));
+	}
+
+	private async incorporateWhispersAtToolBoundary(
+		sessionId: string,
+	): Promise<void> {
+		const session = this.getSession(sessionId);
+		const task = session && this.getController(session)?.task;
+		if (!task) return;
+
+		const whispers = this.getWhispers(sessionId);
+		if (whispers.length === 0) return;
+
+		const guidance = whispers.map((whisper) => `- ${whisper}`).join("\n");
+		task.taskState.pendingUserMessage =
+			`${task.taskState.pendingUserMessage ?? ""}\n\n[Client guidance received during this turn:\n${guidance}\n]`.trim();
+		this.clearWhispers(sessionId);
+		await this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "agent_message_chunk",
+			content: {
+				type: "text",
+				text: "\nIncorporated your mid-turn guidance.\n",
+			},
+		});
+	}
+
+	private async incorporateWhispersAtTerminalToolBoundary(
+		sessionId: string,
+		message: DiracMessage,
+	): Promise<void> {
+		if (message.content.type !== DiracMessageType.CARD) return;
+		if (
+			![
+				CardStatus.SUCCESS,
+				CardStatus.ERROR,
+				CardStatus.SKIPPED,
+				CardStatus.CANCELLED,
+				CardStatus.ABANDONED,
+			].includes(message.content.card.status)
+		)
+			return;
+
+		const cardKey = `${sessionId}:${message.content.card.id}`;
+		if (this.whisperBoundaryCardKeys.has(cardKey)) return;
+		this.whisperBoundaryCardKeys.add(cardKey);
+		await this.incorporateWhispersAtToolBoundary(sessionId);
 	}
 
 	private async handleDiracMessagesChanged(
@@ -163,21 +341,130 @@ export class TaskMessageBridge {
 		switch (change.type) {
 			case "add":
 				if (change.message) {
-					await this.processMessageWithDelta(sessionId, sessionState, change.message)
-					this.checkMessageForPromptResolution(change.message, resolvePrompt, promptResolved)
+					await this.processMessageWithDelta(
+						sessionId,
+						sessionState,
+						change.message,
+					);
+					this.checkMessageForPromptResolution(
+						change.message,
+						resolvePrompt,
+						promptResolved,
+					);
 				}
-				break
+
+				if (change.message) {
+					await this.incorporateWhispersAtTerminalToolBoundary(
+						sessionId,
+						change.message,
+					);
+				}
+				break;
 
 			case "update":
 				if (change.message) {
-					await this.processMessageWithDelta(sessionId, sessionState, change.message)
-					this.checkMessageForPromptResolution(change.message, resolvePrompt, promptResolved)
+					await this.processMessageWithDelta(
+						sessionId,
+						sessionState,
+						change.message,
+					);
+					this.checkMessageForPromptResolution(
+						change.message,
+						resolvePrompt,
+						promptResolved,
+					);
 				}
-				break
+
+				if (change.message) {
+					await this.incorporateWhispersAtTerminalToolBoundary(
+						sessionId,
+						change.message,
+					);
+				}
+				break;
 			case "set":
-				break
+				break;
 			case "delete":
-				break
+				break;
+		}
+	}
+
+	private structuredElicitationIsNegotiated(): boolean {
+		return (
+			this.getClientCapabilities()?._meta?.["dev.dirac/elicitation"] === true
+		);
+	}
+
+	private elicitationRequestFromCard(
+		sessionId: string,
+		message: DiracMessage,
+	): ElicitationRequest | undefined {
+		if (message.content.type !== DiracMessageType.CARD) return undefined;
+
+		const { card } = message.content;
+		if (
+			card.status !== CardStatus.WAITING_FOR_INPUT ||
+			!card.requireFeedback ||
+			card.header !== "Question"
+		)
+			return undefined;
+
+		return {
+			sessionId,
+			elicitationId: card.id,
+			message: card.body || card.header,
+			options: (card.actions ?? []).map((action) => ({
+				id: action.value,
+				label: action.label,
+			})),
+			allowFreeformInput: true,
+		};
+	}
+
+	private async handleElicitationRequest(
+		sessionId: string,
+		request: ElicitationRequest,
+	): Promise<void> {
+		const session = this.getSession(sessionId);
+		const controller = session && this.getController(session);
+		if (!controller?.task) return;
+
+		try {
+			const response = await this.requestElicitation(request);
+			if (response.outcome === "cancelled") {
+				await controller.task.submitCardResponse(
+					request.elicitationId,
+					DiracAskResponse.REJECT,
+				);
+				return;
+			}
+
+			const selectedOption = request.options.find(
+				(option) => option.id === response.optionId,
+			);
+			if (response.optionId && !selectedOption) {
+				throw new Error("Elicitation response selected an unknown option");
+			}
+			if (!selectedOption && !response.text) {
+				throw new Error(
+					"Elicitation response must provide an optionId or text",
+				);
+			}
+
+			await controller.task.submitCardResponse(
+				request.elicitationId,
+				selectedOption?.id ?? DiracAskResponse.MESSAGE,
+				response.text,
+			);
+		} catch (error) {
+			Logger.debug(
+				"[TaskMessageBridge] Error handling elicitation request:",
+				error,
+			);
+			await controller.task.submitCardResponse(
+				request.elicitationId,
+				DiracAskResponse.REJECT,
+			);
 		}
 	}
 
@@ -187,32 +474,55 @@ export class TaskMessageBridge {
 		message: DiracMessage,
 		permissionRequest: Omit<acp.RequestPermissionRequest, "sessionId">,
 	): Promise<void> {
-		const session = this.getSession(sessionId)
+		const session = this.getSession(sessionId);
 
 		if (!session) {
-			Logger.debug("[TaskMessageBridge] No session found for permission request")
-			return
+			Logger.debug(
+				"[TaskMessageBridge] No session found for permission request",
+			);
+			return;
 		}
 
-		const controller = this.getController(session)
+		const controller = this.getController(session);
 
 		if (!controller?.task) {
-			Logger.debug("[TaskMessageBridge] No active task for permission request")
-			return
+			Logger.debug("[TaskMessageBridge] No active task for permission request");
+			return;
 		}
 
-		const cardId = message.content.type === DiracMessageType.CARD ? message.content.card.id : ""
+		const cardId =
+			message.content.type === DiracMessageType.CARD
+				? message.content.card.id
+				: "";
 
 		// Derive interaction type from card properties: requireApproval → "tool", requireFeedback → "followup"
 		const interactionType: "tool" | "followup" =
-			message.content.type === DiracMessageType.CARD && message.content.card.requireApproval ? "tool" : "followup"
+			message.content.type === DiracMessageType.CARD &&
+				message.content.card.requireApproval
+				? "tool"
+				: "followup";
 
 		try {
-			const response = await this.requestPermission(sessionId, permissionRequest.toolCall, permissionRequest.options)
+			const response = await this.requestPermission(
+				sessionId,
+				permissionRequest.toolCall,
+				permissionRequest.options,
+			);
 
-			Logger.debug("[TaskMessageBridge] Permission response received:", response.outcome)
+			Logger.debug(
+				"[TaskMessageBridge] Permission response received:",
+				response.outcome,
+			);
 
-			const result = handlePermissionResponse(response, interactionType)
+			const result = handlePermissionResponse(response, interactionType);
+			if (result.persistentAction) {
+				await this.persistPermissionRule(
+					sessionId,
+					permissionRequest.toolCall,
+					result.persistentAction,
+				);
+			}
+
 			if (sessionState.currentToolCallId) {
 				if (result.cancelled) {
 					await this.emitSessionUpdate(sessionId, {
@@ -220,30 +530,40 @@ export class TaskMessageBridge {
 						toolCallId: sessionState.currentToolCallId,
 						status: "failed",
 						rawOutput: { reason: "cancelled" },
-					})
+					});
 				} else if (result.response === DiracAskResponse.REJECT) {
 					await this.emitSessionUpdate(sessionId, {
 						sessionUpdate: "tool_call_update",
 						toolCallId: sessionState.currentToolCallId,
 						status: "failed",
 						rawOutput: { reason: "rejected" },
-					})
+					});
 				} else {
 					await this.emitSessionUpdate(sessionId, {
 						sessionUpdate: "tool_call_update",
 						toolCallId: sessionState.currentToolCallId,
 						status: "in_progress",
-					})
+					});
 				}
 			}
 
 			if (result.cancelled) {
-				await controller.task.submitCardResponse(cardId, DiracAskResponse.REJECT)
+				await controller.task.submitCardResponse(
+					cardId,
+					DiracAskResponse.REJECT,
+				);
 			} else {
-				await controller.task.submitCardResponse(cardId, result.response, result.text)
+				await controller.task.submitCardResponse(
+					cardId,
+					result.response,
+					result.text,
+				);
 			}
 		} catch (error) {
-			Logger.debug("[TaskMessageBridge] Error handling permission request:", error)
+			Logger.debug(
+				"[TaskMessageBridge] Error handling permission request:",
+				error,
+			);
 
 			if (sessionState.currentToolCallId) {
 				await this.emitSessionUpdate(sessionId, {
@@ -251,10 +571,10 @@ export class TaskMessageBridge {
 					toolCallId: sessionState.currentToolCallId,
 					status: "failed",
 					rawOutput: { error: String(error) },
-				})
+				});
 			}
 
-			await controller.task.submitCardResponse(cardId, DiracAskResponse.REJECT)
+			await controller.task.submitCardResponse(cardId, DiracAskResponse.REJECT);
 		}
 	}
 
@@ -263,18 +583,27 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
 	): void {
-		if (promptResolved.value) return
+		if (promptResolved.value) return;
+		const apiStopReason = this.stopReasonFromApiStatus(message);
+		if (apiStopReason) {
+			promptResolved.value = true;
+			resolvePrompt({ stopReason: apiStopReason });
+			return;
+		}
 
 		switch (message.content.type) {
 			case DiracMessageType.CARD: {
-				const card = message.content.card
+				const card = message.content.card;
 
 				// Feedback cards (followup, plan_mode_respond, act_mode_respond, mistake_limit_reached)
 				// → waiting for user text input, end the turn so the client can collect it.
-				if (card.status === CardStatus.WAITING_FOR_INPUT && card.requireFeedback) {
-					promptResolved.value = true
-					resolvePrompt({ stopReason: "end_turn" })
-					return
+				if (
+					card.status === CardStatus.WAITING_FOR_INPUT &&
+					card.requireFeedback
+				) {
+					promptResolved.value = true;
+					resolvePrompt({ stopReason: "end_turn" });
+					return;
 				}
 
 				// Approval cards for terminal failures (api_req_failed, mistake_limit_reached with requireApproval)
@@ -282,18 +611,22 @@ export class TaskMessageBridge {
 				if (
 					card.status === CardStatus.WAITING_FOR_INPUT &&
 					card.requireApproval &&
-					(card.header === "API Request Failed" || card.header === "Mistake Limit Reached")
+					(card.header === "API Request Failed" ||
+						card.header === "Mistake Limit Reached")
 				) {
-					promptResolved.value = true
-					resolvePrompt({ stopReason: "end_turn" })
-					return
+					promptResolved.value = true;
+					resolvePrompt({ stopReason: "end_turn" });
+					return;
 				}
 
 				// Terminal success — task completed (completion_result)
-				if (card.status === CardStatus.SUCCESS && card.header === "Task Completed") {
-					promptResolved.value = true
-					resolvePrompt({ stopReason: "end_turn" })
-					return
+				if (
+					card.status === CardStatus.SUCCESS &&
+					card.header === "Task Completed"
+				) {
+					promptResolved.value = true;
+					resolvePrompt({ stopReason: "end_turn" });
+					return;
 				}
 
 				// Error cards — terminal failure signals
@@ -311,36 +644,91 @@ export class TaskMessageBridge {
 				// which IS terminal.
 				if (card.status === CardStatus.ERROR) {
 					if (!card.requireApproval && !card.requireFeedback) {
-						break
+						break;
 					}
-					promptResolved.value = true
-					resolvePrompt({ stopReason: "end_turn" })
-					return
+					promptResolved.value = true;
+					resolvePrompt({ stopReason: "end_turn" });
+					return;
 				}
 
-				break
+				break;
 			}
 			case DiracMessageType.CHECKPOINT: {
 				// Task completed successfully
-				promptResolved.value = true
-				resolvePrompt({ stopReason: "end_turn" })
-				break
+				promptResolved.value = true;
+				resolvePrompt({ stopReason: "end_turn" });
+				break;
 			}
 			case DiracMessageType.MARKDOWN:
 			case DiracMessageType.API_STATUS:
 				// Not terminal — continue streaming
-				break
+				break;
 		}
 	}
 
-	private getInteractionCardKey(sessionId: string, message: DiracMessage): string | undefined {
-		if (message.content.type !== DiracMessageType.CARD) return undefined
+	private async emitPlanFromMessage(
+		sessionId: string,
+		message: DiracMessage,
+	): Promise<void> {
+		if (
+			message.content.type !== DiracMessageType.CARD ||
+			message.content.card.header !== "Proposed Plan"
+		)
+			return;
 
-		const { card } = message.content
-		if (card.status !== CardStatus.WAITING_FOR_INPUT) return undefined
-		if (!card.requireApproval && !card.requireFeedback && !card.actions?.length) return undefined
+		const body = message.content.card.body;
+		if (!body) return;
 
-		return `${sessionId}:${card.id}`
+		const planText = this.planTextFromCard(body).trim();
+		if (!planText) return;
+
+		const numberedItems = planText
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => /^[-*]\s+|^\d+[.)]\s+/.test(line))
+			.map((line) => line.replace(/^[-*]\s+|^\d+[.)]\s+/, "").trim())
+			.filter(Boolean);
+		const planItems = numberedItems.length > 0 ? numberedItems : [planText];
+		const status = this.planStatusFromCard(message.content.card.status);
+
+		await this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "plan",
+			entries: planItems.map((content, index) => ({
+				content,
+				priority: index === 0 ? "high" : "medium",
+				status,
+			})),
+		});
+	}
+
+	private planTextFromCard(body: string): string {
+		try {
+			const parsed = JSON.parse(body) as { response?: unknown };
+			return typeof parsed.response === "string" ? parsed.response : body;
+		} catch {
+			return body;
+		}
+	}
+
+	private planStatusFromCard(status: CardStatus): acp.PlanEntryStatus {
+		if (status === CardStatus.SUCCESS) return "completed";
+		if (status === CardStatus.RUNNING || status === CardStatus.BUILDING)
+			return "in_progress";
+		return "pending";
+	}
+
+	private getInteractionCardKey(
+		sessionId: string,
+		message: DiracMessage,
+	): string | undefined {
+		if (message.content.type !== DiracMessageType.CARD) return undefined;
+
+		const { card } = message.content;
+		if (card.status !== CardStatus.WAITING_FOR_INPUT) return undefined;
+		if (!card.requireApproval && !card.requireFeedback && !card.actions?.length)
+			return undefined;
+
+		return `${sessionId}:${card.id}`;
 	}
 
 	private async processMessageWithDelta(
@@ -348,24 +736,27 @@ export class TaskMessageBridge {
 		sessionState: AcpSessionState,
 		message: DiracMessage,
 	): Promise<void> {
-		const messageKey = message.ts
-		const lastText = this.partialMessageLastContent.get(messageKey) || ""
+		const messageKey = message.ts;
+		const lastText = this.partialMessageLastContent.get(messageKey) || "";
+
+		await this.emitPlanFromMessage(sessionId, message);
 
 		// In the new message model, only MARKDOWN messages stream text content.
 		// Card bodies are set at creation time (no incremental streaming).
 		// Narrow message.content to MARKDOWN up front so that downstream
 		// property accesses (.content, .isCompletion, .isReasoning) type-check
 		// without intermediate boolean variables that defeat TS narrowing.
-		const isTextStreamingMessage = message.content.type === DiracMessageType.MARKDOWN
+		const isTextStreamingMessage =
+			message.content.type === DiracMessageType.MARKDOWN;
 
 		if (
 			message.content.type === DiracMessageType.MARKDOWN &&
 			message.content.content &&
 			!parseWebSearchMarkerText(message.content.content)
 		) {
-			const isCompletionResult = message.content.isCompletion === true
+			const isCompletionResult = message.content.isCompletion === true;
 
-			const textContent = message.content.content
+			const textContent = message.content.content;
 
 			// completion_result text was previously wrapped in JSON; in the new model
 			// the content is already plain text.
@@ -374,92 +765,148 @@ export class TaskMessageBridge {
 			// (see tsUnstableStreamLastContent). The ts-keyed partialMessageLastContent
 			// sees "" for that new ts and would re-emit the whole text, so for these
 			// subtypes we accumulate under a stable key.
-			const stableStreamKey = isCompletionResult ? "completion_result" : undefined
-			const lastTextForDelta = stableStreamKey ? (this.tsUnstableStreamLastContent.get(stableStreamKey) ?? "") : lastText
+			const stableStreamKey = isCompletionResult
+				? "completion_result"
+				: undefined;
+			const lastTextForDelta = stableStreamKey
+				? (this.tsUnstableStreamLastContent.get(stableStreamKey) ?? "")
+				: lastText;
 
 			// For streaming text messages, compute delta to avoid sending duplicates
-			let textDelta: string
+			let textDelta: string;
 			if (textContent.startsWith(lastTextForDelta)) {
-				textDelta = textContent.slice(lastTextForDelta.length)
+				textDelta = textContent.slice(lastTextForDelta.length);
 			} else {
 				// Content changed entirely (rare), send all
-				textDelta = textContent
+				textDelta = textContent;
 			}
 
 			// Determine the correct update type based on message content
-			const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" = message.content.isReasoning
-				? "agent_thought_chunk"
-				: "agent_message_chunk"
+			const sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" =
+				message.content.isReasoning
+					? "agent_thought_chunk"
+					: "agent_message_chunk";
 
 			// For completion_result messages, add a leading newline to separate from previous content
-			const needsNewline = isCompletionResult && lastTextForDelta === ""
+			const needsNewline = isCompletionResult && lastTextForDelta === "";
 
 			// Update tracking BEFORE the await: concurrent event handlers share these accumulators,
 			// and an await yields the event loop — a second handler could otherwise read stale state
 			// and re-send the full accumulated text instead of just the delta.
 			if (stableStreamKey) {
-				this.tsUnstableStreamLastContent.set(stableStreamKey, textContent)
+				this.tsUnstableStreamLastContent.set(stableStreamKey, textContent);
 			} else {
-				this.partialMessageLastContent.set(messageKey, textContent)
+				this.partialMessageLastContent.set(messageKey, textContent);
 			}
 
 			// Only send if there's new content
 			if (textDelta) {
 				await this.emitSessionUpdate(sessionId, {
 					sessionUpdate,
-					content: { type: "text", text: needsNewline ? `\n${textDelta}` : textDelta },
-				})
+					content: {
+						type: "text",
+						text: needsNewline ? `\n${textDelta}` : textDelta,
+					},
+				});
 			}
 		} else {
 			// For non-streaming messages (cards, checkpoints, api status), use the full translator
 			// Check if we already have a toolCallId for this message (from a previous partial update)
-			const existingToolCallId = this.messageToToolCallId.get(messageKey)
+			const existingToolCallId = this.messageToToolCallId.get(messageKey);
 
 			const result = translateMessage(message, sessionState, {
 				existingToolCallId,
 				clientCapabilities: this.getClientCapabilities(),
-			})
+			});
 
 			// Send all updates produced by the translator
 			for (const update of result.updates) {
-				await this.emitSessionUpdate(sessionId, update)
+				await this.emitSessionUpdate(sessionId, update);
 			}
 
-			// Emit usage_update for API_STATUS messages so the TUI StatusBar can show token/cost data.
+			// Emit usage data through Dirac's ACP extension. ACP SDK v0.13.1 has no
+			// stable usage update, so AcpAgent forwards a capability-gated
+			// dev.dirac/usage_update notification.
 			if (message.content.type === DiracMessageType.API_STATUS) {
-				const info = message.content.status
-				if (info.tokensIn !== undefined || info.cost !== undefined) {
-					await this.emitSessionUpdate(sessionId, {
-						sessionUpdate: "usage_update" as any,
+				const info = message.content.status;
+				if (
+					info.tokensIn !== undefined ||
+					info.tokensOut !== undefined ||
+					info.cost !== undefined ||
+					info.contextWindow !== undefined
+				) {
+					const contextTokens =
+						(info.tokensIn ?? 0) +
+						(info.tokensOut ?? 0) +
+						(info.cacheWrites ?? 0) +
+						(info.cacheReads ?? 0);
+					this.emitUsageUpdate(sessionId, {
 						tokensIn: info.tokensIn ?? 0,
 						tokensOut: info.tokensOut ?? 0,
-						totalCost: info.cost ?? 0,
-					} as any)
+						totalCost: info.cost,
+						contextTokens,
+						contextWindow: info.contextWindow,
+						contextUsagePercentage: info.contextUsagePercentage,
+					});
 				}
 			}
 
 			// Track the toolCallId for this message so subsequent updates reuse it
 			if (result.toolCallId) {
-				this.messageToToolCallId.set(messageKey, result.toolCallId)
+				this.messageToToolCallId.set(messageKey, result.toolCallId);
 			}
 
-			// Handle permission requests for card messages
-			if (result.requiresPermission && result.permissionRequest) {
-				const interactionCardKey = this.getInteractionCardKey(sessionId, message)
+			const elicitationRequest = this.structuredElicitationIsNegotiated()
+				? this.elicitationRequestFromCard(sessionId, message)
+				: undefined;
+			if (elicitationRequest) {
+				const interactionCardKey = this.getInteractionCardKey(
+					sessionId,
+					message,
+				);
+				if (
+					interactionCardKey &&
+					!this.processedInteractionCardKeys.has(interactionCardKey)
+				) {
+					this.processedInteractionCardKeys.add(interactionCardKey);
+					await this.handleElicitationRequest(sessionId, elicitationRequest);
+				}
+			} else if (result.requiresPermission && result.permissionRequest) {
+				const interactionCardKey = this.getInteractionCardKey(
+					sessionId,
+					message,
+				);
 
-				if (interactionCardKey && this.processedInteractionCardKeys.has(interactionCardKey)) {
-					Logger.debug("[TaskMessageBridge] Skipping duplicate ACP interaction request:", interactionCardKey)
+				if (
+					interactionCardKey &&
+					this.processedInteractionCardKeys.has(interactionCardKey)
+				) {
+					Logger.debug(
+						"[TaskMessageBridge] Skipping duplicate ACP interaction request:",
+						interactionCardKey,
+					);
 				} else {
 					if (interactionCardKey) {
-						this.processedInteractionCardKeys.add(interactionCardKey)
+						this.processedInteractionCardKeys.add(interactionCardKey);
 					}
-					await this.handlePermissionRequest(sessionId, sessionState, message, result.permissionRequest)
+					await this.handlePermissionRequest(
+						sessionId,
+						sessionState,
+						message,
+						result.permissionRequest,
+					);
 				}
 			}
 
 			// Track text content for this message (in case of future updates)
-			if (message.content.type === DiracMessageType.CARD && message.content.card.body) {
-				this.partialMessageLastContent.set(messageKey, message.content.card.body)
+			if (
+				message.content.type === DiracMessageType.CARD &&
+				message.content.card.body
+			) {
+				this.partialMessageLastContent.set(
+					messageKey,
+					message.content.card.body,
+				);
 			}
 
 			// NOTE: Do NOT delete messageToToolCallId here. A message can receive multiple

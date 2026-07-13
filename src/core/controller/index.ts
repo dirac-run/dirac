@@ -21,8 +21,14 @@ import { getStateToPostToWebview as getUiState } from "./ui/UiController"
 import { sendStateUpdate } from "./state/subscribeToState"
 import { SkillMetadata } from "@/shared/skills"
 import { TaskController } from "./task/TaskController"
+
+import type { TaskInitializationOptions } from "./task/TaskController"
 import { fingerprintAvailableTools } from "@shared/utils/tool-fingerprint"
 import { Initializer, type InitializerConfig } from "./index-initializer"
+
+export type ControllerOptions = {
+	workspaceCwd?: string
+}
 
 export class Controller {
 	public discoveredSkillsCache?: SkillMetadata[]
@@ -73,9 +79,12 @@ export class Controller {
 		return this.workspaceManager || this.taskController.workspaceManager
 	}
 
-	constructor(readonly context: DiracExtensionContext) {
+	constructor(
+		readonly context: DiracExtensionContext,
+		options: ControllerOptions = {},
+	) {
 		const initializer = new Initializer(context)
-		this.initializerConfig = initializer.createConfig(this)
+		this.initializerConfig = initializer.createConfig(this, options.workspaceCwd)
 		Object.assign(this, this.initializerConfig)
 		this.stateManager = this.initializerConfig.stateManager
 
@@ -96,10 +105,10 @@ export class Controller {
 	}
 
 	/*
-    VSCode extensions use the disposable pattern to clean up resources when the sidebar/editor tab is closed by the user or system. This applies to event listening, commands, interacting with the UI, etc.
-    - https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
-    - https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
-    */
+	VSCode extensions use the disposable pattern to clean up resources when the sidebar/editor tab is closed by the user or system. This applies to event listening, commands, interacting with the UI, etc.
+	- https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
+	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
+	*/
 	async dispose() {
 		await this.clearTask()
 
@@ -116,12 +125,22 @@ export class Controller {
 		taskSettings?: any,
 		conversationUlid?: string,
 		_watcherFactory?: any,
+		initializationOptions?: TaskInitializationOptions,
 	): Promise<string> {
-		return this.taskController.initTask(task, images, files, historyItem, taskSettings, conversationUlid, _watcherFactory)
+		return this.taskController.initTask(
+			task,
+			images,
+			files,
+			historyItem,
+			taskSettings,
+			conversationUlid,
+			_watcherFactory,
+			initializationOptions,
+		)
 	}
 
-	async reinitExistingTaskFromId(taskId: string): Promise<void> {
-		return this.taskController.reinitExistingTaskFromId(taskId)
+	async reinitExistingTaskFromId(taskId: string, initializationOptions?: TaskInitializationOptions): Promise<void> {
+		return this.taskController.reinitExistingTaskFromId(taskId, initializationOptions)
 	}
 
 	async cancelTask(): Promise<void> {

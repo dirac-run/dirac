@@ -149,6 +149,30 @@ describe("SurfaceAdapter", () => {
 			const result = await adapter.interaction.askPermission("May I?")
 			result.approved.should.equal(false)
 		})
+
+
+		it("attaches an effect preview diff and raw input to permission cards", async () => {
+			const fakeHandle = {
+				id: "card-1",
+				update: sinon.stub().resolves(),
+				appendBody: sinon.stub().resolves(),
+				finalize: sinon.stub().resolves(),
+				waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
+			}
+			config.taskMessenger.createCard = sinon.stub().resolves(fakeHandle)
+
+			await adapter.interaction.askPermission("May I?", {
+				diffs: [{ path: "new.ts", oldText: "", newText: "export {}\n" }],
+				rawInput: { path: "new.ts", content: "export {}\n" },
+			})
+
+			sinon.assert.calledWithMatch(config.taskMessenger.createCard, {
+				header: "Permission Request",
+				renderType: "diff",
+				diffs: [{ path: "new.ts", oldText: "", newText: "export {}\n" }],
+				rawInput: { path: "new.ts", content: "export {}\n" },
+			})
+		})
 	})
 
 	describe("browser trait", () => {

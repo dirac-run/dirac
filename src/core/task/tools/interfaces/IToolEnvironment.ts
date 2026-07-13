@@ -1,4 +1,4 @@
-import { CardStatus, Card, RenderType, ActionButton, CleanupStrategy } from "../../../../shared/ExtensionMessage"
+import { CardStatus, Card, RenderType, ActionButton, CardLocation, CleanupStrategy } from "../../../../shared/ExtensionMessage"
 import { FileDiagnostics } from "@shared/proto/index.dirac"
 import { SymbolRange } from "@utils/ASTAnchorBridge"
 import { SymbolLocation } from "@services/symbol-index/SymbolIndexService"
@@ -22,6 +22,10 @@ export interface ICardHandle {
 	readonly icon?: string
 	readonly renderType: RenderType
 	readonly body?: string
+
+	readonly rawInput?: import("../../../../shared/ExtensionMessage").CardRawInput
+	readonly rawOutput?: import("../../../../shared/ExtensionMessage").CardRawOutput
+	readonly locations?: CardLocation[]
 	readonly requireApproval?: boolean
 	readonly requireFeedback?: boolean
 	readonly feedbackPlaceholder?: string
@@ -67,6 +71,11 @@ export interface CardParams {
 	status?: CardStatus
 	renderType?: RenderType
 	body?: string
+
+	rawInput?: import("../../../../shared/ExtensionMessage").CardRawInput
+	rawOutput?: import("../../../../shared/ExtensionMessage").CardRawOutput
+	diffs?: import("../../../../shared/ExtensionMessage").CardDiff[]
+	locations?: CardLocation[]
 	requireApproval?: boolean
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string
@@ -101,7 +110,7 @@ export interface IInteractionTrait {
 	 * Triggers a transient permission request.
 	 * The UI for this request is separate from any execution cards.
 	 */
-	askPermission(message: string): Promise<{
+	askPermission(message: string, preview?: PermissionPreview): Promise<{
 		approved: boolean
 		action: string
 		value?: string
@@ -116,6 +125,12 @@ export interface IInteractionTrait {
 	 * Generic ask for followup, plan_mode, new_task, condense, etc.
 	 */
 }
+
+export interface PermissionPreview {
+	diffs?: import("../../../../shared/ExtensionMessage").CardDiff[]
+	rawInput?: import("../../../../shared/ExtensionMessage").CardRawInput
+}
+
 
 export interface ITelemetryTrait {
 	/**

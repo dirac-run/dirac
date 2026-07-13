@@ -20,26 +20,42 @@ import { AcpSessionStatus } from "./types.js"
  */
 const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	// File operations
+	edit_file: "edit",
 	editFile: "edit",
+	replace_symbol: "edit",
 	replaceSymbol: "edit",
-	write_to_file: "edit", // Keep for backward compatibility if needed, but DiracSayTool uses camelCase
+	rename_symbol: "edit",
+	write_to_file: "edit",
+	new_rule: "edit",
 	newFileCreated: "edit",
 	editedExistingFile: "edit",
 	fileDeleted: "delete",
+	read_file: "read",
 	readFile: "read",
+	read_line_range: "read",
 	readLineRange: "read",
+	list_files: "read",
 	listFilesTopLevel: "read",
 	listFilesRecursive: "read",
-	listCodeDefinitionNames: "read",
-	searchFiles: "search",
-	// Other
-	summarizeTask: "think",
-	useSkill: "other",
+	list_skills: "read",
 	listSkills: "read",
-	useSubagents: "other",
+	list_code_definition_names: "read",
+	listCodeDefinitionNames: "read",
+	get_function: "read",
 	getFunction: "read",
+	get_file_skeleton: "read",
 	getFileSkeleton: "read",
+	search_files: "search",
+	searchFiles: "search",
+	find_symbol_references: "search",
 	findSymbolReferences: "search",
+	// Other
+	summarize_task: "think",
+	summarizeTask: "think",
+	use_skill: "other",
+	useSkill: "other",
+	use_subagents: "other",
+	useSubagents: "other",
 	execute_command: "execute",
 }
 
@@ -67,6 +83,11 @@ export function parseWebSearchMarkerText(text: string | undefined): string | und
 	const query = match[1]?.trim()
 	return query || WEB_SEARCH_FALLBACK_QUERY
 }
+
+function toolKindForCard(header: string): acp.ToolKind {
+	return TOOL_KIND_MAP[header] ?? getBrowserActionKind(header) ?? "other"
+}
+
 
 /**
  * Options for translating a message.
@@ -216,9 +237,13 @@ function translateWebSearchMarkerMessage(query: string, sessionState: AcpSession
 			toolCallId,
 			title: `Web Search: ${query}`,
 			kind: "search",
-			status: "in_progress",
+			status: "pending",
 			rawInput: { query },
 		})
+	}
+
+	if (!isExistingToolCall) {
+		updates.push({ sessionUpdate: "tool_call_update", toolCallId, status: "in_progress" })
 	}
 
 	updates.push({
@@ -273,19 +298,30 @@ function translateCardMessage(
 		}
 	}
 
-	const status = mapStatus(card.status)
+	const actualStatus = mapStatus(card.status)
+	const status = actualStatus === "in_progress" ? "pending" : actualStatus
+	const locations = card.locations?.map((location) => ({
+		path: location.path,
+		...(location.line === undefined ? {} : { line: location.line }),
+	}))
 	const isExisting = sessionState.pendingToolCalls.has(toolCallId)
-
+	const kind = toolKindForCard(card.header)
+	const content = card.diffs?.map((diff) => ({ type: "diff" as const, ...diff }))
+	const rawInput = card.rawInput ?? (card.body ? { body: card.body } : undefined)
+	const rawOutput = card.rawOutput ?? (card.body ? { body: card.body } : undefined)
 	if (isExisting) {
 		const existing = sessionState.pendingToolCalls.get(toolCallId)!
-		existing.status = status
+		existing.status = actualStatus
 		existing.title = card.header
 		updates.push({
 			sessionUpdate: "tool_call_update",
 			toolCallId,
 			title: card.header,
-			status,
-			rawOutput: card.body ? { body: card.body } : undefined,
+			status: actualStatus,
+			locations,
+			content,
+			rawInput,
+			rawOutput,
 		})
 		if (isFinalStatus(card.status)) {
 			sessionState.pendingToolCalls.delete(toolCallId)
@@ -294,11 +330,17 @@ function translateCardMessage(
 		const toolCall: acp.ToolCall = {
 			toolCallId,
 			title: card.header,
-			kind: getBrowserActionKind(card.header) ?? TOOL_KIND_MAP[card.header] ?? "other",
+			kind,
 			status,
-			rawInput: card.body ? { body: card.body } : undefined,
+			locations,
+			content,
+			rawInput,
+			rawOutput,
 		}
 		updates.push({ sessionUpdate: "tool_call", ...toolCall })
+		if (actualStatus === "in_progress") {
+			updates.push({ sessionUpdate: "tool_call_update", toolCallId, status: "in_progress", locations })
+		}
 		if (!isFinalStatus(card.status)) {
 			sessionState.pendingToolCalls.set(toolCallId, toolCall)
 		}
@@ -309,16 +351,19 @@ function translateCardMessage(
 		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || {
 			toolCallId,
 			title: card.header,
-			kind: (getBrowserActionKind(card.header) ?? "other") as acp.ToolKind,
+			kind,
 			status: "pending" as acp.ToolCallStatus,
+			locations,
 		}
 		requiresPermission = true
 		if (card.requireApproval) {
 			permissionRequest = {
 				toolCall: existingToolCall as acp.ToolCall,
 				options: [
-					{ kind: "allow_once", optionId: "allow_once", name: "Approve" },
-					{ kind: "reject_once", optionId: "reject_once", name: "Reject" },
+					{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
+					{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
+					{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
+					{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
 				],
 			}
 		} else {

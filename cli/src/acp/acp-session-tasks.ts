@@ -39,3 +39,10 @@ export function getLatestTaskIdForSession(sessionId: string): string | undefined
 	const tasks = map[sessionId]
 	return tasks && tasks.length > 0 ? tasks[tasks.length - 1] : undefined
 }
+
+/** Remove all replacement task IDs recorded for an ACP session. */
+export function deleteTasksForSession(sessionId: string): void {
+	const map = readSessionTasksMap()
+	delete map[sessionId]
+	writeSessionTasksMap(map)
+}

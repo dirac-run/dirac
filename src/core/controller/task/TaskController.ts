@@ -13,11 +13,17 @@ import { setupWorkspaceManager } from "../../workspace/setup"
 import type { WorkspaceRootManager } from "../../workspace/WorkspaceRootManager"
 import type { Controller } from ".."
 
+export type TaskInitializationOptions = {
+	pinnedContext?: string
+	onContextCompacted?: () => void
+}
+
 export interface ITaskControllerDependencies {
 	task?: Task
 	controller: Controller | undefined
 	stateManager: StateManager
 	workspaceManager?: WorkspaceRootManager
+	workspaceCwd?: string
 	backgroundCommandRunning: boolean
 	backgroundCommandTaskId?: string
 	cancelInProgress: boolean
@@ -96,6 +102,7 @@ export class TaskController {
 		taskSettings?: Partial<Settings>,
 		conversationUlid?: string,
 		_watcherFactory?: any,
+		initializationOptions?: TaskInitializationOptions,
 	): Promise<string> {
 		// Controller is required to construct a Task; fail fast with a clear error if missing
 		if (!this.deps.controller) {
@@ -120,12 +127,17 @@ export class TaskController {
 			await this.deps.postStateToWebview()
 		}
 
-		this._workspaceManager = await this.setupWorkspaceManagerFn({
-			stateManager: this.deps.stateManager,
-			detectRoots: this.detectRootsFn,
-		})
+		this._workspaceManager = this.deps.workspaceCwd
+			? await controller.ensureWorkspaceManager()
+			: await this.setupWorkspaceManagerFn({
+					stateManager: this.deps.stateManager,
+					detectRoots: this.detectRootsFn,
+				})
+		if (!this._workspaceManager) {
+			throw new Error("TaskController.initTask could not initialize a workspace manager")
+		}
 
-		const cwd = this._workspaceManager?.getPrimaryRoot()?.path || (await this.getCwdFn(this.getDesktopDirFn()))
+		const cwd = this._workspaceManager.getPrimaryRoot()?.path || (await this.getCwdFn(this.getDesktopDirFn()))
 
 		const taskId = historyItem?.id || Date.now().toString()
 
@@ -172,6 +184,8 @@ export class TaskController {
 			taskId,
 			conversationUlid,
 			taskLockAcquired,
+			pinnedContext: initializationOptions?.pinnedContext,
+			onContextCompacted: initializationOptions?.onContextCompacted,
 		})
 
 		if (historyItem) {
@@ -183,10 +197,19 @@ export class TaskController {
 		return this._task.taskId
 	}
 
-	async reinitExistingTaskFromId(taskId: string) {
+	async reinitExistingTaskFromId(taskId: string, initializationOptions?: TaskInitializationOptions) {
 		const history = await this.deps.getTaskWithId(taskId)
 		if (history) {
-			await this.initTask(undefined, undefined, undefined, history.historyItem)
+			await this.initTask(
+				undefined,
+				undefined,
+				undefined,
+				history.historyItem,
+				undefined,
+				undefined,
+				undefined,
+				initializationOptions,
+			)
 		}
 	}
 
@@ -237,7 +260,7 @@ export class TaskController {
 			}
 
 			if (historyItem) {
-				await this.initTask(undefined, undefined, undefined, historyItem, undefined)
+				await this.initTask(undefined, undefined, undefined, historyItem)
 			} else {
 				await this.clearTask()
 			}

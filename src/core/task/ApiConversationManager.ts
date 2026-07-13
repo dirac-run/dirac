@@ -75,6 +75,7 @@ export class ApiConversationManager {
 		this.dependencies.taskState.conversationHistoryDeletedRange = newDeletedRange
 
 		await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+		this.dependencies.onContextCompacted?.()
 	}
 
 	public async determineContextCompaction(previousApiReqIndex: number): Promise<boolean> {
@@ -208,10 +209,15 @@ export class ApiConversationManager {
 		}
 
 		if (params.shouldCompact) {
+			const pinnedContext = this.dependencies.taskState.pinnedContext
+			if (pinnedContext) {
+				userContent.push({ type: "text", text: pinnedContext })
+			}
 			userContent.push({
 				type: "text",
 				text: summarizeTask(this.dependencies.cwd, isMultiRootEnabled(this.dependencies.stateManager)),
 			})
+			this.dependencies.onContextCompacted?.()
 		}
 
 		// getting verbose details is an expensive operation, it uses globby to top-down build file structure of project which for large projects can take a few seconds

@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
+
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { CommandPermissionController } from "./CommandPermissionController"
 import { COMMAND_PERMISSIONS_ENV_VAR } from "./types"
-import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("CommandPermissionController", () => {
 	let originalEnvValue: string | undefined
@@ -19,6 +23,49 @@ describe("CommandPermissionController", () => {
 		} else {
 			process.env[COMMAND_PERMISSIONS_ENV_VAR] = originalEnvValue
 		}
+	})
+
+	describe("Persisted project rules", () => {
+		it("reloads allow and deny rules after a controller restart", async () => {
+			const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permissions-"))
+
+			try {
+				const firstController = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				await firstController.initialize(workspaceRoot)
+				await firstController.addRule({ tool: "execute_command", pattern: "npm test", action: "allow" })
+				await firstController.addRule({ tool: "edit_file", pattern: "src/**", action: "deny" })
+				await firstController.dispose()
+
+				const restartedController = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				await restartedController.initialize(workspaceRoot)
+
+				restartedController.validateTool("execute_command", "npm test").allowed.should.be.true()
+				restartedController.validateTool("edit_file", "src/index.ts").allowed.should.be.false()
+				await restartedController.dispose()
+			} finally {
+				await fs.rm(workspaceRoot, { recursive: true, force: true })
+			}
+		})
+
+		it("lists and deletes persisted project rules", async () => {
+			const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permissions-"))
+
+			try {
+				const controller = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				await controller.initialize(workspaceRoot)
+				const allowRule = { tool: "execute_command", pattern: "npm test", action: "allow" as const }
+				const denyRule = { tool: "edit_file", pattern: "src/**", action: "deny" as const }
+				await controller.addRule(allowRule)
+				await controller.addRule(denyRule)
+
+				;(await controller.listRules()).should.deepEqual([allowRule, denyRule])
+				await controller.deleteRule(allowRule)
+				;(await controller.listRules()).should.deepEqual([denyRule])
+				await controller.dispose()
+			} finally {
+				await fs.rm(workspaceRoot, { recursive: true, force: true })
+			}
+		})
 	})
 
 	describe("No Configuration", () => {

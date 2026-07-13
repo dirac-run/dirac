@@ -3,6 +3,7 @@ import { DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { beforeEach, describe, expect, it } from "vitest"
 import { translateMessage, translateMessages } from "./messageTranslator"
+import { handlePermissionResponse } from "./permissionHandler"
 import type { AcpSessionState } from "./public-types"
 import { AcpSessionStatus } from "./public-types"
 
@@ -36,6 +37,16 @@ function createApiStatusMessage(status: string): DiracMessage {
 		content: {
 			type: DiracMessageType.API_STATUS,
 			status,
+		},
+	} as DiracMessage
+}
+
+function createCheckpointMessage(): DiracMessage {
+	return {
+		id: "checkpoint-id",
+		ts: Date.now(),
+		content: {
+			type: DiracMessageType.CHECKPOINT,
 		},
 	} as DiracMessage
 }
@@ -92,13 +103,82 @@ describe("messageTranslator (Modular Architecture)", () => {
 			const message = createCardMessage(card)
 			const result = translateMessage(message, sessionState)
 
-			expect(result.updates).toHaveLength(1)
+			expect(result.updates).toHaveLength(2)
 			expect(result.updates[0].sessionUpdate).toBe("tool_call")
 			const toolCall = result.updates[0] as acp.ToolCall
 			expect(toolCall.toolCallId).toBe("tool-1")
 			expect(toolCall.title).toBe("read_file")
-			expect(toolCall.status).toBe("in_progress")
+			expect(toolCall.status).toBe("pending")
+			expect(result.updates[1]).toMatchObject({ sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "in_progress" })
 			expect(sessionState.pendingToolCalls.has("tool-1")).toBe(true)
+		})
+
+		it("reports file edits as ACP diff content with before and after text", () => {
+			const result = translateMessage(
+				createCardMessage({
+					id: "tool-1",
+					header: "Edited src/file.ts",
+					status: CardStatus.SUCCESS,
+					diffs: [{ path: "src/file.ts", oldText: "const before = 1\n", newText: "const after = 2\n" }],
+				}),
+				sessionState,
+			)
+
+			expect(result.updates[0]).toMatchObject({
+				sessionUpdate: "tool_call",
+				content: [{ type: "diff", path: "src/file.ts", oldText: "const before = 1\n", newText: "const after = 2\n" }],
+			})
+		})
+
+		it("uses empty old or new text for created and deleted files", () => {
+			const created = translateMessage(
+				createCardMessage({
+					id: "created",
+					header: "Wrote new.ts",
+					status: CardStatus.SUCCESS,
+					diffs: [{ path: "new.ts", oldText: "", newText: "export const created = true\n" }],
+				}),
+				sessionState,
+			)
+			const deleted = translateMessage(
+				createCardMessage({
+					id: "deleted",
+					header: "Deleted old.ts",
+					status: CardStatus.SUCCESS,
+					diffs: [{ path: "old.ts", oldText: "export const obsolete = true\n", newText: "" }],
+				}),
+				sessionState,
+			)
+
+			expect((created.updates[0] as acp.ToolCall).content).toMatchObject([
+				{ type: "diff", path: "new.ts", oldText: "", newText: "export const created = true\n" },
+			])
+			expect((deleted.updates[0] as acp.ToolCall).content).toMatchObject([
+				{ type: "diff", path: "old.ts", oldText: "export const obsolete = true\n", newText: "" },
+			])
+		})
+
+		it("emits a pending-to-in_progress lifecycle with locations for active cards", () => {
+			const card = {
+				id: "tool-1",
+				header: "read_file",
+				status: CardStatus.RUNNING,
+				locations: [{ path: "src/file.ts", line: 12 }],
+			}
+			const result = translateMessage(createCardMessage(card), sessionState)
+
+			expect(result.updates).toHaveLength(2)
+			expect(result.updates[0]).toMatchObject({
+				sessionUpdate: "tool_call",
+				kind: "read",
+				status: "pending",
+				locations: [{ path: "src/file.ts", line: 12 }],
+			})
+			expect(result.updates[1]).toMatchObject({
+				sessionUpdate: "tool_call_update",
+				toolCallId: "tool-1",
+				status: "in_progress",
+			})
 		})
 
 		it("should translate an existing Card update to tool_call_update", () => {
@@ -125,21 +205,72 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(update.status).toBe("completed")
 		})
 
-		it("should handle interaction requests (approvals)", () => {
+		it("offers once and always choices for approval requests", () => {
 			const card = {
 				id: "tool-1",
 				header: "execute_command",
 				status: CardStatus.WAITING_FOR_INPUT,
 				requireApproval: true,
 			}
-			const message = createCardMessage(card)
-			const result = translateMessage(message, sessionState)
+			const result = translateMessage(createCardMessage(card), sessionState)
 
 			expect(result.requiresPermission).toBe(true)
-			expect(result.permissionRequest).toBeDefined()
-			expect(result.permissionRequest?.options).toHaveLength(2)
-			expect(result.permissionRequest?.options?.[0].name).toBe("Approve")
-			expect(result.permissionRequest?.options?.[1].name).toBe("Reject")
+			expect(result.permissionRequest?.options).toEqual([
+				{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
+				{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
+				{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
+				{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
+			])
+		})
+
+
+		it("attaches the pending command and diff to an approval request's tool call", () => {
+			const result = translateMessage(
+				createCardMessage({
+					id: "edit-approval-1",
+					header: "edit_file",
+					status: CardStatus.WAITING_FOR_INPUT,
+					requireApproval: true,
+					rawInput: { command: "python apply_edit.py", language: "bash" },
+					diffs: [{ path: "src/file.ts", oldText: "const before = true\n", newText: "const after = true\n" }],
+				}),
+				sessionState,
+			)
+
+			expect(result.permissionRequest?.toolCall).toMatchObject({
+				toolCallId: "edit-approval-1",
+				rawInput: { command: "python apply_edit.py", language: "bash" },
+				content: [{ type: "diff", path: "src/file.ts", oldText: "const before = true\n", newText: "const after = true\n" }],
+			})
+		})
+
+
+		it("attaches a write preview diff to the permission request tool call", () => {
+			const result = translateMessage(
+				createCardMessage({
+					id: "write-approval-1",
+					header: "Permission Request",
+					status: CardStatus.WAITING_FOR_INPUT,
+					requireApproval: true,
+					rawInput: { path: "src/new.ts", content: "export const preview = true\n" },
+					diffs: [{ path: "src/new.ts", oldText: "", newText: "export const preview = true\n" }],
+				}),
+				sessionState,
+			)
+
+			expect(result.permissionRequest?.toolCall).toMatchObject({
+				rawInput: { path: "src/new.ts", content: "export const preview = true\n" },
+				content: [{ type: "diff", path: "src/new.ts", oldText: "", newText: "export const preview = true\n" }],
+			})
+		})
+
+
+		it("marks always approval and rejection responses for persisted rules", () => {
+			const allow = handlePermissionResponse({ outcome: { outcome: "selected", optionId: "allow_always" } } as any, "tool")
+			const reject = handlePermissionResponse({ outcome: { outcome: "selected", optionId: "reject_always" } } as any, "tool")
+
+			expect(allow).toMatchObject({ response: "approve", persistentAction: "allow" })
+			expect(reject).toMatchObject({ response: "reject", persistentAction: "deny" })
 		})
 
 		it("should handle interaction requests (feedback/input)", () => {
@@ -184,6 +315,39 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(update.status).toBe("failed")
 		})
 
+
+		it("preserves structured raw tool input and output", () => {
+			const created = translateMessage(
+				createCardMessage({
+					id: "command-1",
+					header: "execute_command",
+					status: CardStatus.RUNNING,
+					rawInput: { command: "npm test", language: "bash" },
+				}),
+				sessionState,
+			)
+			expect(created.updates[0]).toMatchObject({
+				sessionUpdate: "tool_call",
+				rawInput: { command: "npm test", language: "bash" },
+			})
+
+			const completed = translateMessage(
+				createCardMessage({
+					id: "command-1",
+					header: "Executed: npm test",
+					status: CardStatus.SUCCESS,
+					rawInput: { command: "npm test", language: "bash" },
+					rawOutput: { output: "all tests passed", exitCode: 0, userRejected: false },
+				}),
+				sessionState,
+			)
+			expect(completed.updates[0]).toMatchObject({
+				sessionUpdate: "tool_call_update",
+				rawInput: { command: "npm test", language: "bash" },
+				rawOutput: { output: "all tests passed", exitCode: 0, userRejected: false },
+			})
+		})
+
 		it("should map CardStatus.CANCELLED to failed", () => {
 			const card = {
 				id: "tool-1",
@@ -211,6 +375,12 @@ describe("messageTranslator (Modular Architecture)", () => {
 			const result = translateMessage(message, sessionState)
 			expect(result.updates).toHaveLength(0)
 		})
+	})
+
+	it("skips checkpoint messages", () => {
+		const result = translateMessage(createCheckpointMessage(), sessionState)
+
+		expect(result.updates).toHaveLength(0)
 	})
 
 	describe("translateMessages", () => {

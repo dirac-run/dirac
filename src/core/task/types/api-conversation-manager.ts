@@ -46,6 +46,8 @@ export interface ApiConversationManagerDependencies {
 	}) => Promise<void>
 	handleHookCancellation: (hookName: string, wasCancelled: boolean) => Promise<void>
 	cancelTask: () => Promise<void>
+	getPinnedContext?: () => string | undefined
+	onContextCompacted?: () => void
 	setActiveHookExecution: (hookExecution: HookExecution | undefined) => Promise<void>
 	clearActiveHookExecution: () => Promise<void>
 	taskInitializationStartTime: number

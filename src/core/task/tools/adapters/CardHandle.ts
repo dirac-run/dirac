@@ -3,6 +3,7 @@ import {
 	ICardHandle as IProtocolCardHandle,
 	RenderType,
 	ActionButton,
+	CardLocation,
 	CleanupStrategy,
 	Card,
 } from "../../../../shared/ExtensionMessage"
@@ -15,6 +16,11 @@ export class CardHandle implements ICardHandle {
 	public status: CardStatus = CardStatus.PENDING
 	public renderType: RenderType = "text"
 	public body = ""
+
+	public rawInput?: import("../../../../shared/ExtensionMessage").CardRawInput
+	public rawOutput?: import("../../../../shared/ExtensionMessage").CardRawOutput
+	public diffs?: import("../../../../shared/ExtensionMessage").CardDiff[]
+	public locations?: CardLocation[]
 	public requireApproval?: boolean
 	public requireFeedback?: boolean
 	public feedbackPlaceholder?: string
@@ -39,6 +45,11 @@ export class CardHandle implements ICardHandle {
 		this.status = params.status || CardStatus.RUNNING
 		this.renderType = params.renderType || "text"
 		this.body = params.body || ""
+
+		this.rawInput = params.rawInput
+		this.rawOutput = params.rawOutput
+		this.diffs = params.diffs
+		this.locations = params.locations
 		this.requireApproval = params.requireApproval
 		this.requireFeedback = params.requireFeedback
 		this.feedbackPlaceholder = params.feedbackPlaceholder
@@ -58,6 +69,11 @@ export class CardHandle implements ICardHandle {
 			status: this.status,
 			renderType: this.renderType,
 			body: this.body,
+
+			rawInput: this.rawInput,
+			rawOutput: this.rawOutput,
+			diffs: this.diffs,
+			locations: this.locations,
 			requireApproval: this.requireApproval,
 			requireFeedback: this.requireFeedback,
 			feedbackPlaceholder: this.feedbackPlaceholder,
@@ -78,6 +94,11 @@ export class CardHandle implements ICardHandle {
 		if (patch.status !== undefined) this.status = patch.status
 		if (patch.renderType !== undefined) this.renderType = patch.renderType
 		if (patch.body !== undefined) this.body = patch.body
+
+		if (patch.rawInput !== undefined) this.rawInput = patch.rawInput
+		if (patch.rawOutput !== undefined) this.rawOutput = patch.rawOutput
+		if (patch.diffs !== undefined) this.diffs = patch.diffs
+		if (patch.locations !== undefined) this.locations = patch.locations
 		if (patch.requireApproval !== undefined) this.requireApproval = patch.requireApproval
 		if (patch.requireFeedback !== undefined) this.requireFeedback = patch.requireFeedback
 		if (patch.feedbackPlaceholder !== undefined) this.feedbackPlaceholder = patch.feedbackPlaceholder

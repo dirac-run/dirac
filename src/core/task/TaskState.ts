@@ -55,6 +55,8 @@ export class TaskState {
 
 	// Context and history
 	conversationHistoryDeletedRange?: [number, number]
+	/** Session-owned snapshots injected into every compacted request. */
+	pinnedContext?: string
 
 	// Tool execution flags
 	didRejectTool = false

@@ -115,6 +115,8 @@ type TaskParams = {
 	taskId: string
 	conversationUlid?: string
 	taskLockAcquired: boolean
+	pinnedContext?: string
+	onContextCompacted?: () => void
 }
 
 export class Task {
@@ -146,6 +148,12 @@ export class Task {
 	public async clearActiveHookExecution(): Promise<void> {
 		return this.hookManager.clearActiveHookExecution()
 	}
+
+	/** Observe automatic and recovery context compaction for the owning ACP session. */
+	public setContextCompactionObserver(observer: () => void): void {
+		this.contextCompactionObserver = observer
+	}
+
 
 	public async getActiveHookExecution(): Promise<typeof this.taskState.activeHookExecution> {
 		return this.hookManager.getActiveHookExecution()
@@ -188,6 +196,7 @@ export class Task {
 	private lifecycleManager: LifecycleManager
 	private apiConversationManager: ApiConversationManager
 	private assistantStreamManager: AssistantStreamManager
+	private contextCompactionObserver?: () => void
 
 	private responseProcessor: ResponseProcessor
 
@@ -238,6 +247,8 @@ export class Task {
 
 		this.taskInitializationStartTime = performance.now()
 		this.taskState = new TaskState()
+		this.taskState.pinnedContext = params.pinnedContext
+		this.contextCompactionObserver = params.onContextCompacted
 		this.controller = controller
 		this.updateTaskHistory = updateTaskHistory
 		this.postStateToWebview = postStateToWebview
@@ -581,6 +592,8 @@ export class Task {
 			taskInitializationStartTime: this.taskInitializationStartTime,
 			cancelTask: this.cancelTask,
 			runUserPromptSubmitHook: this.runUserPromptSubmitHook.bind(this),
+			onContextCompacted: () => this.contextCompactionObserver?.(),
+
 		})
 
 		this.responseProcessor = new ResponseProcessor({
@@ -604,6 +617,26 @@ export class Task {
 
 	async getEnvironmentDetails(includeFileDetails = false): Promise<string> {
 		return this.environmentManager.getEnvironmentDetails(includeFileDetails)
+	}
+
+	private async persistApiStopReason(stopReason?: string): Promise<void> {
+		if (!stopReason) return
+
+		const lastApiRequestIndex = findLastIndex(
+			this.messageStateHandler.getDiracMessages(),
+			(message) => message.content.type === DiracMessageType.API_STATUS,
+		)
+		if (lastApiRequestIndex === -1) return
+
+		const message = this.messageStateHandler.getDiracMessages()[lastApiRequestIndex]
+		if (message.content.type !== DiracMessageType.API_STATUS) return
+
+		await this.messageStateHandler.updateDiracMessage(lastApiRequestIndex, {
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: { ...message.content.status, stopReason },
+			},
+		})
 	}
 
 	private async handleMistakeLimitReached(
@@ -760,6 +793,21 @@ export class Task {
 		}
 
 		return userContent
+	}
+
+	/** Persist a project-scoped tool permission rule for an ACP “always” decision. */
+	public async addPermissionRule(rule: import("@core/permissions/types").ToolPermissionRule): Promise<void> {
+		await this.commandPermissionController.addRule(rule)
+	}
+
+	/** List project-scoped ACP permission rules. */
+	public async listPermissionRules(): Promise<import("@core/permissions/types").ToolPermissionRule[]> {
+		return await this.commandPermissionController.listRules()
+	}
+
+	/** Delete one project-scoped ACP permission rule. */
+	public async deletePermissionRule(rule: import("@core/permissions/types").ToolPermissionRule): Promise<void> {
+		await this.commandPermissionController.deleteRule(rule)
 	}
 
 	public async submitCardResponse(
@@ -1869,6 +1917,7 @@ export class Task {
 			}
 
 			await finalizeApiReqMsg()
+			await this.persistApiStopReason(stopReason)
 			await this.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 			await this.postStateToWebview()
 

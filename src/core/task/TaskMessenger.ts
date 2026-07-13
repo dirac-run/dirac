@@ -146,6 +146,7 @@ export class TaskMessenger implements ITaskMessenger {
 				(params.requireApproval || params.requireFeedback ? CardStatus.WAITING_FOR_INPUT : CardStatus.RUNNING),
 			renderType: params.renderType || "text",
 			body: params.body || "",
+			locations: params.locations,
 			requireApproval: params.requireApproval,
 			requireFeedback: params.requireFeedback,
 			feedbackPlaceholder: params.feedbackPlaceholder,

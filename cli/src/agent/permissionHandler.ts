@@ -18,8 +18,8 @@ export interface InteractionHandlerResult {
 	response: DiracAskResponse | string
 	/** Optional text to pass with the response */
 	text?: string
-	/** Whether "always allow" was selected (for auto-approval tracking) */
-	alwaysAllow?: boolean
+	/** Whether this decision should become a persisted permission rule. */
+	persistentAction?: "allow" | "deny"
 	/** Whether the request was cancelled */
 	cancelled?: boolean
 }
@@ -52,21 +52,24 @@ export function handlePermissionResponse(
 		case "allow_once":
 			return {
 				response: DiracAskResponse.APPROVE,
-				alwaysAllow: false,
 			}
 
 		case "allow_always":
 			return {
 				response: DiracAskResponse.APPROVE,
-				alwaysAllow: true,
+				persistentAction: "allow",
 			}
 
 		case DiracAskResponse.REJECT:
 		case "reject_once":
+			return {
+				response: DiracAskResponse.REJECT,
+			}
+
 		case "reject_always":
 			return {
 				response: DiracAskResponse.REJECT,
-				alwaysAllow: false,
+				persistentAction: "deny",
 			}
 
 		case DiracAskResponse.MESSAGE:

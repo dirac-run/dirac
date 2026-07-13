@@ -77,7 +77,45 @@ export class SurfaceAdapter implements IToolEnvironment {
 	}
 
 	public async createCard(params: CardParams): Promise<ICardHandle> {
-		return await createCardFromMessenger(this.config, params, this.createdCards)
+		return await createCardFromMessenger(
+			this.config,
+			{ ...params, locations: params.locations ?? this.locationsForTool() },
+			this.createdCards,
+		)
+	}
+
+	private locationsForTool(): CardParams["locations"] {
+		const args = this.config.toolUse?.params
+		if (!args) return undefined
+
+		const path = this.pathFromToolArguments(args)
+		if (!path) return undefined
+
+		const line = this.lineFromToolArguments(args)
+		return [{ path, ...(line === undefined ? {} : { line }) }]
+	}
+
+	private pathFromToolArguments(args: Record<string, unknown>): string | undefined {
+		for (const key of ["path", "file_path", "filePath"]) {
+			const value = args[key]
+			if (typeof value === "string" && value.trim()) return value
+		}
+
+		for (const key of ["paths", "files"]) {
+			const value = args[key]
+			if (Array.isArray(value) && typeof value[0] === "string" && value[0].trim()) return value[0]
+		}
+
+		return undefined
+	}
+
+	private lineFromToolArguments(args: Record<string, unknown>): number | undefined {
+		for (const key of ["start_line", "startLine", "line"]) {
+			const value = args[key]
+			if (typeof value === "number" && Number.isInteger(value) && value > 0) return value
+		}
+
+		return undefined
 	}
 
 	public async executeCommand(

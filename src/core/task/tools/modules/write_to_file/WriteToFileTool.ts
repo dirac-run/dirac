@@ -31,7 +31,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			// 1. Validate and Resolve
 			const validation = await this.validateAndResolve(args, env)
 			if ("error" in validation) return validation.error
-			const { absolutePath, displayPath, fileExists } = validation
+			const { absolutePath, displayPath, fileExists, originalContent } = validation
 
 			// 2. Pre-process content
 			const content = this.preprocessContent(rawContent, env, relPath)
@@ -44,6 +44,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					icon: DiracIcon.FILE_WRITE,
 					status: CardStatus.RUNNING,
 					collapsed: true,
+					diffs: [{ path: displayPath, oldText: originalContent, newText: content }],
 				})
 			}
 
@@ -55,6 +56,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				displayPath,
 				content,
 				fileExists,
+				originalContent,
 				shouldAutoApprove,
 				card,
 			)
@@ -111,7 +113,12 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			return { error: formatResponse.toolError(errorMsg) }
 		}
 
-		return { absolutePath, displayPath, fileExists: fileInfo.exists }
+		return {
+			absolutePath,
+			displayPath,
+			fileExists: fileInfo.exists,
+			originalContent: fileInfo.exists ? await env.workspace.readFile(absolutePath) : "",
+		}
 	}
 
 	private preprocessContent(rawContent: string, env: IToolEnvironment, relPath: string): string {
@@ -135,6 +142,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		displayPath: string,
 		content: string,
 		fileExists: boolean,
+		originalContent: string,
 		shouldAutoApprove: boolean,
 		card?: any,
 	): Promise<any | string> {
@@ -162,6 +170,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				await card.update({
 					header: `Wrote ${displayPath}`,
 					body: `✓ Successfully wrote to ${displayPath}`,
+					diffs: [{ path: displayPath, oldText: originalContent, newText: saveResult.content }],
 				})
 				await card.finalize(CardStatus.SUCCESS)
 			}
@@ -170,7 +179,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				ulid: env.config.ulid,
 				tool: toolId,
 				source: "agent",
-				beforeContent: "",
+				beforeContent: originalContent,
 				afterContent: content,
 				providerId,
 				modelId,
@@ -182,7 +191,10 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			}
 
 			const permissionMessage = `Dirac wants to ${fileExists ? "edit" : "create"} ${displayPath}`
-			const result = await env.interaction.askPermission(permissionMessage)
+			const result = await env.interaction.askPermission(permissionMessage, {
+				diffs: [{ path: displayPath, oldText: originalContent, newText: content }],
+				rawInput: { path: displayPath, content },
+			})
 			const { approved, value: reason } = result
 
 			if (result.action === DiracAskResponse.MESSAGE) {
@@ -211,7 +223,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					ulid: env.config.ulid,
 					tool: toolId,
 					source: "agent",
-					beforeContent: "",
+					beforeContent: originalContent,
 					afterContent: content,
 					providerId,
 					modelId,
@@ -230,6 +242,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				await card.update({
 					header: `Wrote ${displayPath}`,
 					body: `✓ Successfully wrote to ${displayPath}`,
+					diffs: [{ path: displayPath, oldText: originalContent, newText: saveResult.content }],
 				})
 				await card.finalize(CardStatus.SUCCESS)
 			}
@@ -238,7 +251,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				ulid: env.config.ulid,
 				tool: toolId,
 				source: "agent",
-				beforeContent: "",
+				beforeContent: originalContent,
 				afterContent: content,
 				providerId,
 				modelId,

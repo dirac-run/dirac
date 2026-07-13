@@ -37,6 +37,7 @@ export class Initializer {
 	 */
 	createConfig(
 		controller: Pick<Controller, "task" | "postStateToWebview" | "toggleActModeForYoloMode" | "cancelTask">,
+		workspaceCwd?: string,
 	): InitializerConfig {
 		Session.reset() // Reset session on controller initialization
 		PromptRegistry.getInstance() // Ensure prompts and tools are registered
@@ -51,7 +52,7 @@ export class Initializer {
 				return controller.task
 			},
 		})
-		const workspaceController = new WorkspaceController(stateManager)
+		const workspaceController = new WorkspaceController(stateManager, workspaceCwd)
 
 		const taskController = new TaskController(
 			{
@@ -59,6 +60,7 @@ export class Initializer {
 				controller: controller as unknown as Controller,
 				stateManager,
 				workspaceManager: undefined, // Will be set later by Controller
+				workspaceCwd,
 				backgroundCommandRunning: false,
 				cancelInProgress: false,
 				postStateToWebview: () => controller.postStateToWebview(),

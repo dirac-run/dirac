@@ -47,6 +47,29 @@ export type PermissionHandler = (
 	resolve: (response: acp.RequestPermissionResponse) => void,
 ) => void
 
+
+/** Typed user-decision request used by Dirac's capability-gated ACP elicitation extension. */
+export interface ElicitationRequest {
+	sessionId: string
+	elicitationId: string
+	message: string
+	options: Array<{ id: string; label: string }>
+	allowFreeformInput: boolean
+}
+
+/** Structured outcome returned by the client for an elicitation request. */
+export interface ElicitationResponse {
+	outcome: "accepted" | "cancelled"
+	optionId?: string
+	text?: string
+}
+
+/** Handler function for a capability-gated structured elicitation request. */
+export type ElicitationHandler = (
+	request: ElicitationRequest,
+	resolve: (response: ElicitationResponse) => void,
+) => void
+
 // ============================================================
 // Session Event Emitter Types
 // ============================================================
@@ -60,8 +83,14 @@ export type DiracSessionEvents = {
 } & {
 	/** Error event for session-level errors (not part of ACP SessionUpdate) */
 	error: (error: Error) => void
-	/** Token usage and cost update (not part of ACP SessionUpdate). */
-	usage_update: (payload: { tokensIn: number; tokensOut: number; totalCost: number }) => void
+	/** Token, cost, and context usage update exposed through Dirac's ACP extension. */
+	usage_update: (payload: Record<string, unknown>) => void
+	/** Capability-gated vendor update for pinned-message and context-compaction state. */
+	pinned_messages_update: (payload: Record<string, unknown>) => void
+
+	/** Capability-gated vendor replay of a client-recorded control-plane event. */
+	client_annotation: (payload: Record<string, unknown>) => void
+
 }
 
 // ============================================================
@@ -80,6 +109,8 @@ export interface DiracAgentOptions {
 	cwd?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
+	/** Whether ACP is served through a reconnectable Unix socket. */
+	detached?: boolean
 }
 
 /**
@@ -94,6 +125,8 @@ export interface AcpAgentOptions {
 	cwd?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
+	/** Whether ACP is served through a reconnectable Unix socket. */
+	detached?: boolean
 }
 
 // ============================================================
@@ -117,6 +150,8 @@ export interface DiracAcpSession {
 	createdAt: number
 	/** Timestamp of last activity */
 	lastActivityAt: number
+	/** Human-readable title derived from the first user exchange. */
+	title?: string
 	/** Whether this session was loaded from history (needs resume on first prompt) */
 	isLoadedFromHistory?: boolean
 	/** TaskId reserved for the first initTask call in this session (sessionId itself). Consumed on first use. */

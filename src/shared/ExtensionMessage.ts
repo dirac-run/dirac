@@ -296,6 +296,8 @@ export interface DiracApiReqInfo {
 
 	cancelReason?: DiracApiReqCancelReason
 	streamingFailedMessage?: string
+	/** Provider finish reason for the most recent model response. */
+	stopReason?: string
 	retryStatus?: {
 		attempt: number
 		maxAttempts: number
@@ -362,6 +364,20 @@ export interface UIActionState {
 	sendingDisabled: boolean
 }
 
+export interface CardDiff {
+	path: string
+	oldText: string
+	newText: string
+}
+
+
+/** Machine-readable input supplied to the tool represented by this card. */
+export type CardRawInput = Record<string, unknown>
+
+/** Machine-readable result produced by the tool represented by this card. */
+export type CardRawOutput = Record<string, unknown>
+
+
 export interface Card {
 	id: string
 	header: string
@@ -369,6 +385,11 @@ export interface Card {
 	status: CardStatus
 	renderType: RenderType
 	body?: string
+
+	rawInput?: CardRawInput
+	rawOutput?: CardRawOutput
+	diffs?: CardDiff[]
+	locations?: CardLocation[]
 	requireApproval?: boolean
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string
@@ -382,6 +403,12 @@ export interface Card {
 	endTime?: number
 	outcome?: string
 }
+export interface CardLocation {
+	path: string
+	line?: number
+}
+
+
 export enum CardStatus {
 	BUILDING = "building",
 	PENDING = "pending",
@@ -413,6 +440,11 @@ export interface CardParams {
 	status?: CardStatus
 	renderType?: RenderType
 	body?: string
+
+	rawInput?: CardRawInput
+	rawOutput?: CardRawOutput
+	diffs?: CardDiff[]
+	locations?: CardLocation[]
 	requireApproval?: boolean
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string

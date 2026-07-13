@@ -18,6 +18,12 @@ import { shortenCommandForDisplay } from "./path-display"
 const MAX_PATH_LENGTH = 255
 const MAX_COMMAND_OUTPUT_SIZE = 10 * 1024
 
+
+function exitCodeFromCommandResult(output: string): number | undefined {
+	const match = output.match(/exit code (-?\d+)/i)
+	return match ? Number.parseInt(match[1], 10) : undefined
+}
+
 export const execute_command_spec: DiracToolSpec = {
 	id: DiracDefaultTool.BASH,
 	name: "execute_command",
@@ -156,6 +162,8 @@ export class ExecuteCommandTool implements IDiracTool {
 					requireApproval: true,
 					renderType: "markdown",
 					maxHeight: 10000, // setting it to a high number to prevent scroll in a scroll
+
+					rawInput: { commands: commands.map(({ command, displayName, language }) => ({ command, displayName, language })) },
 					body: commands
 						.map((c) => {
 							const lang = c.language || "bash"
@@ -225,6 +233,8 @@ export class ExecuteCommandTool implements IDiracTool {
 					header: header.replace("Executing command", "Executing"),
 					icon: DiracIcon.COMMAND,
 					collapsed: true,
+
+					rawInput: { command: cmd.command, displayName: cmd.displayName, language: cmd.language ?? "bash" },
 				})
 			: null
 		if (activeCard) {
@@ -277,7 +287,13 @@ export class ExecuteCommandTool implements IDiracTool {
 			if (activeCard) {
 				await activeCard.update({
 					header: `Executed: ${cmd.displayName}`,
-					body: (userRejected ? "Error:\n```\n" : "Executed:\n```\n") + truncatedOutput + "\n```",
+					body: [userRejected ? "Error:" : "Executed:", "```", truncatedOutput, "```"].join("\n"),
+
+					rawOutput: {
+						output: truncatedOutput,
+						userRejected,
+						...(exitCodeFromCommandResult(output) === undefined ? {} : { exitCode: exitCodeFromCommandResult(output) }),
+					},
 				})
 				await activeCard.finalize(userRejected ? CardStatus.ERROR : CardStatus.SUCCESS)
 			}
@@ -289,7 +305,7 @@ export class ExecuteCommandTool implements IDiracTool {
 			}
 		} catch (error: any) {
 			if (activeCard) {
-				await activeCard.update({ body: `Error: ${error.message}` })
+				await activeCard.update({ body: `Error: ${error.message}`, rawOutput: { error: error.message } })
 				await activeCard.finalize(CardStatus.ERROR)
 			}
 			return {

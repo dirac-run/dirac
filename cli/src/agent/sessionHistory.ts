@@ -78,3 +78,11 @@ export function listLatestConversationHistoryItems(cwd?: string | null, defaultC
 
 	return Array.from(latestByConversationId.values()).sort((a, b) => (b.ts || 0) - (a.ts || 0))
 }
+
+
+/** Return every persisted task ID belonging to an ACP session. */
+export function getTaskIdsForSession(sessionId: string): string[] {
+	return getTaskHistory()
+		.filter((item) => getHistoryItemSessionId(item) === sessionId)
+		.map((item) => item.id)
+}

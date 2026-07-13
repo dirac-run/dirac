@@ -67,6 +67,8 @@ export interface TaskConfig {
 	coordinator: ToolExecutorCoordinator
 	taskMessenger: TaskMessenger
 	context: IDiracContext
+	/** The model tool call currently being executed, used for observable metadata. */
+	toolUse?: { name: string; params: Record<string, unknown> }
 
 	/** Snapshot active for the request that created this tool execution context. */
 	activeToolSnapshot?: ToolRequestSnapshot

@@ -73,7 +73,7 @@ export class ToolExecutorCoordinator {
 		const startTime = Date.now()
 
 		// 1. Initialize Tool Environment (Surface Adapter)
-		const env = new SurfaceAdapter(config, block.name)
+		const env = new SurfaceAdapter({ ...config, toolUse: { name: block.name, params: block.params } }, block.name)
 
 		// 2. Load Context
 		await (env.context as DiracContext).load()

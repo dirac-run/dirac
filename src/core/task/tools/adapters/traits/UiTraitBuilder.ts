@@ -22,12 +22,14 @@ export function buildInteractionTrait(
 	createCardFn: (params: CardParams) => Promise<ICardHandle>,
 ): IInteractionTrait {
 	return {
-		askPermission: async (message: string) => {
+		askPermission: async (message, preview) => {
 			const card = await createCardFn({
 				header: "Permission Request",
 				body: message,
 				requireApproval: true,
 				collapsed: false,
+				...(preview?.diffs ? { diffs: preview.diffs, renderType: "diff" } : {}),
+				...(preview?.rawInput ? { rawInput: preview.rawInput } : {}),
 			})
 			const result = await card.waitForInteraction()
 			return {

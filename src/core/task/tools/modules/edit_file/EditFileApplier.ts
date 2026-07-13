@@ -68,6 +68,13 @@ export class EditFileApplier {
 						status: CardStatus.SUCCESS,
 						body: batch.prepared!.diff,
 						renderType: "diff",
+						diffs: [
+							{
+								path: batch.displayPath,
+								oldText: batch.prepared!.content,
+								newText: finalContent,
+							},
+						],
 					})
 			}),
 		)
