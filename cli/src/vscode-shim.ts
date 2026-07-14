@@ -4,7 +4,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import path from "node:path"
 import pino, { type Logger } from "pino"
 import { printError, printInfo, printWarning } from "./utils/display"
 import { DIRAC_CLI_DIR } from "./utils/path"
@@ -12,7 +11,7 @@ import { DIRAC_CLI_DIR } from "./utils/path"
 export { URI } from "vscode-uri"
 export { DiracFileStorage } from "@/shared/storage"
 
-export const CLI_LOG_FILE = path.join(DIRAC_CLI_DIR.log, "dirac.1.log")
+export const CLI_LOG_FILE = DIRAC_CLI_DIR.cliLog
 
 /**
  * Safely read and parse a JSON file, returning a default value on failure
@@ -105,16 +104,7 @@ const outputChannelLoggers = new Map<string, Logger>()
 function getOutputChannelLogger(channelName: string): Logger {
 	let logger = outputChannelLoggers.get(channelName)
 	if (!logger) {
-		const transport = pino.transport({
-			target: "pino-roll",
-			options: {
-				name: channelName,
-				file: CLI_LOG_FILE.replace(".1", ""),
-				mkdir: true,
-				frequency: "daily",
-				limit: { count: 5 },
-			},
-		})
+		const transport = pino.destination({ dest: CLI_LOG_FILE, mkdir: true })
 		logger = pino({ timestamp: pino.stdTimeFunctions.isoTime }, transport)
 		outputChannelLoggers.set(channelName, logger)
 	}

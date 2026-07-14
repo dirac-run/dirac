@@ -11,6 +11,8 @@ const log = process.env.DIRAC_LOG_DIR ?? path.join(data, "logs")
 export const DIRAC_CLI_DIR = {
 	data,
 	log,
+	cliLog: path.join(log, "dirac-cli.log"),
+	acpLog: path.join(log, "dirac-acp.log"),
 }
 
 /**
