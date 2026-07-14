@@ -4,6 +4,9 @@
  *
  * Phase 0 — Prerequisite coverage for refactoring
  */
+import * as fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 
@@ -101,6 +104,80 @@ describe("SymbolIndexService", () => {
 
 			svc.setPersistenceEnabled(true)
 			;(svc as any).isPersistenceEnabled.should.be.true()
+		})
+	})
+
+	describe("index storage migration", () => {
+		const INDEX_DIR = ".dirac-cache"
+		const INDEX_FILE = "symbol-index.db"
+		const LEGACY_INDEX_DIR = ".dirac-symbol-index"
+		const LEGACY_INDEX_FILE = "data.db"
+		let projectRoot: string
+
+		const exists = async (filePath: string): Promise<boolean> => {
+			try {
+				await fs.access(filePath)
+				return true
+			} catch {
+				return false
+			}
+		}
+
+		const prepareIndexDir = async (): Promise<void> => {
+			const service = SymbolIndexService.getInstance()
+			;(service as any).projectRoot = projectRoot
+			await (service as any).ensureIndexDir()
+		}
+
+		beforeEach(async () => {
+			projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-index-"))
+		})
+
+		afterEach(async () => {
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		})
+
+		it("creates only the canonical cache directory when no index exists", async () => {
+			await prepareIndexDir()
+
+			;(await exists(path.join(projectRoot, INDEX_DIR))).should.be.true()
+			;(await exists(path.join(projectRoot, LEGACY_INDEX_DIR))).should.be.false()
+		})
+
+		it("migrates a legacy index directory and database file", async () => {
+			const legacyIndexDir = path.join(projectRoot, LEGACY_INDEX_DIR)
+			await fs.mkdir(legacyIndexDir)
+			await fs.writeFile(path.join(legacyIndexDir, LEGACY_INDEX_FILE), "legacy-index")
+
+			await prepareIndexDir()
+
+			;(await exists(legacyIndexDir)).should.be.false()
+			;(await fs.readFile(path.join(projectRoot, INDEX_DIR, INDEX_FILE), "utf8")).should.equal("legacy-index")
+		})
+
+		it("keeps an existing canonical index unchanged", async () => {
+			const indexDir = path.join(projectRoot, INDEX_DIR)
+			await fs.mkdir(indexDir)
+			await fs.writeFile(path.join(indexDir, INDEX_FILE), "canonical-index")
+
+			await prepareIndexDir()
+
+			;(await exists(path.join(projectRoot, LEGACY_INDEX_DIR))).should.be.false()
+			;(await fs.readFile(path.join(indexDir, INDEX_FILE), "utf8")).should.equal("canonical-index")
+		})
+
+		it("removes the legacy directory when both index directories exist", async () => {
+			const indexDir = path.join(projectRoot, INDEX_DIR)
+			const legacyIndexDir = path.join(projectRoot, LEGACY_INDEX_DIR)
+			await fs.mkdir(indexDir)
+			await fs.mkdir(legacyIndexDir)
+			await fs.writeFile(path.join(indexDir, INDEX_FILE), "canonical-index")
+			await fs.writeFile(path.join(legacyIndexDir, LEGACY_INDEX_FILE), "legacy-index")
+
+			await prepareIndexDir()
+
+			;(await exists(legacyIndexDir)).should.be.false()
+			;(await fs.readFile(path.join(indexDir, INDEX_FILE), "utf8")).should.equal("canonical-index")
 		})
 	})
 

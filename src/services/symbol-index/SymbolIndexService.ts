@@ -112,8 +112,10 @@ export class SymbolIndexService {
 	// Performance and behavior constants
 	private static readonly FILES_PER_BATCH = 10
 	private static readonly PARALLEL_PARSING_LIMIT = 10
-	private static readonly INDEX_DIR = ".dirac-symbol-index"
-	private static readonly INDEX_FILE = "data.db"
+	private static readonly INDEX_DIR = ".dirac-cache"
+	private static readonly INDEX_FILE = "symbol-index.db"
+	private static readonly LEGACY_INDEX_DIR = ".dirac-symbol-index"
+	private static readonly LEGACY_INDEX_FILE = "data.db"
 	private static readonly SAVE_DEBOUNCE_MS = 2000
 	private static readonly VERSION = 1
 
@@ -209,16 +211,48 @@ export class SymbolIndexService {
 
 	private async ensureIndexDir(): Promise<void> {
 		if (!this.isPersistenceEnabled) return
-		const dirPath = path.join(this.projectRoot, SymbolIndexService.INDEX_DIR)
-		Logger.info(`[SymbolIndexService] Ensuring index directory: ${dirPath}`)
-		try {
-			await fs.access(dirPath)
-			Logger.info("[SymbolIndexService] Index directory already exists")
-		} catch {
-			Logger.info("[SymbolIndexService] Creating index directory")
-			await fs.mkdir(dirPath, { recursive: true })
-			Logger.info("[SymbolIndexService] Index directory created")
+
+		const indexDir = path.join(this.projectRoot, SymbolIndexService.INDEX_DIR)
+		const legacyIndexDir = path.join(this.projectRoot, SymbolIndexService.LEGACY_INDEX_DIR)
+		const indexDirExists = await this.pathExists(indexDir)
+		const legacyIndexDirExists = await this.pathExists(legacyIndexDir)
+
+		if (legacyIndexDirExists && indexDirExists) {
+			Logger.info(`[SymbolIndexService] Removing legacy symbol index directory: ${legacyIndexDir}`)
+			await fs.rm(legacyIndexDir, { recursive: true, force: true })
 		}
+
+		if (legacyIndexDirExists && !indexDirExists) {
+			Logger.info(`[SymbolIndexService] Migrating symbol index directory to: ${indexDir}`)
+			await fs.rename(legacyIndexDir, indexDir)
+		}
+
+		await fs.mkdir(indexDir, { recursive: true })
+		await this.migrateLegacyIndexFile(indexDir)
+	}
+
+	private async pathExists(filePath: string): Promise<boolean> {
+		try {
+			await fs.access(filePath)
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	private async migrateLegacyIndexFile(indexDir: string): Promise<void> {
+		const legacyIndexFile = path.join(indexDir, SymbolIndexService.LEGACY_INDEX_FILE)
+		if (!(await this.pathExists(legacyIndexFile))) return
+
+		const indexFile = path.join(indexDir, SymbolIndexService.INDEX_FILE)
+		if (await this.pathExists(indexFile)) {
+			Logger.info(`[SymbolIndexService] Removing legacy symbol index file: ${legacyIndexFile}`)
+			await fs.rm(legacyIndexFile, { force: true })
+			return
+		}
+
+		Logger.info(`[SymbolIndexService] Migrating symbol index file to: ${indexFile}`)
+		await fs.rename(legacyIndexFile, indexFile)
 	}
 
 	private async excludeIndexDirFromGit(): Promise<void> {
@@ -258,7 +292,7 @@ export class SymbolIndexService {
 
 	private isExcluded(name: string): boolean {
 		if (SymbolIndexService.EXCLUDED_DIRS.has(name)) return true
-		if (name === SymbolIndexService.INDEX_DIR) return true
+		if (name === SymbolIndexService.INDEX_DIR || name === SymbolIndexService.LEGACY_INDEX_DIR) return true
 		if (name.startsWith(".") && !name.startsWith(".dirac")) return true
 		return false
 	}
