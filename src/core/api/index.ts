@@ -45,6 +45,7 @@ import { ApiStream, ApiStreamUsageChunk } from "./transform/stream"
 
 export type CommonApiHandlerOptions = {
 	onRetryAttempt?: ApiConfiguration["onRetryAttempt"]
+	enableParallelToolCalling?: boolean
 }
 export interface ApiHandler {
 	createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: DiracTool[], useResponseApi?: boolean): ApiStream
@@ -200,6 +201,7 @@ const PROVIDER_REGISTRY: Record<
 				openAiModelId,
 				openAiModelInfo,
 				reasoningEffort: mc.reasoningEffort,
+				enableParallelToolCalling: cfg.enableParallelToolCalling,
 			})
 		}
 		return new OpenAiHandler({
@@ -211,6 +213,7 @@ const PROVIDER_REGISTRY: Record<
 			openAiModelId,
 			openAiModelInfo,
 			reasoningEffort: mc.reasoningEffort,
+			enableParallelToolCalling: cfg.enableParallelToolCalling,
 		})
 	},
 	lmstudio: (cfg, mc) =>
@@ -240,12 +243,14 @@ const PROVIDER_REGISTRY: Record<
 			reasoningEffort: mc.reasoningEffort,
 			apiModelId: mc.apiModelId,
 			thinkingBudgetTokens: mc.thinkingBudgetTokens,
+			enableParallelToolCalling: cfg.enableParallelToolCalling,
 		}),
 	"openai-codex": (cfg, mc) =>
 		new OpenAiCodexHandler({
 			onRetryAttempt: cfg.onRetryAttempt,
 			reasoningEffort: mc.reasoningEffort,
 			apiModelId: mc.apiModelId,
+			enableParallelToolCalling: cfg.enableParallelToolCalling,
 		}),
 	deepseek: (cfg, mc) =>
 		new DeepSeekHandler({

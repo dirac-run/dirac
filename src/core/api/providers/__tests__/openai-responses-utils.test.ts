@@ -1,5 +1,5 @@
 import "should"
-import { shouldRetryWithFullContext } from "../openai-responses-utils"
+import { buildResponseCreateParams, shouldRetryWithFullContext } from "../openai-responses-utils"
 
 // Characterization tests for shouldRetryWithFullContext.
 // The function decides whether a failed request should be retried with the full
@@ -40,5 +40,24 @@ describe("shouldRetryWithFullContext", () => {
 
 	it("returns false for unrelated errors", () => {
 		shouldRetryWithFullContext({ status: 500, message: "server error" }, true).should.equal(false)
+	})
+})
+
+describe("buildResponseCreateParams", () => {
+	const baseArgs = {
+		modelId: "gpt-test",
+		systemPrompt: "You are helpful.",
+		input: [] as any,
+		tools: [{ type: "function", name: "read_file", parameters: { type: "object" }, strict: true }] as any,
+	}
+
+	it("includes parallel_tool_calls when enabled", () => {
+		const params = buildResponseCreateParams({ ...baseArgs, enableParallelToolCalling: true }) as any
+		params.parallel_tool_calls.should.equal(true)
+	})
+
+	it("includes parallel_tool_calls when disabled", () => {
+		const params = buildResponseCreateParams({ ...baseArgs, enableParallelToolCalling: false }) as any
+		params.parallel_tool_calls.should.equal(false)
 	})
 })

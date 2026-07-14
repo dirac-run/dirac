@@ -9,6 +9,7 @@ import { ApiStream } from "../transform/stream"
 import { buildResponseCreateParams, mapResponseTools, processResponsesEvents } from "./openai-responses-utils"
 import { ChatCompletionTool } from "openai/resources/chat/completions"
 
+import { isParallelToolCallingEnabled } from "@/utils/model-utils"
 interface OpenAiResponsesCompatibleHandlerOptions extends CommonApiHandlerOptions {
 	openAiApiKey?: string
 	openAiBaseUrl?: string
@@ -24,6 +25,10 @@ export class OpenAiResponsesCompatibleHandler implements ApiHandler {
 
 	constructor(options: OpenAiResponsesCompatibleHandlerOptions) {
 		this.options = options
+	}
+
+	private shouldEnableParallelToolCalling(): boolean {
+		return isParallelToolCallingEnabled(this.options.enableParallelToolCalling ?? false)
 	}
 
 	private ensureClient(): OpenAI {
@@ -61,6 +66,7 @@ export class OpenAiResponsesCompatibleHandler implements ApiHandler {
 			tools: responseTools,
 			reasoningEffort: this.options.reasoningEffort,
 			store: true,
+			enableParallelToolCalling: this.shouldEnableParallelToolCalling(),
 		})
 
 		const stream = await client.responses.create(params, { signal: this.abortController.signal })

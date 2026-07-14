@@ -19,6 +19,7 @@ import { convertToOpenAIResponsesInput } from "../transform/openai-response-form
 import { ApiStream } from "../transform/stream"
 import { parseSseResponse, processResponsesEvents, ResponsesWebsocketManager } from "./openai-responses-utils"
 import { RetriableError } from "../retry"
+import { isParallelToolCallingEnabled } from "@/utils/model-utils"
 
 /**
  * OpenAI Codex base URL for API requests
@@ -67,6 +68,10 @@ export class OpenAiCodexHandler implements ApiHandler {
 	constructor(options: OpenAiCodexHandlerOptions) {
 		this.options = options
 		this.sessionId = uuidv7()
+	}
+
+	private shouldEnableParallelToolCalling(): boolean {
+		return isParallelToolCallingEnabled(this.options.enableParallelToolCalling ?? false)
 	}
 
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: ChatCompletionTool[]): ApiStream {
@@ -139,7 +144,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 			instructions: systemPrompt,
 			prompt_cache_key: this.sessionId,
 			tool_choice: "auto",
-			parallel_tool_calls: false,
+			parallel_tool_calls: this.shouldEnableParallelToolCalling(),
 			...(includeReasoning ? { include: ["reasoning.encrypted_content"] } : {}),
 			...(includeReasoning
 				? {

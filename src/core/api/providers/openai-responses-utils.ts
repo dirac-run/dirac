@@ -87,6 +87,7 @@ export function buildResponseCreateParams(args: {
 	reasoningEffort?: string
 	previousResponseId?: string
 	store?: boolean
+	enableParallelToolCalling?: boolean
 }): OpenAI.Responses.ResponseCreateParamsStreaming {
 	const requestedEffort = normalizeOpenaiReasoningEffort(args.reasoningEffort)
 	const reasoning: { effort: ChatCompletionReasoningEffort; summary: "auto" } | undefined =
@@ -103,6 +104,9 @@ export function buildResponseCreateParams(args: {
 		input: args.input,
 		stream: true,
 		tools: args.tools,
+		...(args.tools.length > 0 && args.enableParallelToolCalling !== undefined
+			? { parallel_tool_calls: args.enableParallelToolCalling }
+			: {}),
 		...(args.store !== undefined ? { store: args.store } : { store: !args.previousResponseId }),
 		...(args.previousResponseId ? { previous_response_id: args.previousResponseId } : {}),
 		...(reasoning ? { reasoning } : {}),

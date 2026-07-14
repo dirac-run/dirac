@@ -14,6 +14,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream } from "../transform/stream"
 import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
 import { formatOpenAiCompatibleUsage } from "../transform/openai-usage"
+import { isParallelToolCallingEnabled } from "@/utils/model-utils"
 
 interface OpenAiHandlerOptions extends CommonApiHandlerOptions {
 	openAiApiKey?: string
@@ -32,6 +33,10 @@ export class OpenAiHandler implements ApiHandler {
 
 	constructor(options: OpenAiHandlerOptions) {
 		this.options = options
+	}
+
+	private shouldEnableParallelToolCalling(): boolean {
+		return isParallelToolCallingEnabled(this.options.enableParallelToolCalling ?? false)
 	}
 
 	private getAzureAudienceScope(baseUrl?: string): string {
@@ -182,7 +187,7 @@ export class OpenAiHandler implements ApiHandler {
 			reasoning_effort: reasoningEffort,
 			stream: true,
 			stream_options: { include_usage: true },
-			...getOpenAIToolParams(finalTools, false),
+			...getOpenAIToolParams(finalTools, this.shouldEnableParallelToolCalling()),
 		})
 
 		const toolCallProcessor = new ToolCallProcessor()

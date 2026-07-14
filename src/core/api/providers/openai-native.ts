@@ -23,7 +23,7 @@ import { createOpenAIClient } from "@/shared/net"
 import { ApiFormat } from "@/shared/proto/dirac/models"
 import { FeatureFlag } from "@/shared/services/feature-flags/feature-flags"
 import { Logger } from "@/shared/services/Logger"
-import { isGPT5 } from "@/utils/model-utils"
+import { isParallelToolCallingEnabled } from "@/utils/model-utils"
 import { ApiHandler, CommonApiHandlerOptions } from "../"
 import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -62,6 +62,10 @@ export class OpenAiNativeHandler implements ApiHandler {
 	}
 	constructor(options: OpenAiNativeHandlerOptions) {
 		this.options = options
+	}
+
+	private shouldEnableParallelToolCalling(): boolean {
+		return isParallelToolCallingEnabled(this.options.enableParallelToolCalling ?? false)
 	}
 
 	private ensureClient(): OpenAI {
@@ -143,7 +147,7 @@ export class OpenAiNativeHandler implements ApiHandler {
 			stream_options: { include_usage: true },
 			reasoning_effort: reasoningEffort,
 			...(model.info.temperature !== undefined ? { temperature: model.info.temperature } : {}),
-			...(includeTools ? getOpenAIToolParams(tools, isGPT5(model.id)) : {}),
+			...(includeTools ? getOpenAIToolParams(tools, this.shouldEnableParallelToolCalling()) : {}),
 		})
 
 		for await (const chunk of stream) {
@@ -197,6 +201,7 @@ export class OpenAiNativeHandler implements ApiHandler {
 			previousResponseId,
 			tools: responseTools,
 			reasoningEffort: this.options.reasoningEffort,
+			enableParallelToolCalling: this.shouldEnableParallelToolCalling(),
 		})
 
 		const fallbackParams = buildResponseCreateParams({
@@ -205,6 +210,7 @@ export class OpenAiNativeHandler implements ApiHandler {
 			input,
 			tools: responseTools,
 			reasoningEffort: this.options.reasoningEffort,
+			enableParallelToolCalling: this.shouldEnableParallelToolCalling(),
 		})
 
 		if (usePreviousResponseId && previousResponseId) {

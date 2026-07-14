@@ -64,7 +64,7 @@ export function parsePrice(priceString: string | undefined): number {
  * Check if parallel tool calling is enabled.
  * For this fork, we always enable parallel tool calling to support multiple tool uses per turn.
  */
-export function isParallelToolCallingEnabled(enableParallelSetting: boolean, providerInfo: ApiProviderInfo): boolean {
+export function isParallelToolCallingEnabled(enableParallelSetting: boolean, providerInfo?: ApiProviderInfo): boolean {
 	return true
 }
 
