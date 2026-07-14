@@ -98,6 +98,8 @@ const copyAssets = {
 			const sourceDir = path.join(__dirname, "node_modules", "web-tree-sitter")
 			const targetDir = path.join(__dirname, destDir)
 
+			fs.rmSync(path.join(targetDir, "node_modules", "@vscode", "ripgrep"), { recursive: true, force: true })
+
 			// Copy .hash_anchors
 			const dictionarySource = path.join(__dirname, "src", "utils", ".hash_anchors")
 			const dictionaryTarget = path.join(targetDir, ".hash_anchors")
@@ -155,15 +157,6 @@ const copyAssets = {
 			// Copy source code for /askDirac command
 			copySourceCode(__dirname, path.join(__dirname, destDir))
 
-			// Copy runtime modules that are externalized or need files/binaries available on disk
-			const modulesToCopy = ["@vscode/ripgrep"]
-			for (const mod of modulesToCopy) {
-				const sourceModuleDir = path.join(__dirname, "node_modules", mod)
-				const targetModuleDir = path.join(targetDir, "node_modules", mod)
-				if (fs.existsSync(sourceModuleDir)) {
-					fs.cpSync(sourceModuleDir, targetModuleDir, { recursive: true })
-				}
-			}
 		})
 	},
 }

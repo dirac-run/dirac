@@ -2,8 +2,6 @@
 // Import the module and reference it with the alias vscode in your code below
 
 import assert from "node:assert"
-import * as childProcess from "node:child_process"
-import * as fs from "node:fs"
 import { DIFF_VIEW_URI_SCHEME } from "@hosts/vscode/diff-view-constants"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"
@@ -16,7 +14,6 @@ import { createDiracAPI } from "./exports"
 import { initializeTestMode } from "./services/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
 import "./utils/path"; // necessary to have access to String.prototype.toPosix
-import path from "node:path"
 import { isDev } from "@shared/config/environment"
 import type { ExtensionContext } from "vscode"
 import { HostProvider } from "@/hosts/host-provider"
@@ -38,7 +35,6 @@ import {
 	migrateWelcomeViewCompleted,
 	migrateWorkspaceToGlobalStorage,
 } from "./core/storage/state-migrations"
-import { workspaceResolver } from "./core/workspace"
 import { findMatchingNotebookCell, getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
 import { abortCommitGeneration, generateCommitMsg } from "./hosts/vscode/commit-message-generator"
 import { registerDiracOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
@@ -51,12 +47,12 @@ import { VscodeDiffViewProvider } from "./hosts/vscode/VscodeDiffViewProvider"
 import { VscodeDiracWebviewProvider } from "./hosts/vscode/VscodeWebviewProvider"
 import { exportVSCodeStorageToSharedFiles } from "./hosts/vscode/vscode-to-file-migration"
 import { ExtensionRegistryInfo } from "./registry"
+import { resolveWorkingRipgrepBinary } from "./services/ripgrep/resolve-ripgrep-binary"
 import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
 import { telemetryService } from "./services/telemetry"
 import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
 import { ShowMessageType } from "./shared/proto/host/window"
 
-let extensionRootForBinaryResolution: string | undefined
 // This method is called when the VS Code extension is activated.
 // NOTE: This is VS Code specific - services that should be registered
 // for all-platform should be registered in common.ts.
@@ -69,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// 2. Set up HostProvider for VSCode using shared data directory
 	// IMPORTANT: This must be done before any service can be registered
-	setupHostProvider(context, storageContext.dataDir)
+	await setupHostProvider(context, storageContext.dataDir)
 
 	// 3. Clean up legacy data patterns within VSCode's native storage.
 	// Moves workspace→global keys, task history→file, custom instructions→rules, etc.
@@ -650,11 +646,30 @@ async function showJupyterPromptInput(title: string, placeholder: string): Promi
 	})
 }
 
-function setupHostProvider(context: ExtensionContext, globalStorageFsPath: string) {
-	extensionRootForBinaryResolution = context.extensionUri.fsPath
-
+async function setupHostProvider(context: ExtensionContext, globalStorageFsPath: string) {
 	const outputChannel = registerDiracOutputChannel(context)
 	outputChannel.appendLine("[Dirac] Setting up VS Code host...")
+
+	const ripgrep = await resolveWorkingRipgrepBinary(context.extensionUri.fsPath).catch((error: unknown) => {
+		const resolutionError = error instanceof Error ? error : new Error(String(error))
+		Logger.warn(`[Dirac] ${resolutionError.message}`)
+		outputChannel.appendLine(`[Dirac] ${resolutionError.message}`)
+		return resolutionError
+	})
+
+	if (!(ripgrep instanceof Error)) {
+		outputChannel.appendLine(`[Dirac] Resolved rg from ${ripgrep.source}: ${ripgrep.path}`)
+	}
+
+	const getCachedBinaryLocation = async (name: string): Promise<string> => {
+		if (!name.startsWith("rg")) {
+			throw new Error(`Binary '${name}' is not supported`)
+		}
+		if (ripgrep instanceof Error) {
+			throw ripgrep
+		}
+		return ripgrep.path
+	}
 
 	const createWebview = () => new VscodeDiracWebviewProvider(context)
 	const createDiffView = () => new VscodeDiffViewProvider()
@@ -689,7 +704,7 @@ function setupHostProvider(context: ExtensionContext, globalStorageFsPath: strin
 		vscodeHostBridgeClient,
 		(msg: string) => outputChannel.appendLine(msg),
 		getCallbackUrl,
-		getBinaryLocation,
+		getCachedBinaryLocation,
 		context.extensionUri.fsPath,
 		globalStorageFsPath,
 
@@ -722,85 +737,6 @@ async function openDiracSidebarForTaskUri(): Promise<void> {
 	Logger.warn("Task URI handling timed out waiting for Dirac sidebar visibility")
 }
 
-async function getBinaryLocation(name: string): Promise<string> {
-	if (!name.startsWith("rg")) {
-		throw new Error(`Binary '${name}' is not supported`)
-	}
-
-	const checkedPaths: string[] = []
-	const isWindows = process.platform === "win32"
-	const accessMode = isWindows ? fs.constants.F_OK : fs.constants.X_OK
-	const binaryNames = isWindows && !name.endsWith(".exe") ? [name, `${name}.exe`] : [name]
-	const universalPlatformDir = `${process.platform}-${process.env.npm_config_arch || process.arch}`
-	const packageRelativeDirs = [
-		"dist/node_modules/@vscode/ripgrep/bin",
-		"dist/node_modules/vscode-ripgrep/bin",
-		"node_modules/@vscode/ripgrep/bin",
-		"node_modules/vscode-ripgrep/bin",
-		"node_modules.asar.unpacked/@vscode/ripgrep/bin",
-		"node_modules.asar.unpacked/vscode-ripgrep/bin",
-	]
-	const universalPackageRelativeDirs = [
-		path.join("dist/node_modules/@vscode/ripgrep-universal/bin", universalPlatformDir),
-		path.join("node_modules/@vscode/ripgrep-universal/bin", universalPlatformDir),
-		path.join("node_modules.asar.unpacked/@vscode/ripgrep-universal/bin", universalPlatformDir),
-	]
-
-	const isExecutable = async (candidatePath: string) => {
-		checkedPaths.push(candidatePath)
-		try {
-			await fs.promises.access(candidatePath, accessMode)
-			return true
-		} catch {
-			return false
-		}
-	}
-
-	const checkPath = async (root: string, relativePath: string) => {
-		const fullPathResult = workspaceResolver.resolveWorkspacePath(root, relativePath, "Services.ripgrep.getBinPath")
-		const fullPath = typeof fullPathResult === "string" ? fullPathResult : fullPathResult.absolutePath
-		return (await isExecutable(fullPath)) ? fullPath : undefined
-	}
-
-	const roots = [
-		...(extensionRootForBinaryResolution ? [{ label: "extension", path: extensionRootForBinaryResolution }] : []),
-		{ label: "vscode", path: vscode.env.appRoot },
-	]
-
-	for (const root of roots) {
-		for (const pkgFolder of [...packageRelativeDirs, ...universalPackageRelativeDirs]) {
-			for (const binaryName of binaryNames) {
-				const binPath = await checkPath(root.path, path.join(pkgFolder, binaryName))
-				if (binPath) {
-					Logger.info(`[Dirac] Resolved ${name} from ${root.label} bundled path: ${binPath}`)
-					return binPath
-				}
-			}
-		}
-	}
-
-	const whichCommand = isWindows ? "where" : "which"
-	for (const binaryName of binaryNames) {
-		try {
-			const result = childProcess.execFileSync(whichCommand, [binaryName], {
-				encoding: "utf-8",
-				stdio: ["pipe", "pipe", "pipe"],
-			})
-			const binPath = result.trim().split("\n")[0].trim()
-			if (binPath && (await isExecutable(binPath))) {
-				Logger.info(`[Dirac] Resolved ${name} from system PATH: ${binPath}`)
-				return binPath
-			}
-		} catch {
-			// Not on PATH.
-		}
-	}
-
-	const installHint = process.platform === "darwin" ? " Install ripgrep with: brew install ripgrep." : ""
-	throw new Error(
-		`Could not find an executable ripgrep binary '${name}'. Checked paths: ${checkedPaths.join(", ")}.${installHint}`,
-	)
-}
 
 // This method is called when your extension is deactivated
 export async function deactivate() {
