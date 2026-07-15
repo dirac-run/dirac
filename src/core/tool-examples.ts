@@ -19,7 +19,8 @@ export const TOOL_EXAMPLES: Partial<Record<DiracDefaultTool, string>> = {
 	[DiracDefaultTool.PLAN_MODE]: '{"response": "I have gathered context..."}',
 	[DiracDefaultTool.FILE_READ]: '{"paths": ["src/main.ts"]}',
 	[DiracDefaultTool.SEARCH]: '{"paths": ["src"], "regex": "TODO"}',
-	[DiracDefaultTool.USE_SUBAGENTS]: '{"prompt_1": "...", "prompt_2": "..."}',
+	[DiracDefaultTool.USE_SUBAGENTS]:
+		'{"subagents": [{"prompt": "..."}, {"prompt": "...", "timeout": 120, "max_turns": 10, "include_history": true}]}',
 	[DiracDefaultTool.USE_SKILL]: '{"skill_name": "skill-name"}',
 	[DiracDefaultTool.LIST_SKILLS]: "{}",
 	[DiracDefaultTool.FILE_NEW]: '{"path": "src/new-file.ts", "content": "export const x = 1"}',

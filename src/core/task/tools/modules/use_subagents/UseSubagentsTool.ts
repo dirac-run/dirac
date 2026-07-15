@@ -9,51 +9,47 @@ import { excerpt } from "../../../utils/excerpt"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@/shared/icons"
 
+interface SubagentRequest {
+	prompt: string
+	timeout: number
+	maxTurns?: number
+	includeHistory: boolean
+}
+
 export const use_subagents_spec: DiracToolSpec = {
 	id: DiracDefaultTool.USE_SUBAGENTS,
 	name: "use_subagents",
-	description: "Run up to five focused in-process subagents in parallel.",
+	description: "Run subagents in parallel.",
 	contextRequirements: (context) => context.subagentsEnabled === true,
 	parameters: [
 		{
-			name: "prompt_1",
+			name: "subagents",
+			type: "array",
 			required: true,
-			instruction: "First subagent prompt.",
-		},
-		{
-			name: "prompt_2",
-			required: false,
-			instruction: "Second subagent prompt.",
-		},
-		{
-			name: "prompt_3",
-			required: false,
-			instruction: "Optional third subagent prompt.",
-		},
-		{
-			name: "prompt_4",
-			required: false,
-			instruction: "Optional fourth subagent prompt.",
-		},
-		{
-			name: "prompt_5",
-			required: false,
-			instruction: "Optional fifth subagent prompt.",
-		},
-		{
-			name: "timeout",
-			required: false,
-			instruction: "Optional timeout in seconds for each subagent. Defaults to 300 seconds.",
-		},
-		{
-			name: "max_turns",
-			required: false,
-			instruction: "Optional maximum number of turns for each subagent.",
-		},
-		{
-			name: "include_history",
-			required: false,
-			instruction: "Optional boolean to include the main task's conversation history.",
+			instruction: "Subagents to run in parallel.",
+			items: {
+				type: "object",
+				properties: {
+					prompt: {
+						type: "string",
+						description: "Task for this subagent.",
+					},
+					timeout: {
+						type: "integer",
+						description: "Timeout in seconds. Default: 300.",
+					},
+					max_turns: {
+						type: "integer",
+						description: "Maximum turns.",
+					},
+					include_history: {
+						type: "boolean",
+						description: "Include the main task conversation history.",
+					},
+				},
+				required: ["prompt"],
+				additionalProperties: false,
+			},
 		},
 	],
 }
@@ -71,25 +67,24 @@ export class UseSubagentsTool implements IDiracTool {
 		this.validateExecution(env)
 
 		const subagentName = AgentConfigLoader.getInstance().resolveSubagentNameForTool(env.toolName)
-		const prompts = this.resolvePrompts(args, subagentName)
+		const requests = this.resolveRequests(args, subagentName)
 
-		if (prompts.length === 0) {
+		if (requests.length === 0) {
 			env.orchestration.setTaskState(
 				"consecutiveMistakeCount",
 				env.orchestration.getTaskState("consecutiveMistakeCount") + 1,
 			)
-			return formatResponse.toolError("Missing required parameter: prompt_1")
+			return formatResponse.toolError(`Missing required parameter: ${subagentName ? "prompt" : "subagents"}`)
 		}
 
-		const options = this.parseOptions(args)
-		const entries = this.initializeEntries(prompts)
+		const entries = this.initializeEntries(requests.map(({ prompt }) => prompt))
 
 		const card = !env.config.isSubagentExecution
 			? await env.ui.createCard({
-					header: "Run Subagents",
-					icon: DiracIcon.SUBAGENTS,
-					collapsed: true,
-				})
+				header: "Run Subagents",
+				icon: DiracIcon.SUBAGENTS,
+				collapsed: true,
+			})
 			: undefined
 
 		const emitStatus = async (status: string, partial: boolean) => {
@@ -106,18 +101,18 @@ export class UseSubagentsTool implements IDiracTool {
 
 		await emitStatus("running", true)
 
-		await this.runSubagents(prompts, options, subagentName, entries, env, emitStatus)
+		await this.runSubagents(requests, subagentName, entries, env, emitStatus)
 
 		const failures = entries.filter((e) => e.status === "failed").length
 		if (card) {
 			await card.update({
-				header: `Ran ${prompts.length} subagents`,
+				header: `Ran ${requests.length} subagents`,
 			})
 			await card.finalize(failures > 0 ? CardStatus.ERROR : CardStatus.SUCCESS)
 		}
 		await emitStatus(failures > 0 ? "failed" : "completed", false)
 
-		const summary = this.formatFinalResponse(entries, options, failures)
+		const summary = this.formatFinalResponse(entries, failures)
 		return formatResponse.toolResult(summary)
 	}
 
@@ -127,18 +122,30 @@ export class UseSubagentsTool implements IDiracTool {
 		}
 	}
 
-	private resolvePrompts(args: any, subagentName: string | undefined): string[] {
-		return subagentName
-			? [args.prompt || args.prompt_1].map((p) => p?.trim()).filter((p): p is string => !!p)
-			: ["prompt_1", "prompt_2", "prompt_3", "prompt_4", "prompt_5"]
-					.map((key) => args[key]?.trim())
-					.filter((p): p is string => !!p)
+	private resolveRequests(args: any, subagentName: string | undefined): SubagentRequest[] {
+		if (subagentName) {
+			const prompt = typeof args.prompt === "string" ? args.prompt.trim() : ""
+			return prompt ? [{ prompt, ...this.parseOptions(args) }] : []
+		}
+
+		if (!Array.isArray(args.subagents)) {
+			return []
+		}
+
+		return args.subagents.map((subagent: any, index: number) => {
+			const prompt = typeof subagent?.prompt === "string" ? subagent.prompt.trim() : ""
+			if (!prompt) {
+				throw new Error(`Subagent ${index + 1} is missing required parameter: prompt`)
+			}
+
+			return { prompt, ...this.parseOptions(subagent) }
+		})
 	}
 
-	private parseOptions(args: any) {
+	private parseOptions(args: any): Omit<SubagentRequest, "prompt"> {
 		return {
-			timeout: args.timeout ? parseInt(String(args.timeout), 10) : 300,
-			maxTurns: args.max_turns ? parseInt(String(args.max_turns), 10) : undefined,
+			timeout: args.timeout === undefined ? 300 : parseInt(String(args.timeout), 10),
+			maxTurns: args.max_turns === undefined ? undefined : parseInt(String(args.max_turns), 10),
 			includeHistory: args.include_history === true || String(args.include_history) === "true",
 		}
 	}
@@ -193,26 +200,25 @@ export class UseSubagentsTool implements IDiracTool {
 	}
 
 	private async runSubagents(
-		prompts: string[],
-		options: any,
+		requests: SubagentRequest[],
 		subagentName: string | undefined,
 		entries: SubagentStatusItem[],
 		env: IToolEnvironment,
 		emitStatus: (status: string, partial: boolean) => Promise<void>,
 	): Promise<void> {
-		const execution = prompts.map(async (prompt, index) => {
+		const execution = requests.map(async (request, index) => {
 			const subagentCard = !env.config.isSubagentExecution
 				? await env.ui.createCard({
-						header: `Subagent ${index + 1}: ${prompt.substring(0, 30)}...`,
-						collapsed: true,
-						status: CardStatus.RUNNING,
-					})
+					header: `Subagent ${index + 1}: ${request.prompt.substring(0, 30)}...`,
+					collapsed: true,
+					status: CardStatus.RUNNING,
+				})
 				: undefined
 
-			return env.orchestration.runSubagent(prompt, {
-				timeout: options.timeout,
-				maxTurns: options.maxTurns,
-				includeHistory: options.includeHistory,
+			return env.orchestration.runSubagent(request.prompt, {
+				timeout: request.timeout,
+				maxTurns: request.maxTurns,
+				includeHistory: request.includeHistory,
 				subagentName,
 				onUpdate: async (update) => {
 					const current = entries[index]
@@ -273,7 +279,7 @@ export class UseSubagentsTool implements IDiracTool {
 		})
 	}
 
-	private formatFinalResponse(entries: SubagentStatusItem[], options: any, failures: number): string {
+	private formatFinalResponse(entries: SubagentStatusItem[], failures: number): string {
 		const totalToolCalls = entries.reduce((acc: number, e) => acc + (e.toolCalls || 0), 0)
 		const maxContextTokens = entries.reduce((acc: number, e) => Math.max(acc, e.contextTokens || 0), 0)
 		const contextWindow = entries.reduce((acc: number, e) => Math.max(acc, e.contextWindow || 0), 0)
@@ -283,8 +289,6 @@ export class UseSubagentsTool implements IDiracTool {
 
 		const summary = [
 			"Subagent results:",
-			options.timeout ? `Timeout: ${options.timeout}s` : undefined,
-			options.maxTurns ? `Max turns: ${options.maxTurns}` : undefined,
 			`Total: ${entries.length}`,
 			`Succeeded: ${entries.length - failures}`,
 			`Failed: ${failures}`,
