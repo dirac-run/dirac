@@ -1,19 +1,38 @@
-import { IDiracTool } from "../../interfaces/IDiracTool"
-import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
-import { DiracIcon } from "@/shared/icons"
-import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
-import { SurfaceType } from "../../interfaces/SurfaceType"
+import { formatResponse } from "@core/formatResponse"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { formatLineForModel } from "@utils/line-hashing"
-import { CardStatus } from "@/shared/ExtensionMessage"
 import * as path from "path"
-import { formatResponse } from "@core/formatResponse"
+import { CardStatus } from "@/shared/ExtensionMessage"
+import { DiracIcon } from "@/shared/icons"
+import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
+import { IDiracTool } from "../../interfaces/IDiracTool"
+import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { SurfaceType } from "../../interfaces/SurfaceType"
 
 export interface FindSymbolReferencesArgs {
 	symbols: string | string[]
 	paths: string | string[]
 	find_type?: "definition" | "reference" | "both"
 	include_anchors?: boolean
+}
+
+interface ResolvedSearchPath {
+	absolutePath: string
+	displayPath: string
+}
+
+interface SymbolHit {
+	symbol: string
+	startLine: number
+	[key: string]: any
+}
+
+interface SearchCard {
+	symbol: string
+	searchPath: ResolvedSearchPath
+	card: ICardHandle
+	hitsByFile: Map<string, SymbolHit[]>
+	isFinalized: boolean
 }
 
 export const find_symbol_references_spec: DiracToolSpec = {
@@ -67,12 +86,11 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 	}
 
 	async processCall(args: FindSymbolReferencesArgs, env: IToolEnvironment): Promise<string> {
-		const isSubagent = env.config.isSubagentExecution
-		const cards = !isSubagent ? new Map<string, any>() : undefined
 		const symbols = Array.isArray(args.symbols) ? args.symbols : args.symbols ? [args.symbols] : []
 		const relPaths = Array.isArray(args.paths) ? args.paths : args.paths ? [args.paths] : []
 		const findType = args.find_type || "both"
 		const includeAnchors = args.include_anchors === true
+		let cards: SearchCard[] | undefined
 
 		if (symbols.length === 0 || relPaths.length === 0) {
 			this.incrementMistakeCount(env)
@@ -85,13 +103,17 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 		try {
 			await this.initializeIndex(env)
 
-			const absolutePaths = await this.resolveAbsolutePaths(relPaths, env)
-			await this.updateIndexForPaths(absolutePaths, env)
+			const searchPaths = await this.resolveSearchPaths(relPaths, env)
+			await this.updateIndexForPaths(
+				searchPaths.map(({ absolutePath }) => absolutePath),
+				env,
+			)
+			cards = env.config.isSubagentExecution ? undefined : await this.createSearchCards(symbols, searchPaths, findType, env)
 
-			const fileHitsMap = await this.findSymbolLocations(symbols, absolutePaths, findType, env, cards)
+			const fileHitsMap = await this.findSymbolLocations(symbols, searchPaths, findType, cards, env)
+			await this.finalizeSearchCards(cards, findType, env, includeAnchors)
 
 			if (fileHitsMap.size === 0) {
-				// No results found is a valid outcome, not a mistake.
 				return `No ${findType === "both" ? "references or definitions" : findType + "s"} found for symbols: ${symbols.join(", ")}.`
 			}
 
@@ -99,6 +121,7 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 			env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 			return output.trim()
 		} catch (error: any) {
+			await this.finalizeSearchCardsWithError(cards, error.message)
 			this.incrementMistakeCount(env)
 			return formatResponse.toolError(error.message)
 		}
@@ -113,9 +136,8 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 		await env.symbol.initializeIndex(env.config.cwd)
 	}
 
-	private async resolveAbsolutePaths(relPaths: string[], env: IToolEnvironment): Promise<string[]> {
-		const resolvedPaths = await Promise.all(relPaths.map((p) => env.workspace.resolvePath(p)))
-		return resolvedPaths.map((rp) => rp.absolutePath)
+	private async resolveSearchPaths(relPaths: string[], env: IToolEnvironment): Promise<ResolvedSearchPath[]> {
+		return await Promise.all(relPaths.map((relPath) => env.workspace.resolvePath(relPath)))
 	}
 
 	private async updateIndexForPaths(absolutePaths: string[], env: IToolEnvironment): Promise<void> {
@@ -133,94 +155,142 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 		}
 	}
 
-	private async findSymbolLocations(
+	private async createSearchCards(
 		symbols: string[],
-		absolutePaths: string[],
+		searchPaths: ResolvedSearchPath[],
 		findType: "definition" | "reference" | "both",
 		env: IToolEnvironment,
-		cards?: Map<string, any>,
-	): Promise<Map<string, any[]>> {
-		const fileHitsMap = new Map<string, any[]>()
+	): Promise<SearchCard[]> {
+		const cards: SearchCard[] = []
+		const matchLabel = this.getMatchLabel(findType)
 
 		for (const symbol of symbols) {
-			try {
-				let locations: any[] = []
-				if (findType === "definition") {
-					locations = await env.symbol.getDefinitions(symbol)
-				} else if (findType === "reference") {
-					locations = await env.symbol.getReferences(symbol)
-				} else {
-					locations = await env.symbol.getSymbols(symbol)
-				}
-
-				for (const loc of locations) {
-					const absLocPath = path.join(env.config.cwd, loc.path)
-					const isInRequestedPath = absolutePaths.some(
-						(requestedPath) => absLocPath === requestedPath || absLocPath.startsWith(requestedPath + path.sep),
-					)
-
-					if (isInRequestedPath) {
-						let hits = fileHitsMap.get(absLocPath)
-						if (!hits) {
-							hits = []
-							fileHitsMap.set(absLocPath, hits)
-						}
-						hits.push({ ...loc, symbol })
-
-						if (cards && !cards.has(absLocPath)) {
-							const { displayPath } = await env.workspace.resolvePath(absLocPath)
-							const fileCard = await env.ui.createCard({
-								header: `Finding references in ${displayPath}`,
-								icon: DiracIcon.SYMBOL_FIND,
-								collapsed: true,
-							})
-							cards.set(absLocPath, fileCard)
-						}
-					}
-				}
-			} catch (error: any) {
-				if (cards) {
-					for (const [absPath, c] of cards) {
-						const hits = fileHitsMap.get(absPath) || []
-						if (hits.length === 0) {
-							await c.update({ status: CardStatus.ERROR, body: `✕ Error: ${error.message}` })
-							await c.finalize(CardStatus.ERROR)
-						}
-					}
-				}
-				throw error
+			for (const searchPath of searchPaths) {
+				const card = await env.ui.createCard({
+					header: `Finding ${matchLabel} for ${symbol} in ${searchPath.displayPath}`,
+					icon: DiracIcon.SYMBOL_FIND,
+					status: CardStatus.RUNNING,
+					collapsed: true,
+				})
+				cards.push({
+					symbol,
+					searchPath,
+					card,
+					hitsByFile: new Map(),
+					isFinalized: false,
+				})
 			}
 		}
 
-		if (cards) {
-			for (const [absPath, card] of cards) {
-				const hits = fileHitsMap.get(absPath) || []
-				const foundSymbols = new Set(hits.map((h) => h.symbol))
-				const firstSymbol = Array.from(foundSymbols)[0]
-				const otherCount = foundSymbols.size - 1
-				const { displayPath } = await env.workspace.resolvePath(absPath)
+		return cards
+	}
 
-				const bodyLines = Array.from(foundSymbols).map((s) => {
-					const symbolHits = hits.filter((h) => h.symbol === s).length
-					return `✓ ${s} (${symbolHits} hits)`
-				})
+	private async findSymbolLocations(
+		symbols: string[],
+		searchPaths: ResolvedSearchPath[],
+		findType: "definition" | "reference" | "both",
+		cards: SearchCard[] | undefined,
+		env: IToolEnvironment,
+	): Promise<Map<string, SymbolHit[]>> {
+		const fileHitsMap = new Map<string, SymbolHit[]>()
 
-				await card.update({
-					header: `Found references for ${firstSymbol}${otherCount > 0 ? ` (+${otherCount} more)` : ""} in ${displayPath}`,
-					status: CardStatus.SUCCESS,
-					body: bodyLines.join("\n"),
-				})
-				await card.finalize(CardStatus.SUCCESS)
+		for (const symbol of symbols) {
+			let locations: any[] = []
+			if (findType === "definition") {
+				locations = await env.symbol.getDefinitions(symbol)
+			} else if (findType === "reference") {
+				locations = await env.symbol.getReferences(symbol)
+			} else {
+				locations = await env.symbol.getSymbols(symbol)
+			}
+
+			const symbolCards = cards?.filter((card) => card.symbol === symbol) || []
+			for (const loc of locations) {
+				const absLocPath = path.join(env.config.cwd, loc.path)
+				if (!searchPaths.some((searchPath) => this.isWithinSearchPath(absLocPath, searchPath.absolutePath))) {
+					continue
+				}
+
+				const hit = { ...loc, symbol }
+				this.addHit(fileHitsMap, absLocPath, hit)
+				for (const card of symbolCards) {
+					if (this.isWithinSearchPath(absLocPath, card.searchPath.absolutePath)) {
+						this.addHit(card.hitsByFile, absLocPath, hit)
+					}
+				}
 			}
 		}
 
 		return fileHitsMap
 	}
 
-	private async formatResults(
-		fileHitsMap: Map<string, any[]>,
+	private isWithinSearchPath(locationPath: string, searchPath: string): boolean {
+		return locationPath === searchPath || locationPath.startsWith(searchPath + path.sep)
+	}
+
+	private addHit(fileHitsMap: Map<string, SymbolHit[]>, absFilePath: string, hit: SymbolHit): void {
+		let hits = fileHitsMap.get(absFilePath)
+		if (!hits) {
+			hits = []
+			fileHitsMap.set(absFilePath, hits)
+		}
+		hits.push(hit)
+	}
+
+	private async finalizeSearchCards(
+		cards: SearchCard[] | undefined,
+		findType: "definition" | "reference" | "both",
 		env: IToolEnvironment,
 		includeAnchors: boolean,
+	): Promise<void> {
+		if (!cards) return
+
+		const fileContentCache = new Map<string, string>()
+		const matchLabel = this.getMatchLabel(findType)
+		for (const searchCard of cards) {
+			const hitCount = Array.from(searchCard.hitsByFile.values()).reduce((total, hits) => total + hits.length, 0)
+			const body =
+				hitCount === 0
+					? `No ${matchLabel} found.`
+					: `✓ Found ${hitCount} ${matchLabel} across ${searchCard.hitsByFile.size} ${searchCard.hitsByFile.size === 1 ? "file" : "files"}\n\n${(
+							await this.formatResults(searchCard.hitsByFile, env, includeAnchors, false, fileContentCache)
+						).trim()}`
+
+			await searchCard.card.update({
+				header: `${hitCount === 0 ? "No" : "Found"} ${matchLabel} for ${searchCard.symbol} in ${searchCard.searchPath.displayPath}`,
+				status: CardStatus.SUCCESS,
+				body,
+			})
+			await searchCard.card.finalize(CardStatus.SUCCESS)
+			searchCard.isFinalized = true
+		}
+	}
+
+	private async finalizeSearchCardsWithError(cards: SearchCard[] | undefined, errorMessage: string): Promise<void> {
+		if (!cards) return
+
+		for (const searchCard of cards) {
+			if (searchCard.isFinalized) continue
+			await searchCard.card.update({
+				status: CardStatus.ERROR,
+				body: `✕ Error: ${errorMessage}`,
+			})
+			await searchCard.card.finalize(CardStatus.ERROR)
+			searchCard.isFinalized = true
+		}
+	}
+
+	private getMatchLabel(findType: "definition" | "reference" | "both"): string {
+		if (findType === "both") return "references or definitions"
+		return `${findType}s`
+	}
+
+	private async formatResults(
+		fileHitsMap: Map<string, SymbolHit[]>,
+		env: IToolEnvironment,
+		includeAnchors: boolean,
+		includeSymbols = true,
+		fileContentCache = new Map<string, string>(),
 	): Promise<string> {
 		let output = ""
 		const sortedFiles = Array.from(fileHitsMap.keys()).sort()
@@ -228,7 +298,11 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 		for (const absFilePath of sortedFiles) {
 			try {
 				const fileHits = fileHitsMap.get(absFilePath)!
-				const fileContent = await env.workspace.readFile(absFilePath)
+				let fileContent = fileContentCache.get(absFilePath)
+				if (fileContent === undefined) {
+					fileContent = await env.workspace.readFile(absFilePath)
+					fileContentCache.set(absFilePath, fileContent)
+				}
 				const lines = fileContent.split(/\r?\n/)
 				const anchors = AnchorStateManager.reconcile(absFilePath, lines, env.config.ulid)
 
@@ -249,10 +323,10 @@ export class FindSymbolReferencesTool implements IDiracTool<FindSymbolReferences
 
 				const fileRefs: string[] = []
 				for (const hit of mergedHits) {
-					const hitSymbols = Array.from(hit.symbols).join(", ")
 					const lineContent = lines[hit.startLine]
 					const formattedLine = formatLineForModel(lineContent, anchors[hit.startLine], includeAnchors)
-					fileRefs.push(`  (${hitSymbols}) ${formattedLine}`)
+					const symbolPrefix = includeSymbols ? `(${Array.from(hit.symbols).join(", ")}) ` : ""
+					fileRefs.push(`  ${symbolPrefix}${formattedLine}`)
 				}
 
 				const relPath = path.relative(env.config.cwd, absFilePath)
