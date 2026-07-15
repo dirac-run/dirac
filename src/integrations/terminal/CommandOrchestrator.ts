@@ -256,7 +256,7 @@ export async function orchestrateCommandExecution(
 						)
 					}
 					process.continue()
-					cleanupFileLog(fileState)
+					await cleanupFileLog(fileState)
 					return backgroundTrackingResult
 				}
 
@@ -278,14 +278,14 @@ export async function orchestrateCommandExecution(
 
 	// ---- Final result building ----
 	if (backgroundTrackingResult) {
-		cleanupFileLog(fileState)
+		await cleanupFileLog(fileState)
 		return backgroundTrackingResult
 	}
 
 	cleanupListeners()
 	clearChunkTimer(chunkTimerRef)
 	await setTimeoutPromise(50)
-	cleanupFileLog(fileState)
+	await cleanupFileLog(fileState)
 
 	let result: string
 	const resultOutputLines =

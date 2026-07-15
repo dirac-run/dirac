@@ -1,5 +1,5 @@
 import { formatLineWithHash } from "@utils/line-hashing"
-import { Parser, Node as SyntaxNode, Query, QueryCapture } from "web-tree-sitter"
+import { Parser, Node as SyntaxNode, Query, QueryCapture, Tree } from "web-tree-sitter"
 import { Logger } from "@/shared/services/Logger"
 
 export interface SymbolContextResolverOptions {
@@ -36,9 +36,11 @@ export class SymbolContextResolver {
 			return ""
 		}
 
+		let temporaryTree: Tree | null = null
 		try {
-			const tree = parser.parse(fileContent)
-			const rootNode = providedRootNode || tree?.rootNode
+			const parsedTree = parser.parse(fileContent) as Tree
+			temporaryTree = parsedTree
+			const rootNode = providedRootNode || parsedTree.rootNode
 			if (!rootNode) return ""
 			const query = new Query(language, queryStrings.contextQuery)
 			const captures = query.captures(rootNode)
@@ -60,6 +62,8 @@ export class SymbolContextResolver {
 		} catch (error) {
 			Logger.error(`Error resolving symbol context for .${ext}:`, error)
 			return ""
+		} finally {
+			temporaryTree?.delete()
 		}
 	}
 

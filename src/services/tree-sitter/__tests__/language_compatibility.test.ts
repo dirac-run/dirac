@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
+import * as os from "node:os"
 import * as path from "node:path"
 import { TaskState } from "@core/task/TaskState"
 import { FindSymbolReferencesTool } from "@core/task/tools/modules/find_symbol_references/FindSymbolReferencesTool"
@@ -11,7 +13,7 @@ import { ToolExecutorCoordinator } from "@core/task/tools/ToolExecutorCoordinato
 import { DiracDefaultTool } from "@shared/tools"
 import { stripHashes } from "@shared/utils/line-hashing"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
-import { before, beforeEach, describe, it } from "mocha"
+import { after, before, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import * as diagnosticsProvidersModule from "@/integrations/diagnostics/getDiagnosticsProviders"
@@ -21,6 +23,24 @@ import { createMockContext } from "@core/task/tools/__tests__/helpers/mockTaskCo
 
 const UPDATE_SNAPSHOTS = process.env.UPDATE_SNAPSHOTS === "true" || process.argv.includes("--update-snapshots")
 const FIXTURES_DIR = path.join(__dirname, "fixtures")
+let workingFixturesDir = ""
+let fixtureHashBeforeSuite = ""
+
+async function hashFixtureDirectory(directory: string): Promise<string> {
+	const hash = createHash("sha256")
+	const entries = await fs.readdir(directory, { withFileTypes: true })
+	for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+		const entryPath = path.join(directory, entry.name)
+		const relativePath = path.relative(directory, entryPath)
+		hash.update(relativePath)
+		if (entry.isDirectory()) {
+			hash.update(await hashFixtureDirectory(entryPath))
+		} else {
+			hash.update(await fs.readFile(entryPath))
+		}
+	}
+	return hash.digest("hex")
+}
 
 function createMockConfig(cwd: string) {
 	const taskState = new TaskState()
@@ -141,7 +161,11 @@ describe("Language Compatibility Tests (Big Four)", () => {
 		replace: new ReplaceSymbolTool(),
 	}
 
-	before(async () => {
+	before(async function () {
+		this.timeout(30_000)
+		fixtureHashBeforeSuite = await hashFixtureDirectory(FIXTURES_DIR)
+		workingFixturesDir = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-fixtures-"))
+		await fs.cp(FIXTURES_DIR, workingFixturesDir, { recursive: true })
 		SymbolIndexService.getInstance().setPersistenceEnabled(false)
 		SymbolIndexService.getInstance().setSkipRepoCheck(true)
 		if (!HostProvider.isInitialized()) {
@@ -154,7 +178,7 @@ describe("Language Compatibility Tests (Big Four)", () => {
 				{
 					workspaceClient: {
 						saveOpenDocumentIfDirty: sinon.stub().resolves(),
-						getWorkspacePaths: sinon.stub().resolves({ paths: [FIXTURES_DIR] }),
+						getWorkspacePaths: sinon.stub().resolves({ paths: [workingFixturesDir] }),
 						prepareDiagnostics: sinon.stub().resolves({}),
 						getDiagnostics: sinon.stub().resolves({ fileDiagnostics: [] }),
 					},
@@ -183,17 +207,28 @@ describe("Language Compatibility Tests (Big Four)", () => {
 		])
 	})
 
-	after(() => {
+	after(async function () {
+		this.timeout(30_000)
 		sinon.restore()
+		await fs.rm(workingFixturesDir, { recursive: true, force: true })
+		if (!UPDATE_SNAPSHOTS) {
+			assert.strictEqual(
+				await hashFixtureDirectory(FIXTURES_DIR),
+				fixtureHashBeforeSuite,
+				"Tree-sitter fixtures were mutated",
+			)
+		}
 	})
 
 	for (const lang of languages) {
 		describe(`Language: ${lang.name}`, () => {
-			const langDir = path.join(FIXTURES_DIR, lang.name)
-			const samplePath = path.join(langDir, `sample.${lang.ext}`)
+			let langDir: string
+			let samplePath: string
 			let config: any
 
 			beforeEach(async () => {
+				langDir = path.join(workingFixturesDir, lang.name)
+				samplePath = path.join(langDir, `sample.${lang.ext}`)
 				config = createMockConfig(langDir)
 				AnchorStateManager.reset("test-ulid")
 			})
@@ -205,7 +240,7 @@ describe("Language Compatibility Tests (Big Four)", () => {
 					name: DiracDefaultTool.GET_FILE_SKELETON,
 					params: { paths: [`sample.${lang.ext}`] },
 				} as any)
-				await assertSnapshot(path.join(langDir, "get_file_skeleton.txt"), result as string)
+				await assertSnapshot(path.join(FIXTURES_DIR, lang.name, "get_file_skeleton.txt"), result as string)
 			})
 
 			describe("Complex Tool Tests", () => {
@@ -222,9 +257,15 @@ describe("Language Compatibility Tests (Big Four)", () => {
 						coordinator.registerModularTool(handlers.getFunction)
 						const result = await coordinator.execute(testConfig, {
 							name: DiracDefaultTool.GET_FUNCTION,
-							params: { paths: [`sample.${lang.ext}`], function_names: test.symbols },
+							params: {
+								paths: [`sample.${lang.ext}`],
+								function_names: test.symbols,
+							},
 						} as any)
-						await assertSnapshot(path.join(langDir, `get_function_${test.name}.txt`), result as string)
+						await assertSnapshot(
+							path.join(FIXTURES_DIR, lang.name, `get_function_${test.name}.txt`),
+							result as string,
+						)
 					}
 				})
 
@@ -241,7 +282,10 @@ describe("Language Compatibility Tests (Big Four)", () => {
 								find_type: test.find_type || "both",
 							},
 						} as any)
-						await assertSnapshot(path.join(langDir, `find_symbol_references_${test.name}.txt`), result as string)
+						await assertSnapshot(
+							path.join(FIXTURES_DIR, lang.name, `find_symbol_references_${test.name}.txt`),
+							result as string,
+						)
 					}
 				})
 
@@ -261,7 +305,10 @@ describe("Language Compatibility Tests (Big Four)", () => {
 									text: test.text,
 								},
 							} as any)
-							await assertSnapshot(path.join(langDir, `replace_symbol_${test.name}.txt`), result as string)
+							await assertSnapshot(
+								path.join(FIXTURES_DIR, lang.name, `replace_symbol_${test.name}.txt`),
+								result as string,
+							)
 							// Restore original content after each replace test
 							await fs.writeFile(samplePath, originalContent, "utf-8")
 						}

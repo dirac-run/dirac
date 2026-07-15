@@ -224,12 +224,30 @@ export class SymbolIndexDatabase {
 		}
 	}
 
-	public removeFile(relPath: string): void {
+	public removeFile(relPath: string): boolean {
+		return this.removeFiles([relPath]) === 1
+	}
+
+	public removeFiles(relPaths: readonly string[]): number {
+		if (relPaths.length === 0) return 0
+
 		try {
-			this.db.run("DELETE FROM files WHERE path = ?", [relPath])
+			this.db.run("BEGIN TRANSACTION")
+			for (const relPath of relPaths) {
+				this.db.run("DELETE FROM symbols WHERE file_path = ?", [relPath])
+				this.db.run("DELETE FROM files WHERE path = ?", [relPath])
+			}
+			this.db.run("COMMIT")
 			this.persist()
+			return relPaths.length
 		} catch (error) {
-			Logger.error(`[SymbolIndexDatabase] Error removing file ${relPath}:`, error)
+			try {
+				this.db.run("ROLLBACK")
+			} catch {
+				/* ignore rollback error */
+			}
+			Logger.error(`[SymbolIndexDatabase] Error removing ${relPaths.length} files:`, error)
+			return 0
 		}
 	}
 

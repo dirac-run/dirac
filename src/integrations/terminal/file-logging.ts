@@ -70,12 +70,26 @@ export function updateFirstLines(state: FileLogState, lines: string[]): FileLogS
 	}
 }
 
-export function cleanupFileLog(state: FileLogState): FileLogState {
-	if (state.largeOutputLogStream) {
-		state.largeOutputLogStream.end()
-		return { ...state, largeOutputLogStream: null }
-	}
-	return state
+export async function cleanupFileLog(state: FileLogState): Promise<FileLogState> {
+	const stream = state.largeOutputLogStream
+	if (!stream) return state
+
+	await new Promise<void>((resolve, reject) => {
+		const onError = (error: Error) => {
+			stream.off("finish", onFinish)
+			reject(error)
+		}
+		const onFinish = () => {
+			stream.off("error", onError)
+			resolve()
+		}
+
+		stream.once("error", onError)
+		stream.once("finish", onFinish)
+		stream.end()
+	})
+
+	return { ...state, largeOutputLogStream: null }
 }
 
 export function buildFileSummary(

@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import * as path from "path"
+import { Tree } from "web-tree-sitter"
 import { DiracIgnoreController } from "../core/ignore/DiracIgnoreController"
 import { SymbolContextResolver } from "../core/task/tools/utils/SymbolContextResolver"
 import { parseFile } from "../services/tree-sitter"
@@ -98,114 +99,125 @@ export class ASTAnchorBridge {
 		}
 
 		const fileContent = await fs.readFile(absolutePath, "utf8")
-		const tree = parser.parse(fileContent)
-		if (!tree || !tree.rootNode) {
-			return {
-				formattedContent: `Could not parse file: ${relPath}`,
-				foundNames: [],
-			}
-		}
-
-		const allLines = fileContent.split(/\r?\n/)
-		const allAnchors = AnchorStateManager.reconcile(absolutePath, allLines, taskId)
-		const revealAnchors = includeAnchors === true
-
-		const matches = query.matches(tree.rootNode)
-		const nodeToMatch = new Map<number, any>()
-		for (const match of matches) {
-			for (const capture of match.captures) {
-				if (capture.name.startsWith("name.")) {
-					nodeToMatch.set(capture.node.id, match)
-				}
-				if (capture.name.startsWith("definition.")) {
-					nodeToMatch.set(capture.node.id, match)
+		let tree: Tree | null = null
+		try {
+			const parsedTree = parser.parse(fileContent) as Tree
+			tree = parsedTree
+			if (!parsedTree.rootNode) {
+				return {
+					formattedContent: `Could not parse file: ${relPath}`,
+					foundNames: [],
 				}
 			}
-		}
 
-		const fileResults: string[] = []
-		const foundNamesInFile = new Set<string>()
-		const seenRanges = new Set<string>()
+			const allLines = fileContent.split(/\r?\n/)
+			const allAnchors = AnchorStateManager.reconcile(absolutePath, allLines, taskId)
+			const revealAnchors = includeAnchors === true
 
-		for (const match of matches) {
-			const nameCapture = match.captures.find((c: any) => c.name.includes("name.definition"))
-			const defCapture =
-				match.captures.find((c: any) => c.name.startsWith("definition.")) ||
-				match.captures.find((c: any) => !c.name.includes("name"))
-
-			if (nameCapture && defCapture) {
-				const nameText = fileContent.slice(nameCapture.node.startIndex, nameCapture.node.endIndex)
-
-				// Calculate full name by walking up the tree
-				let fullName = nameText
-				let currentNode = defCapture.node
-				const seenMatches = new Set<any>([match])
-				while (currentNode.parent) {
-					currentNode = currentNode.parent
-					const parentMatch = nodeToMatch.get(currentNode.id)
-					if (parentMatch && !seenMatches.has(parentMatch)) {
-						const parentNameCap = parentMatch.captures.find((c: any) => c.name.startsWith("name."))
-						if (parentNameCap) {
-							const parentNameText = fileContent.slice(parentNameCap.node.startIndex, parentNameCap.node.endIndex)
-							fullName = `${parentNameText}.${fullName}`
-							seenMatches.add(parentMatch)
-						}
+			const matches = query.matches(parsedTree.rootNode)
+			const nodeToMatch = new Map<number, any>()
+			for (const match of matches) {
+				for (const capture of match.captures) {
+					if (capture.name.startsWith("name.")) {
+						nodeToMatch.set(capture.node.id, match)
+					}
+					if (capture.name.startsWith("definition.")) {
+						nodeToMatch.set(capture.node.id, match)
 					}
 				}
+			}
 
-				const normalizedFullName = fullName.replace(/::/g, ".")
-				const matchedReqNames = functionNames.filter((reqName) => {
-					const normalizedReqName = reqName.replace(/::/g, ".")
-					if (normalizedFullName === normalizedReqName) return true
-					if (normalizedFullName.endsWith("." + normalizedReqName)) return true
-					return false
-				})
+			const fileResults: string[] = []
+			const foundNamesInFile = new Set<string>()
+			const seenRanges = new Set<string>()
 
-				if (matchedReqNames.length > 0) {
-					matchedReqNames.forEach((reqName) => foundNamesInFile.add(reqName))
+			for (const match of matches) {
+				const nameCapture = match.captures.find((c: any) => c.name.includes("name.definition"))
+				const defCapture =
+					match.captures.find((c: any) => c.name.startsWith("definition.")) ||
+					match.captures.find((c: any) => !c.name.includes("name"))
 
-					const { startIndex, endIndex, startLine } = ASTAnchorBridge.getExtendedRange(defCapture.node, fileContent)
+				if (nameCapture && defCapture) {
+					const nameText = fileContent.slice(nameCapture.node.startIndex, nameCapture.node.endIndex)
 
-					const rangeKey = `${startIndex}-${endIndex}`
-					if (seenRanges.has(rangeKey)) continue
-					seenRanges.add(rangeKey)
+					// Calculate full name by walking up the tree
+					let fullName = nameText
+					let currentNode = defCapture.node
+					const seenMatches = new Set<any>([match])
+					while (currentNode.parent) {
+						currentNode = currentNode.parent
+						const parentMatch = nodeToMatch.get(currentNode.id)
+						if (parentMatch && !seenMatches.has(parentMatch)) {
+							const parentNameCap = parentMatch.captures.find((c: any) => c.name.startsWith("name."))
+							if (parentNameCap) {
+								const parentNameText = fileContent.slice(
+									parentNameCap.node.startIndex,
+									parentNameCap.node.endIndex,
+								)
+								fullName = `${parentNameText}.${fullName}`
+								seenMatches.add(parentMatch)
+							}
+						}
+					}
 
-					const defText = fileContent.slice(startIndex, endIndex)
-
-					const defLines = defText.split(/\r?\n/)
-					const defAnchors = allAnchors.slice(startLine, startLine + defLines.length)
-
-					const context = await SymbolContextResolver.resolve({
-						node: defCapture.node,
-						fileContent,
-						parser,
-						ext,
-						anchors: allAnchors,
-						rootNode: tree.rootNode,
+					const normalizedFullName = fullName.replace(/::/g, ".")
+					const matchedReqNames = functionNames.filter((reqName) => {
+						const normalizedReqName = reqName.replace(/::/g, ".")
+						if (normalizedFullName === normalizedReqName) return true
+						if (normalizedFullName.endsWith("." + normalizedReqName)) return true
+						return false
 					})
 
-					const formatted = defLines.map((line, i) => formatLineForModel(line, defAnchors[i], revealAnchors)).join("\n")
-					const funcHash = contentHash(defText)
-					const anchorHeader = revealAnchors
-						? "All Hash Anchors provided below are stable and can be used with edit_file directly.\n"
-						: ""
-					fileResults.push(
-						`${relPath}::${fullName}\n[Function Hash: ${funcHash}]\n${anchorHeader}${context}${formatted}`,
-					)
+					if (matchedReqNames.length > 0) {
+						matchedReqNames.forEach((reqName) => foundNamesInFile.add(reqName))
+
+						const { startIndex, endIndex, startLine } = ASTAnchorBridge.getExtendedRange(defCapture.node, fileContent)
+
+						const rangeKey = `${startIndex}-${endIndex}`
+						if (seenRanges.has(rangeKey)) continue
+						seenRanges.add(rangeKey)
+
+						const defText = fileContent.slice(startIndex, endIndex)
+
+						const defLines = defText.split(/\r?\n/)
+						const defAnchors = allAnchors.slice(startLine, startLine + defLines.length)
+
+						const context = await SymbolContextResolver.resolve({
+							node: defCapture.node,
+							fileContent,
+							parser,
+							ext,
+							anchors: allAnchors,
+							rootNode: parsedTree.rootNode,
+						})
+
+						const formatted = defLines
+							.map((line, i) => formatLineForModel(line, defAnchors[i], revealAnchors))
+							.join("\n")
+						const funcHash = contentHash(defText)
+						const anchorHeader = revealAnchors
+							? "All Hash Anchors provided below are stable and can be used with edit_file directly.\n"
+							: ""
+						fileResults.push(
+							`${relPath}::${fullName}\n[Function Hash: ${funcHash}]\n${anchorHeader}${context}${formatted}`,
+						)
+					}
 				}
 			}
-		}
 
-		if (fileResults.length > 0) {
-			return {
-				formattedContent: fileResults.join("\n\n---\n\n"),
-				foundNames: Array.from(foundNamesInFile),
+			if (fileResults.length > 0) {
+				return {
+					formattedContent: fileResults.join("\n\n---\n\n"),
+					foundNames: Array.from(foundNamesInFile),
+				}
 			}
-		}
 
-		return {
-			formattedContent: `None of the requested functions (${functionNames.join(", ")}) were found in ${relPath}`,
-			foundNames: [],
+			return {
+				formattedContent: `None of the requested functions (${functionNames.join(", ")}) were found in ${relPath}`,
+				foundNames: [],
+			}
+		} finally {
+			tree?.delete()
 		}
 	}
 
@@ -232,68 +244,77 @@ export class ASTAnchorBridge {
 		}
 
 		const fileContent = await fs.readFile(absolutePath, "utf8")
-		const tree = parser.parse(fileContent)
-		if (!tree || !tree.rootNode) {
-			return null
-		}
+		let tree: Tree | null = null
+		try {
+			const parsedTree = parser.parse(fileContent) as Tree
+			tree = parsedTree
+			if (!parsedTree.rootNode) {
+				return null
+			}
 
-		const matches = query.matches(tree.rootNode)
-		const nodeToMatch = new Map<number, any>()
-		for (const match of matches) {
-			for (const capture of match.captures) {
-				if (capture.name.startsWith("name.")) {
-					nodeToMatch.set(capture.node.id, match)
-				}
-				if (capture.name.startsWith("definition.")) {
-					nodeToMatch.set(capture.node.id, match)
+			const matches = query.matches(parsedTree.rootNode)
+			const nodeToMatch = new Map<number, any>()
+			for (const match of matches) {
+				for (const capture of match.captures) {
+					if (capture.name.startsWith("name.")) {
+						nodeToMatch.set(capture.node.id, match)
+					}
+					if (capture.name.startsWith("definition.")) {
+						nodeToMatch.set(capture.node.id, match)
+					}
 				}
 			}
-		}
 
-		const normalizedRequestedSymbol = symbol.replace(/::/g, ".")
+			const normalizedRequestedSymbol = symbol.replace(/::/g, ".")
 
-		for (const match of matches) {
-			const nameCapture = match.captures.find((c: any) => c.name.startsWith("name.definition"))
-			const defCapture =
-				match.captures.find((c: any) => c.name.startsWith("definition.")) ||
-				match.captures.find((c: any) => !c.name.startsWith("name."))
+			for (const match of matches) {
+				const nameCapture = match.captures.find((c: any) => c.name.startsWith("name.definition"))
+				const defCapture =
+					match.captures.find((c: any) => c.name.startsWith("definition.")) ||
+					match.captures.find((c: any) => !c.name.startsWith("name."))
 
-			if (nameCapture && defCapture) {
-				const nameText = fileContent.slice(nameCapture.node.startIndex, nameCapture.node.endIndex)
-				const defType = defCapture.name.split(".").pop() || ""
+				if (nameCapture && defCapture) {
+					const nameText = fileContent.slice(nameCapture.node.startIndex, nameCapture.node.endIndex)
+					const defType = defCapture.name.split(".").pop() || ""
 
-				let fullName = nameText
-				let currentNode = defCapture.node
-				const seenMatches = new Set<any>([match])
-				while (currentNode.parent) {
-					currentNode = currentNode.parent
-					const parentMatch = nodeToMatch.get(currentNode.id)
-					if (parentMatch && !seenMatches.has(parentMatch)) {
-						const parentNameCap = parentMatch.captures.find((c: any) => c.name.startsWith("name."))
-						if (parentNameCap) {
-							const parentNameText = fileContent.slice(parentNameCap.node.startIndex, parentNameCap.node.endIndex)
-							fullName = `${parentNameText}.${fullName}`
-							seenMatches.add(parentMatch)
+					let fullName = nameText
+					let currentNode = defCapture.node
+					const seenMatches = new Set<any>([match])
+					while (currentNode.parent) {
+						currentNode = currentNode.parent
+						const parentMatch = nodeToMatch.get(currentNode.id)
+						if (parentMatch && !seenMatches.has(parentMatch)) {
+							const parentNameCap = parentMatch.captures.find((c: any) => c.name.startsWith("name."))
+							if (parentNameCap) {
+								const parentNameText = fileContent.slice(
+									parentNameCap.node.startIndex,
+									parentNameCap.node.endIndex,
+								)
+								fullName = `${parentNameText}.${fullName}`
+								seenMatches.add(parentMatch)
+							}
+						}
+					}
+
+					const normalizedFullName = fullName.replace(/::/g, ".")
+					if (
+						(normalizedFullName === normalizedRequestedSymbol ||
+							normalizedFullName.endsWith("." + normalizedRequestedSymbol)) &&
+						ASTAnchorBridge.areTypesCompatible(defType, type)
+					) {
+						const range = ASTAnchorBridge.getExtendedRange(defCapture.node, fileContent)
+						return {
+							...range,
+							nameText,
 						}
 					}
 				}
-
-				const normalizedFullName = fullName.replace(/::/g, ".")
-				if (
-					(normalizedFullName === normalizedRequestedSymbol ||
-						normalizedFullName.endsWith("." + normalizedRequestedSymbol)) &&
-					ASTAnchorBridge.areTypesCompatible(defType, type)
-				) {
-					const range = ASTAnchorBridge.getExtendedRange(defCapture.node, fileContent)
-					return {
-						...range,
-						nameText,
-					}
-				}
 			}
-		}
 
-		return null
+			return null
+		} finally {
+			tree?.delete()
+		}
 	}
 
 	private static areTypesCompatible(defType: string, reqType?: string): boolean {

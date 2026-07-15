@@ -51,6 +51,7 @@ scripts/
 biome.jsonc
 knip.json
 .nycrc.unit.json
+.dirac-cache
 .dirac-symbol-index
 .vscode-test.mjs
 dirac-*.vsix

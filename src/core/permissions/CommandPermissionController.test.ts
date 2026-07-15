@@ -8,6 +8,16 @@ import { expectLoggerErrors } from "@/test/loggerGuard"
 import { CommandPermissionController } from "./CommandPermissionController"
 import { COMMAND_PERMISSIONS_ENV_VAR } from "./types"
 
+function createWatcherFactory() {
+	return () => {
+		const watcher = {
+			on: () => watcher,
+			close: async () => { },
+		}
+		return watcher as any
+	}
+}
+
 describe("CommandPermissionController", () => {
 	let originalEnvValue: string | undefined
 
@@ -30,13 +40,13 @@ describe("CommandPermissionController", () => {
 			const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permissions-"))
 
 			try {
-				const firstController = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				const firstController = new CommandPermissionController(createWatcherFactory())
 				await firstController.initialize(workspaceRoot)
 				await firstController.addRule({ tool: "execute_command", pattern: "npm test", action: "allow" })
 				await firstController.addRule({ tool: "edit_file", pattern: "src/**", action: "deny" })
 				await firstController.dispose()
 
-				const restartedController = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				const restartedController = new CommandPermissionController(createWatcherFactory())
 				await restartedController.initialize(workspaceRoot)
 
 				restartedController.validateTool("execute_command", "npm test").allowed.should.be.true()
@@ -51,16 +61,16 @@ describe("CommandPermissionController", () => {
 			const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permissions-"))
 
 			try {
-				const controller = new CommandPermissionController(() => ({ close: async () => {} }) as any)
+				const controller = new CommandPermissionController(createWatcherFactory())
 				await controller.initialize(workspaceRoot)
 				const allowRule = { tool: "execute_command", pattern: "npm test", action: "allow" as const }
 				const denyRule = { tool: "edit_file", pattern: "src/**", action: "deny" as const }
 				await controller.addRule(allowRule)
 				await controller.addRule(denyRule)
 
-				;(await controller.listRules()).should.deepEqual([allowRule, denyRule])
+					; (await controller.listRules()).should.deepEqual([allowRule, denyRule])
 				await controller.deleteRule(allowRule)
-				;(await controller.listRules()).should.deepEqual([denyRule])
+					; (await controller.listRules()).should.deepEqual([denyRule])
 				await controller.dispose()
 			} finally {
 				await fs.rm(workspaceRoot, { recursive: true, force: true })

@@ -13,7 +13,7 @@ import { DiracWebviewProvider } from "./core/webview"
 import { createDiracAPI } from "./exports"
 import { initializeTestMode } from "./services/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
-import "./utils/path"; // necessary to have access to String.prototype.toPosix
+import "./utils/path" // necessary to have access to String.prototype.toPosix
 import { isDev } from "@shared/config/environment"
 import type { ExtensionContext } from "vscode"
 import { HostProvider } from "@/hosts/host-provider"
@@ -49,6 +49,7 @@ import { exportVSCodeStorageToSharedFiles } from "./hosts/vscode/vscode-to-file-
 import { ExtensionRegistryInfo } from "./registry"
 import { resolveWorkingRipgrepBinary } from "./services/ripgrep/resolve-ripgrep-binary"
 import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
+import { SymbolIndexUpdateScheduler } from "./services/symbol-index/SymbolIndexUpdateScheduler"
 import { telemetryService } from "./services/telemetry"
 import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
 import { ShowMessageType } from "./shared/proto/host/window"
@@ -565,35 +566,20 @@ ${ctx.cellJson || "{}"}
 		"swift",
 		"kt",
 	]
+	const symbolIndexService = SymbolIndexService.getInstance()
+	const updateScheduler = new SymbolIndexUpdateScheduler({
+		shouldIndexPath: (absolutePath) => symbolIndexService.shouldIndexPath(absolutePath),
+		updateFile: (absolutePath) => symbolIndexService.updateFile(absolutePath),
+		removeFile: (absolutePath) => symbolIndexService.removeFile(absolutePath),
+		requestFullRescan: () => symbolIndexService.requestFullRescan(),
+	})
 	const fileWatcher = vscode.workspace.createFileSystemWatcher(`**/*.{${supportedExts.join(",")}}`)
 
-	const debounceMap = new Map<string, NodeJS.Timeout>()
-	const DEBOUNCE_MS = 1000
+	fileWatcher.onDidChange((uri) => updateScheduler.scheduleUpdate(uri.fsPath))
+	fileWatcher.onDidCreate((uri) => updateScheduler.scheduleUpdate(uri.fsPath))
+	fileWatcher.onDidDelete((uri) => updateScheduler.removeFile(uri.fsPath))
 
-	const debouncedUpdate = (uri: vscode.Uri) => {
-		const fsPath = uri.fsPath
-		if (debounceMap.has(fsPath)) {
-			clearTimeout(debounceMap.get(fsPath))
-		}
-		const timeout = setTimeout(async () => {
-			debounceMap.delete(fsPath)
-			await SymbolIndexService.getInstance().updateFile(fsPath)
-		}, DEBOUNCE_MS)
-		debounceMap.set(fsPath, timeout)
-	}
-
-	fileWatcher.onDidChange(debouncedUpdate)
-	fileWatcher.onDidCreate(debouncedUpdate)
-	fileWatcher.onDidDelete(async (uri) => {
-		const fsPath = uri.fsPath
-		if (debounceMap.has(fsPath)) {
-			clearTimeout(debounceMap.get(fsPath))
-			debounceMap.delete(fsPath)
-		}
-		await SymbolIndexService.getInstance().removeFile(fsPath)
-	})
-
-	context.subscriptions.push(fileWatcher)
+	context.subscriptions.push(fileWatcher, updateScheduler)
 
 	Logger.log(`[Dirac] extension activated in ${performance.now() - activationStartTime} ms`)
 
@@ -736,7 +722,6 @@ async function openDiracSidebarForTaskUri(): Promise<void> {
 
 	Logger.warn("Task URI handling timed out waiting for Dirac sidebar visibility")
 }
-
 
 // This method is called when your extension is deactivated
 export async function deactivate() {
