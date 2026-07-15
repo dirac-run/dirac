@@ -19,11 +19,6 @@ export const attempt_completion_spec: DiracToolSpec = {
 			required: true,
 			instruction: "The final result of the task.",
 		},
-		{
-			name: "command",
-			required: false,
-			instruction: "Optional CLI command to demo the result (e.g., 'open index.html'). Do not use 'echo' or 'cat'.",
-		},
 	],
 }
 
@@ -37,7 +32,7 @@ export class AttemptCompletionTool implements IDiracTool {
 	}
 
 	async processCall(args: any, env: IToolEnvironment): Promise<any> {
-		const { result, command } = args
+		const { result } = args
 
 		if (!result) {
 			env.orchestration.setTaskState(
@@ -65,16 +60,7 @@ export class AttemptCompletionTool implements IDiracTool {
 			})
 		}
 
-		let commandResult: any
-		if (command) {
-			const cmdExecResult = await this.handleCommandExecution(env, result, command)
-			if (cmdExecResult.userRejected) {
-				return cmdExecResult.commandResult
-			}
-			commandResult = cmdExecResult.commandResult
-		} else {
-			await this.handleCompletionResult(env, result)
-		}
+		await this.handleCompletionResult(env, result)
 
 		// Run TaskComplete hook
 		await env.orchestration.runHook("TaskComplete", {
@@ -83,11 +69,9 @@ export class AttemptCompletionTool implements IDiracTool {
 					taskId: env.config.taskId,
 					ulid: env.config.ulid,
 					result,
-					command: command || "",
 				},
 			},
 		})
-
 		return result
 	}
 
@@ -203,51 +187,6 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 		}
 	}
 
-	private async handleCommandExecution(
-		env: IToolEnvironment,
-		result: string,
-		command: string,
-	): Promise<{ userRejected: boolean; commandResult: any }> {
-		const history = env.orchestration.getHistory()
-		const lastMessage = history[history.length - 1]
-
-		// Check if last message was a command approval card
-		const isCommandAsk = lastMessage?.content.type === "card" && lastMessage.content.card.requireApproval
-		if (!isCommandAsk) {
-			const card = await env.ui.createCard({
-				icon: DiracIcon.COMPLETE,
-				header: "Task Completed",
-				body: result,
-				renderType: "markdown",
-				collapsed: false,
-				maxHeight: 1200,
-			})
-			await card.finalize(CardStatus.SUCCESS, true)
-			await env.orchestration.saveCheckpoint(true, card.id)
-			if (!env.config.isSubagentExecution) {
-				telemetryService.captureTaskCompleted(env.config.ulid, getTaskCompletionTelemetry(env.config))
-				await env.orchestration.runHook("Notification", {
-					notification: {
-						event: "task_completed",
-						source: "attempt_completion",
-						message: result,
-						waitingForUserInput: true,
-					},
-				})
-			}
-		} else {
-			await env.orchestration.saveCheckpoint(true)
-		}
-
-		const [userRejected, execCommandResult] = await env.system.executeCommand(command)
-		if (userRejected) {
-			env.orchestration.setTaskState("didRejectTool", true)
-			return { userRejected: true, commandResult: execCommandResult }
-		}
-
-		return { userRejected: false, commandResult: execCommandResult }
-	}
-
 	private async handleCompletionResult(env: IToolEnvironment, result: string): Promise<void> {
 		const card = await env.ui.createCard({
 			icon: DiracIcon.COMPLETE,
@@ -259,7 +198,6 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 		})
 		await card.finalize(CardStatus.SUCCESS, true)
 
-		const ts = Date.now()
 		await env.orchestration.saveCheckpoint(true, card.id)
 		if (!env.config.isSubagentExecution) {
 			telemetryService.captureTaskCompleted(env.config.ulid, getTaskCompletionTelemetry(env.config))
