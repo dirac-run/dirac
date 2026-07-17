@@ -15,6 +15,22 @@ export interface ReadFileArgs {
 	include_anchors?: boolean
 }
 
+interface LineRange {
+	start: number
+	end?: number
+}
+
+interface TextSelection {
+	text: string
+	lines: string[]
+	totalLineCount: number
+	startIndex: number
+	endIndex: number
+	coversWholeFile: boolean
+}
+
+const MAX_TEXT_READ_SIZE = 50 * 1024
+
 export const read_file_spec: DiracToolSpec = {
 	id: DiracDefaultTool.FILE_READ,
 	name: "read_file",
@@ -65,59 +81,35 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 
 	async processCall(args: ReadFileArgs, env: IToolEnvironment): Promise<any> {
 		const paths = Array.isArray(args.paths) ? args.paths : args.paths ? [args.paths] : []
-		const { start_line, end_line } = args
-		const includeAnchors = args.include_anchors === true
-		const startLineNum = start_line ? Number(start_line) : undefined
-		const endLineNum = end_line ? Number(end_line) : undefined
 
 		if (paths.length === 0) {
 			this.incrementMistakeCount(env)
 			return formatResponse.toolError("Missing required parameter: paths")
 		}
 
-		if ((start_line && isNaN(startLineNum!)) || (end_line && isNaN(endLineNum!))) {
-			throw new Error("Invalid line numbers. Please provide valid integers for start_line and end_line.")
-		}
-
-		if (startLineNum !== undefined && startLineNum < 1) {
-			throw new Error("Invalid start_line: must be >= 1.")
-		}
-		if (endLineNum !== undefined && endLineNum < 1) {
-			throw new Error("Invalid end_line: must be >= 1.")
-		}
-		if (startLineNum !== undefined && endLineNum !== undefined && startLineNum > endLineNum) {
-			throw new Error(`Invalid line range: start_line ${startLineNum} cannot be greater than end_line ${endLineNum}.`)
-		}
-
+		const lineRange = this.parseLineRange(args.start_line, args.end_line)
 		const results: string[] = []
 		const contentBlocks: any[] = []
 		const fileHashes = env.context.task.get<Record<string, string>>("fileHashes") || {}
-
 		let anySucceeded = false
-		let anyFailed = false
 
 		for (const relPath of paths) {
 			const { success, result, contentBlock } = await this.readFileContent(
 				relPath,
 				paths.length > 1,
-				startLineNum,
-				endLineNum,
+				lineRange,
 				fileHashes,
 				env,
-				includeAnchors,
+				args.include_anchors === true,
 			)
-			if (success) {
-				anySucceeded = true
-			} else {
-				anyFailed = true
-			}
+			anySucceeded ||= success
 			results.push(result)
 			if (contentBlock) {
 				contentBlocks.push(contentBlock)
 			}
 		}
 
-		this.updateTaskState(anySucceeded, anyFailed, env)
+		this.updateTaskState(anySucceeded, env)
 		await env.context.task.set("fileHashes", fileHashes)
 
 		const finalResultText = results.join("\n\n")
@@ -131,18 +123,15 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 	private async readFileContent(
 		relPath: string,
 		isMultiFile: boolean,
-		startLineNum: number | undefined,
-		endLineNum: number | undefined,
+		lineRange: LineRange | undefined,
 		fileHashes: Record<string, string>,
 		env: IToolEnvironment,
 		includeAnchors: boolean,
 	): Promise<{ success: boolean; result: string; contentBlock?: any }> {
-		const MAX_FILE_READ_SIZE = 50 * 1024 // 50KB
 		const header = isMultiFile ? `--- ${relPath} ---\n` : ""
 		let absolutePath = ""
 		let displayPath = relPath
 		let usedWorkspaceHint = false
-
 		let card: any | undefined
 
 		try {
@@ -151,98 +140,72 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 			displayPath = resolved.displayPath
 			usedWorkspaceHint = displayPath !== relPath
 
+			const rangeLabel = lineRange ? `lines ${lineRange.start}-${lineRange.end ?? "end"}` : undefined
 			card = !env.config.isSubagentExecution
 				? await env.ui.createCard({
-						header:
-							startLineNum || endLineNum
-								? `Reading lines ${startLineNum || 1}-${endLineNum || "end"} from ${displayPath}`
-								: `Reading from ${displayPath}`,
-						icon: DiracIcon.FILE_READ,
-						collapsed: true,
-					})
+					header: rangeLabel ? `Reading ${rangeLabel} from ${displayPath}` : `Reading from ${displayPath}`,
+					icon: DiracIcon.FILE_READ,
+					collapsed: true,
+				})
 				: undefined
 
-			if (!startLineNum && !endLineNum) {
-				const info = await env.workspace.getFileInfo(absolutePath)
-				if (info.isFile && info.size > MAX_FILE_READ_SIZE) {
-					const msg = `The file size is ${Math.round(info.size / 1024)}KB, which exceeds the ${
-						MAX_FILE_READ_SIZE / 1024
-					}KB limit for full file reads. Reading this file will likely flood the context window. Please use more surgical means or specify a line range using 'start_line' and 'end_line' parameters.`
-					if (card) {
-						await card.update({ status: CardStatus.ERROR, body: `✕ ${msg}` })
-						await card.finalize(CardStatus.ERROR)
-					}
-					return { success: false, result: `${header}${msg}` }
+			const fileContent = await env.workspace.readRichFile(absolutePath)
+			if (fileContent.imageBlock) {
+				if (card) {
+					await card.update({
+						header: `Read image from ${displayPath}`,
+						status: CardStatus.SUCCESS,
+						body: `✓ Successfully read ${displayPath}`,
+					})
+					await card.finalize(CardStatus.SUCCESS)
 				}
+				this.captureReadTelemetry(relPath, usedWorkspaceHint, env)
+				return { success: true, result: `${header}${fileContent.text}`, contentBlock: fileContent.imageBlock }
 			}
 
-			const fileContent = await env.workspace.readRichFile(absolutePath)
-			const contentBlock = fileContent.imageBlock
+			const selection = this.selectText(fileContent.text, lineRange)
+			this.enforceTextReadSize(selection.text)
 
 			const currentHash = contentHash(fileContent.text)
-			const cacheKey = `${relPath}#${includeAnchors ? "anchored" : "plain"}`
-			const lastHash = fileHashes[cacheKey]
-
-			let resultText = ""
-			if (lastHash === currentHash && !startLineNum && !endLineNum) {
-				resultText = `${header}no changes have been made to the file since your last read (Hash: ${lastHash})`
+			const cacheKey = `${absolutePath}#${includeAnchors ? "anchored" : "plain"}`
+			if (selection.coversWholeFile && fileHashes[cacheKey] === currentHash) {
+				const result = `${header}no changes have been made to the file since your last read (Hash: ${currentHash})`
 				if (card) {
 					await card.update({
 						header: `Reading from ${displayPath} (no changes)`,
 						status: CardStatus.SUCCESS,
-						body: `✓ No changes since last read`,
+						body: "✓ No changes since last read",
 					})
 					await card.finalize(CardStatus.SUCCESS)
 				}
-			} else {
-				const lines = fileContent.text.split(/\r?\n/)
-				const anchors = AnchorStateManager.reconcile(absolutePath, lines, env.config.ulid)
-				let formattedContent = includeAnchors ? formatLinesForModel(lines, anchors, true) : fileContent.text
-				let totalLineCount: number | undefined
-				if (startLineNum || endLineNum) {
-					const contentLines = includeAnchors ? formattedContent.split("\n") : lines
-					totalLineCount = contentLines.length
-					const startLine = startLineNum || 1
-					if (startLine > contentLines.length) {
-						const msg = `start_line ${startLine} exceeds file length (${contentLines.length} lines). No content in specified range.`
-						if (card) {
-							await card.update({ status: CardStatus.ERROR, body: `✕ ${msg}` })
-							await card.finalize(CardStatus.ERROR)
-						}
-						return { success: false, result: `${header}${msg}` }
-					}
-					const start = startLine - 1
-					const end = Math.min(contentLines.length, endLineNum || contentLines.length)
-					const sliced = contentLines.slice(start, end)
-					formattedContent = sliced.join("\n")
-				}
-				const lineCountSuffix = totalLineCount !== undefined ? `\n[Total lines: ${totalLineCount}]` : ""
-				resultText = `${header}[File Hash: ${currentHash}]${lineCountSuffix}\n${formattedContent}`
-				fileHashes[cacheKey] = currentHash
-
-				if (card) {
-					const range =
-						startLineNum || endLineNum ? `lines ${startLineNum || 1} to ${endLineNum || "end"}` : "full file"
-					await card.update({
-						header:
-							startLineNum || endLineNum
-								? `Read lines ${startLineNum || 1}-${endLineNum || "end"} from ${displayPath}`
-								: `Read from ${displayPath}`,
-						status: CardStatus.SUCCESS,
-						body: `✓ Successfully read ${displayPath}${startLineNum || endLineNum ? ` (lines ${startLineNum || 1} to ${endLineNum || "end"})` : ""}`,
-					})
-					await card.finalize(CardStatus.SUCCESS)
-				}
+				this.captureReadTelemetry(relPath, usedWorkspaceHint, env)
+				return { success: true, result }
 			}
 
-			env.telemetry.captureCustomMetadata({
-				path: relPath,
-				isMultiRootEnabled: env.config.isMultiRootEnabled || false,
-				usedWorkspaceHint,
-				resolutionMethod: usedWorkspaceHint ? "hint" : "primary_fallback",
-			})
+			let formattedContent = selection.text
+			if (includeAnchors) {
+				const allLines = fileContent.text.split(/\r?\n/)
+				const anchors = AnchorStateManager.reconcile(absolutePath, allLines, env.config.ulid)
+				formattedContent = formatLinesForModel(selection.lines, anchors.slice(selection.startIndex, selection.endIndex), true)
+			}
 
-			return { success: true, result: resultText, contentBlock }
+			const lineCountSuffix = lineRange ? `\n[Total lines: ${selection.totalLineCount}]` : ""
+			const result = `${header}[File Hash: ${currentHash}]${lineCountSuffix}\n${formattedContent}`
+
+			if (card) {
+				await card.update({
+					header: rangeLabel ? `Read ${rangeLabel} from ${displayPath}` : `Read from ${displayPath}`,
+					status: CardStatus.SUCCESS,
+					body: `✓ Successfully read ${displayPath}${rangeLabel ? ` (${rangeLabel})` : ""}`,
+				})
+				await card.finalize(CardStatus.SUCCESS)
+			}
+
+			if (selection.coversWholeFile) {
+				fileHashes[cacheKey] = currentHash
+			}
+			this.captureReadTelemetry(relPath, usedWorkspaceHint, env)
+			return { success: true, result }
 		} catch (error: any) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const normalizedMessage = errorMessage.startsWith("Error reading file:")
@@ -253,27 +216,98 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 				await card.update({ status: CardStatus.ERROR, body: `✕ ${normalizedMessage}` })
 				await card.finalize(CardStatus.ERROR)
 			}
-
 			env.telemetry.captureCustomMetadata({
 				path: relPath,
 				isMultiRootEnabled: env.config.isMultiRootEnabled || false,
 				usedWorkspaceHint,
 				resolutionMethod: "error",
 			})
-
 			return { success: false, result: `${header}${normalizedMessage}` }
 		}
 	}
+	private parseLineRange(startLine: number | undefined, endLine: number | undefined): LineRange | undefined {
+		if (startLine === undefined && endLine === undefined) {
+			return undefined
+		}
+
+		const parseLineNumber = (name: string, value: number | undefined): number | undefined => {
+			if (value === undefined) {
+				return undefined
+			}
+			const parsed = Number(value)
+			if (!Number.isInteger(parsed) || parsed < 1) {
+				throw new Error(`Invalid ${name}: must be an integer >= 1.`)
+			}
+			return parsed
+		}
+
+		const start = parseLineNumber("start_line", startLine) ?? 1
+		const end = parseLineNumber("end_line", endLine)
+		if (end !== undefined && start > end) {
+			throw new Error(`Invalid line range: start_line ${start} cannot be greater than end_line ${end}.`)
+		}
+		return { start, end }
+	}
+
+	private selectText(text: string, lineRange: LineRange | undefined): TextSelection {
+		const lines = text.split(/\r?\n/)
+		if (!lineRange) {
+			return {
+				text,
+				lines,
+				totalLineCount: lines.length,
+				startIndex: 0,
+				endIndex: lines.length,
+				coversWholeFile: true,
+			}
+		}
+
+		if (lineRange.start > lines.length) {
+			throw new Error(
+				`start_line ${lineRange.start} exceeds file length (${lines.length} lines). No content in specified range.`,
+			)
+		}
+
+		const startIndex = lineRange.start - 1
+		const endIndex = Math.min(lineRange.end ?? lines.length, lines.length)
+		const selectedLines = lines.slice(startIndex, endIndex)
+		return {
+			text: selectedLines.join("\n"),
+			lines: selectedLines,
+			totalLineCount: lines.length,
+			startIndex,
+			endIndex,
+			coversWholeFile: startIndex === 0 && endIndex === lines.length,
+		}
+	}
+
+	private enforceTextReadSize(text: string): void {
+		const selectedBytes = Buffer.byteLength(text, "utf8")
+		if (selectedBytes > MAX_TEXT_READ_SIZE) {
+			throw new Error(
+				`Selected text is ${selectedBytes} bytes, which exceeds the ${MAX_TEXT_READ_SIZE}-byte read limit. Specify a smaller line range.`,
+			)
+		}
+	}
+
+	private captureReadTelemetry(relPath: string, usedWorkspaceHint: boolean, env: IToolEnvironment): void {
+		env.telemetry.captureCustomMetadata({
+			path: relPath,
+			isMultiRootEnabled: env.config.isMultiRootEnabled || false,
+			usedWorkspaceHint,
+			resolutionMethod: usedWorkspaceHint ? "hint" : "primary_fallback",
+		})
+	}
+
+
 
 	private incrementMistakeCount(env: IToolEnvironment): void {
 		env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 	}
 
-	private updateTaskState(anySucceeded: boolean, anyFailed: boolean, env: IToolEnvironment): void {
-		// Only reset on success. Do NOT increment on failures here —
-		// file-not-found is a valid outcome (the model provided correct arguments,
-		// the file just doesn't exist). Missing-parameter mistakes are handled
-		// separately above via incrementMistakeCount.
+	private updateTaskState(anySucceeded: boolean, env: IToolEnvironment): void {
+		// Only reset on success. File-level failures are valid outcomes; missing
+		// parameters are counted separately before file processing begins.
 		if (anySucceeded) {
 			env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 		}
