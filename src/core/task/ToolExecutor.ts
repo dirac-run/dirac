@@ -76,7 +76,7 @@ export class ToolExecutor {
 			command: string,
 			timeoutSeconds: number | undefined,
 			options?: CommandExecutionOptions,
-		) => Promise<[boolean, any]>,
+		) => Promise<import("@integrations/terminal").CommandExecutionResult>,
 		private cancelRunningCommandTool: () => Promise<boolean>,
 		private doesLatestTaskCompletionHaveNewChanges: () => Promise<boolean>,
 		private switchToActMode: () => Promise<boolean>,

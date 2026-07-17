@@ -736,7 +736,7 @@ export class AcpTerminalManager implements ITerminalManager {
 				request.env = options.env.map((e) => ({ name: e.name, value: e.value }))
 			}
 			if (options.outputByteLimit !== undefined) {
-				request.outputByteLimit = options.outputByteLimit
+				request.outputByteLimit = Number(options.outputByteLimit)
 			}
 
 			const handle = await this.connection.createTerminal(request)

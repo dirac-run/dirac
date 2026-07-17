@@ -16,7 +16,6 @@ import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type { DiracMessageChange } from "@core/task/message-state";
-import type { ApiProvider } from "@shared/api";
 import type { DiracMessage } from "@shared/ExtensionMessage";
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage";
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands";
@@ -83,8 +82,6 @@ import type {
 	DiracAcpSession,
 	DiracAgentOptions,
 	ElicitationHandler,
-	ElicitationRequest,
-	ElicitationResponse,
 	PermissionHandler,
 } from "./public-types.js";
 import { AcpSessionStatus } from "./public-types.js";
@@ -179,12 +176,12 @@ export class DiracAgent implements acp.Agent {
 		this.unsubscribeFromStateChanges?.();
 		this.unsubscribeFromStateChanges = undefined;
 		for (const sessionId of [...this.sessions.keys()]) {
-			await this.closeSession(sessionId);
+			await this.releaseSessionResources(sessionId);
 		}
 	}
 
 	/** Release active session resources while retaining all persisted history. */
-	async closeSession(sessionId: string): Promise<void> {
+	private async releaseSessionResources(sessionId: string): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (!session) {
 			return;
@@ -207,8 +204,8 @@ export class DiracAgent implements acp.Agent {
 	}
 
 	/** Delete a session's active resources, owned worktree, and persisted task history. */
-	async deleteSession(sessionId: string): Promise<void> {
-		await this.closeSession(sessionId);
+	private async deleteSessionResources(sessionId: string): Promise<void> {
+		await this.releaseSessionResources(sessionId);
 
 		const worktree = getSessionWorktree(sessionId);
 		if (worktree) {
@@ -382,7 +379,7 @@ export class DiracAgent implements acp.Agent {
 	/** Permission handler callback for requesting user permission */
 	private permissionHandler?: PermissionHandler;
 
-	/** Elicitation handler supplied by the ACP transport when structured questions are negotiated. */
+	/** Elicitation handler supplied by the ACP transport. */
 	private elicitationHandler?: ElicitationHandler;
 
 	/** Client capabilities received during initialization */
@@ -667,6 +664,12 @@ export class DiracAgent implements acp.Agent {
 		(response: acp.RequestPermissionResponse) => void
 	> = new Map();
 
+	/** Pending elicitation requests, so session/cancel can abort the client interaction. */
+	private readonly pendingElicitationResolvers: Map<
+		string,
+		(response: acp.CreateElicitationResponse) => void
+	> = new Map();
+
 	constructor(options: DiracAgentOptions) {
 		this.options = options;
 		setRuntimeHooksDir(options.hooksDir);
@@ -689,21 +692,41 @@ export class DiracAgent implements acp.Agent {
 		this.permissionHandler = handler;
 	}
 
-	/** Set the transport callback used for capability-gated structured elicitation. */
+	/** Set the transport callback used for ACP elicitation. */
 	setElicitationHandler(handler: ElicitationHandler): void {
 		this.elicitationHandler = handler;
 	}
 
 	private async requestElicitation(
-		request: ElicitationRequest,
-	): Promise<ElicitationResponse> {
+		request: acp.CreateElicitationRequest,
+	): Promise<acp.CreateElicitationResponse> {
 		if (!this.elicitationHandler) {
-			return { outcome: "cancelled" };
+			return { action: "cancel" };
 		}
 
-		return await new Promise((resolve) =>
-			this.elicitationHandler!(request, resolve),
-		);
+		const sessionId =
+			"sessionId" in request && typeof request.sessionId === "string"
+				? request.sessionId
+				: undefined;
+		return await new Promise((resolve) => {
+			let settled = false;
+			const settle = (response: acp.CreateElicitationResponse) => {
+				if (settled) return;
+				settled = true;
+				if (
+					sessionId &&
+					this.pendingElicitationResolvers.get(sessionId) === settle
+				) {
+					this.pendingElicitationResolvers.delete(sessionId);
+				}
+				resolve(response);
+			};
+			if (sessionId) {
+				this.pendingElicitationResolvers.get(sessionId)?.({ action: "cancel" });
+				this.pendingElicitationResolvers.set(sessionId, settle);
+			}
+			this.elicitationHandler!(request, settle);
+		});
 	}
 
 	/**
@@ -908,14 +931,12 @@ export class DiracAgent implements acp.Agent {
 					},
 					"dev.dirac/worktree.integrate": true,
 
-					"dev.dirac/elicitation": {
-						requestMethod: "dev.dirac/elicitation.request",
-						responseShape: "{ outcome: accepted|cancelled, optionId?, text? }",
-					},
 				},
 				loadSession: true,
 				sessionCapabilities: {
 					resume: {},
+					close: {},
+					delete: {},
 				},
 				promptCapabilities: {
 					image: true,
@@ -1055,9 +1076,6 @@ export class DiracAgent implements acp.Agent {
 		this.sessionStates.set(sessionId, sessionState);
 
 		// Get current model configuration for the response
-		const modelState = await this.sessionConfig.getSessionModelState(
-			session.mode,
-		);
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(
 			session,
 			this.acpSessionOverrides.get(session.sessionId),
@@ -1069,7 +1087,6 @@ export class DiracAgent implements acp.Agent {
 				session.mode,
 				this.acpSessionOverrides.get(sessionId),
 			),
-			models: modelState,
 			configOptions,
 			...(worktree
 				? {
@@ -1099,9 +1116,6 @@ export class DiracAgent implements acp.Agent {
 		const sessionId = params.sessionId;
 		const existingSession = this.sessions.get(sessionId);
 		if (existingSession) {
-			const modelState = await this.sessionConfig.getSessionModelState(
-				existingSession.mode,
-			);
 			const configOptions = await this.sessionConfig.getSessionConfigOptions(
 				existingSession,
 				this.acpSessionOverrides.get(sessionId),
@@ -1111,7 +1125,6 @@ export class DiracAgent implements acp.Agent {
 					existingSession.mode,
 					this.acpSessionOverrides.get(sessionId),
 				),
-				models: modelState,
 				configOptions,
 			};
 		}
@@ -1167,9 +1180,6 @@ export class DiracAgent implements acp.Agent {
 			pendingToolCalls: new Map(),
 		});
 
-		const modelState = await this.sessionConfig.getSessionModelState(
-			session.mode,
-		);
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(
 			session,
 			this.acpSessionOverrides.get(session.sessionId),
@@ -1179,7 +1189,6 @@ export class DiracAgent implements acp.Agent {
 				session.mode,
 				this.acpSessionOverrides.get(sessionId),
 			),
-			models: modelState,
 			configOptions,
 		};
 	}
@@ -1221,49 +1230,7 @@ export class DiracAgent implements acp.Agent {
 		await this.emitConfigOptionsUpdate(sessionId);
 	}
 
-	/**
-	 * Set the model for a session.
-	 *
-	 * This method allows changing the model for either plan or act mode.
-	 * The modelId format is "provider/modelId" (e.g., "anthropic/claude-3-5-sonnet-20241022").
-	 *
-	 * @experimental This is an unstable API that may change.
-	 */
-	async unstable_setSessionModel(
-		params: acp.SetSessionModelRequest,
-	): Promise<acp.SetSessionModelResponse> {
-		const session = this.sessions.get(params.sessionId);
-
-		if (!session) {
-			throw new Error(`Session not found: ${params.sessionId}`);
-		}
-
-		Logger.debug("[DiracAgent] unstable_setSessionModel called:", {
-			sessionId: params.sessionId,
-			modelId: params.modelId,
-		});
-
-		// Parse the modelId format: "provider/modelId"
-		const slashIndex = params.modelId.indexOf("/");
-		if (slashIndex === -1) {
-			throw new Error(
-				`Invalid modelId format: ${params.modelId}. Expected "provider/modelId".`,
-			);
-		}
-
-		const provider = params.modelId.substring(0, slashIndex) as ApiProvider;
-		const modelId = params.modelId.substring(slashIndex + 1);
-
-		await this.sessionConfig.applyProviderAndModel(session, provider, modelId);
-		session.lastActivityAt = Date.now();
-
-		await StateManager.get().flushPendingState();
-		await this.emitConfigOptionsUpdate(params.sessionId);
-
-		return {};
-	}
-
-	async unstable_setSessionConfigOption(
+	async setSessionConfigOption(
 		params: acp.SetSessionConfigOptionRequest,
 	): Promise<acp.SetSessionConfigOptionResponse> {
 		const session = this.sessions.get(params.sessionId);
@@ -1271,40 +1238,45 @@ export class DiracAgent implements acp.Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
-		Logger.debug("[DiracAgent] unstable_setSessionConfigOption called:", {
+		Logger.debug("[DiracAgent] setSessionConfigOption called:", {
 			sessionId: params.sessionId,
 			configId: params.configId,
 			value: params.value,
 		});
 
+		if (typeof params.value !== "string") {
+			throw new Error(`Boolean session config is not supported: ${params.configId}`);
+		}
+
+		const value = params.value;
 		let emittedConfigUpdate = false;
 		switch (params.configId) {
 			case "mode":
 				await this.setSessionMode({
 					sessionId: params.sessionId,
-					modeId: params.value,
+					modeId: value,
 				});
 				emittedConfigUpdate = true;
 				break;
 			case "provider":
 				await this.sessionConfig.applyProviderConfigOption(
 					session,
-					params.value,
+					value,
 				);
 				break;
 			case "model":
-				await this.sessionConfig.applyModelConfigOption(session, params.value);
+				await this.sessionConfig.applyModelConfigOption(session, value);
 				break;
 			case "reasoning_effort":
 				this.sessionConfig.applyReasoningEffortConfigOption(
 					session,
-					params.value,
+					value,
 				);
 				break;
 			case "thinking_budget":
 				this.sessionConfig.applyThinkingBudgetConfigOption(
 					session,
-					params.value,
+					value,
 				);
 				break;
 			default:
@@ -1424,6 +1396,22 @@ export class DiracAgent implements acp.Agent {
 			resolved: promptResolved,
 		});
 
+		let subscribedTask: object | undefined;
+		const subscribeToCurrentTask = () => {
+			const task = controller.task;
+			if (!task || subscribedTask === task) return;
+			bridge.subscribeToTaskMessages(
+				controller,
+				params.sessionId,
+				sessionState,
+				resolvePrompt!,
+				promptResolved,
+				cleanupFunctions,
+				controller.taskRunPromise,
+			);
+			subscribedTask = task;
+		};
+
 		try {
 			// Extract text content from prompt
 			const { textContent, imageContent, fileResources } = parsePromptContent(
@@ -1508,6 +1496,7 @@ export class DiracAgent implements acp.Agent {
 						Promise.resolve(controller.taskRunPromise).catch(onRunPromiseError);
 						task.messageStateHandler.on("diracMessagesChanged", onChanged);
 					});
+					subscribeToCurrentTask();
 					await task.submitCardResponse(
 						"",
 						DiracAskResponse.MESSAGE,
@@ -1523,28 +1512,22 @@ export class DiracAgent implements acp.Agent {
 					controller.task.taskId,
 				);
 
-				// Find the last ask message and respond to it
-				const messages = controller.task.messageStateHandler.getDiracMessages();
-				const lastAskMessage = [...messages]
-					.reverse()
-					.find(
-						(m) =>
-							m.content.type === DiracMessageType.CARD &&
-							(m.content.card.requireApproval ||
-								m.content.card.requireFeedback),
-					);
+				const waitingCardId = controller.task.taskState.lastWaitingCardId;
+				const waitingCard = waitingCardId
+					? controller.task.messageStateHandler
+						.getDiracMessages()
+						.find(
+							(message) =>
+								message.content.type === DiracMessageType.CARD &&
+								message.content.card.id === waitingCardId &&
+								message.content.card.status === CardStatus.WAITING_FOR_INPUT,
+						)
+					: undefined;
 
-				const terminalCardHeaders = new Set([
-					"API Request Failed",
-					"Mistake Limit Reached",
-				]);
-				const lastAskIsTerminal =
-					lastAskMessage?.content.type === DiracMessageType.CARD &&
-					terminalCardHeaders.has(lastAskMessage.content.card.header);
-
-				if (lastAskMessage && !lastAskIsTerminal) {
+				if (waitingCard) {
+					subscribeToCurrentTask();
 					await controller.task.submitCardResponse(
-						"",
+						waitingCardId!,
 						DiracAskResponse.MESSAGE,
 						textContent,
 						imageContent,
@@ -1552,7 +1535,7 @@ export class DiracAgent implements acp.Agent {
 					);
 				} else {
 					Logger.debug(
-						"[DiracAgent] Starting new task (no pending ask or last ask was terminal failure)",
+						"[DiracAgent] Starting new task (active task is not waiting for input)",
 					);
 					await controller.initTask(
 						textContent,
@@ -1564,12 +1547,21 @@ export class DiracAgent implements acp.Agent {
 						undefined,
 						this.pinnedContextInitializationOptions(params.sessionId),
 					);
-					// reservedTaskId was already consumed on first prompt; record the
-					// replacement task so loadSession can recover it after a restart.
 					if (controller.task) {
 						await recordTaskForSession(
 							params.sessionId,
 							controller.task.taskId,
+						);
+						const replayEndIndex = controller.task.messageStateHandler.getDiracMessages().length;
+						subscribeToCurrentTask();
+						await bridge.replayTaskMessages(
+							controller,
+							params.sessionId,
+							sessionState,
+							resolvePrompt!,
+							promptResolved,
+							0,
+							replayEndIndex,
 						);
 					}
 				}
@@ -1591,21 +1583,23 @@ export class DiracAgent implements acp.Agent {
 				);
 			}
 
-			// Subscribe to diracMessages changes after task is created.
-			// The bridge handles all message translation, delta tracking, permission
-			// requests, prompt resolution, and error surfacing.
-			const task = controller.task;
-			if (task) {
-				bridge.subscribeToTaskMessages(
+			if (controller.task && !subscribedTask) {
+				const replayEndIndex = controller.task.messageStateHandler.getDiracMessages().length;
+				subscribeToCurrentTask();
+				await bridge.replayTaskMessages(
 					controller,
 					params.sessionId,
 					sessionState,
 					resolvePrompt!,
 					promptResolved,
-					cleanupFunctions,
-					controller.taskRunPromise,
+					0,
+					replayEndIndex,
 				);
 			}
+
+			// Existing continuations subscribe before waking the task; newly created
+			// tasks subscribe and replay the messages emitted during initialization.
+			subscribeToCurrentTask();
 
 			// Pins were installed during task construction. This preserves the observer
 			// for task implementations that do not consume initialization options.
@@ -1696,6 +1690,12 @@ export class DiracAgent implements acp.Agent {
 				outcome: { outcome: "cancelled" },
 			});
 
+			const bridge = this.bridgeForSession(params.sessionId);
+			bridge.invalidatePendingInteractions();
+			this.pendingElicitationResolvers.get(params.sessionId)?.({
+				action: "cancel",
+			});
+
 			// If we have an active controller task, cancel it before resolving prompt.
 			const controller = this.#sessionControllers.get(session);
 			if (controller?.task) {
@@ -1704,6 +1704,8 @@ export class DiracAgent implements acp.Agent {
 				} catch (error) {
 					Logger.debug("[DiracAgent] Error cancelling task:", error);
 				}
+
+				await bridge.waitForMessageWork();
 			}
 
 			// ACP clients retain tool calls until a terminal update arrives. Close
@@ -1736,6 +1738,16 @@ export class DiracAgent implements acp.Agent {
 	 * `autoApproveAllToggled` and `yoloModeToggled` flags exist; this method
 	 * translates between the two.
 	 */
+	async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+		await this.releaseSessionResources(params.sessionId);
+		return {};
+	}
+
+	async deleteSession(params: acp.DeleteSessionRequest): Promise<acp.DeleteSessionResponse> {
+		await this.deleteSessionResources(params.sessionId);
+		return {};
+	}
+
 	async setSessionMode(
 		params: acp.SetSessionModeRequest,
 	): Promise<acp.SetSessionModeResponse> {

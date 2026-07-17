@@ -95,27 +95,6 @@ export class SessionConfigManager {
 		}
 	}
 
-	async getSessionModelState(mode: Mode): Promise<acp.SessionModelState> {
-		const stateManager = StateManager.get()
-		const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
-		const currentProvider = stateManager.getGlobalSettingsKey(providerKey) as ApiProvider | undefined
-		const modelKey = currentProvider ? getProviderModelIdKey(currentProvider, mode) : null
-		const currentModelId =
-			((modelKey ? stateManager.getGlobalSettingsKey(modelKey) : undefined) as string | undefined) ||
-			(currentProvider ? getDefaultModelId(currentProvider) : undefined)
-		const currentFullModelId =
-			currentProvider && currentModelId ? `${currentProvider}/${currentModelId}` : currentProvider || ""
-		const modelIds = await this.getAvailableModelIds(currentProvider, currentModelId)
-		const availableModels: acp.ModelInfo[] = modelIds.map((modelId) => ({
-			modelId: currentProvider ? `${currentProvider}/${modelId}` : modelId,
-			name: modelId,
-		}))
-
-		return {
-			currentModelId: currentFullModelId,
-			availableModels,
-		}
-	}
 
 	async getSessionConfigOptions(
 		session: DiracAcpSession,

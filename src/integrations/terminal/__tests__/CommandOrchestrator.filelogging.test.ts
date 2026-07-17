@@ -82,25 +82,25 @@ function createCallbacks(): { callbacks: CommandExecutorCallbacks; upsertedTexts
 				},
 				streamText: async () => ({
 					id: "1",
-					append: async () => {},
-					close: async () => {},
-					setImages: async () => {},
-					setFiles: async () => {},
+					append: async () => { },
+					close: async () => { },
+					setImages: async () => { },
+					setFiles: async () => { },
 				}),
 				createCard: async () => ({
 					id: "1",
-					update: async () => {},
-					appendBody: async () => {},
-					finalize: async () => {},
+					update: async () => { },
+					appendBody: async () => { },
+					finalize: async () => { },
 					// Auto-approve so didContinue=true, lines stream directly without blocking
 					waitForInteraction: async () => ({ response: DiracAskResponse.APPROVE }) as any,
 				}),
-				upsertApiStatus: async () => {},
+				upsertApiStatus: async () => { },
 			} as any,
-			updateBackgroundCommandState: () => {},
-			updateDiracMessage: async () => {},
+			updateBackgroundCommandState: () => { },
+			updateDiracMessage: async () => { },
 			getDiracMessages: () => [],
-			addToUserMessageContent: () => {},
+			addToUserMessageContent: () => { },
 			getEnvironmentVariables: async () => undefined,
 		},
 		upsertedTexts,
@@ -137,9 +137,9 @@ describe("CommandOrchestrator file-based logging", () => {
 		process.complete({ exitCode: 0, signal: null })
 		const result: OrchestrationResult = await orchestrationPromise
 
-		// Verify file logging was activated — user should be notified
+		// Suppressed executions still use file logging without publishing UI messages.
 		const fileNotification = upsertedTexts.find((t) => t.includes("Output is large"))
-		assert.ok(fileNotification, "Should have notified user about file-based logging")
+		assert.equal(fileNotification, undefined)
 
 		// Result should reference a log file path
 		assert.ok(result.logFilePath, "Result should have a logFilePath when file logging activated")
@@ -148,7 +148,7 @@ describe("CommandOrchestrator file-based logging", () => {
 		// Clean up
 		try {
 			unlinkSync(result.logFilePath!)
-		} catch {}
+		} catch { }
 	})
 
 	it("activates file logging when output exceeds MAX_BYTES_BEFORE_FILE threshold", async () => {
@@ -166,12 +166,12 @@ describe("CommandOrchestrator file-based logging", () => {
 		const result: OrchestrationResult = await orchestrationPromise
 
 		const fileNotification = upsertedTexts.find((t) => t.includes("Output is large"))
-		assert.ok(fileNotification, "Should have notified user about file-based logging (byte threshold)")
+		assert.equal(fileNotification, undefined)
 		assert.ok(result.logFilePath, "Result should have a logFilePath when byte threshold exceeded")
 
 		try {
 			unlinkSync(result.logFilePath!)
-		} catch {}
+		} catch { }
 	})
 
 	it("writes all output to file after switching to file mode", async () => {
@@ -196,7 +196,7 @@ describe("CommandOrchestrator file-based logging", () => {
 
 		try {
 			unlinkSync(result.logFilePath!)
-		} catch {}
+		} catch { }
 	})
 
 	it("does not activate file logging for small outputs", async () => {
@@ -217,4 +217,24 @@ describe("CommandOrchestrator file-based logging", () => {
 		assert.ok(!fileNotification, "Should NOT notify about file logging for small output")
 		assert.ok(!result.logFilePath, "Should NOT have a log file path for small output")
 	})
+	it("keeps both ends of one oversized output line in the summary", async () => {
+		const { orchestrateCommandExecution } = await import("../CommandOrchestrator")
+		const process = new FakeTerminalProcess()
+		const { callbacks } = createCallbacks()
+		const orchestrationPromise = orchestrateCommandExecution(process.asResultPromise(), createTerminalManager(), callbacks, {
+			command: "single-large-line",
+			suppressUserInteraction: true,
+		})
+		const line = "prefix-" + "x".repeat(600 * 1024) + "-suffix"
+
+		process.sendLine(line)
+		process.complete({ exitCode: 0, signal: null })
+		const result = await orchestrationPromise
+
+		assert.match(result.result as string, /prefix-/)
+		assert.match(result.result as string, /-suffix/)
+		if (result.logFilePath) unlinkSync(result.logFilePath)
+	})
+
+
 })

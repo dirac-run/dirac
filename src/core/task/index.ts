@@ -33,6 +33,7 @@ import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { showSystemNotification } from "@integrations/notifications"
 import {
 	type CommandExecutionOptions,
+	type CommandExecutionResult,
 	CommandExecutor,
 	CommandExecutorCallbacks,
 	FullCommandExecutorConfig,
@@ -927,7 +928,7 @@ export class Task {
 		command: string,
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
-	): Promise<[boolean, DiracToolResponseContent]> {
+	): Promise<CommandExecutionResult> {
 		return this.commandExecutor.execute(command, timeoutSeconds, options)
 	}
 

@@ -48,26 +48,10 @@ export type PermissionHandler = (
 ) => void
 
 
-/** Typed user-decision request used by Dirac's capability-gated ACP elicitation extension. */
-export interface ElicitationRequest {
-	sessionId: string
-	elicitationId: string
-	message: string
-	options: Array<{ id: string; label: string }>
-	allowFreeformInput: boolean
-}
-
-/** Structured outcome returned by the client for an elicitation request. */
-export interface ElicitationResponse {
-	outcome: "accepted" | "cancelled"
-	optionId?: string
-	text?: string
-}
-
-/** Handler function for a capability-gated structured elicitation request. */
+/** Handler function for an ACP form elicitation request. */
 export type ElicitationHandler = (
-	request: ElicitationRequest,
-	resolve: (response: ElicitationResponse) => void,
+	request: acp.CreateElicitationRequest,
+	resolve: (response: acp.CreateElicitationResponse) => void,
 ) => void
 
 // ============================================================
@@ -278,7 +262,6 @@ export type {
 	ListSessionsRequest,
 	ListSessionsResponse,
 	LoadSessionResponse,
-	ModelInfo,
 	NewSessionRequest,
 	NewSessionResponse,
 	PermissionOption,
@@ -288,13 +271,10 @@ export type {
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	SessionConfigOption,
-	SessionModelState,
 	SessionNotification,
 	SessionUpdate,
 	SetSessionConfigOptionRequest,
 	SetSessionConfigOptionResponse,
-	SetSessionModelRequest,
-	SetSessionModelResponse,
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 	StopReason,

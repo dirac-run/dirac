@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => {
 		prompt: vi.fn(),
 		cancel: vi.fn(),
 		setSessionMode: vi.fn(),
-		unstable_setSessionModel: vi.fn(),
-		unstable_setSessionConfigOption: vi.fn(),
+		setSessionModel: vi.fn(),
+		setSessionConfigOption: vi.fn(),
 		authenticate: vi.fn(),
 		logout: vi.fn(),
 
@@ -61,7 +61,8 @@ describe("AcpAgent", () => {
 		sessionUpdate: vi.fn(),
 		extNotification: vi.fn().mockResolvedValue(undefined),
 
-		extMethod: vi.fn().mockResolvedValue({ outcome: "accepted", optionId: "option-1" }),
+		extMethod: vi.fn(),
+		unstable_createElicitation: vi.fn().mockResolvedValue({ action: "accept", content: { optionId: "option-1" } }),
 	} as any
 
 	beforeEach(() => {
@@ -147,42 +148,62 @@ describe("AcpAgent", () => {
 	})
 
 
-	it("bridges structured elicitation requests and validates the structured answer", async () => {
+	it("bridges ACP form elicitation responses unchanged", async () => {
+		new AcpAgent(connection, {})
+		const handler = mocks.diracAgentInstance.setElicitationHandler.mock.calls[0][0]
+		const resolve = vi.fn()
+		const request = {
+			mode: "form",
+			sessionId: "session-1",
+			toolCallId: "question-1",
+			message: "Choose a target",
+			requestedSchema: { type: "object", properties: {} },
+		}
+
+		handler(request, resolve)
+		await Promise.resolve()
+
+		expect(connection.unstable_createElicitation).toHaveBeenCalledWith(request)
+		expect(connection.extMethod).not.toHaveBeenCalledWith("dev.dirac/elicitation.request", expect.anything())
+		expect(resolve).toHaveBeenCalledWith({ action: "accept", content: { optionId: "option-1" } })
+	})
+
+	it.each([
+		{ action: "decline" },
+		{ action: "cancel" },
+	])("forwards $action elicitation responses unchanged", async (response) => {
+		connection.unstable_createElicitation.mockResolvedValueOnce(response)
 		new AcpAgent(connection, {})
 		const handler = mocks.diracAgentInstance.setElicitationHandler.mock.calls[0][0]
 		const resolve = vi.fn()
 
-		handler(
-			{
-				sessionId: "session-1",
-				elicitationId: "question-1",
-				message: "Choose a target",
-				options: [{ id: "option-1", label: "Option 1" }],
-				allowFreeformInput: true,
-			},
-			resolve,
-		)
+		handler({ mode: "form", sessionId: "session-1", message: "Question", requestedSchema: {} }, resolve)
 		await Promise.resolve()
 
-		expect(connection.extMethod).toHaveBeenCalledWith("dev.dirac/elicitation.request", {
-			sessionId: "session-1",
-			elicitationId: "question-1",
-			message: "Choose a target",
-			options: [{ id: "option-1", label: "Option 1" }],
-			allowFreeformInput: true,
-		})
-		expect(resolve).toHaveBeenCalledWith({ outcome: "accepted", optionId: "option-1", text: undefined })
+		expect(resolve).toHaveBeenCalledWith(response)
 	})
 
-	it("delegates unstable_setSessionConfigOption", async () => {
-		mocks.diracAgentInstance.unstable_setSessionConfigOption.mockResolvedValue({ configOptions: [] })
+	it("cancels elicitation when the transport rejects", async () => {
+		connection.unstable_createElicitation.mockRejectedValueOnce(new Error("disconnected"))
+		new AcpAgent(connection, {})
+		const handler = mocks.diracAgentInstance.setElicitationHandler.mock.calls[0][0]
+		const resolve = vi.fn()
+
+		handler({ mode: "form", sessionId: "session-1", message: "Question", requestedSchema: {} }, resolve)
+		await new Promise((settle) => setTimeout(settle, 0))
+
+		expect(resolve).toHaveBeenCalledWith({ action: "cancel" })
+	})
+
+	it("delegates setSessionConfigOption", async () => {
+		mocks.diracAgentInstance.setSessionConfigOption.mockResolvedValue({ configOptions: [] })
 		const agent = new AcpAgent(connection, {})
 
 		await expect(
-			agent.unstable_setSessionConfigOption({ sessionId: "session-1", configId: "mode", value: "plan" }),
+			agent.setSessionConfigOption({ sessionId: "session-1", configId: "mode", value: "plan" }),
 		).resolves.toEqual({ configOptions: [] })
 
-		expect(mocks.diracAgentInstance.unstable_setSessionConfigOption).toHaveBeenCalledWith({
+		expect(mocks.diracAgentInstance.setSessionConfigOption).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			configId: "mode",
 			value: "plan",
@@ -339,7 +360,7 @@ describe("AcpAgent", () => {
 
 		await expect(agent.extMethod("dev.dirac/session.close", { sessionId: "session-1" })).resolves.toEqual({})
 
-		expect(mocks.diracAgentInstance.closeSession).toHaveBeenCalledWith("session-1")
+		expect(mocks.diracAgentInstance.closeSession).toHaveBeenCalledWith({ sessionId: "session-1" })
 	})
 
 	it("handles the delete-session extension and removes its wrapper state", async () => {
@@ -347,7 +368,26 @@ describe("AcpAgent", () => {
 
 		await expect(agent.extMethod("dev.dirac/session.delete", { sessionId: "session-1" })).resolves.toEqual({})
 
-		expect(mocks.diracAgentInstance.deleteSession).toHaveBeenCalledWith("session-1")
+		expect(mocks.diracAgentInstance.deleteSession).toHaveBeenCalledWith({ sessionId: "session-1" })
+	})
+
+
+	it("delegates standard closeSession", async () => {
+		mocks.diracAgentInstance.closeSession.mockResolvedValue({})
+		const agent = new AcpAgent(connection, {})
+
+		await expect(agent.closeSession({ sessionId: "session-1" })).resolves.toEqual({})
+
+		expect(mocks.diracAgentInstance.closeSession).toHaveBeenCalledWith({ sessionId: "session-1" })
+	})
+
+	it("delegates standard deleteSession", async () => {
+		mocks.diracAgentInstance.deleteSession.mockResolvedValue({})
+		const agent = new AcpAgent(connection, {})
+
+		await expect(agent.deleteSession({ sessionId: "session-1" })).resolves.toEqual({})
+
+		expect(mocks.diracAgentInstance.deleteSession).toHaveBeenCalledWith({ sessionId: "session-1" })
 	})
 
 	it("lists and deletes rules through capability-advertised permission extensions", async () => {

@@ -37,6 +37,8 @@ export type {
 	ActiveBackgroundCommand,
 	AskResponse,
 	CommandExecutionOptions,
+	CommandExecutionMetadata,
+	CommandExecutionResult,
 	CommandExecutorCallbacks,
 	CommandExecutorConfig,
 	FullCommandExecutorConfig,

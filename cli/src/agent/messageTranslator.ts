@@ -258,7 +258,6 @@ function translateWebSearchMarkerMessage(query: string, sessionState: AcpSession
 	return toolCallId
 }
 
-const DiracAskResponse_MESSAGE = "messageResponse"
 
 /**
  * Translate a CARD type Dirac message to ACP updates.
@@ -346,8 +345,8 @@ function translateCardMessage(
 		}
 	}
 
-	// Handle interaction requests (approval / feedback)
-	if (card.status === CardStatus.WAITING_FOR_INPUT && (card.requireApproval || card.requireFeedback)) {
+	// Permission requests are exclusively for real approval decisions.
+	if (card.status === CardStatus.WAITING_FOR_INPUT && card.requireApproval) {
 		const existingToolCall = sessionState.pendingToolCalls.get(toolCallId) || {
 			toolCallId,
 			title: card.header,
@@ -356,22 +355,14 @@ function translateCardMessage(
 			locations,
 		}
 		requiresPermission = true
-		if (card.requireApproval) {
-			permissionRequest = {
-				toolCall: existingToolCall as acp.ToolCall,
-				options: [
-					{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
-					{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
-					{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
-					{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
-				],
-			}
-		} else {
-			// requireFeedback
-			permissionRequest = {
-				toolCall: existingToolCall as acp.ToolCall,
-				options: [{ kind: "allow_once", optionId: DiracAskResponse_MESSAGE, name: "Submit" }],
-			}
+		permissionRequest = {
+			toolCall: existingToolCall as acp.ToolCall,
+			options: [
+				{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
+				{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
+				{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
+				{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
+			],
 		}
 	}
 

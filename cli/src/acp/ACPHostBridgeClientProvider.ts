@@ -239,28 +239,24 @@ class ACPWindowServiceClient implements WindowServiceClientInterface {
 	async openSettings(_request: proto.host.OpenSettingsRequest): Promise<proto.host.OpenSettingsResponse> {
 		// Next phase: Send ACP extension request to open settings panel.
 		// This would open the settings/preferences in the ACP client.
-		Logger.debug("[ACPWindowServiceClient] openSettings called (stub)")
 		return proto.host.OpenSettingsResponse.create({})
 	}
 
 	async getOpenTabs(_request: proto.host.GetOpenTabsRequest): Promise<proto.host.GetOpenTabsResponse> {
 		// Next phase: Send ACP extension request to list open tabs/documents.
 		// This would return a list of currently open files in the editor.
-		Logger.debug("[ACPWindowServiceClient] getOpenTabs called (stub)")
 		return proto.host.GetOpenTabsResponse.create({ paths: [] })
 	}
 
 	async getVisibleTabs(_request: proto.host.GetVisibleTabsRequest): Promise<proto.host.GetVisibleTabsResponse> {
 		// Next phase: Send ACP extension request to list visible tabs.
 		// This would return a list of visible tabs/panes in the editor.
-		Logger.debug("[ACPWindowServiceClient] getVisibleTabs called (stub)")
 		return proto.host.GetVisibleTabsResponse.create({ paths: [] })
 	}
 
 	async getActiveEditor(_request: proto.host.GetActiveEditorRequest): Promise<proto.host.GetActiveEditorResponse> {
 		// Next phase: Send ACP extension request to get active editor info.
 		// This would return information about the currently focused editor.
-		Logger.debug("[ACPWindowServiceClient] getActiveEditor called (stub)")
 		return proto.host.GetActiveEditorResponse.create({})
 	}
 }

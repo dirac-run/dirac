@@ -101,14 +101,13 @@ describe("DiracAgent ACP worktrees", () => {
 
 		expect(Object.keys(capabilities).sort()).toEqual(["_meta", "loadSession", "promptCapabilities", "sessionCapabilities"])
 		expect(capabilities.loadSession).toBe(true)
-		expect(capabilities.sessionCapabilities).toEqual({ resume: {} })
+		expect(capabilities.sessionCapabilities).toEqual({ resume: {}, close: {}, delete: {} })
 		expect(capabilities.promptCapabilities).toEqual({ image: true, audio: false, embeddedContext: true })
 		expect(Object.keys(capabilities._meta).sort()).toEqual([
 			"dev.dirac/auth.logout",
 			"dev.dirac/checkpoints.list",
 			"dev.dirac/checkpoints.restore",
 			"dev.dirac/client_annotation",
-			"dev.dirac/elicitation",
 			"dev.dirac/messages.pin",
 			"dev.dirac/messages.pinned",
 			"dev.dirac/messages.unpin",
@@ -184,7 +183,7 @@ describe("DiracAgent ACP worktrees", () => {
 			cwdOnTaskInitialization: worktree.path,
 		})
 
-		await agent.closeSession(session.sessionId)
+		await agent.closeSession({ sessionId: session.sessionId })
 		await agent.loadSession({
 			sessionId: session.sessionId,
 			cwd: repository,

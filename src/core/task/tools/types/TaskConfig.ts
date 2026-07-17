@@ -4,7 +4,7 @@ import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 import type { IDiracContext } from "../interfaces/IDiracContext"
 import type { CommandPermissionController } from "@core/permissions"
 import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
-import type { CommandExecutionOptions } from "@integrations/terminal"
+import type { CommandExecutionOptions, CommandExecutionResult } from "@integrations/terminal"
 import type { BrowserSession } from "@services/browser/BrowserSession"
 import type { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
@@ -98,7 +98,7 @@ export interface TaskCallbacks {
 		command: string,
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
-	) => Promise<[boolean, any]>
+	) => Promise<CommandExecutionResult>
 	cancelRunningCommandTool?: () => Promise<boolean>
 
 	doesLatestTaskCompletionHaveNewChanges: () => Promise<boolean>

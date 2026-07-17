@@ -253,8 +253,16 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		process: TerminalProcessResultPromise,
 		command: string,
 		existingOutput: string[] = [],
+		existingLogFilePath?: string,
+		existingOutputReady?: Promise<void>,
 	): BackgroundCommand {
-		return this.processManager.trackBackgroundCommand(process, command, existingOutput)
+		return this.processManager.trackBackgroundCommand(
+			process,
+			command,
+			existingOutput,
+			existingLogFilePath,
+			existingOutputReady,
+		)
 	}
 
 	/** Get a specific background command by ID. */

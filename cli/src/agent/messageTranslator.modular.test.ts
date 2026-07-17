@@ -273,20 +273,20 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(reject).toMatchObject({ response: "reject", persistentAction: "deny" })
 		})
 
-		it("should handle interaction requests (feedback/input)", () => {
-			const card = {
-				id: "tool-1",
-				header: "ask_followup_question",
-				status: CardStatus.WAITING_FOR_INPUT,
-				requireFeedback: true,
-			}
-			const message = createCardMessage(card)
-			const result = translateMessage(message, sessionState)
+		it("does not translate follow-up questions into permission requests", () => {
+			const result = translateMessage(
+				createCardMessage({
+					id: "question-1",
+					header: "Question: Choose a target",
+					status: CardStatus.WAITING_FOR_INPUT,
+					requireFeedback: true,
+					rawInput: { tool: "ask_followup_question" },
+				}),
+				sessionState,
+			)
 
-			expect(result.requiresPermission).toBe(true)
-			expect(result.permissionRequest).toBeDefined()
-			expect(result.permissionRequest?.options).toHaveLength(1)
-			expect(result.permissionRequest?.options?.[0].name).toBe("Submit")
+			expect(result.requiresPermission).toBe(false)
+			expect(result.permissionRequest).toBeUndefined()
 		})
 
 		it("should not create feedback permission when approval has been cleared", () => {

@@ -3,6 +3,7 @@ import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 import { findLastIndex } from "@shared/array"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { DiracIcon } from "@shared/icons"
 import { parsePartialArrayString } from "@shared/array"
 import { formatResponse } from "@core/formatResponse"
@@ -75,19 +76,33 @@ export class AskFollowupQuestionTool implements IDiracTool {
 			header: `Question: ${question.length > 60 ? question.substring(0, 57) + "..." : question}`,
 			icon: DiracIcon.FOLLOW_UP,
 			body: question,
+			rawInput: { tool: "ask_followup_question", question, options: sharedMessage.options },
 			renderType: "markdown",
 			requireFeedback: true,
+			feedbackPlaceholder: "Type another answer",
 			actions: sharedMessage.options.map((opt) => ({ label: opt, value: opt })),
 			collapsed: false,
 			maxHeight: 1200,
 		})
-		const { action, value, text: interactionText, images, files: followupFiles } = await cardHandle.waitForInteraction()
+		const { response, value, text: interactionText, images, files: followupFiles } = await cardHandle.waitForInteraction()
+		if (response === DiracAskResponse.REJECT) {
+			await cardHandle.update({
+				header: `Declined: ${question.length > 40 ? question.substring(0, 37) + "..." : question}`,
+				body: "The user declined to answer.",
+				collapsed: true,
+				outcome: "declined",
+			})
+			await cardHandle.finalize(CardStatus.SKIPPED)
+			return formatResponse.toolResult("The user declined to answer the follow-up question.")
+		}
+
 		const text = interactionText || value
 
 		await cardHandle.update({
 			header: `Answered: ${question.length > 40 ? question.substring(0, 37) + "..." : question}`,
 			body: `**Answer:** ${text || "(no answer)"}`,
 			collapsed: true,
+			outcome: "accepted",
 		})
 		await cardHandle.finalize(CardStatus.SUCCESS)
 

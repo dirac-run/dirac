@@ -14,6 +14,7 @@ export interface ListenerConfig {
 	taskMessenger: TaskMessenger
 	terminalType: "vscode" | "standalone"
 	showShellIntegrationSuggestion?: boolean
+	suppressUserInteraction?: boolean
 }
 
 /**
@@ -24,7 +25,7 @@ export function attachProcessListeners(
 	config: ListenerConfig,
 	onCompleted: (details?: TerminalCompletionDetails) => void,
 ): { cleanup: () => void; getCompletionState: () => { completed: boolean; details?: TerminalCompletionDetails } } {
-	const { process, taskMessenger, terminalType, showShellIntegrationSuggestion } = config
+	const { process, taskMessenger, terminalType, showShellIntegrationSuggestion, suppressUserInteraction } = config
 
 	let completionTimer: NodeJS.Timeout | null = null
 	let completed = false
@@ -41,6 +42,7 @@ export function attachProcessListeners(
 	}
 
 	const onShellIntegrationHandler = async () => {
+		if (suppressUserInteraction) return
 		if (showShellIntegrationSuggestion) {
 			await taskMessenger.upsertText(
 				"Shell integration is not available. Consider using background execution mode for better performance.",
@@ -62,6 +64,8 @@ export function attachProcessListeners(
 
 	const cleanup = () => {
 		if (completionTimer) clearTimeout(completionTimer)
+		process.off("completed", onCompletedHandler)
+		process.off("no_shell_integration", onShellIntegrationHandler)
 	}
 
 	return {

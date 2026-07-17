@@ -15,12 +15,11 @@ import {
 import { handlePermissionResponse } from "./permissionHandler.js";
 import type { DiracAcpSession } from "./public-types.js";
 import type { AcpSessionState } from "./types.js";
-import type {
-	ElicitationRequest,
-	ElicitationResponse,
-} from "./public-types.js";
+import { isFollowupQuestionCard } from "./questionCard.js";
 
 type PromptResolver = (response: acp.PromptResponse) => void;
+
+const OTHER_ANSWER_OPTION_ID = "__dirac_other_answer";
 
 type TaskMessageBridgeOptions = {
 	getSession: (sessionId: string) => DiracAcpSession | undefined;
@@ -47,8 +46,8 @@ type TaskMessageBridgeOptions = {
 	) => void;
 	getClientCapabilities: () => acp.ClientCapabilities | undefined;
 	requestElicitation: (
-		request: ElicitationRequest,
-	) => Promise<ElicitationResponse>;
+		request: acp.CreateElicitationRequest,
+	) => Promise<acp.CreateElicitationResponse>;
 
 	getWhispers: (sessionId: string) => string[];
 	clearWhispers: (sessionId: string) => void;
@@ -100,6 +99,10 @@ export class TaskMessageBridge {
 	private readonly processedInteractionCardKeys: Set<string> = new Set();
 	/** Terminal card updates may be delivered repeatedly; incorporate guidance once per card. */
 	private readonly whisperBoundaryCardKeys: Set<string> = new Set();
+	/** Serialize asynchronous message translation and interaction handling. */
+	private messageWork = Promise.resolve();
+	/** Invalidates interaction responses that belong to a cancelled prompt turn. */
+	private interactionGeneration = 0;
 
 	constructor(options: TaskMessageBridgeOptions) {
 		this.getSession = options.getSession;
@@ -115,23 +118,22 @@ export class TaskMessageBridge {
 		this.persistPermissionRule = options.persistPermissionRule;
 	}
 
-	/** Translate persisted provider finish reasons into ACP turn stop reasons. */
-	private stopReasonFromApiStatus(
-		message: DiracMessage,
-	): acp.StopReason | undefined {
-		if (message.content.type !== DiracMessageType.API_STATUS) return undefined;
-
-		switch (message.content.status.stopReason) {
-			case "MAX_TOKENS":
-			case "max_tokens":
-			case "length":
-				return "max_tokens";
-			case "refusal":
-			case "content_filter":
-				return "refusal";
-			default:
-				return undefined;
-		}
+	private queueMessageWork(
+		work: () => Promise<void>,
+		sessionId: string,
+		resolvePrompt: PromptResolver,
+		promptResolved: { value: boolean },
+	): Promise<void> {
+		const queued = this.messageWork.then(work);
+		this.messageWork = queued.catch(() => undefined);
+		return queued.catch((error) => {
+			this.handleUnhandledHandlerError(
+				sessionId,
+				promptResolved,
+				resolvePrompt,
+				error,
+			);
+		});
 	}
 
 	clearPromptState(): void {
@@ -140,6 +142,14 @@ export class TaskMessageBridge {
 		this.messageToToolCallId.clear();
 		this.processedInteractionCardKeys.clear();
 		this.whisperBoundaryCardKeys.clear();
+	}
+
+	invalidatePendingInteractions(): void {
+		this.interactionGeneration += 1;
+	}
+
+	waitForMessageWork(): Promise<void> {
+		return this.messageWork;
 	}
 
 	/** Finalize every non-terminal tool call when the client cancels its turn. */
@@ -178,52 +188,66 @@ export class TaskMessageBridge {
 		cleanupFunctions: Array<() => void>,
 		taskRunPromise?: Promise<void>,
 	): void {
-		// Capture the task reference once so that if cancelTask() triggers a
-		// Controller.initTask() reinit (which replaces controller.task with a
-		// new Task instance), our cleanup still removes the listener from the
-		// *original* task — not from whatever controller.task points to at
-		// cleanup time.
+		// Capture the task reference once so cleanup always removes the listener
+		// from the task that was active when this prompt subscribed.
 		const task = controller.task;
 		if (!task) return;
+		let active = true;
 
 		const onDiracMessagesChanged = (change: DiracMessageChange) => {
-			this.handleDiracMessagesChanged(
+			void this.queueMessageWork(
+				() =>
+					this.handleDiracMessagesChanged(
+						sessionId,
+						sessionState,
+						change,
+						resolvePrompt,
+						promptResolved,
+					),
 				sessionId,
-				sessionState,
-				change,
 				resolvePrompt,
 				promptResolved,
-			).catch((error) =>
-				this.handleUnhandledHandlerError(
-					sessionId,
-					promptResolved,
-					resolvePrompt,
-					error,
-				),
 			);
 		};
 
 		task.messageStateHandler.on("diracMessagesChanged", onDiracMessagesChanged);
-		cleanupFunctions.push(() =>
+		cleanupFunctions.push(() => {
+			active = false;
 			task.messageStateHandler.off(
 				"diracMessagesChanged",
 				onDiracMessagesChanged,
-			),
-		);
+			);
+		});
 
-		// Safety net: Task.startTask/resumeTaskFromHistory are kicked off
-		// detached by Controller.initTask, so any uncaught throw inside the
-		// task's run loop never reaches the outer try/catch. This handler
-		// ensures task errors surface as failures rather than hanging.
+		// Task runs are detached by Controller.initTask. Fulfillment is the
+		// authoritative fallback for task-loop exits that do not emit a dedicated
+		// terminal card (direct responses, fatal exits, and similar paths). Queue
+		// the resolution behind message forwarding so the client receives every
+		// preceding update before session/prompt completes.
 		if (taskRunPromise) {
-			taskRunPromise.catch((error) => {
-				this.handleUnhandledHandlerError(
-					sessionId,
-					promptResolved,
-					resolvePrompt,
-					error,
-				);
-			});
+			taskRunPromise.then(
+				() => {
+					void this.queueMessageWork(
+						async () => {
+							if (!active || promptResolved.value) return;
+							promptResolved.value = true;
+							resolvePrompt({ stopReason: "end_turn" });
+						},
+						sessionId,
+						resolvePrompt,
+						promptResolved,
+					);
+				},
+				(error) => {
+					if (!active) return;
+					this.handleUnhandledHandlerError(
+						sessionId,
+						promptResolved,
+						resolvePrompt,
+						error,
+					);
+				},
+			);
 		}
 	}
 
@@ -234,21 +258,34 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
 		startIndex = 0,
+		endIndex?: number,
 	): Promise<void> {
-		const messages =
-			controller.task?.messageStateHandler
-				.getDiracMessages()
-				.slice(startIndex) ?? [];
+		await this.queueMessageWork(
+			async () => {
+				const messages =
+					controller.task?.messageStateHandler
+						.getDiracMessages()
+						.slice(startIndex, endIndex) ?? [];
 
-		for (const message of messages) {
-			await this.processMessageWithDelta(sessionId, sessionState, message);
-			this.checkMessageForPromptResolution(
-				message,
-				resolvePrompt,
-				promptResolved,
-			);
-			if (promptResolved.value) return;
-		}
+				for (const message of messages) {
+					const handledInlineInteraction = await this.processMessageWithDelta(
+						sessionId,
+						sessionState,
+						message,
+					);
+					this.checkMessageForPromptResolution(
+						message,
+						resolvePrompt,
+						promptResolved,
+						handledInlineInteraction,
+					);
+					if (promptResolved.value) return;
+				}
+			},
+			sessionId,
+			resolvePrompt,
+			promptResolved,
+		);
 	}
 
 	/**
@@ -338,132 +375,272 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
 	): Promise<void> {
-		switch (change.type) {
-			case "add":
-				if (change.message) {
-					await this.processMessageWithDelta(
-						sessionId,
-						sessionState,
-						change.message,
-					);
-					this.checkMessageForPromptResolution(
-						change.message,
-						resolvePrompt,
-						promptResolved,
-					);
-				}
-
-				if (change.message) {
-					await this.incorporateWhispersAtTerminalToolBoundary(
-						sessionId,
-						change.message,
-					);
-				}
-				break;
-
-			case "update":
-				if (change.message) {
-					await this.processMessageWithDelta(
-						sessionId,
-						sessionState,
-						change.message,
-					);
-					this.checkMessageForPromptResolution(
-						change.message,
-						resolvePrompt,
-						promptResolved,
-					);
-				}
-
-				if (change.message) {
-					await this.incorporateWhispersAtTerminalToolBoundary(
-						sessionId,
-						change.message,
-					);
-				}
-				break;
-			case "set":
-				break;
-			case "delete":
-				break;
+		if ((change.type !== "add" && change.type !== "update") || !change.message) {
+			return;
 		}
-	}
 
-	private structuredElicitationIsNegotiated(): boolean {
-		return (
-			this.getClientCapabilities()?._meta?.["dev.dirac/elicitation"] === true
+		const handledInlineInteraction = await this.processMessageWithDelta(
+			sessionId,
+			sessionState,
+			change.message,
+		);
+		await this.incorporateWhispersAtTerminalToolBoundary(
+			sessionId,
+			change.message,
+		);
+		this.checkMessageForPromptResolution(
+			change.message,
+			resolvePrompt,
+			promptResolved,
+			handledInlineInteraction,
 		);
 	}
 
+	private formElicitationIsNegotiated(): boolean {
+		return this.getClientCapabilities()?.elicitation?.form != null;
+	}
+
+	private freeformTextProperty(
+		message: DiracMessage,
+	): NonNullable<acp.ElicitationSchema["properties"]>[string] {
+		const description =
+			message.content.type === DiracMessageType.CARD
+				? message.content.card.feedbackPlaceholder
+				: undefined;
+		return {
+			type: "string",
+			title: "Answer",
+			...(description ? { description } : {}),
+			minLength: 1,
+			pattern: ".*\\S.*",
+		};
+	}
+
+	private freeformElicitationRequest(
+		sessionId: string,
+		message: DiracMessage,
+	): acp.CreateElicitationRequest {
+		if (message.content.type !== DiracMessageType.CARD) {
+			throw new Error("Elicitation no longer refers to a card");
+		}
+		return {
+			mode: "form",
+			sessionId,
+			toolCallId: message.content.card.id,
+			message: "Enter another answer",
+			requestedSchema: {
+				type: "object",
+				properties: { text: this.freeformTextProperty(message) },
+				required: ["text"],
+			},
+		};
+	}
 	private elicitationRequestFromCard(
 		sessionId: string,
 		message: DiracMessage,
-	): ElicitationRequest | undefined {
+	): acp.CreateElicitationRequest | undefined {
+		if (!isFollowupQuestionCard(message)) return undefined;
 		if (message.content.type !== DiracMessageType.CARD) return undefined;
 
 		const { card } = message.content;
-		if (
-			card.status !== CardStatus.WAITING_FOR_INPUT ||
-			!card.requireFeedback ||
-			card.header !== "Question"
-		)
-			return undefined;
+		const properties: NonNullable<acp.ElicitationSchema["properties"]> = {};
+		const required: string[] = [];
+		const actionIds = new Set<string>();
+
+		if (card.actions?.length) {
+			for (const action of card.actions) {
+				if (
+					!action.value ||
+					action.value === OTHER_ANSWER_OPTION_ID ||
+					actionIds.has(action.value)
+				) {
+					throw new Error(
+						"Follow-up question actions must have unique, non-empty values reserved for their options",
+					);
+				}
+				actionIds.add(action.value);
+			}
+			properties.optionId = {
+				type: "string",
+				title: "Choose an option",
+				oneOf: [
+					...card.actions.map((action) => ({
+						const: action.value,
+						title: action.label,
+					})),
+					{ const: OTHER_ANSWER_OPTION_ID, title: "Other answer" },
+				],
+			};
+			required.push("optionId");
+		} else {
+			properties.text = this.freeformTextProperty(message);
+			required.push("text");
+		}
 
 		return {
+			mode: "form",
 			sessionId,
-			elicitationId: card.id,
+			toolCallId: card.id,
 			message: card.body || card.header,
-			options: (card.actions ?? []).map((action) => ({
-				id: action.value,
-				label: action.label,
-			})),
-			allowFreeformInput: true,
+			requestedSchema: {
+				type: "object",
+				properties,
+				required,
+			},
 		};
+	}
+
+	private async emitInvalidElicitationMessage(
+		sessionId: string,
+		message: string,
+	): Promise<void> {
+		await this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: `\n${message}\n` },
+		});
+	}
+
+	private acceptedElicitationAnswer(
+		message: DiracMessage,
+		response: acp.CreateElicitationResponse,
+		expectedField: "optionId" | "text",
+	): { optionId?: string; text?: string; requestsFreeformText?: boolean } {
+		if (response.action !== "accept") {
+			throw new Error(`Expected accepted elicitation, received ${response.action}`);
+		}
+		if (
+			!response.content ||
+			typeof response.content !== "object" ||
+			Array.isArray(response.content)
+		) {
+			throw new Error("Accepted elicitation content must be an object");
+		}
+		if (message.content.type !== DiracMessageType.CARD) {
+			throw new Error("Elicitation no longer refers to a card");
+		}
+
+		const content = response.content as Record<string, unknown>;
+		const unknownKeys = Object.keys(content).filter(
+			(key) => key !== expectedField,
+		);
+		if (unknownKeys.length > 0) {
+			throw new Error(`Unsupported elicitation fields: ${unknownKeys.join(", ")}`);
+		}
+
+		if (expectedField === "text") {
+			if (typeof content.text !== "string") {
+				throw new Error("Elicitation text must be a string");
+			}
+			const text = content.text.trim();
+			if (!text) throw new Error("Elicitation text must not be empty");
+			return { text };
+		}
+
+		if (typeof content.optionId !== "string") {
+			throw new Error("Elicitation optionId must be a string");
+		}
+		if (content.optionId === OTHER_ANSWER_OPTION_ID) {
+			return { requestsFreeformText: true };
+		}
+		if (
+			!message.content.card.actions?.some(
+				(action) => action.value === content.optionId,
+			)
+		) {
+			throw new Error(`Unknown elicitation option: ${content.optionId}`);
+		}
+		return { optionId: content.optionId };
+	}
+
+	private async cancelQuestionCard(
+		sessionId: string,
+		message: DiracMessage,
+		reason: string,
+	): Promise<void> {
+		if (message.content.type !== DiracMessageType.CARD) return;
+		Logger.error(`[TaskMessageBridge] ${reason}`);
+		await this.emitInvalidElicitationMessage(sessionId, reason);
+		const session = this.getSession(sessionId);
+		const task = session && this.getController(session)?.task;
+		await task?.submitCardResponse(
+			message.content.card.id,
+			DiracAskResponse.REJECT,
+		);
 	}
 
 	private async handleElicitationRequest(
 		sessionId: string,
-		request: ElicitationRequest,
+		message: DiracMessage,
+		request: acp.CreateElicitationRequest,
 	): Promise<void> {
 		const session = this.getSession(sessionId);
 		const controller = session && this.getController(session);
-		if (!controller?.task) return;
+		if (!controller?.task || message.content.type !== DiracMessageType.CARD) return;
+		const task = controller.task;
+		const cardId = message.content.card.id;
+		const interactionGeneration = this.interactionGeneration;
+		const interactionIsCurrent = () =>
+			this.interactionGeneration === interactionGeneration;
 
 		try {
 			const response = await this.requestElicitation(request);
-			if (response.outcome === "cancelled") {
-				await controller.task.submitCardResponse(
-					request.elicitationId,
-					DiracAskResponse.REJECT,
-				);
-				return;
-			}
+			if (!interactionIsCurrent()) return;
 
-			const selectedOption = request.options.find(
-				(option) => option.id === response.optionId,
-			);
-			if (response.optionId && !selectedOption) {
-				throw new Error("Elicitation response selected an unknown option");
+			switch (response.action) {
+				case "accept": {
+					const expectedField = message.content.card.actions?.length
+						? "optionId"
+						: "text";
+					const answer = this.acceptedElicitationAnswer(
+						message,
+						response,
+						expectedField,
+					);
+					if (answer.requestsFreeformText) {
+						const freeformResponse = await this.requestElicitation(
+							this.freeformElicitationRequest(sessionId, message),
+						);
+						if (!interactionIsCurrent()) return;
+						if (freeformResponse.action !== "accept") {
+							await task.submitCardResponse(cardId, DiracAskResponse.REJECT);
+							return;
+						}
+						const freeformAnswer = this.acceptedElicitationAnswer(
+							message,
+							freeformResponse,
+							"text",
+						);
+						await task.submitCardResponse(
+							cardId,
+							DiracAskResponse.APPROVE,
+							freeformAnswer.text,
+						);
+						return;
+					}
+					await task.submitCardResponse(
+						cardId,
+						DiracAskResponse.APPROVE,
+						answer.text,
+						undefined,
+						undefined,
+						answer.optionId,
+					);
+					return;
+				}
+				case "decline":
+				case "cancel":
+					await task.submitCardResponse(cardId, DiracAskResponse.REJECT);
+					return;
+				default:
+					throw new Error(`Unsupported elicitation action: ${response.action}`);
 			}
-			if (!selectedOption && !response.text) {
-				throw new Error(
-					"Elicitation response must provide an optionId or text",
-				);
-			}
-
-			await controller.task.submitCardResponse(
-				request.elicitationId,
-				selectedOption?.id ?? DiracAskResponse.MESSAGE,
-				response.text,
-			);
 		} catch (error) {
-			Logger.debug(
-				"[TaskMessageBridge] Error handling elicitation request:",
-				error,
-			);
-			await controller.task.submitCardResponse(
-				request.elicitationId,
-				DiracAskResponse.REJECT,
+			if (!interactionIsCurrent()) return;
+			const detail = error instanceof Error ? error.message : String(error);
+			await this.cancelQuestionCard(
+				sessionId,
+				message,
+				`The ACP client returned an invalid answer: ${detail}`,
 			);
 		}
 	}
@@ -582,87 +759,39 @@ export class TaskMessageBridge {
 		message: DiracMessage,
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
+		handledInlineInteraction: boolean,
 	): void {
-		if (promptResolved.value) return;
-		const apiStopReason = this.stopReasonFromApiStatus(message);
-		if (apiStopReason) {
-			promptResolved.value = true;
-			resolvePrompt({ stopReason: apiStopReason });
+		if (promptResolved.value || message.content.type !== DiracMessageType.CARD) {
 			return;
 		}
 
-		switch (message.content.type) {
-			case DiracMessageType.CARD: {
-				const card = message.content.card;
+		const card = message.content.card;
 
-				// Feedback cards (followup, plan_mode_respond, act_mode_respond, mistake_limit_reached)
-				// → waiting for user text input, end the turn so the client can collect it.
-				if (
-					card.status === CardStatus.WAITING_FOR_INPUT &&
-					card.requireFeedback
-				) {
-					promptResolved.value = true;
-					resolvePrompt({ stopReason: "end_turn" });
-					return;
-				}
+		// Permission and elicitation requests are serviced inside the active ACP
+		// prompt. Their source snapshot remains WAITING_FOR_INPUT even after the
+		// response has been submitted to Task, so it must not terminate the turn.
+		if (handledInlineInteraction) return;
 
-				// Approval cards for terminal failures (api_req_failed, mistake_limit_reached with requireApproval)
-				// End the turn so the client can decide whether to retry.
-				if (
-					card.status === CardStatus.WAITING_FOR_INPUT &&
-					card.requireApproval &&
-					(card.header === "API Request Failed" ||
-						card.header === "Mistake Limit Reached")
-				) {
-					promptResolved.value = true;
-					resolvePrompt({ stopReason: "end_turn" });
-					return;
-				}
+		// Feedback cards without an ACP-native interaction are intentionally
+		// deferred: return control to the client and accept the answer in the next
+		// session/prompt request.
+		if (
+			card.status === CardStatus.WAITING_FOR_INPUT &&
+			card.requireFeedback
+		) {
+			promptResolved.value = true;
+			resolvePrompt({ stopReason: "end_turn" });
+			return;
+		}
 
-				// Terminal success — task completed (completion_result)
-				if (
-					card.status === CardStatus.SUCCESS &&
-					card.header === "Task Completed"
-				) {
-					promptResolved.value = true;
-					resolvePrompt({ stopReason: "end_turn" });
-					return;
-				}
-
-				// Error cards — terminal failure signals
-				//
-				// Only ERROR cards that require user interaction are terminal.
-				// Cards with requireApproval (e.g. "API Request Failed") or
-				// requireFeedback (e.g. "Mistake Limit Reached") need the client
-				// to decide whether to retry — so end the turn.
-				//
-				// All other ERROR cards are non-terminal: tool-created error cards
-				// (e.g. "Listed files in…", "Diagnostics Scan"), individual tool
-				// failures, and informational retry-exhausted notices. The task
-				// loop handles recovery. Consecutive mistakes will eventually
-				// trigger the "Mistake Limit Reached" card (requireFeedback)
-				// which IS terminal.
-				if (card.status === CardStatus.ERROR) {
-					if (!card.requireApproval && !card.requireFeedback) {
-						break;
-					}
-					promptResolved.value = true;
-					resolvePrompt({ stopReason: "end_turn" });
-					return;
-				}
-
-				break;
-			}
-			case DiracMessageType.CHECKPOINT: {
-				// Task completed successfully
-				promptResolved.value = true;
-				resolvePrompt({ stopReason: "end_turn" });
-				break;
-			}
-			case DiracMessageType.MARKDOWN:
-			case DiracMessageType.API_STATUS:
-				// Not terminal — continue streaming
-				break;
+		// attempt_completion is a deliberate ACP boundary even though the core task
+		// remains alive to accept optional follow-up feedback.
+		if (
+			card.status === CardStatus.SUCCESS &&
+			card.header === "Task Completed"
+		) {
+			promptResolved.value = true;
+			resolvePrompt({ stopReason: "end_turn" });
 		}
 	}
 
@@ -735,7 +864,8 @@ export class TaskMessageBridge {
 		sessionId: string,
 		sessionState: AcpSessionState,
 		message: DiracMessage,
-	): Promise<void> {
+	): Promise<boolean> {
+		let handledInlineInteraction = false;
 		const messageKey = message.ts;
 		const lastText = this.partialMessageLastContent.get(messageKey) || "";
 
@@ -856,20 +986,48 @@ export class TaskMessageBridge {
 				this.messageToToolCallId.set(messageKey, result.toolCallId);
 			}
 
-			const elicitationRequest = this.structuredElicitationIsNegotiated()
-				? this.elicitationRequestFromCard(sessionId, message)
-				: undefined;
-			if (elicitationRequest) {
-				const interactionCardKey = this.getInteractionCardKey(
-					sessionId,
-					message,
-				);
+			if (result.requiresPermission) {
+				handledInlineInteraction = true;
+			}
+
+			const isQuestionCard = isFollowupQuestionCard(message);
+			if (isQuestionCard && this.formElicitationIsNegotiated()) {
+				handledInlineInteraction = true;
+			}
+			if (isQuestionCard) {
+				const interactionCardKey = this.getInteractionCardKey(sessionId, message);
 				if (
 					interactionCardKey &&
 					!this.processedInteractionCardKeys.has(interactionCardKey)
 				) {
 					this.processedInteractionCardKeys.add(interactionCardKey);
-					await this.handleElicitationRequest(sessionId, elicitationRequest);
+					if (!this.formElicitationIsNegotiated()) {
+						await this.emitInvalidElicitationMessage(
+							sessionId,
+							"This ACP client does not support form elicitation. You can provide the answer in a later prompt.",
+						);
+					} else {
+						try {
+							const elicitationRequest = this.elicitationRequestFromCard(
+								sessionId,
+								message,
+							);
+							if (elicitationRequest) {
+								await this.handleElicitationRequest(
+									sessionId,
+									message,
+									elicitationRequest,
+								);
+							}
+						} catch (error) {
+							const detail = error instanceof Error ? error.message : String(error);
+							await this.cancelQuestionCard(
+								sessionId,
+								message,
+								`Unable to create ACP form elicitation: ${detail}`,
+							);
+						}
+					}
 				}
 			} else if (result.requiresPermission && result.permissionRequest) {
 				const interactionCardKey = this.getInteractionCardKey(
@@ -915,5 +1073,7 @@ export class TaskMessageBridge {
 			// existingToolCallId, generating new tool_call + permission events.
 			// The map is cleared at the start of each prompt cycle (clearPromptState()).
 		}
+
+		return handledInlineInteraction;
 	}
 }

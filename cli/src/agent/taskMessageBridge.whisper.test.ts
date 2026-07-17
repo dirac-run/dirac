@@ -78,48 +78,7 @@ describe("TaskMessageBridge whisper guidance", () => {
 		expect(emitSessionUpdate).not.toHaveBeenCalled()
 	})
 
-	it("sends follow-up cards as typed elicitations when the client negotiates the extension", async () => {
-		const requestElicitation = vi.fn().mockResolvedValue({ outcome: "accepted", optionId: "option-a" })
-		const submitCardResponse = vi.fn().mockResolvedValue(undefined)
-		const bridge = new TaskMessageBridge({
-			getSession: () => ({}) as any,
-			getController: () => ({ task: { submitCardResponse } }) as any,
-			requestPermission: vi.fn(),
-			emitSessionUpdate: vi.fn().mockResolvedValue(undefined),
-			emitUsageUpdate: vi.fn(),
-			getClientCapabilities: () => ({ _meta: { "dev.dirac/elicitation": true } }) as any,
-			requestElicitation,
-			getWhispers: () => [],
-			clearWhispers: vi.fn(),
-			persistPermissionRule: vi.fn(),
-		})
-		const message = {
-			ts: 1,
-			content: {
-				type: DiracMessageType.CARD,
-				card: {
-					id: "question-1",
-					header: "Question",
-					body: "Choose a target",
-					status: CardStatus.WAITING_FOR_INPUT,
-					requireFeedback: true,
-					actions: [{ label: "Option A", value: "option-a" }],
-				},
-			},
-		} as any
 
-		const request = (bridge as any).elicitationRequestFromCard("session-1", message)
-		await (bridge as any).handleElicitationRequest("session-1", request)
-
-		expect(requestElicitation).toHaveBeenCalledWith({
-			sessionId: "session-1",
-			elicitationId: "question-1",
-			message: "Choose a target",
-			options: [{ id: "option-a", label: "Option A" }],
-			allowFreeformInput: true,
-		})
-		expect(submitCardResponse).toHaveBeenCalledWith("question-1", "option-a", undefined)
-	})
 })
 
 function createBridge(options: {

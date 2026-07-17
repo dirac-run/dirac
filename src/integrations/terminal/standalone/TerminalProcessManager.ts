@@ -22,7 +22,7 @@ import { StandaloneTerminalProcess } from "./StandaloneTerminalProcess"
 
 /** Merge a process with a promise so the result is both awaitable and has event methods. */
 function mergePromise(process: StandaloneTerminalProcess, promise: Promise<void>): TerminalProcessResultPromise {
-	const nativePromisePrototype = (async () => {})().constructor.prototype
+	const nativePromisePrototype = (async () => { })().constructor.prototype
 	const descriptors = ["then", "catch", "finally"].map((property) => [
 		property,
 		Reflect.getOwnPropertyDescriptor(nativePromisePrototype, property),
@@ -57,6 +57,7 @@ export class TerminalProcessManager {
 
 	/** Map of background command ID to log file write stream */
 	private logStreams: Map<string, fs.WriteStream> = new Map()
+	private backgroundLogFinalizers: Map<string, (suffix?: string) => void> = new Map()
 
 	/** Map of background command ID to timeout handle */
 	private backgroundTimeouts: Map<string, NodeJS.Timeout> = new Map()
@@ -132,18 +133,15 @@ export class TerminalProcessManager {
 		this.processes.clear()
 	}
 
-	// =========================================================================
-	// Background Command Tracking
-	// =========================================================================
-
-	/** Track a command running in the background. Creates a log file and sets up a 10-minute hard timeout. */
 	trackBackgroundCommand(
 		process: TerminalProcessResultPromise,
 		command: string,
 		existingOutput: string[] = [],
+		existingLogFilePath?: string,
+		existingOutputReady: Promise<void> = Promise.resolve(),
 	): BackgroundCommand {
 		const id = `background-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-		const logFilePath = DiracTempManager.createTempFilePath("background")
+		const logFilePath = existingLogFilePath ?? DiracTempManager.createTempFilePath("background")
 
 		const backgroundCommand: BackgroundCommand = {
 			id,
@@ -155,85 +153,117 @@ export class TerminalProcessManager {
 			process,
 		}
 
-		// Create write stream for log file
 		const logStream = fs.createWriteStream(logFilePath, { flags: "a" })
 		this.logStreams.set(id, logStream)
+		const pendingLines: string[] = []
+		let backgroundLoggingReady = false
+		let finalizationRequested = false
+		let finalizationPerformed = false
+		let finalizationSuffix = ""
 
-		// Write existing output that was captured before tracking started
-		if (existingOutput.length > 0) {
-			logStream.write(`${existingOutput.join("\n")}\n`)
+		const onLine = (line: string) => {
+			backgroundCommand.lineCount++
+			if (backgroundLoggingReady) {
+				logStream.write(`${line}\n`)
+			} else {
+				pendingLines.push(line)
+			}
+		}
+		process.on("line", onLine)
+
+		const performFinalization = () => {
+			if (!backgroundLoggingReady || !finalizationRequested || finalizationPerformed) return
+			finalizationPerformed = true
+			process.off("line", onLine)
+			if (finalizationSuffix) logStream.write(finalizationSuffix)
+			logStream.end()
+			this.logStreams.delete(id)
+			this.backgroundLogFinalizers.delete(id)
+		}
+		const requestFinalization = (suffix = "") => {
+			if (finalizationRequested) return
+			finalizationRequested = true
+			finalizationSuffix = suffix
+			setTimeout(performFinalization, 50)
+		}
+		this.backgroundLogFinalizers.set(id, requestFinalization)
+
+		const markLoggingReady = (handoffError?: unknown) => {
+			backgroundLoggingReady = true
+			if (handoffError) {
+				backgroundCommand.status = "error"
+				logStream.write(`\n[LOG_HANDOFF_ERROR] ${handoffError instanceof Error ? handoffError.message : String(handoffError)}\n`)
+				requestFinalization()
+			}
+			for (const line of pendingLines) logStream.write(`${line}\n`)
+			pendingLines.length = 0
+			performFinalization()
 		}
 
-		// Pipe future process output to log file
-		process.on("line", (line: string) => {
-			backgroundCommand.lineCount++
-			logStream.write(`${line}\n`)
+		let logReady = existingOutputReady
+		if (!existingLogFilePath && existingOutput.length > 0) {
+			logReady = logReady.then(
+				() =>
+					new Promise<void>((resolve, reject) => {
+						logStream.write(`${existingOutput.join("\n")}\n`, (error) => (error ? reject(error) : resolve()))
+					}),
+			)
+		}
+		void logReady.then(() => markLoggingReady(), (error) => markLoggingReady(error))
+
+		logStream.on("error", () => {
+			backgroundCommand.status = "error"
+			process.off("line", onLine)
+			const timeout = this.backgroundTimeouts.get(id)
+			if (timeout) clearTimeout(timeout)
+			this.backgroundTimeouts.delete(id)
+			this.logStreams.delete(id)
+			this.backgroundLogFinalizers.delete(id)
 		})
 
-		// Set up 10-minute hard timeout to prevent zombie processes
 		const timeoutId = setTimeout(() => {
 			if (backgroundCommand.status === "running") {
 				backgroundCommand.status = "timed_out"
-				logStream.write("\n[TIMEOUT] Process killed after 10 minutes\n")
-				logStream.end()
-
-				// Terminate the process if it has a terminate method
-				if (process?.terminate) {
-					process.terminate()
-				}
+				requestFinalization("\n[TIMEOUT] Process killed after 10 minutes\n")
+				if (process?.terminate) process.terminate()
 			}
 		}, BACKGROUND_COMMAND_TIMEOUT_MS)
 		this.backgroundTimeouts.set(id, timeoutId)
 
-		// Listen for completion — clear timeout
 		process.on("completed", (details) => {
-			// Guard: Skip if already handled by timeout
-			if (backgroundCommand.status !== "running") {
-				return
-			}
+			if (backgroundCommand.status !== "running") return
 			const timeout = this.backgroundTimeouts.get(id)
-			if (timeout) {
-				clearTimeout(timeout)
-				this.backgroundTimeouts.delete(id)
-			}
+			if (timeout) clearTimeout(timeout)
+			this.backgroundTimeouts.delete(id)
 			const exitCode = details?.exitCode
 			const signal = details?.signal
-			if (typeof exitCode === "number") {
-				backgroundCommand.exitCode = exitCode
-			}
+			if (typeof exitCode === "number") backgroundCommand.exitCode = exitCode
 
 			if ((typeof exitCode === "number" && exitCode !== 0) || signal) {
 				backgroundCommand.status = "error"
-				if (typeof exitCode === "number" && exitCode !== 0) {
-					logStream.write(`\n[EXIT_CODE] Process exited with code ${exitCode}\n`)
-				}
-				if (signal) {
-					logStream.write(`\n[SIGNAL] Process terminated by signal ${signal}\n`)
-				}
+				requestFinalization(
+					[
+						typeof exitCode === "number" && exitCode !== 0
+							? `\n[EXIT_CODE] Process exited with code ${exitCode}\n`
+							: "",
+						signal ? `\n[SIGNAL] Process terminated by signal ${signal}\n` : "",
+					].join(""),
+				)
 			} else {
 				backgroundCommand.status = "completed"
+				requestFinalization()
 			}
-			logStream.end()
 		})
 
-		// Listen for errors — clear timeout
 		process.on("error", (error: Error) => {
-			// Guard: Skip if already handled by timeout
-			if (backgroundCommand.status !== "running") {
-				return
-			}
+			if (backgroundCommand.status !== "running") return
 			const timeout = this.backgroundTimeouts.get(id)
-			if (timeout) {
-				clearTimeout(timeout)
-				this.backgroundTimeouts.delete(id)
-			}
+			if (timeout) clearTimeout(timeout)
+			this.backgroundTimeouts.delete(id)
 			backgroundCommand.status = "error"
-			// Try to extract exit code from error message if available
 			const exitCodeMatch = error.message.match(/exit code (\d+)/)
-			if (exitCodeMatch) {
-				backgroundCommand.exitCode = Number.parseInt(exitCodeMatch[1], 10)
-			}
-			logStream.end()
+			if (exitCodeMatch) backgroundCommand.exitCode = Number.parseInt(exitCodeMatch[1], 10)
+			requestFinalization()
 		})
 
 		this.backgroundCommands.set(id, backgroundCommand)
@@ -274,13 +304,9 @@ export class TerminalProcessManager {
 			this.backgroundTimeouts.delete(id)
 		}
 
-		// Close log stream
-		const logStream = this.logStreams.get(id)
-		if (logStream) {
-			logStream.write("\n[CANCELLED] Command cancelled by user\n")
-			logStream.end()
-			this.logStreams.delete(id)
-		}
+		// Close the log after any foreground-output handoff has finished.
+		this.backgroundLogFinalizers.get(id)?.("\n[CANCELLED] Command cancelled by user\n")
+		this.backgroundLogFinalizers.delete(id)
 
 		// Terminate process
 		if (command.process?.terminate) {
@@ -314,15 +340,9 @@ export class TerminalProcessManager {
 		}
 		this.backgroundTimeouts.clear()
 
-		// Close all log streams
-		for (const [_id, logStream] of this.logStreams) {
-			try {
-				logStream.end()
-			} catch (_error) {
-				// Ignore errors when closing log streams
-			}
-		}
-		this.logStreams.clear()
+		// Request orderly closure after any pending output handoff is complete.
+		for (const finalizeLog of this.backgroundLogFinalizers.values()) finalizeLog()
+		this.backgroundLogFinalizers.clear()
 
 		// Clear command tracking
 		this.backgroundCommands.clear()
