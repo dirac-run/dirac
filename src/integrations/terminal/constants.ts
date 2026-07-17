@@ -17,25 +17,9 @@ export const PROCESS_HOT_TIMEOUT_NORMAL = 2_000
 /** Extended timeout for compilation/build commands (15 seconds) */
 export const PROCESS_HOT_TIMEOUT_COMPILING = 15_000
 
-// =============================================================================
-// Output Buffering (CommandOrchestrator)
-// =============================================================================
-// Controls how output is chunked and sent to the UI
-
-/** Lines to buffer before flushing to UI */
-export const CHUNK_LINE_COUNT = 20
-
-/** Bytes to buffer before flushing to UI */
-export const CHUNK_BYTE_SIZE = 2048 // 2KB
-
-/** Debounce time for buffer flush */
-export const CHUNK_DEBOUNCE_MS = 100
-
-/** Timeout to detect stuck buffer */
-export const BUFFER_STUCK_TIMEOUT_MS = 6000 // 6 seconds
-
 /** Timeout to detect stuck completion */
 export const COMPLETION_TIMEOUT_MS = 6000 // 6 seconds
+
 
 // =============================================================================
 // Large Output Protection
@@ -50,6 +34,9 @@ export const MAX_BYTES_BEFORE_FILE = 512 * 1024 // 512KB
 
 /** Lines to keep at start/end for summary when truncating */
 export const SUMMARY_LINES_TO_KEEP = 100
+
+/** Maximum combined UTF-8 size of the first/last-line summary */
+export const SUMMARY_BYTES_TO_KEEP = 64 * 1024 // 64KB
 
 /** Maximum size for fullOutput storage (memory protection) */
 export const MAX_FULL_OUTPUT_SIZE = 1024 * 1024 // 1MB

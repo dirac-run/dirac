@@ -1,4 +1,4 @@
-import type { ISystemTrait } from "../../interfaces/IToolEnvironment"
+import type { ISystemTrait, SystemCommandResult } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 import { regexSearchFiles } from "@services/ripgrep"
 import { openUrlInBrowser } from "@utils/github-url-utils"
@@ -9,10 +9,7 @@ import * as os from "os"
 // Builds the system trait — command execution, file search, system info, URL opening.
 export function buildSystemTrait(
 	config: TaskConfig,
-	executeCommandFn: (
-		command: string,
-		options?: { timeout?: number; onOutput?: (chunk: string) => void },
-	) => Promise<[boolean, any]>,
+	executeCommandFn: (command: string, options?: { timeout?: number }) => Promise<SystemCommandResult>,
 ): ISystemTrait {
 	return {
 		executeCommand: executeCommandFn,

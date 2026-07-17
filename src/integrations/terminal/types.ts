@@ -361,18 +361,26 @@ export interface CommandExecutorCallbacks {
 /**
  * Optional per-command execution behavior overrides.
  */
+export interface CommandExecutionMetadata {
+	completed: boolean
+	exitCode?: number | null
+	signal?: NodeJS.Signals | null
+	logFilePath?: string
+}
+
+export type CommandExecutionResult = [
+	userRejected: boolean,
+	result: DiracToolResponseContent,
+	metadata?: CommandExecutionMetadata,
+]
+
+
 export interface CommandExecutionOptions {
 	/**
 	 * Force command execution in standalone/background terminal mode for this command.
 	 * This is useful for subagent runs and headless-style execution flows.
 	 */
 	useBackgroundExecution?: boolean
-	/**
-	 * Callback to track output lines for real-time UI updates.
-	 * This is used when suppressUserInteraction is true to allow the caller to handle output.
-	 */
-	onOutputLine?: (line: string) => void
-
 	/**
 	 * Suppress command interaction/output UI messages (ask/say) for this command execution.
 	 * Command output is still captured and returned as the tool result.
@@ -411,17 +419,20 @@ export interface OrchestrationOptions {
 	command: string
 	/** Optional timeout in seconds */
 	timeoutSeconds?: number
-	/** Callback to track output lines for background command tracking */
-	onOutputLine?: (line: string) => void
 	/** Whether to show shell integration warning with suggestion */
 	showShellIntegrationSuggestion?: boolean
 	/**
 	 * Callback invoked when user clicks "Proceed While Running".
 	 * Used to start background command tracking in the terminal manager.
-	 * @param existingOutput The output lines captured so far (to write to log file)
+	 * @param existingOutput The in-memory output lines captured before file logging started.
+	 * @param existingLogFilePath Complete file-backed output captured before the handoff, when present.
 	 * @returns The log file path if tracking was started, undefined otherwise
 	 */
-	onProceedWhileRunning?: (existingOutput: string[]) => { logFilePath: string } | undefined
+	onProceedWhileRunning?: (
+		existingOutput: string[],
+		existingLogFilePath?: string,
+		existingOutputReady?: Promise<void>,
+	) => { logFilePath: string; outputReady?: Promise<void> } | undefined
 	/**
 	 * The type of terminal being used for telemetry tracking.
 	 * Defaults to "vscode" for backward compatibility.

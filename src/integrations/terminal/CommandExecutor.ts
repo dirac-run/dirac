@@ -14,12 +14,13 @@
  */
 
 import { findLastIndex } from "@shared/array"
-import { DiracToolResponseContent } from "@shared/messages"
 import { Logger } from "@/shared/services/Logger"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
 import type {
+	CommandExecutionMetadata,
 	CommandExecutionOptions,
+	CommandExecutionResult,
 	CommandExecutorCallbacks,
 	CommandExecutorConfig,
 	ITerminalManager,
@@ -88,27 +89,22 @@ export class CommandExecutor {
 		command: string,
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
-	): Promise<[boolean, DiracToolResponseContent]> {
-		// Strip leading `cd` to workspace from command
+	): Promise<CommandExecutionResult> {
 		const workspaceCdPrefix = `cd ${this.cwd} && `
 		if (command.startsWith(workspaceCdPrefix)) {
 			command = command.substring(workspaceCdPrefix.length)
 		}
 
-		// Select the appropriate terminal manager
 		const useStandalone = options?.useBackgroundExecution || this.terminalExecutionMode === "backgroundExec"
 		const manager = useStandalone ? this.standaloneManager : this.terminalManager
 
-		// Fetch environment variables
 		const env = await this.callbacks.getEnvironmentVariables(this.cwd)
 		Logger.info(`Executing command in ${useStandalone ? "standalone" : "VSCode"} terminal: ${command}`)
 
-		// Get terminal and run command
 		const terminalInfo = await manager.getOrCreateTerminal(this.cwd, env)
 		terminalInfo.terminal.show()
 		const process = manager.runCommand(terminalInfo, command)
 
-		// Reset cancellation flag and track the current process
 		this.wasCancelledExternally = false
 		this.currentProcess = process
 		const clearCurrentProcess = () => {
@@ -117,38 +113,42 @@ export class CommandExecutor {
 		process.once("completed", clearCurrentProcess)
 		process.once("error", clearCurrentProcess)
 
-		// Use shared orchestration logic
-		// The StandaloneTerminalManager handles background command tracking internally
 		const result = await orchestrateCommandExecution(process, manager, this.callbacks, {
 			command,
 			timeoutSeconds,
 			suppressUserInteraction: options?.suppressUserInteraction,
-			onOutputLine: options?.onOutputLine,
-
-			// When "Proceed While Running" is triggered, track the command in the manager
-			// Returns the log file path so the orchestrator can send it to the UI
-			// existingOutput contains all output lines captured so far
 			onProceedWhileRunning: useStandalone
-				? (existingOutput: string[]) => {
-						const backgroundCmd = this.standaloneManager.trackBackgroundCommand(process, command, existingOutput)
-						return { logFilePath: backgroundCmd.logFilePath }
-					}
+				? (existingOutput: string[], existingLogFilePath?: string, existingOutputReady?: Promise<void>) => {
+					const backgroundCmd = this.standaloneManager.trackBackgroundCommand(
+						process,
+						command,
+						existingOutput,
+						existingLogFilePath,
+						existingOutputReady,
+					)
+					return { logFilePath: backgroundCmd.logFilePath, outputReady: existingOutputReady }
+				}
 				: undefined,
 			showShellIntegrationSuggestion: this.shouldShowBackgroundTerminalSuggestion(),
 			terminalType: useStandalone ? "standalone" : "vscode",
 		})
 
-		// If the command was cancelled externally (via cancel button), return a clear cancellation message
-		// This ensures the AI agent knows the command was cancelled by the user
+		const metadata: CommandExecutionMetadata = {
+			completed: result.completed,
+			exitCode: result.exitCode,
+			signal: result.signal,
+			logFilePath: result.logFilePath,
+		}
+
 		if (this.wasCancelledExternally) {
 			const outputSoFar =
 				result.outputLines.length > 0
 					? `\nOutput captured before cancellation:\n${manager.processOutput(result.outputLines)}`
 					: ""
-			return [true, `Command was cancelled by the user.${outputSoFar}`]
+			return [true, `Command was cancelled by the user.${outputSoFar}`, metadata]
 		}
 
-		return [result.userRejected, result.result]
+		return [result.userRejected, result.result, metadata]
 	}
 
 	/**
@@ -176,7 +176,7 @@ export class CommandExecutor {
 		if (this.currentProcess && typeof (this.currentProcess as any).terminate === "function") {
 			// Set flag so execute() knows the command was cancelled externally
 			this.wasCancelledExternally = true
-			;(this.currentProcess as any).terminate()
+				; (this.currentProcess as any).terminate()
 			this.currentProcess = null
 			cancelled = true
 			Logger.info("Cancelled foreground command")

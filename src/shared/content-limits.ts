@@ -36,33 +36,45 @@ export function formatBytes(bytes: number): string {
  * @returns The original content if under limit, or head/tail truncated content with message in middle
  */
 export function truncateHeadTail(content: string, maxSize: number = MAX_CONTENT_SIZE_BYTES): string {
-	if (content.length <= maxSize) {
+	const contentBuffer = Buffer.from(content, "utf8")
+	if (contentBuffer.byteLength <= maxSize) {
 		return content
 	}
+	if (maxSize <= 0) {
+		return ""
+	}
 
-	const halfLimit = Math.floor(maxSize / 2)
-	const start = content.slice(0, halfLimit)
-	const end = content.slice(-halfLimit)
-	const truncatedAmount = content.length - maxSize
+	const initiallyTruncatedBytes = contentBuffer.byteLength - maxSize
+	const notice = `\n\n... [Output truncated to ${formatBytes(maxSize)} to avoid context flooding (${formatBytes(initiallyTruncatedBytes)} truncated). Use more specific commands if you need to see more output.] ...\n\n`
+	const noticeBytes = Buffer.byteLength(notice, "utf8")
+	if (noticeBytes >= maxSize) {
+		return Buffer.from(notice, "utf8").subarray(0, maxSize).toString("utf8").replace(/\uFFFD$/, "")
+	}
 
-	return `${start}
+	const contentBudget = maxSize - noticeBytes
+	const headBytes = Math.floor(contentBudget / 2)
+	const tailBytes = contentBudget - headBytes
+	const start = contentBuffer.subarray(0, headBytes).toString("utf8").replace(/\uFFFD$/, "")
+	const end = contentBuffer
+		.subarray(contentBuffer.byteLength - tailBytes)
+		.toString("utf8")
+		.replace(/^\uFFFD/, "")
 
-... [Output truncated to ${formatBytes(maxSize)} to avoid context flooding (${formatBytes(truncatedAmount)} truncated). Use more specific commands if you need to see more output.] ...
-
-${end}`
+	return `${start}${notice}${end}`
 }
 
 export function truncateContent(content: string, maxSize: number = MAX_CONTENT_SIZE_BYTES): string {
-	if (content.length <= maxSize) {
+	const contentBuffer = Buffer.from(content, "utf8")
+	if (contentBuffer.byteLength <= maxSize) {
 		return content
 	}
 
-	const truncatedContent = content.slice(0, maxSize)
-	const truncatedAmount = content.length - maxSize
+	const truncatedContent = contentBuffer.subarray(0, maxSize).toString("utf8").replace(/\uFFFD$/, "")
+	const truncatedAmount = contentBuffer.byteLength - maxSize
 
 	return `${truncatedContent}
 
 ---
 
-[FILE TRUNCATED: This content is ${formatBytes(content.length)} but only the first ${formatBytes(maxSize)} is shown (${formatBytes(truncatedAmount)} truncated). Use search_files to find specific patterns, or execute_command with grep/head/tail for targeted reading.]`
+[FILE TRUNCATED: This content is ${formatBytes(contentBuffer.byteLength)} but only the first ${formatBytes(maxSize)} is shown (${formatBytes(truncatedAmount)} truncated). Use search_files to find specific patterns, or execute_command with grep/head/tail for targeted reading.]`
 }

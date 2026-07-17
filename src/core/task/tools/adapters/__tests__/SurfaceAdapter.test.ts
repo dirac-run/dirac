@@ -218,13 +218,20 @@ describe("SurfaceAdapter", () => {
 
 	describe("system trait", () => {
 		it("executeCommand delegates to callbacks.executeCommandTool with suppress flags", async () => {
-			config.callbacks.executeCommandTool = sinon.stub().resolves([true, "output"])
-			const [success, output] = (await adapter.system.executeCommand("ls", { timeout: 5000, onOutput: () => {} })) as [
-				boolean,
-				any,
-			]
-			success.should.equal(true)
-			output.should.equal("output")
+			config.callbacks.executeCommandTool = sinon.stub().resolves([
+				true,
+				"output",
+				{ completed: true, exitCode: 2, signal: null, logFilePath: "/tmp/output.log" },
+			])
+			const result = await adapter.system.executeCommand("ls", { timeout: 5000 })
+			expect(result).to.deep.equal({
+				userRejected: true,
+				output: "output",
+				completed: true,
+				exitCode: 2,
+				signal: null,
+				logFilePath: "/tmp/output.log",
+			})
 			const callArgs = config.callbacks.executeCommandTool.getCall(0).args
 			callArgs[0].should.equal("ls")
 			callArgs[1].should.equal(5000)

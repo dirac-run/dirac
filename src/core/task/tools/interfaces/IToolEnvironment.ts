@@ -54,8 +54,8 @@ export interface ICardHandle {
 	}>
 
 	/**
-	 * Append text to the existing body.
-	 * Optimized for streaming stdout/logs.
+	 * Append a small, bounded status update to the existing body.
+	 * Callers must not use this for unbounded stdout or log streaming.
 	 */
 	appendBody(chunk: string): Promise<void>
 
@@ -140,11 +140,21 @@ export interface ITelemetryTrait {
 	captureCustomMetadata(metadata: Record<string, any>): void
 }
 
+export interface SystemCommandResult {
+	userRejected: boolean
+	output: unknown
+	completed?: boolean
+	exitCode?: number | null
+	signal?: NodeJS.Signals | null
+	logFilePath?: string
+}
+
+
 export interface ISystemTrait {
 	/**
 	 * Executes a shell command.
 	 */
-	executeCommand(command: string, options?: { timeout?: number; onOutput?: (chunk: string) => void }): Promise<[boolean, any]>
+	executeCommand(command: string, options?: { timeout?: number }): Promise<SystemCommandResult>
 
 	/**
 	 * Performs a regex search across files.

@@ -12,6 +12,7 @@ import {
 	ISkillsTrait,
 	ISymbolTrait,
 	ISystemTrait,
+	SystemCommandResult,
 	ITelemetryTrait,
 	IToolEnvironment,
 	IUITrait,
@@ -118,15 +119,19 @@ export class SurfaceAdapter implements IToolEnvironment {
 		return undefined
 	}
 
-	public async executeCommand(
-		command: string,
-		options?: { timeout?: number; onOutput?: (chunk: string) => void },
-	): Promise<[boolean, any]> {
-		return this.config.callbacks.executeCommandTool(command, options?.timeout, {
-			onOutputLine: options?.onOutput,
+	public async executeCommand(command: string, options?: { timeout?: number }): Promise<SystemCommandResult> {
+		const [userRejected, output, metadata] = await this.config.callbacks.executeCommandTool(command, options?.timeout, {
 			suppressUserInteraction: true,
 			useBackgroundExecution: true,
 		})
+		return {
+			userRejected,
+			output,
+			completed: metadata?.completed,
+			exitCode: metadata?.exitCode,
+			signal: metadata?.signal,
+			logFilePath: metadata?.logFilePath,
+		}
 	}
 
 	public getCreatedCards(): CardHandle[] {
