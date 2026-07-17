@@ -3,27 +3,24 @@ import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 
 export const SUBAGENT_MAX_TURNS = 15
 export const SUBAGENT_TIMEOUT_SECONDS = 240
+export const BUILDER_MAX_ATTEMPTS = 3
+export const TOOL_IMPLEMENTATION_SENTINEL = "__DIRAC_TOOL_IMPLEMENTATION_REQUIRED__"
+export const SMOKE_ARGS_FILE = "smoke-args.json"
 
 export type ToolScope = "global" | "workspace" | "task"
 
 export const TOOL_BUILDER_SYSTEM_SUFFIX = `
 # Tool Builder Subagent Mode
-You are a code generator for upsert_tool. Your only job: implement processCall in the existing tool.ts scaffold, test it via the provided test harness, and submit.
-
-## Steps
-The tool.ts file already exists in the output directory with correct boilerplate (spec, create, exports). Do NOT rewrite it.
-1. Read the existing tool.ts to understand the scaffold and parameters
-2. Edit tool.ts: replace everything between the \`/* ── REPLACE THIS BLOCK ── */\` and \`/* ── END REPLACE ── */\` markers in processCall with your real implementation using a single edit_file call
-3. Run: \`cd <output_directory> && npx tsx test-harness.ts '{"your_realistic_args_here"}'\` via execute_command
-4. If output shows PASS, call attempt_completion with a brief summary. If FAIL, fix tool.ts and retry (max 2 retries).
+You implement processCall in an existing user-tool scaffold, provide realistic smoke-test arguments, test the implementation, and submit.
 
 ## Strict boundaries
-- Do NOT rewrite tool.ts from scratch — edit only the processCall implementation.
-- Do NOT modify the spec object or create function unless adding required parameters.
-- Do NOT write or modify any files outside the output directory.
-- Do NOT install packages or explore the filesystem beyond what your tool needs to read.
-- The only tools you should use are: write_to_file, execute_command, read_file, attempt_completion.
-- Do NOT paste source code in attempt_completion — it is already on disk.
+- Read the existing tool.ts before editing it.
+- Edit only the processCall implementation. Do not rewrite the spec or create function.
+- The only auxiliary file you may create or update is smoke-args.json in the staging directory.
+- Do not modify files outside the staging directory.
+- Do not install packages or call upsert_tool/use_subagents.
+- Use read_file, edit_file, write_to_file, execute_command, and attempt_completion only.
+- Do not paste source code in attempt_completion; it is already on disk.
 `
 
 /**
@@ -73,7 +70,7 @@ export function create() {
   - \`await resolvePath(path): { absolutePath, displayPath }\` — Resolve a path
 
 - **env.system** — System operations
-  - \`await executeCommand(cmd, opts?): [denied: boolean, output: string]\` — Run a shell command
+  - \`await executeCommand(cmd, opts?): { userRejected: boolean, output: unknown, completed?: boolean, exitCode?: number | null, signal?: NodeJS.Signals | null, logFilePath?: string }\` — Run a shell command
   - \`await searchFiles(dir, regex, opts?): string\` — Search files with regex
 
 - **env.ui** — UI

@@ -8,14 +8,34 @@ import { ToolRegistry } from "../../registry/ToolRegistry"
 import { Logger } from "@/shared/services/Logger"
 import { CardStatus } from "@shared/ExtensionMessage"
 import {
-	ToolScope, upsert_tool_spec,
+	ToolScope,
+	upsert_tool_spec,
 	resolveTaskToolDir,
-	buildManifest
+	buildManifest,
 } from "./constants"
-import { spawnBuilderSubagent } from "./subagent-builder"
+import { buildToolWithRepairs } from "./subagent-builder"
 import { buildScaffoldedToolSource, writeTestHarness } from "./scaffold-generator"
+import { validateStagedTool } from "./builder-validation"
+import {
+	commitToolPromotion,
+	createToolStagingDirectory,
+	discardStagedTool,
+	promoteStagedTool,
+	rollbackToolPromotion,
+	ToolPromotion,
+} from "./tool-lifecycle"
 
 export { upsert_tool_spec }
+
+interface PreparedTool {
+	name: string
+	scope: ToolScope
+	description: string
+	parameters: any[]
+	requirements: string
+	finalDir: string
+	stagingDir: string
+}
 
 export class UpsertTool implements IDiracTool {
 	spec(): DiracToolSpec {
@@ -28,25 +48,9 @@ export class UpsertTool implements IDiracTool {
 
 	async processCall(args: any, env: IToolEnvironment): Promise<any> {
 		const { tools } = args ?? {}
-
-		// --- Validate tools array ---
-		if (!Array.isArray(tools) || tools.length === 0) {
-			return "❌ Missing required parameter: tools (must be a non-empty array of tool definitions)."
-		}
-
-		const errors: string[] = []
-		for (let i = 0; i < tools.length; i++) {
-			const t = tools[i]
-			const prefix = `tools[${i}]`
-			if (!t.name || typeof t.name !== "string") errors.push(`${prefix}: Missing required field: name`)
-			if (!t.scope || !["global", "workspace", "task"].includes(t.scope)) errors.push(`${prefix}: scope must be 'global', 'workspace', or 'task'`)
-			if (!t.description || typeof t.description !== "string") errors.push(`${prefix}: Missing required field: description`)
-			if (!t.requirements || typeof t.requirements !== "string") errors.push(`${prefix}: Missing required field: requirements`)
-			if (!/^[a-z][a-z0-9_]*$/.test(t.name || "")) errors.push(`${prefix}: name must be a snake_case identifier`)
-		}
-
-		if (errors.length > 0) {
-			return `❌ Validation errors:\n${errors.map((e) => `  - ${e}`).join("\n")}`
+		const validationError = validateToolDefinitions(tools)
+		if (validationError) {
+			return validationError
 		}
 
 		const progressLines: string[] = []
@@ -69,152 +73,199 @@ export class UpsertTool implements IDiracTool {
 
 		await updateProgress("Validating request", `${tools.length} tool(s) passed validation`)
 
-		// --- Prepare all tools: resolve dirs, write manifests, scaffolds, test harnesses ---
-		interface PreparedTool {
-			name: string
-			scope: ToolScope
-			description: string
-			parameters: any[]
-			requirements: string
-			toolDir: string
-		}
 		const prepared: PreparedTool[] = []
+		const outcomeLines: string[] = []
+		let hasFailure = false
 
-		for (const t of tools) {
-			const { name, scope, description, parameters, requirements } = t
-
-			// Resolve tool directory
-			let toolDir: string
-			try {
-				if (scope === "task") {
-					const taskId = env.config.taskId
-					if (!taskId) {
-						await updateProgress(`[${name}] Failed`, "no taskId for task-scoped tool", CardStatus.ERROR)
-						continue
-					}
-					toolDir = await resolveTaskToolDir(name, taskId)
-				} else {
-					const home = process.env.DIRAC_DIR || path.join(process.env.HOME || "~", ".dirac")
-					if (scope === "global") {
-						toolDir = path.join(home, "tools", name)
-					} else {
-						toolDir = path.join(env.config.cwd, ".dirac", "tools", name)
-					}
-				}
-				await updateProgress(`[${name}] Resolved directory`, toolDir)
-			} catch (error) {
-				await updateProgress(`[${name}] Failed`, `directory resolution: ${error instanceof Error ? error.message : String(error)}`, CardStatus.ERROR)
+		for (const definition of tools) {
+			const preparation = await prepareTool(definition, env, updateProgress)
+			if (typeof preparation === "string") {
+				outcomeLines.push(`❌ Tool '${definition.name}' failed: ${preparation}`)
+				hasFailure = true
 				continue
 			}
-
-			// Write manifest
-			try {
-				await fs.mkdir(toolDir, { recursive: true })
-				const manifest = buildManifest(name, scope)
-				await fs.writeFile(path.join(toolDir, "dirac-tool.json"), JSON.stringify(manifest, null, 2), "utf8")
-				await updateProgress(`[${name}] Wrote manifest`, toolDir)
-			} catch (error) {
-				await updateProgress(`[${name}] Failed`, `manifest: ${error instanceof Error ? error.message : String(error)}`, CardStatus.ERROR)
-				continue
-			}
-
-			// Write test harness
-			try {
-				await writeTestHarness(toolDir)
-				await updateProgress(`[${name}] Wrote test harness`, toolDir)
-			} catch (error) {
-				await updateProgress(`[${name}] Failed`, `test harness: ${error instanceof Error ? error.message : String(error)}`, CardStatus.ERROR)
-				continue
-			}
-
-			// Scaffold tool.ts
-			try {
-				const scaffoldSource = buildScaffoldedToolSource(name, description, parameters)
-				await fs.writeFile(path.join(toolDir, "tool.ts"), scaffoldSource, "utf8")
-				await updateProgress(`[${name}] Scaffolded tool.ts`, "boilerplate written")
-			} catch (error) {
-				await updateProgress(`[${name}] Failed`, `scaffold: ${error instanceof Error ? error.message : String(error)}`, CardStatus.ERROR)
-				continue
-			}
-
-			prepared.push({ name, scope, description, parameters, requirements, toolDir })
+			prepared.push(preparation)
 		}
 
-		if (prepared.length === 0) {
-			await progressCard.finalize(CardStatus.ERROR)
-			return "❌ All tools failed during preparation. Check the progress card for details."
+		if (prepared.length > 0) {
+			await updateProgress("Spawning builders", `${prepared.length} subagent(s) in parallel`)
 		}
 
-		await updateProgress("Spawning builders", `${prepared.length} subagent(s) in parallel`)
-
-		// --- Spawn all builder subagents in parallel ---
 		const buildResults = await Promise.allSettled(
-			prepared.map((t) =>
-				spawnBuilderSubagent(env, t.name, t.scope, t.description, t.parameters, t.requirements, t.toolDir, updateProgress),
+			prepared.map((tool) =>
+				buildToolWithRepairs(
+					env,
+					{
+						name: tool.name,
+						scope: tool.scope,
+						description: tool.description,
+						parameters: tool.parameters,
+						requirements: tool.requirements,
+						toolDir: tool.stagingDir,
+					},
+					async () => (await validateStagedTool(env, tool.stagingDir, tool.scope)).error,
+					updateProgress,
+				),
 			),
 		)
 
-		// --- Load & register all successful tools ---
-		const outcomeLines: string[] = []
 		const taskScopedToolIds = new Set(env.orchestration.getTaskState("taskScopedToolIds"))
-		let hasFailure = false
+		for (let index = 0; index < prepared.length; index++) {
+			const tool = prepared[index]
+			const buildResult = buildResults[index]
+			const buildError = buildResult.status === "rejected"
+				? buildResult.reason instanceof Error ? buildResult.reason.message : String(buildResult.reason)
+				: buildResult.value
 
-		for (let i = 0; i < prepared.length; i++) {
-			const t = prepared[i]
-			const buildResult = buildResults[i]
-
-			// Check if build failed
-			if (buildResult.status === "rejected") {
-				outcomeLines.push(`❌ Tool '${t.name}' failed: ${buildResult.reason?.message || "subagent crashed"}`)
-				hasFailure = true
-				continue
-			}
-			if (buildResult.value) {
-				outcomeLines.push(`❌ Tool '${t.name}' failed: ${buildResult.value}`)
+			if (buildError) {
+				await discardStagedTool(tool.stagingDir)
+				outcomeLines.push(`❌ Tool '${tool.name}' failed: ${buildError}`)
 				hasFailure = true
 				continue
 			}
 
-			// Load
-			await updateProgress(`[${t.name}] Loading`, "compile/import")
-			const loadResult = await UserToolLoader.loadWithDiagnostics(t.toolDir, t.scope)
-			if (loadResult.error) {
-				Logger.verbose(`[UpsertTool] Tool load error: ${loadResult.error}, dir: ${t.toolDir}`)
-				outcomeLines.push(`❌ Tool '${t.name}' failed to load: ${loadResult.error}`)
+			const activationError = await promoteAndActivateTool(tool, env, updateProgress)
+			if (activationError) {
+				outcomeLines.push(`❌ Tool '${tool.name}' failed: ${activationError}`)
 				hasFailure = true
 				continue
 			}
 
-			const tool = loadResult.tool!
-			await updateProgress(`[${t.name}] Loaded`, "passed")
-
-			// Register
-			const registry = ToolRegistry.getInstance()
-			registry.removeUserTool(t.name)
-			if (!registry.registerUserTool(tool)) {
-				outcomeLines.push(`❌ Tool '${t.name}' loaded but failed to register (conflicts with a built-in tool).`)
-				hasFailure = true
-				continue
+			if (tool.scope === "task" && env.config.taskId) {
+				taskScopedToolIds.add(tool.name)
 			}
-			registry.enable(t.name)
-			Logger.info(`[UpsertTool] Registered and enabled '${t.name}' (source: ${t.scope}, registryVersion: ${registry.getVersion()})`)
-
-			if (t.scope === "task" && env.config.taskId) {
-				taskScopedToolIds.add(t.name)
-			}
-
-			const paramHint = Array.isArray(t.parameters) ? t.parameters.map((p: any) => p.name).join(", ") : ""
-			outcomeLines.push(`✅ Tool '${t.name}' is ready. Invoke it by calling '${t.name}' as a tool function with: ${paramHint}`)
+			const paramHint = tool.parameters.map((parameter: any) => parameter.name).join(", ")
+			outcomeLines.push(`✅ Tool '${tool.name}' is ready. Invoke it by calling '${tool.name}' as a tool function with: ${paramHint}`)
 		}
 
 		if (env.config.taskId) {
 			env.orchestration.setTaskState("taskScopedToolIds", [...taskScopedToolIds])
 		}
 
-		const successCount = outcomeLines.filter((l) => l.startsWith("✅")).length
-		await updateProgress("Complete", `${successCount}/${tools.length} tools ready`, hasFailure ? CardStatus.ERROR : CardStatus.SUCCESS)
-		await progressCard.finalize(hasFailure ? CardStatus.ERROR : CardStatus.SUCCESS)
-
+		const successCount = outcomeLines.filter((line) => line.startsWith("✅")).length
+		const finalStatus = hasFailure ? CardStatus.ERROR : CardStatus.SUCCESS
+		await updateProgress("Complete", `${successCount}/${tools.length} tools ready`, finalStatus)
+		await progressCard.finalize(finalStatus)
 		return outcomeLines.join("\n")
 	}
+}
+
+async function prepareTool(
+	definition: any,
+	env: IToolEnvironment,
+	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
+): Promise<PreparedTool | string> {
+	const { name, scope, description, parameters, requirements } = definition
+	let finalDir: string
+	let stagingDir: string | undefined
+
+	try {
+		finalDir = await resolveToolDirectory(name, scope, env)
+		await updateProgress(`[${name}] Resolved directory`, finalDir)
+		stagingDir = await createToolStagingDirectory(finalDir)
+
+		const manifest = buildManifest(name, scope)
+		await fs.writeFile(path.join(stagingDir, "dirac-tool.json"), JSON.stringify(manifest, null, 2), "utf8")
+		await writeTestHarness(stagingDir)
+		await fs.writeFile(path.join(stagingDir, "tool.ts"), buildScaffoldedToolSource(name, description, parameters), "utf8")
+		await updateProgress(`[${name}] Prepared staging directory`, stagingDir)
+
+		return { name, scope, description, parameters, requirements, finalDir, stagingDir }
+	} catch (error) {
+		if (stagingDir) {
+			await discardStagedTool(stagingDir)
+		}
+		const message = error instanceof Error ? error.message : String(error)
+		await updateProgress(`[${name}] Failed`, `preparation: ${message}`, CardStatus.ERROR)
+		return `preparation failed: ${message}`
+	}
+}
+
+async function resolveToolDirectory(name: string, scope: ToolScope, env: IToolEnvironment): Promise<string> {
+	if (scope === "task") {
+		if (!env.config.taskId) {
+			throw new Error("no taskId for task-scoped tool")
+		}
+		return resolveTaskToolDir(name, env.config.taskId)
+	}
+
+	const home = process.env.DIRAC_DIR || path.join(process.env.HOME || "~", ".dirac")
+	return scope === "global"
+		? path.join(home, "tools", name)
+		: path.join(env.config.cwd, ".dirac", "tools", name)
+}
+
+async function promoteAndActivateTool(
+	prepared: PreparedTool,
+	env: IToolEnvironment,
+	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
+): Promise<string | undefined> {
+	let promotion: ToolPromotion | undefined
+
+	try {
+		await updateProgress(`[${prepared.name}] Promoting`, prepared.finalDir)
+		promotion = await promoteStagedTool(prepared.stagingDir, prepared.finalDir)
+
+		const loadResult = await UserToolLoader.loadWithDiagnostics(prepared.finalDir, prepared.scope)
+		if (loadResult.error) {
+			throw new Error(`promoted tool failed to load: ${loadResult.error}`)
+		}
+
+		const registry = ToolRegistry.getInstance()
+		if (!registry.replaceUserTool(loadResult.tool!, true)) {
+			throw new Error("loaded but failed to replace the registry entry because of a tool conflict")
+		}
+	} catch (error) {
+		const failure = error instanceof Error ? error.message : String(error)
+		if (!promotion) {
+			await discardStagedTool(prepared.stagingDir)
+			return failure
+		}
+
+		try {
+			await rollbackToolPromotion(promotion)
+			await updateProgress(`[${prepared.name}] Rolled back`, "previous tool restored", CardStatus.ERROR)
+			return failure
+		} catch (rollbackError) {
+			const rollbackFailure = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+			return `${failure}; rollback also failed: ${rollbackFailure}`
+		}
+	}
+
+	try {
+		await commitToolPromotion(promotion)
+	} catch (error) {
+		Logger.warn(`[UpsertTool] Failed to remove backup for '${prepared.name}'.`, error)
+	}
+
+	const registry = ToolRegistry.getInstance()
+	Logger.info(`[UpsertTool] Registered and enabled '${prepared.name}' (source: ${prepared.scope}, registryVersion: ${registry.getVersion()})`)
+	await updateProgress(`[${prepared.name}] Activated`, "promotion and registration passed")
+	return undefined
+}
+
+function validateToolDefinitions(tools: unknown): string | undefined {
+	if (!Array.isArray(tools) || tools.length === 0) {
+		return "❌ Missing required parameter: tools (must be a non-empty array of tool definitions)."
+	}
+
+	const errors: string[] = []
+	for (let index = 0; index < tools.length; index++) {
+		const tool = tools[index]
+		const prefix = `tools[${index}]`
+		if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
+			errors.push(`${prefix}: tool definition must be an object`)
+			continue
+		}
+		if (!tool.name || typeof tool.name !== "string") errors.push(`${prefix}: Missing required field: name`)
+		if (!tool.scope || !["global", "workspace", "task"].includes(tool.scope)) errors.push(`${prefix}: scope must be 'global', 'workspace', or 'task'`)
+		if (!tool.description || typeof tool.description !== "string") errors.push(`${prefix}: Missing required field: description`)
+		if (!tool.requirements || typeof tool.requirements !== "string") errors.push(`${prefix}: Missing required field: requirements`)
+		if (!Array.isArray(tool.parameters)) errors.push(`${prefix}: parameters must be an array`)
+		if (!/^[a-z][a-z0-9_]*$/.test(tool.name || "")) errors.push(`${prefix}: name must be a snake_case identifier`)
+	}
+
+	return errors.length > 0
+		? `❌ Validation errors:\n${errors.map((error) => `  - ${error}`).join("\n")}`
+		: undefined
 }

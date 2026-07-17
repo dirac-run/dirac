@@ -277,6 +277,49 @@ describe("ToolRegistry", () => {
 		})
 	})
 
+	describe("replaceUserTool", () => {
+		it("replaces a same-source tool and preserves its enabled state", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerUserTool(makeTool({ id: "user_tool", source: "workspace", modulePath: "old" }))
+			registry.enable("user_tool")
+			const version = registry.getVersion()
+
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "user_tool", source: "workspace", modulePath: "new" })),
+				true,
+			)
+			assert.strictEqual(registry.getToolsBySource("workspace")[0].modulePath, "new")
+			assert.strictEqual(registry.isEnabled("user_tool"), true)
+			assert.strictEqual(registry.getVersion(), version + 1)
+		})
+
+		it("enables a new tool only when requested", () => {
+			const registry = ToolRegistry.getInstance()
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "user_tool", source: "workspace" }), true),
+				true,
+			)
+			assert.strictEqual(registry.isEnabled("user_tool"), true)
+		})
+
+		it("rejects a lower-priority replacement without mutating the existing tool", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "user_tool", source: "task", modulePath: "task" })
+			registry.registerUserTool(existing)
+			registry.enable("user_tool")
+			const version = registry.getVersion()
+
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "user_tool", source: "workspace", modulePath: "workspace" })),
+				false,
+			)
+			assert.strictEqual(registry.getAllTools()[0], existing)
+			assert.strictEqual(registry.isEnabled("user_tool"), true)
+			assert.strictEqual(registry.getVersion(), version)
+		})
+	})
+
+
 	describe("removeUserTool", () => {
 		it("removes a registered user tool and returns true", () => {
 			const registry = ToolRegistry.getInstance()

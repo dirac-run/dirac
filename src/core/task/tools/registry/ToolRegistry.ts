@@ -76,6 +76,48 @@ export class ToolRegistry {
 	}
 
 	/**
+	 * Atomically adds or replaces the effective user tool. Existing toggle state
+	 * is preserved on replacement; enableIfNew applies only when no tool exists.
+	 */
+	replaceUserTool(tool: DiscoveredTool, enableIfNew = false): boolean {
+		if (this.collidesWithBuiltin(tool)) {
+			Logger.warn(`[ToolRegistry] User tool '${tool.id}' conflicts with built-in tool id/name. Skipping.`)
+			return false
+		}
+
+		const existing = this.findUserToolByIdOrName(tool)
+		if (!existing) {
+			this.userTools.set(tool.id, tool)
+			if (enableIfNew) {
+				this.enabledOverrides.set(tool.id, true)
+			}
+			this._version++
+			return true
+		}
+
+		const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0
+		const newPriority = SOURCE_PRIORITY[tool.source] ?? 0
+		if (existing.source !== tool.source && newPriority <= existingPriority) {
+			Logger.warn(
+				`[ToolRegistry] User tool '${tool.id}' conflicts with existing tool '${existing.id}' (source: ${existing.source}). Keeping existing.`,
+			)
+			return false
+		}
+
+		const enabledOverride = this.enabledOverrides.get(existing.id)
+		this.userTools.delete(existing.id)
+		this.userTools.set(tool.id, tool)
+		if (existing.id !== tool.id) {
+			this.enabledOverrides.delete(existing.id)
+		}
+		if (enabledOverride !== undefined) {
+			this.enabledOverrides.set(tool.id, enabledOverride)
+		}
+		this._version++
+		return true
+	}
+
+	/**
 	 * Reconcile global and workspace tools discovered from disk without invalidating
 	 * the registry when their effective inventory has not changed. Task tools are
 	 * runtime state and are retained as the highest-priority source.

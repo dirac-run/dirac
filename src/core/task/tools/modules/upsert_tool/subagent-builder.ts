@@ -1,39 +1,77 @@
-import * as fs from "fs/promises"
-import * as path from "path"
 import { DiracDefaultTool } from "@/shared/tools"
 import { CardStatus } from "@shared/ExtensionMessage"
-import { SUBAGENT_DEFAULT_ALLOWED_TOOLS } from "../../subagent/SubagentBuilder"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import {
-    ToolScope,
-    SUBAGENT_MAX_TURNS,
-    SUBAGENT_TIMEOUT_SECONDS,
-    TOOL_BUILDER_SYSTEM_SUFFIX,
-    TOOL_AUTHORING_CONTRACT,
+	BUILDER_MAX_ATTEMPTS,
+	ToolScope,
+	SMOKE_ARGS_FILE,
+	SUBAGENT_MAX_TURNS,
+	SUBAGENT_TIMEOUT_SECONDS,
+	TOOL_AUTHORING_CONTRACT,
+	TOOL_BUILDER_SYSTEM_SUFFIX,
+	TOOL_IMPLEMENTATION_SENTINEL,
 } from "./constants"
 
-export async function spawnBuilderSubagent(
+const BUILDER_ALLOWED_TOOLS = [
+	DiracDefaultTool.FILE_READ,
+	DiracDefaultTool.EDIT_FILE,
+	DiracDefaultTool.FILE_NEW,
+	DiracDefaultTool.BASH,
+	DiracDefaultTool.ATTEMPT,
+]
+
+interface ToolBuildRequest {
+	name: string
+	scope: ToolScope
+	description: string
+	parameters: any[]
+	requirements: string
+	toolDir: string
+}
+
+export async function buildToolWithRepairs(
 	env: IToolEnvironment,
-	name: string,
-	scope: ToolScope,
-	description: string,
-	parameters: any[],
-	requirements: string,
-	toolDir: string,
+	request: ToolBuildRequest,
+	validate: () => Promise<string | undefined>,
 	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
 ): Promise<string | undefined> {
-	const builderAllowedTools = SUBAGENT_DEFAULT_ALLOWED_TOOLS.filter(
-		(tool) => tool !== DiracDefaultTool.UPSERT_TOOL && tool !== DiracDefaultTool.USE_SUBAGENTS,
-	)
+	let repairFeedback: string | undefined
 
-	const prompt = buildSubagentPrompt(name, scope, description, parameters, requirements, toolDir)
+	for (let attempt = 1; attempt <= BUILDER_MAX_ATTEMPTS; attempt++) {
+		await updateProgress(`[${request.name}] Builder attempt`, `${attempt}/${BUILDER_MAX_ATTEMPTS}`)
+		const generationError = await runBuilderSubagentAttempt(env, request, attempt, repairFeedback, updateProgress)
+		const parentValidationError = await validate()
+		const validationError = parentValidationError
+			? generationError ? `${generationError} Parent validation: ${parentValidationError}` : parentValidationError
+			: undefined
 
-	await updateProgress("Generating implementation", "subagent")
+		if (!validationError) {
+			await updateProgress(`[${request.name}] Validated`, `attempt ${attempt}`)
+			return undefined
+		}
+
+		repairFeedback = validationError
+		if (attempt < BUILDER_MAX_ATTEMPTS) {
+			await updateProgress(`[${request.name}] Repair requested`, summarizeError(validationError))
+		}
+	}
+
+	return `Build failed after ${BUILDER_MAX_ATTEMPTS} attempts. Last error: ${repairFeedback}`
+}
+
+async function runBuilderSubagentAttempt(
+	env: IToolEnvironment,
+	request: ToolBuildRequest,
+	attempt: number,
+	repairFeedback: string | undefined,
+	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
+): Promise<string | undefined> {
+	const prompt = buildSubagentPrompt(request, attempt, repairFeedback)
 	const result = await env.orchestration.runSubagent(prompt, {
-		subagentName: `tool_builder:${name}`,
+		subagentName: `tool_builder:${request.name}:attempt_${attempt}`,
 		maxTurns: SUBAGENT_MAX_TURNS,
 		timeout: SUBAGENT_TIMEOUT_SECONDS,
-		allowedTools: builderAllowedTools,
+		allowedTools: BUILDER_ALLOWED_TOOLS,
 		systemSuffix: TOOL_BUILDER_SYSTEM_SUFFIX,
 		onUpdate: async (update) => {
 			if (update.textChunk) {
@@ -47,65 +85,60 @@ export async function spawnBuilderSubagent(
 				await updateProgress("Builder subagent", "completed")
 			}
 			if (update.status === "failed") {
-				await updateProgress("Builder subagent", update.error || "failed", CardStatus.ERROR)
+				await updateProgress("Builder subagent", update.error || "failed")
 			}
 		},
 	})
 
 	if (result.status === "failed") {
-		return `❌ Code generation failed: ${result.error || "Subagent did not complete successfully."}`
+		return `Code generation failed: ${result.error || "Subagent did not complete successfully."}`
 	}
 
-	// Verify the subagent wrote tool.ts to disk
-	try {
-		await fs.access(path.join(toolDir, "tool.ts"))
-		await updateProgress("Generated tool source", "verified on disk")
-		// Verify the generated tool actually differs from the scaffold
-		const generated = await fs.readFile(path.join(toolDir, "tool.ts"), "utf8")
-		if (generated.includes("REPLACE THIS BLOCK")) {
-			return `❌ Subagent did not implement processCall — tool.ts still contains the scaffold placeholder.\n\nTool directory: ${toolDir}`
-		}
-		await updateProgress("Verified implementation", "processCall implemented")
-		return undefined
-	} catch {
-		return `❌ Subagent reported success but tool.ts was not found at ${toolDir}/tool.ts.`
-	}
+	return undefined
 }
 
-/**
- * Builds the complete prompt for the code-generation subagent.
- */
 function buildSubagentPrompt(
-	name: string,
-	scope: ToolScope,
-	description: string,
-	parameters: any[],
-	requirements: string,
-	toolDir: string,
+	request: ToolBuildRequest,
+	attempt: number,
+	repairFeedback: string | undefined,
 ): string {
-	return `You are a Dirac tool code generator. Your job is to implement processCall in the existing tool.ts scaffold for the Dirac coding agent.
+	const repairSection = repairFeedback
+		? `\n## Repair Feedback\n\nThe parent validator rejected the previous attempt:\n\n${repairFeedback}\n\nRead the current files and repair the implementation. Do not restore the scaffold sentinel.`
+		: ""
+
+	return `You are a Dirac tool code generator. Implement and smoke-test the existing tool scaffold for the Dirac coding agent.
 
 ## Tool Requirements
 
-- **Name**: ${name}
-- **Description**: ${description}
-- **Requested Scope**: ${scope}
-- **Parameters**: ${JSON.stringify(parameters, null, 2)}
-- **Behavior**: ${requirements}
+- **Name**: ${request.name}
+- **Description**: ${request.description}
+- **Requested Scope**: ${request.scope}
+- **Parameters**: ${JSON.stringify(request.parameters, null, 2)}
+- **Behavior**: ${request.requirements}
+- **Builder Attempt**: ${attempt}/${BUILDER_MAX_ATTEMPTS}
 
 ## Scope Protocol
 
-The requested scope is **${scope}**. Treat it as immutable context.
+The requested scope is **${request.scope}**. Treat it as immutable context.
 You are not allowed to decide a different scope, write a manifest, choose a storage directory, register a tool, enable a tool, or call upsert_tool.
-Only implement the processCall body in the existing tool.ts.
-\`upsert_tool\` will handle validation, registration, and enabling the tool.
+Only edit the processCall implementation and the smoke-test arguments file in the existing staging directory.
+\`upsert_tool\` handles validation, promotion, registration, and enablement.
 
 ${TOOL_AUTHORING_CONTRACT}
+${repairSection}
 
 ## Steps
 
-1. tool.ts already exists with correct boilerplate. Read it, then replace everything between the \`/* ── REPLACE THIS BLOCK ── */\` and \`/* ── END REPLACE ── */\` markers in processCall with your real implementation using a single edit_file call.
-2. Run: \`cd ${toolDir} && npx tsx test-harness.ts '{"your_realistic_args_here"}'\` via execute_command
-3. If output shows PASS, call attempt_completion. If FAIL, fix tool.ts and retry (max 2 retries).
-`
+1. Read ${request.toolDir}/tool.ts and any existing ${request.toolDir}/${SMOKE_ARGS_FILE}.
+2. On the first attempt, replace the exact sentinel statement \`throw new Error(${JSON.stringify(TOOL_IMPLEMENTATION_SENTINEL)})\` with the complete processCall implementation using edit_file. On repair attempts, make only the edits needed to address the validator feedback.
+3. Write ${request.toolDir}/${SMOKE_ARGS_FILE} as a JSON object containing realistic arguments for a successful smoke test. This is the only auxiliary file you may write.
+4. Run: \`npx tsx ${JSON.stringify(`${request.toolDir}/test-harness.ts`)}\` via execute_command. The harness reads ${SMOKE_ARGS_FILE} itself.
+5. If the harness fails, repair the implementation and rerun it. Then call attempt_completion with a brief summary.
+
+Never leave the sentinel token in tool.ts, including in comments or strings.`
+}
+
+function summarizeError(error: string): string {
+	const normalized = error.replace(/\s+/g, " ").trim()
+	return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized
 }
