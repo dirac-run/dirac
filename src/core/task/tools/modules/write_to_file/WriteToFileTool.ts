@@ -335,34 +335,9 @@ export const write_to_file_spec: DiracToolSpec = {
 	],
 }
 
-export const new_rule_spec: DiracToolSpec = {
-	id: DiracDefaultTool.NEW_RULE,
-	name: "new_rule",
-	description: "Adds a new rule to the project's .diracrules file.",
-	parameters: [
-		{
-			name: "path",
-			required: true,
-			type: "string",
-			instruction: "The path of the rule file (e.g., '.diracrules').",
-		},
-		{
-			name: "content",
-			required: true,
-			type: "string",
-			instruction: "The content of the rule.",
-		},
-	],
-}
 
 export class WriteToFileTool extends BaseWriteFileTool {
 	spec(): DiracToolSpec {
 		return write_to_file_spec
-	}
-}
-
-export class NewRuleTool extends BaseWriteFileTool {
-	spec(): DiracToolSpec {
-		return new_rule_spec
 	}
 }

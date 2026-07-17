@@ -170,7 +170,8 @@ describe("parseSlashCommands", () => {
 
 		it("handles /newrule and sets needsDiracrulesFileCheck to true", async () => {
 			const result = await parse("<task>/newrule</task>")
-			expect(result.processedText).to.contain("new_rule")
+			expect(result.processedText).to.contain("write_to_file")
+			expect(result.processedText).to.not.contain("MUST use the new_rule tool")
 			expect(result.needsDiracrulesFileCheck).to.be.true
 			expect(captureStub.calledWith(ULID, "newrule", "builtin")).to.be.true
 		})

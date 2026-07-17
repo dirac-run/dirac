@@ -11,7 +11,6 @@ export const FILE_EDIT_TOOLS = new Set([
 	"edit_file",
 	"replace_symbol",
 	"write_to_file",
-	"new_rule",
 	"rename_symbol",
 	"edited_existing_file",
 	"new_file_created",
@@ -27,7 +26,6 @@ export const FILE_SAVE_TOOLS = new Set([
 	"edit_file",
 	"replace_symbol",
 	"write_to_file",
-	"new_rule",
 	"rename_symbol",
 	"edited_existing_file",
 	"new_file_created",
@@ -109,7 +107,6 @@ export const TOOL_DESCRIPTIONS: Record<string, { ask: string; say: string }> = {
 	condense: { ask: "wants to condense the conversation", say: "condensed the conversation" },
 	summarize_task: { ask: "wants to summarize the task", say: "summarized the task" },
 	report_bug: { ask: "wants to report a bug", say: "reported a bug" },
-	new_rule: { ask: "wants to create a new rule", say: "created a new rule" },
 	subagent: { ask: "wants to use a subagent", say: "used a subagent" },
 }
 

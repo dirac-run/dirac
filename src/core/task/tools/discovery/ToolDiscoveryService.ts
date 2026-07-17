@@ -42,7 +42,7 @@ export class ToolDiscoveryService {
 				modulePath: `modules/${moduleName}/tool.ts`,
 			})
 
-			// Handle dual-export modules (e.g., write_to_file with secondarySpec/createSecondary)
+			// Handle modules that expose an optional second built-in tool.
 			if (manifest.secondarySpec && manifest.createSecondary) {
 				tools.push({
 					id: manifest.secondarySpec.id,

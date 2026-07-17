@@ -119,57 +119,39 @@ Example:
 
 export const newRuleToolResponse = () =>
 	`<explicit_instructions type="new_rule">
-The user has explicitly asked you to help them create a new Dirac rule file inside the .diracrules top-level directory based on the conversation up to this point in time. The user may have provided instructions or additional information for you to consider when creating the new Dirac rule.
-When creating a new Dirac rule file, you should NOT overwrite or alter an existing Dirac rule file. To create the Dirac rule file you MUST use the new_rule tool. The new_rule tool can be used in either of the PLAN or ACT modes.
+The user has explicitly asked you to help them create a new Dirac rule file inside the top-level .diracrules directory based on the conversation so far. The user may have provided additional information to consider.
 
-The new_rule tool is defined below:
+Do not overwrite or alter an existing rule file. Use the write_to_file tool to create the new file.
 
-Description:
-Your task is to create a new Dirac rule file which includes guidelines on how to approach developing code in tandem with the user, which can be either project specific or cover more global rules. This includes but is not limited to: desired conversational style, favorite project dependencies, coding styles, naming conventions, architectural choices, ui/ux preferences, etc.
-The Dirac rule file must be formatted as markdown and be a '.md' file. The name of the file you generate must be as succinct as possible and be encompassing the main overarching concept of the rules you added to the file (e.g., 'memory-bank.md' or 'project-overview.md').
+In PLAN mode, prepare the proposed path and complete content, but do not call write_to_file. Ask the user to switch to ACT mode before writing the rule. In ACT mode, create the rule with write_to_file.
 
-Parameters:
-- Path: (required) The path of the file to write to (relative to the current working directory). This will be the Dirac rule file you create, and it must be placed inside the .diracrules top-level directory (create this if it doesn't exist). The filename created CANNOT be "default-diracignore.md". For filenames, use hyphens ("-") instead of underscores ("_") to separate words.
-- Content: (required) The content to write to the file. ALWAYS provide the COMPLETE intended content of the file, without any truncation or omissions. You MUST include ALL parts of the file, even if they haven't been modified. The content for the Dirac rule file MUST be created according to the following instructions:
-  1. Format the Dirac rule file to have distinct guideline sections, each with their own markdown heading, starting with "## Brief overview". Under each of these headings, include bullet points fully fleshing out the details, with examples and/or trigger cases ONLY when applicable.
-  2. These guidelines can be specific to the task(s) or project worked on thus far, or cover more high-level concepts. Guidelines can include coding conventions, general design patterns, preferred tech stack including favorite libraries and language, communication style with Dirac (verbose vs concise), prompting strategies, naming conventions, testing strategies, comment verbosity, time spent on architecting prior to development, and other preferences.
-  3. When creating guidelines, you should not invent preferences or make assumptions based on what you think a typical user might want. These should be specific to the conversation you had with the user. Your guidelines / rules should not be overly verbose.
-  4. Your guidelines should NOT be a recollection of the conversation up to this point in time, meaning you should NOT be including arbitrary details of the conversation.
+Rule requirements:
+1. The path must be inside the top-level .diracrules directory and the filename must end in .md.
+2. Choose a succinct filename that reflects the overarching concept of the rules. Use hyphens instead of underscores. Do not use default-diracignore.md.
+3. Start the content with a "## Brief overview" section and use distinct markdown headings for subsequent guideline sections.
+4. Under each heading, use concise bullet points that fully explain each guideline. Include examples or trigger cases only when applicable.
+5. Include only preferences established in the conversation. Do not invent or assume preferences.
+6. Describe durable guidelines rather than recounting arbitrary conversation details.
+7. Provide the complete intended file content without truncation or omissions.
 
-Usage:
-<new_rule>
-<path>.diracrules/{file name}.md</path>
-<content>Dirac rule file content here</content>
-</new_rule>
+Usage in ACT mode:
+<write_to_file>
+<path>.diracrules/{file-name}.md</path>
+<content>Complete Dirac rule file content</content>
+</write_to_file>
 
-Example:
-<new_rule>
-<path>.diracrules/project-preferences.md</path>
-<content>
+Example content:
 ## Brief overview
-  [Brief description of the rules, including if this set of guidelines is project-specific or global]
+- [Brief description of whether these guidelines are project-specific or global.]
 
 ## Communication style
-  - [Description, rule, preference, instruction]
-  - [...]
+- [Established communication preference.]
 
 ## Development workflow
-  - [Description, rule, preference, instruction]
-  - [...]
+- [Established workflow preference.]
 
 ## Coding best practices
-  - [Description, rule, preference, instruction]
-  - [...]
-
-## Project context
-  - [Description, rule, preference, instruction]
-  - [...]
-
-## Other guidelines
-  - [Description, rule, preference, instruction]
-  - [...]
-</content>
-</new_rule>
+- [Established coding preference.]
 
 Below is the user's input when they indicated that they wanted to create a new Dirac rule file.
 </explicit_instructions>\n

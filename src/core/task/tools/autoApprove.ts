@@ -11,7 +11,6 @@ const WRITE_TOOLS: DiracDefaultTool[] = [
 	DiracDefaultTool.EDIT_FILE,
 	DiracDefaultTool.REPLACE_SYMBOL,
 	DiracDefaultTool.RENAME_SYMBOL,
-	DiracDefaultTool.NEW_RULE,
 ]
 
 export class AutoApprove {
@@ -60,7 +59,6 @@ export class AutoApprove {
 				case DiracDefaultTool.DIAGNOSTICS_SCAN:
 				case DiracDefaultTool.LIST_FILES:
 				case DiracDefaultTool.SEARCH:
-				case DiracDefaultTool.NEW_RULE:
 				case DiracDefaultTool.FILE_NEW:
 				case DiracDefaultTool.EDIT_FILE:
 				case DiracDefaultTool.REPLACE_SYMBOL:
@@ -83,7 +81,6 @@ export class AutoApprove {
 				case DiracDefaultTool.DIAGNOSTICS_SCAN:
 				case DiracDefaultTool.LIST_FILES:
 				case DiracDefaultTool.SEARCH:
-				case DiracDefaultTool.NEW_RULE:
 				case DiracDefaultTool.FILE_NEW:
 				case DiracDefaultTool.EDIT_FILE:
 				case DiracDefaultTool.REPLACE_SYMBOL:
@@ -111,7 +108,6 @@ export class AutoApprove {
 			case DiracDefaultTool.USE_SKILL:
 				return [autoApprovalSettings.actions.readFiles, autoApprovalSettings.actions.readFilesExternally ?? false]
 
-			case DiracDefaultTool.NEW_RULE:
 			case DiracDefaultTool.FILE_NEW:
 			case DiracDefaultTool.EDIT_FILE:
 			case DiracDefaultTool.REPLACE_SYMBOL:

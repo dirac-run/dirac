@@ -56,7 +56,6 @@ export enum DiracDefaultTool {
 	CONDENSE = "condense",
 	SUMMARIZE_TASK = "summarize_task",
 	REPORT_BUG = "report_bug",
-	NEW_RULE = "new_rule",
 	USE_SKILL = "use_skill",
 	LIST_SKILLS = "list_skills",
 	USE_SUBAGENTS = "use_subagents",
@@ -114,7 +113,6 @@ export const MUTATING_TOOLS: DiracDefaultTool[] = [
 	DiracDefaultTool.EDIT_FILE,
 	DiracDefaultTool.REPLACE_SYMBOL,
 	DiracDefaultTool.RENAME_SYMBOL,
-	DiracDefaultTool.NEW_RULE,
 	DiracDefaultTool.BASH, // conservatively treat bash as it can modify the filesystem
 ]
 

@@ -26,7 +26,6 @@ const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	replaceSymbol: "edit",
 	rename_symbol: "edit",
 	write_to_file: "edit",
-	new_rule: "edit",
 	newFileCreated: "edit",
 	editedExistingFile: "edit",
 	fileDeleted: "delete",

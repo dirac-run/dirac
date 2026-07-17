@@ -74,8 +74,6 @@ export const TASK_CALLBACKS_KEYS = [
 export const PATH_REQUIRED_TOOLS = [
 	"read_file",
 	"write_to_file",
-
-	"new_rule",
 	"list_files",
 	"search_files",
 ] as const

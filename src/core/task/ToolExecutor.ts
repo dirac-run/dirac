@@ -49,7 +49,6 @@ export class ToolExecutor {
 	private static readonly PLAN_MODE_RESTRICTED_TOOLS: DiracDefaultTool[] = [
 		DiracDefaultTool.FILE_NEW,
 		DiracDefaultTool.EDIT_FILE,
-		DiracDefaultTool.NEW_RULE,
 	]
 
 	constructor(
