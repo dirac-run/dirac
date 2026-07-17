@@ -106,7 +106,6 @@ export const TOOL_DESCRIPTIONS: Record<string, { ask: string; say: string }> = {
 	focus_chain: { ask: "wants to update the todo list", say: "updated the todo list" },
 	condense: { ask: "wants to condense the conversation", say: "condensed the conversation" },
 	summarize_task: { ask: "wants to summarize the task", say: "summarized the task" },
-	report_bug: { ask: "wants to report a bug", say: "reported a bug" },
 	subagent: { ask: "wants to use a subagent", say: "used a subagent" },
 }
 

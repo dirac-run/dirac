@@ -198,9 +198,6 @@ export class ModelsServiceClient extends ProtoBusClient {
 }
 export class SlashServiceClient extends ProtoBusClient {
 	static override serviceName: string = "dirac.SlashService"
-	static async reportBug(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest("reportBug", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
-	}
 	static async condense(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("condense", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}

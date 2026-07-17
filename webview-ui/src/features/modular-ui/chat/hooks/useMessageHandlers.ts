@@ -271,11 +271,6 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 						await SlashServiceClient.condense(StringRequest.create({ value: text })).catch((err) =>
 							console.error(err),
 						)
-					} else if (value === "report_bug") {
-						const text = lastMessage?.content.type === "markdown" ? lastMessage.content.content : ""
-						await SlashServiceClient.reportBug(StringRequest.create({ value: text })).catch((err) =>
-							console.error(err),
-						)
 					} else if (value) {
 						// Generic utility action - send as message response
 						await TaskServiceClient.askResponse(

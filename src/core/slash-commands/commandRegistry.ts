@@ -3,7 +3,6 @@ import {
 	condenseToolResponse,
 	newRuleToolResponse,
 	newTaskToolResponse,
-	reportBugToolResponse,
 } from "../prompts/commands"
 
 // Builtin slash commands recognized by the parser.
@@ -12,7 +11,6 @@ export const SUPPORTED_DEFAULT_COMMANDS = [
 	"smol",
 	"compact",
 	"newrule",
-	"reportbug",
 	"permissions",
 	"askDirac",
 	"reloadtools",
@@ -42,7 +40,6 @@ export function buildCommandReplacements(
 		smol: condenseToolResponse(),
 		compact: condenseToolResponse(),
 		newrule: newRuleToolResponse(),
-		reportbug: reportBugToolResponse(),
 		askDirac: askDiracToolResponse(extensionPath, sourceDir),
 		reloadtools: "__RELOAD_TOOLS__",
 	}

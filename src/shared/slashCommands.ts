@@ -25,12 +25,6 @@ export const BASE_SLASH_COMMANDS: SlashCommand[] = [
 		cliCompatible: true,
 	},
 	{
-		name: "reportbug",
-		description: "Create a Github issue with Dirac",
-		section: "default",
-		cliCompatible: true,
-	},
-	{
 		name: "askDirac",
 		description: "Get help with Dirac's internal workings and source code",
 		section: "default",

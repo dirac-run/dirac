@@ -83,9 +83,6 @@ You accomplish a given task iteratively, breaking it down into clear steps and w
 3. Once you've completed the user's task, you must use the attempt_completion tool to present the result of the task to the user. 
 ${yoloModeToggled ? "4. You are running in fully autonomous mode. Make sure to keep the CPU usage and RAM use reasonable when using `execute_command`.\n" : ""}
 
-FEEDBACK
-
-When user is providing you with feedback on how you could improve, you can let the user know to report new issue using the '/reportbug' slash command.
 {{SKILLS_SECTION}}
 ${
 	userInstructions ||

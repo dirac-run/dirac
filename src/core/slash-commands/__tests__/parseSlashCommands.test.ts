@@ -132,11 +132,6 @@ describe("parseSlashCommands", () => {
 			expect(result.processedText).to.contain("condense")
 		})
 
-		it("detects slash commands inside <user_message> tags", async () => {
-			const text = "<user_message>/reportbug</user_message>"
-			const result = await parse(text)
-			expect(result.processedText).to.contain("report_bug")
-		})
 
 		it("is case-insensitive on the tag name but preserves command casing", async () => {
 			const text = "<TASK>/newtask</TASK>"
@@ -176,11 +171,6 @@ describe("parseSlashCommands", () => {
 			expect(captureStub.calledWith(ULID, "newrule", "builtin")).to.be.true
 		})
 
-		it("handles /reportbug", async () => {
-			const result = await parse("<task>/reportbug</task>")
-			expect(result.processedText).to.contain("report_bug")
-			expect(captureStub.calledWith(ULID, "reportbug", "builtin")).to.be.true
-		})
 
 		it("handles /askDirac", async () => {
 			const result = await parse("<task>/askDirac</task>")

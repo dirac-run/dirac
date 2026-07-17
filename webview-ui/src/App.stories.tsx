@@ -659,12 +659,6 @@ export const CondenseConversation = quickStory(
 	"Shows utility action to condense conversation for better performance.",
 )
 
-export const ReportBug = quickStory(
-	"Report Bug",
-	"report_bug",
-	"Steps to reproduce: 1. Open Dirac, 2. Start a new task, 3. Observe the error. What happened: Dirac crashes unexpectedly",
-	"Shows utility action to report bugs to the GitHub repository.",
-)
 
 export const ResumeCompletedTask = quickStory(
 	"Resume Completed Task type",

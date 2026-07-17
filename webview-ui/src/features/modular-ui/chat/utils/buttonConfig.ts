@@ -8,7 +8,7 @@ export type ButtonActionType =
 	| "proceed" // Send approve response
 	| "new_task" // Start a new task
 	| "cancel" // Cancel streaming
-	| "utility" // Execute utility function (condense, report_bug)
+	| "utility" // Execute a utility function
 	| DiracAskResponse.EDIT // Send edit response
 	| DiracAskResponse.VIEW // Send view response
 	| "retry" // Retry the last action
