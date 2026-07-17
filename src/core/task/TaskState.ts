@@ -84,11 +84,13 @@ export class TaskState {
 	// Hook execution tracking for cancellation
 	activeHookExecution?: HookExecution
 
-	// Auto-context summarization
-	currentlySummarizing = false
+	// Conversation compaction
+	skipNextAutoCondenseCheck = false
+	pendingCondenseSource?: "automatic"
+	pendingCondenseFeedback?: string
 	totalToolCallCount = 0
 
-	lastAutoCompactTriggerIndex?: number
+	lastAutoCondenseTriggerIndex?: number
 	taskLockAcquired = false
 	initialCheckpointCommitPromise?: Promise<string | undefined>
 	availableSkills: SkillMetadata[] = []

@@ -69,8 +69,8 @@ export const TELEMETRY_EVENTS = {
 		GEMINI_API_PERFORMANCE: "task.gemini_api_performance",
 		// Tracks when API providers return errors
 		PROVIDER_API_ERROR: "task.provider_api_error",
-		// Tracks when the context window is auto-condensed with the summarize_task tool call
-		AUTO_COMPACT: "task.summarize_task",
+		// Tracks conversation compaction, including whether it was automatic or user-requested.
+		CONDENSE: "task.condense",
 		// Tracks when slash commands or workflows are activated
 		SLASH_COMMAND_USED: "task.slash_command_used",
 		// Tracks when a feature is toggled on/off

@@ -49,8 +49,7 @@ const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	find_symbol_references: "search",
 	findSymbolReferences: "search",
 	// Other
-	summarize_task: "think",
-	summarizeTask: "think",
+	condense: "think",
 	use_skill: "other",
 	useSkill: "other",
 	use_subagents: "other",
@@ -86,7 +85,6 @@ export function parseWebSearchMarkerText(text: string | undefined): string | und
 function toolKindForCard(header: string): acp.ToolKind {
 	return TOOL_KIND_MAP[header] ?? getBrowserActionKind(header) ?? "other"
 }
-
 
 /**
  * Options for translating a message.
@@ -256,7 +254,6 @@ function translateWebSearchMarkerMessage(query: string, sessionState: AcpSession
 
 	return toolCallId
 }
-
 
 /**
  * Translate a CARD type Dirac message to ACP updates.

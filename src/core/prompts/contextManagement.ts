@@ -1,5 +1,5 @@
-export const summarizeTask = (cwd?: string, isMultiRootEnabled?: boolean) => {
-	return `The conversation is nearing its context limit. To continue effectively, you must now call the summarize_task tool to create a comprehensive, high-fidelity summary of the task's progress. 
+export const autoCondensePrompt = () => {
+	return `The conversation is nearing its context limit. To continue effectively, you must now call the condense tool with a comprehensive, high-fidelity summary of the task's progress.
 
 Your summary must be exhaustive, capturing the "whole nine yards":
 - All user intents and requirements.
@@ -7,7 +7,7 @@ Your summary must be exhaustive, capturing the "whole nine yards":
 - A detailed account of all files examined or modified, including critical code snippets.
 - The precise current status and the exact next steps to take.
 
-This summary will be your only context moving forward, so ensure no relevant detail is lost. You MUST ONLY respond by calling summarize_task or attempt_completion.`
+This summary will be your only context moving forward, so ensure no relevant detail is lost. You MUST ONLY respond by calling condense or attempt_completion.`
 }
 
 export const continuationPrompt = (summaryText: string) => `

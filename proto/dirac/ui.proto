@@ -29,8 +29,8 @@ enum DiracAsk {
   BROWSER_ACTION_LAUNCH = 10;
   NEW_TASK = 12;
   CONDENSE = 13;
-  reserved 14;
-  SUMMARIZE_TASK = 15;
+  reserved 14, 15;
+  reserved "SUMMARIZE_TASK";
   ACT_MODE_RESPOND = 16;
   USE_SUBAGENTS = 17;
   STORAGE = 18;

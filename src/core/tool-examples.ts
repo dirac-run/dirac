@@ -3,7 +3,7 @@ import { DiracDefaultTool } from "@shared/tools"
 export const TOOL_EXAMPLES: Partial<Record<DiracDefaultTool, string>> = {
 	[DiracDefaultTool.ASK]: '{"question": "What should I do next?"}',
 	[DiracDefaultTool.ATTEMPT]: '{"result": "Summary of work done..."}',
-	[DiracDefaultTool.SUMMARIZE_TASK]: '{"context": "Detailed summary of the conversation..."}',
+	[DiracDefaultTool.CONDENSE]: '{"context": "Detailed summary of the conversation..."}',
 	[DiracDefaultTool.DIAGNOSTICS_SCAN]: '{"paths": ["src"]}',
 	[DiracDefaultTool.BROWSER]: '{"action": "launch", "url": "https://google.com"}',
 	[DiracDefaultTool.EDIT_FILE]:

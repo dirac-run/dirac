@@ -100,7 +100,7 @@ message PreCompactData {
   int64 context_size = 3; // Number of messages in API conversation history
 
   // Compaction strategy indicating how conversation history is managed:
-  // * auto-condense:                   AI-powered compression using summarize_task tool
+  // * auto-condense:                   AI-powered compression using the condense tool
   // * standard-truncation-firstpair:   Keep only the original task (used during auto-condense)
   // * standard-truncation-lasthalf:    Keep first pair + most recent 50% of conversation
   // * standard-truncation-lastquarter: Keep first pair + most recent 25% of conversation (aggressive)

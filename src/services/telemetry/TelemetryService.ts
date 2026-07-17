@@ -153,8 +153,8 @@ export class TelemetryService {
 	public captureModeSwitch(...a: Parameters<TaskTelemetry["captureModeSwitch"]>) {
 		return this.task.captureModeSwitch(...a)
 	}
-	public captureSummarizeTask(...a: Parameters<TaskTelemetry["captureSummarizeTask"]>) {
-		return this.task.captureSummarizeTask(...a)
+	public captureCondense(...a: Parameters<TaskTelemetry["captureCondense"]>) {
+		return this.task.captureCondense(...a)
 	}
 	public captureTaskFeedback(...a: Parameters<TaskTelemetry["captureTaskFeedback"]>) {
 		return this.task.captureTaskFeedback(...a)

@@ -167,7 +167,7 @@ export interface PreCompactHookResult {
 /**
  * Executes the PreCompact hook with proper cleanup and error handling.
  * This shared function eliminates duplication between Task.executePreCompactHook
- * and SummarizeTaskHandler.execute.
+ * and CondenseTool.processCall.
  *
  * @param params - Configuration for executing the hook
  * @returns Result containing any context modification provided by the hook

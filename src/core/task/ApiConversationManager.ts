@@ -1,8 +1,7 @@
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/hooks/precompact-executor"
-import { summarizeTask } from "@core/prompts/contextManagement"
-import { isMultiRootEnabled } from "@core/workspace/multi-root-utils"
+import { autoCondensePrompt } from "@core/prompts/contextManagement"
 import { formatContentBlockToMarkdown } from "@integrations/misc/export-markdown"
 import { telemetryService } from "@services/telemetry"
 import { findLastIndex } from "@shared/array"
@@ -79,39 +78,30 @@ export class ApiConversationManager {
 	}
 
 	public async determineContextCompaction(previousApiReqIndex: number): Promise<boolean> {
-		let shouldCompact = false
 		const useAutoCondense = this.dependencies.stateManager.getGlobalSettingsKey("useAutoCondense")
-		const autoCondenseThreshold = useAutoCondense ? 0.75 : undefined
+		if (!useAutoCondense) return false
 
-		if (useAutoCondense) {
-			if (this.dependencies.taskState.currentlySummarizing) {
-				this.dependencies.taskState.currentlySummarizing = false
-			} else {
-				shouldCompact = this.dependencies.contextManager.shouldCompactContextWindow(
-					this.dependencies.messageStateHandler.getDiracMessages(),
-					this.dependencies.api,
-					previousApiReqIndex,
-					autoCondenseThreshold,
-				)
-
-				// Edge case: summarize_task tool call completes but user cancels next request before it finishes.
-				// This results in currentlySummarizing being false, and we fail to update the context window token estimate.
-				// Check active message count to avoid summarizing a summary (bad UX but doesn't break logic).
-				if (shouldCompact && this.dependencies.taskState.conversationHistoryDeletedRange) {
-					const apiHistory = this.dependencies.messageStateHandler.getApiConversationHistory()
-					const activeMessageCount =
-						apiHistory.length - this.dependencies.taskState.conversationHistoryDeletedRange[1] - 1
-
-					// IMPORTANT: We haven't appended the next user message yet, so the last message is an assistant message.
-					// That's why we compare to even numbers (0, 2) rather than odd (1, 3).
-					if (activeMessageCount <= 2) {
-						shouldCompact = false
-					}
-				}
-			}
+		if (this.dependencies.taskState.skipNextAutoCondenseCheck) {
+			this.dependencies.taskState.skipNextAutoCondenseCheck = false
+			return false
 		}
 
-		return shouldCompact
+		const shouldCompact = this.dependencies.contextManager.shouldCompactContextWindow(
+			this.dependencies.messageStateHandler.getDiracMessages(),
+			this.dependencies.api,
+			previousApiReqIndex,
+			0.75,
+		)
+		if (!shouldCompact || !this.dependencies.taskState.conversationHistoryDeletedRange) {
+			return shouldCompact
+		}
+
+		const apiHistory = this.dependencies.messageStateHandler.getApiConversationHistory()
+		const activeMessageCount = apiHistory.length - this.dependencies.taskState.conversationHistoryDeletedRange[1] - 1
+
+		// The next user message has not been appended yet, so an already-condensed
+		// conversation has zero or two active messages at this point.
+		return activeMessageCount > 2
 	}
 
 	public async prepareApiRequest(params: {
@@ -155,11 +145,12 @@ export class ApiConversationManager {
 		let directResponseText = params.directResponseText
 
 		if (params.shouldCompact) {
-			// When compacting, skip full context loading (use summarize_task instead)
+			// Automatic compaction needs only the existing conversation and compaction instructions.
 			parsedUserContent = params.userContent
 			environmentDetails = ""
 			diracrulesError = false
-			this.dependencies.taskState.lastAutoCompactTriggerIndex = params.previousApiReqIndex
+			this.dependencies.taskState.lastAutoCondenseTriggerIndex = params.previousApiReqIndex
+			this.dependencies.taskState.pendingCondenseSource = "automatic"
 		} else {
 			// When NOT compacting, load full context with mentions parsing and slash commands
 			const [
@@ -215,7 +206,7 @@ export class ApiConversationManager {
 			}
 			userContent.push({
 				type: "text",
-				text: summarizeTask(this.dependencies.cwd, isMultiRootEnabled(this.dependencies.stateManager)),
+				text: autoCondensePrompt(),
 			})
 			this.dependencies.onContextCompacted?.()
 		}

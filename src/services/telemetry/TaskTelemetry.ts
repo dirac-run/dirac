@@ -188,10 +188,17 @@ export class TaskTelemetry {
 		this.emitter.capture({ event: TaskTelemetry.EVENTS.MODE_SWITCH, properties: { ulid, mode } })
 	}
 
-	captureSummarizeTask(ulid: string, modelId: string, provider: string, currentTokens: number, maxContextWindow: number): void {
+	captureCondense(
+		ulid: string,
+		modelId: string,
+		provider: string,
+		source: "automatic" | "user",
+		currentTokens: number,
+		maxContextWindow: number,
+	): void {
 		this.emitter.capture({
-			event: TaskTelemetry.EVENTS.AUTO_COMPACT,
-			properties: { ulid, modelId, provider, currentTokens, maxContextWindow },
+			event: TaskTelemetry.EVENTS.CONDENSE,
+			properties: { ulid, modelId, provider, source, currentTokens, maxContextWindow },
 		})
 	}
 

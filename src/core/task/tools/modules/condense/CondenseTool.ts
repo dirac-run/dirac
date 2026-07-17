@@ -1,27 +1,32 @@
-import { IDiracTool } from "../../interfaces/IDiracTool"
-import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { showSystemNotification } from "@integrations/notifications"
 import { telemetryService } from "@/services/telemetry"
-import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
+import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { formatResponse } from "@core/formatResponse"
-import { DiracMessageType } from "@shared/ExtensionMessage"
+import { continuationPrompt } from "@core/prompts/contextManagement"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@/shared/icons"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-import { processFilesIntoText } from "@integrations/misc/extract-text"
+import { stripHashes } from "../../../../../shared/utils/line-hashing"
+import { IDiracTool } from "../../interfaces/IDiracTool"
+import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 
 export const condense_spec: DiracToolSpec = {
 	id: DiracDefaultTool.CONDENSE,
 	name: "condense",
-	description: "Suggests to condense the conversation to free up context window space.",
+	description: "Condense the conversation to free up context window space while preserving the current task.",
 	parameters: [
 		{
 			name: "context",
 			required: true,
-			instruction: "A summary of the conversation so far.",
+			instruction:
+				"Detailed summary of the conversation so far, including current work, technical concepts, modified files, problems solved, and exact pending next steps.",
 		},
 	],
 }
+
+type CondenseSource = "automatic" | "user"
+
+type ApprovalResult = { approved: true; card: ICardHandle } | { approved: false; feedback: string }
 
 export class CondenseTool implements IDiracTool {
 	spec(): DiracToolSpec {
@@ -34,7 +39,6 @@ export class CondenseTool implements IDiracTool {
 
 	async processCall(args: any, env: IToolEnvironment): Promise<any> {
 		const { context } = args
-
 		if (!context) {
 			env.orchestration.setTaskState(
 				"consecutiveMistakeCount",
@@ -42,97 +46,175 @@ export class CondenseTool implements IDiracTool {
 			)
 			return formatResponse.toolError("Missing required parameter: context")
 		}
-		// Show notification if enabled
-		if (!env.config.isSubagentExecution && env.config.autoApprovalSettings.enableNotifications) {
+
+		const source = this.consumeSource(env)
+		env.orchestration.setTaskState("consecutiveMistakeCount", 0)
+
+		const approval = source === "user" ? await this.requestUserApproval(context, env) : undefined
+		if (approval && !approval.approved) {
+			this.captureToolUsage(false, env)
+			return formatResponse.toolResult(
+				`The user provided feedback on the condensed conversation summary:\n<feedback>\n${approval.feedback}\n</feedback>`,
+			)
+		}
+
+		const range = env.orchestration.getNextTruncationRange("lastTwo")
+		const hookResult = await this.runPreCompactHook(source, range, env)
+		if (hookResult.cancel) {
+			await this.finalizeCancelledApproval(approval)
+			return formatResponse.toolError("Context compaction was cancelled by PreCompact hook.")
+		}
+
+		let result = continuationPrompt(context)
+		if (hookResult.contextModification) {
+			result += `\n\n[Context Modification from PreCompact Hook]\n${hookResult.contextModification}`
+		}
+
+		await this.applyCompaction(range, env)
+		await this.displayCompletedSummary(context, source, approval, env)
+		this.captureSuccessfulCondense(source, env)
+
+		return formatResponse.toolResult(result)
+	}
+
+	private consumeSource(env: IToolEnvironment): CondenseSource {
+		const source = env.orchestration.getTaskState("pendingCondenseSource") ?? "user"
+		env.orchestration.setTaskState("pendingCondenseSource", undefined)
+		return source
+	}
+
+	private async requestUserApproval(context: string, env: IToolEnvironment): Promise<ApprovalResult> {
+		if (env.config.isSubagentExecution) {
+			throw new Error("Subagents cannot condense the parent conversation.")
+		}
+
+		if (env.config.autoApprovalSettings.enableNotifications) {
 			showSystemNotification({
 				subtitle: "Dirac wants to condense the conversation...",
-				message: `Dirac is suggesting to condense your conversation with: ${context}`,
+				message: "Review the generated conversation summary before condensing.",
 			})
 		}
 
-		const card = !env.config.isSubagentExecution
-			? await env.ui.createCard({
-					header: "Condense Conversation",
-					icon: DiracIcon.CHAT,
-					requireApproval: true,
-					collapsed: false,
-					actions: [
-						{ label: "Condense", value: DiracAskResponse.APPROVE, primary: true },
-						{ label: "Cancel", value: DiracAskResponse.REJECT, style: "secondary" },
-					],
-				})
-			: undefined
+		const card = await env.ui.createCard({
+			header: "Condense Conversation",
+			icon: DiracIcon.CHAT,
+			requireApproval: true,
+			collapsed: false,
+			actions: [
+				{ label: "Condense", value: DiracAskResponse.APPROVE, primary: true },
+				{ label: "Cancel", value: DiracAskResponse.REJECT, style: "secondary" },
+			],
+		})
+		await card.update({ body: stripHashes(context), renderType: "markdown" })
 
-		if (card) {
-			await card.update({ body: context })
-		} else {
-			// Subagents shouldn't really be calling condense, but if they do, we skip it
-			return formatResponse.toolResult(formatResponse.condense())
-		}
-
-		env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 		const interaction = await card.waitForInteraction()
-		const text = interaction.action === DiracAskResponse.APPROVE ? "" : interaction.text || "cancel"
-		const images: string[] = []
-		const condenseFiles: string[] = []
+		if (interaction.action === DiracAskResponse.APPROVE) {
+			return { approved: true, card }
+		}
 
-		const apiConfig = env.config.services.stateManager.getApiConfiguration()
-		const provider = (env.config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
+		const feedback = interaction.text || "cancel"
+		await card.update({ body: `Condense cancelled: ${feedback}` })
+		await card.finalize(CardStatus.CANCELLED)
+		return { approved: false, feedback }
+	}
 
-		if (text || (images && images.length > 0) || (condenseFiles && condenseFiles.length > 0)) {
-			let fileContentString = ""
-			if (condenseFiles && condenseFiles.length > 0) {
-				fileContentString = await processFilesIntoText(condenseFiles)
-			}
+	private async finalizeCancelledApproval(approval: ApprovalResult | undefined): Promise<void> {
+		if (!approval?.approved) return
+		await approval.card.update({ body: "Condense cancelled by PreCompact hook." })
+		await approval.card.finalize(CardStatus.CANCELLED)
+	}
 
-			await card.update({
-				body: `Condense cancelled: ${text}`,
-			})
-			await card.finalize(CardStatus.CANCELLED)
+	private async displayCompletedSummary(
+		context: string,
+		source: CondenseSource,
+		approval: ApprovalResult | undefined,
+		env: IToolEnvironment,
+	): Promise<void> {
+		if (source === "user") {
+			if (!approval?.approved) throw new Error("Approved user condense is missing its approval card.")
+			await approval.card.update({ header: "Conversation Condensed", collapsed: true })
+			await approval.card.finalize(CardStatus.SUCCESS)
+			return
+		}
+		if (env.config.isSubagentExecution) return
 
-			telemetryService.captureToolUsage(
+		const card = await env.ui.createCard({
+			header: "Conversation Condensed",
+			status: CardStatus.RUNNING,
+			icon: DiracIcon.SUMMARIZE,
+			collapsed: true,
+		})
+		await card.update({
+			status: CardStatus.SUCCESS,
+			body: stripHashes(context),
+			renderType: "markdown",
+		})
+		await card.finalize(CardStatus.SUCCESS)
+	}
+
+	private async runPreCompactHook(source: CondenseSource, range: [number, number], env: IToolEnvironment) {
+		const telemetryData = this.getContextTelemetry(env)
+		return await env.orchestration.runHook(
+			"PreCompact",
+			{
+				ulid: env.config.ulid,
+				contextSize: telemetryData?.tokensUsed ?? 0,
+				compactionStrategy: source === "automatic" ? "auto-condense" : "user-condense",
+				tokensIn: telemetryData?.tokensUsed ?? 0,
+				tokensOut: 0,
+				tokensInCache: 0,
+				tokensOutCache: 0,
+				deletedRangeStart: range[0],
+				deletedRangeEnd: range[1],
+			},
+			{ isCancellable: true },
+		)
+	}
+
+	private async applyCompaction(range: [number, number], env: IToolEnvironment): Promise<void> {
+		env.orchestration.setTruncationRange(range)
+		env.orchestration.setTaskState("skipNextAutoCondenseCheck", true)
+		await env.orchestration.resetTransientState()
+		await env.config.messageState.saveDiracMessagesAndUpdateHistory()
+	}
+
+	private captureSuccessfulCondense(source: CondenseSource, env: IToolEnvironment): void {
+		const telemetryData = this.getContextTelemetry(env)
+		if (telemetryData) {
+			const apiConfig = env.config.services.stateManager.getApiConfiguration()
+			const provider = (env.config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
+			telemetryService.captureCondense(
 				env.config.ulid,
-				this.spec().id,
 				env.config.api.getModel().id,
 				provider,
-				false, // autoApproved - condense is never auto-approved
-				false, // success=false because user provided feedback instead
-				undefined,
-				true, // isNativeToolCall
-			)
-			return formatResponse.toolResult(
-				`The user provided feedback on the condensed conversation summary:\n<feedback>\n${text}\n</feedback>`,
-				images,
-				fileContentString,
+				source,
+				telemetryData.tokensUsed,
+				telemetryData.maxContextWindow,
 			)
 		}
+		this.captureToolUsage(true, env)
+	}
 
-		const history = env.orchestration.getHistory()
-		const lastMessage = history[history.length - 1]
-		const summaryAlreadyAppended = lastMessage && lastMessage.content.type === DiracMessageType.MARKDOWN
-		const keepStrategy = summaryAlreadyAppended ? "lastTwo" : "none"
-
-		const range = env.orchestration.getNextTruncationRange(keepStrategy)
-		env.orchestration.setTruncationRange(range)
-		await env.orchestration.resetTransientState()
-
+	private captureToolUsage(success: boolean, env: IToolEnvironment): void {
+		const apiConfig = env.config.services.stateManager.getApiConfiguration()
+		const provider = (env.config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
 		telemetryService.captureToolUsage(
 			env.config.ulid,
 			this.spec().id,
 			env.config.api.getModel().id,
 			provider,
-			false, // autoApproved - condense is never auto-approved
-			true,
+			false,
+			success,
 			undefined,
-			true, // isNativeToolCall
+			true,
 		)
+	}
 
-		await card.update({
-			header: "Conversation Condensed",
-			collapsed: true,
-		})
-		await card.finalize(CardStatus.SUCCESS)
-
-		return formatResponse.toolResult(formatResponse.condense())
+	private getContextTelemetry(env: IToolEnvironment) {
+		return env.config.services.contextManager.getContextTelemetryData(
+			env.config.messageState.getDiracMessages(),
+			env.config.api,
+			env.config.taskState.lastAutoCondenseTriggerIndex,
+		)
 	}
 }

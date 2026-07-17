@@ -54,7 +54,6 @@ export enum DiracDefaultTool {
 	NEW_TASK = "new_task",
 	PLAN_MODE = "plan_mode_respond",
 	CONDENSE = "condense",
-	SUMMARIZE_TASK = "summarize_task",
 	USE_SKILL = "use_skill",
 	LIST_SKILLS = "list_skills",
 	USE_SUBAGENTS = "use_subagents",

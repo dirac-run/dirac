@@ -14,7 +14,7 @@ export interface SubagentBuilderOptions {
 }
 
 export const SUBAGENT_DEFAULT_ALLOWED_TOOLS: DiracDefaultTool[] = Object.values(DiracDefaultTool).filter(
-	(tool) => tool !== DiracDefaultTool.USE_SUBAGENTS,
+	(tool) => tool !== DiracDefaultTool.USE_SUBAGENTS && tool !== DiracDefaultTool.CONDENSE,
 )
 
 export const SUBAGENT_SYSTEM_SUFFIX = `\n\n# Subagent Execution Mode
@@ -66,7 +66,9 @@ export class SubagentBuilder {
 	}
 
 	private resolveAllowedTools(configuredTools?: string[]): string[] {
-		const sourceTools = this.options.allowedTools ?? (configuredTools && configuredTools.length > 0 ? configuredTools : SUBAGENT_DEFAULT_ALLOWED_TOOLS)
+		const sourceTools =
+			this.options.allowedTools ??
+			(configuredTools && configuredTools.length > 0 ? configuredTools : SUBAGENT_DEFAULT_ALLOWED_TOOLS)
 		return Array.from(new Set([...sourceTools, DiracDefaultTool.ATTEMPT]))
 	}
 
