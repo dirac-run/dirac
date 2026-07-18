@@ -410,6 +410,13 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 		supportsReasoning: true,
 		supportsTools: true,
 	},
+	"kimi-k3": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsReasoning: true,
+		supportsTools: true,
+	},
 	"llama-4-maverick-17b-128e-instruct": {
 		maxTokens: 4096,
 		contextWindow: 131072,

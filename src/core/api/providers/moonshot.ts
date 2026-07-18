@@ -24,7 +24,7 @@ interface MoonshotUsage extends OpenAI.CompletionUsage {
 export class MoonshotHandler implements ApiHandler {
 	private client: OpenAI | undefined
 
-	constructor(private readonly options: MoonshotHandlerOptions) {}
+	constructor(private readonly options: MoonshotHandlerOptions) { }
 
 	private ensureClient(): OpenAI {
 		if (!this.client) {
@@ -55,15 +55,17 @@ export class MoonshotHandler implements ApiHandler {
 			...((model.info as any).isR1FormatRequired ? addReasoningContent(convertedMessages, messages) : convertedMessages),
 		]
 
-		const stream = await client.chat.completions.create({
+		const request = {
 			model: model.id,
 			messages: openAiMessages,
-			temperature: model.info.temperature,
-			max_tokens: model.info.maxTokens,
 			stream: true,
 			stream_options: { include_usage: true },
 			...getOpenAIToolParams(tools),
-		})
+			...(model.id === "kimi-k3"
+				? { max_completion_tokens: model.info.maxTokens, reasoning_effort: "max" }
+				: { max_tokens: model.info.maxTokens, temperature: model.info.temperature }),
+		}
+		const stream = await client.chat.completions.create(request as OpenAI.Chat.ChatCompletionCreateParamsStreaming)
 
 		const toolCallProcessor = new ToolCallProcessor()
 
