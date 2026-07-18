@@ -179,7 +179,7 @@ describe("Controller (original)", () => {
 		sandbox.restore()
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
-		} catch { }
+		} catch {}
 	})
 
 	// Helper: call initTask with mock watcher
@@ -208,7 +208,7 @@ describe("Controller (original)", () => {
 	it("has no task initially", () => {
 		expectLoggerErrors()
 		const c = new Controller(mockContext)
-			; (c.task === undefined).should.be.true()
+		;(c.task === undefined).should.be.true()
 	})
 	it("initTask returns a string taskId", async () => {
 		expectLoggerErrors()
@@ -220,20 +220,20 @@ describe("Controller (original)", () => {
 	it("initTask creates a Task on controller.task", async () => {
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
-			; (c.task !== undefined).should.be.true()
+		;(c.task !== undefined).should.be.true()
 	})
 	it("dispose clears task", async () => {
 		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		await c.dispose()
-			; (c.task === undefined).should.be.true()
+		;(c.task === undefined).should.be.true()
 	})
 	it("clearTask nullifies controller.task", async () => {
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		await c.clearTask()
-			; (c.task === undefined).should.be.true()
+		;(c.task === undefined).should.be.true()
 	})
 	it("cancelTask resolves", async () => {
 		const c = new Controller(mockContext)
@@ -292,6 +292,6 @@ describe("Controller (original)", () => {
 	it("readOpenRouterModels returns undefined", async () => {
 		const c = new Controller(mockContext)
 		const m = await c.readOpenRouterModels()
-			; (m === undefined).should.be.true()
+		;(m === undefined).should.be.true()
 	})
 })
