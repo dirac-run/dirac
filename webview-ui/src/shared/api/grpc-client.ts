@@ -225,6 +225,9 @@ export class StateServiceClient extends ProtoBusClient {
 	static async toggleFavoriteModel(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("toggleFavoriteModel", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
+	static async activateModelProviderPreset(request: proto.dirac.StringRequest): Promise<proto.dirac.Empty> {
+		return this.makeUnaryRequest("activateModelProviderPreset", request, proto.dirac.StringRequest.toJSON, proto.dirac.Empty.fromJSON)
+	}
 	static async resetState(request: proto.dirac.ResetStateRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("resetState", request, proto.dirac.ResetStateRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}

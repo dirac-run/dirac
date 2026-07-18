@@ -45,6 +45,7 @@ import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import { DiracError, DiracErrorType, ErrorService } from "@services/error"
 import { featureFlagsService } from "@services/feature-flags"
 import { telemetryService } from "@services/telemetry"
+import { recordSuccessfulModelProviderPreset } from "@core/models/modelProviderPresets"
 import { ApiConfiguration } from "@shared/api"
 import { findLastIndex } from "@shared/array"
 import { DiracClient } from "@shared/dirac"
@@ -154,7 +155,6 @@ export class Task {
 	public setContextCompactionObserver(observer: () => void): void {
 		this.contextCompactionObserver = observer
 	}
-
 
 	public async getActiveHookExecution(): Promise<typeof this.taskState.activeHookExecution> {
 		return this.hookManager.getActiveHookExecution()
@@ -594,7 +594,6 @@ export class Task {
 			cancelTask: this.cancelTask,
 			runUserPromptSubmitHook: this.runUserPromptSubmitHook.bind(this),
 			onContextCompacted: () => this.contextCompactionObserver?.(),
-
 		})
 
 		this.responseProcessor = new ResponseProcessor({
@@ -1010,7 +1009,7 @@ export class Task {
 			}
 			// Ensure the artifact dir is git-ignored so debug dumps don't get committed.
 			const gitignorePath = path.join(writeDir, ".gitignore")
-			await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => { })
+			await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => {})
 
 			const debugPath = path.join(writeDir, `task-${this.taskId}-debug.md`)
 
@@ -1235,7 +1234,7 @@ export class Task {
 		if (!useAutoCondense) {
 			const lastMessage =
 				contextManagementMetadata.truncatedConversationHistory[
-				contextManagementMetadata.truncatedConversationHistory.length - 1
+					contextManagementMetadata.truncatedConversationHistory.length - 1
 				]
 			if (lastMessage && lastMessage.role === "user") {
 				const notice = formatResponse.contextTruncationNotice()
@@ -1597,6 +1596,13 @@ export class Task {
 				yield chunk
 			}
 
+			recordSuccessfulModelProviderPreset(
+				this.stateManager,
+				providerId as import("@shared/api").ApiProvider,
+				model.id,
+				model.info,
+				providerInfo.mode,
+			)
 			await finalizeApiReqMsg()
 		} catch (error) {
 			const shouldRetry = await this.handleApiRequestError({
@@ -1630,7 +1636,7 @@ export class Task {
 		if (providerId && model.id) {
 			try {
 				await this.modelContextTracker.recordModelUsage(providerId, model.id, mode)
-			} catch { }
+			} catch {}
 		}
 
 		const modelInfo: DiracMessageModelInfo = {
@@ -1753,9 +1759,10 @@ export class Task {
 							type: "text",
 							text:
 								assistantMessage +
-								`\n\n[${cancelReason === "streaming_failed"
-									? "Response interrupted by API Error"
-									: "Response interrupted by user"
+								`\n\n[${
+									cancelReason === "streaming_failed"
+										? "Response interrupted by API Error"
+										: "Response interrupted by user"
 								}]`,
 						},
 					],

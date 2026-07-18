@@ -16,6 +16,7 @@ service StateService {
   rpc getAvailableTerminalProfiles(EmptyRequest) returns (TerminalProfiles);
   rpc subscribeToState(EmptyRequest) returns (stream State);
   rpc toggleFavoriteModel(StringRequest) returns (Empty);
+  rpc activateModelProviderPreset(StringRequest) returns (Empty);
   rpc resetState(ResetStateRequest) returns (Empty);
   rpc togglePlanActModeProto(TogglePlanActModeRequest) returns (Boolean);
   rpc updateAutoApprovalSettings(AutoApprovalSettingsRequest) returns (Empty);
@@ -53,6 +54,18 @@ message AutoApprovalSettings {
   int32 version = 1;
   AutoApprovalActions actions = 2;
   optional bool enable_notifications = 3;
+}
+
+message ModelProviderPreset {
+  string id = 1;
+  ApiProvider provider = 2;
+  string model_id = 3;
+  optional OpenRouterModelInfo model_info = 4;
+  optional string open_ai_profile_name = 5;
+  optional LanguageModelChatSelector vs_code_lm_model_selector = 6;
+  optional bool aws_bedrock_custom_selected = 7;
+  optional string aws_bedrock_custom_model_base_id = 8;
+  int64 last_used_at = 9;
 }
 
 // NOTE: Add the new secret fields under SECRETS_KEYS in src/shared/storage/state-keys.ts
@@ -257,6 +270,9 @@ message Settings {
   optional OpenRouterModelInfo plan_mode_github_copilot_model_info = 191;
   optional string act_mode_github_copilot_model_id = 192;
   optional OpenRouterModelInfo act_mode_github_copilot_model_info = 193;
+  repeated ModelProviderPreset model_provider_presets = 194;
+  optional string tool_toggles = 195;
+  optional bool verbose_batch_toggled = 196;
 }
 
 message State {

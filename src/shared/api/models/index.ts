@@ -5,6 +5,7 @@ export {
 	type ModelInfo,
 	type PriceTier,
 	type OpenAiCompatibleProfile,
+	type ModelProviderPreset,
 	type OpenAiCompatibleModelInfo,
 	type OcaModelInfo,
 	type LiteLLMModelInfo,

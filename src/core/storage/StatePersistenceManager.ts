@@ -1,5 +1,6 @@
 import type {
 	GlobalState,
+	GlobalStateAndSettings,
 	GlobalStateAndSettingsKey,
 	LocalState,
 	LocalStateKey,
@@ -244,6 +245,11 @@ export class StatePersistenceManager {
 	}
 
 	// ── Disk reads ──────────────────────────────────────────────────────
+
+	readGlobalStateKeyFromDisk<K extends GlobalStateAndSettingsKey>(key: K): GlobalStateAndSettings[K] | undefined {
+		this.storage.globalStateBackingStore.reloadFromDisk()
+		return this.storage.globalStateBackingStore.get(key)
+	}
 
 	async readAllFromDisk(): Promise<{ globalState: GlobalState; secrets: Secrets; workspaceState: LocalState }> {
 		const globalState = await readGlobalStateFromStorage(this.storage.globalState)

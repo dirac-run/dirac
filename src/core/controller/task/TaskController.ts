@@ -110,6 +110,7 @@ export class TaskController {
 		}
 		const controller = this.deps.controller
 		await this.clearTask()
+		this.deps.stateManager.refreshModelProviderPresetsFromDisk()
 
 		const autoApprovalSettings = this.deps.stateManager.getGlobalSettingsKey("autoApprovalSettings")
 		const shellIntegrationTimeout = this.deps.stateManager.getGlobalSettingsKey("shellIntegrationTimeout")

@@ -1,4 +1,4 @@
-import type { ApiConfiguration, ModelInfo } from "@shared/api"
+import type { ApiConfiguration, ModelInfo, ModelProviderPreset } from "@shared/api"
 import { getSecretsFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
 import {
 	ApiHandlerSettingsKeys,
@@ -182,6 +182,25 @@ export class StateManager {
 		this.globalStateCache[key] = value
 		this.persistence.addPendingGlobalState(key)
 		this.notifyStateChange()
+	}
+
+	refreshModelProviderPresetsFromDisk(): void {
+		if (!this.isInitialized) throw new Error(STATE_MANAGER_NOT_INITIALIZED)
+
+		const cachedPresets = this.globalStateCache.modelProviderPresets
+		const diskPresets = this.persistence.readGlobalStateKeyFromDisk("modelProviderPresets") as
+			| ModelProviderPreset[]
+			| undefined
+		const presetsById = new Map<string, ModelProviderPreset>()
+
+		for (const preset of [...cachedPresets, ...(diskPresets || [])]) {
+			const existing = presetsById.get(preset.id)
+			if (!existing || preset.lastUsedAt > existing.lastUsedAt) presetsById.set(preset.id, preset)
+		}
+
+		const mergedPresets = [...presetsById.values()].sort((a, b) => b.lastUsedAt - a.lastUsedAt).slice(0, 20)
+		if (JSON.stringify(mergedPresets) === JSON.stringify(cachedPresets)) return
+		this.setGlobalState("modelProviderPresets", mergedPresets)
 	}
 
 	setGlobalStateBatch(updates: Partial<GlobalStateAndSettings>): void {

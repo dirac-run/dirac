@@ -7,6 +7,7 @@ export function assembleModelState(stateManager: StateManager) {
 	const enableCheckpointsSetting = stateManager.getGlobalSettingsKey("enableCheckpointsSetting")
 	return {
 		apiConfiguration: stateManager.getApiConfiguration(),
+		modelProviderPresets: stateManager.getGlobalSettingsKey("modelProviderPresets"),
 		autoApprovalSettings: stateManager.getGlobalSettingsKey("autoApprovalSettings"),
 		browserSettings: stateManager.getGlobalSettingsKey("browserSettings"),
 		preferredLanguage: stateManager.getGlobalSettingsKey("preferredLanguage"),

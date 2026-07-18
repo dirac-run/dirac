@@ -5,7 +5,7 @@ import { DiracAskResponse } from "./WebviewMessage"
 import { WorkspaceRoot } from "@shared/multi-root/types"
 import type { Environment } from "../config"
 import { AutoApprovalSettings } from "./AutoApprovalSettings"
-import { ApiConfiguration } from "./api"
+import { ApiConfiguration, ModelProviderPreset } from "./api"
 import { SkillMetadata } from "./skills"
 import { BrowserSettings } from "./BrowserSettings"
 import { DiracFeatureSetting } from "./DiracFeatureSetting"
@@ -52,6 +52,7 @@ export interface ExtensionState {
 	welcomeViewCompleted: boolean
 	onboardingModels?: OnboardingModelGroup | undefined
 	apiConfiguration?: ApiConfiguration
+	modelProviderPresets: ModelProviderPreset[]
 	autoApprovalSettings: AutoApprovalSettings
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string
@@ -158,16 +159,16 @@ export enum DiracMessageType {
 export type DiracMessageContent =
 	/** Stateless conversational content (speech, reasoning, info) */
 	| {
-		type: DiracMessageType.MARKDOWN
-		content: string
-		isReasoning?: boolean
-		images?: string[]
-		files?: string[]
-		isCompletion?: boolean
-		completionType?: "act" | "plan"
-		showFeedback?: boolean
-		role?: "user" | "assistant"
-	}
+			type: DiracMessageType.MARKDOWN
+			content: string
+			isReasoning?: boolean
+			images?: string[]
+			files?: string[]
+			isCompletion?: boolean
+			completionType?: "act" | "plan"
+			showFeedback?: boolean
+			role?: "user" | "assistant"
+	  }
 	/** Stateful tool-mediated unit of work */
 	| { type: DiracMessageType.CARD; card: Card }
 	/** System telemetry and vitals (tokens, cost, latency) */
@@ -370,13 +371,11 @@ export interface CardDiff {
 	newText: string
 }
 
-
 /** Machine-readable input supplied to the tool represented by this card. */
 export type CardRawInput = Record<string, unknown>
 
 /** Machine-readable result produced by the tool represented by this card. */
 export type CardRawOutput = Record<string, unknown>
-
 
 export interface Card {
 	id: string
@@ -407,7 +406,6 @@ export interface CardLocation {
 	path: string
 	line?: number
 }
-
 
 export enum CardStatus {
 	BUILDING = "building",

@@ -200,6 +200,7 @@ const API_HANDLER_SETTINGS_FIELDS = {
 
 const USER_SETTINGS_FIELDS = {
 	// Settings that are NOT part of ApiHandlerOptions
+	modelProviderPresets: { default: [] as import("@shared/api").ModelProviderPreset[] },
 	autoApprovalSettings: {
 		default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,
 	},

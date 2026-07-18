@@ -30,6 +30,11 @@ export class DiracFileStorage<T = any> extends DiracSyncStorage<T> {
 		this.data = this.readFromDisk()
 	}
 
+	/** Reload the backing JSON file so subsequent reads and writes use the latest cross-process state. */
+	public reloadFromDisk(): void {
+		this.data = this.readFromDisk()
+	}
+
 	protected _get(key: string): T | undefined {
 		return this.data[key]
 	}

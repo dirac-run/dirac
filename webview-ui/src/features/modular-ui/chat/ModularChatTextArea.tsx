@@ -16,10 +16,23 @@ import { createActionDecorator } from "./decorators/ActionDecorator"
 import Thumbnails from "@/shared/ui/Thumbnails"
 
 import type { TaskStatus } from "@shared/ExtensionMessage"
+import type { OpenaiReasoningEffort } from "@shared/ExtensionMessage"
+import type { ModelProviderPreset } from "@shared/api"
 interface ModularChatTextAreaProps {
 	mode: "plan" | "act"
 	modelDisplayName: string
 	onModelButtonClick: () => void
+	modelProviderPresets: ModelProviderPreset[]
+	activeModelProviderPresetId?: string
+	onModelProviderPresetSelect: (presetId: string) => Promise<void>
+	modelPresetError?: string
+	isActivatingModelPreset: boolean
+	supportsReasoningEffort: boolean
+	reasoningEffort: OpenaiReasoningEffort
+	reasoningEffortOptions: readonly OpenaiReasoningEffort[]
+	onReasoningEffortSelect: (effort: OpenaiReasoningEffort) => Promise<void>
+	reasoningEffortError?: string
+	isUpdatingReasoningEffort: boolean
 	onSelectFilesAndImages: () => void
 	shouldDisableFilesAndImages: boolean
 	placeholder?: string
@@ -40,6 +53,17 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 	mode,
 	modelDisplayName,
 	onModelButtonClick,
+	modelProviderPresets,
+	activeModelProviderPresetId,
+	onModelProviderPresetSelect,
+	modelPresetError,
+	isActivatingModelPreset,
+	supportsReasoningEffort,
+	reasoningEffort,
+	reasoningEffortOptions,
+	onReasoningEffortSelect,
+	reasoningEffortError,
+	isUpdatingReasoningEffort,
 	onSelectFilesAndImages,
 	shouldDisableFilesAndImages,
 	placeholder,
@@ -78,6 +102,17 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 				mode,
 				modelDisplayName,
 				onModelButtonClick,
+				modelProviderPresets,
+				activeModelProviderPresetId,
+				onModelProviderPresetSelect,
+				modelPresetError,
+				isActivatingModelPreset,
+				supportsReasoningEffort,
+				reasoningEffort,
+				reasoningEffortOptions,
+				onReasoningEffortSelect,
+				reasoningEffortError,
+				isUpdatingReasoningEffort,
 				onSelectFilesAndImages,
 				shouldDisableFilesAndImages,
 				sendingDisabled,
@@ -89,6 +124,17 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 			mode,
 			modelDisplayName,
 			onModelButtonClick,
+			modelProviderPresets,
+			activeModelProviderPresetId,
+			onModelProviderPresetSelect,
+			modelPresetError,
+			isActivatingModelPreset,
+			supportsReasoningEffort,
+			reasoningEffort,
+			reasoningEffortOptions,
+			onReasoningEffortSelect,
+			reasoningEffortError,
+			isUpdatingReasoningEffort,
 			onSelectFilesAndImages,
 			shouldDisableFilesAndImages,
 			sendingDisabled,

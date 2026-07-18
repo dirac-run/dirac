@@ -79,6 +79,7 @@ function inferProtoType(typeText, fieldName) {
 	const knownTypes = [
 		// Specific model info types first
 		["OpenAiCompatibleProfile", "OpenAiCompatibleProfile"],
+		["ModelProviderPreset", "ModelProviderPreset"],
 		["OpenAiCompatibleModelInfo", "OpenAiCompatibleModelInfo"],
 		["LiteLLMModelInfo", "LiteLLMModelInfo"],
 		["OcaModelInfo", "OcaModelInfo"],

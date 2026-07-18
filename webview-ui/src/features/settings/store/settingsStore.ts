@@ -18,6 +18,7 @@ import {
 	openAiModelInfoSaneDefaults,
 	ModelInfo,
 } from "@shared/api"
+import type { ModelProviderPreset } from "@shared/api"
 import { fromProtobufModels } from "@shared/proto-conversions/models/typeConversion"
 import { OpenAiModelsRequest } from "@shared/proto/dirac/models"
 import { EmptyRequest } from "@shared/proto/dirac/common"
@@ -27,6 +28,7 @@ import { create } from "zustand"
 interface SettingsState {
 	version: string
 	apiConfiguration: any
+	modelProviderPresets: ModelProviderPreset[]
 	navigateToAccount: () => void
 	setShowWelcome: (show: boolean) => void
 	availableTerminalProfiles: any[]
@@ -226,8 +228,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
 	version: "0.0.0",
 	apiConfiguration: {},
-	navigateToAccount: () => { },
-	setShowWelcome: () => { },
+	modelProviderPresets: [],
+	navigateToAccount: () => {},
+	setShowWelcome: () => {},
 	availableTerminalProfiles: [],
 
 	refreshTerminalProfiles: async () => {
@@ -349,12 +352,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 	dismissedBanners: [],
 	banners: [],
 	welcomeBanners: [],
-	navigateToSettings: () => { },
-	navigateToSettingsModelPicker: () => { },
-	navigateToHistory: () => { },
-	navigateToChat: () => { },
-	navigateToWorktrees: () => { },
-	onRelinquishControl: () => () => { },
+	navigateToSettings: () => {},
+	navigateToSettingsModelPicker: () => {},
+	navigateToHistory: () => {},
+	navigateToChat: () => {},
+	navigateToWorktrees: () => {},
+	onRelinquishControl: () => () => {},
 	setDiracMessages: (messages) => set({ diracMessages: messages }),
 	setTaskHistory: (history) => set({ taskHistory: history }),
 	setExpandTaskHeader: (expand) => set({ expandTaskHeader: expand }),

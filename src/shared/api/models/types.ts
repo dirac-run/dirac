@@ -61,6 +61,18 @@ export interface OpenAiCompatibleProfile {
 	azureApiVersion?: string
 }
 
+export interface ModelProviderPreset {
+	id: string
+	provider: import("../../api").ApiProvider
+	modelId: string
+	modelInfo?: ModelInfo
+	openAiProfileName?: string
+	vsCodeLmModelSelector?: import("vscode").LanguageModelChatSelector
+	awsBedrockCustomSelected?: boolean
+	awsBedrockCustomModelBaseId?: string
+	lastUsedAt: number
+}
+
 export interface OpenAiCompatibleModelInfo extends ModelInfo {
 	temperature?: number
 	isR1FormatRequired?: boolean

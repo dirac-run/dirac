@@ -2,6 +2,7 @@ import { Empty } from "@shared/proto/dirac/common"
 import { UpdateApiConfigurationRequest } from "@shared/proto/dirac/models"
 import { convertProtoToApiConfiguration } from "@shared/proto-conversions/models/api-configuration-conversion"
 import { buildApiHandler } from "@/core/api"
+import { recordSavedOpenAiCompatibleProfileChanges } from "@/core/models/modelProviderPresets"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
 
@@ -25,8 +26,11 @@ export async function updateApiConfigurationProto(
 
 		const convertedApiConfigurationFromProto = convertProtoToApiConfiguration(protoApiConfiguration)
 
+		const previousProfiles = controller.stateManager.getApiConfiguration().openAiCompatibleProfiles || []
+
 		// Update the API configuration in storage
 		controller.stateManager.setApiConfiguration(convertedApiConfigurationFromProto)
+		recordSavedOpenAiCompatibleProfileChanges(controller.stateManager, previousProfiles)
 
 		// Update the task's API handler if there's an active task
 		if (controller.task) {
