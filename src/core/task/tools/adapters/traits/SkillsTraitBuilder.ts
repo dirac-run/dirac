@@ -11,6 +11,8 @@ export function buildSkillsTrait(config: TaskConfig): ISkillsTrait {
 			const globalToggles = stateManager.getGlobalSettingsKey("globalSkillsToggles") ?? {}
 			const localToggles = stateManager.getWorkspaceStateKey("localSkillsToggles") ?? {}
 			return resolvedSkills.filter((skill) => {
+				if (config.yoloModeToggled && skill.interactiveOnly) return false
+				if (skill.source === "builtin") return true
 				const toggles = skill.source === "global" ? globalToggles : localToggles
 				return toggles[skill.path] !== false
 			})

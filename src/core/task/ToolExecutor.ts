@@ -97,6 +97,10 @@ export class ToolExecutor {
 			createTaskConfig: (coordinator) => this.asToolConfig(coordinator),
 			getWorkspaceRoot: () => this.workspaceManager?.getPrimaryRoot()?.path,
 			getToggles: () => this.stateManager.getGlobalSettingsKey("toolToggles") || {},
+			getActiveSkills: () => {
+				const activeIds = new Set(this.taskState.activeSkillIds)
+				return this.taskState.availableSkills.filter((skill) => activeIds.has(skill.name))
+			},
 		})
 		this.hookRunner = new ToolHookRunner(
 			taskState,

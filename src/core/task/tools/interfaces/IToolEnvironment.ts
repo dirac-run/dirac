@@ -338,6 +338,9 @@ export interface IOrchestrationTrait {
 	 */
 	setTaskState<T extends keyof TaskState>(key: T, value: TaskState[T]): void
 
+	/** Activates a trusted skill and persists the activation for task resume. */
+	activateSkill(skillId: string): Promise<void>
+
 	/**
 	 * Checks if the latest task completion has new changes.
 	 */

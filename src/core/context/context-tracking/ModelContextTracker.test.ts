@@ -11,16 +11,17 @@ describe("ModelContextTracker", () => {
 	let sandbox: sinon.SinonSandbox
 	let tracker: ModelContextTracker
 	let mockTaskMetadata: TaskMetadata
-	let getTaskMetadataStub: sinon.SinonStub
-	let saveTaskMetadataStub: sinon.SinonStub
+	let updateTaskMetadataStub: sinon.SinonStub
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
 
 		// Mock disk module functions
 		mockTaskMetadata = { files_in_context: [], model_usage: [], environment_history: [] }
-		getTaskMetadataStub = sandbox.stub(diskModule, "getTaskMetadata").resolves(mockTaskMetadata)
-		saveTaskMetadataStub = sandbox.stub(diskModule, "saveTaskMetadata").resolves()
+		updateTaskMetadataStub = sandbox.stub(diskModule, "updateTaskMetadata").callsFake(async (_taskId, update) => {
+			await update(mockTaskMetadata)
+			return mockTaskMetadata
+		})
 
 		// Create tracker instance
 		tracker = new ModelContextTracker(taskId)
@@ -44,15 +45,10 @@ describe("ModelContextTracker", () => {
 			// Call the method being tested
 			await tracker.recordModelUsage(apiProviderId, modelId, mode)
 
-			// Verify getTaskMetadata was called with correct parameters
-			expect(getTaskMetadataStub.calledOnce).to.be.true
-			expect(getTaskMetadataStub.firstCall.args[0]).to.equal(taskId)
+			expect(updateTaskMetadataStub.calledOnce).to.be.true
+			expect(updateTaskMetadataStub.firstCall.args[0]).to.equal(taskId)
 
-			// Verify saveTaskMetadata was called with the correct data
-			expect(saveTaskMetadataStub.calledOnce).to.be.true
-
-			// Extract the saved metadata from the call arguments
-			const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+			const savedMetadata = mockTaskMetadata
 
 			// Verify model_usage array has one entry
 			expect(savedMetadata.model_usage.length).to.equal(1)
@@ -94,11 +90,9 @@ describe("ModelContextTracker", () => {
 			// Call the method being tested
 			await tracker.recordModelUsage(apiProviderId, modelId, mode)
 
-			// Verify saveTaskMetadata was called
-			expect(saveTaskMetadataStub.calledOnce).to.be.true
+			expect(updateTaskMetadataStub.calledOnce).to.be.true
 
-			// Extract the saved metadata
-			const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+			const savedMetadata = mockTaskMetadata
 
 			// Verify model_usage array now has two entries
 			expect(savedMetadata.model_usage.length).to.equal(2)
@@ -145,8 +139,7 @@ describe("ModelContextTracker", () => {
 				const expectedTime = startTime + (i + 1) * 1000
 
 				// Reset history between calls to check individual call behavior
-				getTaskMetadataStub.resetHistory()
-				saveTaskMetadataStub.resetHistory()
+				updateTaskMetadataStub.resetHistory()
 
 				// Reset mock metadata for each iteration to avoid accumulation
 				mockTaskMetadata.model_usage = []
@@ -154,12 +147,9 @@ describe("ModelContextTracker", () => {
 				// Call the method
 				await tracker.recordModelUsage(provider, model, mode)
 
-				// Verify interaction with disk module
-				expect(getTaskMetadataStub.calledOnce).to.be.true
-				expect(saveTaskMetadataStub.calledOnce).to.be.true
+				expect(updateTaskMetadataStub.calledOnce).to.be.true
 
-				// Get the saved metadata
-				const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+				const savedMetadata = mockTaskMetadata
 
 				// Since we reset the array for each call, we should always have 1 entry
 				expect(savedMetadata.model_usage.length).to.equal(1)

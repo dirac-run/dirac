@@ -24,11 +24,14 @@ describe("new-tool skill template", () => {
 			// References the upsert_tool for creating tools
 			assert.match(instructions, /upsert_tool/)
 			// Mentions all three scopes
-			assert.match(instructions, /global/)
-			assert.match(instructions, /workspace/)
-			assert.match(instructions, /task/)
+			assert.match(instructions, /global/i)
+			assert.match(instructions, /workspace/i)
+			assert.match(instructions, /task/i)
 			// Mentions the requirements parameter (subagent-based generation)
 			assert.match(instructions, /requirements/)
+			// Supports both user-guided and autonomous creation when requirements are clear
+			assert.match(instructions, /request may come directly from the user/)
+			assert.match(instructions, /requirements are clear, proceed without an interview/)
 			// No deprecated patterns
 			assert.doesNotMatch(instructions, /\.diracrules\/tools/)
 			assert.doesNotMatch(instructions, /@core\//)

@@ -7,6 +7,7 @@ import { ToolRegistry } from "../registry/ToolRegistry"
 import { refreshToolRegistryForWorkspace } from "../registry/refreshToolRegistry"
 import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
+import type { SkillMetadata } from "@shared/skills"
 import { ToolInventorySnapshot, ToolRequestSnapshot, ToolSnapshotDirtyReason, validateToolRequestSnapshot } from "./ToolSnapshot"
 
 import { Logger } from "@/shared/services/Logger"
@@ -15,6 +16,7 @@ interface ToolSnapshotManagerOptions {
 	createTaskConfig: (coordinator: ToolExecutorCoordinator) => TaskConfig
 	getWorkspaceRoot: () => string | undefined
 	getToggles: () => Record<string, boolean>
+	getActiveSkills: () => readonly SkillMetadata[]
 }
 
 export class ToolSnapshotManager {
@@ -47,22 +49,28 @@ export class ToolSnapshotManager {
 
 	async getSnapshotForRequest(context: SystemPromptContext): Promise<ToolRequestSnapshot> {
 		const inventory = await this.getInventorySnapshot()
-		const promptVisibleSpecs = this.buildPromptVisibleSpecs(inventory.enabledTools, context)
+		const activeSkills = this.options.getActiveSkills()
+		const skillTools = ToolRegistry.getInstance().resolveSkillDependencyTools(activeSkills)
+		const effectiveTools = this.mergeTools(inventory.enabledTools, skillTools)
+		const promptVisibleSpecs = this.buildPromptVisibleSpecs(effectiveTools, context)
 		const nativeTools = DiracToolSet.convertSpecsToNativeTools(promptVisibleSpecs, context)
 		const dynamicSubagentToolNames = new Set(
 			promptVisibleSpecs
 				.filter((spec) => spec.id === DiracDefaultTool.USE_SUBAGENTS && spec.name !== DiracDefaultTool.USE_SUBAGENTS)
 				.map((spec) => spec.name),
 		)
-		const executableToolNames = new Set([...inventory.executableToolNames, ...dynamicSubagentToolNames])
+		const coordinator = this.buildCoordinator(effectiveTools)
+		this.validateInventoryCoordinator(effectiveTools, coordinator)
+		const executableToolNames = new Set([...effectiveTools.map((tool) => tool.spec.name), ...dynamicSubagentToolNames])
 
 		const snapshot: ToolRequestSnapshot = {
 			inventoryVersion: inventory.version,
 			requestId: ulid(),
 			promptVisibleSpecs,
-			inventoryEnabledTools: inventory.enabledTools,
+			inventoryEnabledTools: effectiveTools,
+			activeSkillIds: activeSkills.map((skill) => skill.name),
 			nativeTools,
-			coordinator: inventory.coordinator,
+			coordinator,
 			executableToolNames,
 			dynamicSubagentToolNames,
 		}
@@ -112,6 +120,12 @@ export class ToolSnapshotManager {
 		Logger.info(`[ToolSnapshotManager] Inventory rebuilt (v${this.inventoryVersion}): [${toolIds}]`)
 
 		return this.inventorySnapshot
+	}
+
+	private mergeTools(baseTools: DiscoveredTool[], skillTools: DiscoveredTool[]): DiscoveredTool[] {
+		const tools = new Map(baseTools.map((tool) => [tool.id, tool]))
+		for (const tool of skillTools) tools.set(tool.id, tool)
+		return [...tools.values()]
 	}
 
 	private buildCoordinator(enabledTools: DiscoveredTool[]): ToolExecutorCoordinator {

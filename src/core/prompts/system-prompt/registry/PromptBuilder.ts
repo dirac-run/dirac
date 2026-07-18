@@ -80,11 +80,12 @@ export class PromptBuilder {
 		let section = "\n\n# AVAILABLE SKILLS\n"
 		section += "You have access to specialized skills. Use the 'use_skill' tool to activate one.\n\n"
 
-		// Prioritize Project skills
+		// Prioritize project-specific guidance, then trusted built-ins, then global skills.
 		const projectSkills = filtered.filter((s) => s.source === "project")
+		const builtinSkills = filtered.filter((s) => s.source === "builtin")
 		const globalSkills = filtered.filter((s) => s.source === "global")
 
-		const displaySkills = [...projectSkills, ...globalSkills].slice(0, 10)
+		const displaySkills = [...projectSkills, ...builtinSkills, ...globalSkills].slice(0, 10)
 
 		displaySkills.forEach((skill) => {
 			section += `- ${skill.name}: ${skill.description}\n`

@@ -14,11 +14,11 @@ import { parseYamlFrontmatter } from "@utils/frontmatter"
 const NEW_TOOL_SKILL_INSTRUCTIONS = `
 # Creating a New Custom Tool
 
-You are helping the user create a new custom tool for Dirac. Guide them through an interactive process to define and create a tool.
+You are creating a new custom tool for Dirac. The request may come directly from the user, or you may identify that a reusable tool would help accomplish the task.
 
 ## Step 1: Gather Requirements
 
-Ask the user these questions (all at once if they gave a detailed request, otherwise one at a time):
+Use requirements already established by the task and conversation. Ask the user only for details that are genuinely missing or ambiguous. If the requirements are clear, proceed without an interview.
 
 1. **Tool name** — a \`snake_case\` identifier (e.g. \`run_tests\`, \`format_code\`, \`analyze_deps\`).
 2. **Description** — what the tool does, shown to the LLM.
@@ -37,26 +37,17 @@ Ask the user these questions (all at once if they gave a detailed request, other
 
 Call the \`upsert_tool\` tool with the gathered information. It handles code generation, compilation, validation, and smoke testing internally.
 
-Parameters:
-- \`tools\`: array of tool definitions, each containing:
-  - \`name\`: the snake_case tool identifier
-  - \`scope\`: \`"global"\`, \`"workspace"\`, or \`"task"\`
-  - \`description\`: what the tool does
-  - \`parameters\`: array of \`{ name, type, required, instruction }\`
-  - \`requirements\`: natural language description of what the tool should do
-
 ## Step 3: Handle Results
 
 - **Success** (\`✅\`): proceed to Step 4.
-- **Failure** (\`❌\`): read the error, adjust requirements, and call \`upsert_tool\` again. Max 3 retries.
+- **Failure** (\`❌\`): read the error, adjust the requirements, and call \`upsert_tool\` again.
 
 ## Step 4: Inform the User
 
 Tell the user:
-- The tool will appear in the **Tools** tab of the settings panel.
-- User tools default to **disabled** and must be enabled in settings before use.
-- Once enabled, the tool is available to the main agent and to subagents whose allowlist includes the tool id/name.
-- Task-scoped tools are automatically available for this task and will persist across task resume.
+- Global and workspace tools appear in the **Tools** tab and default to disabled until enabled.
+- Task-scoped tools are automatically available for this task and persist across task resume.
+- Enabled tools are available to the main agent and to subagents whose allowlist includes the tool id/name.
 `
 
 const DELETE_TOOL_SKILL_INSTRUCTIONS = `
@@ -147,16 +138,16 @@ const BUILTIN_SKILL_CONTENT = new Map<string, string>([
 export const BUILTIN_SKILLS: SkillMetadata[] = [
 	{
 		name: "new-tool",
-		description: "Create a new custom tool for Dirac through an interactive interview",
+		description: "Create a custom Dirac tool from user-provided or model-derived requirements",
 		path: "<builtin>/new-tool/SKILL.md",
-		source: "global",
-		interactiveOnly: true,
+		source: "builtin",
+		toolDependencies: ["upsert_tool"],
 	},
 	{
 		name: "delete-tool",
 		description: "Delete a local user-defined custom tool from global or workspace scope",
 		path: "<builtin>/delete-tool/SKILL.md",
-		source: "global",
+		source: "builtin",
 		interactiveOnly: true,
 	},
 ]
@@ -265,7 +256,7 @@ export async function discoverSkills(cwd: string): Promise<SkillMetadata[]> {
 }
 
 /**
- * Get available skills with override resolution (global > project).
+ * Get available skills with override resolution (built-in > global > project).
  */
 export function getAvailableSkills(skills: SkillMetadata[]): SkillMetadata[] {
 	const seen = new Set<string>()

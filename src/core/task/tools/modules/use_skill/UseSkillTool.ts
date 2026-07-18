@@ -37,10 +37,10 @@ export class UseSkillTool implements IDiracTool {
 
 		const card = !env.config.isSubagentExecution
 			? await env.ui.createCard({
-					icon: DiracIcon.SKILL,
-					header: `Activate skill: ${skill_name}`,
-					collapsed: true,
-				})
+				icon: DiracIcon.SKILL,
+				header: `Activate skill: ${skill_name}`,
+				collapsed: true,
+			})
 			: undefined
 
 		try {
@@ -56,12 +56,14 @@ export class UseSkillTool implements IDiracTool {
 				return errorMsg
 			}
 
+			await env.orchestration.activateSkill(skillContent.name)
+
 			const globalCount = availableSkills.filter((skill) => skill.source === "global").length
 			const projectCount = availableSkills.filter((skill) => skill.source === "project").length
 
 			env.telemetry.captureCustomMetadata({
 				skillName: skill_name,
-				skillSource: skillContent.source === "global" ? "global" : "project",
+				skillSource: skillContent.source,
 				skillsAvailableGlobal: globalCount,
 				skillsAvailableProject: projectCount,
 			})

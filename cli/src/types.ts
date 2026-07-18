@@ -29,7 +29,6 @@ export interface TaskOptions {
 	noIndex?: boolean
 
 	noEmoji?: boolean
-	customTools?: boolean
 	format?: "json" | "ansi" | "plain"
 }
 

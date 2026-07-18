@@ -62,7 +62,8 @@ export function applyCustomPromptWebview(controller: Controller, request: Update
 export function applyToolToggles(controller: Controller, request: UpdateSettingsRequest): void {
 	if (request.toolToggles === undefined) return
 	const toggles = JSON.parse(request.toolToggles) as Record<string, boolean>
-	controller.stateManager.setGlobalState("toolToggles", toggles)
-	ToolRegistry.getInstance().loadToggles(toggles)
+	const registry = ToolRegistry.getInstance()
+	registry.loadToggles(toggles)
+	controller.stateManager.setGlobalState("toolToggles", registry.getToggles())
 	controller.task?.markToolsDirty("tool_toggles_changed")
 }

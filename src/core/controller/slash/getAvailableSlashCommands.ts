@@ -86,17 +86,18 @@ export async function getAvailableSlashCommands(controller: Controller, _request
 	const localSkillsToggles = controller.stateManager.getWorkspaceStateKey("localSkillsToggles") ?? {}
 
 	for (const skill of discoveredSkills) {
-		const toggles = skill.source === "global" ? globalSkillsToggles : localSkillsToggles
-		if (toggles[skill.path] !== false) {
-			commands.push(
-				SlashCommandInfo.create({
-					name: skill.name,
-					description: skill.description,
-					section: "skill",
-					cliCompatible: true,
-				}),
-			)
-		}
+		const enabled =
+			skill.source === "builtin" ||
+			(skill.source === "global" ? globalSkillsToggles : localSkillsToggles)[skill.path] !== false
+		if (!enabled) continue
+		commands.push(
+			SlashCommandInfo.create({
+				name: skill.name,
+				description: skill.description,
+				section: "skill",
+				cliCompatible: true,
+			}),
+		)
 	}
 
 	return SlashCommandsResponse.create({ commands })

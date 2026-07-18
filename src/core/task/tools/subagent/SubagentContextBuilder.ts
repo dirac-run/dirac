@@ -19,7 +19,7 @@ export class SubagentContextBuilder {
 		private agent: SubagentBuilder,
 		private allowedTools: string[],
 		private apiHandler: any,
-	) {}
+	) { }
 
 	// Builds the full system prompt context for the subagent run.
 	async buildContext(): Promise<{
@@ -90,8 +90,12 @@ export class SubagentContextBuilder {
 	}
 
 	buildSubagentRequestSnapshot(context: SystemPromptContext): ToolRequestSnapshot {
-		const enabledTools =
+		const parentTools =
 			this.baseConfig.activeToolSnapshot?.inventoryEnabledTools ?? ToolRegistry.getInstance().getEnabledTools()
+		const activeSkillIds = new Set(this.baseConfig.taskState.activeSkillIds)
+		const activeSkills = this.baseConfig.taskState.availableSkills.filter((skill) => activeSkillIds.has(skill.name))
+		const skillTools = ToolRegistry.getInstance().resolveSkillDependencyTools(activeSkills)
+		const enabledTools = this.mergeTools(parentTools, skillTools)
 		const allowedEnabledTools = enabledTools.filter((tool) => this.isDiscoveredToolAllowed(tool))
 		const contextFilteredSpecs = allowedEnabledTools
 			.map((tool) => tool.spec)
@@ -101,11 +105,22 @@ export class SubagentContextBuilder {
 		)
 		const coordinator = this.buildSubagentCoordinator(allowedEnabledTools)
 		const nativeTools = DiracToolSet.convertSpecsToNativeTools(promptVisibleSpecs, context)
-		const snapshot = subagentToolSnapshot(promptVisibleSpecs, nativeTools, allowedEnabledTools, coordinator)
+		const snapshot = subagentToolSnapshot(
+			promptVisibleSpecs,
+			nativeTools,
+			allowedEnabledTools,
+			activeSkills.map((skill) => skill.name),
+			coordinator,
+		)
 		validateToolRequestSnapshot(snapshot)
 		return snapshot
 	}
 
+	private mergeTools(baseTools: readonly DiscoveredTool[], skillTools: readonly DiscoveredTool[]): DiscoveredTool[] {
+		const tools = new Map(baseTools.map((tool) => [tool.id, tool]))
+		for (const tool of skillTools) tools.set(tool.id, tool)
+		return [...tools.values()]
+	}
 	private buildSubagentCoordinator(enabledTools: DiscoveredTool[]): ToolExecutorCoordinator {
 		const coordinator = new ToolExecutorCoordinator()
 		for (const tool of enabledTools) coordinator.registerModularTool(tool.factory(this.baseConfig))
@@ -122,6 +137,7 @@ function subagentToolSnapshot(
 	promptVisibleSpecs: ToolRequestSnapshot["promptVisibleSpecs"],
 	nativeTools: DiracTool[],
 	inventoryEnabledTools: readonly DiscoveredTool[],
+	activeSkillIds: readonly string[],
 	coordinator: ToolExecutorCoordinator,
 ): ToolRequestSnapshot {
 	return {
@@ -129,6 +145,7 @@ function subagentToolSnapshot(
 		requestId: "subagent",
 		promptVisibleSpecs,
 		inventoryEnabledTools,
+		activeSkillIds,
 		nativeTools,
 		coordinator,
 		executableToolNames: new Set(promptVisibleSpecs.map((spec) => spec.name)),

@@ -306,6 +306,29 @@ Content`)
 			expect(names).to.include("global-skill")
 			expect(names).to.include("project-skill")
 		})
+
+		it("prevents disk skills from shadowing trusted built-in skills", () => {
+			const skills = getAvailableSkills([
+				{
+					name: "new-tool",
+					description: "Untrusted project shadow",
+					path: "/project/new-tool/SKILL.md",
+					source: "project",
+				},
+				{
+					name: "new-tool",
+					description: "Trusted built-in",
+					path: "<builtin>/new-tool/SKILL.md",
+					source: "builtin",
+					toolDependencies: ["upsert_tool"],
+				},
+			])
+
+			expect(skills).to.have.lengthOf(1)
+			expect(skills[0].source).to.equal("builtin")
+			expect(skills[0].toolDependencies).to.deep.equal(["upsert_tool"])
+		})
+
 	})
 
 	describe("Metadata Validation", () => {

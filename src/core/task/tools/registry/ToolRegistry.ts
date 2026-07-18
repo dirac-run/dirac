@@ -1,6 +1,7 @@
 import type { DiracToolSpec } from "@/shared/tools"
 import { Logger } from "@/shared/services/Logger"
 import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
+import type { SkillMetadata } from "@shared/skills"
 import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool, ToolSource } from "../discovery/DiscoveredTool"
@@ -151,20 +152,24 @@ export class ToolRegistry {
 	}
 
 	enable(toolId: string): void {
+		this.assertConfigurable(toolId)
 		this.enabledOverrides.set(toolId, true)
 	}
 
 	disable(toolId: string): void {
+		this.assertConfigurable(toolId)
 		this.enabledOverrides.set(toolId, false)
 	}
 
 	isEnabled(toolId: string): boolean {
+		const tool = this.getTool(toolId)
+		if (!tool || tool.exposure.kind === "skill_only") return false
+
 		const override = this.enabledOverrides.get(toolId)
 		if (override !== undefined) {
 			return override
 		}
-		const tool = this.getTool(toolId)
-		return tool?.source === "builtin"
+		return tool.source === "builtin"
 	}
 
 	getEnabledTools(): DiscoveredTool[] {
@@ -186,6 +191,31 @@ export class ToolRegistry {
 
 	getAllTools(): DiscoveredTool[] {
 		return [...this.builtinTools.values(), ...this.userTools.values()]
+	}
+
+	getConfigurableTools(): DiscoveredTool[] {
+		return this.getAllTools().filter((tool) => tool.exposure.kind === "configurable")
+	}
+
+	resolveSkillDependencyTools(activeSkills: readonly SkillMetadata[]): DiscoveredTool[] {
+		const resolved = new Map<string, DiscoveredTool>()
+
+		for (const skill of activeSkills) {
+			if (skill.source !== "builtin") continue
+			for (const toolId of skill.toolDependencies ?? []) {
+				const tool = this.getTool(toolId)
+				if (!tool) throw new Error(`Built-in skill '${skill.name}' depends on missing tool '${toolId}'.`)
+				if (tool.exposure.kind !== "skill_only") {
+					throw new Error(`Built-in skill '${skill.name}' declares non-skill-only dependency '${toolId}'.`)
+				}
+				if (!tool.exposure.authorizedSkillIds.includes(skill.name)) {
+					throw new Error(`Skill '${skill.name}' is not authorized to activate tool '${toolId}'.`)
+				}
+				resolved.set(tool.id, tool)
+			}
+		}
+
+		return [...resolved.values()]
 	}
 
 	getToolsBySource(source: ToolSource): DiscoveredTool[] {
@@ -211,7 +241,9 @@ export class ToolRegistry {
 	}
 
 	loadToggles(toggles: Record<string, boolean>): void {
-		this.enabledOverrides = new Map(Object.entries(toggles))
+		this.enabledOverrides = new Map(
+			Object.entries(toggles).filter(([toolId]) => this.getTool(toolId)?.exposure.kind === "configurable"),
+		)
 	}
 
 	getToggles(): Record<string, boolean> {
@@ -303,7 +335,8 @@ export class ToolRegistry {
 			current.id !== next.id ||
 			current.name !== next.name ||
 			current.source !== next.source ||
-			current.modulePath !== next.modulePath
+			current.modulePath !== next.modulePath ||
+			JSON.stringify(current.exposure) !== JSON.stringify(next.exposure)
 		) {
 			return false
 		}
@@ -318,6 +351,13 @@ export class ToolRegistry {
 
 	private getTool(toolId: string): DiscoveredTool | undefined {
 		return this.builtinTools.get(toolId) ?? this.userTools.get(toolId)
+	}
+
+	private assertConfigurable(toolId: string): void {
+		const tool = this.getTool(toolId)
+		if (tool?.exposure.kind === "skill_only") {
+			throw new Error(`Skill-only tool '${toolId}' cannot be enabled or disabled directly.`)
+		}
 	}
 
 	private findToolByIdOrName(toolName: string): DiscoveredTool | undefined {

@@ -265,11 +265,14 @@ describe("updateSettings", () => {
 
 		it("should parse toolToggles JSON and load into ToolRegistry", async () => {
 			const controller = createMockController({ task: {} })
-			const loadTogglesStub = sinon.stub(ToolRegistry.getInstance(), "loadToggles")
-			const toggles = { readFiles: true, editFiles: false }
+			const registry = ToolRegistry.getInstance()
+			const loadTogglesStub = sinon.stub(registry, "loadToggles")
+			const getTogglesStub = sinon.stub(registry, "getToggles").returns({ readFiles: true })
+			const toggles = { readFiles: true, upsert_tool: true }
 			await updateSettings(controller, UpdateSettingsRequest.create({ toolToggles: JSON.stringify(toggles) }))
 			expect(loadTogglesStub.calledOnceWith(toggles)).to.be.true
-			expect(controller.stateManager.setGlobalState.calledWith("toolToggles", toggles)).to.be.true
+			expect(getTogglesStub.calledOnce).to.be.true
+			expect(controller.stateManager.setGlobalState.calledWith("toolToggles", { readFiles: true })).to.be.true
 			expect(controller.task.markToolsDirty.calledWith("tool_toggles_changed")).to.be.true
 		})
 

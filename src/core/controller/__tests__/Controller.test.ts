@@ -20,6 +20,7 @@ import type { DiracExtensionContext } from "@/shared/dirac"
 import { Session } from "@/shared/services/Session"
 import * as pathUtils from "@/utils/path"
 import { StateManager } from "../../storage/StateManager"
+import { Task } from "../../task"
 import { Controller } from "../index"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 
@@ -142,6 +143,7 @@ describe("Controller (original)", () => {
 			getModelsCache: sandbox.stub().returns(null),
 			setModelsCache: sandbox.stub(),
 			registerCallbacks: sandbox.stub(),
+			refreshModelProviderPresetsFromDisk: sandbox.stub(),
 			flushPendingState: sandbox.stub().resolves(),
 			getAllGlobalStateEntries: sandbox.stub().returns({}),
 			getAllWorkspaceStateEntries: sandbox.stub().returns({}),
@@ -177,7 +179,7 @@ describe("Controller (original)", () => {
 		sandbox.restore()
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
-		} catch {}
+		} catch { }
 	})
 
 	// Helper: call initTask with mock watcher
@@ -206,7 +208,7 @@ describe("Controller (original)", () => {
 	it("has no task initially", () => {
 		expectLoggerErrors()
 		const c = new Controller(mockContext)
-		;(c.task === undefined).should.be.true()
+			; (c.task === undefined).should.be.true()
 	})
 	it("initTask returns a string taskId", async () => {
 		expectLoggerErrors()
@@ -218,20 +220,20 @@ describe("Controller (original)", () => {
 	it("initTask creates a Task on controller.task", async () => {
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
-		;(c.task !== undefined).should.be.true()
+			; (c.task !== undefined).should.be.true()
 	})
 	it("dispose clears task", async () => {
 		expectLoggerErrors()
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		await c.dispose()
-		;(c.task === undefined).should.be.true()
+			; (c.task === undefined).should.be.true()
 	})
 	it("clearTask nullifies controller.task", async () => {
 		const c = new Controller(mockContext)
 		await initTask(c, "test")
 		await c.clearTask()
-		;(c.task === undefined).should.be.true()
+			; (c.task === undefined).should.be.true()
 	})
 	it("cancelTask resolves", async () => {
 		const c = new Controller(mockContext)
@@ -281,12 +283,15 @@ describe("Controller (original)", () => {
 		r.should.be.an.Array()
 	})
 	it("createTask creates task", async () => {
+		const startTaskStub = sandbox.stub(Task.prototype, "startTask").resolves()
 		const c = new Controller(mockContext)
 		await c.createTask("test prompt").should.not.be.rejected()
+		await c.taskRunPromise
+		sinon.assert.calledOnceWithExactly(startTaskStub, "test prompt", undefined, undefined)
 	})
 	it("readOpenRouterModels returns undefined", async () => {
 		const c = new Controller(mockContext)
 		const m = await c.readOpenRouterModels()
-		;(m === undefined).should.be.true()
+			; (m === undefined).should.be.true()
 	})
 })

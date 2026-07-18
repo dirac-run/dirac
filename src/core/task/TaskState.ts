@@ -95,6 +95,8 @@ export class TaskState {
 	initialCheckpointCommitPromise?: Promise<string | undefined>
 	availableSkills: SkillMetadata[] = []
 	discoveredSkillsCache?: SkillMetadata[]
+	// Trusted skills active for this task. Their authorized tool dependencies are request-scoped.
+	activeSkillIds: string[] = []
 
 	// Task-scoped user tool ids (persisted across task resume)
 	taskScopedToolIds: string[] = []

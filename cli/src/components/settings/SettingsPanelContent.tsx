@@ -64,7 +64,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	// Tool toggle state
 	const [availableTools] = useState<ToolMetadata[]>(() => {
 		const registry = ToolRegistry.getInstance()
-		return registry.getAllTools().map((t) => ({
+		return registry.getConfigurableTools().map((t) => ({
 			id: t.id,
 			name: t.name,
 			description: t.spec.description,
@@ -72,9 +72,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			modulePath: t.modulePath,
 		}))
 	})
-	const [toolToggles, setToolToggles] = useState<Record<string, boolean>>(
-		() => stateManager.getGlobalSettingsKey("toolToggles") || {},
-	)
+	const [toolToggles, setToolToggles] = useState<Record<string, boolean>>(() => ToolRegistry.getInstance().getToggles())
 
 	// Settings state
 	const [features, setFeatures] = useState<Record<FeatureKey, boolean>>(() => {

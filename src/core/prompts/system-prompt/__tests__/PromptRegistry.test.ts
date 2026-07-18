@@ -10,6 +10,7 @@ function emptyToolSnapshot(): ToolRequestSnapshot {
 		requestId: "test",
 		promptVisibleSpecs: [],
 		inventoryEnabledTools: [],
+		activeSkillIds: [],
 		nativeTools: [],
 		coordinator: { has: () => false } as any,
 		executableToolNames: new Set(),

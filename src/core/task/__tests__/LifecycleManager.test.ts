@@ -143,6 +143,12 @@ describe("LifecycleManager", () => {
 			sinon.stub(diskModule, "getSavedDiracMessages").resolves(messages)
 			sinon.stub(diskModule, "getSavedApiConversationHistory").resolves(history)
 			sinon.stub(diskModule, "ensureTaskDirectoryExists").resolves("/test/task")
+			sinon.stub(diskModule, "getTaskMetadata").resolves({
+				files_in_context: [],
+				model_usage: [],
+				environment_history: [],
+				active_skill_ids: ["new-tool"],
+			})
 		}
 
 		// Helper: sets askResponse asynchronously after the manager resets it, to unblock pWaitFor.
@@ -169,6 +175,13 @@ describe("LifecycleManager", () => {
 			deps.taskState.abort = true
 			await manager.resumeTaskFromHistory()
 			deps.taskState.isInitialized.should.equal(true)
+		})
+
+		it("restores active skill ids from task metadata", async () => {
+			setupDiskMocks()
+			unblockWaitFor()
+			await manager.resumeTaskFromHistory()
+			deps.taskState.activeSkillIds.should.eql(["new-tool"])
 		})
 
 		it("aborts if abort flag set during pWaitFor", async () => {
@@ -259,7 +272,13 @@ describe("LifecycleManager", () => {
 
 function createMockDeps(): any {
 	return {
-		taskState: { isInitialized: false, abort: false, askResponse: undefined, taskScopedToolIds: [] } as any,
+		taskState: {
+			isInitialized: false,
+			abort: false,
+			taskScopedToolIds: [],
+			activeSkillIds: [],
+			taskScopedSkillIds: [],
+		} as any,
 		messageStateHandler: {
 			setDiracMessages: sinon.stub(),
 			setApiConversationHistory: sinon.stub(),

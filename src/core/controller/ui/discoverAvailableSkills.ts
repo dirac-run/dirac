@@ -7,6 +7,7 @@ export async function discoverAvailableSkills(stateManager: StateManager, cwd: s
 	const localSkillsToggles = stateManager.getWorkspaceStateKey("localSkillsToggles")
 	const discoveredSkills = await getOrDiscoverSkills(cwd, taskState || {})
 	return discoveredSkills.filter((skill) => {
+		if (skill.source === "builtin") return true
 		const toggles = skill.source === "global" ? globalSkillsToggles : localSkillsToggles
 		return toggles[skill.path] !== false
 	})

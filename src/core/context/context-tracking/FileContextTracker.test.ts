@@ -20,8 +20,7 @@ describe("FileContextTracker", () => {
 	let chokidarWatchStub: sinon.SinonStub
 	let tracker: FileContextTracker
 	let mockTaskMetadata: TaskMetadata
-	let getTaskMetadataStub: sinon.SinonStub
-	let saveTaskMetadataStub: sinon.SinonStub
+	let updateTaskMetadataStub: sinon.SinonStub
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
@@ -48,8 +47,10 @@ describe("FileContextTracker", () => {
 
 		// Mock disk module functions
 		mockTaskMetadata = { files_in_context: [], model_usage: [], environment_history: [] }
-		getTaskMetadataStub = sandbox.stub(diskModule, "getTaskMetadata").resolves(mockTaskMetadata)
-		saveTaskMetadataStub = sandbox.stub(diskModule, "saveTaskMetadata").resolves()
+		updateTaskMetadataStub = sandbox.stub(diskModule, "updateTaskMetadata").callsFake(async (_taskId, update) => {
+			await update(mockTaskMetadata)
+			return mockTaskMetadata
+		})
 
 		setVscodeHostProviderMock()
 
@@ -66,13 +67,10 @@ describe("FileContextTracker", () => {
 		await tracker.trackFileContext(filePath, "read_tool")
 
 		// Verify getTaskMetadata was called
-		expect(getTaskMetadataStub.calledOnce).to.be.true
-		expect(getTaskMetadataStub.firstCall.args[0]).to.equal(taskId)
+		expect(updateTaskMetadataStub.calledOnce).to.be.true
+		expect(updateTaskMetadataStub.firstCall.args[0]).to.equal(taskId)
 
-		// Verify saveTaskMetadata was called with the correct data
-		expect(saveTaskMetadataStub.calledOnce).to.be.true
-
-		const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+		const savedMetadata = mockTaskMetadata
 		expect(savedMetadata.files_in_context.length).to.equal(1)
 
 		const fileEntry = savedMetadata.files_in_context[0]
@@ -86,9 +84,7 @@ describe("FileContextTracker", () => {
 	it("should add a record when a file is edited by Dirac", async () => {
 		await tracker.trackFileContext(filePath, "dirac_edited")
 
-		// Verify saveTaskMetadata was called with the correct data
-		expect(saveTaskMetadataStub.calledOnce).to.be.true
-		const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+		const savedMetadata = mockTaskMetadata
 
 		// Check that we have at least one entry in files_in_context
 		expect(savedMetadata.files_in_context).to.be.an("array").that.is.not.empty
@@ -96,7 +92,7 @@ describe("FileContextTracker", () => {
 		// Find the active entry for this file
 		const activeEntry = savedMetadata.files_in_context.find(
 			(entry: FileMetadataEntry) => entry.path === filePath && entry.record_state === "active",
-		)
+		)!
 
 		// Assert that we found an active entry
 		expect(activeEntry).to.exist
@@ -112,8 +108,7 @@ describe("FileContextTracker", () => {
 	it("should add a record when a file is mentioned", async () => {
 		await tracker.trackFileContext(filePath, "file_mentioned")
 
-		// Verify saveTaskMetadata was called with the correct data
-		const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+		const savedMetadata = mockTaskMetadata
 		const fileEntry = savedMetadata.files_in_context[0]
 
 		expect(fileEntry.path).to.equal(filePath)
@@ -126,8 +121,7 @@ describe("FileContextTracker", () => {
 	it("should add a record when a file is edited by the user", async () => {
 		await tracker.trackFileContext(filePath, "user_edited")
 
-		// Verify saveTaskMetadata was called with the correct data
-		const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+		const savedMetadata = mockTaskMetadata
 		const fileEntry = savedMetadata.files_in_context[0]
 
 		expect(fileEntry.path).to.equal(filePath)
@@ -156,8 +150,7 @@ describe("FileContextTracker", () => {
 		// Track a new operation on the same file
 		await tracker.trackFileContext(filePath, "dirac_edited")
 
-		// Verify the metadata now has two entries - one stale and one active
-		const savedMetadata = saveTaskMetadataStub.firstCall.args[1]
+		const savedMetadata = mockTaskMetadata
 		expect(savedMetadata.files_in_context.length).to.equal(2)
 
 		// First entry should be marked as stale
@@ -184,8 +177,7 @@ describe("FileContextTracker", () => {
 		await tracker.trackFileContext(filePath, "read_tool")
 
 		// Reset the stubs to check the next calls
-		getTaskMetadataStub.resetHistory()
-		saveTaskMetadataStub.resetHistory()
+		updateTaskMetadataStub.resetHistory()
 
 		// Create a spy on trackFileContext to verify it's called with the right parameters
 		const trackFileContextSpy = sandbox.spy(tracker, "trackFileContext")
@@ -212,8 +204,7 @@ describe("FileContextTracker", () => {
 		tracker.markFileAsEditedByDirac(filePath)
 
 		// Reset the stubs to check the next calls
-		getTaskMetadataStub.resetHistory()
-		saveTaskMetadataStub.resetHistory()
+		updateTaskMetadataStub.resetHistory()
 
 		// Create a spy on trackFileContext to verify it's not called
 		const trackFileContextSpy = sandbox.spy(tracker, "trackFileContext")

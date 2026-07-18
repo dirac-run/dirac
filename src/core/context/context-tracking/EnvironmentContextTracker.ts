@@ -1,4 +1,4 @@
-import { collectEnvironmentMetadata, getTaskMetadata, saveTaskMetadata } from "@core/storage/disk"
+import { collectEnvironmentMetadata, updateTaskMetadata } from "@core/storage/disk"
 import type { EnvironmentMetadataEntry } from "./ContextTrackerTypes"
 
 export class EnvironmentContextTracker {
@@ -9,25 +9,18 @@ export class EnvironmentContextTracker {
 	}
 
 	async recordEnvironment() {
-		const metadata = await getTaskMetadata(this.taskId)
-
-		if (!metadata.environment_history) {
-			metadata.environment_history = []
-		}
-
 		const currentEnv = await collectEnvironmentMetadata()
 		const currentEnvWithTs: EnvironmentMetadataEntry = {
 			ts: Date.now(),
 			...currentEnv,
 		}
 
-		const lastEntry = metadata.environment_history[metadata.environment_history.length - 1]
-		if (lastEntry && this.isSameEnvironment(lastEntry, currentEnvWithTs)) {
-			return // No change, don't add duplicate
-		}
-
-		metadata.environment_history.push(currentEnvWithTs)
-		await saveTaskMetadata(this.taskId, metadata)
+		await updateTaskMetadata(this.taskId, (metadata) => {
+			metadata.environment_history ??= []
+			const lastEntry = metadata.environment_history[metadata.environment_history.length - 1]
+			if (lastEntry && this.isSameEnvironment(lastEntry, currentEnvWithTs)) return
+			metadata.environment_history.push(currentEnvWithTs)
+		})
 	}
 
 	private isSameEnvironment(a: EnvironmentMetadataEntry, b: EnvironmentMetadataEntry): boolean {

@@ -6,8 +6,10 @@ export interface SkillMetadata {
 	name: string
 	description: string
 	path: string
-	source: "global" | "project"
+	source: "builtin" | "global" | "project"
 	interactiveOnly?: boolean
+	/** Built-in-only dependencies injected while this skill is active. */
+	toolDependencies?: readonly string[]
 }
 
 /**

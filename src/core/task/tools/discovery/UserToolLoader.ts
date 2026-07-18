@@ -7,7 +7,7 @@ import * as ts from "typescript"
 import type { DiracToolSpec } from "@/shared/tools"
 import { Logger } from "@/shared/services/Logger"
 import type { IDiracTool } from "../interfaces/IDiracTool"
-import type { DiscoveredTool, ToolSource } from "./DiscoveredTool"
+import { CONFIGURABLE_TOOL_EXPOSURE, type DiscoveredTool, type ToolSource } from "./DiscoveredTool"
 
 export interface UserToolLoadResult {
 	tool?: DiscoveredTool
@@ -74,6 +74,7 @@ export class UserToolLoader {
 					id: manifest.id,
 					name: manifest.name,
 					source,
+					exposure: CONFIGURABLE_TOOL_EXPOSURE,
 					spec: mod.spec,
 					factory: mod.create,
 					modulePath: sourcePath,

@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert"
 import { beforeEach, describe, it } from "mocha"
 import { ToolRegistry } from "../../registry/ToolRegistry"
 import type { DiscoveredTool } from "../DiscoveredTool"
+import { ToolDiscoveryService } from "../ToolDiscoveryService"
 import type { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 
 function makeTool(overrides: Partial<DiscoveredTool> = {}): DiscoveredTool {
@@ -11,6 +12,7 @@ function makeTool(overrides: Partial<DiscoveredTool> = {}): DiscoveredTool {
 		id,
 		name,
 		source: overrides.source ?? "builtin",
+		exposure: overrides.exposure ?? { kind: "configurable" },
 		spec:
 			overrides.spec ??
 			({
@@ -432,6 +434,100 @@ describe("ToolRegistry", () => {
 
 			assert.strictEqual(changed, true)
 			assert.strictEqual(registry.getVersion(), version + 1)
+		})
+	})
+
+
+	describe("skill-only exposure", () => {
+		const skillOnlyExposure = { kind: "skill_only" as const, authorizedSkillIds: ["new-tool"] }
+
+		it("discovers upsert_tool as skill-only and authorized only for new-tool", () => {
+			const upsertTool = ToolDiscoveryService.scanBuiltinTools().find((tool) => tool.id === "upsert_tool")
+			assert.ok(upsertTool)
+			assert.deepStrictEqual(upsertTool.exposure, skillOnlyExposure)
+		})
+
+		it("keeps skill-only tools registered but hidden from configurable and enabled inventories", () => {
+			const registry = ToolRegistry.getInstance()
+			const tool = makeTool({ id: "upsert_tool", exposure: skillOnlyExposure })
+			registry.registerBuiltin(tool)
+
+			assert.deepStrictEqual(registry.getAllTools(), [tool])
+			assert.deepStrictEqual(registry.getConfigurableTools(), [])
+			assert.deepStrictEqual(registry.getEnabledTools(), [])
+			assert.strictEqual(registry.isEnabled("upsert_tool"), false)
+		})
+
+		it("ignores stale and crafted toggles for skill-only and unknown tools", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: "upsert_tool", exposure: skillOnlyExposure }))
+			registry.loadToggles({ upsert_tool: true, stale_tool: true })
+
+			assert.deepStrictEqual(registry.getToggles(), {})
+			assert.strictEqual(registry.isEnabled("upsert_tool"), false)
+		})
+
+		it("rejects direct enable, disable, and persisted toggle operations", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: "upsert_tool", exposure: skillOnlyExposure }))
+
+			assert.throws(() => registry.enable("upsert_tool"), /cannot be enabled or disabled directly/)
+			assert.throws(() => registry.disable("upsert_tool"), /cannot be enabled or disabled directly/)
+			assert.throws(() => registry.toggleAndPersist("upsert_tool", true), /cannot be enabled or disabled directly/)
+		})
+
+		it("resolves a dependency only for a trusted built-in skill with matching declarations", () => {
+			const registry = ToolRegistry.getInstance()
+			const tool = makeTool({ id: "upsert_tool", exposure: skillOnlyExposure })
+			registry.registerBuiltin(tool)
+
+			assert.deepStrictEqual(
+				registry.resolveSkillDependencyTools([
+					{
+						name: "new-tool",
+						description: "Create tools",
+						path: "<builtin>/new-tool/SKILL.md",
+						source: "builtin",
+						toolDependencies: ["upsert_tool"],
+					},
+				]),
+				[tool],
+			)
+			assert.deepStrictEqual(
+				registry.resolveSkillDependencyTools([
+					{
+						name: "new-tool",
+						description: "Untrusted shadow",
+						path: "/tmp/new-tool/SKILL.md",
+						source: "project",
+						toolDependencies: ["upsert_tool"],
+					},
+				]),
+				[],
+			)
+		})
+
+		it("rejects missing, non-skill-only, and unauthorized built-in dependencies", () => {
+			const registry = ToolRegistry.getInstance()
+			const builtinSkill = (toolId: string, name = "new-tool") => ({
+				name,
+				description: "Built-in skill",
+				path: `<builtin>/${name}/SKILL.md`,
+				source: "builtin" as const,
+				toolDependencies: [toolId],
+			})
+
+			assert.throws(() => registry.resolveSkillDependencyTools([builtinSkill("missing")]), /depends on missing tool/)
+			registry.registerBuiltin(makeTool({ id: "ordinary_tool" }))
+			assert.throws(
+				() => registry.resolveSkillDependencyTools([builtinSkill("ordinary_tool")]),
+				/declares non-skill-only dependency/,
+			)
+			registry.registerBuiltin(makeTool({ id: "upsert_tool", exposure: skillOnlyExposure }))
+			assert.throws(
+				() => registry.resolveSkillDependencyTools([builtinSkill("upsert_tool", "other-skill")]),
+				/not authorized/,
+			)
 		})
 	})
 

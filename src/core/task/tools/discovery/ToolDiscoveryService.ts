@@ -1,7 +1,7 @@
 import * as fs from "fs"
 import * as path from "path"
 import * as os from "os"
-import type { DiscoveredTool, ToolSource } from "./DiscoveredTool"
+import { CONFIGURABLE_TOOL_EXPOSURE, type DiscoveredTool, type ToolExposure, type ToolSource } from "./DiscoveredTool"
 import { UserToolLoader } from "./UserToolLoader"
 import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { DiracToolSpec } from "@/shared/tools"
@@ -9,6 +9,7 @@ import type { DiracToolSpec } from "@/shared/tools"
 interface ToolManifest {
 	spec: DiracToolSpec
 	create: (config?: any) => IDiracTool
+	exposure?: ToolExposure
 }
 
 interface DualToolManifest extends ToolManifest {
@@ -37,6 +38,7 @@ export class ToolDiscoveryService {
 				id: manifest.spec.id,
 				name: manifest.spec.name,
 				source: "builtin",
+				exposure: manifest.exposure ?? CONFIGURABLE_TOOL_EXPOSURE,
 				spec: manifest.spec,
 				factory: manifest.create,
 				modulePath: `modules/${moduleName}/tool.ts`,
@@ -48,6 +50,7 @@ export class ToolDiscoveryService {
 					id: manifest.secondarySpec.id,
 					name: manifest.secondarySpec.name,
 					source: "builtin",
+					exposure: manifest.exposure ?? CONFIGURABLE_TOOL_EXPOSURE,
 					spec: manifest.secondarySpec,
 					factory: manifest.createSecondary,
 					modulePath: `modules/${moduleName}/tool.ts`,

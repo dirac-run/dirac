@@ -84,8 +84,8 @@ export class ContextLoader {
 		const globalToggles = this.dependencies.stateManager.getGlobalSettingsKey("globalSkillsToggles") ?? {}
 		const localToggles = this.dependencies.stateManager.getWorkspaceStateKey("localSkillsToggles") ?? {}
 		return resolvedSkills.filter((skill) => {
-			// Filter out interactive-only skills in autonomous mode
 			if (this.dependencies.yoloModeToggled && skill.interactiveOnly) return false
+			if (skill.source === "builtin") return true
 			const toggles = skill.source === "global" ? globalToggles : localToggles
 			return toggles[skill.path] !== false
 		})

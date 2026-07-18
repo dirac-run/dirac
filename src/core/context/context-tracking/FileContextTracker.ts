@@ -1,5 +1,5 @@
 import type { WatcherFactory } from "@core/ignore/DiracIgnoreController"
-import { getTaskMetadata, readTaskHistoryFromState, saveTaskMetadata } from "@core/storage/disk"
+import { getTaskMetadata, readTaskHistoryFromState, updateTaskMetadata } from "@core/storage/disk"
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import chokidar, { FSWatcher } from "chokidar"
 import * as path from "path"
@@ -113,56 +113,46 @@ export class FileContextTracker {
 	 */
 	async addFileToFileContextTracker(taskId: string, filePath: string, source: FileMetadataEntry["record_source"]) {
 		try {
-			const metadata = await getTaskMetadata(taskId)
-			const now = Date.now()
+			await updateTaskMetadata(taskId, (metadata) => {
+				const now = Date.now()
 
-			// Mark existing entries for this file as stale
-			metadata.files_in_context.forEach((entry) => {
-				if (entry.path === filePath && entry.record_state === "active") {
-					entry.record_state = "stale"
+				metadata.files_in_context.forEach((entry) => {
+					if (entry.path === filePath && entry.record_state === "active") entry.record_state = "stale"
+				})
+
+				const getLatestDateForField = (path: string, field: keyof FileMetadataEntry): number | null => {
+					const relevantEntries = metadata.files_in_context
+						.filter((entry) => entry.path === path && entry[field])
+						.sort((a, b) => (b[field] as number) - (a[field] as number))
+					return relevantEntries.length > 0 ? (relevantEntries[0][field] as number) : null
 				}
+
+				const newEntry: FileMetadataEntry = {
+					path: filePath,
+					record_state: "active",
+					record_source: source,
+					dirac_read_date: getLatestDateForField(filePath, "dirac_read_date"),
+					dirac_edit_date: getLatestDateForField(filePath, "dirac_edit_date"),
+					user_edit_date: getLatestDateForField(filePath, "user_edit_date"),
+				}
+
+				switch (source) {
+					case "user_edited":
+						newEntry.user_edit_date = now
+						this.recentlyModifiedFiles.add(filePath)
+						break
+					case "dirac_edited":
+						newEntry.dirac_read_date = now
+						newEntry.dirac_edit_date = now
+						break
+					case "read_tool":
+					case "file_mentioned":
+						newEntry.dirac_read_date = now
+						break
+				}
+
+				metadata.files_in_context.push(newEntry)
 			})
-
-			// Helper to get the latest date for a specific field and file
-			const getLatestDateForField = (path: string, field: keyof FileMetadataEntry): number | null => {
-				const relevantEntries = metadata.files_in_context
-					.filter((entry) => entry.path === path && entry[field])
-					.sort((a, b) => (b[field] as number) - (a[field] as number))
-
-				return relevantEntries.length > 0 ? (relevantEntries[0][field] as number) : null
-			}
-
-			const newEntry: FileMetadataEntry = {
-				path: filePath,
-				record_state: "active",
-				record_source: source,
-				dirac_read_date: getLatestDateForField(filePath, "dirac_read_date"),
-				dirac_edit_date: getLatestDateForField(filePath, "dirac_edit_date"),
-				user_edit_date: getLatestDateForField(filePath, "user_edit_date"),
-			}
-
-			switch (source) {
-				// user_edited: The user has edited the file
-				case "user_edited":
-					newEntry.user_edit_date = now
-					this.recentlyModifiedFiles.add(filePath)
-					break
-
-				// dirac_edited: Dirac has edited the file
-				case "dirac_edited":
-					newEntry.dirac_read_date = now
-					newEntry.dirac_edit_date = now
-					break
-
-				// read_tool/file_mentioned: Dirac has read the file via a tool or file mention
-				case "read_tool":
-				case "file_mentioned":
-					newEntry.dirac_read_date = now
-					break
-			}
-
-			metadata.files_in_context.push(newEntry)
-			await saveTaskMetadata(taskId, metadata)
 		} catch (error) {
 			Logger.error("Failed to add file to metadata:", error)
 		}

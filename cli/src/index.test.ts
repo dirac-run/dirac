@@ -37,7 +37,6 @@ describe("CLI Commands", () => {
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
 			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
-			.option("--custom-tools", "Enable custom tool building (use --no-custom-tools to disable)")
 			.option("--hooks-dir <path>", "Additional hooks directory")
 			.action(() => { })
 
@@ -85,7 +84,6 @@ describe("CLI Commands", () => {
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
 			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
-			.option("--custom-tools", "Enable custom tool building (use --no-custom-tools to disable)")
 			.option("--hooks-dir <path>", "Additional hooks directory")
 			.option("--auto-approve-all", "Enable auto-approve all")
 			.option("--kanban", "Run npx kanban --agent dirac")

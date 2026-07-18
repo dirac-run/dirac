@@ -168,6 +168,7 @@ function emptyToolSnapshot(): ToolRequestSnapshot {
 		requestId: "test",
 		promptVisibleSpecs: [],
 		inventoryEnabledTools: [],
+		activeSkillIds: [],
 		nativeTools: [],
 		coordinator: { has: () => false } as any,
 		executableToolNames: new Set(),
@@ -214,7 +215,7 @@ describe("Prompt System Integration Tests", () => {
 		SymbolIndexService.getInstance().setPersistenceEnabled(false)
 		SymbolIndexService.getInstance().setSkipRepoCheck(true)
 		console.log(UPDATE_SNAPSHOTS ? "🔄 SNAPSHOT UPDATE MODE" : "✅ SNAPSHOT TEST MODE")
-		await fs.mkdir(SNAPSHOTS_DIR, { recursive: true }).catch(() => {})
+		await fs.mkdir(SNAPSHOTS_DIR, { recursive: true }).catch(() => { })
 	})
 
 	describe("Snapshot Testing", () => {

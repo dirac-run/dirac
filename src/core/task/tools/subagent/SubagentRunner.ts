@@ -15,7 +15,6 @@ import { calculateApiCostAnthropic } from "@/utils/cost"
 import { TaskState } from "../../TaskState"
 import { excerpt } from "../../utils/excerpt"
 import { DiracContext } from "../context/DiracContext"
-import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import type { TaskConfig } from "../types/TaskConfig"
 import { SubagentAbortHandler } from "./SubagentAbortHandler"
@@ -24,25 +23,6 @@ import { SubagentContextBuilder } from "./SubagentContextBuilder"
 import { SubagentToolExecutor } from "./SubagentToolExecutor"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-function subagentToolSnapshot(
-	promptVisibleSpecs: ToolRequestSnapshot["promptVisibleSpecs"],
-	nativeTools: DiracTool[],
-	inventoryEnabledTools: readonly DiscoveredTool[],
-	coordinator: ToolExecutorCoordinator,
-): ToolRequestSnapshot {
-	return {
-		inventoryVersion: 0,
-		requestId: "subagent",
-		promptVisibleSpecs,
-		inventoryEnabledTools,
-		nativeTools,
-		coordinator,
-		executableToolNames: new Set(promptVisibleSpecs.map((spec) => spec.name)),
-		dynamicSubagentToolNames: new Set(),
-	}
-}
-
 const MAX_EMPTY_ASSISTANT_RETRIES = 3
 const MAX_INITIAL_STREAM_ATTEMPTS = 3
 const INITIAL_STREAM_RETRY_BASE_DELAY_MS = 2_000
@@ -346,6 +326,8 @@ export class SubagentRunner {
 		this.abortRequested = false
 		this.abortReason = undefined
 		const state = new TaskState()
+		state.activeSkillIds = [...this.baseConfig.taskState.activeSkillIds]
+		state.availableSkills = this.baseConfig.taskState.availableSkills
 		let emptyAssistantResponseRetries = 0
 		let conversation: DiracStorageMessage[] = []
 		let timeoutHandle: NodeJS.Timeout | undefined
@@ -383,14 +365,12 @@ export class SubagentRunner {
 			const api = this.apiHandler
 			this.activeApiAbort = api.abort?.bind(api)
 
-			const {
-				context,
-				systemPrompt: baseSystemPrompt,
-				requestSnapshot,
-				useNativeToolCalls,
-			} = await this.contextBuilder.buildContext()
+			const initialContext = await this.contextBuilder.buildContext()
+			const context = initialContext.context
+			let requestSnapshot = initialContext.requestSnapshot
+			let useNativeToolCalls = initialContext.useNativeToolCalls
 			stats.contextWindow = context.providerInfo.model.info.contextWindow || 0
-			const systemPrompt = this.contextBuilder.appendExecutionLimits(baseSystemPrompt, timeout, maxTurns)
+			let systemPrompt = this.contextBuilder.appendExecutionLimits(initialContext.systemPrompt, timeout, maxTurns)
 			const workspaceMetadataEnvironmentBlock = await this.getWorkspaceMetadataEnvironmentBlock()
 
 			if (this.shouldAbort()) {
@@ -691,6 +671,14 @@ export class SubagentRunner {
 						result: toolExecResult.completed.result,
 						stats: toolExecResult.completed.stats,
 					}
+
+				this.baseConfig.taskState.activeSkillIds = [
+					...new Set([...this.baseConfig.taskState.activeSkillIds, ...state.activeSkillIds]),
+				]
+				const refreshedContext = await this.contextBuilder.buildContext()
+				requestSnapshot = refreshedContext.requestSnapshot
+				useNativeToolCalls = refreshedContext.useNativeToolCalls
+				systemPrompt = this.contextBuilder.appendExecutionLimits(refreshedContext.systemPrompt, timeout, maxTurns)
 
 				conversation.push({ role: "user", content: toolExecResult.toolResultBlocks })
 

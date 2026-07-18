@@ -49,10 +49,10 @@ export class ListSkillsTool implements IDiracTool {
 			return "No skills are currently available."
 		}
 
-		// Prioritize Project skills
 		const projectSkills = skills.filter((s: SkillMetadata) => s.source === "project")
+		const builtinSkills = skills.filter((s: SkillMetadata) => s.source === "builtin")
 		const globalSkills = skills.filter((s: SkillMetadata) => s.source === "global")
-		const sortedSkills = [...projectSkills, ...globalSkills]
+		const sortedSkills = [...projectSkills, ...builtinSkills, ...globalSkills]
 
 		let response = "# AVAILABLE SKILLS\n\n"
 		sortedSkills.forEach((skill) => {
@@ -67,7 +67,7 @@ export class ListSkillsTool implements IDiracTool {
 				collapsed: true,
 			})
 			await card.appendBody(
-				`Found ${skills.length} skills (${projectSkills.length} project, ${globalSkills.length} global).\n`,
+				`Found ${skills.length} skills (${projectSkills.length} project, ${builtinSkills.length} built-in, ${globalSkills.length} global).\n`,
 			)
 			await card.update({
 				header: "Listed available skills",

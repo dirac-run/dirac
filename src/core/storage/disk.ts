@@ -55,4 +55,5 @@ export const writeTaskHistoryToState = _taskHistory.writeTaskHistoryToState
 export const getTaskMetadata = _taskStorage.getTaskMetadata
 export const readTaskSettingsFromStorage = _taskStorage.readTaskSettingsFromStorage
 export const saveTaskMetadata = _taskStorage.saveTaskMetadata
+export const updateTaskMetadata = _taskStorage.updateTaskMetadata
 export const writeTaskSettingsToStorage = _taskStorage.writeTaskSettingsToStorage

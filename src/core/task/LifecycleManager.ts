@@ -2,7 +2,7 @@ import { executeHook } from "@core/hooks/hook-executor"
 import { getHookModelContext } from "@core/hooks/hook-model-context"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { formatResponse } from "@core/formatResponse"
-import { ensureTaskDirectoryExists, getSavedApiConversationHistory, getSavedDiracMessages } from "@core/storage/disk"
+import { ensureTaskDirectoryExists, getSavedApiConversationHistory, getSavedDiracMessages, getTaskMetadata } from "@core/storage/disk"
 import { HostProvider } from "@hosts/host-provider"
 import { ensureCheckpointInitialized } from "@integrations/checkpoints/initializer"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
@@ -234,6 +234,8 @@ export class LifecycleManager {
 		// Restore task-scoped tools from the task directory
 		const { refreshTaskTools } = await import("@core/task/tools/registry/refreshToolRegistry")
 		this.dependencies.taskState.taskScopedToolIds = await refreshTaskTools(this.dependencies.taskId)
+		const taskMetadata = await getTaskMetadata(this.dependencies.taskId)
+		this.dependencies.taskState.activeSkillIds = taskMetadata.active_skill_ids ?? []
 
 		const lastDiracMessage = this.dependencies.messageStateHandler
 			.getDiracMessages()

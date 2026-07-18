@@ -10,14 +10,13 @@ export async function assembleToolState(
 ): Promise<Pick<ExtensionState, "availableTools" | "toolToggles">> {
 	const toolToggles = stateManager.getGlobalSettingsKey("toolToggles") || {}
 	await refreshToolRegistryForWorkspace({ workspaceRoot: primaryRootPath, includeUserTools: true, toggles: toolToggles })
-	const availableTools = ToolRegistry.getInstance()
-		.getAllTools()
-		.map((t) => ({
-			id: t.id,
-			name: t.name,
-			description: t.spec.description,
-			source: t.source,
-			modulePath: t.modulePath,
-		}))
-	return { availableTools, toolToggles }
+	const registry = ToolRegistry.getInstance()
+	const availableTools = registry.getConfigurableTools().map((t) => ({
+		id: t.id,
+		name: t.name,
+		description: t.spec.description,
+		source: t.source,
+		modulePath: t.modulePath,
+	}))
+	return { availableTools, toolToggles: registry.getToggles() }
 }

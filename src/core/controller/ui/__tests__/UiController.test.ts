@@ -124,6 +124,13 @@ function makeFakeWorkspaceManager(roots: string[] = ["/test/workspace"]): any {
 	}
 }
 
+function makeFakeToolRegistry(tools: any[] = [], toggles: Record<string, boolean> = {}): any {
+	return {
+		getConfigurableTools: () => tools,
+		getToggles: () => toggles,
+	}
+}
+
 describe("getStateToPostToWebview", () => {
 	let sandbox: sinon.SinonSandbox
 	let codexIsAuthStub: sinon.SinonStub
@@ -138,9 +145,7 @@ describe("getStateToPostToWebview", () => {
 		sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager())
 		sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
 		sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-		sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({
-			getAllTools: () => [],
-		} as any)
+		sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns(makeFakeToolRegistry())
 		sandbox.stub(BannerServiceModule.BannerService, "get").returns({
 			getActiveBanners: () => [],
 			getWelcomeBanners: () => [],
@@ -279,7 +284,7 @@ describe("getStateToPostToWebview", () => {
 			sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager())
 			sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
 			sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => [] } as any)
+			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns(makeFakeToolRegistry())
 			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
 				getActiveBanners: () => [],
 				getWelcomeBanners: () => [],
@@ -349,7 +354,7 @@ describe("getStateToPostToWebview", () => {
 			sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager())
 			sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
 			sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => [] } as any)
+			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns(makeFakeToolRegistry())
 			const banners = [{ bannerId: "b1", title: "Info" }] as any
 			const welcomeBanners = [{ bannerId: "w1", title: "Welcome" }] as any
 			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
@@ -458,7 +463,7 @@ describe("getStateToPostToWebview", () => {
 			sandbox.stub(workspaceSetup, "setupWorkspaceManager").resolves(makeFakeWorkspaceManager(["/a", "/b"]))
 			sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves([])
 			sandbox.stub(registryRefresh, "refreshToolRegistryForWorkspace").resolves()
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => [] } as any)
+			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns(makeFakeToolRegistry())
 			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
 				getActiveBanners: () => [],
 				getWelcomeBanners: () => [],
@@ -529,7 +534,7 @@ describe("getStateToPostToWebview", () => {
 			const tools = [
 				{ id: "read", name: "Read", source: "builtin", modulePath: "/p/read", spec: { description: "read file" } },
 			]
-			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns({ getAllTools: () => tools } as any)
+			sandbox.stub(ToolRegistryModule.ToolRegistry, "getInstance").returns(makeFakeToolRegistry(tools))
 			sandbox.stub(BannerServiceModule.BannerService, "get").returns({
 				getActiveBanners: () => [],
 				getWelcomeBanners: () => [],

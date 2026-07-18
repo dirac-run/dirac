@@ -29,6 +29,7 @@ import {
 	saveApiConversationHistory,
 	saveDiracMessages,
 	saveTaskMetadata,
+	updateTaskMetadata,
 	setRuntimeHooksDir,
 	taskHistoryStateFileExists,
 	writeConversationHistoryJson,
@@ -826,6 +827,30 @@ describe("disk - core read/write/mkdir operations", () => {
 	})
 
 	describe("task metadata read/write", () => {
+		it("serializes concurrent metadata updates without losing fields", async () => {
+			const taskId = `meta-concurrent-${Date.now()}`
+			await saveTaskMetadata(taskId, { files_in_context: [], model_usage: [], environment_history: [] })
+
+			await Promise.all([
+				updateTaskMetadata(taskId, async (metadata) => {
+					await new Promise((resolve) => setTimeout(resolve, 10))
+					metadata.active_skill_ids = [...(metadata.active_skill_ids ?? []), "new-tool"]
+				}),
+				updateTaskMetadata(taskId, (metadata) => {
+					metadata.model_usage.push({
+						ts: 1,
+						model_id: "model",
+						model_provider_id: "provider",
+						mode: "act",
+					})
+				}),
+			])
+
+			const metadata = await getTaskMetadata(taskId)
+			metadata.active_skill_ids!.should.deepEqual(["new-tool"])
+			metadata.model_usage.should.have.length(1)
+		})
+
 		it("getTaskMetadata returns default empty metadata for non-existent task", async () => {
 			const result = await getTaskMetadata(`nonexistent-${Date.now()}`)
 			result.should.have.property("files_in_context")
