@@ -11,6 +11,7 @@ import type { TaskConfig } from "./types/TaskConfig"
 import type { ToolResponse } from "./types/ToolResponse"
 import { ToolSkippedByUserMessage } from "./types/ToolSkippedByUserMessage"
 import { createUIHelpers } from "./types/UIHelpers"
+import { normalizeOptionalToolParameters } from "./runtime/normalizeOptionalToolParameters"
 
 interface PartialToolUseHandler extends IDiracTool {
 	bufferPartialToolUse(block: ToolUse, uiHelpers: ReturnType<typeof createUIHelpers>): Promise<void>
@@ -21,7 +22,7 @@ interface PartialToolUseHandler extends IDiracTool {
  * Throws an error for unregistered tools.
  */
 export class ToolExecutorCoordinator {
-	constructor() {}
+	constructor() { }
 
 	private modularTools = new Map<string, IDiracTool>()
 
@@ -71,6 +72,14 @@ export class ToolExecutorCoordinator {
 
 	private async executeModularTool(tool: IDiracTool, config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
 		const startTime = Date.now()
+		const requestSnapshot = config.activeToolSnapshot
+		const nativeTool = requestSnapshot?.nativeTools.find(
+			(candidate) => "function" in candidate && candidate.function.name === block.name,
+		)
+		if (requestSnapshot && nativeTool && "function" in nativeTool && nativeTool.function.strict === true) {
+			const requestSpec = requestSnapshot.promptVisibleSpecs.find((spec) => spec.name === block.name) ?? tool.spec()
+			block.params = normalizeOptionalToolParameters(block.params, requestSpec)
+		}
 
 		// 1. Initialize Tool Environment (Surface Adapter)
 		const env = new SurfaceAdapter({ ...config, toolUse: { name: block.name, params: block.params } }, block.name)

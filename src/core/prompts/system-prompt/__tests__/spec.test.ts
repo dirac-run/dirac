@@ -123,7 +123,61 @@ describe("native tool placeholder replacement", () => {
 		}
 	})
 })
+describe("toolSpecFunctionDefinition strict optional parameters", () => {
+	it("makes optional primitive parameters nullable while requiring every property", () => {
+		const result = toolSpecFunctionDefinition(
+			makeTool({
+				parameters: [
+					{ name: "required_param", required: true, type: "boolean", instruction: "Required" },
+					{ name: "optional_param", required: false, type: "boolean", instruction: "Optional" },
+				],
+			}),
+			mockContext,
+			true,
+		) as any
 
+		expect(result.function.parameters.required).to.deep.equal(["required_param", "optional_param"])
+		expect(result.function.parameters.properties.required_param.type).to.equal("boolean")
+		expect(result.function.parameters.properties.optional_param.type).to.deep.equal(["boolean", "null"])
+	})
+
+	it("preserves nested requiredness and nullable enum values through arrays", () => {
+		const result = toolSpecFunctionDefinition(
+			makeTool({
+				parameters: [
+					{
+						name: "entries",
+						required: true,
+						type: "array",
+						instruction: "Entries",
+						items: {
+							type: "object",
+							properties: {
+								name: { type: "string" },
+								mode: { type: "string", enum: ["fast", "safe"] },
+							},
+							required: ["name"],
+						},
+					},
+				],
+			}),
+			mockContext,
+			true,
+		) as any
+
+		const itemSchema = result.function.parameters.properties.entries.items
+		expect(itemSchema.required).to.deep.equal(["name", "mode"])
+		expect(itemSchema.properties.name.type).to.equal("string")
+		expect(itemSchema.properties.mode.type).to.deep.equal(["string", "null"])
+		expect(itemSchema.properties.mode.enum).to.deep.equal(["fast", "safe", null])
+	})
+
+	it("does not change non-strict optional parameters", () => {
+		const result = toolSpecFunctionDefinition(makeTool(), mockContext, false) as any
+		expect(result.function.parameters.required).to.deep.equal(["path"])
+		expect(result.function.parameters.properties.optional_param.type).to.equal("string")
+	})
+})
 describe("tools without parameters", () => {
 	const noParamTool: DiracToolSpec = {
 		id: DiracDefaultTool.LIST_SKILLS,
