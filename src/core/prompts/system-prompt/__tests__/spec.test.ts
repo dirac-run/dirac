@@ -2,7 +2,7 @@ import { expect } from "chai"
 import { describe, it } from "mocha"
 import { DiracDefaultTool } from "@/shared/tools"
 import type { DiracToolSpec } from "../spec"
-import { toolSpecFunctionDeclarations, toolSpecFunctionDefinition, toolSpecInputSchema } from "../spec"
+import { shouldUseStrictToolSchemas, toolSpecFunctionDeclarations, toolSpecFunctionDefinition, toolSpecInputSchema } from "../spec"
 import type { SystemPromptContext } from "../types"
 const mockContext: SystemPromptContext = {
 	cwd: "/test/project",
@@ -213,6 +213,36 @@ describe("tools without parameters", () => {
 			properties: {},
 			required: [],
 		})
+	})
+})
+
+describe("shouldUseStrictToolSchemas", () => {
+	const makeProviderInfo = (providerId: string, modelId: string, supportsStrictTools?: boolean) => ({
+		providerId,
+		model: { id: modelId, info: { supportsPromptCache: false, supportsStrictTools } },
+		mode: "act" as const,
+	})
+
+	it("returns false when the model does not advertise strict tool support", () => {
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "openai/gpt-5", false))).to.be.false
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "openai/gpt-5", undefined))).to.be.false
+		expect(shouldUseStrictToolSchemas(undefined)).to.be.false
+	})
+
+	it("allows strict schemas for OpenAI models served through OpenRouter", () => {
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "openai/gpt-5", true))).to.be.true
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "openai/gpt-5@preset/code", true))).to.be.true
+	})
+
+	it("disables strict schemas for non-OpenAI models on OpenRouter even when flagged", () => {
+		// Regression: nullable-union strict schemas broke tool calling for models whose
+		// upstream providers (vLLM/SGLang/llama.cpp-style) reject them.
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "qwen/qwen3-coder", true))).to.be.false
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openrouter", "anthropic/claude-sonnet-4.5", true))).to.be.false
+	})
+
+	it("keeps strict schemas for non-OpenRouter providers that advertise support", () => {
+		expect(shouldUseStrictToolSchemas(makeProviderInfo("openai-native", "gpt-5", true))).to.be.true
 	})
 })
 

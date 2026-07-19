@@ -107,7 +107,11 @@ function parseOpenRouterResponse(rawModels: OpenRouterRawModelInfo[]): Record<st
 			cacheReadsPrice: parsePrice(rawModel.pricing?.input_cache_read),
 			description: rawModel.description ?? "",
 			thinkingConfig: supportThinking ? { maxBudget: ANTHROPIC_MAX_THINKING_BUDGET } : undefined,
-			supportsStrictTools: rawModel.supported_parameters?.includes("structured_outputs") ?? undefined,
+			// Strict Structured Outputs are only honored by OpenAI upstreams. Other providers
+			// ignore `strict` and may reject the nullable-union schemas it requires.
+			supportsStrictTools: rawModel.id.startsWith("openai/")
+				? (rawModel.supported_parameters?.includes("structured_outputs") ?? undefined)
+				: undefined,
 			supportsGlobalEndpoint: rawModel.supports_global_endpoint ?? undefined,
 			tiers: rawModel.tiers ?? undefined,
 		}

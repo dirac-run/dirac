@@ -1,10 +1,16 @@
 import { AgentConfigLoader } from "@core/task/tools/subagent/AgentConfigLoader"
 import { DiracDefaultTool, type DiracTool } from "@/shared/tools"
-import { type DiracToolSpec, toolSpecFunctionDeclarations, toolSpecFunctionDefinition, toolSpecInputSchema } from "../spec"
+import {
+	type DiracToolSpec,
+	shouldUseStrictToolSchemas,
+	toolSpecFunctionDeclarations,
+	toolSpecFunctionDefinition,
+	toolSpecInputSchema,
+} from "../spec"
 import { SystemPromptContext } from "../types"
 
 export class DiracToolSet {
-	private constructor() {}
+	private constructor() { }
 
 	public static getDynamicSubagentToolSpecs(context: SystemPromptContext): DiracToolSpec[] {
 		if (context.subagentsEnabled !== true) {
@@ -80,7 +86,7 @@ export class DiracToolSet {
 			default:
 				// Default to OpenAI Compatible converter
 				return (tool: DiracToolSpec, ctx: SystemPromptContext) =>
-					toolSpecFunctionDefinition(tool, ctx, ctx.providerInfo?.model?.info?.supportsStrictTools ?? false)
+					toolSpecFunctionDefinition(tool, ctx, shouldUseStrictToolSchemas(ctx.providerInfo))
 		}
 	}
 }

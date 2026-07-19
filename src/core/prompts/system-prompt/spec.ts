@@ -126,6 +126,23 @@ export function toolSpecFunctionDefinition(tool: DiracToolSpec, context: SystemP
 }
 
 /**
+ * Decides whether strict tool schemas (OpenAI Structured Outputs) should be emitted for
+ * the current model. Strict mode requires nullable-union schemas that many OpenAI-compatible
+ * upstreams reject or silently mishandle; only OpenAI-served models honor `strict`.
+ * OpenRouter proxies many upstream providers, so strict mode is restricted to its openai/*
+ * models regardless of what the cached model info advertises.
+ */
+export function shouldUseStrictToolSchemas(providerInfo: SystemPromptContext["providerInfo"] | undefined): boolean {
+	if (!providerInfo?.model?.info?.supportsStrictTools) {
+		return false
+	}
+	if (providerInfo.providerId === "openrouter") {
+		return (providerInfo.model.id ?? "").startsWith("openai/")
+	}
+	return true
+}
+
+/**
  * Converts a DiracToolSpec into an Anthropic Tool definition
  */
 export function toolSpecInputSchema(tool: DiracToolSpec, context: SystemPromptContext): AnthropicTool {
@@ -350,9 +367,9 @@ export function openAIToolToAnthropic(openAITool: OpenAITool): AnthropicTool {
 				type: "object",
 				...(Object.keys(func.parameters?.properties || {}).length > 0
 					? {
-							properties: func.parameters?.properties,
-							required: (func.parameters as any)?.required || [],
-						}
+						properties: func.parameters?.properties,
+						required: (func.parameters as any)?.required || [],
+					}
 					: {}),
 			},
 		}
