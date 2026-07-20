@@ -16,6 +16,8 @@ import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type { DiracMessageChange } from "@core/task/message-state";
+import type { ApiProvider } from "@shared/api";
+import { getProviderModelIdKey } from "@shared/storage/provider-keys";
 import type { DiracMessage } from "@shared/ExtensionMessage";
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage";
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands";
@@ -74,6 +76,7 @@ import {
 import { swapSessionOverrides } from "../acp/sessionOverrides.js";
 import { initCoreServices } from "../initCoreServices.js";
 import { openUrlInBrowser } from "../utils/browser.js";
+import { isValidCliProvider } from "../utils/providers.js";
 import { CliContextResult, initializeCliContext } from "../vscode-context.js";
 import { DiracSessionEmitter } from "./DiracSessionEmitter.js";
 import { translateMessage } from "./messageTranslator.js";
@@ -630,17 +633,17 @@ export class DiracAgent implements acp.Agent {
 	private unsubscribeFromStateChanges?: () => void;
 
 	/**
-	 * Per-session override map for security-relevant settings (auto-approve, yolo, mode).
+	 * Per-session settings that must not bleed across concurrent ACP sessions.
 	 *
-	 * The global StateManager.sessionOverrideCache is process-wide — writing to it from
-	 * one ACP session would bleed into every other concurrent session. Instead we keep
-	 * the authoritative per-session values here, and swap them into StateManager only for
-	 * the duration of each session's prompt() call (see applySessionOverrides /
-	 * restoreSessionOverrides). This ensures the Task-level auto-approve reads that go
-	 * through StateManager.getGlobalSettingsKey() see the correct session's values.
+	 * The global StateManager.sessionOverrideCache is process-wide. Each session
+	 * keeps its authoritative explicit choices here, and prompt() swaps that
+	 * session's values into StateManager only for the duration of its turn.
 	 */
 	private readonly acpSessionOverrides: Map<string, Partial<Settings>> =
 		new Map();
+
+	/** Explicit provider/model CLI options copied into each ACP session. */
+	private startupSessionOverrides: Partial<Settings> = {};
 
 	/**
 	 * In-flight prompt resolvers, keyed by session id. {@link cancel} uses these
@@ -677,6 +680,60 @@ export class DiracAgent implements acp.Agent {
 		// unwritable --config path) surface as a JSON-RPC error response on
 		// `initialize` rather than killing the process before the client can
 		// observe anything.
+	}
+
+	private createStartupSessionOverrides(): Partial<Settings> {
+		const { provider, model } = this.options;
+		if (provider && !model) {
+			throw new Error("--provider requires --model to be specified");
+		}
+		if (!model) return {};
+
+		const stateManager = StateManager.get();
+		const currentMode = (stateManager.getGlobalSettingsKey("mode") || "act") as
+			| "act"
+			| "plan";
+		const overrides: Partial<Settings> = {};
+		let targetProvider: ApiProvider | undefined;
+
+		if (provider?.startsWith("http://") || provider?.startsWith("https://")) {
+			targetProvider = "openai";
+			overrides.openAiBaseUrl = provider;
+		} else if (provider) {
+			if (!isValidCliProvider(provider)) {
+				throw new Error(`Invalid provider: ${provider}`);
+			}
+			targetProvider = provider as ApiProvider;
+		} else {
+			const providerKey =
+				currentMode === "act" ? "actModeApiProvider" : "planModeApiProvider";
+			targetProvider = stateManager.getGlobalSettingsKey(providerKey) as
+				| ApiProvider
+				| undefined;
+		}
+
+		if (!targetProvider) {
+			throw new Error("--model requires a configured provider or an explicit --provider");
+		}
+
+		const setProviderAndModel = (mode: "act" | "plan") => {
+			const values = overrides as Record<string, unknown>;
+			values[mode === "act" ? "actModeApiProvider" : "planModeApiProvider"] =
+				targetProvider;
+			values[getProviderModelIdKey(targetProvider, mode)] = model;
+		};
+		setProviderAndModel(currentMode);
+
+		const separateModels =
+			stateManager.getGlobalSettingsKey("planActSeparateModelsSetting") ?? false;
+		if (!separateModels) {
+			setProviderAndModel(currentMode === "act" ? "plan" : "act");
+		}
+		return overrides;
+	}
+
+	private initializeSessionOverrides(sessionId: string): void {
+		this.acpSessionOverrides.set(sessionId, { ...this.startupSessionOverrides });
 	}
 
 	/**
@@ -894,6 +951,7 @@ export class DiracAgent implements acp.Agent {
 			extensionDir: this.ctx.EXTENSION_DIR,
 			storageContext: this.ctx.storageContext,
 		});
+		this.startupSessionOverrides = this.createStartupSessionOverrides();
 
 		this.unsubscribeFromStateChanges?.();
 		this.unsubscribeFromStateChanges = StateManager.get().subscribe(() => {
@@ -1065,6 +1123,7 @@ export class DiracAgent implements acp.Agent {
 		this.#sessionControllers.set(session, controller);
 
 		this.sessions.set(sessionId, session);
+		this.initializeSessionOverrides(sessionId);
 
 		// Initialize session state
 		const sessionState: AcpSessionState = {
@@ -1174,6 +1233,7 @@ export class DiracAgent implements acp.Agent {
 
 		this.#sessionControllers.set(session, controller);
 		this.sessions.set(sessionId, session);
+		this.initializeSessionOverrides(sessionId);
 		this.sessionStates.set(sessionId, {
 			sessionId,
 			status: AcpSessionStatus.Idle,
@@ -1249,6 +1309,9 @@ export class DiracAgent implements acp.Agent {
 		}
 
 		const value = params.value;
+		const sessionOverrides =
+			this.acpSessionOverrides.get(params.sessionId) ?? {};
+		this.acpSessionOverrides.set(params.sessionId, sessionOverrides);
 		let emittedConfigUpdate = false;
 		switch (params.configId) {
 			case "mode":
@@ -1262,10 +1325,15 @@ export class DiracAgent implements acp.Agent {
 				await this.sessionConfig.applyProviderConfigOption(
 					session,
 					value,
+					sessionOverrides,
 				);
 				break;
 			case "model":
-				await this.sessionConfig.applyModelConfigOption(session, value);
+				await this.sessionConfig.applyModelConfigOption(
+					session,
+					value,
+					sessionOverrides,
+				);
 				break;
 			case "reasoning_effort":
 				this.sessionConfig.applyReasoningEffortConfigOption(

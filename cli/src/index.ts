@@ -183,6 +183,8 @@ program
 			await runAcpMode({
 				config: options.config,
 				cwd: options.cwd,
+				provider: options.provider,
+				model: options.model,
 				hooksDir: options.hooksDir,
 				verbose: options.verbose,
 				listen: options.listen,

@@ -23,9 +23,9 @@ class RawAcpClient {
 	#nextId = 1
 	#pending = new Map<number, { resolve: (frame: JsonRpcFrame) => void; reject: (error: Error) => void }>()
 
-	constructor(configDir: string, cwd: string) {
+	constructor(configDir: string, cwd: string, cliArgs: string[] = []) {
 		const cliEntry = path.resolve(process.cwd(), "dist/cli.mjs")
-		this.child = spawn(process.execPath, [cliEntry, "--acp", "--config", configDir, "--cwd", cwd], {
+		this.child = spawn(process.execPath, [cliEntry, "--acp", "--config", configDir, "--cwd", cwd, ...cliArgs], {
 			stdio: ["pipe", "pipe", "pipe"],
 			cwd,
 			env: { ...process.env, VITEST: undefined }
@@ -164,6 +164,46 @@ describe("ACP protocol conformance over raw stdio", () => {
 		await waitForUpdate(client, "config_option_update")
 	})
 
+	it("uses explicit startup provider and model until the ACP client changes them", async () => {
+		const configDir = await temporaryDirectory("dirac-acp-config-")
+		const cwd = await temporaryDirectory("dirac-acp-workspace-")
+		const client = createRawClient(configDir, cwd, [
+			"--provider",
+			"deepseek",
+			"--model",
+			"deepseek-v4-flash",
+		])
+		await client.initialize()
+
+		const session = await client.request("session/new", { cwd, mcpServers: [] })
+		const sessionId = session.result?.sessionId as string
+		expect(session.result?.configOptions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "provider", currentValue: "deepseek" }),
+				expect.objectContaining({ id: "model", currentValue: "deepseek-v4-flash" }),
+			]),
+		)
+
+		const configured = await client.request("session/set_config_option", {
+			sessionId,
+			configId: "model",
+			value: "deepseek-v4-pro",
+		})
+		expect(configured.result?.configOptions).toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: "model", currentValue: "deepseek-v4-pro" })]),
+		)
+	})
+
+	it("rejects an explicit startup provider without a model", async () => {
+		const configDir = await temporaryDirectory("dirac-acp-config-")
+		const cwd = await temporaryDirectory("dirac-acp-workspace-")
+		const client = createRawClient(configDir, cwd, ["--provider", "deepseek"])
+
+		await expect(client.initialize()).resolves.toMatchObject({
+			error: { message: expect.stringContaining("--provider requires --model") },
+		})
+	})
+
 	it("cancels a prompt while a permission request is pending", async () => {
 		const { client, cwd } = await createClient()
 		await client.initialize()
@@ -216,8 +256,8 @@ async function createClient(): Promise<{ client: RawAcpClient; cwd: string }> {
 	return { client: createRawClient(configDir, cwd), cwd }
 }
 
-function createRawClient(configDir: string, cwd: string): RawAcpClient {
-	const client = new RawAcpClient(configDir, cwd)
+function createRawClient(configDir: string, cwd: string, cliArgs: string[] = []): RawAcpClient {
+	const client = new RawAcpClient(configDir, cwd, cliArgs)
 	clients.push(client)
 	return client
 }

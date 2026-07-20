@@ -75,6 +75,10 @@ export interface AcpModeOptions {
   config?: string;
   /** Working directory (default: process.cwd()) */
   cwd?: string;
+  /** API provider explicitly selected at process startup */
+  provider?: string;
+  /** Model explicitly selected at process startup */
+  model?: string;
   /** Additional runtime hooks directory */
   hooksDir?: string;
   /** Enable verbose/debug logging to stderr */
@@ -122,6 +126,8 @@ export async function runAcpMode(options: AcpModeOptions = {}): Promise<void> {
       debug: Boolean(options.verbose),
       diracDir: options.config,
       cwd: options.cwd,
+      provider: options.provider,
+      model: options.model,
       hooksDir: options.hooksDir,
     });
     return agent;
@@ -169,6 +175,8 @@ async function runDetachedAcpMode(options: AcpModeOptions): Promise<void> {
     debug: Boolean(options.verbose),
     diracDir: options.config,
     cwd: options.cwd,
+    provider: options.provider,
+    model: options.model,
     hooksDir: options.hooksDir,
     socketPath: options.listen!,
   });

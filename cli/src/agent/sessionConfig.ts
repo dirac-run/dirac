@@ -101,19 +101,15 @@ export class SessionConfigManager {
 		sessionOverrides?: Partial<Settings>,
 	): Promise<acp.SessionConfigOption[]> {
 		const stateManager = StateManager.get()
-		const currentProvider = stateManager.getGlobalSettingsKey(
-			session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider",
-		) as ApiProvider | undefined
-		const currentModelId = await this.getCurrentModeModelId(session.mode, currentProvider)
-		const thinkingBudget = String(
-			stateManager.getGlobalSettingsKey(
-				session.mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens",
-			) ?? 0,
-		)
-		const reasoningEffort = String(
-			stateManager.getGlobalSettingsKey(session.mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort") ??
-				"medium",
-		)
+		const providerKey = session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
+		const currentProvider = (sessionOverrides?.[providerKey] ?? stateManager.getGlobalSettingsKey(providerKey)) as
+			| ApiProvider
+			| undefined
+		const currentModelId = await this.getCurrentModeModelId(session.mode, currentProvider, sessionOverrides)
+		const thinkingKey = session.mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
+		const thinkingBudget = String(sessionOverrides?.[thinkingKey] ?? stateManager.getGlobalSettingsKey(thinkingKey) ?? 0)
+		const reasoningKey = session.mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort"
+		const reasoningEffort = String(sessionOverrides?.[reasoningKey] ?? stateManager.getGlobalSettingsKey(reasoningKey) ?? "medium")
 
 		return [
 			{
@@ -167,27 +163,36 @@ export class SessionConfigManager {
 		]
 	}
 
-	async applyProviderConfigOption(session: DiracAcpSession, providerValue: string): Promise<void> {
+	async applyProviderConfigOption(
+		session: DiracAcpSession,
+		providerValue: string,
+		sessionOverrides?: Partial<Settings>,
+	): Promise<void> {
 		if (!isValidCliProvider(providerValue)) {
 			throw new Error(`Invalid provider: ${providerValue}`)
 		}
 
 		const provider = providerValue as ApiProvider
-		const currentModelId = await this.getCurrentModeModelId(session.mode, provider)
-		await this.applyProviderAndModel(session, provider, currentModelId)
+		const currentModelId = await this.getCurrentModeModelId(session.mode, provider, sessionOverrides)
+		await this.applyProviderAndModel(session, provider, currentModelId, sessionOverrides)
 	}
 
-	async applyModelConfigOption(session: DiracAcpSession, modelValue: string): Promise<void> {
+	async applyModelConfigOption(
+		session: DiracAcpSession,
+		modelValue: string,
+		sessionOverrides?: Partial<Settings>,
+	): Promise<void> {
 		const stateManager = StateManager.get()
-		const provider = stateManager.getGlobalSettingsKey(
-			session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider",
-		) as ApiProvider | undefined
+		const providerKey = session.mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
+		const provider = (sessionOverrides?.[providerKey] ?? stateManager.getGlobalSettingsKey(providerKey)) as
+			| ApiProvider
+			| undefined
 
 		if (!provider) {
 			throw new Error("Cannot set model before a provider is selected")
 		}
 
-		await this.applyProviderAndModel(session, provider, modelValue)
+		await this.applyProviderAndModel(session, provider, modelValue, sessionOverrides)
 	}
 
 	applyReasoningEffortConfigOption(session: DiracAcpSession, effort: string): void {
@@ -217,13 +222,23 @@ export class SessionConfigManager {
 		})
 	}
 
-	async applyProviderAndModel(session: DiracAcpSession, provider: ApiProvider, modelId: string): Promise<void> {
+	async applyProviderAndModel(
+		session: DiracAcpSession,
+		provider: ApiProvider,
+		modelId: string,
+		sessionOverrides?: Partial<Settings>,
+	): Promise<void> {
 		this.setModeScopedSessionState(session.mode, (mode) => {
 			const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
-			StateManager.get().setGlobalState(providerKey, provider)
-
 			const modelKey = getProviderModelIdKey(provider, mode)
-			StateManager.get().setGlobalState(modelKey, modelId as any)
+			if (sessionOverrides) {
+				const overrides = sessionOverrides as Record<string, unknown>
+				overrides[providerKey] = provider
+				overrides[modelKey] = modelId
+			} else {
+				StateManager.get().setGlobalState(providerKey, provider)
+				StateManager.get().setGlobalState(modelKey, modelId as any)
+			}
 
 			if (mode === "act") {
 				session.actModeModelId = `${provider}/${modelId}`
@@ -233,10 +248,18 @@ export class SessionConfigManager {
 		})
 	}
 
-	async getCurrentModeModelId(mode: Mode, provider?: ApiProvider): Promise<string> {
+	async getCurrentModeModelId(
+		mode: Mode,
+		provider?: ApiProvider,
+		sessionOverrides?: Partial<Settings>,
+	): Promise<string> {
 		if (!provider) return ""
 		const modelKey = getProviderModelIdKey(provider, mode)
-		return (StateManager.get().getGlobalSettingsKey(modelKey) as string | undefined) || getDefaultModelId(provider)
+		return (
+			(sessionOverrides?.[modelKey] as string | undefined) ||
+			(StateManager.get().getGlobalSettingsKey(modelKey) as string | undefined) ||
+			getDefaultModelId(provider)
+		)
 	}
 
 	private async getModelConfigOptions(

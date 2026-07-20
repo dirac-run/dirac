@@ -91,6 +91,10 @@ export interface DiracAgentOptions {
 	diracDir?: string
 	/** Workspace directory for CLI context initialization */
 	cwd?: string
+	/** API provider explicitly selected for this agent process */
+	provider?: string
+	/** Model explicitly selected for this agent process */
+	model?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
 	/** Whether ACP is served through a reconnectable Unix socket. */
@@ -107,6 +111,10 @@ export interface AcpAgentOptions {
 	diracDir?: string
 	/** Workspace directory for CLI context initialization */
 	cwd?: string
+	/** API provider explicitly selected for this agent process */
+	provider?: string
+	/** Model explicitly selected for this agent process */
+	model?: string
 	/** Additional runtime hooks directory */
 	hooksDir?: string
 	/** Whether ACP is served through a reconnectable Unix socket. */
