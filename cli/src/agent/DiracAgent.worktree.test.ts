@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => {
 		getTaskWithId = vi.fn(async (taskId: string) => ({
 			historyItem: mocks.taskHistory.find((item) => item.id === taskId),
 		}))
-		constructor(_: unknown, readonly options?: { workspaceCwd?: string }) {
+		constructor(
+			_: unknown,
+			readonly options?: { workspaceCwd?: string },
+		) {
 			controllerOptions.push(options)
 		}
 	}
@@ -34,7 +37,7 @@ const mocks = vi.hoisted(() => {
 			EXTENSION_DIR: "/tmp/dirac-test",
 			DATA_DIR: "/tmp/dirac-test-data",
 		})),
-		initCoreServices: vi.fn(async () => { }),
+		initCoreServices: vi.fn(async () => {}),
 		setRuntimeHooksDir: vi.fn(),
 		hostProviderInitialize: vi.fn(),
 	}
@@ -47,18 +50,16 @@ vi.mock("@/core/storage/disk", () => ({ setRuntimeHooksDir: mocks.setRuntimeHook
 vi.mock("@/hosts/host-provider.js", () => ({ HostProvider: { initialize: mocks.hostProviderInitialize } }))
 vi.mock("@/core/storage/StateManager", () => ({
 	StateManager: {
-		initialize: vi.fn(async () => { }),
+		initialize: vi.fn(async () => {}),
 		get: vi.fn(() => ({
 			getSessionOverrideCache: vi.fn(() => ({})),
 			setSessionOverrideCache: vi.fn(),
 			getGlobalSettingsKey: vi.fn(() => "act"),
 			getApiConfiguration: vi.fn(() => ({ actModeThinkingBudgetTokens: 1024, planModeThinkingBudgetTokens: 1024 })),
-			getGlobalStateKey: vi.fn((key: string) =>
-				key === "taskHistory" ? mocks.taskHistory : undefined,
-			),
+			getGlobalStateKey: vi.fn((key: string) => (key === "taskHistory" ? mocks.taskHistory : undefined)),
 			setGlobalState: vi.fn(),
-			flushPendingState: vi.fn(async () => { }),
-			subscribe: vi.fn(() => () => { }),
+			flushPendingState: vi.fn(async () => {}),
+			subscribe: vi.fn(() => () => {}),
 		})),
 	},
 }))
@@ -99,8 +100,15 @@ describe("DiracAgent ACP worktrees", () => {
 		const initialized = await agent.initialize({ clientCapabilities: {} } as any)
 		const capabilities = initialized.agentCapabilities as any
 
-		expect(Object.keys(capabilities).sort()).toEqual(["_meta", "loadSession", "promptCapabilities", "sessionCapabilities"])
+		expect(Object.keys(capabilities).sort()).toEqual([
+			"_meta",
+			"loadSession",
+			"promptCapabilities",
+			"providers",
+			"sessionCapabilities",
+		])
 		expect(capabilities.loadSession).toBe(true)
+		expect(capabilities.providers).toEqual({})
 		expect(capabilities.sessionCapabilities).toEqual({ resume: {}, close: {}, delete: {} })
 		expect(capabilities.promptCapabilities).toEqual({ image: true, audio: false, embeddedContext: true })
 		expect(Object.keys(capabilities._meta).sort()).toEqual([
@@ -127,7 +135,6 @@ describe("DiracAgent ACP worktrees", () => {
 		const session = await agent.newSession({ cwd: repository, mcpServers: [] } as any)
 		expect(Object.keys(session).sort()).toEqual(["configOptions", "models", "modes", "sessionId"])
 	})
-
 
 	it("provisions a branch-backed worktree requested at session creation and integrates it", async () => {
 		const repository = createRepository()
@@ -162,11 +169,8 @@ describe("DiracAgent ACP worktrees", () => {
 			_meta: { "dev.dirac/worktree": true },
 		} as any)
 		const worktree = (session as any)._meta["dev.dirac/worktree"]
-		expect(mocks.controllerOptions.at(-1)).toEqual(
-			{ workspaceCwd: worktree.path },
-		)
+		expect(mocks.controllerOptions.at(-1)).toEqual({ workspaceCwd: worktree.path })
 	})
-
 
 	it("keeps a loaded worktree session bound to its owned path", async () => {
 		const repository = createRepository()
@@ -190,9 +194,6 @@ describe("DiracAgent ACP worktrees", () => {
 			mcpServers: [],
 		} as any)
 
-		expect(mocks.controllerOptions.at(-1)).toEqual(
-			{ workspaceCwd: worktree.path },
-		)
+		expect(mocks.controllerOptions.at(-1)).toEqual({ workspaceCwd: worktree.path })
 	})
-
 })

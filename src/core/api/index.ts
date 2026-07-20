@@ -119,6 +119,7 @@ const PROVIDER_REGISTRY: Record<
 			onRetryAttempt: cfg.onRetryAttempt,
 			apiKey: cfg.apiKey,
 			anthropicBaseUrl: cfg.anthropicBaseUrl,
+			anthropicHeaders: cfg.anthropicHeaders,
 			apiModelId: mc.apiModelId,
 			thinkingBudgetTokens: mc.thinkingBudgetTokens,
 			reasoningEffort: mc.reasoningEffort,
@@ -432,6 +433,7 @@ export function createRegistryHandler(configuration: ApiConfiguration, mode: Mod
 			onRetryAttempt: configuration.onRetryAttempt,
 			apiKey: configuration.apiKey,
 			anthropicBaseUrl: configuration.anthropicBaseUrl,
+			anthropicHeaders: configuration.anthropicHeaders,
 			apiModelId: m.apiModelId,
 			thinkingBudgetTokens: m.thinkingBudgetTokens,
 		})

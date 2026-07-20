@@ -1,9 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
+import { afterEach, describe, expect, it } from "vitest"
 
 type JsonRpcFrame = {
 	jsonrpc?: string
@@ -28,7 +28,7 @@ class RawAcpClient {
 		this.child = spawn(process.execPath, [cliEntry, "--acp", "--config", configDir, "--cwd", cwd, ...cliArgs], {
 			stdio: ["pipe", "pipe", "pipe"],
 			cwd,
-			env: { ...process.env, VITEST: undefined }
+			env: { ...process.env, VITEST: undefined },
 		})
 		this.child.stdout.setEncoding("utf8")
 		this.child.stderr.setEncoding("utf8")
@@ -37,7 +37,9 @@ class RawAcpClient {
 		this.child.on("error", (error) => this.rejectPending(error))
 		this.child.on("exit", (code, signal) => {
 			if (this.#pending.size > 0) {
-				this.rejectPending(new Error(`ACP process exited (${code ?? "null"}, ${signal ?? "none"}); stderr: ${this.stderr.join("")}`))
+				this.rejectPending(
+					new Error(`ACP process exited (${code ?? "null"}, ${signal ?? "none"}); stderr: ${this.stderr.join("")}`),
+				)
 			}
 		})
 	}
@@ -63,7 +65,10 @@ class RawAcpClient {
 	}
 
 	write(frame: JsonRpcFrame | string): void {
-		if (this.child.stdin.writableEnded) throw new Error(`ACP stdin closed before sending ${typeof frame === "string" ? frame : JSON.stringify(frame)}; stderr: ${this.stderr.join("")}`)
+		if (this.child.stdin.writableEnded)
+			throw new Error(
+				`ACP stdin closed before sending ${typeof frame === "string" ? frame : JSON.stringify(frame)}; stderr: ${this.stderr.join("")}`,
+			)
 		this.child.stdin.write(`${typeof frame === "string" ? frame : JSON.stringify(frame)}\n`)
 	}
 
@@ -134,7 +139,9 @@ const configs: string[] = []
 
 afterEach(async () => {
 	await Promise.all(clients.splice(0).map((client) => client.close()))
-	await Promise.all([...workspaces.splice(0), ...configs.splice(0)].map((directory) => rm(directory, { recursive: true, force: true })))
+	await Promise.all(
+		[...workspaces.splice(0), ...configs.splice(0)].map((directory) => rm(directory, { recursive: true, force: true })),
+	)
 })
 
 describe("ACP protocol conformance over raw stdio", () => {
@@ -167,22 +174,27 @@ describe("ACP protocol conformance over raw stdio", () => {
 	it("uses explicit startup provider and model until the ACP client changes them", async () => {
 		const configDir = await temporaryDirectory("dirac-acp-config-")
 		const cwd = await temporaryDirectory("dirac-acp-workspace-")
-		const client = createRawClient(configDir, cwd, [
-			"--provider",
-			"deepseek",
-			"--model",
-			"deepseek-v4-flash",
-		])
+		const client = createRawClient(configDir, cwd, ["--provider", "deepseek", "--model", "deepseek-v4-flash"])
 		await client.initialize()
 
 		const session = await client.request("session/new", { cwd, mcpServers: [] })
 		const sessionId = session.result?.sessionId as string
-		expect(session.result?.configOptions).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ id: "provider", currentValue: "deepseek" }),
-				expect.objectContaining({ id: "model", currentValue: "deepseek-v4-flash" }),
-			]),
-		)
+		const configOptions = session.result?.configOptions as Array<Record<string, unknown>>
+		const providerOption = configOptions.find((option) => option.id === "provider")
+		const modelOptions = configOptions.filter((option) => option.category === "model")
+		expect(providerOption).toMatchObject({
+			id: "provider",
+			category: "_provider",
+			currentValue: "deepseek",
+		})
+		expect(modelOptions).toHaveLength(1)
+		expect(modelOptions[0]).toMatchObject({
+			id: "model",
+			category: "model",
+			currentValue: "deepseek-v4-flash",
+			options: expect.arrayContaining([expect.objectContaining({ value: "deepseek-v4-flash" })]),
+		})
+		expect((modelOptions[0].options as Array<Record<string, unknown>>).map((option) => option.value)).not.toContain("deepseek")
 
 		const configured = await client.request("session/set_config_option", {
 			sessionId,
@@ -192,6 +204,59 @@ describe("ACP protocol conformance over raw stdio", () => {
 		expect(configured.result?.configOptions).toEqual(
 			expect.arrayContaining([expect.objectContaining({ id: "model", currentValue: "deepseek-v4-pro" })]),
 		)
+	})
+
+	it("provisions providers separately from stable session model selection", async () => {
+		const { client, cwd } = await createClient()
+		const initialized = await client.initialize()
+		expect(initialized.result?.agentCapabilities).toMatchObject({ providers: {} })
+
+		const listed = await client.request("providers/list", {})
+		expect(listed.result?.providers).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ providerId: "openai", supported: expect.arrayContaining(["openai", "azure"]) }),
+				expect.objectContaining({ providerId: "anthropic", supported: ["anthropic"] }),
+			]),
+		)
+
+		await client.request("providers/set", {
+			providerId: "openai",
+			apiType: "openai",
+			baseUrl: "https://example.test/v1/",
+			headers: { Authorization: "Bearer protocol-secret", "X-Route": "route-a" },
+		})
+		const configuredProviders = await client.request("providers/list", {})
+		expect(configuredProviders.result?.providers).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					providerId: "openai",
+					current: { apiType: "openai", baseUrl: "https://example.test/v1" },
+				}),
+			]),
+		)
+		expect(JSON.stringify(configuredProviders.result)).not.toContain("protocol-secret")
+
+		const session = await client.request("session/new", { cwd, mcpServers: [] })
+		const sessionId = session.result?.sessionId as string
+		await client.request("session/set_config_option", { sessionId, configId: "provider", value: "openai" })
+		const selected = await client.request("session/set_config_option", {
+			sessionId,
+			configId: "model",
+			value: "remote-model",
+		})
+		expect(selected.result?.configOptions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "provider", currentValue: "openai" }),
+				expect.objectContaining({ id: "model", currentValue: "remote-model" }),
+			]),
+		)
+
+		await client.request("providers/disable", { providerId: "openai" })
+		const disabledProviders = await client.request("providers/list", {})
+		const openAi = (disabledProviders.result?.providers as Array<Record<string, unknown>>).find(
+			(provider) => provider.providerId === "openai",
+		)
+		expect(openAi).not.toHaveProperty("current")
 	})
 
 	it("rejects an explicit startup provider without a model", async () => {
@@ -212,7 +277,9 @@ describe("ACP protocol conformance over raw stdio", () => {
 
 		const prompt = client.request("session/prompt", {
 			sessionId,
-			prompt: [{ type: "text", text: "Use the write_to_file tool to create a file named cancelled.txt containing cancelled." }],
+			prompt: [
+				{ type: "text", text: "Use the write_to_file tool to create a file named cancelled.txt containing cancelled." },
+			],
 		})
 		const permission = await client.waitForPermission(30_000)
 		expect(permission.params?.sessionId).toBe(sessionId)
@@ -229,7 +296,9 @@ describe("ACP protocol conformance over raw stdio", () => {
 
 		const first = createRawClient(configDir, cwd)
 		await first.initialize()
-		await expect(first.request("session/load", { sessionId, cwd, mcpServers: [] })).resolves.toMatchObject({ result: expect.any(Object) })
+		await expect(first.request("session/load", { sessionId, cwd, mcpServers: [] })).resolves.toMatchObject({
+			result: expect.any(Object),
+		})
 		await expect(waitForUpdate(first, "user_message_chunk")).resolves.toMatchObject({
 			params: {
 				sessionId,
@@ -240,7 +309,9 @@ describe("ACP protocol conformance over raw stdio", () => {
 
 		const second = createRawClient(configDir, cwd)
 		await second.initialize()
-		await expect(second.request("session/load", { sessionId, cwd, mcpServers: [] })).resolves.toMatchObject({ result: expect.any(Object) })
+		await expect(second.request("session/load", { sessionId, cwd, mcpServers: [] })).resolves.toMatchObject({
+			result: expect.any(Object),
+		})
 		await expect(waitForUpdate(second, "user_message_chunk")).resolves.toMatchObject({
 			params: {
 				sessionId,
@@ -316,11 +387,12 @@ async function seedPersistedSession(configDir: string, cwd: string, sessionId: s
 	)
 }
 
-
 async function waitForUpdate(client: RawAcpClient, kind: string, timeoutMs = 10_000): Promise<JsonRpcFrame> {
 	const startedAt = Date.now()
 	while (Date.now() - startedAt < timeoutMs) {
-		const update = client.updates.find((frame) => frame.params?.update && (frame.params.update as Record<string, unknown>).sessionUpdate === kind)
+		const update = client.updates.find(
+			(frame) => frame.params?.update && (frame.params.update as Record<string, unknown>).sessionUpdate === kind,
+		)
 		if (update) return update
 		await new Promise((resolve) => setTimeout(resolve, 10))
 	}

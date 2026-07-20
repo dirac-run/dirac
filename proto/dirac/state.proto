@@ -273,6 +273,9 @@ message Settings {
   repeated ModelProviderPreset model_provider_presets = 194;
   optional string tool_toggles = 195;
   optional bool verbose_batch_toggled = 196;
+  map<string, string> anthropic_headers = 197;
+  map<string, string> acp_disabled_providers = 199;
+  map<string, string> acp_provider_api_types = 200;
 }
 
 message State {

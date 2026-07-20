@@ -9,11 +9,11 @@ import {
 } from "@shared/api"
 import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettings"
 import { DiracRulesToggles } from "@shared/dirac-rules"
+import { UIActionState } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import { WorkspaceRoot } from "@shared/multi-root/types"
 import { Mode } from "@shared/storage/types"
 import { TelemetrySetting } from "@shared/TelemetrySetting"
-import { UIActionState } from "@shared/ExtensionMessage"
 import { LanguageModelChatSelector } from "vscode"
 
 // ============================================================================
@@ -78,6 +78,7 @@ const API_HANDLER_SETTINGS_FIELDS = {
 	liteLlmUsePromptCache: { default: undefined as boolean | undefined },
 	openAiHeaders: { default: {} as Record<string, string> },
 	anthropicBaseUrl: { default: undefined as string | undefined },
+	anthropicHeaders: { default: {} as Record<string, string> },
 	openRouterProviderSorting: { default: undefined as string | undefined },
 	awsRegion: { default: undefined as string | undefined },
 	awsUseCrossRegionInference: { default: undefined as boolean | undefined },
@@ -200,6 +201,8 @@ const API_HANDLER_SETTINGS_FIELDS = {
 
 const USER_SETTINGS_FIELDS = {
 	// Settings that are NOT part of ApiHandlerOptions
+	acpDisabledProviders: { default: {} as Record<string, string> },
+	acpProviderApiTypes: { default: {} as Record<string, string> },
 	modelProviderPresets: { default: [] as import("@shared/api").ModelProviderPreset[] },
 	autoApprovalSettings: {
 		default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,

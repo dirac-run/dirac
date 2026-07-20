@@ -1,14 +1,15 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { ApiProvider } from "@shared/api"
-import type { Settings } from "@shared/storage/state-keys"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
-import { StateManager } from "@/core/storage/StateManager"
+import type { Settings } from "@shared/storage/state-keys"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
-import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
+import { StateManager } from "@/core/storage/StateManager"
 import type { Mode } from "@/shared/storage/types"
+import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { getDefaultModelId, getModelList, hasStaticModels } from "../utils/model-metadata.js"
 import { fetchOpenRouterModels, usesOpenRouterModels } from "../utils/openrouter-models"
 import { getProviderLabel, getValidCliProviders, isValidCliProvider } from "../utils/providers.js"
+import type { ProviderConfigurationManager } from "./providerConfiguration.js"
 import type { DiracAcpSession } from "./public-types.js"
 
 /**
@@ -68,6 +69,7 @@ const THINKING_BUDGET_OPTIONS: acp.SessionConfigSelectOption[] = [
 ]
 
 export class SessionConfigManager {
+	constructor(private readonly providerConfiguration?: ProviderConfigurationManager) { }
 	/**
 	 * Compute the effective ACP mode ID for a session, considering per-session overrides.
 	 *
@@ -95,7 +97,6 @@ export class SessionConfigManager {
 		}
 	}
 
-
 	async getSessionConfigOptions(
 		session: DiracAcpSession,
 		sessionOverrides?: Partial<Settings>,
@@ -109,7 +110,9 @@ export class SessionConfigManager {
 		const thinkingKey = session.mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
 		const thinkingBudget = String(sessionOverrides?.[thinkingKey] ?? stateManager.getGlobalSettingsKey(thinkingKey) ?? 0)
 		const reasoningKey = session.mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort"
-		const reasoningEffort = String(sessionOverrides?.[reasoningKey] ?? stateManager.getGlobalSettingsKey(reasoningKey) ?? "medium")
+		const reasoningEffort = String(
+			sessionOverrides?.[reasoningKey] ?? stateManager.getGlobalSettingsKey(reasoningKey) ?? "medium",
+		)
 
 		return [
 			{
@@ -126,12 +129,14 @@ export class SessionConfigManager {
 				name: "Provider",
 				description: "API provider",
 				type: "select",
-				category: "model",
+				category: "_provider",
 				currentValue: currentProvider || "",
-				options: getValidCliProviders().map((provider) => ({
-					value: provider,
-					name: getProviderLabel(provider),
-				})),
+				options: getValidCliProviders()
+					.filter((provider) => this.providerConfiguration?.isProviderEnabled(provider) ?? true)
+					.map((provider) => ({
+						value: provider,
+						name: getProviderLabel(provider),
+					})),
 			},
 			{
 				id: "model",
@@ -171,6 +176,8 @@ export class SessionConfigManager {
 		if (!isValidCliProvider(providerValue)) {
 			throw new Error(`Invalid provider: ${providerValue}`)
 		}
+
+		this.providerConfiguration?.assertProviderEnabled(providerValue as ApiProvider)
 
 		const provider = providerValue as ApiProvider
 		const currentModelId = await this.getCurrentModeModelId(session.mode, provider, sessionOverrides)
@@ -248,11 +255,7 @@ export class SessionConfigManager {
 		})
 	}
 
-	async getCurrentModeModelId(
-		mode: Mode,
-		provider?: ApiProvider,
-		sessionOverrides?: Partial<Settings>,
-	): Promise<string> {
+	async getCurrentModeModelId(mode: Mode, provider?: ApiProvider, sessionOverrides?: Partial<Settings>): Promise<string> {
 		if (!provider) return ""
 		const modelKey = getProviderModelIdKey(provider, mode)
 		return (

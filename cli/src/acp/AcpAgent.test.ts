@@ -14,12 +14,17 @@ const mocks = vi.hoisted(() => {
 		unstable_resumeSession: vi.fn(),
 		replayLoadedSessionHistory: vi.fn(),
 		unstable_listSessions: vi.fn(),
+		listProviders: vi.fn(),
+		setProvider: vi.fn(),
+		disableProvider: vi.fn(),
+		unstable_listProviders: vi.fn(),
+		unstable_setProvider: vi.fn(),
+		unstable_disableProvider: vi.fn(),
 		publishSessionSetupUpdates: vi.fn(),
 		emitterForSession: vi.fn(),
 		prompt: vi.fn(),
 		cancel: vi.fn(),
 		setSessionMode: vi.fn(),
-		setSessionModel: vi.fn(),
 		setSessionConfigOption: vi.fn(),
 		authenticate: vi.fn(),
 		logout: vi.fn(),
@@ -147,7 +152,6 @@ describe("AcpAgent", () => {
 		})
 	})
 
-
 	it("bridges ACP form elicitation responses unchanged", async () => {
 		new AcpAgent(connection, {})
 		const handler = mocks.diracAgentInstance.setElicitationHandler.mock.calls[0][0]
@@ -199,9 +203,9 @@ describe("AcpAgent", () => {
 		mocks.diracAgentInstance.setSessionConfigOption.mockResolvedValue({ configOptions: [] })
 		const agent = new AcpAgent(connection, {})
 
-		await expect(
-			agent.setSessionConfigOption({ sessionId: "session-1", configId: "mode", value: "plan" }),
-		).resolves.toEqual({ configOptions: [] })
+		await expect(agent.setSessionConfigOption({ sessionId: "session-1", configId: "mode", value: "plan" })).resolves.toEqual({
+			configOptions: [],
+		})
 
 		expect(mocks.diracAgentInstance.setSessionConfigOption).toHaveBeenCalledWith({
 			sessionId: "session-1",
@@ -265,6 +269,36 @@ describe("AcpAgent", () => {
 		expect(mocks.diracAgentInstance.unstable_listSessions).toHaveBeenCalledWith({ cwd: "/tmp/workspace" })
 	})
 
+	it("delegates ACP provider provisioning through stable internal methods", async () => {
+		const providers = {
+			providers: [
+				{
+					providerId: "openai",
+					supported: ["openai", "azure"],
+					required: false,
+					current: { apiType: "openai", baseUrl: "https://example.test/v1" },
+				},
+			],
+		}
+		mocks.diracAgentInstance.listProviders.mockResolvedValue(providers)
+		const agent = new AcpAgent(connection, {})
+
+		await expect(agent.unstable_listProviders({})).resolves.toEqual(providers)
+		expect(mocks.diracAgentInstance.listProviders).toHaveBeenCalledWith()
+
+		const setRequest = {
+			providerId: "openai",
+			apiType: "openai",
+			baseUrl: "https://example.test/v1",
+			headers: { Authorization: "Bearer secret", "X-Route": "route-a" },
+		}
+		await agent.unstable_setProvider(setRequest)
+		expect(mocks.diracAgentInstance.setProvider).toHaveBeenCalledWith(setRequest)
+
+		await agent.unstable_disableProvider({ providerId: "openai" })
+		expect(mocks.diracAgentInstance.disableProvider).toHaveBeenCalledWith({ providerId: "openai" })
+	})
+
 	it("forwards persisted sequence metadata on session updates", async () => {
 		const emitter = new EventEmitter()
 		mocks.diracAgentInstance.emitterForSession.mockReturnValue(emitter)
@@ -289,7 +323,6 @@ describe("AcpAgent", () => {
 		})
 	})
 
-
 	it("forwards replayed client annotations through the capability-gated extension", async () => {
 		const emitter = new EventEmitter()
 		mocks.diracAgentInstance.emitterForSession.mockReturnValue(emitter)
@@ -310,7 +343,6 @@ describe("AcpAgent", () => {
 			_meta: { "dev.dirac/seq": 7 },
 		})
 	})
-
 
 	it("forwards usage updates through the capability-gated extension", async () => {
 		const emitter = new EventEmitter()
@@ -371,7 +403,6 @@ describe("AcpAgent", () => {
 		expect(mocks.diracAgentInstance.deleteSession).toHaveBeenCalledWith({ sessionId: "session-1" })
 	})
 
-
 	it("delegates standard closeSession", async () => {
 		mocks.diracAgentInstance.closeSession.mockResolvedValue({})
 		const agent = new AcpAgent(connection, {})
@@ -414,13 +445,18 @@ describe("AcpAgent", () => {
 		})
 	})
 
-
 	it("pins, unpins, and lists messages through capability-advertised extensions", async () => {
-		mocks.diracAgentInstance.listPinnedMessages.mockReturnValue([{ messageId: "message-1", content: "keep this", pinnedAt: "2026-05-27T00:00:00.000Z" }])
+		mocks.diracAgentInstance.listPinnedMessages.mockReturnValue([
+			{ messageId: "message-1", content: "keep this", pinnedAt: "2026-05-27T00:00:00.000Z" },
+		])
 		const agent = new AcpAgent(connection, {})
-		await expect(agent.extMethod("dev.dirac/messages.pin", { sessionId: "session-1", messageId: "message-1" })).resolves.toEqual({})
+		await expect(
+			agent.extMethod("dev.dirac/messages.pin", { sessionId: "session-1", messageId: "message-1" }),
+		).resolves.toEqual({})
 		expect(mocks.diracAgentInstance.pinMessage).toHaveBeenCalledWith("session-1", "message-1")
-		await expect(agent.extMethod("dev.dirac/messages.unpin", { sessionId: "session-1", messageId: "message-1" })).resolves.toEqual({})
+		await expect(
+			agent.extMethod("dev.dirac/messages.unpin", { sessionId: "session-1", messageId: "message-1" }),
+		).resolves.toEqual({})
 		expect(mocks.diracAgentInstance.unpinMessage).toHaveBeenCalledWith("session-1", "message-1")
 		await expect(agent.extMethod("dev.dirac/messages.pinned", { sessionId: "session-1" })).resolves.toEqual({
 			messages: [{ messageId: "message-1", content: "keep this", pinnedAt: "2026-05-27T00:00:00.000Z" }],
@@ -441,7 +477,6 @@ describe("AcpAgent", () => {
 		})
 	})
 
-
 	it("lists and restores workspace checkpoints through capability-advertised extensions", async () => {
 		mocks.diracAgentInstance.listWorkspaceCheckpoints.mockResolvedValue([
 			{ id: "checkpoint-1", createdAt: "2026-05-27T00:00:00.000Z", messageId: "checkpoint-1", commitHash: "abc123" },
@@ -449,7 +484,9 @@ describe("AcpAgent", () => {
 		const agent = new AcpAgent(connection, {})
 
 		await expect(agent.extMethod("dev.dirac/checkpoints.list", { sessionId: "session-1" })).resolves.toEqual({
-			checkpoints: [{ id: "checkpoint-1", createdAt: "2026-05-27T00:00:00.000Z", messageId: "checkpoint-1", commitHash: "abc123" }],
+			checkpoints: [
+				{ id: "checkpoint-1", createdAt: "2026-05-27T00:00:00.000Z", messageId: "checkpoint-1", commitHash: "abc123" },
+			],
 		})
 		expect(mocks.diracAgentInstance.listWorkspaceCheckpoints).toHaveBeenCalledWith("session-1")
 
@@ -459,7 +496,6 @@ describe("AcpAgent", () => {
 		expect(mocks.diracAgentInstance.restoreWorkspaceCheckpoint).toHaveBeenCalledWith("session-1", "checkpoint-1")
 	})
 
-
 	it("rejects malformed worktree integration parameters", async () => {
 		const agent = new AcpAgent(connection, {})
 
@@ -467,7 +503,6 @@ describe("AcpAgent", () => {
 			agent.extMethod("dev.dirac/worktree.integrate", { sessionId: "session-1", deleteAfterMerge: "yes" }),
 		).rejects.toMatchObject({ code: -32602 })
 	})
-
 
 	it("integrates a session-owned worktree through the capability-advertised extension", async () => {
 		mocks.diracAgentInstance.integrateSessionWorktree.mockResolvedValue({
@@ -528,7 +563,9 @@ describe("AcpAgent", () => {
 	it("forwards active-turn whisper guidance to DiracAgent", async () => {
 		const agent = new AcpAgent(connection, {})
 
-		await expect(agent.extNotification("dev.dirac/whisper", { sessionId: "session-1", text: "Use the existing helper." })).resolves.toBeUndefined()
+		await expect(
+			agent.extNotification("dev.dirac/whisper", { sessionId: "session-1", text: "Use the existing helper." }),
+		).resolves.toBeUndefined()
 
 		expect(mocks.diracAgentInstance.queueWhisper).toHaveBeenCalledWith({
 			sessionId: "session-1",
@@ -546,7 +583,6 @@ describe("AcpAgent", () => {
 
 		expect(mocks.diracAgentInstance.recordClientAnnotation).toHaveBeenCalledWith({ sessionId: "session-1", annotation })
 	})
-
 
 	it("forwards client _meta without interpreting it", async () => {
 		mocks.diracAgentInstance.initialize.mockResolvedValue({ protocolVersion: 1, agentCapabilities: {}, agentInfo: {} })

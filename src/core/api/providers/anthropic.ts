@@ -31,6 +31,7 @@ type AnthropicEffort = "low" | "medium" | "high" | "max"
 interface AnthropicHandlerOptions extends CommonApiHandlerOptions {
 	apiKey?: string
 	anthropicBaseUrl?: string
+	anthropicHeaders?: Record<string, string>
 	apiModelId?: string
 	thinkingBudgetTokens?: number
 	reasoningEffort?: string
@@ -53,7 +54,10 @@ export class AnthropicHandler implements ApiHandler {
 				this.client = new Anthropic({
 					apiKey: this.options.apiKey,
 					baseURL: this.options.anthropicBaseUrl || undefined,
-					defaultHeaders: buildExternalBasicHeaders(),
+					defaultHeaders: {
+						...buildExternalBasicHeaders(),
+						...this.options.anthropicHeaders,
+					},
 					fetch, // Use configured fetch with proxy support
 				})
 			} catch (error) {
