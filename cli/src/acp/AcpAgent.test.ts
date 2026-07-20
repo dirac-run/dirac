@@ -77,6 +77,9 @@ describe("AcpAgent", () => {
 		mocks.diracAgentInstance.newSession.mockResolvedValue({ sessionId: "session-1" })
 		mocks.diracAgentInstance.loadSession.mockResolvedValue({})
 		mocks.diracAgentInstance.unstable_resumeSession.mockResolvedValue({})
+
+		mocks.diracAgentInstance.closeSession.mockResolvedValue({})
+		mocks.diracAgentInstance.deleteSession.mockResolvedValue({})
 		mocks.diracAgentInstance.replayLoadedSessionHistory.mockResolvedValue(undefined)
 		mocks.diracAgentInstance.unstable_listSessions.mockResolvedValue({ sessions: [] })
 		mocks.diracAgentInstance.publishSessionSetupUpdates.mockImplementation(async () => {
@@ -344,31 +347,31 @@ describe("AcpAgent", () => {
 		})
 	})
 
-	it("forwards usage updates through the capability-gated extension", async () => {
+	it("forwards standard ACP usage updates", async () => {
 		const emitter = new EventEmitter()
 		mocks.diracAgentInstance.emitterForSession.mockReturnValue(emitter)
 		const agent = new AcpAgent(connection, {})
 
 		await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] })
 		emitter.emit("usage_update", {
-			tokensIn: 100,
-			tokensOut: 25,
-			totalCost: 0.01,
-			contextTokens: 125,
-			contextWindow: 200_000,
-			contextUsagePercentage: 1,
+			used: 125,
+			size: 200_000,
+			cost: { amount: 0.01, currency: "USD" },
+			_meta: { "dev.dirac/seq": 8 },
 		})
 		await Promise.resolve()
 
-		expect(connection.extNotification).toHaveBeenCalledWith("dev.dirac/usage_update", {
+		expect(connection.sessionUpdate).toHaveBeenCalledWith({
 			sessionId: "session-1",
-			tokensIn: 100,
-			tokensOut: 25,
-			totalCost: 0.01,
-			contextTokens: 125,
-			contextWindow: 200_000,
-			contextUsagePercentage: 1,
+			update: {
+				sessionUpdate: "usage_update",
+				used: 125,
+				size: 200_000,
+				cost: { amount: 0.01, currency: "USD" },
+				_meta: { "dev.dirac/seq": 8 },
+			},
 		})
+		expect(connection.extNotification).not.toHaveBeenCalled()
 	})
 
 	it("delegates authentication", async () => {

@@ -10,20 +10,15 @@ type SessionUpdateWithMeta = acp.SessionUpdate & { _meta?: Record<string, unknow
 
 export type PersistedSessionUpdate =
 	| {
-			kind: "session_update"
-			sequenceNumber: number
-			update: SessionUpdateWithMeta
-		}
+		kind: "session_update"
+		sequenceNumber: number
+		update: SessionUpdateWithMeta
+	}
 	| {
-			kind: "usage_update"
-			sequenceNumber: number
-			usage: Record<string, unknown>
-		}
-	| {
-			kind: "client_annotation"
-			sequenceNumber: number
-			annotation: Record<string, unknown>
-		}
+		kind: "client_annotation"
+		sequenceNumber: number
+		annotation: Record<string, unknown>
+	}
 
 type SessionUpdatesMap = Record<string, PersistedSessionUpdate[]>
 
@@ -62,23 +57,6 @@ export function recordSessionUpdate(sessionId: string, update: acp.SessionUpdate
 	return updateWithSequence
 }
 
-/** Persist one Dirac usage extension update with its stable, per-session sequence number. */
-export function recordUsageUpdate(sessionId: string, usage: Record<string, unknown>): Record<string, unknown> {
-	const map = readSessionUpdatesMap()
-	const updates = map[sessionId] ?? []
-	const sequenceNumber = nextSequenceNumber(updates)
-	const usageWithSequence = {
-		...usage,
-		_meta: {
-			...(usage._meta as Record<string, unknown> | undefined),
-			[SEQUENCE_META_KEY]: sequenceNumber,
-		},
-	}
-
-	map[sessionId] = [...updates, { kind: "usage_update", sequenceNumber, usage: usageWithSequence }]
-	writeSessionUpdatesMap(map)
-	return usageWithSequence
-}
 
 
 /** Persist one client control-plane annotation with its stable, per-session sequence number. */

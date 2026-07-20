@@ -57,7 +57,6 @@ import {
 	getSessionUpdates,
 	recordClientAnnotation,
 	recordSessionUpdate,
-	recordUsageUpdate,
 } from "../acp/acp-session-updates.js"
 import {
 	deleteSessionWorktree,
@@ -342,7 +341,6 @@ export class DiracAgent implements acp.Agent {
 			getController: (session: DiracAcpSession) => this.#sessionControllers.get(session),
 			requestPermission: (sessionId, toolCall, options) => this.requestPermission(sessionId, toolCall, options),
 			emitSessionUpdate: (sessionId, update) => this.emitSessionUpdate(sessionId, update),
-			emitUsageUpdate: (sessionId, usage) => this.emitUsageUpdate(sessionId, usage),
 			persistPermissionRule: (sessionId, toolCall, action) => this.persistPermissionRule(sessionId, toolCall, action),
 			getClientCapabilities: () => this.clientCapabilities,
 			requestElicitation: (request) => this.requestElicitation(request),
@@ -460,9 +458,9 @@ export class DiracAgent implements acp.Agent {
 	private applyPinnedContext(
 		task:
 			| {
-					taskState: { pinnedContext?: string }
-					setContextCompactionObserver: (observer: () => void) => void
-			  }
+				taskState: { pinnedContext?: string }
+				setContextCompactionObserver: (observer: () => void) => void
+			}
 			| undefined,
 		sessionId: string,
 	): void {
@@ -820,7 +818,6 @@ export class DiracAgent implements acp.Agent {
 					"dev.dirac/session.close": true,
 					"dev.dirac/session.delete": true,
 					...(this.options.detached ? { "dev.dirac/detached_mode": true } : {}),
-					"dev.dirac/usage_update": true,
 					"dev.dirac/auth.logout": true,
 
 					"dev.dirac/seq": true,
@@ -981,14 +978,14 @@ export class DiracAgent implements acp.Agent {
 			configOptions,
 			...(worktree
 				? {
-						_meta: {
-							"dev.dirac/worktree": {
-								path: worktree.worktreePath,
-								branch: worktree.branch,
-								...(worktree.targetBranch ? { targetBranch: worktree.targetBranch } : {}),
-							},
+					_meta: {
+						"dev.dirac/worktree": {
+							path: worktree.worktreePath,
+							branch: worktree.branch,
+							...(worktree.targetBranch ? { targetBranch: worktree.targetBranch } : {}),
 						},
-					}
+					},
+				}
 				: {}),
 		}
 	}
@@ -1222,7 +1219,7 @@ export class DiracAgent implements acp.Agent {
 		if ((sessionState.status as AcpSessionStatus) === AcpSessionStatus.Cancelled) {
 			releasePrompt()
 			sessionState.status = AcpSessionStatus.Idle
-			return { stopReason: "cancelled" }
+			return this.bridgeForSession(params.sessionId).promptResponse("cancelled")
 		}
 
 		// Install this session's per-session overrides (auto-approve, yolo, mode) into
@@ -1286,16 +1283,19 @@ export class DiracAgent implements acp.Agent {
 			const interceptedReviewResponse =
 				imageContent.length === 0 && fileResources.length === 0
 					? await handleAcpReviewCommand({
-							commandText: textContent,
-							controller,
-							sessionId: params.sessionId,
-							cwd: session.cwd,
-							emitSessionUpdate: this.emitSessionUpdate.bind(this),
-						})
+						commandText: textContent,
+						controller,
+						sessionId: params.sessionId,
+						cwd: session.cwd,
+						emitSessionUpdate: this.emitSessionUpdate.bind(this),
+					})
 					: null
 
 			if (interceptedReviewResponse) {
-				return interceptedReviewResponse
+				return {
+					...interceptedReviewResponse,
+					...bridge.promptResponse(interceptedReviewResponse.stopReason),
+				}
 			}
 
 			// Determine if this is a new task, continuation, or loaded session resume
@@ -1365,13 +1365,13 @@ export class DiracAgent implements acp.Agent {
 				const waitingCardId = controller.task.taskState.lastWaitingCardId
 				const waitingCard = waitingCardId
 					? controller.task.messageStateHandler
-							.getDiracMessages()
-							.find(
-								(message) =>
-									message.content.type === DiracMessageType.CARD &&
-									message.content.card.id === waitingCardId &&
-									message.content.card.status === CardStatus.WAITING_FOR_INPUT,
-							)
+						.getDiracMessages()
+						.find(
+							(message) =>
+								message.content.type === DiracMessageType.CARD &&
+								message.content.card.id === waitingCardId &&
+								message.content.card.status === CardStatus.WAITING_FOR_INPUT,
+						)
 					: undefined
 
 				if (waitingCard) {
@@ -1462,7 +1462,7 @@ export class DiracAgent implements acp.Agent {
 						text: `Error: ${error instanceof Error ? error.message : String(error)}`,
 					},
 				})
-				return { stopReason: "end_turn" }
+				return bridge.promptResponse("end_turn")
 			}
 			throw error
 		} finally {
@@ -1559,7 +1559,7 @@ export class DiracAgent implements acp.Agent {
 			// been successfully aborted ... the Agent MUST respond to the original
 			// session/prompt request with the cancelled stop reason."
 			if (cancelClaimed) {
-				pending!.resolve({ stopReason: "cancelled" })
+				pending!.resolve(bridge.promptResponse("cancelled"))
 			}
 		}
 	}
@@ -1741,47 +1741,8 @@ export class DiracAgent implements acp.Agent {
 		})
 	}
 
-	private emitUsageFromApiStatus(sessionId: string, message: DiracMessage): void {
-		if (message.content.type !== DiracMessageType.API_STATUS) return
 
-		const status = message.content.status
-		if (
-			status.tokensIn === undefined &&
-			status.tokensOut === undefined &&
-			status.cost === undefined &&
-			status.contextWindow === undefined
-		) {
-			return
-		}
-
-		const contextTokens =
-			(status.tokensIn ?? 0) + (status.tokensOut ?? 0) + (status.cacheWrites ?? 0) + (status.cacheReads ?? 0)
-		this.emitUsageUpdate(sessionId, {
-			tokensIn: status.tokensIn ?? 0,
-			tokensOut: status.tokensOut ?? 0,
-			totalCost: status.cost,
-			contextTokens,
-			contextWindow: status.contextWindow,
-			contextUsagePercentage: status.contextUsagePercentage,
-		})
-	}
-
-	/** Persist and emit a capability-gated usage extension update. */
-	private emitUsageUpdate(
-		sessionId: string,
-		usage: {
-			tokensIn: number
-			tokensOut: number
-			totalCost?: number
-			contextTokens?: number
-			contextWindow?: number
-			contextUsagePercentage?: number
-		},
-	): void {
-		this.emitterForSession(sessionId).emit("usage_update", recordUsageUpdate(sessionId, usage))
-	}
-
-	/**
+		/**
 	 * Replay the historical messages for a loaded session as ACP sessionUpdate events.
 	 * Called by AcpAgent after subscribing to session events, so the events reach the client.
 	 */
@@ -1793,23 +1754,6 @@ export class DiracAgent implements acp.Agent {
 		if (!controller) return
 
 		const taskId = session.loadedTaskId ?? sessionId
-		const persistedUpdates = getSessionUpdates(sessionId)
-		if (persistedUpdates.length > 0) {
-			const emitter = this.emitterForSession(sessionId)
-			for (const persistedUpdate of persistedUpdates) {
-				if (persistedUpdate.kind === "session_update") {
-					emitter.emit(persistedUpdate.update.sessionUpdate, persistedUpdate.update)
-				} else if (persistedUpdate.kind === "usage_update") {
-					emitter.emit("usage_update", persistedUpdate.usage)
-				} else {
-					emitter.emit("client_annotation", persistedUpdate.annotation)
-				}
-			}
-			await this.emitPinnedMessagesUpdate(sessionId, "compacted")
-
-			return
-		}
-
 		let uiMessages: DiracMessage[]
 		try {
 			const { uiMessagesFilePath } = await controller.getTaskWithId(taskId)
@@ -1817,6 +1761,27 @@ export class DiracAgent implements acp.Agent {
 			uiMessages = JSON.parse(raw)
 		} catch (error) {
 			Logger.debug("[DiracAgent] replayLoadedSessionHistory: could not read ui_messages:", error)
+			return
+		}
+
+		const bridge = this.bridgeForSession(sessionId)
+		const persistedUpdates = getSessionUpdates(sessionId)
+		if (persistedUpdates.length > 0) {
+			const emitter = this.emitterForSession(sessionId)
+			for (const persistedUpdate of persistedUpdates) {
+				if (persistedUpdate.kind === "session_update") {
+					emitter.emit(persistedUpdate.update.sessionUpdate, persistedUpdate.update)
+				} else if (persistedUpdate.kind === "client_annotation") {
+					emitter.emit("client_annotation", persistedUpdate.annotation)
+				}
+			}
+
+			const hasPersistedUsageUpdate = persistedUpdates.some(
+				(persistedUpdate) =>
+					persistedUpdate.kind === "session_update" && persistedUpdate.update.sessionUpdate === "usage_update",
+			)
+			await bridge.restoreUsage(sessionId, uiMessages, !hasPersistedUsageUpdate)
+			await this.emitPinnedMessagesUpdate(sessionId, "compacted")
 			return
 		}
 
@@ -1849,11 +1814,11 @@ export class DiracAgent implements acp.Agent {
 				for (const update of result.updates) {
 					await this.emitSessionUpdate(sessionId, update)
 				}
-				this.emitUsageFromApiStatus(sessionId, message)
 			} catch (error) {
 				Logger.debug("[DiracAgent] replayLoadedSessionHistory: error translating message:", error)
 			}
 		}
+		await bridge.restoreUsage(sessionId, uiMessages, true)
 	}
 
 	private async emitPlanFromMessage(sessionId: string, message: DiracMessage): Promise<void> {

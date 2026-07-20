@@ -126,14 +126,13 @@ describe("DiracAgent ACP worktrees", () => {
 			"dev.dirac/seq",
 			"dev.dirac/session.close",
 			"dev.dirac/session.delete",
-			"dev.dirac/usage_update",
 			"dev.dirac/whisper",
 			"dev.dirac/worktree.integrate",
 			"dev.dirac/worktree.provision",
 		])
 
 		const session = await agent.newSession({ cwd: repository, mcpServers: [] } as any)
-		expect(Object.keys(session).sort()).toEqual(["configOptions", "models", "modes", "sessionId"])
+		expect(Object.keys(session).sort()).toEqual(["configOptions", "modes", "sessionId"])
 	})
 
 	it("provisions a branch-backed worktree requested at session creation and integrates it", async () => {

@@ -67,8 +67,6 @@ export type DiracSessionEvents = {
 } & {
 	/** Error event for session-level errors (not part of ACP SessionUpdate) */
 	error: (error: Error) => void
-	/** Token, cost, and context usage update exposed through Dirac's ACP extension. */
-	usage_update: (payload: Record<string, unknown>) => void
 	/** Capability-gated vendor update for pinned-message and context-compaction state. */
 	pinned_messages_update: (payload: Record<string, unknown>) => void
 

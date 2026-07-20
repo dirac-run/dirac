@@ -163,6 +163,8 @@ export class AcpAgent implements acp.Agent {
 		forwardSessionUpdate("config_option_update")
 		forwardSessionUpdate("session_info_update")
 
+		forwardSessionUpdate("usage_update")
+
 		const clientAnnotationListener = (payload: Record<string, unknown>) => {
 			this.connection
 				.extNotification("dev.dirac/client_annotation", {
@@ -188,14 +190,6 @@ export class AcpAgent implements acp.Agent {
 		}
 		emitter.on("pinned_messages_update", pinnedMessagesListener)
 		cleanup.push(() => emitter.off("pinned_messages_update", pinnedMessagesListener))
-
-		const usageListener = (payload: Record<string, unknown>) => {
-			this.connection.extNotification("dev.dirac/usage_update", { sessionId, ...payload }).catch((error) => {
-				Logger.error("[AcpAgent] Error forwarding usage update:", error)
-			})
-		}
-		emitter.on("usage_update", usageListener)
-		cleanup.push(() => emitter.off("usage_update", usageListener))
 
 		const errorListener = (error: Error) => Logger.error("[AcpAgent] Session error:", error)
 		emitter.on("error", errorListener)

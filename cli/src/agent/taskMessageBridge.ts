@@ -19,6 +19,27 @@ import { isFollowupQuestionCard } from "./questionCard.js";
 
 type PromptResolver = (response: acp.PromptResponse) => void;
 
+
+type UsageSnapshot = {
+	inputTokens: number;
+	outputTokens: number;
+	cachedReadTokens: number;
+	cachedWriteTokens: number;
+	thoughtTokens: number;
+	cost: number;
+	hasInputTokens: boolean;
+	hasOutputTokens: boolean;
+	hasCachedReadTokens: boolean;
+	hasCachedWriteTokens: boolean;
+	hasThoughtTokens: boolean;
+	hasCost: boolean;
+};
+
+type ContextUsage = {
+	used: number;
+	size: number;
+};
+
 const OTHER_ANSWER_OPTION_ID = "__dirac_other_answer";
 
 type TaskMessageBridgeOptions = {
@@ -33,17 +54,6 @@ type TaskMessageBridgeOptions = {
 		sessionId: string,
 		update: acp.SessionUpdate,
 	) => Promise<void>;
-	emitUsageUpdate: (
-		sessionId: string,
-		usage: {
-			tokensIn: number;
-			tokensOut: number;
-			totalCost?: number;
-			contextTokens?: number;
-			contextWindow?: number;
-			contextUsagePercentage?: number;
-		},
-	) => void;
 	getClientCapabilities: () => acp.ClientCapabilities | undefined;
 	requestElicitation: (
 		request: acp.CreateElicitationRequest,
@@ -63,7 +73,6 @@ export class TaskMessageBridge {
 	private readonly getController: TaskMessageBridgeOptions["getController"];
 	private readonly requestPermission: TaskMessageBridgeOptions["requestPermission"];
 	private readonly emitSessionUpdate: TaskMessageBridgeOptions["emitSessionUpdate"];
-	private readonly emitUsageUpdate: TaskMessageBridgeOptions["emitUsageUpdate"];
 	private readonly getClientCapabilities: TaskMessageBridgeOptions["getClientCapabilities"];
 	private readonly requestElicitation: TaskMessageBridgeOptions["requestElicitation"];
 
@@ -104,12 +113,16 @@ export class TaskMessageBridge {
 	/** Invalidates interaction responses that belong to a cancelled prompt turn. */
 	private interactionGeneration = 0;
 
+	/** Latest cumulative snapshot for every model request observed in this ACP session. */
+	private readonly usageSnapshots = new Map<string, UsageSnapshot>();
+	/** Most recent context occupancy reported by the active model request. */
+	private contextUsage?: ContextUsage;
+
 	constructor(options: TaskMessageBridgeOptions) {
 		this.getSession = options.getSession;
 		this.getController = options.getController;
 		this.requestPermission = options.requestPermission;
 		this.emitSessionUpdate = options.emitSessionUpdate;
-		this.emitUsageUpdate = options.emitUsageUpdate;
 		this.getClientCapabilities = options.getClientCapabilities;
 		this.requestElicitation = options.requestElicitation;
 
@@ -142,6 +155,164 @@ export class TaskMessageBridge {
 		this.messageToToolCallId.clear();
 		this.processedInteractionCardKeys.clear();
 		this.whisperBoundaryCardKeys.clear();
+	}
+
+
+	promptResponse(stopReason: acp.StopReason): acp.PromptResponse {
+		const usage = this.sessionTokenUsage();
+		return usage ? { stopReason, usage } : { stopReason };
+	}
+
+	async restoreUsage(sessionId: string, messages: DiracMessage[], emitCurrentContext: boolean): Promise<void> {
+		this.usageSnapshots.clear();
+		this.contextUsage = undefined;
+		for (const message of messages) {
+			await this.recordUsage(sessionId, message, false);
+		}
+		if (emitCurrentContext) {
+			await this.emitContextUsage(sessionId);
+		}
+	}
+
+	private sessionTokenUsage(): acp.Usage | undefined {
+		let inputTokens = 0;
+		let outputTokens = 0;
+		let cachedReadTokens = 0;
+		let cachedWriteTokens = 0;
+		let thoughtTokens = 0;
+		let hasInputTokens = false;
+		let hasOutputTokens = false;
+		let hasCachedReadTokens = false;
+		let hasCachedWriteTokens = false;
+		let hasThoughtTokens = false;
+
+		for (const snapshot of this.usageSnapshots.values()) {
+			inputTokens += snapshot.inputTokens;
+			outputTokens += snapshot.outputTokens;
+			cachedReadTokens += snapshot.cachedReadTokens;
+			cachedWriteTokens += snapshot.cachedWriteTokens;
+			thoughtTokens += snapshot.thoughtTokens;
+			hasInputTokens ||= snapshot.hasInputTokens;
+			hasOutputTokens ||= snapshot.hasOutputTokens;
+			hasCachedReadTokens ||= snapshot.hasCachedReadTokens;
+			hasCachedWriteTokens ||= snapshot.hasCachedWriteTokens;
+			hasThoughtTokens ||= snapshot.hasThoughtTokens;
+		}
+
+		if (!hasInputTokens && !hasOutputTokens && !hasCachedReadTokens && !hasCachedWriteTokens && !hasThoughtTokens) {
+			return undefined;
+		}
+
+		return {
+			totalTokens: inputTokens + outputTokens + cachedReadTokens + cachedWriteTokens,
+			inputTokens,
+			outputTokens,
+			...(hasThoughtTokens ? { thoughtTokens } : {}),
+			...(hasCachedReadTokens ? { cachedReadTokens } : {}),
+			...(hasCachedWriteTokens ? { cachedWriteTokens } : {}),
+		};
+	}
+
+	private cumulativeCost(): number | undefined {
+		let cost = 0;
+		let hasCost = false;
+		for (const snapshot of this.usageSnapshots.values()) {
+			cost += snapshot.cost;
+			hasCost ||= snapshot.hasCost;
+		}
+		return hasCost ? cost : undefined;
+	}
+
+	private async emitContextUsage(sessionId: string): Promise<void> {
+		if (!this.contextUsage) return;
+		const cost = this.cumulativeCost();
+		await this.emitSessionUpdate(sessionId, {
+			sessionUpdate: "usage_update",
+			used: this.contextUsage.used,
+			size: this.contextUsage.size,
+			...(cost === undefined ? {} : { cost: { amount: cost, currency: "USD" } }),
+		});
+	}
+
+	private usageSnapshotFromMessage(message: DiracMessage): UsageSnapshot | undefined {
+		if (message.content.type === DiracMessageType.API_STATUS) {
+			const info = message.content.status;
+			const deleted = info.deletedMetrics;
+			return {
+				inputTokens: (info.tokensIn ?? 0) + (deleted?.tokensIn ?? 0),
+				outputTokens: (info.tokensOut ?? 0) + (deleted?.tokensOut ?? 0),
+				cachedReadTokens: (info.cacheReads ?? 0) + (deleted?.cacheReads ?? 0),
+				cachedWriteTokens: (info.cacheWrites ?? 0) + (deleted?.cacheWrites ?? 0),
+				thoughtTokens: info.reasoningTokens ?? 0,
+				cost: info.cost ?? 0,
+				hasInputTokens: info.tokensIn !== undefined || deleted?.tokensIn !== undefined,
+				hasOutputTokens: info.tokensOut !== undefined || deleted?.tokensOut !== undefined,
+				hasCachedReadTokens: info.cacheReads !== undefined || deleted?.cacheReads !== undefined,
+				hasCachedWriteTokens: info.cacheWrites !== undefined || deleted?.cacheWrites !== undefined,
+				hasThoughtTokens: info.reasoningTokens !== undefined,
+				hasCost: info.cost !== undefined,
+			};
+		}
+
+		if (message.content.type !== DiracMessageType.CARD || message.content.card.header !== "Subagent Usage") {
+			return undefined;
+		}
+
+		let payload: unknown;
+		try {
+			payload = JSON.parse(message.content.card.body || "{}");
+		} catch {
+			return undefined;
+		}
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+
+		const usage = payload as Record<string, unknown>;
+		const tokensIn = typeof usage.tokensIn === "number" ? usage.tokensIn : undefined;
+		const tokensOut = typeof usage.tokensOut === "number" ? usage.tokensOut : undefined;
+		const cacheReads = typeof usage.cacheReads === "number" ? usage.cacheReads : undefined;
+		const cacheWrites = typeof usage.cacheWrites === "number" ? usage.cacheWrites : undefined;
+		const cost = typeof usage.cost === "number" ? usage.cost : undefined;
+		return {
+			inputTokens: tokensIn ?? 0,
+			outputTokens: tokensOut ?? 0,
+			cachedReadTokens: cacheReads ?? 0,
+			cachedWriteTokens: cacheWrites ?? 0,
+			thoughtTokens: 0,
+			cost: cost ?? 0,
+			hasInputTokens: tokensIn !== undefined,
+			hasOutputTokens: tokensOut !== undefined,
+			hasCachedReadTokens: cacheReads !== undefined,
+			hasCachedWriteTokens: cacheWrites !== undefined,
+			hasThoughtTokens: false,
+			hasCost: cost !== undefined,
+		};
+	}
+
+	private async recordUsage(
+		sessionId: string,
+		message: DiracMessage,
+		emitCurrentContext: boolean,
+	): Promise<void> {
+		const snapshot = this.usageSnapshotFromMessage(message);
+		if (!snapshot) return;
+
+		const keyPrefix = message.content.type === DiracMessageType.API_STATUS ? "api" : "subagent";
+		this.usageSnapshots.set(`${keyPrefix}:${message.id}`, snapshot);
+
+		if (message.content.type === DiracMessageType.API_STATUS) {
+			const info = message.content.status;
+			const contextWindow = info.contextWindow;
+			if (contextWindow !== undefined) {
+				this.contextUsage = {
+					used: (info.tokensIn ?? 0) + (info.tokensOut ?? 0) + (info.cacheWrites ?? 0) + (info.cacheReads ?? 0),
+					size: contextWindow,
+				};
+			}
+		}
+
+		if (emitCurrentContext) {
+			await this.emitContextUsage(sessionId);
+		}
 	}
 
 	invalidatePendingInteractions(): void {
@@ -231,7 +402,7 @@ export class TaskMessageBridge {
 						async () => {
 							if (!active || promptResolved.value) return;
 							promptResolved.value = true;
-							resolvePrompt({ stopReason: "end_turn" });
+							resolvePrompt(this.promptResponse("end_turn"));
 						},
 						sessionId,
 						resolvePrompt,
@@ -320,7 +491,7 @@ export class TaskMessageBridge {
 					emitError,
 				),
 			)
-			.finally(() => resolvePrompt({ stopReason: "end_turn" }));
+			.finally(() => resolvePrompt(this.promptResponse("end_turn")));
 	}
 
 	private async incorporateWhispersAtToolBoundary(
@@ -375,9 +546,11 @@ export class TaskMessageBridge {
 		resolvePrompt: PromptResolver,
 		promptResolved: { value: boolean },
 	): Promise<void> {
-		if ((change.type !== "add" && change.type !== "update") || !change.message) {
+		if (change.type === "set" || change.type === "delete") {
+			await this.restoreUsage(sessionId, change.messages, true);
 			return;
 		}
+		if (!change.message) return;
 
 		const handledInlineInteraction = await this.processMessageWithDelta(
 			sessionId,
@@ -780,7 +953,7 @@ export class TaskMessageBridge {
 			card.requireFeedback
 		) {
 			promptResolved.value = true;
-			resolvePrompt({ stopReason: "end_turn" });
+			resolvePrompt(this.promptResponse("end_turn"));
 			return;
 		}
 
@@ -791,7 +964,7 @@ export class TaskMessageBridge {
 			card.header === "Task Completed"
 		) {
 			promptResolved.value = true;
-			resolvePrompt({ stopReason: "end_turn" });
+			resolvePrompt(this.promptResponse("end_turn"));
 		}
 	}
 
@@ -954,32 +1127,7 @@ export class TaskMessageBridge {
 				await this.emitSessionUpdate(sessionId, update);
 			}
 
-			// Emit usage data through Dirac's ACP extension. ACP SDK v0.13.1 has no
-			// stable usage update, so AcpAgent forwards a capability-gated
-			// dev.dirac/usage_update notification.
-			if (message.content.type === DiracMessageType.API_STATUS) {
-				const info = message.content.status;
-				if (
-					info.tokensIn !== undefined ||
-					info.tokensOut !== undefined ||
-					info.cost !== undefined ||
-					info.contextWindow !== undefined
-				) {
-					const contextTokens =
-						(info.tokensIn ?? 0) +
-						(info.tokensOut ?? 0) +
-						(info.cacheWrites ?? 0) +
-						(info.cacheReads ?? 0);
-					this.emitUsageUpdate(sessionId, {
-						tokensIn: info.tokensIn ?? 0,
-						tokensOut: info.tokensOut ?? 0,
-						totalCost: info.cost,
-						contextTokens,
-						contextWindow: info.contextWindow,
-						contextUsagePercentage: info.contextUsagePercentage,
-					});
-				}
-			}
+			await this.recordUsage(sessionId, message, true);
 
 			// Track the toolCallId for this message so subsequent updates reuse it
 			if (result.toolCallId) {

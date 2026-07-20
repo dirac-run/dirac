@@ -93,7 +93,6 @@ function createBridge(options: {
 		getController: () => ({ task: options.getTask ? options.getTask() : options.task }) as any,
 		requestPermission: vi.fn(),
 		emitSessionUpdate: options.emitSessionUpdate,
-		emitUsageUpdate: vi.fn(),
 		getClientCapabilities: () => undefined,
 		requestElicitation: vi.fn(),
 		getWhispers: options.getWhispers,

@@ -96,7 +96,6 @@ describe("TaskMessageBridge form elicitation", () => {
 			getController: () => ({ task: { submitCardResponse } }) as any,
 			requestPermission,
 			emitSessionUpdate,
-			emitUsageUpdate: vi.fn(),
 			getClientCapabilities: () => ({ elicitation: { form: {} } }) as any,
 			requestElicitation,
 			getWhispers: () => [],
@@ -275,7 +274,6 @@ describe("TaskMessageBridge form elicitation", () => {
 			getController: () => ({ task: { submitCardResponse } }) as any,
 			requestPermission,
 			emitSessionUpdate,
-			emitUsageUpdate: vi.fn(),
 			getClientCapabilities: () => ({}),
 			requestElicitation,
 			getWhispers: () => [],
@@ -433,6 +431,128 @@ describe("TaskMessageBridge form elicitation", () => {
 		await Promise.all([first, second]);
 		expect(secondStarted).toBe(true);
 	});
+
+	it("reports cumulative ACP token usage and standard context updates", async () => {
+		const usageMessage = {
+			id: "api-status-usage",
+			ts: 10,
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: {
+					tokensIn: 100,
+					tokensOut: 25,
+					cacheReads: 10,
+					cacheWrites: 5,
+					reasoningTokens: 4,
+					cost: 0.02,
+					contextWindow: 200_000,
+				},
+			},
+		} as DiracMessage;
+
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), usageMessage);
+
+		expect(emitSessionUpdate).toHaveBeenCalledWith("session-1", {
+			sessionUpdate: "usage_update",
+			used: 140,
+			size: 200_000,
+			cost: { amount: 0.02, currency: "USD" },
+		});
+		expect(bridge.promptResponse("end_turn")).toEqual({
+			stopReason: "end_turn",
+			usage: {
+				totalTokens: 140,
+				inputTokens: 100,
+				outputTokens: 25,
+				thoughtTokens: 4,
+				cachedReadTokens: 10,
+				cachedWriteTokens: 5,
+			},
+		});
+	});
+
+	it("replaces streamed usage snapshots instead of double-counting them", async () => {
+		const usageMessage = {
+			id: "api-status-stream",
+			ts: 11,
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: { tokensIn: 50, tokensOut: 5 },
+			},
+		} as DiracMessage;
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), usageMessage);
+		(usageMessage.content as any).status = { tokensIn: 60, tokensOut: 10 };
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), usageMessage);
+
+		expect(bridge.promptResponse("end_turn").usage).toEqual({
+			totalTokens: 70,
+			inputTokens: 60,
+			outputTokens: 10,
+		});
+	});
+
+	it("rebuilds usage after a checkpoint-style message replacement", async () => {
+		const original = {
+			id: "api-status-original",
+			ts: 12,
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: { tokensIn: 80, tokensOut: 20, cost: 0.03, contextWindow: 1000 },
+			},
+		} as DiracMessage;
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), original);
+
+		const aggregate = {
+			id: "api-status",
+			ts: 13,
+			content: {
+				type: DiracMessageType.API_STATUS,
+				status: {
+					tokensIn: 0,
+					tokensOut: 0,
+					cost: 0.03,
+					deletedMetrics: { tokensIn: 80, tokensOut: 20 },
+				},
+			},
+		} as DiracMessage;
+		await (bridge as any).handleDiracMessagesChanged(
+			"session-1",
+			sessionState(),
+			{ type: "set", messages: [] },
+			vi.fn(),
+			{ value: false },
+		);
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), aggregate);
+
+		expect(bridge.promptResponse("end_turn").usage).toEqual({
+			totalTokens: 100,
+			inputTokens: 80,
+			outputTokens: 20,
+		});
+	});
+
+	it("ignores malformed subagent usage cards", async () => {
+		const malformedUsage = {
+			id: "subagent-usage-malformed",
+			ts: 14,
+			content: {
+				type: DiracMessageType.CARD,
+				card: {
+					id: "subagent-usage-malformed",
+					header: "Subagent Usage",
+					body: "{not-json",
+					status: CardStatus.SUCCESS,
+					renderType: "text",
+				},
+			},
+		} as DiracMessage;
+
+		await expect(
+			(bridge as any).processMessageWithDelta("session-1", sessionState(), malformedUsage),
+		).resolves.toBe(false);
+		expect(bridge.promptResponse("end_turn")).toEqual({ stopReason: "end_turn" });
+	});
+
 
 
 	it("uses task-run fulfillment as the fallback ACP turn boundary", async () => {

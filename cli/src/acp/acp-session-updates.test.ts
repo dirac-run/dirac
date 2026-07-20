@@ -26,13 +26,17 @@ describe("ACP session update journal", () => {
 	})
 
 	it("persists a monotonic per-session sequence and preserves it for replay", async () => {
-		const { getSessionUpdates, recordClientAnnotation, recordSessionUpdate, recordUsageUpdate } = await import("./acp-session-updates.js")
+		const { getSessionUpdates, recordClientAnnotation, recordSessionUpdate } = await import("./acp-session-updates.js")
 
 		const first = recordSessionUpdate("session-1", {
 			sessionUpdate: "agent_message_chunk",
 			content: { type: "text", text: "first" },
 		} as any)
-		const usage = recordUsageUpdate("session-1", { tokensIn: 10, tokensOut: 2 })
+		const usage = recordSessionUpdate("session-1", {
+			sessionUpdate: "usage_update",
+			used: 12,
+			size: 100,
+		} as any)
 		const annotation = recordClientAnnotation("session-1", {
 			kind: "permission_decision",
 			outcome: "allow_once",
@@ -48,7 +52,7 @@ describe("ACP session update journal", () => {
 		expect(second._meta).toEqual({ "dev.dirac/seq": 4 })
 		expect(getSessionUpdates("session-1")).toEqual([
 			{ kind: "session_update", sequenceNumber: 1, update: first },
-			{ kind: "usage_update", sequenceNumber: 2, usage },
+			{ kind: "session_update", sequenceNumber: 2, update: usage },
 			{ kind: "client_annotation", sequenceNumber: 3, annotation },
 			{ kind: "session_update", sequenceNumber: 4, update: second },
 		])
@@ -58,7 +62,7 @@ describe("ACP session update journal", () => {
 		const restartedJournal = await import("./acp-session-updates.js")
 		expect(restartedJournal.getSessionUpdates("session-1")).toEqual([
 			{ kind: "session_update", sequenceNumber: 1, update: first },
-			{ kind: "usage_update", sequenceNumber: 2, usage },
+			{ kind: "session_update", sequenceNumber: 2, update: usage },
 			{ kind: "client_annotation", sequenceNumber: 3, annotation },
 			{ kind: "session_update", sequenceNumber: 4, update: second },
 		])
