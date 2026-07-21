@@ -1,464 +1,500 @@
-/**
- * Characterization tests for SymbolIndexService.
- * Captures current behavior — bugs and all.
- *
- * Phase 0 — Prerequisite coverage for refactoring
- */
+import { execFile } from "node:child_process"
+import * as syncFs from "node:fs"
 import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, it } from "mocha"
-import "should"
-
+import should from "should"
 import sinon from "sinon"
 import { Logger } from "@/shared/services/Logger"
+import { ensureSqlModule } from "@/shared/sqlJsModule"
+import { SymbolIndexDatabase } from "../SymbolIndexDatabase"
 import { SymbolIndexService, type SymbolLocation } from "../SymbolIndexService"
+
+const execFileAsync = promisify(execFile)
 
 describe("SymbolIndexService", () => {
 	let sandbox: sinon.SinonSandbox
-	let mockDb: any
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
-
-		// Silence Logger
 		sandbox.stub(Logger, "log")
 		sandbox.stub(Logger, "error")
 		sandbox.stub(Logger, "info")
-
-		// Build mock database
-		mockDb = {
-			getSymbolsByName: sandbox.stub().returns([]),
-			getAllFilesMetadata: sandbox.stub().returns(new Map()),
-			getFileMetadata: sandbox.stub().returns(null),
-			updateFileSymbols: sandbox.stub(),
-			updateFilesSymbolsBatch: sandbox.stub(),
-			removeFile: sandbox.stub().returns(true),
-			removeFiles: sandbox.stub().callsFake((paths: string[]) => paths.length),
-			close: sandbox.stub(),
-			save: sandbox.stub(),
-		}
-
-			// Reset singleton by nulling the instance
-			; (SymbolIndexService as any).instance = null
+		;(SymbolIndexService as any).instance = null
 	})
 
 	afterEach(() => {
+		SymbolIndexService.getInstance().dispose()
 		sandbox.restore()
 	})
 
-	// ---------------------------------------------------------------
-	describe("static getInstance", () => {
-		it("returns singleton instance", () => {
-			const a = SymbolIndexService.getInstance()
-			const b = SymbolIndexService.getInstance()
-			a.should.equal(b)
-			a.should.be.instanceOf(SymbolIndexService)
-		})
-
-		it("creates instance on first call", () => {
-			; (SymbolIndexService as any).instance = null
-			const svc = SymbolIndexService.getInstance()
-			svc.should.be.instanceOf(SymbolIndexService)
-		})
+	it("returns one service instance", () => {
+		SymbolIndexService.getInstance().should.equal(SymbolIndexService.getInstance())
 	})
 
-	// ---------------------------------------------------------------
-	describe("getProjectRoot", () => {
-		it("returns empty string by default (before initialization)", () => {
-			const svc = SymbolIndexService.getInstance()
-			svc.getProjectRoot().should.equal("")
-		})
+	it("applies the restored standard exclusions by exact path segment", () => {
+		const service = SymbolIndexService.getInstance()
+		;(service as any).projectRoot = "/workspace"
+
+		service.shouldIndexPath("/workspace/src/dist/file.ts").should.be.false()
+		service.shouldIndexPath("/workspace/target/file.rs").should.be.false()
+		service.shouldIndexPath("/workspace/generated/file.ts").should.be.false()
+		service.shouldIndexPath("/workspace/__generated__/file.ts").should.be.false()
+		service.shouldIndexPath("/workspace/vendor/file.php").should.be.false()
+		service.shouldIndexPath("/workspace/.venv/file.py").should.be.false()
+		service.shouldIndexPath("/workspace/.dirac-cache/file.ts").should.be.false()
+		service.shouldIndexPath("/workspace/src/district/file.ts").should.be.true()
+		service.shouldIndexPath("/workspace/src/file.zig").should.be.false()
 	})
 
-	// ---------------------------------------------------------------
-	describe("isScanning", () => {
-		it("returns false by default", () => {
-			const svc = SymbolIndexService.getInstance()
-			svc.isScanning().should.be.false()
-		})
-
-		it("reflects scanning state when set internally", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).isScanningInternal = true
-			svc.isScanning().should.be.true()
-		})
-	})
-
-	// ---------------------------------------------------------------
-	describe("setSkipRepoCheck", () => {
-		it("sets skipRepoCheck flag", () => {
-			const svc = SymbolIndexService.getInstance()
-			svc.setSkipRepoCheck(true)
-				; (svc as any).skipRepoCheck.should.be.true()
-
-			svc.setSkipRepoCheck(false)
-				; (svc as any).skipRepoCheck.should.be.false()
-		})
-	})
-
-	// ---------------------------------------------------------------
-	describe("setPersistenceEnabled", () => {
-		it("sets isPersistenceEnabled flag", () => {
-			const svc = SymbolIndexService.getInstance()
-			svc.setPersistenceEnabled(false)
-				; (svc as any).isPersistenceEnabled.should.be.false()
-
-			svc.setPersistenceEnabled(true)
-				; (svc as any).isPersistenceEnabled.should.be.true()
-		})
-	})
-
-	describe("index storage migration", () => {
-		const INDEX_DIR = ".dirac-cache"
-		const INDEX_FILE = "symbol-index.db"
-		const LEGACY_INDEX_DIR = ".dirac-symbol-index"
-		const LEGACY_INDEX_FILE = "data.db"
-		let projectRoot: string
-
-		const exists = async (filePath: string): Promise<boolean> => {
-			try {
-				await fs.access(filePath)
-				return true
-			} catch {
-				return false
+	it("re-queries a lookup only after successful stale deletion", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-stale-"))
+		try {
+			const service = SymbolIndexService.getInstance()
+			;(service as any).projectRoot = projectRoot
+			const missingLocation = location("missing.ts")
+			const existingLocation = location("existing.ts")
+			await fs.writeFile(path.join(projectRoot, "existing.ts"), "export const target = 1\n")
+			const db = {
+				getSymbolsByName: sandbox
+					.stub()
+					.onFirstCall()
+					.returns([missingLocation])
+					.onSecondCall()
+					.returns([existingLocation]),
+				removeFiles: sandbox.stub().returns(1),
+				close: sandbox.stub(),
 			}
+			;(service as any).db = db
+
+			service.getDefinitions("target", 1).should.deepEqual([existingLocation])
+			sinon.assert.calledTwice(db.getSymbolsByName)
+			sinon.assert.calledOnceWithExactly(db.removeFiles, ["missing.ts"])
+		} finally {
+			await fs.rm(projectRoot, { recursive: true, force: true })
 		}
+	})
 
-		const prepareIndexDir = async (): Promise<void> => {
+	it("stops stale cleanup when deletion makes no progress", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-stale-"))
+		try {
 			const service = SymbolIndexService.getInstance()
-				; (service as any).projectRoot = projectRoot
-			await (service as any).ensureIndexDir()
+			;(service as any).projectRoot = projectRoot
+			const missingLocation = location("missing.ts")
+			const db = {
+				getSymbolsByName: sandbox.stub().returns([missingLocation]),
+				removeFiles: sandbox.stub().returns(0),
+				close: sandbox.stub(),
+			}
+			;(service as any).db = db
+
+			service.getDefinitions("target").should.deepEqual([missingLocation])
+			sinon.assert.calledOnce(db.getSymbolsByName)
+		} finally {
+			await fs.rm(projectRoot, { recursive: true, force: true })
 		}
-
-		beforeEach(async () => {
-			projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-index-"))
-		})
-
-		afterEach(async () => {
-			await fs.rm(projectRoot, { recursive: true, force: true })
-		})
-
-		it("creates only the canonical cache directory when no index exists", async () => {
-			await prepareIndexDir()
-
-				; (await exists(path.join(projectRoot, INDEX_DIR))).should.be.true()
-				; (await exists(path.join(projectRoot, LEGACY_INDEX_DIR))).should.be.false()
-		})
-
-		it("migrates a legacy index directory and database file", async () => {
-			const legacyIndexDir = path.join(projectRoot, LEGACY_INDEX_DIR)
-			await fs.mkdir(legacyIndexDir)
-			await fs.writeFile(path.join(legacyIndexDir, LEGACY_INDEX_FILE), "legacy-index")
-
-			await prepareIndexDir()
-
-				; (await exists(legacyIndexDir)).should.be.false()
-				; (await fs.readFile(path.join(projectRoot, INDEX_DIR, INDEX_FILE), "utf8")).should.equal("legacy-index")
-		})
-
-		it("keeps an existing canonical index unchanged", async () => {
-			const indexDir = path.join(projectRoot, INDEX_DIR)
-			await fs.mkdir(indexDir)
-			await fs.writeFile(path.join(indexDir, INDEX_FILE), "canonical-index")
-
-			await prepareIndexDir()
-
-				; (await exists(path.join(projectRoot, LEGACY_INDEX_DIR))).should.be.false()
-				; (await fs.readFile(path.join(indexDir, INDEX_FILE), "utf8")).should.equal("canonical-index")
-		})
-
-		it("removes the legacy directory when both index directories exist", async () => {
-			const indexDir = path.join(projectRoot, INDEX_DIR)
-			const legacyIndexDir = path.join(projectRoot, LEGACY_INDEX_DIR)
-			await fs.mkdir(indexDir)
-			await fs.mkdir(legacyIndexDir)
-			await fs.writeFile(path.join(indexDir, INDEX_FILE), "canonical-index")
-			await fs.writeFile(path.join(legacyIndexDir, LEGACY_INDEX_FILE), "legacy-index")
-
-			await prepareIndexDir()
-
-				; (await exists(legacyIndexDir)).should.be.false()
-				; (await fs.readFile(path.join(indexDir, INDEX_FILE), "utf8")).should.equal("canonical-index")
-		})
 	})
 
-	// ---------------------------------------------------------------
-	describe("getSymbols", () => {
-		it("returns empty array when db is null", () => {
-			const svc = SymbolIndexService.getInstance()
-			// db is null by default (not initialized)
-			const result = svc.getSymbols("myFunction")
-			result.should.be.an.Array()
-			result.should.be.empty()
-		})
-
-		it("delegates to db.getSymbolsByName with all parameters", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			const expected: SymbolLocation[] = [
-				{
-					path: "src/foo.ts",
-					startLine: 10,
-					startColumn: 4,
-					endLine: 10,
-					endColumn: 20,
-					type: "definition",
-					kind: "function",
-				},
-			]
-			mockDb.getSymbolsByName.returns(expected)
-
-			const result = svc.getSymbols("myFunction", "definition", 50)
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "myFunction", "definition", 50)
-			result.should.equal(expected)
-		})
-
-		it("passes undefined type and limit when not provided", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			svc.getSymbols("someSymbol")
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "someSymbol", undefined, undefined)
-		})
-	})
-
-	// ---------------------------------------------------------------
-	describe("getReferences", () => {
-		it("returns empty array when db is null", () => {
-			const svc = SymbolIndexService.getInstance()
-			const result = svc.getReferences("myFunction")
-			result.should.be.an.Array()
-			result.should.be.empty()
-		})
-
-		it("calls getSymbols with type 'reference'", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			const expected: SymbolLocation[] = [
-				{
-					path: "src/bar.ts",
-					startLine: 5,
-					startColumn: 2,
-					endLine: 5,
-					endColumn: 14,
-					type: "reference",
-				},
-			]
-			mockDb.getSymbolsByName.returns(expected)
-
-			const result = svc.getReferences("myFunction", 10)
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "myFunction", "reference", 10)
-			result.should.equal(expected)
-		})
-
-		it("passes undefined limit when not provided", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			svc.getReferences("someSymbol")
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "someSymbol", "reference", undefined)
-		})
-	})
-
-	// ---------------------------------------------------------------
-	describe("getDefinitions", () => {
-		it("returns empty array when db is null", () => {
-			const svc = SymbolIndexService.getInstance()
-			const result = svc.getDefinitions("myFunction")
-			result.should.be.an.Array()
-			result.should.be.empty()
-		})
-
-		it("calls getSymbols with type 'definition'", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			const expected: SymbolLocation[] = [
-				{
-					path: "src/foo.ts",
-					startLine: 10,
-					startColumn: 4,
-					endLine: 10,
-					endColumn: 20,
-					type: "definition",
-					kind: "function",
-				},
-			]
-			mockDb.getSymbolsByName.returns(expected)
-
-			const result = svc.getDefinitions("myFunction", 100)
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "myFunction", "definition", 100)
-			result.should.equal(expected)
-		})
-
-		it("passes undefined limit when not provided", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			svc.getDefinitions("someSymbol")
-			sinon.assert.calledWith(mockDb.getSymbolsByName, "someSymbol", "definition", undefined)
-		})
-	})
-
-	describe("stale index cleanup", () => {
-		let projectRoot: string
-
-		beforeEach(async () => {
-			projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-index-stale-"))
-				; (SymbolIndexService.getInstance() as any).projectRoot = projectRoot
-		})
-
-		afterEach(async () => {
-			await fs.rm(projectRoot, { recursive: true, force: true })
-		})
-
-		it("removes a missing lookup result and re-queries so the limit can be filled", async () => {
+	it("returns explicit rejected outcomes for oversized and minified files", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-guard-"))
+		try {
 			const service = SymbolIndexService.getInstance()
-				; (service as any).db = mockDb
-			const existingPath = path.join(projectRoot, "existing.ts")
-			await fs.writeFile(existingPath, "export const target = 1\n")
-			const missingLocation: SymbolLocation = {
-				path: "deleted.ts",
-				startLine: 0,
-				startColumn: 0,
-				endLine: 0,
-				endColumn: 6,
-				type: "definition",
-			}
-			const existingLocation: SymbolLocation = { ...missingLocation, path: "existing.ts" }
-			mockDb.getSymbolsByName.onFirstCall().returns([missingLocation])
-			mockDb.getSymbolsByName.onSecondCall().returns([existingLocation])
-
-			const result = service.getDefinitions("target", 1)
-
-			result.should.deepEqual([existingLocation])
-			sinon.assert.calledOnceWithExactly(mockDb.removeFiles, ["deleted.ts"])
-			sinon.assert.calledTwice(mockDb.getSymbolsByName)
-		})
-
-		it("does not delete lookup results on non-ENOENT filesystem errors", async () => {
-			const service = SymbolIndexService.getInstance()
-				; (service as any).db = mockDb
-			const location: SymbolLocation = {
-				path: "temporarily-unavailable.ts",
-				startLine: 0,
-				startColumn: 0,
-				endLine: 0,
-				endColumn: 6,
-				type: "reference",
-			}
-			const inaccessibleRoot = path.join(projectRoot, "file-parent")
-			await fs.writeFile(inaccessibleRoot, "not a directory")
-			location.path = path.join("file-parent", "child.ts")
-			mockDb.getSymbolsByName.returns([location])
-
-			service.getReferences("target").should.deepEqual([location])
-			mockDb.removeFiles.notCalled.should.be.true()
-		})
-
-		it("removes indexed files that are absent after a full scan", async () => {
-			const service = SymbolIndexService.getInstance()
-				; (service as any).db = mockDb
-			mockDb.getAllFilesMetadata.returns(new Map([["deleted.ts", { mtime: 1, size: 1 }]]))
-
-			await (service as any).runFullScan()
-
-			sinon.assert.calledOnceWithExactly(mockDb.removeFiles, ["deleted.ts"])
-		})
-
-		it("keeps indexed files that still exist after a full scan", async () => {
-			const service = SymbolIndexService.getInstance()
-				; (service as any).db = mockDb
-			const filePath = path.join(projectRoot, "existing.ts")
-			await fs.writeFile(filePath, "export const existing = 1\n")
-			const stats = await fs.stat(filePath)
-			mockDb.getAllFilesMetadata.returns(new Map([["existing.ts", { mtime: stats.mtimeMs, size: stats.size }]]))
-			mockDb.getFileMetadata.withArgs("existing.ts").returns({ mtime: stats.mtimeMs, size: stats.size })
-
-			await (service as any).runFullScan()
-
-			mockDb.removeFiles.notCalled.should.be.true()
-		})
-	})
-
-
-	// ---------------------------------------------------------------
-	describe("shouldIndexPath", () => {
-		it("uses exact path-segment exclusions and includes .dirac-cache", () => {
-			const service = SymbolIndexService.getInstance()
-				; (service as any).projectRoot = "/workspace"
-
-			service.shouldIndexPath("/workspace/src/dist/file.ts").should.be.false()
-			service.shouldIndexPath("/workspace/src/dist-standalone/file.ts").should.be.false()
-			service.shouldIndexPath("/workspace/.dirac-cache/symbols.ts").should.be.false()
-			service.shouldIndexPath("/workspace/src/district/file.ts").should.be.true()
-			service.shouldIndexPath("/workspace/src/__tests__/fixture.ts").should.be.true()
-			service.shouldIndexPath("/workspace/src/file.zig").should.be.false()
-		})
-	})
-
-	describe("pre-parse guardrails", () => {
-		let projectRoot: string
-
-		beforeEach(async () => {
-			projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-index-guard-"))
-				; (SymbolIndexService.getInstance() as any).projectRoot = projectRoot
-		})
-
-		afterEach(async () => {
-			await fs.rm(projectRoot, { recursive: true, force: true })
-		})
-
-		it("skips files over the configured size cap before reading", async () => {
-			const service = SymbolIndexService.getInstance()
-			const filePath = path.join(projectRoot, "large.ts")
-			await fs.writeFile(filePath, `export const value = 1\n`)
+			const oversizedPath = path.join(projectRoot, "large.ts")
+			await fs.writeFile(oversizedPath, "export const value = 1\n")
 			service.setMaxFileSizeBytes(1)
+			;(await (service as any).indexFile(oversizedPath, {})).should.deepEqual({
+				status: "rejected",
+				reason: "oversized",
+			})
 
-			const result = await (service as any).indexFile(filePath, {})
+			service.setMaxFileSizeBytes(1024 * 1024)
+			const minifiedPath = path.join(projectRoot, "minified.ts")
+			await fs.writeFile(minifiedPath, `const value = "${"x".repeat(5_001)}"`)
+			;(await (service as any).indexFile(minifiedPath, {})).should.deepEqual({
+				status: "rejected",
+				reason: "generated or minified",
+			})
+		} finally {
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		}
+	})
 
-			should(result).be.null()
-		})
-
-		it("skips likely minified content", async () => {
+	it("returns retry when a source changes during parsing", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-changing-"))
+		try {
 			const service = SymbolIndexService.getInstance()
-			const filePath = path.join(projectRoot, "minified.ts")
-			await fs.writeFile(filePath, `const minified = \"${"x".repeat(5_001)}\"`)
+			const filePath = path.join(projectRoot, "changing.ts")
+			await fs.writeFile(filePath, "export const before = 1\n")
+			const tree = { rootNode: {}, delete: sandbox.stub() }
+			const parser = {
+				parse: sandbox.stub().callsFake(() => {
+					syncFs.writeFileSync(filePath, "export const afterValue = 2\n")
+					return tree
+				}),
+			}
+			const query = { captures: sandbox.stub().returns([]) }
 
-			const result = await (service as any).indexFile(filePath, {})
-			should(result).be.null()
-		})
+			const outcome = await (service as any).indexFile(filePath, { ts: { parser, query } })
+
+			outcome.should.deepEqual({ status: "retry" })
+			sinon.assert.calledOnce(tree.delete)
+		} finally {
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		}
 	})
 
-	describe("dispose", () => {
-		it("closes database when db is set", () => {
-			const svc = SymbolIndexService.getInstance()
-				; (svc as any).db = mockDb
-
-			svc.dispose()
-			sinon.assert.calledOnce(mockDb.close)
-			should((svc as any).db).be.null()
+	it("coalesces concurrent reconciliation requests into one run and one queued rerun", async () => {
+		const service = SymbolIndexService.getInstance()
+		;(service as any).db = { close: sandbox.stub() }
+		;(service as any).eligibility = {}
+		let releaseFirst!: () => void
+		const firstRun = new Promise<void>((resolve) => {
+			releaseFirst = resolve
 		})
+		const reconcile = sandbox.stub(service as any, "reconcile")
+		reconcile.onFirstCall().returns(firstRun)
+		reconcile.onSecondCall().resolves(false)
 
-		it("does not throw when db is null", () => {
-			const svc = SymbolIndexService.getInstance()
-			// db is null by default
-			svc.dispose()
-			// Should not throw
-		})
+		const active = service.requestReconciliation("first")
+		void service.requestReconciliation("second")
+		void service.requestReconciliation("third")
+		releaseFirst()
+		await active
 
-		it("clears save timeout if set", () => {
-			const svc = SymbolIndexService.getInstance()
-			const clearTimeoutSpy = sandbox.stub(global, "clearTimeout")
-			const fakeTimeout = setTimeout(() => { }, 99999) as any
-				; (svc as any).saveTimeout = fakeTimeout
-
-			svc.dispose()
-			sinon.assert.calledWith(clearTimeoutSpy, fakeTimeout)
-			should((svc as any).saveTimeout).be.null()
-		})
+		reconcile.callCount.should.equal(2)
+		reconcile.secondCall.calledWith("third").should.be.true()
 	})
+
+	it("serializes watcher mutations behind an active reconciliation", async () => {
+		const service = SymbolIndexService.getInstance()
+		;(service as any).db = { close: sandbox.stub() }
+		;(service as any).eligibility = {}
+		let releaseReconciliation!: () => void
+		const reconciliationBlocked = new Promise<void>((resolve) => {
+			releaseReconciliation = resolve
+		})
+		const reconcile = sandbox.stub(service as any, "reconcile").returns(reconciliationBlocked)
+		const watcherUpdate = sandbox.stub(service as any, "applyWatcherEventsSerially").resolves()
+
+		const reconciliation = service.requestReconciliation("first")
+		const watcher = (service as any).applyWatcherEvents([{ absolutePath: "/workspace/a.ts", kind: "upsert" }])
+		await Promise.resolve()
+		watcherUpdate.notCalled.should.be.true()
+
+		releaseReconciliation()
+		await Promise.all([reconciliation, watcher])
+		sinon.assert.calledOnce(reconcile)
+		sinon.assert.calledOnce(watcherUpdate)
+	})
+
+	it("evicts a previously indexed file when watcher parsing deliberately rejects it", async () => {
+		const service = SymbolIndexService.getInstance()
+		;(service as any).projectRoot = "/workspace"
+		;(service as any).eligibility = {
+			admitsRelativePath: sandbox.stub().returns(true),
+			enumerate: sandbox.stub().resolves({
+				paths: new Set(["rejected.ts"]),
+				watchDirectories: new Set(),
+				isGitWorkspace: true,
+				gitDirectory: "/workspace/.git",
+			}),
+		}
+		const applyMutation = sandbox.stub().returns({ changed: true, removed: 1, replaced: 0 })
+		;(service as any).db = {
+			applyMutation,
+			close: sandbox.stub(),
+		}
+		sandbox.stub(service as any, "stageFiles").resolves({
+			replacements: [],
+			rejectedPaths: ["rejected.ts"],
+			retryRequested: false,
+		})
+
+		await (service as any).applyWatcherEvents([{ absolutePath: "/workspace/rejected.ts", kind: "upsert" }])
+
+		applyMutation.firstCall.args[0].removals.should.deepEqual(["rejected.ts"])
+	})
+
+	it("uses no cache directory or shutdown write when persistence is disabled", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-memory-"))
+		try {
+			const service = SymbolIndexService.getInstance()
+			service.setSkipRepoCheck(true)
+			service.setPersistenceEnabled(false)
+			await service.initialize(projectRoot)
+			service.dispose()
+			const entries = await fs.readdir(projectRoot)
+			entries.includes(".dirac-cache").should.be.false()
+		} finally {
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		}
+	})
+
+	it("splits large eligibility cleanup into yielding in-memory transactions", async () => {
+		const service = SymbolIndexService.getInstance()
+		const metadata = new Map(
+			Array.from({ length: 1_250 }, (_, index) => [`ignored-${index}.ts`, { mtime: 1, size: 1 }] as const),
+		)
+		let eventLoopMarkerRan = false
+		setImmediate(() => {
+			eventLoopMarkerRan = true
+		})
+		const applyMutation = sandbox.stub().callsFake((mutation) => {
+			if (applyMutation.callCount > 1) eventLoopMarkerRan.should.be.true()
+			return {
+				changed: mutation.removals.length > 0 || mutation.replacements.length > 0,
+				removed: mutation.removals.length,
+				replaced: mutation.replacements.length,
+			}
+		})
+		const db = {
+			getAllFilesMetadata: sandbox.stub().returns(metadata),
+			applyMutation,
+			close: sandbox.stub(),
+			getAllocation: sandbox.stub().returns({
+				pageSize: 4_096,
+				pageCount: 1,
+				freelistCount: 0,
+				databaseBytes: 4_096,
+				reclaimableBytes: 0,
+			}),
+			compact: sandbox.stub(),
+		}
+		;(service as any).projectRoot = "/workspace"
+		;(service as any).eligibility = {
+			enumerate: sandbox.stub().resolves({
+				paths: new Set(),
+				watchDirectories: new Set(),
+				isGitWorkspace: true,
+				gitDirectory: "/workspace/.git",
+			}),
+		}
+		;(service as any).db = db
+		const yieldAfterMutationBatch = sandbox.spy(service as any, "yieldAfterMutationBatch")
+
+		;(await (service as any).reconcile("large cleanup")).should.be.true()
+
+		applyMutation.callCount.should.equal(13)
+		applyMutation
+			.getCalls()
+			.every((call) => call.args[0].removals.length <= 100)
+			.should.be.true()
+		applyMutation
+			.getCalls()
+			.flatMap((call) => call.args[0].removals)
+			.should.have.length(1_250)
+		yieldAfterMutationBatch.callCount.should.equal(13)
+	})
+	it("compacts only when both reclaimable-byte and free-ratio thresholds are met", () => {
+		const service = SymbolIndexService.getInstance()
+		const compact = sandbox.stub()
+		const getAllocation = sandbox.stub()
+		getAllocation.onFirstCall().returns({
+			pageSize: 4_096,
+			pageCount: 20_000,
+			freelistCount: 18_000,
+			databaseBytes: 81_920_000,
+			reclaimableBytes: 73_728_000,
+		})
+		getAllocation.onSecondCall().returns({
+			pageSize: 4_096,
+			pageCount: 2_000,
+			freelistCount: 0,
+			databaseBytes: 8_192_000,
+			reclaimableBytes: 0,
+		})
+		const db = { getAllocation, compact, close: sandbox.stub() }
+		;(service as any).db = db
+
+		;(service as any).compactDatabaseIfNeeded(db, "test")
+
+		sinon.assert.calledOnce(compact)
+		sinon.assert.calledTwice(getAllocation)
+	})
+
+	it("stages and applies large candidate sets without retaining more than ten files", async () => {
+		const service = SymbolIndexService.getInstance()
+		const applyMutation = sandbox.stub().callsFake((mutation) => ({
+			changed: mutation.removals.length > 0 || mutation.replacements.length > 0,
+			removed: mutation.removals.length,
+			replaced: mutation.replacements.length,
+		}))
+		const db = {
+			applyMutation,
+			close: sandbox.stub(),
+		}
+		;(service as any).db = db
+		const stageFiles = sandbox.stub(service as any, "stageFiles").callsFake(async (...args: unknown[]) => {
+			const batch = args[0] as Array<{ absolutePath: string; relPath: string }>
+			return {
+				replacements: batch.map((candidate) => ({
+					relPath: candidate.relPath,
+					mtime: 1,
+					size: 1,
+					symbols: [],
+				})),
+				rejectedPaths: [],
+				retryRequested: false,
+			}
+		})
+		const yieldAfterMutationBatch = sandbox.spy(service as any, "yieldAfterMutationBatch")
+		const candidates = Array.from({ length: 25 }, (_, index) => ({
+			absolutePath: `/workspace/source-${index}.ts`,
+			relPath: `source-${index}.ts`,
+		}))
+
+		const result = await (service as any).applyCandidateBatches(db, candidates, "large candidate test")
+
+		result.should.deepEqual({ changed: true, removed: 0, replaced: 25, retryRequested: false })
+		stageFiles.callCount.should.equal(3)
+		stageFiles
+			.getCalls()
+			.every((call) => call.args[0].length <= 10)
+			.should.be.true()
+		applyMutation.callCount.should.equal(3)
+		applyMutation
+			.getCalls()
+			.every((call) => call.args[0].replacements.length <= 10)
+			.should.be.true()
+		yieldAfterMutationBatch.callCount.should.equal(3)
+	})
+
+	it("stops cleanup after disposal is observed between batches", async () => {
+		const service = SymbolIndexService.getInstance()
+		const db = {
+			applyMutation: sandbox.stub().callsFake((mutation) => ({
+				changed: true,
+				removed: mutation.removals.length,
+				replaced: 0,
+			})),
+			close: sandbox.stub(),
+		}
+		;(service as any).db = db
+		sandbox.stub(service as any, "yieldAfterMutationBatch").callsFake(async () => {
+			;(service as any).disposed = true
+		})
+
+		const removed = await (service as any).applyRemovalBatches(
+			db,
+			Array.from({ length: 300 }, (_, index) => `ignored-${index}.ts`),
+			"dispose test",
+		)
+
+		removed.should.equal(100)
+		db.applyMutation.callCount.should.equal(1)
+	})
+
+	it("purges a large ignored legacy index in bounded transactions without reparsing retained files", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-legacy-"))
+		try {
+			await execFileAsync("git", ["init", "-q"], { cwd: projectRoot })
+			await fs.writeFile(path.join(projectRoot, ".gitignore"), "ignored-*.ts\n")
+			await fs.writeFile(path.join(projectRoot, "allowed.ts"), "export const allowed = 1\n")
+			const allowedStats = await fs.stat(path.join(projectRoot, "allowed.ts"))
+			const cacheDirectory = path.join(projectRoot, ".dirac-cache")
+			await fs.mkdir(cacheDirectory)
+			await seedLegacyDatabase(path.join(cacheDirectory, "symbol-index.db"), allowedStats.mtimeMs, allowedStats.size, 1_205)
+
+			const applyMutation = sandbox.spy(SymbolIndexDatabase.prototype, "applyMutation")
+			const service = SymbolIndexService.getInstance()
+			const stageFiles = sandbox.spy(service as any, "stageFiles")
+			await service.initialize(projectRoot)
+			const database = (service as any).db
+
+			stageFiles.notCalled.should.be.true()
+			const removalCalls = applyMutation.getCalls().filter((call) => call.args[0].removals.length > 0)
+			removalCalls.length.should.equal(13)
+			removalCalls.every((call) => call.args[0].removals.length <= 100).should.be.true()
+			removalCalls.flatMap((call) => call.args[0].removals).should.have.length(1_205)
+			should(database.getFileMetadata("ignored-0.ts")).be.null()
+			database.getSymbolsByName("ignored0").should.be.empty()
+			database.getSymbolsByName("allowed").should.not.be.empty()
+			const cacheEntries = await fs.readdir(cacheDirectory)
+			cacheEntries.some((entry) => entry.startsWith("symbol-index.db.tmp-")).should.be.false()
+
+			await service.requestReconciliation("periodic repair")
+			applyMutation.callCount.should.equal(13)
+		} finally {
+			SymbolIndexService.getInstance().dispose()
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		}
+	})
+
+	it("removes newly ignored files and indexes newly unignored files on reconciliation", async () => {
+		const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-symbol-ignore-change-"))
+		try {
+			await execFileAsync("git", ["init", "-q"], { cwd: projectRoot })
+			await fs.writeFile(path.join(projectRoot, "dynamic.ts"), "export const dynamic = 1\n")
+			const service = SymbolIndexService.getInstance()
+			await service.initialize(projectRoot)
+			const database = (service as any).db
+			database.getFileMetadata("dynamic.ts").should.not.be.null()
+
+			await fs.writeFile(path.join(projectRoot, ".gitignore"), "dynamic.ts\n")
+			await service.requestReconciliation("test newly ignored")
+			should(database.getFileMetadata("dynamic.ts")).be.null()
+
+			await fs.writeFile(path.join(projectRoot, ".gitignore"), "")
+			await service.requestReconciliation("test newly unignored")
+			database.getFileMetadata("dynamic.ts").should.not.be.null()
+		} finally {
+			SymbolIndexService.getInstance().dispose()
+			await fs.rm(projectRoot, { recursive: true, force: true })
+		}
+	})
+
+	function location(filePath: string): SymbolLocation {
+		return {
+			path: filePath,
+			startLine: 0,
+			startColumn: 0,
+			endLine: 0,
+			endColumn: 6,
+			type: "definition",
+		}
+	}
+
+	async function seedLegacyDatabase(
+		databasePath: string,
+		allowedMtime: number,
+		allowedSize: number,
+		ignoredFileCount: number,
+	): Promise<void> {
+		const SQL = await ensureSqlModule()
+		const database = new SQL.Database()
+		database.exec(`
+			CREATE TABLE files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL, size INTEGER NOT NULL);
+			CREATE TABLE symbols (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				file_path TEXT NOT NULL,
+				name TEXT NOT NULL,
+				type TEXT NOT NULL,
+				kind TEXT,
+				start_line INTEGER NOT NULL,
+				start_column INTEGER NOT NULL,
+				end_line INTEGER NOT NULL,
+				end_column INTEGER NOT NULL
+			);
+		`)
+		const insertFile = database.prepare("INSERT INTO files VALUES (?, ?, ?)")
+		const insertSymbol = database.prepare(
+			"INSERT INTO symbols (file_path, name, type, start_line, start_column, end_line, end_column) VALUES (?, ?, 'definition', 0, 0, 0, 7)",
+		)
+		try {
+			insertFile.run(["allowed.ts", allowedMtime, allowedSize])
+			insertSymbol.run(["allowed.ts", "allowed"])
+			for (let index = 0; index < ignoredFileCount; index++) {
+				const relativePath = `ignored-${index}.ts`
+				insertFile.run([relativePath, 1, 1])
+				insertSymbol.run([relativePath, `ignored${index}`])
+			}
+		} finally {
+			insertFile.free()
+			insertSymbol.free()
+		}
+		await fs.writeFile(databasePath, database.export())
+		database.close()
+	}
 })

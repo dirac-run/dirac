@@ -25,14 +25,15 @@ export class CommentReplyHandler {
 	async handleReply(reply: vscode.CommentReply): Promise<void> {
 		const thread = reply.thread
 		const replyText = reply.text
+		const range = this.requireThreadRange(thread)
 
 		const userComment = this.threadManager.createComment(replyText, vscode.CommentMode.Preview, true)
 		thread.comments = [...thread.comments, userComment]
 
 		if (this.onReplyCallback) {
 			const filePath = this.threadManager.threadFilePathsMap.get(thread) || thread.uri.fsPath
-			const startLine = thread.range.start.line
-			const endLine = thread.range.end.line
+			const startLine = range.start.line
+			const endLine = range.end.line
 
 			const existingComments = thread.comments.slice(0, -1).map((c) => {
 				const author = c.author.name
@@ -69,8 +70,9 @@ export class CommentReplyHandler {
 
 	async handleAddToChat(thread: vscode.CommentThread): Promise<void> {
 		const filePath = this.threadManager.threadFilePathsMap.get(thread) || thread.uri.fsPath
-		const startLine = thread.range.start.line + 1
-		const endLine = thread.range.end.line + 1
+		const range = this.requireThreadRange(thread)
+		const startLine = range.start.line + 1
+		const endLine = range.end.line + 1
 
 		const conversation = thread.comments
 			.map((c) => {
@@ -95,8 +97,9 @@ Please continue helping the user with their question about this code.`
 
 	async revealCommentInDocument(thread: vscode.CommentThread): Promise<void> {
 		try {
+			const range = this.requireThreadRange(thread)
 			const doc = await vscode.workspace.openTextDocument(thread.uri)
-			const commentPosition = new vscode.Range(thread.range.start, thread.range.start)
+			const commentPosition = new vscode.Range(range.start, range.start)
 			const editor = await vscode.window.showTextDocument(doc, {
 				selection: commentPosition,
 				preserveFocus: false,
@@ -106,5 +109,9 @@ Please continue helping the user with their question about this code.`
 		} catch (error) {
 			Logger.error("[CommentReplyHandler] Error revealing comment:", error)
 		}
+	}
+	private requireThreadRange(thread: vscode.CommentThread): vscode.Range {
+		if (!thread.range) throw new Error("Code review comment thread has no document range")
+		return thread.range
 	}
 }

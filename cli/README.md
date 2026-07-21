@@ -53,6 +53,8 @@ Dirac is benchmarked against other leading open-source agents on complex, real-w
 
 ## 📦 Installation
 
+Dirac CLI requires Node.js 22.13 through 24.x. Node.js 25 is not supported due to known memory issues.
+
 Install the Dirac CLI globally using npm:
 
 ```bash

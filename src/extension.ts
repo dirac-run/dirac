@@ -48,8 +48,6 @@ import { VscodeDiracWebviewProvider } from "./hosts/vscode/VscodeWebviewProvider
 import { exportVSCodeStorageToSharedFiles } from "./hosts/vscode/vscode-to-file-migration"
 import { ExtensionRegistryInfo } from "./registry"
 import { resolveWorkingRipgrepBinary } from "./services/ripgrep/resolve-ripgrep-binary"
-import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
-import { SymbolIndexUpdateScheduler } from "./services/symbol-index/SymbolIndexUpdateScheduler"
 import { telemetryService } from "./services/telemetry"
 import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
 import { ShowMessageType } from "./shared/proto/host/window"
@@ -545,41 +543,6 @@ ${ctx.cellJson || "{}"}
 			abortCommitGeneration()
 		}),
 	)
-
-	// =============== Symbol Index File Watchers ===============
-	const supportedExts = [
-		"js",
-		"jsx",
-		"ts",
-		"tsx",
-		"py",
-		"rs",
-		"go",
-		"c",
-		"h",
-		"cpp",
-		"hpp",
-		"cs",
-		"rb",
-		"java",
-		"php",
-		"swift",
-		"kt",
-	]
-	const symbolIndexService = SymbolIndexService.getInstance()
-	const updateScheduler = new SymbolIndexUpdateScheduler({
-		shouldIndexPath: (absolutePath) => symbolIndexService.shouldIndexPath(absolutePath),
-		updateFile: (absolutePath) => symbolIndexService.updateFile(absolutePath),
-		removeFile: (absolutePath) => symbolIndexService.removeFile(absolutePath),
-		requestFullRescan: () => symbolIndexService.requestFullRescan(),
-	})
-	const fileWatcher = vscode.workspace.createFileSystemWatcher(`**/*.{${supportedExts.join(",")}}`)
-
-	fileWatcher.onDidChange((uri) => updateScheduler.scheduleUpdate(uri.fsPath))
-	fileWatcher.onDidCreate((uri) => updateScheduler.scheduleUpdate(uri.fsPath))
-	fileWatcher.onDidDelete((uri) => updateScheduler.removeFile(uri.fsPath))
-
-	context.subscriptions.push(fileWatcher, updateScheduler)
 
 	Logger.log(`[Dirac] extension activated in ${performance.now() - activationStartTime} ms`)
 

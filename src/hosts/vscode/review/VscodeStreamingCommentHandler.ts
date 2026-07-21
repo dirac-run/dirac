@@ -63,8 +63,9 @@ export class StreamingCommentHandler {
 
 	private async revealInDocument(thread: vscode.CommentThread): Promise<void> {
 		try {
+			const range = this.requireThreadRange(thread)
 			const doc = await vscode.workspace.openTextDocument(thread.uri)
-			const commentPosition = new vscode.Range(thread.range.start, thread.range.start)
+			const commentPosition = new vscode.Range(range.start, range.start)
 			const editor = await vscode.window.showTextDocument(doc, {
 				selection: commentPosition,
 				preserveFocus: false,
@@ -74,6 +75,10 @@ export class StreamingCommentHandler {
 		} catch (_error) {
 			// Ignore errors - this is not critical
 		}
+	}
+	private requireThreadRange(thread: vscode.CommentThread): vscode.Range {
+		if (!thread.range) throw new Error("Streaming comment thread has no document range")
+		return thread.range
 	}
 
 	private getThreadKey(filePath: string, startLine: number, endLine: number): string {

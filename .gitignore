@@ -67,3 +67,8 @@ tmp_*.txt
 
 # Scratchpad commit-message files (used to work around heredoc+backtick issues)
 COMMIT_MSG*.txt
+
+ast-service/target/
+ast-service/release-artifacts/
+ast-service/qualification/*
+ast-service/

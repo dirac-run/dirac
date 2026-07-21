@@ -6,7 +6,7 @@ class Dirac < Formula
   sha256 "df8bcb76f7da31a545210b29d6ca3a12f01696af5a6fa5d966abbda29950feee"
   license :cannot_represent
 
-  depends_on "node@20"
+  depends_on "node@22"
   depends_on "ripgrep"
 
   def install

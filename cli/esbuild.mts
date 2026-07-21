@@ -261,7 +261,7 @@ const sharedOptions: Partial<esbuild.BuildOptions> = {
 	format: "esm",
 	sourcesContent: false,
 	platform: "node",
-	target: "node20",
+	target: "node22.13",
 	// These modules need to load files from the module directory at runtime
 	external: [
 		"web-tree-sitter",
