@@ -43,3 +43,25 @@ Dirac uses the default Google Cloud authentication chain. Ensure you have authen
 ```bash
 gcloud auth application-default login
 ```
+
+## Eden AI (EU, OpenAI-compatible)
+
+[Eden AI](https://www.edenai.co/) is a French, EU-based OpenAI-compatible gateway that reaches many upstream vendors through one key. Use it through Dirac's OpenAI-compatible support by pointing the base URL at Eden AI. Model ids are vendor-prefixed (`<vendor>/<model>`), e.g. `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4-5`, `mistral/mistral-small-latest`.
+
+### Environment Variables
+
+- `OPENAI_API_BASE` — `https://api.edenai.run/v3` (or `https://api.eu.edenai.run/v3` for EU data residency)
+- `OPENAI_API_KEY` — your Eden AI API key
+
+### Usage Example
+
+```bash
+export OPENAI_API_BASE="https://api.edenai.run/v3"
+export OPENAI_API_KEY="your-edenai-key"
+
+dirac "your task" --model "openai/gpt-4o-mini"
+```
+
+### EU data residency & GDPR
+
+Eden AI's EU endpoint (`https://api.eu.edenai.run/v3`) processes and routes prompts and outputs within the European Union (non-EU models are rejected), with zero data retention by default — prompts and outputs are not stored and are removed within 24 hours. Eden AI is SOC 2 and ISO 27001, with a DPA as standard, designed around GDPR and the EU AI Act. Point `OPENAI_API_BASE` at the EU endpoint to keep traffic in-region. See [Eden AI data compliance](https://www.edenai.co/data-compliancy).
