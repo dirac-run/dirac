@@ -17,6 +17,7 @@ import {
 	liteLlmModelInfoSaneDefaults,
 	openAiModelInfoSaneDefaults,
 	ModelInfo,
+	type ApiConfiguration,
 } from "@shared/api"
 import type { ModelProviderPreset } from "@shared/api"
 import { fromProtobufModels } from "@shared/proto-conversions/models/typeConversion"
@@ -28,6 +29,8 @@ import { create } from "zustand"
 interface SettingsState {
 	version: string
 	apiConfiguration: any
+	apiConfigurationError?: string
+	pendingApiConfigurationUpdates: Partial<ApiConfiguration>
 	modelProviderPresets: ModelProviderPreset[]
 	navigateToAccount: () => void
 	setShowWelcome: (show: boolean) => void
@@ -228,6 +231,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
 	version: "0.0.0",
 	apiConfiguration: {},
+	apiConfigurationError: undefined,
+	pendingApiConfigurationUpdates: {},
 	modelProviderPresets: [],
 	navigateToAccount: () => {},
 	setShowWelcome: () => {},
@@ -428,6 +433,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 	},
 	setSettings: (settings) =>
 		set((state) => {
-			return { ...state, ...settings }
+			const pendingApiConfigurationUpdates = settings.pendingApiConfigurationUpdates ?? state.pendingApiConfigurationUpdates
+			return {
+				...state,
+				...settings,
+				pendingApiConfigurationUpdates,
+				apiConfiguration:
+					settings.apiConfiguration !== undefined
+						? { ...settings.apiConfiguration, ...pendingApiConfigurationUpdates }
+						: state.apiConfiguration,
+			}
 		}),
 }))

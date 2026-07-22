@@ -1,5 +1,5 @@
-import { DiracMessage, CardStatus } from "@shared/ExtensionMessage"
-import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react"
+import { CardStatus, DiracMessage } from "@shared/ExtensionMessage"
+import { type SetStateAction, useCallback, useEffect, useRef, useState } from "react"
 import { ListRange, VirtuosoHandle } from "react-virtuoso"
 import { ScrollBehavior } from "../types/chatTypes"
 
@@ -25,6 +25,8 @@ export function useScrollBehavior(
 	const isAtBottomRef = useRef(false)
 	const programmaticScrollRef = useRef(false)
 	const scrollRafIdRef = useRef(0)
+	const messageScrollRafIdRef = useRef(0)
+	const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	// Debounce timer for at-bottom state changes to absorb scroll jitter
 	const atBottomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,11 +52,20 @@ export function useScrollBehavior(
 		// Range changed callback - we now use scroll position instead
 		// but keep this for potential future use
 	}, [])
+	const beginProgrammaticScroll = useCallback((duration: number) => {
+		programmaticScrollRef.current = true
+		if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current)
+		programmaticScrollTimerRef.current = setTimeout(() => {
+			programmaticScrollRef.current = false
+			programmaticScrollTimerRef.current = null
+		}, duration)
+	}, [])
+
 	// Instant scroll to bottom using Virtuoso's scrollToIndex for precise positioning.
 	const scrollToBottomNow = useCallback(() => {
 		cancelAnimationFrame(scrollRafIdRef.current)
 		scrollRafIdRef.current = requestAnimationFrame(() => {
-			programmaticScrollRef.current = true
+			beginProgrammaticScroll(100)
 			const count = renderedMessagesRef.current.length
 			if (count > 0) {
 				virtuosoRef.current?.scrollToIndex({
@@ -66,25 +77,24 @@ export function useScrollBehavior(
 				footerRef.current?.scrollIntoView({ block: "end", behavior: "auto" })
 			}
 		})
-	}, [])
+	}, [beginProgrammaticScroll])
 
-	// Smooth scroll to bottom — for user-initiated actions (scroll-to-bottom button).
+	// Smooth scrolling is reserved for explicit user actions. Streaming follows instantly.
 	const scrollToBottomSmooth = useCallback(() => {
-		programmaticScrollRef.current = true
+		const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+		beginProgrammaticScroll(prefersReducedMotion ? 100 : 500)
+		const behavior: globalThis.ScrollBehavior = prefersReducedMotion ? "auto" : "smooth"
 		const count = renderedMessagesRef.current.length
 		if (count > 0) {
 			virtuosoRef.current?.scrollToIndex({
 				index: count - 1,
 				align: "end",
-				behavior: "smooth",
+				behavior,
 			})
 		} else {
-			footerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+			footerRef.current?.scrollIntoView({ block: "end", behavior })
 		}
-		setTimeout(() => {
-			programmaticScrollRef.current = false
-		}, 500)
-	}, [])
+	}, [beginProgrammaticScroll])
 
 	// Instant scroll to bottom (backward-compat alias)
 	const scrollToBottomAuto = useCallback(() => {
@@ -120,11 +130,13 @@ export function useScrollBehavior(
 			disableAutoScrollRef.current = true
 
 			// Use scrollToIndex - Virtuoso handles this more reliably than manual scrollTo
-			requestAnimationFrame(() => {
+			cancelAnimationFrame(messageScrollRafIdRef.current)
+			messageScrollRafIdRef.current = requestAnimationFrame(() => {
+				const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 				virtuosoRef.current?.scrollToIndex({
 					index: renderedIndex,
 					align: "start",
-					behavior: "smooth",
+					behavior: prefersReducedMotion ? "auto" : "smooth",
 				})
 			})
 		},
@@ -153,30 +165,23 @@ export function useScrollBehavior(
 			}
 			// Only scroll on collapse, never on expand - expanding should stay in place
 			if (isCollapsing && isAtBottomRef.current) {
-				const timer = setTimeout(() => {
-					scrollToBottomAuto()
-				}, 0)
-				return () => clearTimeout(timer)
+				scrollToBottomAuto()
+				return
 			}
 			if (isCollapsing && (isLast || isSecondToLast)) {
-				if (isSecondToLast && !isLastCollapsedApiReq) {
-					return
-				}
-				const timer = setTimeout(() => {
-					scrollToBottomAuto()
-				}, 0)
-				return () => clearTimeout(timer)
+				if (isSecondToLast && !isLastCollapsedApiReq) return
+				scrollToBottomAuto()
 			}
-			// When expanding, don't scroll - let the element expand in place
+			// Expanding stays anchored at the disclosure control.
 		},
-		[renderedMessages, expandedRows, scrollToBottomAuto],
+		[renderedMessages, expandedRows, scrollToBottomAuto, setExpandedRows],
 	)
 
 	useEffect(() => {
 		if (pendingScrollToMessage !== null) {
 			scrollToMessage(pendingScrollToMessage)
 		}
-	}, [pendingScrollToMessage, renderedMessages, scrollToMessage])
+	}, [pendingScrollToMessage, scrollToMessage])
 
 	useEffect(() => {
 		if (!messages?.length) {
@@ -196,6 +201,27 @@ export function useScrollBehavior(
 		}
 		lastCardStatusRef.current = currentStatus
 	}, [renderedMessages, scrollToBottomAuto])
+
+	const taskId = messages.at(0)?.id
+	useEffect(() => {
+		disableAutoScrollRef.current = false
+		isAtBottomRef.current = false
+		programmaticScrollRef.current = false
+		setIsAtBottom(false)
+		setShowScrollToBottom(false)
+		return () => {
+			cancelAnimationFrame(scrollRafIdRef.current)
+			cancelAnimationFrame(messageScrollRafIdRef.current)
+			if (atBottomDebounceRef.current) {
+				clearTimeout(atBottomDebounceRef.current)
+				atBottomDebounceRef.current = null
+			}
+			if (programmaticScrollTimerRef.current) {
+				clearTimeout(programmaticScrollTimerRef.current)
+				programmaticScrollTimerRef.current = null
+			}
+		}
+	}, [taskId])
 
 	return {
 		virtuosoRef,

@@ -1,36 +1,27 @@
 import { StringRequest } from "@shared/proto/dirac/common"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import mermaid from "mermaid"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import styled from "styled-components"
 import { FileServiceClient } from "@/shared/api/grpc-client"
-import { useDebounceEffect } from "@/shared/lib/useDebounceEffect"
 
 const MERMAID_THEME = {
-	background: "#1e1e1e", // VS Code dark theme background
-	textColor: "#ffffff", // Main text color
-	mainBkg: "#2d2d2d", // Background for nodes
-	nodeBorder: "#888888", // Border color for nodes
-	lineColor: "#cccccc", // Lines connecting nodes
-	primaryColor: "#3c3c3c", // Primary color for highlights
-	primaryTextColor: "#ffffff", // Text in primary colored elements
+	background: "#1e1e1e",
+	textColor: "#ffffff",
+	mainBkg: "#2d2d2d",
+	nodeBorder: "#888888",
+	lineColor: "#cccccc",
+	primaryColor: "#3c3c3c",
+	primaryTextColor: "#ffffff",
 	primaryBorderColor: "#888888",
-	secondaryColor: "#2d2d2d", // Secondary color for alternate elements
-	tertiaryColor: "#454545", // Third color for special elements
-
-	// Class diagram specific
+	secondaryColor: "#2d2d2d",
+	tertiaryColor: "#454545",
 	classText: "#ffffff",
-
-	// State diagram specific
 	labelColor: "#ffffff",
-
-	// Sequence diagram specific
 	actorLineColor: "#cccccc",
 	actorBkg: "#2d2d2d",
 	actorBorder: "#888888",
 	actorTextColor: "#ffffff",
-
-	// Flow diagram specific
 	fillType0: "#2d2d2d",
 	fillType1: "#3c3c3c",
 	fillType2: "#454545",
@@ -38,38 +29,24 @@ const MERMAID_THEME = {
 
 mermaid.initialize({
 	startOnLoad: false,
-	securityLevel: "loose",
+	securityLevel: "strict",
 	theme: "dark",
 	themeVariables: {
 		...MERMAID_THEME,
 		fontSize: "16px",
 		fontFamily: "var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif)",
-
-		// Additional styling
 		noteTextColor: "#ffffff",
 		noteBkgColor: "#454545",
 		noteBorderColor: "#888888",
-
-		// Improve contrast for special elements
 		critBorderColor: "#ff9580",
 		critBkgColor: "#803d36",
-
-		// Task diagram specific
 		taskTextColor: "#ffffff",
 		taskTextOutsideColor: "#ffffff",
 		taskTextLightColor: "#ffffff",
-
-		// Numbers/sections
 		sectionBkgColor: "#2d2d2d",
 		sectionBkgColor2: "#3c3c3c",
-
-		// Alt sections in sequence diagrams
 		altBackground: "#2d2d2d",
-
-		// Links
 		linkColor: "#6cb6ff",
-
-		// Borders and lines
 		compositeBackground: "#2d2d2d",
 		compositeBorder: "#888888",
 		titleColor: "#ffffff",
@@ -80,149 +57,142 @@ interface MermaidBlockProps {
 	code: string
 }
 
+let nextDiagramId = 0
+
 export default function MermaidBlock({ code }: MermaidBlockProps) {
 	const containerRef = useRef<HTMLDivElement>(null)
+	const renderVersionRef = useRef(0)
+	const [renderedSvg, setRenderedSvg] = useState<string>()
+	const [renderError, setRenderError] = useState<string>()
 	const [isLoading, setIsLoading] = useState(false)
 
-	// 1) Whenever `code` changes, mark that we need to re-render a new chart
 	useEffect(() => {
+		const renderVersion = ++renderVersionRef.current
 		setIsLoading(true)
+		setRenderError(undefined)
+
+		const timer = window.setTimeout(async () => {
+			try {
+				const isValid = await mermaid.parse(code, { suppressErrors: true })
+				if (!isValid) throw new Error("Invalid or incomplete Mermaid code")
+
+				const id = `mermaid-${++nextDiagramId}`
+				const { svg } = await mermaid.render(id, code)
+				if (renderVersionRef.current !== renderVersion) return
+				setRenderedSvg(svg)
+			} catch (error) {
+				if (renderVersionRef.current !== renderVersion) return
+				console.warn("Mermaid parse/render failed:", error)
+				setRenderError(code)
+				setRenderedSvg(undefined)
+			} finally {
+				if (renderVersionRef.current === renderVersion) setIsLoading(false)
+			}
+		}, 500)
+
+		return () => {
+			window.clearTimeout(timer)
+			if (renderVersionRef.current === renderVersion) renderVersionRef.current++
+		}
 	}, [code])
 
-	// 2) Debounce the actual parse/render
-	useDebounceEffect(
-		() => {
-			if (containerRef.current) {
-				containerRef.current.innerHTML = ""
-			}
-			mermaid
-				.parse(code, { suppressErrors: true })
-				.then((isValid) => {
-					if (!isValid) {
-						throw new Error("Invalid or incomplete Mermaid code")
-					}
-					const id = `mermaid-${Math.random().toString(36).substring(2)}`
-					return mermaid.render(id, code)
-				})
-				.then(({ svg }) => {
-					if (containerRef.current) {
-						containerRef.current.innerHTML = svg
-					}
-				})
-				.catch((err) => {
-					console.warn("Mermaid parse/render failed:", err)
-					containerRef.current!.innerHTML = code.replace(/</g, "&lt;").replace(/>/g, "&gt;")
-				})
-				.finally(() => {
-					setIsLoading(false)
-				})
-		},
-		500, // Delay 500ms
-		[code], // Dependencies for scheduling
-	)
+	useLayoutEffect(() => {
+		const container = containerRef.current
+		if (!container) return
+		if (renderedSvg) container.innerHTML = renderedSvg
+		else if (renderError) container.replaceChildren()
+	}, [renderedSvg, renderError])
 
-	/**
-	 * Called when user clicks the rendered diagram.
-	 * Converts the <svg> to a PNG and sends it to the extension.
-	 */
 	const handleClick = async () => {
-		if (!containerRef.current) {
-			return
-		}
-		const svgEl = containerRef.current.querySelector("svg")
-		if (!svgEl) {
-			return
-		}
+		const svgElement = containerRef.current?.querySelector("svg")
+		if (!svgElement) return
 
 		try {
-			const pngDataUrl = await svgToPng(svgEl)
-			FileServiceClient.openImage(StringRequest.create({ value: pngDataUrl })).catch((err) =>
-				console.error("Failed to open image:", err),
-			)
-		} catch (err) {
-			console.error("Error converting SVG to PNG:", err)
+			const pngDataUrl = await svgToPng(svgElement)
+			await FileServiceClient.openImage(StringRequest.create({ value: pngDataUrl }))
+		} catch (error) {
+			console.error("Error opening Mermaid diagram:", error)
 		}
 	}
 
 	const handleCopyCode = async () => {
 		try {
 			await navigator.clipboard.writeText(code)
-		} catch (err) {
-			console.error("Copy failed", err)
+		} catch (error) {
+			console.error("Copy failed", error)
 		}
 	}
 
 	return (
-		<MermaidBlockContainer>
-			{isLoading && <LoadingMessage>Generating mermaid diagram...</LoadingMessage>}
+		<MermaidBlockContainer aria-busy={isLoading}>
+			{isLoading && <LoadingMessage role="status">Generating Mermaid diagram…</LoadingMessage>}
 			<ButtonContainer>
-				<StyledVSCodeButton aria-label="Copy Code" onClick={handleCopyCode} title="Copy Code">
+				<StyledVSCodeButton aria-label="Copy Mermaid code" onClick={handleCopyCode} title="Copy Mermaid code">
 					<span className="codicon codicon-copy" />
 				</StyledVSCodeButton>
 			</ButtonContainer>
-			<SvgContainer $isLoading={isLoading} onClick={handleClick} ref={containerRef} />
+			{renderError && !renderedSvg ? <ErrorContainer>{renderError}</ErrorContainer> : null}
+			<SvgContainer
+				aria-label={renderedSvg ? "Open Mermaid diagram" : undefined}
+				onClick={renderedSvg ? handleClick : undefined}
+				onKeyDown={(event) => {
+					if (renderedSvg && (event.key === "Enter" || event.key === " ")) {
+						event.preventDefault()
+						handleClick()
+					}
+				}}
+				ref={containerRef}
+				role={renderedSvg ? "button" : undefined}
+				tabIndex={renderedSvg ? 0 : undefined}
+			/>
 		</MermaidBlockContainer>
 	)
 }
 
-async function svgToPng(svgEl: SVGElement): Promise<string> {
-	// Clone the SVG to avoid modifying the original
-	const svgClone = svgEl.cloneNode(true) as SVGElement
-
-	// Get the original viewBox
+async function svgToPng(svgElement: SVGElement): Promise<string> {
+	const svgClone = svgElement.cloneNode(true) as SVGElement
 	const viewBox = svgClone.getAttribute("viewBox")?.split(" ").map(Number) || []
 	const originalWidth = viewBox[2] || svgClone.clientWidth
 	const originalHeight = viewBox[3] || svgClone.clientHeight
+	if (!originalWidth || !originalHeight) throw new Error("Mermaid diagram has no measurable dimensions")
 
-	// Calculate the scale factor to fit editor width while maintaining aspect ratio
-
-	// Unless we can find a way to get the actual editor window dimensions through the VS Code API (which might be possible but would require changes to the extension side),
-	// the fixed width seems like a reliable approach.
 	const editorWidth = 3_600
-
-	const scale = editorWidth / originalWidth
-	const scaledHeight = originalHeight * scale
-
-	// Update SVG dimensions
+	const scaledHeight = originalHeight * (editorWidth / originalWidth)
 	svgClone.setAttribute("width", `${editorWidth}`)
 	svgClone.setAttribute("height", `${scaledHeight}`)
 
-	const serializer = new XMLSerializer()
-	const svgString = serializer.serializeToString(svgClone)
-	const encoder = new TextEncoder()
-	const bytes = encoder.encode(svgString)
+	const svgString = new XMLSerializer().serializeToString(svgClone)
+	const bytes = new TextEncoder().encode(svgString)
 	const base64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))
 	const svgDataUrl = `data:image/svg+xml;base64,${base64}`
 
 	return new Promise((resolve, reject) => {
-		const img = new Image()
-		img.onload = () => {
+		const image = new Image()
+		image.onload = () => {
 			const canvas = document.createElement("canvas")
 			canvas.width = editorWidth
 			canvas.height = scaledHeight
-
-			const ctx = canvas.getContext("2d")
-			if (!ctx) {
-				return reject("Canvas context not available")
+			const context = canvas.getContext("2d")
+			if (!context) {
+				reject(new Error("Canvas context not available"))
+				return
 			}
 
-			// Fill background with Mermaid's dark theme background color
-			ctx.fillStyle = MERMAID_THEME.background
-			ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-			ctx.imageSmoothingEnabled = true
-			ctx.imageSmoothingQuality = "high"
-
-			ctx.drawImage(img, 0, 0, editorWidth, scaledHeight)
-			resolve(canvas.toDataURL("image/png", 1.0))
+			context.fillStyle = MERMAID_THEME.background
+			context.fillRect(0, 0, canvas.width, canvas.height)
+			context.imageSmoothingEnabled = true
+			context.imageSmoothingQuality = "high"
+			context.drawImage(image, 0, 0, editorWidth, scaledHeight)
+			resolve(canvas.toDataURL("image/png", 1))
 		}
-		img.onerror = reject
-		img.src = svgDataUrl
+		image.onerror = () => reject(new Error("Failed to rasterize Mermaid diagram"))
+		image.src = svgDataUrl
 	})
 }
 
 const MermaidBlockContainer = styled.div`
 	position: relative;
+	min-width: 0;
 	margin: 8px 0;
 `
 
@@ -231,32 +201,59 @@ const ButtonContainer = styled.div`
 	top: 8px;
 	right: 8px;
 	z-index: 1;
-	opacity: 0.6;
+	opacity: 0.7;
 	transition: opacity 0.2s ease;
 
-	&:hover {
+	&:hover,
+	&:focus-within {
 		opacity: 1;
 	}
 `
 
 const LoadingMessage = styled.div`
-	padding: 8px 0;
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 1;
+	padding: 3px 6px;
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 88%, transparent);
 	color: var(--vscode-descriptionForeground);
-	font-style: italic;
-	font-size: 0.9em;
+	font-size: 0.8em;
 `
 
-interface SvgContainerProps {
-	$isLoading: boolean
-}
+const ErrorContainer = styled.pre`
+	box-sizing: border-box;
+	max-width: 100%;
+	max-height: 240px;
+	margin: 0;
+	padding: 12px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+`
 
-const SvgContainer = styled.div<SvgContainerProps>`
-	opacity: ${(props) => (props.$isLoading ? 0.3 : 1)};
-	min-height: 20px;
-	transition: opacity 0.2s ease;
+const SvgContainer = styled.div`
+	min-height: 56px;
+	max-width: 100%;
+	overflow: auto;
 	cursor: pointer;
 	display: flex;
 	justify-content: center;
+
+	&:empty {
+		cursor: default;
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
+	}
+
+	& > svg {
+		max-width: 100%;
+		height: auto;
+	}
 `
 
 const StyledVSCodeButton = styled(VSCodeButton)`
@@ -271,7 +268,7 @@ const StyledVSCodeButton = styled(VSCodeButton)`
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	transition: all 0.2s ease;
+	transition: background-color 0.2s ease, border-color 0.2s ease;
 
 	.codicon {
 		font-size: 14px;
@@ -280,12 +277,5 @@ const StyledVSCodeButton = styled(VSCodeButton)`
 	&:hover {
 		background-color: var(--vscode-button-secondaryHoverBackground);
 		border-color: var(--vscode-button-border);
-		transform: translateY(-1px);
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-	}
-
-	&:active {
-		transform: translateY(0);
-		box-shadow: none;
 	}
 `

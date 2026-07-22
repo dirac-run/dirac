@@ -5,9 +5,9 @@ import {
 	FlaskConical,
 	Info,
 	type LucideIcon,
+	Puzzle,
 	SlidersHorizontal,
 	SquareMousePointer,
-	Puzzle,
 	SquareTerminal,
 	Wrench,
 } from "lucide-react"
@@ -18,7 +18,6 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { cn } from "@/lib/utils"
 import { StateServiceClient } from "@/shared/api/grpc-client"
 import { Tab, TabContent, TabList, TabTrigger } from "@/shared/ui/Tab"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import ViewHeader from "@/shared/ui/ViewHeader"
 import SectionHeader from "../SectionHeader"
 import AboutSection from "../sections/AboutSection"
@@ -126,70 +125,62 @@ const renderSectionHeader = (tabId: string) => {
 	)
 }
 
-const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
-	// Memoize to avoid recreation
-	const TAB_CONTENT_MAP: Record<SettingsTabID, React.FC<any>> = useMemo(
-		() => ({
-			"api-config": ApiConfigurationSection,
-			general: GeneralSettingsSection,
-			features: FeatureSettingsSection,
-			tools: ToolTogglePanel,
-			browser: BrowserSettingsSection,
-			terminal: TerminalSettingsSection,
-			about: AboutSection,
-			debug: DebugSection,
-		}),
-		[],
-	) // Empty deps - these imports never change
+const TAB_CONTENT_MAP: Record<SettingsTabID, React.FC<any>> = {
+	"api-config": ApiConfigurationSection,
+	features: FeatureSettingsSection,
+	tools: ToolTogglePanel,
+	browser: BrowserSettingsSection,
+	terminal: TerminalSettingsSection,
+	general: GeneralSettingsSection,
+	about: AboutSection,
+	debug: DebugSection,
+}
 
-	const { version, environment } = useSettingsStore()
+const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
+	const version = useSettingsStore((state) => state.version)
+	const environment = useSettingsStore((state) => state.environment)
 	const activeOrganization = useUserStore((state) => state.activeOrganization)
 
-	const [activeTab, setActiveTab] = useState<string>(targetSection || SETTINGS_TABS[0].id)
+	const visibleTabs = useMemo(() => SETTINGS_TABS.filter((tab) => !tab.hidden?.({ activeOrganization })), [activeOrganization])
+	const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs])
+	const resolveTab = useCallback(
+		(tabId?: string): SettingsTabID =>
+			tabId && visibleTabIds.has(tabId as SettingsTabID) ? (tabId as SettingsTabID) : visibleTabs[0]?.id || "api-config",
+		[visibleTabIds, visibleTabs],
+	)
+	const [activeTab, setActiveTab] = useState<SettingsTabID>(() => resolveTab(targetSection))
 
-	// Optimized message handler with early returns
-	const handleMessage = useCallback((event: MessageEvent) => {
-		const message: ExtensionMessage = event.data
-		if (message.type !== "grpc_response") {
-			return
-		}
+	useEffect(() => {
+		setActiveTab((current) => resolveTab(targetSection || current))
+	}, [resolveTab, targetSection])
 
-		const grpcMessage = message.grpc_response?.message
-		if (grpcMessage?.key !== "scrollToSettings") {
-			return
-		}
+	const handleMessage = useCallback(
+		(event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
+			if (message.type !== "grpc_response") return
 
-		const tabId = grpcMessage.value
-		if (!tabId) {
-			return
-		}
+			const grpcMessage = message.grpc_response?.message
+			if (grpcMessage?.key !== "scrollToSettings" || !grpcMessage.value) return
 
-		// Check if valid tab ID
-		if (SETTINGS_TABS.some((tab) => tab.id === tabId)) {
-			setActiveTab(tabId)
-			return
-		}
-
-		// Fallback to element scrolling
-		requestAnimationFrame(() => {
-			const element = document.getElementById(tabId)
-			if (!element) {
+			const tabId = grpcMessage.value
+			if (visibleTabIds.has(tabId as SettingsTabID)) {
+				setActiveTab(tabId as SettingsTabID)
 				return
 			}
 
-			element.scrollIntoView({ behavior: "smooth" })
-			element.style.transition = "background-color 0.5s ease"
-			element.style.backgroundColor = "var(--vscode-textPreformat-background)"
-
-			setTimeout(() => {
-				element.style.backgroundColor = "transparent"
-			}, 1200)
-		})
-	}, [])
+			requestAnimationFrame(() => {
+				const element = document.getElementById(tabId)
+				if (!element) return
+				element.scrollIntoView({ behavior: "smooth", block: "center" })
+				element.classList.add("settings-target-highlight")
+				window.setTimeout(() => element.classList.remove("settings-target-highlight"), 1200)
+			})
+		},
+		[visibleTabIds],
+	)
 
 	useEvent("message", handleMessage)
 
-	// Memoized reset state handler
 	const handleResetState = useCallback(async (resetGlobalState?: boolean) => {
 		try {
 			await StateServiceClient.resetState(ResetStateRequest.create({ global: resetGlobalState }))
@@ -198,57 +189,13 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 		}
 	}, [])
 
-	// Update active tab when targetSection changes
-	useEffect(() => {
-		if (targetSection) {
-			setActiveTab(targetSection)
-		}
-	}, [targetSection])
-
-	// Memoized tab item renderer
-	const renderTabItem = useCallback(
-		(tab: (typeof SETTINGS_TABS)[0]) => {
-			return (
-				<TabTrigger className="flex justify-baseline" data-testid={`tab-${tab.id}`} key={tab.id} value={tab.id}>
-					<Tooltip key={tab.id}>
-						<TooltipTrigger>
-							<div
-								className={cn(
-									"whitespace-nowrap overflow-hidden h-12 sm:py-3 box-border flex items-center border-l-2 border-transparent text-foreground opacity-70 bg-transparent hover:bg-list-hover p-4 cursor-pointer gap-2",
-									{
-										"opacity-100 border-l-2 border-l-foreground border-t-0 border-r-0 border-b-0 bg-selection":
-											activeTab === tab.id,
-									},
-								)}>
-								<tab.icon className="w-4 h-4" />
-								<span className="hidden sm:block">{tab.name}</span>
-							</div>
-						</TooltipTrigger>
-						<TooltipContent side="right">{tab.tooltipText}</TooltipContent>
-					</Tooltip>
-				</TabTrigger>
-			)
-		},
-		[activeTab],
-	)
-
-	// Memoized active content component
 	const ActiveContent = useMemo(() => {
-		const Component = TAB_CONTENT_MAP[activeTab as keyof typeof TAB_CONTENT_MAP]
-		if (!Component) {
-			return null
-		}
+		const Component = TAB_CONTENT_MAP[activeTab]
+		if (!Component) return null
 
-		// Special props for specific components
 		const props: any = { renderSectionHeader }
-		if (activeTab === "debug") {
-			props.onResetState = handleResetState
-		} else if (activeTab === "about") {
-			props.version = version
-		} else if (activeTab === "api-config") {
-			// No special props needed for api-config anymore
-		}
-
+		if (activeTab === "debug") props.onResetState = handleResetState
+		if (activeTab === "about") props.version = version
 		return <Component {...props} />
 	}, [activeTab, handleResetState, version])
 
@@ -258,13 +205,37 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 
 			<div className="flex flex-1 overflow-hidden">
 				<TabList
+					aria-label="Settings sections"
+					aria-orientation="vertical"
 					className="shrink-0 flex flex-col overflow-y-auto border-r border-sidebar-background"
-					onValueChange={setActiveTab}
+					onValueChange={(value) => setActiveTab(resolveTab(value))}
 					value={activeTab}>
-					{SETTINGS_TABS.filter((tab) => !tab.hidden?.({ activeOrganization })).map(renderTabItem)}
+					{visibleTabs.map((tab) => (
+						<TabTrigger
+							aria-controls={`settings-panel-${tab.id}`}
+							aria-label={tab.tooltipText}
+							className={cn(
+								"whitespace-nowrap overflow-hidden h-12 box-border flex items-center border-l-2 border-transparent text-foreground opacity-70 bg-transparent hover:bg-list-hover px-4 cursor-pointer gap-2",
+								activeTab === tab.id && "opacity-100 border-l-foreground bg-selection",
+							)}
+							data-testid={`tab-${tab.id}`}
+							id={`settings-tab-${tab.id}`}
+							key={tab.id}
+							title={tab.tooltipText}
+							value={tab.id}>
+							<tab.icon aria-hidden="true" className="w-4 h-4" />
+							<span className="hidden sm:block">{tab.name}</span>
+						</TabTrigger>
+					))}
 				</TabList>
 
-				<TabContent className="flex-1 overflow-auto">{ActiveContent}</TabContent>
+				<TabContent
+					aria-labelledby={`settings-tab-${activeTab}`}
+					className="flex-1 overflow-auto"
+					id={`settings-panel-${activeTab}`}
+					role="tabpanel">
+					{ActiveContent}
+				</TabContent>
 			</div>
 		</Tab>
 	)

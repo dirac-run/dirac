@@ -12,7 +12,6 @@ import { visit } from "unist-util-visit"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, StateServiceClient } from "@/shared/api/grpc-client"
-import { Button } from "@/shared/ui/button"
 import MermaidBlock from "@/shared/ui/MermaidBlock"
 import { WithCopyButton } from "./CopyButton"
 import UnsafeImage from "./UnsafeImage"
@@ -86,7 +85,7 @@ const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLP
 
 	return (
 		<WithCopyButton ariaLabel="Copy code" onCopy={handleCopy} position="top-right">
-			<pre {...preProps} ref={preRef} className={cn(preProps.className, "relative")}>
+			<pre {...preProps} className={cn(preProps.className, "relative")} ref={preRef}>
 				{language && (
 					<span className="absolute top-2.5 left-3 text-xs text-(--vscode-descriptionForeground) opacity-60 select-none pointer-events-none">
 						{language}
@@ -105,9 +104,10 @@ const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLP
 const filePathCache = new Map<string, boolean>()
 
 const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]: unknown }> = (props) => {
-	const [isFilePath, setIsFilePath] = useState<boolean | null>(null)
+	const [fileCheck, setFileCheck] = useState<{ path: string; exists: boolean }>()
 	const filePath = typeof props.children === "string" ? props.children : String(props.children || "")
 	const isPotentialFilePath = props["data-potential-file-path"] === "true"
+	const isFilePath = fileCheck?.path === filePath ? fileCheck.exists : null
 
 	useEffect(() => {
 		if (!isPotentialFilePath) {
@@ -115,7 +115,7 @@ const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]
 		}
 
 		if (filePathCache.has(filePath)) {
-			setIsFilePath(filePathCache.get(filePath)!)
+			setFileCheck({ path: filePath, exists: filePathCache.get(filePath)! })
 			return
 		}
 
@@ -126,13 +126,13 @@ const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]
 			.then((exists) => {
 				filePathCache.set(filePath, exists.value)
 				if (!cancelled) {
-					setIsFilePath(exists.value)
+					setFileCheck({ path: filePath, exists: exists.value })
 				}
 			})
 			.catch((err) => {
 				console.debug(`Failed to check file existence for ${filePath}:`, err)
 				if (!cancelled) {
-					setIsFilePath(false)
+					setFileCheck({ path: filePath, exists: false })
 				}
 			})
 
@@ -141,25 +141,8 @@ const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]
 		}
 	}, [filePath, isPotentialFilePath])
 
-	// If confirmed as a file path, render as clickable button
-	if (isFilePath) {
-		return (
-			<Button
-				className="p-0 ml-0.5 leading-none align-middle transition-opacity text-preformat gap-0.5 inline text-left"
-				onClick={() => FileServiceClient.openFileRelativePath({ value: filePath })}
-				size="icon"
-				title={`Open ${filePath} in editor`}
-				type="button"
-				variant="icon">
-				<code {...props} />
-				<SquareArrowOutUpRightIcon className="inline align-middle ml-0.5" />
-			</Button>
-		)
-	}
-
-	// Otherwise render as regular code (shows immediately, before file check completes)
 	const isInlineCode = !(props.className || "").includes("language-")
-	return (
+	const codeElement = (
 		<code
 			{...props}
 			className={cn(
@@ -167,6 +150,29 @@ const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]
 				isInlineCode && "bg-(--vscode-textCodeBlock-background) px-1.5 py-0.5 rounded text-sm",
 			)}
 		/>
+	)
+
+	// Keep the code element identical before and after the asynchronous check.
+	// Only add a small adjacent control so surrounding text is not reflowed.
+	return (
+		<span className="inline">
+			{codeElement}
+			{isPotentialFilePath && (
+				<button
+					aria-label={isFilePath ? `Open ${filePath} in editor` : undefined}
+					className={cn(
+						"ml-0.5 inline-flex size-4 align-middle items-center justify-center rounded-sm bg-transparent p-0 text-preformat transition-opacity",
+						isFilePath ? "opacity-70 hover:opacity-100 focus-visible:opacity-100" : "invisible pointer-events-none",
+					)}
+					disabled={!isFilePath}
+					onClick={() => FileServiceClient.openFileRelativePath({ value: filePath })}
+					tabIndex={isFilePath ? 0 : -1}
+					title={isFilePath ? `Open ${filePath} in editor` : undefined}
+					type="button">
+					<SquareArrowOutUpRightIcon className="size-3" />
+				</button>
+			)}
+		</span>
 	)
 }
 

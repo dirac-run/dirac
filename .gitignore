@@ -71,4 +71,4 @@ COMMIT_MSG*.txt
 ast-service/target/
 ast-service/release-artifacts/
 ast-service/qualification/*
-ast-service/
+ast-service/.cargo*

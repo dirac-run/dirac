@@ -124,11 +124,13 @@
 	--breakpoint-xxs: 180px;
 
 	--animate-fade-in: fadeIn 0.4s ease-out forwards;
+
 	@keyframes fadeIn {
 		from {
 			opacity: 0;
 			transform: scale(0.98);
 		}
+
 		to {
 			opacity: 1;
 			transform: scale(1);
@@ -136,43 +138,51 @@
 	}
 
 	--animate-cursor-blink: cursorBlink 1s ease-in-out infinite;
+
 	@keyframes cursorBlink {
 		0%,
 		100% {
 			opacity: 1;
 		}
+
 		50% {
 			opacity: 0;
 		}
 	}
 
 	--animate-icon-pulse: iconPulse 1s ease-in-out infinite;
+
 	@keyframes iconPulse {
 		0%,
 		100% {
 			opacity: 0.5;
 		}
+
 		50% {
 			opacity: 1;
 		}
 	}
 
 	--animate-shimmer: shimmer 5s infinite linear;
+
 	@keyframes shimmer {
 		0% {
 			background-position: 200% 0;
 		}
+
 		100% {
 			background-position: -200% 0;
 		}
 	}
 
 	--animate-fade-slide-in: fadeSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+
 	@keyframes fadeSlideIn {
 		from {
 			opacity: 0;
 			transform: translateY(-12px);
 		}
+
 		to {
 			opacity: 1;
 			transform: translateY(0);
@@ -186,6 +196,7 @@
 			opacity: 0.3;
 			transform: scale(1);
 		}
+
 		50% {
 			opacity: 0.6;
 			transform: scale(1.05);
@@ -197,6 +208,7 @@
 		100% {
 			transform: translateY(0px);
 		}
+
 		50% {
 			transform: translateY(-10px);
 		}
@@ -208,6 +220,7 @@
 			filter: drop-shadow(0 0 2px rgba(252, 211, 77, 0.3));
 			opacity: 0.75;
 		}
+
 		50% {
 			filter: drop-shadow(0 0 5px rgba(252, 211, 77, 0.5));
 			opacity: 1;
@@ -350,6 +363,7 @@
 		100% {
 			opacity: 1;
 		}
+
 		50% {
 			opacity: 0.5;
 		}
@@ -364,10 +378,10 @@
 
 		pre {
 			@apply bg-code rounded-xs overflow-x-auto overflow-y-hidden;
+			box-sizing: border-box;
 			margin: 13px 0;
-			padding: 10px 10px;
-			max-width: calc(100vw - 20px);
-			padding-right: 70px;
+			padding: 10px 70px 10px 10px;
+			max-width: 100%;
 		}
 
 		pre > code .hljs-deletion {
@@ -381,39 +395,57 @@
 		code span.line:empty {
 			@apply hidden;
 		}
+
 		code {
 			@apply break-words rounded-xs;
 		}
+
 		p,
 		li,
 		ol,
 		ul {
 			@apply leading-tight;
 		}
+
 		hr,
 		ul,
 		ol {
 			@apply my-3 ml-5;
 		}
+
 		li > ul,
 		li > ol {
 			@apply my-1 ml-2;
 		}
+
 		table {
-			@apply border-collapse w-full my-3;
+			@apply border-collapse my-3;
+			display: block;
+			max-width: 100%;
+			overflow-x: auto;
 		}
+
 		th,
 		td {
 			@apply p-2 border border-border-panel text-left;
 		}
+
 		th {
 			@apply bg-code/20 font-semibold;
 		}
+
 		tr:nth-child(even) {
 			@apply bg-list-hover;
 		}
+
 		del {
 			@apply line-through opacity-70;
+		}
+
+		img,
+		svg {
+			max-width: 100%;
+			height: auto;
 		}
 
 		code:not(pre > code) {

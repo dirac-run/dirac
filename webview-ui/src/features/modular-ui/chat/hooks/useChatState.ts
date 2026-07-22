@@ -31,6 +31,7 @@ export function useChatState(messages: DiracMessage[]): ChatState {
 	const task = useMemo(() => messages.at(0), [messages])
 	const clearExpandedRows = useCallback(() => {
 		setExpandedRows({})
+		useChatStore.getState().clearCardCollapsedStates()
 	}, [])
 
 	// Reset state when starting new conversation

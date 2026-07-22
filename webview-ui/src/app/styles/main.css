@@ -36,6 +36,17 @@ body {
 	width: 100%;
 }
 
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		scroll-behavior: auto !important;
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
 body.scrollable,
 .scrollable,
 body.code-block-scrollable,
@@ -124,6 +135,7 @@ https://github.com/microsoft/vscode-webview-ui-toolkit/tree/main/src/dropdown#wi
 	align-items: flex-start;
 	justify-content: flex-start;
 }
+
 .dropdown-container label {
 	display: block;
 	color: var(--vscode-foreground);
@@ -146,6 +158,7 @@ vscode-dropdown::part(listbox) {
 @layer components {
 	.input-icon-button {
 		@apply cursor-pointer opacity-65 hover:opacity-100 transition-opacity duration-200;
+
 		&.disabled {
 			@apply cursor-not-allowed opacity-40 hover:opacity-40;
 		}
@@ -156,6 +169,7 @@ vscode-dropdown::part(listbox) {
 .scrollbar-none {
 	scrollbar-width: none;
 }
+
 .scrollbar-none::-webkit-scrollbar {
 	display: none;
 }
@@ -207,6 +221,7 @@ vscode-dropdown::part(listbox) {
 	100% {
 		opacity: 1;
 	}
+
 	50% {
 		opacity: 0.5;
 	}
@@ -231,6 +246,7 @@ vscode-dropdown::part(listbox) {
 		opacity: 0;
 		transform: translateY(-4px);
 	}
+
 	to {
 		opacity: 1;
 		transform: translateY(0);

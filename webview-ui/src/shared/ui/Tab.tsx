@@ -9,29 +9,16 @@ export const Tab = ({ className, children, ...props }: TabProps) => (
 )
 
 export const TabHeader = ({ className, children, ...props }: TabProps) => (
-	<div className={`px-5 py-2.5 border-b border-(--vscode-panel-border) ${className}`} {...props}>
+	<div className={`px-5 py-2.5 border-b border-(--vscode-panel-border) ${className || ""}`} {...props}>
 		{children}
 	</div>
 )
 
-export const TabContent = ({ className, children, ...props }: TabProps) => {
-	const onWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-		const target = e.target as HTMLElement
-
-		// Prevent scrolling if the target or any of its ancestors is a listbox or option
-		if (target.closest('[role="listbox"], [role="combobox"], [role="option"]')) {
-			return
-		}
-
-		e.currentTarget.scrollTop += e.deltaY
-	}, [])
-
-	return (
-		<div className={`flex-1 overflow-auto ${className}`} onWheel={onWheel} {...props}>
-			{children}
-		</div>
-	)
-}
+export const TabContent = ({ className, children, ...props }: TabProps) => (
+	<div className={`flex-1 overflow-auto ${className || ""}`} {...props}>
+		{children}
+	</div>
+)
 
 export const TabList = forwardRef<
 	HTMLDivElement,
@@ -39,26 +26,42 @@ export const TabList = forwardRef<
 		value: string
 		onValueChange: (value: string) => void
 	}
->(({ children, className, value, onValueChange, ...props }, ref) => {
-	const handleTabSelect = useCallback(
-		(tabValue: string) => {
-			onValueChange(tabValue)
+>(({ children, className, value, onValueChange, onKeyDown, ...props }, ref) => {
+	const handleTabSelect = useCallback((tabValue: string) => onValueChange(tabValue), [onValueChange])
+	const handleKeyDown = useCallback(
+		(event: React.KeyboardEvent<HTMLDivElement>) => {
+			onKeyDown?.(event)
+			if (event.defaultPrevented) return
+			const orientation = props["aria-orientation"] || "horizontal"
+			const previousKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft"
+			const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight"
+			if (![previousKey, nextKey, "Home", "End"].includes(event.key)) return
+
+			const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)'))
+			if (tabs.length === 0) return
+			const currentIndex = tabs.findIndex((tab) => tab === document.activeElement)
+			let nextIndex = currentIndex < 0 ? 0 : currentIndex
+			if (event.key === previousKey) nextIndex = (nextIndex - 1 + tabs.length) % tabs.length
+			if (event.key === nextKey) nextIndex = (nextIndex + 1) % tabs.length
+			if (event.key === "Home") nextIndex = 0
+			if (event.key === "End") nextIndex = tabs.length - 1
+			event.preventDefault()
+			tabs[nextIndex].focus()
+			tabs[nextIndex].click()
 		},
-		[onValueChange],
+		[onKeyDown, props],
 	)
 
 	return (
-		<div className={`flex ${className}`} ref={ref} role="tablist" {...props}>
-			{React.Children.map(children, (child) => {
-				if (React.isValidElement(child)) {
-					// Make sure we're passing the correct props to the TabTrigger
-					return React.cloneElement(child as React.ReactElement<any>, {
-						isSelected: child.props.value === value,
-						onSelect: () => handleTabSelect(child.props.value),
-					})
-				}
-				return child
-			})}
+		<div className={`flex ${className || ""}`} onKeyDown={handleKeyDown} ref={ref} role="tablist" {...props}>
+			{React.Children.map(children, (child) =>
+				React.isValidElement(child)
+					? React.cloneElement(child as React.ReactElement<any>, {
+							isSelected: child.props.value === value,
+							onSelect: () => handleTabSelect(child.props.value),
+						})
+					: child,
+			)}
 		</div>
 	)
 })

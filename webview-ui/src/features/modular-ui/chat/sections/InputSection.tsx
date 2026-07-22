@@ -1,17 +1,13 @@
-import { ModularChatTextArea } from "../ModularChatTextArea"
-import QuotedMessagePreview from "@/shared/ui/QuotedMessagePreview"
-import { useSettingsStore } from "@/features/settings/store/settingsStore"
-import { ChatSection, ChatViewContext } from "../types"
-import React, { useState } from "react"
+import { isOpenaiReasoningEffort, OPENAI_REASONING_EFFORT_OPTIONS, type OpenaiReasoningEffort } from "@shared/ExtensionMessage"
 import { StringRequest } from "@shared/proto/dirac/common"
-import { StateServiceClient } from "@/shared/api/grpc-client"
-import {
-	isOpenaiReasoningEffort,
-	OPENAI_REASONING_EFFORT_OPTIONS,
-	type OpenaiReasoningEffort,
-} from "@shared/ExtensionMessage"
+import React, { useState } from "react"
 import { supportsReasoningEffortForModelId } from "@/features/settings/components/utils/providerUtils"
 import { useApiConfigurationHandlers } from "@/features/settings/components/utils/useApiConfigurationHandlers"
+import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import { StateServiceClient } from "@/shared/api/grpc-client"
+import QuotedMessagePreview from "@/shared/ui/QuotedMessagePreview"
+import { ModularChatTextArea } from "../ModularChatTextArea"
+import { ChatSection, ChatViewContext } from "../types"
 
 const InputSectionContent: React.FC<{ context: ChatViewContext }> = ({ context }) => {
 	const { navigateToSettingsModelPicker, modelProviderPresets, apiConfiguration } = useSettingsStore()
@@ -44,14 +40,9 @@ const InputSectionContent: React.FC<{ context: ChatViewContext }> = ({ context }
 			preset.modelId === selectedModelInfo.selectedModelId &&
 			(preset.provider !== "openai" || preset.openAiProfileName === activeProfileName),
 	)?.id
-	const supportsReasoningEffort = supportsReasoningEffortForModelId(
-		selectedModelInfo.selectedModelId,
-		selectedModelInfo,
-	)
+	const supportsReasoningEffort = supportsReasoningEffortForModelId(selectedModelInfo.selectedModelId, selectedModelInfo)
 	const configuredReasoningEffort =
-		selectedModelInfo.mode === "plan"
-			? apiConfiguration?.planModeReasoningEffort
-			: apiConfiguration?.actModeReasoningEffort
+		selectedModelInfo.mode === "plan" ? apiConfiguration?.planModeReasoningEffort : apiConfiguration?.actModeReasoningEffort
 	const modelReasoningEfforts = Array.isArray(selectedModelInfo.reasoningEffortOptions)
 		? selectedModelInfo.reasoningEffortOptions.filter(isOpenaiReasoningEffort)
 		: []
@@ -77,20 +68,23 @@ const InputSectionContent: React.FC<{ context: ChatViewContext }> = ({ context }
 			)}
 
 			<ModularChatTextArea
+				activeModelProviderPresetId={activeModelProviderPresetId}
 				className="mt-2"
+				inputValue={inputValue}
+				isActivatingModelPreset={isActivatingModelPreset}
+				isUpdatingReasoningEffort={isUpdatingReasoningEffort}
 				mode={selectedModelInfo.mode}
 				modelDisplayName={`${selectedModelInfo.selectedProvider}:${selectedModelInfo.name || selectedModelInfo.selectedModelId}`}
-				inputValue={inputValue}
-				setInputValue={chatState.setInputValue}
-				selectedFiles={selectedFiles}
-				setSelectedFiles={chatState.setSelectedFiles}
-				selectedImages={selectedImages}
-				setSelectedImages={chatState.setSelectedImages}
+				modelPresetError={modelPresetError}
+				modelProviderPresets={modelProviderPresets}
+				onHeightChange={() => {
+					if (isAtBottomRef.current) {
+						scrollToBottomAuto()
+					}
+				}}
 				onModelButtonClick={() => {
 					navigateToSettingsModelPicker({ targetSection: "api-config" })
 				}}
-				modelProviderPresets={modelProviderPresets}
-				activeModelProviderPresetId={activeModelProviderPresetId}
 				onModelProviderPresetSelect={async (presetId) => {
 					setModelPresetError(undefined)
 					setIsActivatingModelPreset(true)
@@ -102,39 +96,39 @@ const InputSectionContent: React.FC<{ context: ChatViewContext }> = ({ context }
 						setIsActivatingModelPreset(false)
 					}
 				}}
-				modelPresetError={modelPresetError}
-				isActivatingModelPreset={isActivatingModelPreset}
-				supportsReasoningEffort={supportsReasoningEffort}
-				reasoningEffort={reasoningEffort}
-				reasoningEffortOptions={reasoningEffortOptions}
 				onReasoningEffortSelect={async (effort) => {
 					setReasoningEffortError(undefined)
 					setIsUpdatingReasoningEffort(true)
 					try {
-						await handleModeFieldChange(
+						const didPersist = await handleModeFieldChange(
 							{ plan: "planModeReasoningEffort", act: "actModeReasoningEffort" },
 							effort,
 							selectedModelInfo.mode,
 						)
-					} catch (error) {
-						setReasoningEffortError(error instanceof Error ? error.message : "Failed to update reasoning effort")
+						if (!didPersist) {
+							setReasoningEffortError(
+								useSettingsStore.getState().apiConfigurationError || "Failed to update reasoning effort",
+							)
+						}
 					} finally {
 						setIsUpdatingReasoningEffort(false)
 					}
 				}}
-				reasoningEffortError={reasoningEffortError}
-				isUpdatingReasoningEffort={isUpdatingReasoningEffort}
 				onSelectFilesAndImages={selectFilesAndImages}
 				onSend={() => messageHandlers.handleSendMessage(inputValue, selectedImages, selectedFiles)}
 				placeholder={placeholderText}
-				shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+				reasoningEffort={reasoningEffort}
+				reasoningEffortError={reasoningEffortError}
+				reasoningEffortOptions={reasoningEffortOptions}
+				selectedFiles={selectedFiles}
+				selectedImages={selectedImages}
 				sendingDisabled={chatState.sendingDisabled}
+				setInputValue={chatState.setInputValue}
+				setSelectedFiles={chatState.setSelectedFiles}
+				setSelectedImages={chatState.setSelectedImages}
+				shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+				supportsReasoningEffort={supportsReasoningEffort}
 				taskStatus={taskStatus}
-				onHeightChange={() => {
-					if (isAtBottomRef.current) {
-						scrollToBottomAuto()
-					}
-				}}
 			/>
 		</>
 	)

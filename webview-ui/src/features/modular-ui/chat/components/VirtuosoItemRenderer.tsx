@@ -40,7 +40,7 @@ export const MessageRenderer = memo(
 		activeCardId,
 		activeVoiceStreamId,
 	}: MessageRendererProps) => {
-		const { mode } = useSettingsStore() as { mode: Mode }
+		const mode = useSettingsStore((state) => state.mode) as Mode
 
 		const isLastMessage = useMemo(() => index === renderedMessages.length - 1, [renderedMessages, index])
 

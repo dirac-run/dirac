@@ -1,9 +1,10 @@
 import { Card, CardStatus, isFinalStatus } from "@shared/ExtensionMessage"
+import React, { useLayoutEffect } from "react"
+import { useChatStore } from "@/features/chat/store/chatStore"
 import { cn } from "@/lib/utils"
 import { useAutoScroll } from "@/shared/hooks/useAutoScroll"
-import React, { useEffect, useRef, useState } from "react"
-import { ModularCardHeader } from "./components/ModularCardHeader"
 import { ModularCardBody } from "./components/ModularCardBody"
+import { ModularCardHeader } from "./components/ModularCardHeader"
 
 interface ModularCardProps {
 	card: Card
@@ -11,38 +12,55 @@ interface ModularCardProps {
 	onAction?: (value: string) => void
 }
 
-export const ModularCard: React.FC<ModularCardProps> = ({ card, isActive, onAction }) => {
-	const [isCollapsed, setIsCollapsed] = useState(card.collapsed ?? false)
-	const { status, body, autoScroll } = card
-	const hasAutoCollapsed = useRef(false)
+const initialCollapsedState = (card: Card) => card.collapsed ?? (isFinalStatus(card.status) && !card.do_not_auto_collapse)
 
-	useEffect(() => {
-		if (!hasAutoCollapsed.current && isFinalStatus(status) && !card.do_not_auto_collapse) {
-			setIsCollapsed(true)
-			hasAutoCollapsed.current = true
+export const ModularCard: React.FC<ModularCardProps> = ({ card, isActive, onAction }) => {
+	const storedCollapsed = useChatStore((state) => state.cardCollapsedStates[card.id])
+	const userToggled = useChatStore((state) => state.cardUserToggledStates[card.id] ?? false)
+	const setCardCollapsedState = useChatStore((state) => state.setCardCollapsedState)
+	const terminalAutoCollapse = isFinalStatus(card.status) && !card.do_not_auto_collapse && !userToggled
+	const protocolOrAutomaticState = card.collapsed ?? (terminalAutoCollapse ? true : undefined)
+	const isCollapsed = userToggled
+		? (storedCollapsed ?? initialCollapsedState(card))
+		: (protocolOrAutomaticState ?? storedCollapsed ?? initialCollapsedState(card))
+	const { status, body, autoScroll } = card
+	const bodyId = `card-body-${card.id}`
+
+	// Persist protocol/default state before paint so virtualization remounts cannot
+	// restore an obsolete disclosure value. A user choice remains authoritative
+	// until the task changes.
+	useLayoutEffect(() => {
+		if (userToggled || protocolOrAutomaticState === undefined) return
+		if (storedCollapsed !== protocolOrAutomaticState) {
+			setCardCollapsedState(card.id, protocolOrAutomaticState, false)
 		}
-	}, [status])
+	}, [card.id, protocolOrAutomaticState, setCardCollapsedState, storedCollapsed, userToggled])
 
 	const scrollRef = useAutoScroll({
 		dependency: body,
 		enabled: autoScroll ?? status === CardStatus.RUNNING,
 	})
 
+	const toggleCollapsed = () => {
+		setCardCollapsedState(card.id, !isCollapsed, true)
+	}
+
 	return (
 		<div
 			className={cn(
-				"flex flex-col transition-all duration-200 overflow-hidden",
-				isCollapsed ? "my-px bg-transparent" : "my-px rounded-md border border-foreground/10 bg-foreground/[0.02]",
+				"my-px flex flex-col overflow-hidden",
+				isCollapsed ? "bg-transparent" : "rounded-md border border-foreground/10 bg-foreground/[0.02]",
 			)}>
 			<ModularCardHeader
 				card={card}
+				contentId={bodyId}
 				isCollapsed={isCollapsed}
-				onToggleCollapse={() => setIsCollapsed(!isCollapsed)}
 				onAction={onAction}
+				onToggleCollapse={toggleCollapsed}
 			/>
 
 			{!isCollapsed && (
-				<div className="animate-in fade-in duration-200">
+				<div id={bodyId}>
 					<ModularCardBody card={card} isActive={isActive} onAction={onAction} scrollRef={scrollRef} />
 				</div>
 			)}

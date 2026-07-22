@@ -28,8 +28,10 @@
  * This ensures all the elements are rendered with the expected styles consistently without affecting by the parent element / host.
  */
 @layer base {
-	* {
-		@apply border-border outline-ring/50 text-base transition-colors duration-200 ease-in-out;
+	*,
+	*::before,
+	*::after {
+		@apply border-border outline-ring/50 text-base;
 	}
 
 	body {
@@ -38,11 +40,11 @@
 	}
 
 	p {
-		@apply my-0 py-0 text-inherit leading-5 block line-clamp-3;
+		@apply my-0 py-0 text-inherit leading-5 block;
 		margin-block-start: 1em;
 		margin-block-end: 1em;
-		margin-inline-start: 0px;
-		margin-inline-end: 0px;
+		margin-inline-start: 0;
+		margin-inline-end: 0;
 		unicode-bidi: isolate;
 	}
 

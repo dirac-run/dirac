@@ -9,7 +9,7 @@ import {
 } from "@shared/proto/dirac/worktree"
 import { VSCodeButton, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { AlertCircle, Check, ExternalLink, FolderOpen, GitBranch, GitMerge, Loader2, Plus, Trash2, X } from "lucide-react"
-import { memo, useCallback, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { FileServiceClient, TaskServiceClient, WorktreeServiceClient } from "@/shared/api/grpc-client"
 import { getEnvironmentColor } from "@/shared/lib/environmentColors"
@@ -22,7 +22,7 @@ type WorktreesViewProps = {
 }
 
 const WorktreesView = ({ onDone }: WorktreesViewProps) => {
-	const { environment } = useSettingsStore()
+	const environment = useSettingsStore((state) => state.environment)
 	const [worktrees, setWorktrees] = useState<WorktreeProto[]>([])
 	const [isLoading, setIsLoading] = useState(true)
 	const [error, setError] = useState<string | null>(null)
@@ -46,6 +46,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 	const [gitignoreContent, setGitignoreContent] = useState("")
 	const [isCreatingWorktreeInclude, setIsCreatingWorktreeInclude] = useState(false)
 
+	const loadWorktreesPromiseRef = useRef<Promise<void> | null>(null)
 	// Check if a worktree is the main/primary worktree (first one, typically the original clone)
 	const isMainWorktree = useCallback(
 		(worktree: WorktreeProto) => {
@@ -57,26 +58,36 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 		[worktrees],
 	)
 
-	// Load worktrees - only updates state if data changed to prevent flickering
-	const loadWorktrees = useCallback(async () => {
-		try {
-			const response = await WorktreeServiceClient.listWorktrees(EmptyRequest.create({}))
-			// Only update state if data actually changed (prevents flickering)
-			setWorktrees((prev) => {
-				const newData = JSON.stringify(response.worktrees)
-				const oldData = JSON.stringify(prev)
-				return newData === oldData ? prev : response.worktrees
-			})
-			setIsGitRepo((prev) => (prev === response.isGitRepo ? prev : response.isGitRepo))
-			setIsMultiRoot((prev) => (prev === response.isMultiRoot ? prev : response.isMultiRoot))
-			setIsSubfolder((prev) => (prev === response.isSubfolder ? prev : response.isSubfolder))
-			setGitRootPath((prev) => (prev === response.gitRootPath ? prev : response.gitRootPath))
-			setError((prev) => (response.error ? response.error : prev === null ? null : prev))
-		} catch (err: any) {
-			setError(err instanceof Error ? err.message : "Failed to load worktrees")
-		} finally {
-			setIsLoading(false)
+	// Coalesce polling, retry, and mutation refreshes so responses cannot arrive out of order.
+	const loadWorktrees = useCallback((requireFresh = false): Promise<void> => {
+		if (loadWorktreesPromiseRef.current) {
+			if (!requireFresh) return loadWorktreesPromiseRef.current
+			return loadWorktreesPromiseRef.current.then(() => loadWorktrees(true))
 		}
+
+		const operation = (async () => {
+			try {
+				const response = await WorktreeServiceClient.listWorktrees(EmptyRequest.create({}))
+				setWorktrees((previous) =>
+					JSON.stringify(response.worktrees) === JSON.stringify(previous) ? previous : response.worktrees,
+				)
+				setIsGitRepo(response.isGitRepo)
+				setIsMultiRoot(response.isMultiRoot)
+				setIsSubfolder(response.isSubfolder)
+				setGitRootPath(response.gitRootPath)
+				setError(response.error || null)
+			} catch (error) {
+				setError(error instanceof Error ? error.message : "Failed to load worktrees")
+			} finally {
+				setIsLoading(false)
+			}
+		})()
+
+		loadWorktreesPromiseRef.current = operation
+		operation.finally(() => {
+			if (loadWorktreesPromiseRef.current === operation) loadWorktreesPromiseRef.current = null
+		})
+		return operation
 	}, [])
 
 	// Load .worktreeinclude status
@@ -93,26 +104,22 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 
 	// Create .worktreeinclude file and open it in editor
 	const handleCreateWorktreeInclude = useCallback(async () => {
+		if (isCreatingWorktreeInclude) return
 		setIsCreatingWorktreeInclude(true)
+		setError(null)
 		try {
 			const result = await WorktreeServiceClient.createWorktreeInclude(
-				CreateWorktreeIncludeRequest.create({
-					content: gitignoreContent,
-				}),
+				CreateWorktreeIncludeRequest.create({ content: gitignoreContent }),
 			)
-			if (result.success) {
-				setHasWorktreeInclude(true)
-				// Open the file in the editor
-				await FileServiceClient.openFileRelativePath({ value: ".worktreeinclude" })
-			} else {
-				setError(result.message)
-			}
-		} catch (err: any) {
-			setError(err instanceof Error ? err.message : "Failed to create .worktreeinclude")
+			if (!result.success) throw new Error(result.message || "Failed to create .worktreeinclude")
+			setHasWorktreeInclude(true)
+			await FileServiceClient.openFileRelativePath({ value: ".worktreeinclude" })
+		} catch (error) {
+			setError(error instanceof Error ? error.message : "Failed to create .worktreeinclude")
 		} finally {
 			setIsCreatingWorktreeInclude(false)
 		}
-	}, [gitignoreContent])
+	}, [gitignoreContent, isCreatingWorktreeInclude])
 
 	// Initial load
 	useEffect(() => {
@@ -128,23 +135,18 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 
 	const handleDeleteWorktree = useCallback(
 		async (path: string, deleteBranch: boolean, branchName: string) => {
+			setError(null)
 			try {
 				const result = await WorktreeServiceClient.deleteWorktree(
-					DeleteWorktreeRequest.create({
-						path,
-						force: false,
-						deleteBranch,
-						branchName,
-					}),
+					DeleteWorktreeRequest.create({ path, force: false, deleteBranch, branchName }),
 				)
-
-				if (!result.success) {
-					setError(result.message)
-				} else {
-					await loadWorktrees()
-				}
-			} catch (err: any) {
-				setError(err instanceof Error ? err.message : "Failed to delete worktree")
+				if (!result.success) throw new Error(result.message || "Failed to delete worktree")
+				setWorktrees((previous) => previous.filter((worktree) => worktree.path !== path))
+				await loadWorktrees(true)
+			} catch (error) {
+				const message = error instanceof Error ? error.message : "Failed to delete worktree"
+				setError(message)
+				throw error instanceof Error ? error : new Error(message)
 			}
 		},
 		[loadWorktrees],
@@ -186,8 +188,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 
 	// Handle merge
 	const handleMergeWorktree = useCallback(async () => {
-		if (!mergeWorktree) return
-
+		if (!mergeWorktree || isMerging) return
 		setIsMerging(true)
 		setMergeError(null)
 		setMergeResult(null)
@@ -205,7 +206,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 
 			if (result.success) {
 				// Reload worktrees to reflect changes
-				await loadWorktrees()
+				await loadWorktrees(true)
 			} else if (!result.hasConflicts) {
 				setMergeError(result.message)
 			}
@@ -214,7 +215,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 		} finally {
 			setIsMerging(false)
 		}
-	}, [mergeWorktree, getMainBranch, deleteAfterMerge, loadWorktrees])
+	}, [mergeWorktree, isMerging, getMainBranch, deleteAfterMerge, loadWorktrees])
 
 	// Ask Dirac to resolve conflicts
 	const handleAskDiracToResolve = useCallback(async () => {
@@ -338,7 +339,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 					<div className="flex flex-col items-center justify-center min-h-32 py-8 text-center">
 						<AlertCircle className="w-8 h-8 text-[var(--vscode-errorForeground)] mb-2 shrink-0" />
 						<p className="text-[var(--vscode-errorForeground)]">{error}</p>
-						<VSCodeButton appearance="secondary" className="mt-3" onClick={loadWorktrees}>
+						<VSCodeButton appearance="secondary" className="mt-3" onClick={() => void loadWorktrees(true)}>
 							Retry
 						</VSCodeButton>
 					</div>
@@ -479,17 +480,23 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 			)}
 
 			{/* Create Worktree Modal */}
-			<CreateWorktreeModal onClose={() => setShowCreateForm(false)} onSuccess={loadWorktrees} open={showCreateForm} />
+			<CreateWorktreeModal
+				onClose={() => setShowCreateForm(false)}
+				onSuccess={() => loadWorktrees(true)}
+				open={showCreateForm}
+			/>
 
 			{/* Delete Worktree Modal */}
 			<DeleteWorktreeModal
 				branchName={deleteWorktree?.branch || ""}
 				onClose={() => setDeleteWorktree(null)}
-				onConfirm={(deleteBranch) => handleDeleteWorktree(deleteWorktree!.path, deleteBranch, deleteWorktree!.branch)}
+				onConfirm={(deleteBranch) => {
+					if (!deleteWorktree) return Promise.reject(new Error("No worktree selected"))
+					return handleDeleteWorktree(deleteWorktree.path, deleteBranch, deleteWorktree.branch)
+				}}
 				open={!!deleteWorktree}
 				worktreePath={deleteWorktree?.path || ""}
 			/>
-
 			{/* Merge Worktree Modal */}
 			{mergeWorktree && (
 				<div

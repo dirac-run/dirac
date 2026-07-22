@@ -8,7 +8,7 @@ interface ModularCardBodyProps {
 	card: Card
 	isActive?: boolean
 	onAction?: (value: string) => void
-	scrollRef?: React.RefObject<HTMLDivElement>
+	scrollRef?: React.Ref<HTMLDivElement>
 }
 
 export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive, onAction, scrollRef }) => {

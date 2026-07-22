@@ -1,7 +1,7 @@
 import { StringRequest } from "@shared/proto/dirac/common"
 import { memo, useMemo } from "react"
 import DiracLogoVariable from "@/assets/DiracLogoVariable"
-import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import { useTaskStore } from "@/entities/task/store/taskStore"
 import { TaskServiceClient } from "@/shared/api/grpc-client"
 import { getRandomQuote } from "@shared/quotes"
 
@@ -10,7 +10,7 @@ type HistoryPreviewProps = {
 }
 
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
-	const { taskHistory } = useSettingsStore()
+	const taskHistory = useTaskStore((state) => state.taskHistory)
 	const quote = useMemo(() => getRandomQuote(), [])
 	const handleHistorySelect = (id: string) => {
 		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>

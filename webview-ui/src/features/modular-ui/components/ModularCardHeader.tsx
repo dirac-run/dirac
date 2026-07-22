@@ -13,67 +13,76 @@ import React, { useMemo } from "react"
 
 interface ModularCardHeaderProps {
 	card: Card
+	contentId: string
 	isCollapsed: boolean
 	onToggleCollapse: () => void
 	onAction?: (value: string) => void
 }
 
-export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({ card, isCollapsed, onToggleCollapse, onAction }) => {
+export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
+	card,
+	contentId,
+	isCollapsed,
+	onToggleCollapse,
+	onAction,
+}) => {
 	const { header, icon, status } = card
 	const isTerminal = isFinalStatus(status)
 	const filePath = extractFirstPath(header)
-	const decorators = useMemo(() => CARD_DECORATORS.filter((d) => d.shouldApply(card)), [card])
+	const decorators = useMemo(() => CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card)), [card])
 	const iconSizeClass = "size-3.5"
 
 	return (
 		<div
 			className={cn(
-				"flex items-center transition-colors cursor-pointer gap-1.5 text-[10px] leading-4",
-				isCollapsed ? "px-2 py-0.5" : "px-3 py-1",
-				isTerminal && "opacity-60",
-			)}
-			onClick={onToggleCollapse}>
-			<div className="flex-shrink-0 leading-none">
-				{icon ? (
-					<DynamicIcon name={icon as any} className={cn(iconSizeClass, getStatusTextColorClass(status))} />
-				) : (
-					<CardStatusIcon status={status} className={iconSizeClass} />
-				)}
-			</div>
-
-			<div className={cn("font-medium flex-grow", isCollapsed ? "truncate" : "min-w-0")} title={header}>
-				<div className={cn("flex items-center gap-1 min-w-0", !isCollapsed && "flex-wrap")}>
-					<span className={cn(isCollapsed ? "truncate" : "break-all whitespace-normal")}>{header}</span>
-					{filePath && !decorators.some((d) => d.renderHeaderActions) && (
-						<button
-							className={cn(
-								"hover:bg-foreground/10 rounded-sm opacity-50 hover:opacity-100 transition-opacity p-1",
-							)}
-							onClick={(e) => {
-								e.stopPropagation()
-								FileServiceClient.openFileRelativePath(StringRequest.create({ value: filePath }))
-							}}
-							title={`Open ${filePath}`}>
-							<ExternalLinkIcon className="size-2.5" />
-						</button>
+				"flex min-w-0 items-center gap-1 text-[10px] leading-4",
+				isCollapsed ? "px-1 py-0.5" : "px-2 py-1",
+				isTerminal && "opacity-70",
+			)}>
+			<button
+				aria-controls={contentId}
+				aria-expanded={!isCollapsed}
+				className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm bg-transparent px-1 text-left text-inherit hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-ring"
+				onClick={onToggleCollapse}
+				title={isCollapsed ? `Expand ${header}` : `Collapse ${header}`}
+				type="button">
+				<span className="shrink-0 leading-none" aria-hidden="true">
+					{icon ? (
+						<DynamicIcon name={icon as any} className={cn(iconSizeClass, getStatusTextColorClass(status))} />
+					) : (
+						<CardStatusIcon status={status} className={iconSizeClass} />
 					)}
-				</div>
-			</div>
+				</span>
 
-			{decorators.map((d) => (
-				<React.Fragment key={d.id}>{d.renderHeaderActions?.(card, onAction)}</React.Fragment>
-			))}
+				<span className={cn("min-w-0 flex-1 font-medium", isCollapsed ? "truncate" : "break-all whitespace-normal")}>
+					{header}
+				</span>
 
-			<div className="flex items-center gap-2">
 				{status === CardStatus.WAITING_FOR_INPUT && (
-					<Badge variant="warning" className={cn("px-1 py-0", "text-[10px] leading-4")}>
+					<Badge variant="warning" className="shrink-0 px-1 py-0 text-[10px] leading-4">
 						Awaiting Input
 					</Badge>
 				)}
-				<div className="flex-shrink-0 opacity-50 leading-none">
+
+				<span className="shrink-0 opacity-60 leading-none" aria-hidden="true">
 					{isCollapsed ? <ChevronRightIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
-				</div>
-			</div>
+				</span>
+			</button>
+
+			{filePath && !decorators.some((decorator) => decorator.renderHeaderActions) && (
+				<button
+					aria-label={`Open ${filePath}`}
+					className="shrink-0 rounded-sm p-1 opacity-60 transition-opacity hover:bg-foreground/10 hover:opacity-100 focus-visible:opacity-100"
+					onClick={() => FileServiceClient.openFileRelativePath(StringRequest.create({ value: filePath }))}
+					title={`Open ${filePath}`}
+					type="button">
+					<ExternalLinkIcon className="size-2.5" />
+				</button>
+			)}
+
+			{decorators.map((decorator) => (
+				<React.Fragment key={decorator.id}>{decorator.renderHeaderActions?.(card, onAction)}</React.Fragment>
+			))}
 		</div>
 	)
 }

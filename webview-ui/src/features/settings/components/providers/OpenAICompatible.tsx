@@ -1,5 +1,5 @@
 import { TooltipContent, TooltipTrigger } from "@radix-ui/react-tooltip"
-import { azureOpenAiDefaultApiVersion, openAiModelInfoSaneDefaults, OpenAiCompatibleProfile, ModelInfo } from "@shared/api"
+import { azureOpenAiDefaultApiVersion, ModelInfo, OpenAiCompatibleProfile, openAiModelInfoSaneDefaults } from "@shared/api"
 import { Mode } from "@shared/ExtensionMessage"
 import { VSCodeButton, VSCodeCheckbox, VSCodeDropdown, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { PlusIcon, RefreshCwIcon, TrashIcon, XIcon } from "lucide-react"
@@ -73,9 +73,8 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 
 		const profile = profiles.find((p: OpenAiCompatibleProfile) => p.name === name)
 		if (profile) {
-			previousProfileNameRef.current = name
 			// Copy profile values to active fields
-			await handleFieldsChange({
+			const didPersist = await handleFieldsChange({
 				openAiBaseUrl: profile.baseUrl,
 				openAiApiKey: profile.apiKey,
 				openAiHeaders: profile.headers,
@@ -85,16 +84,19 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 					: { actModeOpenAiModelId: profile.modelId, actModeOpenAiModelInfo: profile.modelInfo }),
 				[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: name,
 			})
+			if (!didPersist) return
+			previousProfileNameRef.current = name
 			setProfileNameInput(name)
 		}
 	}
 
 	const handleNewProfile = async () => {
-		previousProfileNameRef.current = currentProfileName
-		setProfileNameInput("")
-		await handleFieldsChange({
+		const didPersist = await handleFieldsChange({
 			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
 		})
+		if (!didPersist) return
+		previousProfileNameRef.current = currentProfileName
+		setProfileNameInput("")
 	}
 
 	const handleSaveProfile = async () => {
@@ -119,10 +121,11 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 			updatedProfiles.push(newProfile)
 		}
 
-		await handleFieldsChange({
+		const didPersist = await handleFieldsChange({
 			openAiCompatibleProfiles: updatedProfiles,
 			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: newProfile.name,
 		})
+		if (!didPersist) return
 		previousProfileNameRef.current = newProfile.name
 	}
 
@@ -132,7 +135,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 			if (previousProfileNameRef.current) {
 				const prevProfile = profiles.find((p: OpenAiCompatibleProfile) => p.name === previousProfileNameRef.current)
 				if (prevProfile) {
-					await handleFieldsChange({
+					const didPersist = await handleFieldsChange({
 						openAiBaseUrl: prevProfile.baseUrl,
 						openAiApiKey: prevProfile.apiKey,
 						openAiHeaders: prevProfile.headers,
@@ -143,22 +146,25 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 						[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]:
 							previousProfileNameRef.current,
 					})
+					if (!didPersist) return
 					setProfileNameInput(previousProfileNameRef.current)
 				} else {
 					// Fallback if previous profile is gone
-					await handleFieldsChange({
+					const didPersist = await handleFieldsChange({
 						[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
 					})
+					if (!didPersist) return
 				}
 			}
 			return
 		}
 
 		const updatedProfiles = profiles.filter((p: OpenAiCompatibleProfile) => p.name !== currentProfileName)
-		await handleFieldsChange({
+		const didPersist = await handleFieldsChange({
 			openAiCompatibleProfiles: updatedProfiles,
 			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
 		})
+		if (!didPersist) return
 		setProfileNameInput("")
 		previousProfileNameRef.current = undefined
 	}
@@ -332,7 +338,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 
 							<div className="flex flex-col gap-2">
 								{headerEntries.map(([key, value], index) => (
-									<div key={index} className="flex gap-2">
+									<div className="flex gap-2" key={index}>
 										<DebouncedTextField
 											disabled={remoteConfigSettings?.openAiHeaders !== undefined}
 											initialValue={key}
@@ -573,10 +579,10 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 						value={profileNameInput}
 					/>
 					<VSCodeButton
+						appearance="secondary"
 						className="w-full"
 						disabled={!profileNameInput.trim()}
-						onClick={handleSaveProfile}
-						appearance="secondary">
+						onClick={handleSaveProfile}>
 						Save Configuration
 					</VSCodeButton>
 				</div>

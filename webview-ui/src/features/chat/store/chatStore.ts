@@ -10,9 +10,13 @@ interface ChatState {
 	activeVoiceStreamId?: string
 	isApiRequestActive?: boolean
 	taskStatus?: TaskStatus
+	cardCollapsedStates: Record<string, boolean>
+	cardUserToggledStates: Record<string, boolean>
 
 	// Actions
 	setDiracMessages: (messages: DiracMessage[]) => void
+	setCardCollapsedState: (cardId: string, collapsed: boolean, userToggled?: boolean) => void
+	clearCardCollapsedStates: () => void
 
 	// Hydration
 	hydrate: () => () => void
@@ -24,8 +28,16 @@ export const useChatStore = create<ChatState>((set) => ({
 	activeVoiceStreamId: undefined,
 	isApiRequestActive: false,
 	taskStatus: undefined,
+	cardCollapsedStates: {},
+	cardUserToggledStates: {},
 
 	setDiracMessages: (messages) => set({ diracMessages: messages }),
+	setCardCollapsedState: (cardId, collapsed, userToggled = false) =>
+		set((state) => ({
+			cardCollapsedStates: { ...state.cardCollapsedStates, [cardId]: collapsed },
+			cardUserToggledStates: { ...state.cardUserToggledStates, [cardId]: userToggled },
+		})),
+	clearCardCollapsedStates: () => set({ cardCollapsedStates: {}, cardUserToggledStates: {} }),
 
 	hydrate: () => {
 		const cleanup = StateServiceClient.subscribeToState({} as EmptyRequest, {

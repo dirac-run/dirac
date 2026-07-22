@@ -163,6 +163,7 @@ export const useAppStore = create<AppState>((set) => ({
 				if (parsedState.taskHistory) {
 					useTaskStore.getState().setTaskHistory(parsedState.taskHistory)
 				}
+				useTaskStore.getState().setCurrentTaskItem(parsedState.currentTaskItem)
 				// totalTasksSize is not in ExtensionState, but it might be in the future or handled elsewhere
 				// if (parsedState.totalTasksSize !== undefined) {
 				// 	useTaskStore.getState().setTotalTasksSize(parsedState.totalTasksSize)

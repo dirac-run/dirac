@@ -82,9 +82,9 @@ declare module "vscode" {
 }
 
 const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, isPopup, currentMode }: ApiOptionsProps) => {
-	// Use full context state for immediate save payload
-	const { apiConfiguration, remoteConfigSettings } = useSettingsStore()
-
+	const apiConfiguration = useSettingsStore((state) => state.apiConfiguration)
+	const remoteConfigSettings = useSettingsStore((state) => state.remoteConfigSettings)
+	const apiConfigurationError = useSettingsStore((state) => state.apiConfigurationError)
 	const { selectedProvider } = normalizeApiConfiguration(apiConfiguration, currentMode)
 
 	const { handleModeFieldChange } = useApiConfigurationHandlers()
@@ -464,6 +464,11 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 
 			{apiConfiguration && selectedProvider === "aihubmix" && (
 				<AIhubmixProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
+			)}
+			{apiConfigurationError && (
+				<p aria-live="polite" className="m-0 text-xs text-error">
+					Could not save API configuration: {apiConfigurationError}
+				</p>
 			)}
 
 			{apiErrorMessage && (

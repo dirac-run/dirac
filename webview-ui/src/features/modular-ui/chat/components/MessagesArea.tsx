@@ -1,6 +1,6 @@
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import type React from "react"
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useMemo } from "react"
 import { Virtuoso } from "react-virtuoso"
 import type { ChatState, MessageHandlers, ScrollBehavior } from "../types/chatTypes"
 import { MessageRenderer } from "./VirtuosoItemRenderer"
@@ -15,8 +15,8 @@ interface MessagesAreaProps {
 }
 
 /**
- * The scrollable messages area with virtualized list
- * Handles rendering of chat rows
+ * The scrollable messages area with virtualized list.
+ * Message IDs are the row identity: card-local state must never follow a list index.
  */
 export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	task,
@@ -26,8 +26,6 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	chatState,
 	messageHandlers,
 }) => {
-	const parentRef = useRef<HTMLDivElement>(null)
-
 	const {
 		virtuosoRef,
 		footerRef,
@@ -43,115 +41,84 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	const { expandedRows, inputValue, setActiveQuote, uiActionState } = chatState
 	const activeCardId = uiActionState?.activeCardId
 
-	// Use refs for renderer deps to keep itemContent callback stable
-	const rendererStateRef = useRef({
-		renderedMessages,
-		modifiedMessages,
-		expandedRows,
-		toggleRowExpansion,
-		setActiveQuote,
-		inputValue,
-		messageHandlers,
-		activeCardId,
-		activeVoiceStreamId,
-	})
-	rendererStateRef.current = {
-		renderedMessages,
-		modifiedMessages,
-		expandedRows,
-		toggleRowExpansion,
-		setActiveQuote,
-		inputValue,
-		messageHandlers,
-		activeCardId,
-		activeVoiceStreamId,
-	}
-
-	const itemContent = useCallback((index: number, message: DiracMessage) => {
-		const state = rendererStateRef.current
-		return (
+	const itemContent = useCallback(
+		(index: number, message: DiracMessage) => (
 			<MessageRenderer
 				index={index}
 				message={message}
-				renderedMessages={state.renderedMessages}
-				modifiedMessages={state.modifiedMessages}
-				expandedRows={state.expandedRows}
-				onToggleExpand={state.toggleRowExpansion}
-				onSetQuote={state.setActiveQuote}
-				inputValue={state.inputValue}
-				messageHandlers={state.messageHandlers}
+				renderedMessages={renderedMessages}
+				modifiedMessages={modifiedMessages}
+				expandedRows={expandedRows}
+				onToggleExpand={toggleRowExpansion}
+				onSetQuote={setActiveQuote}
+				inputValue={inputValue}
+				messageHandlers={messageHandlers}
 				footerActive={false}
-				activeCardId={state.activeCardId}
-				activeVoiceStreamId={state.activeVoiceStreamId}
+				activeCardId={activeCardId}
+				activeVoiceStreamId={activeVoiceStreamId}
 			/>
-		)
-	}, [])
+		),
+		[
+			activeCardId,
+			activeVoiceStreamId,
+			expandedRows,
+			inputValue,
+			messageHandlers,
+			modifiedMessages,
+			renderedMessages,
+			setActiveQuote,
+			toggleRowExpansion,
+		],
+	)
 
 	const virtuosoComponents = useMemo(
 		() => ({
 			Footer: () => <div ref={footerRef} className="min-h-1" />,
 		}),
-		[],
+		[footerRef],
 	)
 
 	return (
-		<div className="overflow-hidden flex flex-col h-full relative">
-			<div className="grow flex">
-				<div
-					className="scrollable grow overflow-y-scroll custom-scrollbar"
-					ref={parentRef}
-					style={{
-						height: "100%",
-						width: "100%",
-						overflowAnchor: "none",
-					}}>
-					<Virtuoso
-						atBottomStateChange={(isAtBottom) => {
-							if (programmaticScrollRef.current) {
-								programmaticScrollRef.current = false
-								return
-							}
-							// Debounce to absorb scroll jitter during streaming
-							if (scrollBehavior.atBottomDebounceRef.current) {
-								clearTimeout(scrollBehavior.atBottomDebounceRef.current)
-							}
-							scrollBehavior.atBottomDebounceRef.current = setTimeout(() => {
-								setIsAtBottom(isAtBottom)
-								disableAutoScrollRef.current = !isAtBottom
-								setShowScrollToBottom(!isAtBottom)
-							}, 150)
-						}}
-						atBottomThreshold={500}
-						className="grow"
-						components={virtuosoComponents}
-						data={renderedMessages}
-						increaseViewportBy={{
-							top: 1_000,
-							bottom: 800,
-						}}
-						followOutput={(isAtBottom) => {
-							if (disableAutoScrollRef.current) return false
-							return "smooth"
-						}}
-						initialTopMostItemIndex={renderedMessages.length - 1}
-						itemContent={itemContent}
-						key={task.id}
-						rangeChanged={handleRangeChanged}
-						ref={virtuosoRef}
-						scrollerRef={(ref) => {
-							if (ref instanceof HTMLElement) {
-								// @ts-expect-error
-								parentRef.current = ref
-							}
-						}}
-						style={{
-							scrollbarWidth: "none",
-							msOverflowStyle: "none",
-							overflowAnchor: "none",
-						}}
-					/>
-				</div>
-			</div>
+		<div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+			<Virtuoso
+				atBottomStateChange={(isAtBottom) => {
+					if (programmaticScrollRef.current) {
+						if (isAtBottom) {
+							programmaticScrollRef.current = false
+							setIsAtBottom(true)
+							disableAutoScrollRef.current = false
+							setShowScrollToBottom(false)
+						}
+						return
+					}
+					if (scrollBehavior.atBottomDebounceRef.current) {
+						clearTimeout(scrollBehavior.atBottomDebounceRef.current)
+					}
+					scrollBehavior.atBottomDebounceRef.current = setTimeout(() => {
+						setIsAtBottom(isAtBottom)
+						disableAutoScrollRef.current = !isAtBottom
+						setShowScrollToBottom(!isAtBottom)
+					}, 80)
+				}}
+				atBottomThreshold={64}
+				className="grow custom-scrollbar"
+				components={virtuosoComponents}
+				computeItemKey={(_index, message) => message.id}
+				data={renderedMessages}
+				increaseViewportBy={{ top: 1_000, bottom: 800 }}
+				followOutput={() => (disableAutoScrollRef.current ? false : "auto")}
+				initialTopMostItemIndex={Math.max(0, renderedMessages.length - 1)}
+				itemContent={itemContent}
+				key={task.id}
+				rangeChanged={handleRangeChanged}
+				ref={virtuosoRef}
+				style={{
+					height: "100%",
+					width: "100%",
+					scrollbarWidth: "thin",
+					overflowAnchor: "none",
+				}}
+			/>
 		</div>
 	)
 }

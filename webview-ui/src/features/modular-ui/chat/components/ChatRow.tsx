@@ -20,7 +20,9 @@ const ChatRow = memo(
 			prevProps.mode === nextProps.mode &&
 			prevProps.reasoningContent === nextProps.reasoningContent &&
 			prevProps.responseStarted === nextProps.responseStarted &&
-			prevProps.lastModifiedMessage === nextProps.lastModifiedMessage
+			prevProps.lastModifiedMessage === nextProps.lastModifiedMessage &&
+			prevProps.activeCardId === nextProps.activeCardId &&
+			prevProps.activeVoiceStreamId === nextProps.activeVoiceStreamId
 		)
 	},
 )
