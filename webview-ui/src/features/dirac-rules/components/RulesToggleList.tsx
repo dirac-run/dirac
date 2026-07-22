@@ -11,6 +11,7 @@ const RulesToggleList = ({
 	showNoRules,
 	isRemote = false,
 	alwaysEnabledMap = {},
+	onChanged,
 }: {
 	rules: [string, boolean][]
 	toggleRule: (rulePath: string, enabled: boolean) => void
@@ -21,6 +22,7 @@ const RulesToggleList = ({
 	showNoRules: boolean
 	isRemote?: boolean
 	alwaysEnabledMap?: Record<string, boolean>
+	onChanged?: () => void
 }) => {
 	const gapClasses = {
 		small: "gap-0",
@@ -39,6 +41,7 @@ const RulesToggleList = ({
 							alwaysEnabled={alwaysEnabledMap[rulePath]}
 							enabled={enabled}
 							isGlobal={isGlobal}
+							onDeleted={onChanged}
 							isRemote={isRemote}
 							key={rulePath}
 							rulePath={rulePath}
@@ -46,7 +49,7 @@ const RulesToggleList = ({
 							toggleRule={toggleRule}
 						/>
 					))}
-					{showNewRule && <NewRuleRow isGlobal={isGlobal} ruleType={ruleType} />}
+					{showNewRule && <NewRuleRow isGlobal={isGlobal} onCreated={onChanged} ruleType={ruleType} />}
 				</>
 			) : (
 				<>
@@ -55,7 +58,7 @@ const RulesToggleList = ({
 							{ruleType === "workflow" ? "No workflows found" : "No rules found"}
 						</div>
 					)}
-					{showNewRule && <NewRuleRow isGlobal={isGlobal} ruleType={ruleType} />}
+					{showNewRule && <NewRuleRow isGlobal={isGlobal} onCreated={onChanged} ruleType={ruleType} />}
 				</>
 			)}
 		</div>

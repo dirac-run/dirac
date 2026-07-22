@@ -35,7 +35,7 @@ interface ActionDecoratorProps {
 
 const modeSwitchClasses = cn(
 	"flex items-center bg-transparent border border-input-border rounded-md overflow-hidden cursor-pointer transition-all duration-200 hover:border-ring/40 select-none relative h-6 w-fit min-w-[112px]",
-	"font-mono text-[9px] tracking-tight whitespace-nowrap",
+	"font-mono text-xs tracking-tight whitespace-nowrap",
 )
 
 export const createActionDecorator = (props: ActionDecoratorProps): InputDecorator => ({
@@ -93,7 +93,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 					<div className="flex min-w-0 max-w-full items-center gap-1">
 						<a
 							className={cn(
-								"flex h-5 min-w-0 max-w-full items-center px-0 text-[10px] outline-none select-none",
+								"flex h-5 min-w-0 max-w-full items-center px-0 text-xs outline-none select-none",
 								"text-(--vscode-descriptionForeground) hover:text-(--vscode-foreground) hover:underline focus:text-(--vscode-foreground) focus:underline active:text-(--vscode-foreground) active:underline",
 							)}
 							onClick={props.onModelButtonClick}
@@ -119,10 +119,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 									<ChevronDownIcon size={12} strokeWidth={2.5} />
 								</button>
 							</PopoverTrigger>
-							<PopoverContent
-								align="start"
-								className="w-72 p-1 text-(--vscode-menu-foreground)"
-								side="top">
+							<PopoverContent align="start" className="w-72 p-1 text-(--vscode-menu-foreground)" side="top">
 								<div className="max-h-64 overflow-y-auto py-1">
 									{props.modelProviderPresets.map((preset) => (
 										<button
@@ -139,7 +136,9 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 															? "var(--vscode-activityWarningBadge-background)"
 															: "var(--vscode-focusBorder)",
 												}}>
-												{preset.id === props.activeModelProviderPresetId && <CheckIcon size={12} strokeWidth={2.5} />}
+												{preset.id === props.activeModelProviderPresetId && (
+													<CheckIcon size={12} strokeWidth={2.5} />
+												)}
 											</span>
 											<span className="min-w-0 flex-1">
 												<span className="block truncate text-(--vscode-menu-foreground)">
@@ -153,7 +152,9 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 										</button>
 									))}
 									{props.modelPresetError && (
-										<p className="mx-2 my-1 text-[10px] leading-4 text-(--vscode-errorForeground)" role="alert">
+										<p
+											className="mx-2 my-1 text-[10px] leading-4 text-(--vscode-errorForeground)"
+											role="alert">
 											{props.modelPresetError}
 										</p>
 									)}
@@ -171,7 +172,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 								<PopoverTrigger asChild>
 									<button
 										aria-label={`Reasoning effort: ${props.reasoningEffort}`}
-										className="flex h-5 shrink-0 items-center gap-0.5 rounded-sm bg-transparent px-1 text-[10px] capitalize text-(--vscode-descriptionForeground) hover:bg-(--vscode-toolbar-hoverBackground) hover:text-(--vscode-foreground) disabled:cursor-wait disabled:opacity-60"
+										className="flex h-5 shrink-0 items-center gap-0.5 rounded-sm bg-transparent px-1 text-xs capitalize text-(--vscode-descriptionForeground) hover:bg-(--vscode-toolbar-hoverBackground) hover:text-(--vscode-foreground) disabled:cursor-wait disabled:opacity-60"
 										disabled={props.isUpdatingReasoningEffort}
 										title="Change reasoning effort"
 										type="button">
@@ -179,10 +180,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 										<ChevronDownIcon size={10} strokeWidth={2.5} />
 									</button>
 								</PopoverTrigger>
-								<PopoverContent
-									align="start"
-									className="w-44 p-1 text-(--vscode-menu-foreground)"
-									side="top">
+								<PopoverContent align="start" className="w-44 p-1 text-(--vscode-menu-foreground)" side="top">
 									<p className="px-2 pb-1 pt-1 text-[10px] text-(--vscode-descriptionForeground)">
 										Reasoning effort
 									</p>
@@ -207,7 +205,9 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 										</button>
 									))}
 									{props.reasoningEffortError && (
-										<p className="mx-2 my-1 text-[10px] leading-4 text-(--vscode-errorForeground)" role="alert">
+										<p
+											className="mx-2 my-1 text-[10px] leading-4 text-(--vscode-errorForeground)"
+											role="alert">
 											{props.reasoningEffortError}
 										</p>
 									)}
@@ -221,8 +221,9 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 
 			<Tooltip>
 				<TooltipContent className="text-xs px-2 flex flex-col gap-1" side="top">
-					{`In ${props.mode === "act" ? "Act" : "Plan"} mode, Dirac will ${props.mode === "act" ? "complete the task immediately" : "gather information to architect a plan"
-						}`}
+					{`In ${props.mode === "act" ? "Act" : "Plan"} mode, Dirac will ${
+						props.mode === "act" ? "complete the task immediately" : "gather information to architect a plan"
+					}`}
 					{props.togglePlanActKeys && (
 						<p className="text-description/80 text-xs mb-0">
 							Toggle w/ <kbd className="text-muted-foreground mx-1">{props.togglePlanActKeys}</kbd>

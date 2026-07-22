@@ -197,7 +197,7 @@ export const CheckpointMarker = ({ message }: CheckpointMarkerProps) => {
 			<DottedLine isCheckedOut={isCheckpointCheckedOut} className="group-hover/chkpt:hidden flex-1" />
 			<div className="hidden group-hover/chkpt:flex flex-1 items-center gap-1">
 				<span
-					className={cn("text-[9px] shrink-0", {
+					className={cn("shrink-0 text-xs", {
 						"text-link": isCheckpointCheckedOut,
 						"text-description": !isCheckpointCheckedOut,
 					})}>
@@ -346,7 +346,7 @@ function CheckpointButton({
 	return (
 		<button
 			className={cn(
-				"border-none px-1.5 py-0.5 text-[9px] cursor-pointer relative",
+				"relative cursor-pointer border-none px-1.5 py-0.5 text-xs",
 				"hover:not-disabled:text-(--vscode-editor-background) transition-colors",
 				"disabled:opacity-50 disabled:cursor-not-allowed",
 				className,

@@ -1,19 +1,12 @@
-import { DiracMessage, Mode } from "@shared/ExtensionMessage"
+import { DiracMessage } from "@shared/ExtensionMessage"
 
 export interface ChatRowProps {
 	message: DiracMessage
 	isExpanded: boolean
 	onToggleExpand: (id: string) => void
-	lastModifiedMessage?: DiracMessage
-	isLast: boolean
-	inputValue?: string
 	sendMessageFromChatRow?: (text: string, images: string[], files: string[]) => void
-	onSetQuote: (text: string) => void
+	onSetQuote: (text: string | null) => void
 	onCancelCommand?: () => void
-	mode?: Mode
-	reasoningContent?: string
-	responseStarted?: boolean
-	isRequestInProgress?: boolean
 	onApprove?: (cardId?: string) => void
 	onReject?: (cardId?: string) => void
 	onAction?: (value: string, cardId?: string) => void

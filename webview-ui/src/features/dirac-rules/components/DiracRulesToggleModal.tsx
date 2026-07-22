@@ -12,7 +12,7 @@ import {
 	ToggleWorkflowRequest,
 } from "@shared/proto/dirac/file"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import React, { useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { useClickAway, useWindowSize } from "react-use"
 import styled from "styled-components"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
@@ -68,6 +68,9 @@ const DiracRulesToggleModal: React.FC = () => {
 	const [menuPosition, setMenuPosition] = useState(0)
 	const [currentView, setCurrentView] = useState<"rules" | "workflows" | "hooks" | "skills">("rules")
 
+	const rulesRefreshRequestIdRef = useRef(0)
+	const skillsRefreshRequestIdRef = useRef(0)
+
 	// Auto-switch to rules tab if hooks become disabled while viewing hooks tab
 	useEffect(() => {
 		if (currentView === "hooks" && !hooksEnabled) {
@@ -75,46 +78,49 @@ const DiracRulesToggleModal: React.FC = () => {
 		}
 	}, [currentView, hooksEnabled])
 
-	useEffect(() => {
-		if (isVisible) {
-			FileServiceClient.refreshRules({} as EmptyRequest)
-				.then((response: RefreshedRules) => {
-					// Update state with the response data using all available setters
-					if (response.globalDiracRulesToggles?.toggles) {
-						setGlobalDiracRulesToggles(response.globalDiracRulesToggles.toggles)
-					}
-					if (response.localDiracRulesToggles?.toggles) {
-						setLocalDiracRulesToggles(response.localDiracRulesToggles.toggles)
-					}
-					if (response.localCursorRulesToggles?.toggles) {
-						setLocalCursorRulesToggles(response.localCursorRulesToggles.toggles)
-					}
-					if (response.localWindsurfRulesToggles?.toggles) {
-						setLocalWindsurfRulesToggles(response.localWindsurfRulesToggles.toggles)
-					}
-					if (response.localAgentsRulesToggles?.toggles) {
-						setLocalAgentsRulesToggles(response.localAgentsRulesToggles.toggles)
-					}
-					if (response.localWorkflowToggles?.toggles) {
-						setLocalWorkflowToggles(response.localWorkflowToggles.toggles)
-					}
-					if (response.globalWorkflowToggles?.toggles) {
-						setGlobalWorkflowToggles(response.globalWorkflowToggles.toggles)
-					}
-				})
-				.catch((error) => {
-					console.error("Failed to refresh rules:", error)
-				})
+	const refreshRules = useCallback(async () => {
+		const requestId = ++rulesRefreshRequestIdRef.current
+		try {
+			const response: RefreshedRules = await FileServiceClient.refreshRules({} as EmptyRequest)
+
+			if (requestId !== rulesRefreshRequestIdRef.current) return
+			if (response.globalDiracRulesToggles?.toggles) {
+				setGlobalDiracRulesToggles(response.globalDiracRulesToggles.toggles)
+			}
+			if (response.localDiracRulesToggles?.toggles) {
+				setLocalDiracRulesToggles(response.localDiracRulesToggles.toggles)
+			}
+			if (response.localCursorRulesToggles?.toggles) {
+				setLocalCursorRulesToggles(response.localCursorRulesToggles.toggles)
+			}
+			if (response.localWindsurfRulesToggles?.toggles) {
+				setLocalWindsurfRulesToggles(response.localWindsurfRulesToggles.toggles)
+			}
+			if (response.localAgentsRulesToggles?.toggles) {
+				setLocalAgentsRulesToggles(response.localAgentsRulesToggles.toggles)
+			}
+			if (response.localWorkflowToggles?.toggles) {
+				setLocalWorkflowToggles(response.localWorkflowToggles.toggles)
+			}
+			if (response.globalWorkflowToggles?.toggles) {
+				setGlobalWorkflowToggles(response.globalWorkflowToggles.toggles)
+			}
+		} catch (error) {
+			console.error("Failed to refresh rules:", error)
 		}
 	}, [
-		isVisible,
 		setGlobalDiracRulesToggles,
-		setLocalDiracRulesToggles,
 		setGlobalWorkflowToggles,
+		setLocalAgentsRulesToggles,
 		setLocalCursorRulesToggles,
+		setLocalDiracRulesToggles,
 		setLocalWindsurfRulesToggles,
 		setLocalWorkflowToggles,
 	])
+
+	useEffect(() => {
+		if (isVisible) void refreshRules()
+	}, [isVisible, refreshRules])
 
 	// Refresh hooks when hooks tab becomes visible
 	useEffect(() => {
@@ -154,42 +160,28 @@ const DiracRulesToggleModal: React.FC = () => {
 		}
 	}, [isVisible, currentView])
 
+	const refreshSkills = useCallback(async () => {
+		const requestId = ++skillsRefreshRequestIdRef.current
+		try {
+			const response = await FileServiceClient.refreshSkills({} as EmptyRequest)
+			if (requestId !== skillsRefreshRequestIdRef.current) return
+			setGlobalSkills(response.globalSkills || [])
+			setLocalSkills(response.localSkills || [])
+		} catch (error) {
+			if (requestId === skillsRefreshRequestIdRef.current) {
+				console.error("Failed to refresh skills:", error)
+			}
+		}
+	}, [])
+
 	// Refresh skills when skills tab becomes visible
 	useEffect(() => {
-		if (!isVisible || currentView !== "skills") {
-			return
-		}
+		if (!isVisible || currentView !== "skills") return
 
-		let isCancelled = false
-
-		const refreshSkills = () => {
-			if (isCancelled) return
-
-			FileServiceClient.refreshSkills({} as EmptyRequest)
-				.then((response) => {
-					if (!isCancelled) {
-						setGlobalSkills(response.globalSkills || [])
-						setLocalSkills(response.localSkills || [])
-					}
-				})
-				.catch((error) => {
-					if (!isCancelled) {
-						console.error("Failed to refresh skills:", error)
-					}
-				})
-		}
-
-		// Refresh immediately
-		refreshSkills()
-
-		// Poll every 1 second to detect filesystem changes
-		const pollInterval = setInterval(refreshSkills, 1000)
-
-		return () => {
-			isCancelled = true
-			clearInterval(pollInterval)
-		}
-	}, [isVisible, currentView])
+		void refreshSkills()
+		const pollInterval = setInterval(() => void refreshSkills(), 1000)
+		return () => clearInterval(pollInterval)
+	}, [isVisible, currentView, refreshSkills])
 
 	// Format global rules for display with proper typing
 	const globalRules = Object.entries(globalDiracRulesToggles || {})
@@ -557,6 +549,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									{/* File-based Global Rules */}
 									<RulesToggleList
 										isGlobal={true}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={globalRules}
 										ruleType={"dirac"}
@@ -571,6 +564,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									<div className="text-sm font-normal mb-2">Workspace Rules</div>
 									<RulesToggleList
 										isGlobal={false}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={localRules}
 										ruleType={"dirac"}
@@ -581,6 +575,7 @@ const DiracRulesToggleModal: React.FC = () => {
 
 									<RulesToggleList
 										isGlobal={false}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={cursorRules}
 										ruleType={"cursor"}
@@ -590,6 +585,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									/>
 									<RulesToggleList
 										isGlobal={false}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={windsurfRules}
 										ruleType={"windsurf"}
@@ -599,6 +595,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									/>
 									<RulesToggleList
 										isGlobal={false}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={agentsRules}
 										ruleType={"agents"}
@@ -642,6 +639,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									{/* File-based Global Workflows */}
 									<RulesToggleList
 										isGlobal={true}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={globalWorkflows}
 										ruleType={"workflow"}
@@ -656,6 +654,7 @@ const DiracRulesToggleModal: React.FC = () => {
 									<div className="text-sm font-normal mb-2">Workspace Workflows</div>
 									<RulesToggleList
 										isGlobal={false}
+										onChanged={refreshRules}
 										listGap="small"
 										rules={localWorkflows}
 										ruleType={"workflow"}
@@ -771,13 +770,18 @@ const DiracRulesToggleModal: React.FC = () => {
 												<RuleRow
 													enabled={skill.enabled}
 													isGlobal={true}
+													onDeleted={() => {
+														setGlobalSkills((skills) =>
+															skills.filter((item) => item.path !== skill.path),
+														)
+													}}
 													key={skill.path}
 													rulePath={skill.path}
 													ruleType="skill"
 													toggleRule={(path, enabled) => toggleSkill(true, path, enabled)}
 												/>
 											))}
-										<NewRuleRow isGlobal={true} ruleType="skill" />
+										<NewRuleRow isGlobal={true} onCreated={() => void refreshSkills()} ruleType="skill" />
 									</div>
 								</div>
 
@@ -791,13 +795,18 @@ const DiracRulesToggleModal: React.FC = () => {
 												<RuleRow
 													enabled={skill.enabled}
 													isGlobal={false}
+													onDeleted={() => {
+														setLocalSkills((skills) =>
+															skills.filter((item) => item.path !== skill.path),
+														)
+													}}
 													key={skill.path}
 													rulePath={skill.path}
 													ruleType="skill"
 													toggleRule={(path, enabled) => toggleSkill(false, path, enabled)}
 												/>
 											))}
-										<NewRuleRow isGlobal={false} ruleType="skill" />
+										<NewRuleRow isGlobal={false} onCreated={() => void refreshSkills()} ruleType="skill" />
 									</div>
 								</div>
 							</>

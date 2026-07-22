@@ -7,14 +7,14 @@ interface ApiStatusOverlayProps {
 }
 
 export const ApiStatusOverlay = memo(({ status }: ApiStatusOverlayProps) => {
-	const { cost, tokensIn, tokensOut, cacheWrites, cacheReads, contextUsagePercentage } = status
+	const { cost, tokensIn, tokensOut, contextUsagePercentage } = status
 
-	if (cost === undefined && tokensIn === undefined && tokensOut === undefined) {
+	if (cost === undefined && tokensIn === undefined && tokensOut === undefined && contextUsagePercentage === undefined) {
 		return null
 	}
 
 	return (
-		<div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-muted-foreground bg-foreground/5 rounded-md border border-foreground/10 w-fit">
+		<div className="flex w-fit items-center gap-3 rounded-md border border-foreground/10 bg-foreground/5 px-3 py-1.5 text-xs text-muted-foreground">
 			{cost !== undefined && (
 				<div className="flex items-center gap-1">
 					<CoinsIcon className="size-3" />

@@ -8,7 +8,6 @@ import { MessageRenderer } from "./VirtuosoItemRenderer"
 interface MessagesAreaProps {
 	task: DiracMessage
 	renderedMessages: DiracMessage[]
-	modifiedMessages: DiracMessage[]
 	scrollBehavior: ScrollBehavior
 	chatState: ChatState
 	messageHandlers: MessageHandlers
@@ -21,7 +20,6 @@ interface MessagesAreaProps {
 export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	task,
 	renderedMessages,
-	modifiedMessages,
 	scrollBehavior,
 	chatState,
 	messageHandlers,
@@ -38,7 +36,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	} = scrollBehavior
 
 	const { activeVoiceStreamId } = chatState
-	const { expandedRows, inputValue, setActiveQuote, uiActionState } = chatState
+	const { expandedRows, setActiveQuote, uiActionState } = chatState
 	const activeCardId = uiActionState?.activeCardId
 
 	const itemContent = useCallback(
@@ -47,28 +45,16 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 				index={index}
 				message={message}
 				renderedMessages={renderedMessages}
-				modifiedMessages={modifiedMessages}
 				expandedRows={expandedRows}
 				onToggleExpand={toggleRowExpansion}
 				onSetQuote={setActiveQuote}
-				inputValue={inputValue}
 				messageHandlers={messageHandlers}
 				footerActive={false}
 				activeCardId={activeCardId}
 				activeVoiceStreamId={activeVoiceStreamId}
 			/>
 		),
-		[
-			activeCardId,
-			activeVoiceStreamId,
-			expandedRows,
-			inputValue,
-			messageHandlers,
-			modifiedMessages,
-			renderedMessages,
-			setActiveQuote,
-			toggleRowExpansion,
-		],
+		[activeCardId, activeVoiceStreamId, expandedRows, messageHandlers, renderedMessages, setActiveQuote, toggleRowExpansion],
 	)
 
 	const virtuosoComponents = useMemo(

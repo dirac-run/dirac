@@ -1,24 +1,16 @@
-import { memo, useEffect } from "react"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-import { ModularCard, ModularMarkdown, CheckpointMarker } from "@/features/modular-ui"
-import { useRelinquishControl } from "@/shared/hooks/useRelinquishControl"
-import { ChatRowProps } from "../types/chatRowTypes"
+import { memo } from "react"
+import { CheckpointMarker, ModularCard, ModularMarkdown } from "@/features/modular-ui"
+import type { ChatRowProps } from "../types/chatRowTypes"
 
 export const MessageRenderer = memo(
 	({
 		message,
 		isExpanded,
 		onToggleExpand,
-		lastModifiedMessage,
-		isLast,
-		inputValue,
 		sendMessageFromChatRow,
 		onSetQuote,
 		onCancelCommand,
-		mode,
-		isRequestInProgress,
-		reasoningContent: dashboardReasoningContent,
-		responseStarted,
 		onApprove,
 		onReject,
 		onAction,
@@ -27,36 +19,24 @@ export const MessageRenderer = memo(
 	}: ChatRowProps) => {
 		const onAskForUpdate = async () => {
 			await onCancelCommand?.()
-			// Small delay to ensure task is re-initialized before sending message
-			setTimeout(() => {
-				sendMessageFromChatRow?.("I'm still waiting for an update, are you stuck?", [], [])
-			}, 200)
+			await new Promise((resolve) => setTimeout(resolve, 200))
+			sendMessageFromChatRow?.("I'm still waiting for an update, are you stuck?", [], [])
 		}
 
-		const onRelinquishControl = useRelinquishControl()
-
-		useEffect(() => {
-			return onRelinquishControl(() => {
-				// Cleanup logic if needed
-			})
-		}, [onRelinquishControl])
-
-		const handleToggle = () => onToggleExpand(message.id)
-
-		// --- New Protocol Dispatcher ---
 		if ("content" in message) {
 			switch (message.content.type) {
 				case "markdown":
 					return (
 						<ModularMarkdown
 							content={message.content.content}
-							isReasoning={message.content.isReasoning}
-							partial={message.id === activeVoiceStreamId}
-							isExpanded={isExpanded}
-							onToggleExpand={() => onToggleExpand(message.id)}
-							onAskForUpdate={onAskForUpdate}
-							images={message.content.images}
 							files={message.content.files}
+							images={message.content.images}
+							isExpanded={isExpanded}
+							isReasoning={message.content.isReasoning}
+							onAskForUpdate={onAskForUpdate}
+							onSetQuote={onSetQuote}
+							onToggleExpand={() => onToggleExpand(message.id)}
+							partial={message.id === activeVoiceStreamId}
 							role={message.content.role}
 						/>
 					)
@@ -81,21 +61,20 @@ export const MessageRenderer = memo(
 				case "checkpoint":
 					return <CheckpointMarker message={message} />
 				default:
-					// Fail hard on unknown primitive types in the new protocol
 					return (
-						<div className="p-2 border border-error bg-error/10 text-error rounded-md">
+						<div className="rounded-md border border-error bg-error/10 p-2 text-error">
 							<strong>Protocol Error:</strong> Unknown primitive type "{(message.content as any).type}"
 						</div>
 					)
 			}
 		}
 
-		// If we reach here, it means the message doesn't have the 'content' field,
-		// which should be impossible according to the new DiracMessage type.
 		return (
-			<div className="p-2 border border-error bg-error/10 text-error rounded-md">
+			<div className="rounded-md border border-error bg-error/10 p-2 text-error">
 				<strong>Protocol Error:</strong> Message is missing "content" field.
 			</div>
 		)
 	},
 )
+
+MessageRenderer.displayName = "MessageRenderer"

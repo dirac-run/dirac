@@ -1,35 +1,58 @@
 import { mentionRegexGlobal } from "@shared/context-mentions"
 import { slashCommandRegexGlobal } from "@/shared/lib/slash-commands"
-import { InputDecorator, ModularInputContext } from "../types"
+import type { ReactNode } from "react"
+import type { InputDecorator } from "../types"
+
+type HighlightRange = {
+	start: number
+	end: number
+}
+
+function collectHighlightRanges(value: string): HighlightRange[] {
+	const ranges: HighlightRange[] = []
+	const mentionRegex = new RegExp(mentionRegexGlobal.source, "g")
+
+	for (const match of value.matchAll(mentionRegex)) {
+		if (match.index === undefined) continue
+		ranges.push({ start: match.index, end: match.index + match[0].length })
+	}
+
+	const slashRegex = new RegExp(slashCommandRegexGlobal.source, "g")
+	const slashMatch = slashRegex.exec(value)
+	if (slashMatch?.index !== undefined) {
+		const prefixLength = slashMatch[1]?.length ?? 0
+		const command = slashMatch[2] ?? ""
+		ranges.push({
+			start: slashMatch.index + prefixLength,
+			end: slashMatch.index + prefixLength + command.length,
+		})
+	}
+
+	return ranges.sort((left, right) => left.start - right.start)
+}
+
+function renderHighlightedText(value: string) {
+	const displayValue = value.endsWith("\n") ? `${value}\n` : value
+	const ranges = collectHighlightRanges(value)
+	const nodes: ReactNode[] = []
+	let cursor = 0
+
+	for (const range of ranges) {
+		if (range.start < cursor) continue
+		if (range.start > cursor) nodes.push(displayValue.slice(cursor, range.start))
+		nodes.push(
+			<mark className="mention-context-textarea-highlight" key={`${range.start}-${range.end}`}>
+				{displayValue.slice(range.start, range.end)}
+			</mark>,
+		)
+		cursor = range.end
+	}
+
+	if (cursor < displayValue.length) nodes.push(displayValue.slice(cursor))
+	return nodes
+}
 
 export const HighlightDecorator: InputDecorator = {
 	id: "highlight",
-	renderHighlight: (value: string, context: ModularInputContext) => {
-		let processedText = value.replace(/\n$/, "\n\n").replace(/[<>&]/g, (c) => ({ "<": "<", ">": ">", "&": "&" })[c] || c)
-
-		// Highlight @mentions
-		processedText = processedText.replace(mentionRegexGlobal, '<mark class="mention-context-textarea-highlight">$&</mark>')
-
-		// Highlight only the FIRST valid /slash-command in the text
-		slashCommandRegexGlobal.lastIndex = 0
-		let hasHighlightedSlashCommand = false
-		processedText = processedText.replace(slashCommandRegexGlobal, (match, prefix, command) => {
-			if (hasHighlightedSlashCommand) {
-				return match
-			}
-
-			const commandName = command.substring(1)
-			// For now, we'll assume it's valid if it matches the regex
-			// In a real implementation, we would check against available skills/workflows
-			const isValidCommand = true
-
-			if (isValidCommand) {
-				hasHighlightedSlashCommand = true
-				return `${prefix}<mark class="mention-context-textarea-highlight">${command}</mark>`
-			}
-			return match
-		})
-
-		return <div dangerouslySetInnerHTML={{ __html: processedText }} />
-	},
+	renderHighlight: (value: string) => <div>{renderHighlightedText(value)}</div>,
 }

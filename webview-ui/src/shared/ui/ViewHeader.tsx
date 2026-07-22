@@ -22,15 +22,13 @@ const ViewHeader = ({ title, onDone, showEnvironmentSuffix, environment }: ViewH
 	const titleColor = getEnvironmentColor(environment)
 
 	return (
-		<div className="flex justify-between items-center py-2.5 px-5 mb-[17px]">
-			<div className="relative">
-				<h3 className="m-0 text-lg font-normal" style={{ color: titleColor }}>
+		<div className="mb-2 flex items-center justify-between border-b border-border-panel px-4 py-3">
+			<div>
+				<h3 className="m-0 text-md font-medium tracking-tight" style={{ color: titleColor }}>
 					{title}
 				</h3>
 				{showSubtext && (
-					<span className="absolute left-0 top-8 -translate-y-1 text-xs text-description whitespace-nowrap">
-						{capitalizedEnv} environment
-					</span>
+					<span className="block whitespace-nowrap pt-1 text-xs text-description">{capitalizedEnv} environment</span>
 				)}
 			</div>
 			<Button onClick={onDone} size="header">

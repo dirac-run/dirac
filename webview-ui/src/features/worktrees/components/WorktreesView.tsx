@@ -12,8 +12,9 @@ import { AlertCircle, Check, ExternalLink, FolderOpen, GitBranch, GitMerge, Load
 import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { FileServiceClient, TaskServiceClient, WorktreeServiceClient } from "@/shared/api/grpc-client"
-import { getEnvironmentColor } from "@/shared/lib/environmentColors"
+import ViewHeader from "@/shared/ui/ViewHeader"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
+
 import CreateWorktreeModal from "./CreateWorktreeModal"
 import DeleteWorktreeModal from "./DeleteWorktreeModal"
 
@@ -239,16 +240,10 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 
 	return (
 		<div className="fixed inset-0 flex flex-col overflow-hidden">
-			{/* Sticky Header with title and Done button */}
-			<div className="flex-none flex justify-between items-center px-5 py-3 border-b border-[var(--vscode-panel-border)]">
-				<h3 className="m-0" style={{ color: getEnvironmentColor(environment) }}>
-					Worktrees
-				</h3>
-				<VSCodeButton onClick={onDone}>Done</VSCodeButton>
-			</div>
+			<ViewHeader environment={environment} onDone={onDone} title="Worktrees" />
 
 			{/* Scrollable Content */}
-			<div className="flex-1 overflow-y-auto p-5">
+			<div className="flex-1 overflow-y-auto p-4">
 				{/* Description */}
 				<p className="text-sm text-[var(--vscode-descriptionForeground)] m-0 mb-4">
 					Git worktrees let you work on multiple branches at the same time, each in its own folder. Open worktrees in

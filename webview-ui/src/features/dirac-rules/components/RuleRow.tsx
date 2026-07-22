@@ -36,8 +36,8 @@ const RuleRow: React.FC<{
 	toggleRule: (rulePath: string, enabled: boolean) => void
 	isRemote?: boolean
 	alwaysEnabled?: boolean
-	onDeleteSkill?: () => void
-}> = ({ rulePath, enabled, isGlobal, toggleRule, ruleType, isRemote = false, alwaysEnabled = false, onDeleteSkill }) => {
+	onDeleted?: () => void
+}> = ({ rulePath, enabled, isGlobal, toggleRule, ruleType, isRemote = false, alwaysEnabled = false, onDeleted }) => {
 	const displayName = getDisplayNameFromPath(rulePath)
 	const skillDisplayName = getSkillDisplayNameFromSkillMdPath(rulePath)
 
@@ -116,7 +116,7 @@ const RuleRow: React.FC<{
 					isGlobal,
 				}),
 			)
-				.then(() => onDeleteSkill?.())
+				.then(() => onDeleted?.())
 				.catch((err) => console.error("Failed to delete skill:", err))
 		} else {
 			FileServiceClient.deleteRuleFile(
@@ -125,7 +125,9 @@ const RuleRow: React.FC<{
 					isGlobal,
 					type: ruleType || "dirac",
 				}),
-			).catch((err) => console.error("Failed to delete rule file:", err))
+			)
+				.then(() => onDeleted?.())
+				.catch((err) => console.error("Failed to delete rule file:", err))
 		}
 	}
 

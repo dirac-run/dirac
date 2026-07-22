@@ -11,7 +11,7 @@ interface CardContentProps {
 export const CardContent: React.FC<CardContentProps> = ({ body, renderType }) => {
 	switch (renderType) {
 		case "text":
-			return <pre className="whitespace-pre-wrap font-mono text-xs">{body}</pre>
+			return <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{body}</pre>
 		case "markdown":
 			return <MarkdownBlock markdown={body} />
 		case "diff":

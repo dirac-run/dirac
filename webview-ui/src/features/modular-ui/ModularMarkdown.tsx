@@ -64,10 +64,10 @@ export const ModularMarkdown = memo(
 					ref={contentRef}>
 					<div
 						className={cn(
-							"flex-1 min-w-0 px-2.5 py-1.5 rounded-lg relative",
+							"relative min-w-0 flex-1 rounded-lg border px-3 py-2 text-base leading-relaxed",
 							role === "user"
-								? "bg-(--vscode-focusBorder)/10 border border-(--vscode-focusBorder)/20"
-								: "bg-amber-900/10 border border-amber-800/20",
+								? "border-(--vscode-focusBorder)/25 bg-(--vscode-focusBorder)/10"
+								: "border-foreground/10 bg-foreground/[0.025]",
 						)}>
 						<MarkdownRow markdown={content} showCursor={false} />
 						{quoteButtonState.visible && (

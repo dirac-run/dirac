@@ -13,7 +13,7 @@ export const ReasoningTimeline: React.FC<ReasoningTimelineProps> = memo(({ conte
 	return (
 		<div className="flex flex-col gap-1.5">
 			{steps.map((step, index) => (
-				<p key={index} className="whitespace-pre-wrap leading-relaxed text-[13px] text-description/90">
+				<p key={index} className="whitespace-pre-wrap text-sm leading-relaxed text-description/90">
 					{step.trim()}
 				</p>
 			))}

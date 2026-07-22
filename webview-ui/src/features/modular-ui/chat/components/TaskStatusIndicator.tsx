@@ -47,7 +47,7 @@ export const TaskStatusIndicator: React.FC<TaskStatusIndicatorProps> = ({ status
 			aria-live="polite"
 			className={cn(
 				"flex h-5 max-w-[180px] min-w-0 shrink items-center gap-1.5 rounded-sm px-1.5",
-				"font-mono text-[10px] leading-none tracking-tight transition-colors duration-200",
+				"font-mono text-xs leading-none tracking-tight transition-colors duration-200",
 				toneClasses[projection.tone],
 				className,
 			)}

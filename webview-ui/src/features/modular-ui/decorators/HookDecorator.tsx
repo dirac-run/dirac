@@ -16,7 +16,7 @@ export const HookDecorator: CardDecorator = {
 		return (
 			<div className="flex items-center gap-2">
 				{exitCodeMatch && (
-					<Badge variant="default" className="text-[10px] px-1 py-0 opacity-70">
+					<Badge variant="default" className="px-1 py-0 text-xs opacity-70">
 						exit: {exitCodeMatch[1]}
 					</Badge>
 				)}
@@ -24,7 +24,7 @@ export const HookDecorator: CardDecorator = {
 					<Button
 						variant="secondary"
 						size="xs"
-						className="h-5 text-[10px] px-1.5"
+						className="h-5 px-1.5 text-xs"
 						onClick={(e) => {
 							e.stopPropagation()
 							TaskServiceClient.cancelTask(EmptyRequest.create({})).catch((err) =>

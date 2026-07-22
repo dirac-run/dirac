@@ -11,6 +11,7 @@ interface NewRuleRowProps {
 	ruleType?: string
 	existingHooks?: string[]
 	workspaceName?: string
+	onCreated?: () => void
 }
 
 const HOOK_TYPES = [
@@ -24,7 +25,7 @@ const HOOK_TYPES = [
 	{ name: "PreCompact", description: "Executes before conversation compaction" },
 ]
 
-const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHooks = [], workspaceName }) => {
+const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHooks = [], workspaceName, onCreated }) => {
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [filename, setFilename] = useState("")
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -73,6 +74,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 					workspaceName,
 				}),
 			)
+			onCreated?.()
 		} catch (err) {
 			console.error("Error creating hook:", err)
 		}
@@ -99,6 +101,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 							isGlobal,
 						}),
 					)
+					onCreated?.()
 					setFilename("")
 					setError(null)
 					setIsExpanded(false)
@@ -128,8 +131,10 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 						type: ruleType || "dirac",
 					}),
 				)
+				onCreated?.()
 			} catch (err) {
-				console.error("Error creating rule file:", err)
+				setError(err instanceof Error ? err.message : "Failed to create file")
+				return
 			}
 
 			setFilename("")

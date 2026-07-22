@@ -31,11 +31,11 @@
 	*,
 	*::before,
 	*::after {
-		@apply border-border outline-ring/50 text-base;
+		@apply border-border outline-ring/50;
 	}
 
 	body {
-		@apply bg-background text-foreground font-sans antialiased selection:bg-selection selection:text-selection-foreground;
+		@apply bg-background text-foreground font-sans text-base antialiased selection:bg-selection selection:text-selection-foreground;
 		font-weight: 500;
 	}
 

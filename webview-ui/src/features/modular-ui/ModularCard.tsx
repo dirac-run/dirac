@@ -49,7 +49,9 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, isActive, onActi
 		<div
 			className={cn(
 				"my-px flex flex-col overflow-hidden",
-				isCollapsed ? "bg-transparent" : "rounded-md border border-foreground/10 bg-foreground/[0.02]",
+				isCollapsed
+					? "bg-transparent"
+					: "rounded-md border border-foreground/10 bg-foreground/[0.025] shadow-[0_1px_2px_color-mix(in_srgb,var(--vscode-widget-shadow)_18%,transparent)]",
 			)}>
 			<ModularCardHeader
 				card={card}

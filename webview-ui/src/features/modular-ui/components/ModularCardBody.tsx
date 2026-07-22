@@ -20,7 +20,7 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 
 	const bodyContent = body && (
 		<div
-			className="p-2 text-xs overflow-y-auto overflow-x-auto"
+			className="overflow-x-auto overflow-y-auto p-2.5 text-sm leading-relaxed"
 			ref={scrollRef}
 			style={{ maxHeight: maxHeight ? `${maxHeight}px` : "320px" }}>
 			<CardContent body={body} renderType={renderType} />

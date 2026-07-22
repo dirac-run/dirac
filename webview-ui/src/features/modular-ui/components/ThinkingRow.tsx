@@ -104,7 +104,7 @@ export const ThinkingRow = memo(
 
 						{/* Title text */}
 						<span
-							className={cn("text-[13px] leading-none font-medium tracking-tight text-description", {
+							className={cn("text-sm leading-none font-medium tracking-tight text-description", {
 								"animate-shimmer bg-linear-90 from-glow-plan via-description to-glow-plan bg-[length:200%_100%] bg-clip-text text-transparent":
 									isStreaming,
 							})}>
@@ -113,9 +113,7 @@ export const ThinkingRow = memo(
 
 						{/* Elapsed time — inline, subtle */}
 						{isStreaming && thinkingTime > 0 && (
-							<span className="text-[11px] text-description/40 leading-none ml-0.5">
-								{formatTime(thinkingTime)}
-							</span>
+							<span className="ml-0.5 text-xs leading-none text-description/50">{formatTime(thinkingTime)}</span>
 						)}
 
 						{/* Chevron */}
@@ -134,7 +132,7 @@ export const ThinkingRow = memo(
 				{/* Ask for update — inline after header */}
 				{showAskForUpdate && (
 					<button
-						className="ml-1.5 mt-1 text-[11px] text-link/80 hover:text-link underline underline-offset-2 transition-colors duration-150"
+						className="ml-1.5 mt-1 text-xs text-link/80 underline underline-offset-2 transition-colors duration-150 hover:text-link"
 						onClick={(e) => {
 							e.stopPropagation()
 							onAskForUpdate()

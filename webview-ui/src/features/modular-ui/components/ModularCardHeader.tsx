@@ -35,8 +35,8 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	return (
 		<div
 			className={cn(
-				"flex min-w-0 items-center gap-1 text-[10px] leading-4",
-				isCollapsed ? "px-1 py-0.5" : "px-2 py-1",
+				"flex min-w-0 items-center gap-1.5 text-base leading-5",
+				isCollapsed ? "px-1.5 py-1" : "px-2.5 py-1.5",
 				isTerminal && "opacity-70",
 			)}>
 			<button
@@ -59,7 +59,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				</span>
 
 				{status === CardStatus.WAITING_FOR_INPUT && (
-					<Badge variant="warning" className="shrink-0 px-1 py-0 text-[10px] leading-4">
+					<Badge variant="warning" className="shrink-0 px-1.5 py-0 text-xs leading-4">
 						Awaiting Input
 					</Badge>
 				)}

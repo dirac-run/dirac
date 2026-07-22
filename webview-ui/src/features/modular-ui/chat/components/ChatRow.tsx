@@ -5,7 +5,7 @@ import { ChatRowProps } from "../types/chatRowTypes"
 const ChatRow = memo(
 	(props: ChatRowProps) => {
 		return (
-			<div className="relative pt-1 px-3 group transition-colors duration-300 hover:bg-white/5">
+			<div className="group relative px-3 pt-1 transition-colors duration-150 hover:bg-foreground/[0.025]">
 				<MessageRenderer {...props} />
 			</div>
 		)
@@ -13,16 +13,16 @@ const ChatRow = memo(
 	(prevProps, nextProps) => {
 		return (
 			prevProps.message === nextProps.message &&
-			prevProps.isLast === nextProps.isLast &&
 			prevProps.isExpanded === nextProps.isExpanded &&
-			prevProps.isRequestInProgress === nextProps.isRequestInProgress &&
-			prevProps.inputValue === nextProps.inputValue &&
-			prevProps.mode === nextProps.mode &&
-			prevProps.reasoningContent === nextProps.reasoningContent &&
-			prevProps.responseStarted === nextProps.responseStarted &&
-			prevProps.lastModifiedMessage === nextProps.lastModifiedMessage &&
 			prevProps.activeCardId === nextProps.activeCardId &&
-			prevProps.activeVoiceStreamId === nextProps.activeVoiceStreamId
+			prevProps.activeVoiceStreamId === nextProps.activeVoiceStreamId &&
+			prevProps.onAction === nextProps.onAction &&
+			prevProps.onApprove === nextProps.onApprove &&
+			prevProps.onCancelCommand === nextProps.onCancelCommand &&
+			prevProps.onReject === nextProps.onReject &&
+			prevProps.onSetQuote === nextProps.onSetQuote &&
+			prevProps.onToggleExpand === nextProps.onToggleExpand &&
+			prevProps.sendMessageFromChatRow === nextProps.sendMessageFromChatRow
 		)
 	},
 )

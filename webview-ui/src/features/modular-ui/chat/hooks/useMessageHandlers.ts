@@ -1,4 +1,3 @@
-import type { DiracMessage } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 
 import { EmptyRequest, StringRequest } from "@shared/proto/dirac/common"
@@ -10,9 +9,10 @@ import { useInteractionState } from "../context/InteractionStateContext"
 import type { ButtonActionType } from "../utils/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
 
-export function useMessageHandlers(messages: DiracMessage[], chatState: ChatState): MessageHandlers {
+export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 	const { state: interactionState } = useInteractionState()
-	const { backgroundCommandRunning, setExpandTaskHeader } = useSettingsStore() as any
+	const backgroundCommandRunning = useSettingsStore((state) => state.backgroundCommandRunning)
+	const setExpandTaskHeader = useSettingsStore((state) => state.setExpandTaskHeader)
 	const {
 		setInputValue,
 		activeQuote,
@@ -87,24 +87,18 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 				setSendingDisabled(true)
 				setSelectedImages([])
 				setSelectedFiles([])
-
-				if ("disableAutoScrollRef" in chatState) {
-					;(chatState as any).disableAutoScrollRef.current = false
-				}
 			} catch (error) {
 				console.error("[ChatView] Failed to send message:", error)
 			}
 		},
 		[
 			interactionState,
-			backgroundCommandRunning,
 			activeQuote,
 			setInputValue,
 			setActiveQuote,
 			setSendingDisabled,
 			setSelectedImages,
 			setSelectedFiles,
-			chatState,
 			setExpandTaskHeader,
 			uiActionState,
 		],
@@ -256,11 +250,6 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 						cancelInFlightRef.current = false
 						// Explicitly reset UI state to allow immediate follow-up
 						setSendingDisabled(false)
-
-						// Ensure auto-scroll is re-enabled after cancellation
-						if ("disableAutoScrollRef" in chatState) {
-							;(chatState as any).disableAutoScrollRef.current = false
-						}
 					}
 					break
 				}
@@ -299,22 +288,8 @@ export function useMessageHandlers(messages: DiracMessage[], chatState: ChatStat
 					)
 					break
 			}
-
-			if ("disableAutoScrollRef" in chatState) {
-				;(chatState as any).disableAutoScrollRef.current = false
-			}
 		},
-		[
-			uiActionState,
-			lastMessage,
-			messages,
-			clearInputState,
-			handleSendMessage,
-			startNewTask,
-			chatState,
-			backgroundCommandRunning,
-			setSendingDisabled,
-		],
+		[uiActionState, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled],
 	)
 
 	// Handle task close button click

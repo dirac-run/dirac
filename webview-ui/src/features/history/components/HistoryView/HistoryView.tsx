@@ -479,6 +479,18 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 }
 
 // https://gist.github.com/evenfrost/1ba123656ded32fb7a0cd4651efd4db0
+const escapeHtml = (value: string) =>
+	value.replace(/[&<>"']/g, (character) => {
+		const entities: Record<string, string> = {
+			"&": "&amp;",
+			"<": "&lt;",
+			">": "&gt;",
+			'"': "&quot;",
+			"'": "&#39;",
+		}
+		return entities[character]
+	})
+
 export const highlight = (fuseSearchResult: FuseResult<any>[], highlightClassName = "history-item-highlight") => {
 	const set = (obj: Record<string, any>, path: string, value: any) => {
 		const pathValue = path.split(".")
@@ -501,16 +513,18 @@ export const highlight = (fuseSearchResult: FuseResult<any>[], highlightClassNam
 	}
 
 	const generateHighlightedText = (inputText: string, regions: [number, number][] = []) => {
-		if (regions.length === 0) return inputText
+		if (regions.length === 0) return escapeHtml(inputText)
 		const mergedRegions = mergeRegions(regions)
 		let content = ""
 		let nextUnhighlightedRegionStartingIndex = 0
 		mergedRegions.forEach(([start, end]) => {
 			const lastRegionNextIndex = end + 1
-			content += `${inputText.substring(nextUnhighlightedRegionStartingIndex, start)}<span class="${highlightClassName}">${inputText.substring(start, lastRegionNextIndex)}</span>`
+			const prefix = inputText.substring(nextUnhighlightedRegionStartingIndex, start)
+			const highlighted = inputText.substring(start, lastRegionNextIndex)
+			content += `${escapeHtml(prefix)}<span class="${highlightClassName}">${escapeHtml(highlighted)}</span>`
 			nextUnhighlightedRegionStartingIndex = lastRegionNextIndex
 		})
-		return content + inputText.substring(nextUnhighlightedRegionStartingIndex)
+		return content + escapeHtml(inputText.substring(nextUnhighlightedRegionStartingIndex))
 	}
 
 	return fuseSearchResult

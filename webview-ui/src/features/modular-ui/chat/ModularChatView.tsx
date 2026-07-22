@@ -5,7 +5,6 @@ import { useChatStore } from "@/features/chat/store/chatStore"
 import { useTaskStore } from "@/entities/task/store/taskStore"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { useAppStore } from "@/app/store/appStore"
-import { useUserStore } from "@/entities/user/store/userStore"
 import { useShowNavbar } from "@/context/PlatformContext"
 import { normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { Mode } from "@shared/ExtensionMessage"
@@ -33,19 +32,18 @@ import { ActionButtonsDecorator } from "./decorators/view/ActionButtonsDecorator
 
 import { useDebouncedValue } from "@/shared/lib/useDebouncedValue"
 const MAX_IMAGES_AND_FILES_PER_MESSAGE = CHAT_CONSTANTS.MAX_IMAGES_AND_FILES_PER_MESSAGE
-const QUICK_WINS_HISTORY_THRESHOLD = 3
 
 export const ModularChatView: React.FC<ChatViewProps> = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryView }) => {
 	const showNavbar = useShowNavbar()
 	const hydrate = useChatStore((state) => state.hydrate)
 	const version = useAppStore((state: any) => state.version)
-	const { diracMessages: messages, activeVoiceStreamId, isApiRequestActive } = useChatStore()
+	const messages = useChatStore((state) => state.diracMessages)
+	const activeVoiceStreamId = useChatStore((state) => state.activeVoiceStreamId)
+	const isApiRequestActive = useChatStore((state) => state.isApiRequestActive)
 	const taskHistory = useTaskStore((state) => state.taskHistory)
 	const apiConfiguration = useSettingsStore((state: any) => state.apiConfiguration)
 	const telemetrySetting = useSettingsStore((state) => state.telemetrySetting)
 	const mode = useSettingsStore((state) => state.mode)
-	const userInfo = useUserStore((state) => state.userInfo)
-	const isProdHostedApp = (userInfo as any)?.appBaseUrl === "https://app.dirac.run"
 	const shouldShowQuickWins = !!taskHistory && taskHistory.length > 0
 
 	const task = useMemo(() => messages.at(0), [messages])
@@ -61,7 +59,6 @@ export const ModularChatView: React.FC<ChatViewProps> = ({ isHidden, showAnnounc
 
 	const chatState = useChatState(messages)
 	const {
-		setInputValue,
 		selectedImages,
 		setSelectedImages,
 		selectedFiles,
@@ -73,7 +70,7 @@ export const ModularChatView: React.FC<ChatViewProps> = ({ isHidden, showAnnounc
 		textAreaRef,
 	} = chatState
 
-	const messageHandlers = useMessageHandlers(messages, chatState)
+	const messageHandlers = useMessageHandlers(chatState)
 
 	const { selectedModelInfo, selectedModelId, selectedProvider } = useMemo(() => {
 		return normalizeApiConfiguration(apiConfiguration, mode as Mode)

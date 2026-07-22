@@ -9,7 +9,6 @@ export const MessagesSection: ChatSection = {
 			chatState={context.chatState}
 			renderedMessages={context.renderedMessages}
 			messageHandlers={context.messageHandlers}
-			modifiedMessages={context.modifiedMessages}
 			scrollBehavior={context.scrollBehavior}
 			task={context.task!}
 		/>
