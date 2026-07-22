@@ -380,8 +380,8 @@ export function normalizeApiConfiguration(
 				selectedModelInfo: basetenModelInfo ||
 					basetenModels[finalBasetenModelId as keyof typeof basetenModels] ||
 					basetenModels[basetenDefaultModelId] || {
-						description: "Baseten model",
-					},
+					description: "Baseten model",
+				},
 			}
 		}
 		case "huawei-cloud-maas":
@@ -558,7 +558,7 @@ export function getModeSpecificFields(apiConfiguration: ApiConfiguration | undef
 export async function syncModeConfigurations(
 	apiConfiguration: ApiConfiguration | undefined,
 	sourceMode: Mode,
-	handleFieldsChange: (updates: Partial<ApiConfiguration>) => Promise<void>,
+	handleFieldsChange: (updates: Partial<ApiConfiguration>) => Promise<boolean>,
 ): Promise<void> {
 	if (!apiConfiguration) {
 		return
