@@ -105,16 +105,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	const { isActive: isSpinnerActive, startTime: spinnerStartTime } = useIsSpinnerActive()
 	const ctrl = useMemo(() => controller || taskController, [controller, taskController])
 
-	const resetComposerInputRef = useRef<() => void>(() => {})
+	const resetComposerInputRef = useRef<() => void>(() => { })
 	const composerActionsRef = useRef<ComposerActions>({
 		handleAskShortcuts: () => false,
-		handleSubmit: () => {},
-		handleExit: () => {},
-		clearViewAndResetTask: () => {},
-		handleButtonAction: () => {},
-		toggleMode: () => {},
-		toggleAutoApproveAll: () => {},
-		toggleTranscriptVerbosity: () => {},
+		handleSubmit: () => { },
+		handleExit: () => { },
+		clearViewAndResetTask: () => { },
+		handleButtonAction: () => { },
+		toggleMode: () => { },
+		toggleAutoApproveAll: () => { },
+		toggleTranscriptVerbosity: () => { },
 	})
 
 	const [respondedToAsk, setRespondedToAsk] = useState<string | null>(null)
@@ -234,10 +234,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
 	const permissionCard =
 		pendingAsk?.content.type === DiracMessageType.CARD &&
-		!isYoloSuppressed(yolo, pendingAsk) &&
-		!isSpinnerActive &&
-		!isFinalStatus(pendingAsk.content.card.status) &&
-		(pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
+			!isYoloSuppressed(yolo, pendingAsk) &&
+			!isSpinnerActive &&
+			!isFinalStatus(pendingAsk.content.card.status) &&
+			(pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
 			? pendingAsk.content.card
 			: null
 	const permissionModalWidth = Math.max(1, Math.min(terminalColumns - 2, Math.floor(terminalColumns * 0.8)))
@@ -311,14 +311,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	}, [mode, ctrl, textInput, pastedTexts])
 
 	const sendAskResponse = useCallback(
-		async (responseType: DiracAskResponse | string, text?: string, value?: string) => {
+		async (responseType: DiracAskResponse | string, text?: string, value?: string, images?: string[]) => {
 			if (!ctrl?.task || !pendingAsk) return
 			if (!isProcessing) setIsProcessing(true)
 			const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
 			setRespondedToAsk(pendingAsk.id)
 			resetInput()
 			try {
-				await ctrl.task.submitCardResponse(pendingAsk.id, responseType, expandedText, undefined, undefined, value)
+				await ctrl.task.submitCardResponse(pendingAsk.id, responseType, expandedText, images, undefined, value)
 			} catch (error) {
 			} finally {
 				setIsProcessing(false)
@@ -373,7 +373,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	}, [isProcessing, uiActionState, isSpinnerActive, setIsProcessing])
 
 	const handleButtonAction = useCallback(
-		async (action: UIActionButtonType | string | undefined, _isPrimary: boolean = true) => {
+		async (action: UIActionButtonType | string | undefined, _isPrimary: boolean = true, value?: string) => {
 			if (!action || !ctrl || isProcessing) return
 			setIsProcessing(true)
 			try {
@@ -406,10 +406,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					case UIActionButtonType.CANCEL:
 						await handleCancel()
 						break
-					default:
-						// For custom actions, we send the value as a message response
-						await sendAskResponse(DiracAskResponse.MESSAGE, undefined, action)
+					default: {
+						const expandedText = textInput.trim() ? expandPastedTexts(textInput, pastedTexts).trim() : undefined
+						const validImages = imagePaths.length > 0 ? await processImagePaths(imagePaths) : undefined
+						await sendAskResponse(DiracAskResponse.APPROVE, expandedText, value ?? action, validImages)
 						break
+					}
 				}
 			} catch (error) {
 			} finally {
@@ -427,6 +429,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			setIsProcessing,
 			isCompletionChoiceActive,
 			isResumeChoiceActive,
+			textInput,
+			pastedTexts,
+			imagePaths,
 		],
 	)
 
@@ -436,7 +441,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			if (pendingAsk.content.type !== DiracMessageType.CARD) return false
 			const { card } = pendingAsk.content
 
-			if (card.requireApproval) {
+			if (card.requireApproval && (!card.actions || card.actions.length === 0)) {
 				if (input.toLowerCase() === "y") {
 					handleButtonAction(DiracAskResponse.APPROVE, true)
 					return true
@@ -452,7 +457,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 				if (options.length > 0) {
 					const num = Number.parseInt(input, 10)
 					if (!Number.isNaN(num) && num >= 1 && num <= options.length) {
-						sendAskResponse(DiracAskResponse.MESSAGE, options[num - 1])
+						handleButtonAction("utility", false, card.actions![num - 1].value)
 						return true
 					}
 				}
@@ -488,10 +493,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					}
 				}
 
-				if (card.requireApproval && (normalized === "y" || normalized === "yes")) {
+				if (card.requireApproval && (!card.actions || card.actions.length === 0) && (normalized === "y" || normalized === "yes")) {
 					await sendAskResponse(DiracAskResponse.APPROVE)
 				} else {
-					await sendAskResponse(DiracAskResponse.MESSAGE, prompt)
+					const validImages = images.length > 0 ? await processImagePaths(images) : undefined
+					await sendAskResponse(DiracAskResponse.MESSAGE, prompt, undefined, validImages)
 				}
 				resetInput()
 				return

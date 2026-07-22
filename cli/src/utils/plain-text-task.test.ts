@@ -1,4 +1,8 @@
+import { CardStatus, type Card } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { Controller } from "@/core/controller"
+import { approveCardForPlainTextYolo } from "./plain-text-task"
 import { emitTaskStartedMessage } from "./task-start-output"
 
 describe("emitTaskStartedMessage", () => {
@@ -24,5 +28,31 @@ describe("emitTaskStartedMessage", () => {
 
 		expect(stderrWriteSpy).toHaveBeenCalledWith("Task started: task-456\n")
 		expect(stdoutWriteSpy).not.toHaveBeenCalled()
+	})
+})
+
+
+describe("approveCardForPlainTextYolo", () => {
+	it("forwards the primary action value when approving a new-task card", () => {
+		const submitCardResponse = vi.fn().mockResolvedValue(undefined)
+		const controller = { task: { submitCardResponse } } as unknown as Controller
+		const card: Card = {
+			id: "new-task-card",
+			header: "New Task",
+			status: CardStatus.WAITING_FOR_INPUT,
+			renderType: "markdown",
+			actions: [{ label: "Approve New Task", value: "new_task", primary: true }],
+		}
+
+		approveCardForPlainTextYolo(controller, card)
+
+		expect(submitCardResponse).toHaveBeenCalledWith(
+			card.id,
+			DiracAskResponse.APPROVE,
+			undefined,
+			undefined,
+			undefined,
+			"new_task",
+		)
 	})
 })

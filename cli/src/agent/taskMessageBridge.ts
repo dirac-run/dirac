@@ -903,10 +903,15 @@ export class TaskMessageBridge {
 					DiracAskResponse.REJECT,
 				);
 			} else {
+				const isNewTaskTransition =
+					message.content.type === DiracMessageType.CARD && message.content.card.rawInput?.tool === "new_task";
 				await controller.task.submitCardResponse(
 					cardId,
-					result.response,
+					isNewTaskTransition && result.response === "new_task" ? DiracAskResponse.APPROVE : result.response,
 					result.text,
+					undefined,
+					undefined,
+					isNewTaskTransition && result.response === "new_task" ? "new_task" : undefined,
 				);
 			}
 		} catch (error) {

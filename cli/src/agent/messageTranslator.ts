@@ -350,15 +350,21 @@ function translateCardMessage(
 			status: "pending" as acp.ToolCallStatus,
 			locations,
 		}
+		const isNewTaskTransition = card.rawInput?.tool === "new_task"
 		requiresPermission = true
 		permissionRequest = {
 			toolCall: existingToolCall as acp.ToolCall,
-			options: [
-				{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
-				{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
-				{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
-				{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
-			],
+			options: isNewTaskTransition
+				? [
+					{ kind: "allow_once", optionId: "new_task", name: card.actions?.[0]?.label ?? "Start new task" },
+					{ kind: "reject_once", optionId: "reject_once", name: "Keep current task" },
+				]
+				: [
+					{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
+					{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
+					{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
+					{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
+				]
 		}
 	}
 

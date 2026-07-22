@@ -58,6 +58,10 @@ export class Controller {
 		return this.taskController?.taskRunPromise
 	}
 
+	onTaskReplaced(listener: (taskId: string) => void | Promise<void>): () => void {
+		return this.taskController.onTaskReplaced(listener)
+	}
+
 	// Debounce state broadcast — coalesce multiple per-tick calls into a single push (from main)
 	private webviewUpdateScheduled = false
 

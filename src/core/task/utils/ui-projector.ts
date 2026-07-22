@@ -38,9 +38,9 @@ export function projectUIActionState(
 				card.actions?.map(mapCardActionToUIButton) ||
 				(card.requireApproval
 					? [
-							{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-							{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-						]
+						{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+						{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+					]
 					: [])
 			return uiState
 		}
@@ -95,20 +95,14 @@ export function projectUIActionState(
 function mapCardActionToUIButton(action: ActionButton): UIActionButton {
 	return {
 		label: action.label,
-		action: mapValueToActionButtonType(action.value),
+		action:
+			action.value === DiracAskResponse.APPROVE
+				? UIActionButtonType.APPROVE
+				: action.value === DiracAskResponse.REJECT
+					? UIActionButtonType.REJECT
+					: UIActionButtonType.UTILITY,
 		value: action.value,
 		primary: action.primary,
 		style: action.style,
-	}
-}
-
-function mapValueToActionButtonType(value: string): UIActionButtonType {
-	switch (value) {
-		case DiracAskResponse.APPROVE:
-			return UIActionButtonType.APPROVE
-		case DiracAskResponse.REJECT:
-			return UIActionButtonType.REJECT
-		default:
-			return UIActionButtonType.UTILITY
 	}
 }

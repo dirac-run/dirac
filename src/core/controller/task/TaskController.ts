@@ -50,6 +50,10 @@ export class TaskController {
 	private _backgroundCommandTaskId?: string
 	private cancelInProgress = false
 	private _taskRunPromise?: Promise<void>
+	private initializingReplacement = false
+	private readonly taskReplacementListeners = new Set<(taskId: string) => void | Promise<void>>()
+	private currentConversationUlid?: string
+	private currentInitializationOptions?: TaskInitializationOptions
 
 	// Promise for the in-flight task run; consumed via Controller.taskRunPromise (from main).
 	get taskRunPromise(): Promise<void> | undefined {
@@ -94,6 +98,36 @@ export class TaskController {
 		return this._backgroundCommandTaskId
 	}
 
+	onTaskReplaced(listener: (taskId: string) => void | Promise<void>): () => void {
+		this.taskReplacementListeners.add(listener)
+		return () => this.taskReplacementListeners.delete(listener)
+	}
+
+	private async runTaskWithReplacement(task: Task, run: Promise<void>): Promise<void> {
+		await run
+		if (this._task !== task || !task.taskState.pendingTaskReplacement) return
+
+		const replacement = task.taskState.pendingTaskReplacement
+		task.taskState.pendingTaskReplacement = undefined
+		this.initializingReplacement = true
+		try {
+			const taskId = await this.initTask(
+				replacement.context,
+				replacement.images,
+				replacement.files,
+				undefined,
+				undefined,
+				this.currentConversationUlid,
+				undefined,
+				this.currentInitializationOptions,
+			)
+			await Promise.all([...this.taskReplacementListeners].map((listener) => listener(taskId)))
+			await this._taskRunPromise
+		} finally {
+			this.initializingReplacement = false
+		}
+	}
+
 	async initTask(
 		task?: string,
 		images?: string[],
@@ -109,7 +143,11 @@ export class TaskController {
 			throw new Error("TaskController.initTask requires a Controller instance")
 		}
 		const controller = this.deps.controller
+		this.currentConversationUlid = conversationUlid
+		this.currentInitializationOptions = initializationOptions
+		const previousRun = this._taskRunPromise
 		await this.clearTask()
+		if (previousRun && !this.initializingReplacement) await previousRun
 		this.deps.stateManager.refreshModelProviderPresetsFromDisk()
 
 		const autoApprovalSettings = this.deps.stateManager.getGlobalSettingsKey("autoApprovalSettings")
@@ -190,9 +228,11 @@ export class TaskController {
 		})
 
 		if (historyItem) {
-			this._taskRunPromise = this._task.resumeTaskFromHistory()
+			this._taskRunPromise = this.runTaskWithReplacement(this._task, this._task.resumeTaskFromHistory())
 		} else if (task || images || files) {
-			this._taskRunPromise = this._task.startTask(task, images, files)
+			this._taskRunPromise = this.runTaskWithReplacement(this._task, this._task.startTask(task, images, files))
+		} else {
+			this._taskRunPromise = undefined
 		}
 
 		return this._task.taskId

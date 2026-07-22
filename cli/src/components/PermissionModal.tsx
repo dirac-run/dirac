@@ -66,7 +66,7 @@ function renderFooter(card: CardType, scrollOffset: number, maxScrollOffset: num
 					{canScrollUp ? "↑" : " "} / {canScrollDown ? "↓" : " "} SCROLL
 				</Text>
 			)}
-			{card.requireApproval && (
+			{card.requireApproval && (!card.actions || card.actions.length === 0) && (
 				<Text color="gray">
 					[
 					<Text bold color="white">

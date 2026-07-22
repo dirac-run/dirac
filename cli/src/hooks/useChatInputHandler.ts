@@ -47,7 +47,7 @@ interface UseChatInputHandlerProps {
 	yolo: boolean
 	uiActionState: any
 	pendingAsk: any
-	handleButtonAction: (action: any, isPrimary: boolean) => void
+	handleButtonAction: (action: any, isPrimary: boolean, value?: string) => void
 	isYoloSuppressed: (yolo: boolean, ask: any) => boolean
 	// Paste state
 	lastPasteTimeRef: React.MutableRefObject<number>
@@ -288,7 +288,7 @@ export function useChatInputHandler({
 		) {
 			const num = Number.parseInt(input, 10)
 			if (!Number.isNaN(num) && num >= 1 && num <= buttons.length) {
-				handleButtonAction(buttons[num - 1].action, true)
+				handleButtonAction(buttons[num - 1].action, true, buttons[num - 1].value)
 				return
 			}
 		}
@@ -303,7 +303,7 @@ export function useChatInputHandler({
 			if (card?.actions && card.actions.length > 0) {
 				const num = Number.parseInt(input, 10)
 				if (!Number.isNaN(num) && num >= 1 && num <= card.actions.length) {
-					handleButtonAction(card.actions[num - 1].value, false)
+					handleButtonAction("utility", false, card.actions[num - 1].value)
 					return
 				}
 			}

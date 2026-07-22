@@ -8,7 +8,6 @@ import { SlashServiceClient, TaskServiceClient } from "@/shared/api/grpc-client"
 import { useInteractionState } from "../context/InteractionStateContext"
 import type { ButtonActionType } from "../utils/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
-
 export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 	const { state: interactionState } = useInteractionState()
 	const backgroundCommandRunning = useSettingsStore((state) => state.backgroundCommandRunning)
@@ -22,6 +21,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 		setSendingDisabled,
 		uiActionState,
 		lastMessage,
+		messages,
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 
@@ -211,22 +211,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 					break
 
 				case "new_task":
-					if (
-						uiActionState?.cardButtons.some(
-							(b) => b.label.toLowerCase().includes("new task") || b.label.toLowerCase().includes("resume"),
-						)
-					) {
-						const text = lastMessage?.content.type === "markdown" ? lastMessage.content.content : ""
-						await TaskServiceClient.newTask(
-							NewTaskRequest.create({
-								text,
-								images: [],
-								files: [],
-							}),
-						)
-					} else {
-						await startNewTask()
-					}
+					await startNewTask()
 					break
 
 				case "cancel": {
@@ -261,14 +246,17 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 							console.error(err),
 						)
 					} else if (value) {
-						// Generic utility action - send as message response
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								cardId: finalCardId,
-								responseType: DiracAskResponse.MESSAGE,
-								text: value,
+								responseType: DiracAskResponse.APPROVE,
+								value,
+								text: trimmedInput,
+								images,
+								files,
 							}),
 						)
+						clearInputState()
 					}
 					break
 				case DiracAskResponse.EDIT:

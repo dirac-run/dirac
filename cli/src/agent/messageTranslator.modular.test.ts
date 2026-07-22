@@ -223,6 +223,25 @@ describe("messageTranslator (Modular Architecture)", () => {
 			])
 		})
 
+		it("offers only a one-shot declared action for new-task transitions", () => {
+			const result = translateMessage(
+				createCardMessage({
+					id: "new-task-1",
+					header: "New Task",
+					status: CardStatus.WAITING_FOR_INPUT,
+					requireApproval: true,
+					rawInput: { tool: "new_task" },
+					actions: [{ label: "Approve New Task", value: "new_task", primary: true }],
+				}),
+				sessionState,
+			)
+
+			expect(result.permissionRequest?.options).toEqual([
+				{ kind: "allow_once", optionId: "new_task", name: "Approve New Task" },
+				{ kind: "reject_once", optionId: "reject_once", name: "Keep current task" },
+			])
+		})
+
 
 		it("attaches the pending command and diff to an approval request's tool call", () => {
 			const result = translateMessage(

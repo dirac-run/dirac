@@ -17,7 +17,7 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 
 	// Find the first decorator that provides a body wrapper
 	const bodyWrapper = decorators.find((d) => d.renderBodyWrapper)
-
+	const suppressDefaultActions = decorators.some((d) => d.suppressDefaultActions)
 	const bodyContent = body && (
 		<div
 			className="overflow-x-auto overflow-y-auto p-2.5 text-sm leading-relaxed"
@@ -35,7 +35,7 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 				<React.Fragment key={d.id}>{d.renderFooterExtra?.(card)}</React.Fragment>
 			))}
 
-			<CardActions card={card} isActive={isActive} onAction={onAction} />
+			{!suppressDefaultActions && <CardActions card={card} isActive={isActive} onAction={onAction} />}
 		</div>
 	)
 }

@@ -5,6 +5,12 @@ import type { HookExecution } from "./types/HookExecution"
 import { SkillMetadata } from "@/shared/skills"
 import { TaskStatus } from "@shared/ExtensionMessage"
 
+export interface TaskReplacementRequest {
+	context: string
+	images?: string[]
+	files?: string[]
+}
+
 export class TaskState {
 	status: TaskStatus = TaskStatus.IDLE
 
@@ -78,6 +84,8 @@ export class TaskState {
 
 	// Task Abort / Cancellation
 	abort = false
+	/** Requested by a tool after its current task has unwound. */
+	pendingTaskReplacement?: TaskReplacementRequest
 	didFinishAbortingStream = false
 	abandoned = false
 

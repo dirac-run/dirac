@@ -11,7 +11,14 @@
 /* eslint-disable no-console */
 // Console output is intentional here for plain text mode
 
-import { DiracMessage, ExtensionState, DiracMessageType, CardStatus, UIActionButtonType } from "@shared/ExtensionMessage"
+import {
+	CardStatus,
+	type Card,
+	DiracMessage,
+	DiracMessageType,
+	ExtensionState,
+	UIActionButtonType,
+} from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 
 import { StringRequest } from "@shared/proto/dirac/common"
@@ -35,6 +42,19 @@ export interface PlainTextTaskOptions {
 	taskId?: string
 	yolo?: boolean
 }
+
+export function approveCardForPlainTextYolo(controller: Controller, card: Card): void {
+	const primaryActionValue = card.actions?.find((action) => action.primary)?.value
+	void controller.task?.submitCardResponse(
+		card.id,
+		DiracAskResponse.APPROVE,
+		undefined,
+		undefined,
+		undefined,
+		primaryActionValue,
+	)
+}
+
 
 export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<boolean> {
 	const { controller, prompt, imageDataUrls, verbose, jsonOutput, yolo } = options
@@ -140,7 +160,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			(content.card.requireApproval || content.card.requireFeedback) &&
 			!autoApprovedCards.has(content.card.id)
 		) {
-			controller.task?.submitCardResponse(content.card.id, DiracAskResponse.APPROVE)
+			approveCardForPlainTextYolo(controller, content.card)
 			autoApprovedCards.add(content.card.id)
 		}
 

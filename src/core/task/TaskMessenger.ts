@@ -27,7 +27,7 @@ export class TaskMessenger implements ITaskMessenger {
 	private activeVoiceStream?: ITextStreamHandle
 	private lastMessageId = 0
 
-	constructor(private dependencies: TaskMessengerDependencies) {}
+	constructor(private dependencies: TaskMessengerDependencies) { }
 
 	public setApi(api: ApiHandler) {
 		this.dependencies.api = api
@@ -263,10 +263,18 @@ export class TaskMessenger implements ITaskMessenger {
 						await pWaitFor(
 							() => {
 								const response = this.dependencies.taskState.askResponse
-								return response !== undefined || this.dependencies.taskState.lastMessageTs !== messageTs
+								return (
+									response !== undefined ||
+									this.dependencies.taskState.lastMessageTs !== messageTs ||
+									this.dependencies.taskState.abort
+								)
 							},
 							{ interval: 100 },
 						)
+
+						if (this.dependencies.taskState.abort) {
+							throw new Error("Task aborted while waiting for card interaction")
+						}
 
 						if (this.dependencies.taskState.lastMessageTs !== messageTs) {
 							throw new Error("Current card interaction promise was ignored")
@@ -308,7 +316,7 @@ export class TaskMessenger implements ITaskMessenger {
 
 						return result
 					} finally {
-						this.dependencies.taskState.status = previousStatus
+						if (!this.dependencies.taskState.abort) this.dependencies.taskState.status = previousStatus
 						this.dependencies.taskState.waitingCardIds = this.dependencies.taskState.waitingCardIds.filter(
 							(cid) => cid !== id,
 						)

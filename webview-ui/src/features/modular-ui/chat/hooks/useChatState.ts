@@ -73,6 +73,7 @@ export function useChatState(messages: DiracMessage[]): ChatState {
 		textAreaRef,
 
 		// Derived values
+		messages,
 		lastMessage,
 		secondLastMessage,
 		task,

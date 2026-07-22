@@ -52,6 +52,10 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 		setTaskState: (key, value) => {
 			config.taskState[key] = value
 		},
+		requestTaskReplacement: (context, images, files) => {
+			config.taskState.pendingTaskReplacement = { context, images, files }
+			config.taskState.abort = true
+		},
 		activateSkill: async (skillId) => {
 			const metadata = await updateTaskMetadata(config.taskId, (current) => {
 				current.active_skill_ids = [...new Set([...(current.active_skill_ids ?? []), skillId])]

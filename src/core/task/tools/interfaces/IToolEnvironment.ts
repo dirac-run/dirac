@@ -338,6 +338,9 @@ export interface IOrchestrationTrait {
 	 */
 	setTaskState<T extends keyof TaskState>(key: T, value: TaskState[T]): void
 
+	/** Ends the current task and asks its controller to start a replacement after unwind. */
+	requestTaskReplacement(context: string, images?: string[], files?: string[]): void
+
 	/** Activates a trusted skill and persists the activation for task resume. */
 	activateSkill(skillId: string): Promise<void>
 

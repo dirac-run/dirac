@@ -54,16 +54,24 @@ export class NewTaskTool implements IDiracTool {
 			header: "New Task",
 			icon: DiracIcon.CHAT,
 			requireApproval: true,
-			body: context,
 			requireFeedback: true,
+			rawInput: { tool: DiracDefaultTool.NEW_TASK },
+			body: context,
+			renderType: "markdown",
+			actions: [{ label: "Approve New Task", value: DiracDefaultTool.NEW_TASK, primary: true }],
 			collapsed: false,
+			maxHeight: 1200,
+			do_not_auto_collapse: true,
 		})
-		const { text, images, files: newTaskFiles } = await cardHandle.waitForInteraction()
+		const { response, value, text, images, files: newTaskFiles } = await cardHandle.waitForInteraction()
 
 		const apiConfig = env.config.services.stateManager.getApiConfiguration()
 		const provider = (env.config.mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider) as string
 
-		if (text || (images && images.length > 0) || (newTaskFiles && newTaskFiles.length > 0)) {
+		const hasFeedback = !!text || !!images?.length || !!newTaskFiles?.length
+		const approvedReplacement = response === "approve" && value === DiracDefaultTool.NEW_TASK
+
+		if (!approvedReplacement || hasFeedback) {
 			let fileContentString = ""
 			if (newTaskFiles && newTaskFiles.length > 0) {
 				fileContentString = await processFilesIntoText(newTaskFiles)
@@ -76,13 +84,13 @@ export class NewTaskTool implements IDiracTool {
 				this.spec().id,
 				env.config.api.getModel().id,
 				provider,
-				false, // autoApproved - new_task is never auto-approved
-				false, // success=false because user provided feedback instead
+				false,
+				false,
 				undefined,
-				true, // isNativeToolCall
+				true,
 			)
 			return formatResponse.toolResult(
-				`The user provided feedback instead of creating a new task:\n<feedback>\n${text}\n</feedback>`,
+				`The user provided feedback instead of creating a new task:\n<feedback>\n${text ?? ""}\n</feedback>`,
 				images,
 				fileContentString,
 			)
@@ -93,6 +101,8 @@ export class NewTaskTool implements IDiracTool {
 			collapsed: true,
 		})
 		await cardHandle.finalize(CardStatus.SUCCESS)
+
+		env.orchestration.requestTaskReplacement(context)
 
 		return formatResponse.toolResult(`The user has created a new task with the provided context.`)
 	}

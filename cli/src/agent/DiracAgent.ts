@@ -1270,6 +1270,26 @@ export class DiracAgent implements acp.Agent {
 			)
 			subscribedTask = task
 		}
+		const removeTaskReplacementListener = controller.onTaskReplaced(async (taskId) => {
+			await bridge.cancelInFlightToolCalls(params.sessionId, sessionState)
+			await recordTaskForSession(params.sessionId, taskId)
+			session.taskId = taskId
+			subscribedTask = undefined
+			const replacementTask = controller.task
+			if (!replacementTask) return
+			const replayEndIndex = replacementTask.messageStateHandler.getDiracMessages().length
+			subscribeToCurrentTask()
+			await bridge.replayTaskMessages(
+				controller,
+				params.sessionId,
+				sessionState,
+				resolvePrompt!,
+				promptResolved,
+				0,
+				replayEndIndex,
+			)
+		})
+		cleanupFunctions.push(removeTaskReplacementListener)
 
 		try {
 			// Extract text content from prompt
@@ -1742,10 +1762,10 @@ export class DiracAgent implements acp.Agent {
 	}
 
 
-		/**
-	 * Replay the historical messages for a loaded session as ACP sessionUpdate events.
-	 * Called by AcpAgent after subscribing to session events, so the events reach the client.
-	 */
+	/**
+ * Replay the historical messages for a loaded session as ACP sessionUpdate events.
+ * Called by AcpAgent after subscribing to session events, so the events reach the client.
+ */
 	async replayLoadedSessionHistory(sessionId: string): Promise<void> {
 		const session = this.sessions.get(sessionId)
 		if (!session) return

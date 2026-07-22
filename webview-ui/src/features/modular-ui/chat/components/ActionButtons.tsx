@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { VirtuosoHandle } from "react-virtuoso"
 import { ButtonActionType } from "../utils/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
+import { findActiveNewTaskCard } from "../../utils/newTaskCard"
 
 interface ActionButtonsProps {
 	task?: DiracMessage
@@ -66,18 +67,20 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({ task, messages, chatState
 			setIsProcessing(true)
 
 			try {
-				await messageHandlers.executeButtonAction(action, value, text, images, files, lastMessage?.id)
+				await messageHandlers.executeButtonAction(action, value, text, images, files, uiActionState?.activeCardId)
 			} catch (error) {
 				console.error(`[ActionButtons] Failed to execute action ${action}:`, error)
 			} finally {
 				setIsProcessing(false)
 			}
 		},
-		[messageHandlers, isProcessing, lastMessage?.id],
+		[messageHandlers, isProcessing, uiActionState?.activeCardId],
 	)
 
 	// Keyboard event handler
 	const globalButtons = uiActionState?.globalButtons || []
+	const activeNewTaskCard = findActiveNewTaskCard(messages, uiActionState?.activeCardId)
+	const promotedCardButtons = activeNewTaskCard ? (uiActionState?.cardButtons ?? []) : []
 	const hasActiveButtons = globalButtons.length > 0
 
 	const handleKeyDown = useCallback(
@@ -103,7 +106,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({ task, messages, chatState
 
 	const { showScrollToBottom, scrollToBottomSmooth, disableAutoScrollRef } = scrollBehavior
 
-	const allButtons = [...globalButtons]
+	const allButtons = [...promotedCardButtons, ...globalButtons]
 	const hasButtons = allButtons.length > 0
 	const isStreaming = isApiRequestActive || !!activeVoiceStreamId
 	const canInteract = !isStreaming && !isProcessing
