@@ -3,6 +3,7 @@ import type { ChatContent } from "@shared/ChatContent"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
 import type { Mode } from "@shared/storage/types"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { TaskStatus } from "@shared/ExtensionMessage"
 import type { StateManager } from "@core/storage/StateManager"
 import { telemetryService } from "@/services/telemetry"
 
@@ -100,6 +101,10 @@ export class StateController {
 
 				return true
 			}
+			if (task.taskState.status === TaskStatus.COMPLETED) {
+				return false
+			}
+
 			await this.cancelTaskFn()
 			return false
 		}

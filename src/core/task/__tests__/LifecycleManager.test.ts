@@ -1,6 +1,7 @@
 import "should"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { TaskStatus } from "@shared/ExtensionMessage"
 import sinon from "sinon"
 import { LifecycleManager } from "../LifecycleManager"
 
@@ -184,6 +185,24 @@ describe("LifecycleManager", () => {
 			deps.taskState.activeSkillIds.should.eql(["new-tool"])
 		})
 
+		it("restores completed history without entering the resume flow", async () => {
+			setupDiskMocks([
+				{
+					id: "completion-card",
+					ts: Date.now(),
+					content: {
+						type: "card",
+						card: { header: "Task Completed", status: "success" },
+					},
+				},
+			])
+
+			await manager.resumeTaskFromHistory()
+
+			deps.taskState.status.should.equal(TaskStatus.COMPLETED)
+			sinon.assert.notCalled(deps.initiateTaskLoop)
+			sinon.assert.notCalled(deps.hookManager.runUserPromptSubmitHook)
+		})
 		it("aborts if abort flag set during pWaitFor", async () => {
 			setupDiskMocks()
 			// Set abort via postStateToWebview callback (called before pWaitFor)

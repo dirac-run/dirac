@@ -10,13 +10,13 @@ import { DiracContent } from "@shared/messages/content"
 import { Logger } from "@shared/services/Logger"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
-import { TaskStatus } from "@/shared/ExtensionMessage"
+import { CardStatus, type DiracMessage, TaskStatus } from "@/shared/ExtensionMessage"
 import type { LifecycleManagerDependencies } from "../types/lifecycle-manager"
 import { buildUserFeedbackContent } from "../utils/buildUserFeedbackContent"
 
 // Manages task resume from history — loads saved messages, waits for user response, runs hooks.
 export class TaskResumeManager {
-	constructor(private deps: LifecycleManagerDependencies) {}
+	constructor(private deps: LifecycleManagerDependencies) { }
 
 	// Loads saved conversation, waits for user decision, builds new user content, and initiates task loop.
 	async resume(): Promise<void> {
@@ -25,9 +25,10 @@ export class TaskResumeManager {
 		await this.restoreMessageState(savedDiracMessages)
 		await ensureTaskDirectoryExists(this.deps.taskId)
 		const lastDiracMessage = this.findLastNonResumeMessage()
-		this.prepareTaskStateForResume()
+		const isCompleted = this.isCompletedTask(lastDiracMessage)
+		this.prepareTaskStateForResume(isCompleted)
 		await this.deps.postStateToWebview()
-		if (await this.waitForUserOrAbort()) return
+		if (isCompleted || (await this.waitForUserOrAbort())) return
 		const { response, text, images, files } = this.extractUserResponse()
 		const newUserContent: DiracContent[] = []
 		await this.runTaskResumeHook(newUserContent, lastDiracMessage)
@@ -102,14 +103,22 @@ export class TaskResumeManager {
 			)
 	}
 
-	private prepareTaskStateForResume() {
+	private isCompletedTask(lastDiracMessage: DiracMessage | undefined): boolean {
+		return (
+			lastDiracMessage?.content.type === "card" &&
+			lastDiracMessage.content.card.header === "Task Completed" &&
+			lastDiracMessage.content.card.status === CardStatus.SUCCESS
+		)
+	}
+
+	private prepareTaskStateForResume(isCompleted: boolean) {
 		this.deps.taskState.isInitialized = true
 		this.deps.taskState.abort = false
 		this.deps.taskState.askResponse = undefined
 		this.deps.taskState.askResponseText = undefined
 		this.deps.taskState.askResponseImages = undefined
 		this.deps.taskState.askResponseFiles = undefined
-		this.deps.taskState.status = TaskStatus.CANCELLED
+		this.deps.taskState.status = isCompleted ? TaskStatus.COMPLETED : TaskStatus.CANCELLED
 	}
 
 	// Returns true if aborted during wait.

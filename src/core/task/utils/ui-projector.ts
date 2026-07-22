@@ -46,7 +46,7 @@ export function projectUIActionState(
 		}
 	}
 	// 1. Terminal Success State
-	if (state?.didAttemptCompletion) {
+	if (state?.status === TaskStatus.COMPLETED || state?.didAttemptCompletion) {
 		uiState.globalButtons.push({
 			label: "Start New Task",
 			action: UIActionButtonType.NEW_TASK,
