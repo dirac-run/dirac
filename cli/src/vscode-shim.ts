@@ -352,3 +352,96 @@ export type Extension<T> = any
  * Components can listen to this to clean up UI before process exit.
  */
 export const shutdownEvent = new EventEmitter<void>()
+
+// ============================================================================
+// Language Model API members (used by vscode-lm provider + transform tests)
+// ============================================================================
+
+export interface LanguageModelChatSelector {
+	vendor?: string
+	family?: string
+	version?: string
+	id?: string
+}
+
+export class LanguageModelTextPart {
+	public readonly value: string
+	public readonly text: string
+	constructor(text: string) {
+		this.value = text
+		this.text = text
+	}
+}
+
+export enum LanguageModelChatMessageRole {
+	User = 1,
+	Assistant = 2,
+}
+
+export class LanguageModelToolCallPart {
+	constructor(
+		public readonly callId: string,
+		public readonly name: string,
+		public readonly input: unknown,
+	) {}
+}
+
+export class LanguageModelToolResultPart {
+	constructor(
+		public readonly callId: string,
+		public readonly content: LanguageModelTextPart[],
+	) {}
+}
+
+export type LanguageModelChatContentPart = LanguageModelTextPart | LanguageModelToolCallPart | LanguageModelToolResultPart
+
+export class LanguageModelChatMessage {
+	constructor(
+		public readonly role: LanguageModelChatMessageRole,
+		public readonly content: LanguageModelChatContentPart[],
+	) {}
+
+	static User(content: string | LanguageModelChatContentPart[]): LanguageModelChatMessage {
+		return new LanguageModelChatMessage(LanguageModelChatMessageRole.User, toParts(content))
+	}
+	static Assistant(content: string | LanguageModelChatContentPart[]): LanguageModelChatMessage {
+		return new LanguageModelChatMessage(LanguageModelChatMessageRole.Assistant, toParts(content))
+	}
+}
+
+function toParts(content: string | LanguageModelChatContentPart[]): LanguageModelChatContentPart[] {
+	return typeof content === "string" ? [new LanguageModelTextPart(content)] : content
+}
+
+export interface LanguageModelChatRequestOptions {
+	justification?: string
+	tools?: unknown[]
+}
+
+export class LanguageModelChatResponse {
+	public readonly stream: AsyncIterable<LanguageModelChatContentPart>
+	constructor(stream: AsyncIterable<LanguageModelChatContentPart>) {
+		this.stream = stream
+	}
+}
+
+export class LanguageModelChat {
+	constructor(
+		public readonly name: string,
+		public readonly vendor: string,
+		private readonly send = () => ({ stream: (async function* () {})() as AsyncIterable<LanguageModelChatContentPart> }),
+	) {}
+	sendRequest(
+		_messages: LanguageModelChatMessage[],
+		_options: LanguageModelChatRequestOptions,
+		_token?: unknown,
+	): Promise<LanguageModelChatResponse> {
+		return Promise.resolve(new LanguageModelChatResponse(this.send()))
+	}
+}
+
+export namespace lm {
+	export function selectChatModels(_selector: LanguageModelChatSelector): Promise<LanguageModelChat[]> {
+		return Promise.resolve([])
+	}
+}
