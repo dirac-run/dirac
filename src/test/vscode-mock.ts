@@ -169,6 +169,13 @@ export enum LanguageModelChatMessageRole {
 	Assistant = 2,
 }
 
+export interface LanguageModelChatSelector {
+	vendor?: string
+	family?: string
+	version?: string
+	id?: string
+}
+
 export class LanguageModelTextPart {
 	constructor(public value: string) { }
 }
