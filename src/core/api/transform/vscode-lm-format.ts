@@ -52,7 +52,7 @@ function convertToolResultContent(
 // Converts user-role array content: tool results first, then text/image parts.
 function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
 	const { nonToolMessages, toolMessages } = content.reduce<{
-		nonToolMessages: Anthropic.Messages.TextBlockParam[] | Anthropic.Messages.ImageBlockParam[]
+		nonToolMessages: (Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam)[]
 		toolMessages: Anthropic.Messages.ToolResultBlockParam[]
 	}>(
 		(acc, part) => {
@@ -78,7 +78,7 @@ function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockPara
 // Converts assistant-role array content: tool calls first, then text/image parts.
 function convertVsCodeLmAssistantMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
 	const { nonToolMessages, toolMessages } = content.reduce<{
-		nonToolMessages: Anthropic.Messages.TextBlockParam[] | Anthropic.Messages.ImageBlockParam[]
+		nonToolMessages: (Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam)[]
 		toolMessages: Anthropic.Messages.ToolUseBlockParam[]
 	}>(
 		(acc, part) => {
