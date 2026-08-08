@@ -436,7 +436,7 @@ export class LanguageModelChat {
 		_options: LanguageModelChatRequestOptions,
 		_token?: unknown,
 	): Promise<LanguageModelChatResponse> {
-		return Promise.resolve(new LanguageModelChatResponse(this.send()))
+		return Promise.resolve(new LanguageModelChatResponse(this.send().stream))
 	}
 }
 
