@@ -11,6 +11,21 @@ import {
 } from "@/shared/messages/content"
 
 /**
+ * Local structural union of the OpenAI Responses items this transform produces.
+ * Kept separate from the SDK's strict `ResponseInputItem` because this code emits
+ * `output_text` list items (an output-only content type) which the request-oriented
+ * SDK type does not accept.
+ */
+type ReasoningSummary = { type: "summary_text"; text: string }
+type AssistantContentPart = { type: "output_text"; text: string }
+type ResponseTransformItem =
+	| { role: string; content: ResponseInputMessageContentList; type?: never }
+	| { type: "message"; role: "assistant"; content: AssistantContentPart[] }
+	| { type: "reasoning"; summary: ReasoningSummary[]; encrypted_content?: string }
+	| { type: "function_call"; call_id: string; name: string; arguments: string }
+	| { type: "function_call_output"; call_id: string; output: string }
+
+/**
  * Converts an array of DiracStorageMessage objects (extension of Anthropic format) to a ResponseInput array to use with OpenAI's Responses API.
  *
  * ## Key Differences from Chat Completions API
@@ -112,7 +127,7 @@ export function convertToOpenAIResponsesInput(
 		}
 	}
 
-	const allItems: any[] = []
+	const allItems: ResponseTransformItem[] = []
 
 	for (const m of messages) {
 		if (typeof m.content === "string") {
@@ -126,7 +141,7 @@ export function convertToOpenAIResponsesInput(
 		}
 	}
 
-	return { input: allItems, previousResponseId }
+	return { input: allItems as unknown as ResponseInput, previousResponseId }
 }
 
 function seedToolCallIdsFromAssistantTurn(
@@ -152,8 +167,8 @@ function getPartCallId(part: DiracContent): string | undefined {
 // Processes an assistant turn: groups parts by call_id, sorts by hex ID, and ensures
 // every reasoning item is immediately followed by a message or function_call (inserts
 // placeholder messages where needed).
-function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: Map<string, string>): any[] {
-	const assistantTurnItems = new Map<string, any>()
+function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: Map<string, string>): ResponseTransformItem[] {
+	const assistantTurnItems = new Map<string, ResponseTransformItem>()
 	const itemOrder: string[] = []
 
 	for (const _part of content) {
@@ -173,8 +188,14 @@ function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: M
 					item = { type: "reasoning", summary: [] }
 					assistantTurnItems.set(call_id, item)
 				}
-				if (hasSummaryContent) item.summary = thinkingBlock.summary
-				else if (hasThinkingContent) item.summary = [{ type: "summary_text", text: thinkingBlock.thinking }]
+				if (hasSummaryContent) {
+					;(item as Extract<ResponseTransformItem, { type: "reasoning" }>).summary =
+						thinkingBlock.summary as ReasoningSummary[]
+				} else if (hasThinkingContent) {
+					;(item as Extract<ResponseTransformItem, { type: "reasoning" }>).summary = [
+						{ type: "summary_text", text: thinkingBlock.thinking },
+					]
+				}
 				break
 			}
 			case "redacted_thinking": {
@@ -183,7 +204,9 @@ function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: M
 					item = { type: "reasoning", summary: [] }
 					assistantTurnItems.set(call_id, item)
 				}
-				if (redactedBlock.data) item.encrypted_content = redactedBlock.data
+				if (redactedBlock.data) {
+					;(item as Extract<ResponseTransformItem, { type: "reasoning" }>).encrypted_content = redactedBlock.data
+				}
 				break
 			}
 			case "text":
@@ -230,9 +253,10 @@ function convertAssistantTurnItems(content: DiracContent[], toolUseIdToCallId: M
 	})
 
 	// Ensure strict pairing: every reasoning must be followed by a message or function_call
-	const finalized: any[] = []
+	const finalized: ResponseTransformItem[] = []
 	for (let i = 0; i < sortedIds.length; i++) {
 		const item = assistantTurnItems.get(sortedIds[i])
+		if (!item) continue
 		finalized.push(item)
 		if (item.type === "reasoning") {
 			const nextItem = sortedIds[i + 1] ? assistantTurnItems.get(sortedIds[i + 1]) : null
@@ -250,9 +274,9 @@ function convertUserTurnItems(
 	content: DiracContent[],
 	role: string,
 	toolUseIdToCallId: Map<string, string>,
-	allItems: any[],
-): any[] {
-	const newItems: any[] = []
+	allItems: ResponseTransformItem[],
+): ResponseTransformItem[] {
+	const newItems: ResponseTransformItem[] = []
 	const messageContent: ResponseInputMessageContentList = []
 
 	for (const _part of content) {
