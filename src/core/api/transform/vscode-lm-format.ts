@@ -5,7 +5,7 @@ import { Logger } from "@/shared/services/Logger"
 /**
  * Safely converts a value into a plain object.
  */
-export function asObjectSafe(value: any): object {
+export function asObjectSafe(value: unknown): object {
 	// Handle null/undefined
 	if (!value) {
 		return {}
@@ -30,7 +30,7 @@ export function asObjectSafe(value: any): object {
 }
 
 // Describes an unsupported image as a text placeholder for the VSCode LM API.
-function imagePlaceholder(source?: any): string {
+function imagePlaceholder(source?: Anthropic.ImageBlockParam["source"]): string {
 	const type = source?.type || "Unknown source-type"
 	const detail = source?.type === "base64" ? source.media_type : "url"
 	return `[Image (${type}): ${detail} not supported by VSCode LM API]`
@@ -42,7 +42,7 @@ function convertToolResultContent(
 ): vscode.LanguageModelTextPart[] {
 	if (typeof content === "string") return [new vscode.LanguageModelTextPart(content)]
 	if (!Array.isArray(content)) return [new vscode.LanguageModelTextPart("")]
-	return content.map((part: any) =>
+	return content.map((part) =>
 		part.type === "image"
 			? new vscode.LanguageModelTextPart(imagePlaceholder(part.source))
 			: new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
@@ -51,19 +51,22 @@ function convertToolResultContent(
 
 // Converts user-role array content: tool results first, then text/image parts.
 function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
-	const { nonToolMessages, toolMessages } = content.reduce<{ nonToolMessages: any[]; toolMessages: any[] }>(
+	const { nonToolMessages, toolMessages } = content.reduce<{
+		nonToolMessages: Anthropic.Messages.TextBlockParam[] | Anthropic.Messages.ImageBlockParam[]
+		toolMessages: Anthropic.Messages.ToolResultBlockParam[]
+	}>(
 		(acc, part) => {
-			if (part.type === "tool_result") acc.toolMessages.push(part)
-			else if (part.type === "text" || part.type === "image") acc.nonToolMessages.push(part)
+			if (part.type === "tool_result") acc.toolMessages.push(part as Anthropic.Messages.ToolResultBlockParam)
+			else if (part.type === "text" || part.type === "image") {
+				acc.nonToolMessages.push(part as Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam)
+			}
 			return acc
 		},
 		{ nonToolMessages: [], toolMessages: [] },
 	)
 	const contentParts = [
-		...toolMessages.map(
-			(tm: any) => new vscode.LanguageModelToolResultPart(tm.tool_use_id, convertToolResultContent(tm.content)),
-		),
-		...nonToolMessages.map((part: any) =>
+		...toolMessages.map((tm) => new vscode.LanguageModelToolResultPart(tm.tool_use_id, convertToolResultContent(tm.content))),
+		...nonToolMessages.map((part) =>
 			part.type === "image"
 				? new vscode.LanguageModelTextPart(imagePlaceholder(part.source))
 				: new vscode.LanguageModelTextPart(part.text),
@@ -74,17 +77,22 @@ function convertVsCodeLmUserMessage(content: Anthropic.Messages.ContentBlockPara
 
 // Converts assistant-role array content: tool calls first, then text/image parts.
 function convertVsCodeLmAssistantMessage(content: Anthropic.Messages.ContentBlockParam[]): vscode.LanguageModelChatMessage {
-	const { nonToolMessages, toolMessages } = content.reduce<{ nonToolMessages: any[]; toolMessages: any[] }>(
+	const { nonToolMessages, toolMessages } = content.reduce<{
+		nonToolMessages: Anthropic.Messages.TextBlockParam[] | Anthropic.Messages.ImageBlockParam[]
+		toolMessages: Anthropic.Messages.ToolUseBlockParam[]
+	}>(
 		(acc, part) => {
-			if (part.type === "tool_use") acc.toolMessages.push(part)
-			else if (part.type === "text" || part.type === "image") acc.nonToolMessages.push(part)
+			if (part.type === "tool_use") acc.toolMessages.push(part as Anthropic.Messages.ToolUseBlockParam)
+			else if (part.type === "text" || part.type === "image") {
+				acc.nonToolMessages.push(part as Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam)
+			}
 			return acc
 		},
 		{ nonToolMessages: [], toolMessages: [] },
 	)
 	const contentParts = [
-		...toolMessages.map((tm: any) => new vscode.LanguageModelToolCallPart(tm.id, tm.name, asObjectSafe(tm.input))),
-		...nonToolMessages.map((part: any) =>
+		...toolMessages.map((tm) => new vscode.LanguageModelToolCallPart(tm.id, tm.name, asObjectSafe(tm.input))),
+		...nonToolMessages.map((part) =>
 			part.type === "image"
 				? new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]")
 				: new vscode.LanguageModelTextPart(part.type === "text" ? part.text : ""),
