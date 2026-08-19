@@ -196,11 +196,11 @@ TS_NODE_PROJECT=./tsconfig.unit-test.json npx mocha "src/**/__tests__/*.ts" "src
 
 ## 📈 Star History
 
-<a href="https://star-history.com/#dirac-run/dirac&Date">
+<a href="https://star-history.dera.page/#dirac-run/dirac&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=dirac-run/dirac&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=dirac-run/dirac&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=dirac-run/dirac&type=Date" />
+    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=dirac-run/dirac&type=Date" />
   </picture>
 </a>
 
