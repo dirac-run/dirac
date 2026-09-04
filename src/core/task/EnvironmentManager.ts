@@ -53,6 +53,19 @@ const CODE_EXTENSIONS = new Set([
 ])
 
 const ALWAYS_IGNORED_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "__pycache__", ".venv", "venv", ".cache"])
+const MAX_WALK_ENTRIES = 5000
+
+function isCodeFile(filename: string): boolean {
+	return CODE_EXTENSIONS.has(path.extname(filename).toLowerCase())
+}
+
+async function readDirEntries(dir: string): Promise<Dirent[]> {
+	try {
+		return await fs.readdir(dir, { withFileTypes: true })
+	} catch {
+		return []
+	}
+}
 
 export interface EnvironmentManagerDependencies {
 	cwd: string
@@ -214,24 +227,31 @@ export class EnvironmentManager {
 		return ignored
 	}
 
-	private async *walkCodeFiles(dir: string, ignoredDirs: Set<string>): AsyncGenerator<string> {
-		let entries: Dirent[]
-		try {
-			entries = await fs.readdir(dir, { withFileTypes: true })
-		} catch {
-			return
-		}
-		for (const entry of entries) {
-			if (entry.name.startsWith(".")) {
-				continue
-			}
-			if (entry.isDirectory()) {
-				if (!ignoredDirs.has(entry.name)) {
-					yield* this.walkCodeFiles(path.join(dir, entry.name), ignoredDirs)
+	private async *walkCodeFiles(
+		root: string,
+		ignoredDirs: Set<string>,
+		maxEntries = MAX_WALK_ENTRIES,
+	): AsyncGenerator<string> {
+		const queue: string[] = [root]
+		let inspected = 0
+
+		while (queue.length > 0 && !this.taskState.abort) {
+			const dir = queue.shift()!
+			const entries = await readDirEntries(dir)
+
+			for (const entry of entries) {
+				if (this.taskState.abort || ++inspected > maxEntries) {
+					return
 				}
-			} else if (entry.isFile()) {
-				if (CODE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-					yield path.join(dir, entry.name)
+				if (entry.name.startsWith(".")) {
+					continue
+				}
+
+				const fullPath = path.join(dir, entry.name)
+				if (entry.isDirectory() && !ignoredDirs.has(entry.name)) {
+					queue.push(fullPath)
+				} else if (entry.isFile() && isCodeFile(entry.name)) {
+					yield fullPath
 				}
 			}
 		}

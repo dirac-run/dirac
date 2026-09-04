@@ -1,4 +1,4 @@
-import { credentials as grpcCredentials } from "@grpc/grpc-js"
+import { type ChannelCredentials, credentials as grpcCredentials } from "@grpc/grpc-js"
 import { OTLPLogExporter as OTLPLogExporterGRPC } from "@opentelemetry/exporter-logs-otlp-grpc"
 import { OTLPLogExporter as OTLPLogExporterHTTP } from "@opentelemetry/exporter-logs-otlp-http"
 import { OTLPLogExporter as OTLPLogExporterProto } from "@opentelemetry/exporter-logs-otlp-proto"
@@ -8,6 +8,7 @@ import { OTLPMetricExporter as OTLPMetricExporterProto } from "@opentelemetry/ex
 import { ConsoleLogRecordExporter, LogRecordExporter } from "@opentelemetry/sdk-logs"
 import { ConsoleMetricExporter, MetricReader, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
 import { Logger } from "@/shared/services/Logger"
+import { isLoopbackHost, isTrustedOtlpEndpoint } from "@/shared/services/config/otel-config"
 import { wrapLogsExporterWithDiagnostics, wrapMetricsExporterWithDiagnostics } from "./otel-exporter-diagnostics"
 import { isDev } from "@shared/config/environment"
 
@@ -34,6 +35,31 @@ export function ensurePathSuffix(url: URL, suffix: string): void {
 	}
 }
 
+function sanitizeEndpointForLogging(endpoint: string): string {
+	try {
+		const url = new URL(endpoint)
+		return `${url.protocol}//${url.host}${url.pathname}`
+	} catch {
+		return "[invalid-url]"
+	}
+}
+
+/**
+ * Resolves gRPC credentials according to transport security policy.
+ * Only loopback endpoints (localhost, 127.0.0.1, [::1]) may use insecure credentials.
+ * Remote endpoints and HTTPS endpoints must always use SSL credentials.
+ */
+export function resolveGrpcCredentials(url: URL, insecure: boolean): ChannelCredentials {
+	if (url.protocol === "https:" || !isLoopbackHost(url.hostname)) {
+		if (insecure) {
+			Logger.warn(`[OTEL] Insecure transport requested for remote/HTTPS endpoint '${url.host}', enforcing SSL`)
+		}
+		return grpcCredentials.createSsl()
+	}
+
+	return grpcCredentials.createInsecure()
+}
+
 /**
  * Create an OTLP log exporter based on protocol
  */
@@ -44,28 +70,31 @@ export function createOTLPLogExporter(
 	headers?: Record<string, string>,
 ): LogRecordExporter | null {
 	try {
+		if (!isTrustedOtlpEndpoint(endpoint)) {
+			Logger.warn(`[OTEL] Untrusted OTLP logs endpoint rejected: ${sanitizeEndpointForLogging(endpoint)}`)
+			return null
+		}
+
 		let exporter: any = null
-		const logsUrl = new URL(endpoint)
-		ensurePathSuffix(logsUrl, "/v1/logs")
+		const url = new URL(endpoint)
 
 		switch (protocol) {
 			case "grpc": {
-				const grpcEndpoint = endpoint.replace(/^https?:\/\//, "")
-				const credentials = insecure ? grpcCredentials.createInsecure() : grpcCredentials.createSsl()
-
 				exporter = new OTLPLogExporterGRPC({
-					url: grpcEndpoint,
-					credentials: credentials,
+					url: url.host,
+					credentials: resolveGrpcCredentials(url, insecure),
 					headers,
 				})
 				break
 			}
 			case "http/json": {
-				exporter = new OTLPLogExporterHTTP({ url: logsUrl.toString(), headers })
+				ensurePathSuffix(url, "/v1/logs")
+				exporter = new OTLPLogExporterHTTP({ url: url.toString(), headers })
 				break
 			}
 			case "http/protobuf": {
-				exporter = new OTLPLogExporterProto({ url: logsUrl.toString(), headers })
+				ensurePathSuffix(url, "/v1/logs")
+				exporter = new OTLPLogExporterProto({ url: url.toString(), headers })
 				break
 			}
 			default:
@@ -75,7 +104,7 @@ export function createOTLPLogExporter(
 
 		// Wrap with diagnostics if debug is enabled
 		if (isDebugEnabled()) {
-			wrapLogsExporterWithDiagnostics(exporter, protocol, logsUrl.toString())
+			wrapLogsExporterWithDiagnostics(exporter, protocol, url.toString())
 		}
 
 		return exporter
@@ -109,29 +138,31 @@ export function createOTLPMetricReader(
 	headers?: Record<string, string>,
 ): MetricReader | null {
 	try {
-		let exporter: any = null
+		if (!isTrustedOtlpEndpoint(endpoint)) {
+			Logger.warn(`[OTEL] Untrusted OTLP metrics endpoint rejected: ${sanitizeEndpointForLogging(endpoint)}`)
+			return null
+		}
 
-		const metricsUrl = new URL(endpoint)
-		ensurePathSuffix(metricsUrl, "/v1/metrics")
+		let exporter: any = null
+		const url = new URL(endpoint)
 
 		switch (protocol) {
 			case "grpc": {
-				const grpcEndpoint = endpoint.replace(/^https?:\/\//, "")
-				const credentials = insecure ? grpcCredentials.createInsecure() : grpcCredentials.createSsl()
-
 				exporter = new OTLPMetricExporterGRPC({
-					url: grpcEndpoint,
-					credentials: credentials,
+					url: url.host,
+					credentials: resolveGrpcCredentials(url, insecure),
 					headers,
 				})
 				break
 			}
 			case "http/json": {
-				exporter = new OTLPMetricExporterHTTP({ url: metricsUrl.toString(), headers })
+				ensurePathSuffix(url, "/v1/metrics")
+				exporter = new OTLPMetricExporterHTTP({ url: url.toString(), headers })
 				break
 			}
 			case "http/protobuf": {
-				exporter = new OTLPMetricExporterProto({ url: metricsUrl.toString(), headers })
+				ensurePathSuffix(url, "/v1/metrics")
+				exporter = new OTLPMetricExporterProto({ url: url.toString(), headers })
 				break
 			}
 			default:
@@ -141,7 +172,7 @@ export function createOTLPMetricReader(
 
 		// Wrap with diagnostics if debug is enabled
 		if (isDebugEnabled()) {
-			wrapMetricsExporterWithDiagnostics(exporter, protocol, metricsUrl.toString())
+			wrapMetricsExporterWithDiagnostics(exporter, protocol, url.toString())
 		}
 
 		return new PeriodicExportingMetricReader({
