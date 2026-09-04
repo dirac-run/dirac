@@ -1,6 +1,6 @@
-import { Node as SyntaxNode, Tree } from "web-tree-sitter"
 import * as path from "path"
-import { loadRequiredLanguageParsers } from "@/services/tree-sitter/languageParser"
+import { Node as SyntaxNode, Tree } from "web-tree-sitter"
+import { isLanguageSupported, loadRequiredLanguageParsers } from "@/services/tree-sitter/languageParser"
 import { Diagnostic, DiagnosticSeverity, FileDiagnostics } from "@/shared/proto/index.dirac"
 import { Logger } from "@/shared/services/Logger"
 import { DiagnosticsFeedbackResult, IDiagnosticsProvider } from "./IDiagnosticsProvider"
@@ -19,6 +19,10 @@ export class SyntaxFeedbackProvider implements IDiagnosticsProvider {
 	): Promise<DiagnosticsFeedbackResult> {
 		try {
 			const extension = path.extname(filePath).toLowerCase().slice(1)
+			if (!isLanguageSupported(extension)) {
+				return { newProblemsMessage: "", fixedCount: 0 }
+			}
+
 			const languageParsers = await loadRequiredLanguageParsers([filePath])
 			const { parser } = languageParsers[extension] || {}
 			if (!parser) {

@@ -4,20 +4,20 @@ import { Language, Parser, Query } from "web-tree-sitter"
 import { SymbolIndexTelemetry } from "@/services/symbol-index/SymbolIndexTelemetry"
 import { getErrorMessage } from "@/shared/errors"
 import {
-	cppQuery,
-	cQuery,
-	csharpQuery,
-	goQuery,
-	javaQuery,
-	javascriptQuery,
-	kotlinQuery,
-	phpQuery,
-	pythonQuery,
-	rubyQuery,
-	rustQuery,
-	swiftQuery,
-	typescriptQuery,
-	zigQuery,
+    cppQuery,
+    cQuery,
+    csharpQuery,
+    goQuery,
+    javaQuery,
+    javascriptQuery,
+    kotlinQuery,
+    phpQuery,
+    pythonQuery,
+    rubyQuery,
+    rustQuery,
+    swiftQuery,
+    typescriptQuery,
+    zigQuery,
 } from "./queries"
 
 export interface LanguageParser {
@@ -106,44 +106,38 @@ async function initializeParser(): Promise<void> {
 	return initializationPromise
 }
 
+const languageDefinitions: Record<string, LanguageDefinition> = {
+	js: { langName: "javascript", queryText: javascriptQuery },
+	jsx: { langName: "javascript", queryText: javascriptQuery },
+	ts: { langName: "typescript", queryText: typescriptQuery },
+	tsx: { langName: "tsx", queryText: typescriptQuery },
+	py: { langName: "python", queryText: pythonQuery },
+	rs: { langName: "rust", queryText: rustQuery },
+	go: { langName: "go", queryText: goQuery },
+	cpp: { langName: "cpp", queryText: cppQuery },
+	hpp: { langName: "cpp", queryText: cppQuery },
+	c: { langName: "c", queryText: cQuery },
+	h: { langName: "c", queryText: cQuery },
+	cs: { langName: "c_sharp", queryText: csharpQuery },
+	rb: { langName: "ruby", queryText: rubyQuery },
+	java: { langName: "java", queryText: javaQuery },
+	php: { langName: "php", queryText: phpQuery },
+	swift: { langName: "swift", queryText: swiftQuery },
+	kt: { langName: "kotlin", queryText: kotlinQuery },
+	zig: { langName: "zig", queryText: zigQuery },
+}
+
 function getLanguageDefinition(extension: string): LanguageDefinition {
-	switch (extension) {
-		case "js":
-		case "jsx":
-			return { langName: "javascript", queryText: javascriptQuery }
-		case "ts":
-			return { langName: "typescript", queryText: typescriptQuery }
-		case "tsx":
-			return { langName: "tsx", queryText: typescriptQuery }
-		case "py":
-			return { langName: "python", queryText: pythonQuery }
-		case "rs":
-			return { langName: "rust", queryText: rustQuery }
-		case "go":
-			return { langName: "go", queryText: goQuery }
-		case "cpp":
-		case "hpp":
-			return { langName: "cpp", queryText: cppQuery }
-		case "c":
-		case "h":
-			return { langName: "c", queryText: cQuery }
-		case "cs":
-			return { langName: "c_sharp", queryText: csharpQuery }
-		case "rb":
-			return { langName: "ruby", queryText: rubyQuery }
-		case "java":
-			return { langName: "java", queryText: javaQuery }
-		case "php":
-			return { langName: "php", queryText: phpQuery }
-		case "swift":
-			return { langName: "swift", queryText: swiftQuery }
-		case "kt":
-			return { langName: "kotlin", queryText: kotlinQuery }
-		case "zig":
-			return { langName: "zig", queryText: zigQuery }
-		default:
-			throw new Error(`Unsupported language: ${extension}`)
+	const definition = languageDefinitions[extension]
+	if (!definition) {
+		throw new Error(`Unsupported language: ${extension}`)
 	}
+	return definition
+}
+
+export function isLanguageSupported(extension: string): boolean {
+	const normalized = extension.startsWith(".") ? extension.slice(1) : extension
+	return Object.hasOwn(languageDefinitions, normalized)
 }
 
 /**
