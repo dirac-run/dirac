@@ -1,13 +1,13 @@
 import {
-	ApiConfiguration,
-	type ApiProvider,
-	getModelInfo,
-	ModelInfo,
-	type ModelProviderSelection,
-	modelSupportsInferenceSpeed,
-	openAiModelInfoSaneDefaults,
-	providerSupportsInferenceSpeed,
-	QwenApiRegions,
+    ApiConfiguration,
+    type ApiProvider,
+    getModelInfo,
+    ModelInfo,
+    type ModelProviderSelection,
+    modelSupportsInferenceSpeed,
+    openAiModelInfoSaneDefaults,
+    providerSupportsInferenceSpeed,
+    QwenApiRegions,
 } from "@shared/api"
 import { DEFAULT_INFERENCE_SPEED, type InferenceSpeed, isInferenceSpeed, type Mode } from "@shared/storage/types"
 import { DiracStorageMessage } from "@/shared/messages/content"
@@ -15,9 +15,9 @@ import { Logger } from "@/shared/services/Logger"
 import { DiracTool } from "@/shared/tools"
 import { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigurationError"
 import type {
-	ApiConversationCompactionRequest,
-	ApiConversationCompactionResult,
-	ApiConversationRequestOptions,
+    ApiConversationCompactionRequest,
+    ApiConversationCompactionResult,
+    ApiConversationRequestOptions,
 } from "./conversation"
 import { modelProviderSelectionUpdates } from "./modelProviderSelection"
 import { AIhubmixHandler } from "./providers/aihubmix"
@@ -647,16 +647,21 @@ export function buildApiHandler(configuration: ApiConfiguration, mode: Mode): Ap
 	const apiProvider = (mode === "plan" ? planModeApiProvider : actModeApiProvider) ?? fallbackProvider
 	const handler = createHandlerForProvider(apiProvider, options, mode)
 	const { thinkingBudgetTokens } = resolveModeConfig(options, mode)
-	if (!thinkingBudgetTokens || thinkingBudgetTokens < 0) return handler
+	if (!thinkingBudgetTokens || thinkingBudgetTokens <= 0) return handler
 
-	const maxTokens = handler.getModel().info.maxTokens
-	if (!maxTokens || maxTokens <= 0 || thinkingBudgetTokens <= maxTokens) {
+	const modelInfo = handler.getModel().info
+	const maxBudget = modelInfo.thinkingConfig?.maxBudget
+	const isAnthropicFamily = apiProvider === "anthropic" || apiProvider === "vertex" || apiProvider === "bedrock"
+	const effectiveCap =
+		maxBudget ?? (modelInfo.maxTokens ? (isAnthropicFamily ? modelInfo.maxTokens - 1 : modelInfo.maxTokens) : undefined)
+
+	if (!effectiveCap || thinkingBudgetTokens <= effectiveCap) {
 		return handler
 	}
 
 	const clippedOptions = {
 		...options,
-		[mode === "plan" ? "planModeThinkingBudgetTokens" : "actModeThinkingBudgetTokens"]: maxTokens - 1,
+		[mode === "plan" ? "planModeThinkingBudgetTokens" : "actModeThinkingBudgetTokens"]: effectiveCap,
 	}
 	return createHandlerForProvider(apiProvider, clippedOptions, mode)
 }

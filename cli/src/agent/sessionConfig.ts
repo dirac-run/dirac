@@ -1,19 +1,28 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { ApiConfigurationError, ApiConfigurationErrorCode, resolveModelIdForProvider } from "@core/api"
-import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
+import {
+    type ApiConfiguration,
+    type ApiProvider,
+    clampThinkingBudget,
+    getModelInfo,
+    getModelInfoForProvider,
+    type ModelInfo,
+    modelSupportsInferenceSpeed,
+    providerSupportsInferenceSpeed,
+} from "@shared/api"
 import { getProviderModelIdKey, getProviderModelInfoKey } from "@shared/storage/provider-keys"
 import type { Settings } from "@shared/storage/state-keys"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
 import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import {
-	DEFAULT_OPENAI_REASONING_EFFORT,
-	DEFAULT_INFERENCE_SPEED,
-	INFERENCE_SPEED_LABELS,
-	INFERENCE_SPEED_OPTIONS,
-	type Mode,
-	OPENAI_REASONING_EFFORT_LABELS,
-	OPENAI_REASONING_EFFORT_OPTIONS,
+    DEFAULT_INFERENCE_SPEED,
+    DEFAULT_OPENAI_REASONING_EFFORT,
+    INFERENCE_SPEED_LABELS,
+    INFERENCE_SPEED_OPTIONS,
+    type Mode,
+    OPENAI_REASONING_EFFORT_LABELS,
+    OPENAI_REASONING_EFFORT_OPTIONS,
 } from "@/shared/storage/types"
 import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { getDefaultModelId, getModelList, hasStaticModels } from "../utils/model-metadata.js"
@@ -40,14 +49,16 @@ const ACP_INFERENCE_SPEED_OPTIONS: acp.SessionConfigSelectOption[] = INFERENCE_S
 	name: INFERENCE_SPEED_LABELS[value],
 }))
 
-const THINKING_BUDGET_OPTIONS: acp.SessionConfigSelectOption[] = [
-	{ value: "0", name: "Off" },
-	{ value: "1024", name: "1,024 tokens" },
-	{ value: "4096", name: "4,096 tokens" },
-	{ value: "8192", name: "8,192 tokens" },
-	{ value: "16384", name: "16,384 tokens" },
-	{ value: "32768", name: "32,768 tokens" },
-]
+const STANDARD_THINKING_BUDGET_TIERS = [1024, 4096, 8192, 16384, 32768, 65536, 128000]
+
+export function getThinkingBudgetOptions(modelInfo?: ModelInfo): acp.SessionConfigSelectOption[] {
+	const maxAllowed = modelInfo?.thinkingConfig?.maxBudget ?? modelInfo?.maxTokens ?? 65536
+	const validTiers = STANDARD_THINKING_BUDGET_TIERS.filter((tier) => tier <= maxAllowed)
+	return [
+		{ value: "0", name: "Off" },
+		...validTiers.map((t) => ({ value: String(t), name: `${t.toLocaleString()} tokens` })),
+	]
+}
 
 export class SessionConfigManager {
 	constructor(private readonly providerConfiguration?: ProviderConfigurationManager) {}
@@ -128,6 +139,7 @@ export class SessionConfigManager {
 			modelCandidates,
 		)
 		const currentModelId = await this.getCurrentModeModelId(mode, currentProvider, sessionOverrides)
+		const currentModelInfo = getModelInfoForProvider(currentProvider, currentModelId) ?? getModelInfo(currentModelId)
 		const inferenceSpeedKey = mode === "act" ? "actModeInferenceSpeed" : "planModeInferenceSpeed"
 		const configuredInferenceSpeed = sessionOverrides[inferenceSpeedKey] ?? DEFAULT_INFERENCE_SPEED
 		if (
@@ -218,7 +230,11 @@ export class SessionConfigManager {
 				type: "select",
 				category: "thought_level",
 				currentValue: thinkingBudget,
-				options: this.withCurrentSelectOption(THINKING_BUDGET_OPTIONS, thinkingBudget, `${thinkingBudget} tokens`),
+				options: this.withCurrentSelectOption(
+					getThinkingBudgetOptions(currentModelInfo),
+					thinkingBudget,
+					`${thinkingBudget} tokens`,
+				),
 			},
 		]
 	}
@@ -372,6 +388,13 @@ export class SessionConfigManager {
 			if (provider === "bedrock" && !preserveCustomBedrockModel) {
 				overrides[customSelectedKey] = false
 				overrides[customBaseModelKey] = undefined
+			}
+			const thinkingKey = mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
+			const currentBudget = overrides[thinkingKey] as number | undefined
+			if (currentBudget && currentBudget > 0) {
+				const info = openRouterModelInfo ?? getModelInfoForProvider(provider, modelId) ?? getModelInfo(modelId)
+				const isAnthropicFamily = provider === "anthropic" || provider === "vertex" || provider === "bedrock"
+				overrides[thinkingKey] = clampThinkingBudget(currentBudget, info, isAnthropicFamily)
 			}
 		})
 	}

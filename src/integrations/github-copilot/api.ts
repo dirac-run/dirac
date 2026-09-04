@@ -120,5 +120,10 @@ export function transformCopilotModelToModelInfo(rawModel: z.infer<typeof github
 		supportsTools: rawModel.capabilities.supports.tool_calls,
 		supportsImages: rawModel.capabilities.supports.vision,
 		description: `GitHub Copilot: ${rawModel.name}`,
+		thinkingConfig: rawModel.capabilities.supports.max_thinking_budget
+			? {
+					maxBudget: rawModel.capabilities.supports.max_thinking_budget,
+				}
+			: undefined,
 	}
 }

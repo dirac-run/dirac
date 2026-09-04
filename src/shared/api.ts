@@ -118,34 +118,34 @@ export type ApiConfiguration = ApiHandlerOptions
 
 import type { ModelInfo } from "./api/models"
 import {
-	anthropicModels,
-	basetenModels,
-	bedrockModels,
-	cerebrasModels,
-	claudeCodeModels,
-	deepSeekModels,
-	doubaoModels,
-	fireworksModels,
-	geminiModels,
-	groqModels,
-	huaweiCloudMaasModels,
-	huggingFaceModels,
-	internationalQwenModels,
-	internationalZAiModels,
-	mainlandQwenModels,
-	mainlandZAiModels,
-	minimaxModels,
-	mistralModels,
-	moonshotModels,
-	nebiusModels,
-	nousResearchModels,
-	openAiCodexModels,
-	openAiNativeModels,
-	qwenCodeModels,
-	sambanovaModels,
-	vertexModels,
-	wandbModels,
-	xaiModels,
+    anthropicModels,
+    basetenModels,
+    bedrockModels,
+    cerebrasModels,
+    claudeCodeModels,
+    deepSeekModels,
+    doubaoModels,
+    fireworksModels,
+    geminiModels,
+    groqModels,
+    huaweiCloudMaasModels,
+    huggingFaceModels,
+    internationalQwenModels,
+    internationalZAiModels,
+    mainlandQwenModels,
+    mainlandZAiModels,
+    minimaxModels,
+    mistralModels,
+    moonshotModels,
+    nebiusModels,
+    nousResearchModels,
+    openAiCodexModels,
+    openAiNativeModels,
+    qwenCodeModels,
+    sambanovaModels,
+    vertexModels,
+    wandbModels,
+    xaiModels,
 } from "./api/models"
 
 /**
@@ -226,3 +226,18 @@ export function providerSupportsInferenceSpeed(provider: ApiProvider): boolean {
 export function modelSupportsInferenceSpeed(provider: ApiProvider, modelId: string): boolean {
 	return providerSupportsInferenceSpeed(provider) && getModelInfoForProvider(provider, modelId)?.supportsFastMode === true
 }
+
+/**
+ * Clamps thinking budget tokens to valid provider and model constraints.
+ * Ensures budget_tokens does not exceed maxBudget or maxTokens.
+ */
+export function clampThinkingBudget(budget: number | undefined, modelInfo?: ModelInfo, strictlyLessThanMax = false): number {
+	if (!budget || budget <= 0) return 0
+	if (!modelInfo) return budget
+	const effectiveMax =
+		modelInfo.thinkingConfig?.maxBudget ??
+		(modelInfo.maxTokens ? (strictlyLessThanMax ? modelInfo.maxTokens - 1 : modelInfo.maxTokens) : undefined)
+	if (!effectiveMax) return budget
+	return Math.min(budget, effectiveMax)
+}
+

@@ -341,4 +341,23 @@ describe("SessionConfigManager task runtime behavior", () => {
 		expect(options.find((option) => option.id === "auto_approve")).toMatchObject({ type: "boolean", currentValue: false })
 		expect(options.find((option) => option.id === "yolo")).toMatchObject({ type: "boolean", currentValue: true })
 	})
+
+	it("includes 65,536 tokens tier in thinking budget options", async () => {
+		const options = await new SessionConfigManager().getSessionConfigOptions(session(), linkedDeepSeekRuntime())
+		const thinkingOption = selectOption(options, "thinking_budget")
+		expect(optionValues(thinkingOption)).toContain("65536")
+	})
+
+	it("clamps thinking budget when switching to a model with lower limits", async () => {
+		const manager = new SessionConfigManager()
+		const s = session("act")
+		const runtime: Partial<Settings> = {
+			...linkedDeepSeekRuntime(),
+			actModeApiProvider: "anthropic",
+			actModeThinkingBudgetTokens: 65536,
+		}
+		// Apply a model with 8192 max tokens
+		await manager.applyModelConfigOption(s, "claude-haiku-4-5-20251001", runtime)
+		expect(runtime.actModeThinkingBudgetTokens).toBeLessThanOrEqual(63999)
+	})
 })
