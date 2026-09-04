@@ -388,6 +388,30 @@ describe("ToolRegistry", () => {
 			assert.strictEqual(registry.isEnabled("user_tool"), true)
 			assert.strictEqual(registry.getVersion(), version)
 		})
+
+		it("rejects a user tool that would shadow a built-in by name", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: "read_file_builtin", name: "read_file", source: "builtin" }))
+
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "my_tool", name: "read_file", source: "workspace" }), true),
+				false,
+			)
+			assert.strictEqual(registry.getAllTools().length, 1)
+			assert.strictEqual(registry.getAllTools()[0].source, "builtin")
+		})
+
+		it("rejects a user tool that would shadow a built-in by id", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: "execute_command", name: "execute_command", source: "builtin" }))
+
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "execute_command", name: "my_custom", source: "workspace" }), true),
+				false,
+			)
+			assert.strictEqual(registry.getAllTools().length, 1)
+			assert.strictEqual(registry.getAllTools()[0].source, "builtin")
+		})
 	})
 
 	describe("removeUserTool", () => {
