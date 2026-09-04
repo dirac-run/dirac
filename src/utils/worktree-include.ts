@@ -1,11 +1,7 @@
-import { exec } from "child_process"
 import * as fs from "fs/promises"
 import ignore from "ignore"
 import * as path from "path"
-import { promisify } from "util"
 import { getErrorMessage } from "@/shared/errors"
-
-const execAsync = promisify(exec)
 
 /** Batch size for parallel file operations */
 const COPY_BATCH_SIZE = 100
@@ -52,21 +48,14 @@ async function isDirectoryPattern(sourceDir: string, pattern: string): Promise<s
 }
 
 /**
- * Copy a directory using native cp -r (much faster than recursive Node.js copy)
+ * Copy a directory recursively using fs.cp (no process spawn, safe with any path characters, preserves relative symlinks)
  */
 async function copyDirectoryNative(source: string, target: string): Promise<void> {
 	// Create parent directory if needed
 	await fs.mkdir(path.dirname(target), { recursive: true })
 
-	// Use native cp for performance (10-20x faster than Node.js)
-	const isWindows = process.platform === "win32"
-	if (isWindows) {
-		// Windows: use robocopy or xcopy
-		await execAsync(`xcopy "${source}" "${target}" /E /I /H /Y /Q`)
-	} else {
-		// Unix: use cp -r
-		await execAsync(`cp -r "${source}" "${target}"`)
-	}
+	// Use fs.cp with verbatimSymlinks to preserve relative symlinks without resolving to source absolute paths
+	await fs.cp(source, target, { recursive: true, verbatimSymlinks: true })
 }
 
 /**
@@ -120,8 +109,8 @@ async function copyFilesInBatches(
 				// Create target directory if it doesn't exist
 				await fs.mkdir(path.dirname(targetPath), { recursive: true })
 
-				// Copy the file
-				await fs.copyFile(sourcePath, targetPath)
+				// Copy the file or symlink verbatim
+				await fs.cp(sourcePath, targetPath, { verbatimSymlinks: true })
 				return file
 			}),
 		)

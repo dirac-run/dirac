@@ -135,5 +135,43 @@ describe("Worktree Include Utilities", () => {
 			// Neither file should be copied since there's no intersection
 			result.copiedCount.should.equal(0)
 		})
+
+		it("should preserve relative symlinks verbatim without pointing back to source directory", async () => {
+			const src = path.join(tmpDir, "symlink-src")
+			const tgt = path.join(tmpDir, "symlink-tgt")
+
+			// Setup source with directory containing relative symlinks
+			await fs.mkdir(path.join(src, "node_modules", "pkg"), { recursive: true })
+			await fs.mkdir(path.join(src, "node_modules", "bin"), { recursive: true })
+			await fs.mkdir(tgt, { recursive: true })
+			await fs.writeFile(path.join(src, ".worktreeinclude"), "node_modules/")
+			await fs.writeFile(path.join(src, ".gitignore"), "node_modules/")
+
+			// Real target file
+			await fs.writeFile(path.join(src, "node_modules", "pkg", "target.js"), "target module code")
+
+			// Intra-directory relative symlink: link.js -> target.js
+			await fs.symlink("target.js", path.join(src, "node_modules", "pkg", "link.js"))
+
+			// Cross-directory relative symlink: bin/run -> ../pkg/target.js
+			await fs.symlink(path.join("..", "pkg", "target.js"), path.join(src, "node_modules", "bin", "run"))
+
+			const result = await copyWorktreeIncludeFiles(src, tgt)
+
+			result.copiedCount.should.be.greaterThan(0)
+			result.errors.should.be.empty()
+
+			// 1. Verify intra-directory symlink is preserved verbatim as relative path
+			const intraLink = await fs.readlink(path.join(tgt, "node_modules", "pkg", "link.js"))
+			intraLink.should.equal("target.js")
+
+			// 2. Verify cross-directory symlink is preserved verbatim as relative path
+			const crossLink = await fs.readlink(path.join(tgt, "node_modules", "bin", "run"))
+			crossLink.should.equal(path.join("..", "pkg", "target.js"))
+
+			// 3. Verify reading through the symlink in the target directory works
+			const linkContent = await fs.readFile(path.join(tgt, "node_modules", "pkg", "link.js"), "utf-8")
+			linkContent.should.equal("target module code")
+		})
 	})
 })
