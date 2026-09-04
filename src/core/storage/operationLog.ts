@@ -144,9 +144,17 @@ function parseAndApplyRecord<T>(
 	apply: (record: T, lineNumber: number) => void,
 ): void {
 	if (line.length === 0) return
+
+	let record: T
 	try {
-		apply(JSON.parse(line) as T, lineNumber)
+		record = JSON.parse(line) as T
 	} catch (error) {
 		throw new Error(`Invalid operation record at ${filePath}:${lineNumber}`, { cause: error })
+	}
+
+	try {
+		apply(record, lineNumber)
+	} catch (error) {
+		throw new Error(`Failed to apply operation record at ${filePath}:${lineNumber}`, { cause: error })
 	}
 }

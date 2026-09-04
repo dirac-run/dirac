@@ -42,10 +42,10 @@ describe("MessageStateHandler Mutex Protection", () => {
 	/**
 	 * Helper to create a minimal MessageStateHandler for testing
 	 */
-	function createTestHandler(): MessageStateHandler {
+	function createTestHandler(taskId = `test-task-id-${++handlerId}`): MessageStateHandler {
 		const taskState = new TaskState()
 		const handler = new MessageStateHandler({
-			taskId: `test-task-id-${++handlerId}`,
+			taskId,
 			ulid: "test-ulid",
 			taskState,
 			updateTaskHistory: async () => [],
@@ -450,4 +450,23 @@ describe("MessageStateHandler Mutex Protection", () => {
 		})
 		expect(handler.getLatestApiStatusMessage()).to.equal(undefined)
 	})
+
+	it("discards pending and late writes after persistence retirement", async () => {
+		const taskId = `retired-task-${++handlerId}`
+		const handler = createTestHandler(taskId)
+		await handler.addToDiracMessages(createTestMessage("pending"))
+
+		await handler.retirePersistence()
+		await handler.addToDiracMessages(createTestMessage("late"))
+		await handler.addToApiConversationHistory({ role: "user", content: "late API message" })
+		await handler.overwriteApiConversationProviderState({})
+		await handler.recordDeliveredSteeringMessageIds(["late-steering-message"])
+		await handler.flushPendingWrites()
+
+		expect(handler.getPendingPresentationOperations()).to.deep.equal([])
+		expect(fs.existsSync(path.join(tmpDir, "tasks", taskId, "ui_messages.jsonl"))).to.equal(false)
+		expect(fs.existsSync(path.join(tmpDir, "tasks", taskId, "api_conversation_history.jsonl"))).to.equal(false)
+		expect(fs.existsSync(path.join(tmpDir, "tasks", taskId, "api_conversation_provider_state.json"))).to.equal(false)
+	})
+
 })

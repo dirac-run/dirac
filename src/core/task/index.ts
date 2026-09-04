@@ -1243,6 +1243,10 @@ export class Task {
 		return this.lifecycleManager.abortTask()
 	}
 
+	async retirePersistence(): Promise<void> {
+		await this.messageStateHandler.retirePersistence()
+	}
+
 	// Tools
 	async executeCommandTool(
 		command: string,

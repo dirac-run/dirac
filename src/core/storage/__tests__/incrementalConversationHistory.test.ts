@@ -139,6 +139,96 @@ describe("incremental conversation history", () => {
 		assert.equal(restoredStatus.content.status.retryStatus, undefined)
 		assert.equal(restoredStatus.content.status.cost, 0.25)
 	})
+
+	it("recovers the canonical replacement branch from interleaved stale cancellation writes", async () => {
+		const taskId = "presentation-cancellation-fork"
+		const base: DiracMessage = {
+			id: "base",
+			ts: 1,
+			content: { type: DiracMessageType.MARKDOWN, content: "base" },
+		}
+		const staleStatus: DiracMessage = {
+			id: "stale-api",
+			ts: 2,
+			content: { type: DiracMessageType.API_STATUS, status: { request: "cancelled request" } },
+		}
+		const checkpoint: DiracMessage = {
+			id: "canonical-checkpoint",
+			ts: 3,
+			content: { type: DiracMessageType.CHECKPOINT },
+		}
+		const canonicalMessage: DiracMessage = {
+			id: "canonical-message",
+			ts: 4,
+			content: { type: DiracMessageType.MARKDOWN, content: "replacement" },
+		}
+		const staleCard = cardMessage("stale-retry", "API Error (Retrying)")
+
+		await appendPresentationOperations(taskId, [
+			{ offset: 0, type: "create", message: base },
+			{ offset: 1, type: "create", message: staleStatus },
+			{ offset: 2, type: "reset", messages: [base] },
+			{ offset: 3, type: "create", message: checkpoint },
+			{ offset: 4, type: "create", message: canonicalMessage },
+			{ offset: 2, type: "patch_api_status", id: staleStatus.id, patch: { cancelReason: "user_cancelled" } },
+			{ offset: 3, type: "patch_api_status", id: staleStatus.id, patch: { cost: 0 } },
+			{ offset: 4, type: "create", message: staleCard },
+			{ offset: 5, type: "patch_card", id: staleCard.id, patch: { status: CardStatus.CANCELLED } },
+			{ offset: 5, type: "append_markdown", id: canonicalMessage.id, text: " branch" },
+			{ offset: 6, type: "patch_message", id: checkpoint.id, patch: { isCheckpointCheckedOut: true } },
+		])
+
+		const restored = await getSavedPresentationHistory(taskId)
+		assert.equal(restored.lastOffset, 6)
+		assert.deepEqual(
+			restored.messages.map((message) => message.id),
+			[base.id, checkpoint.id, canonicalMessage.id],
+		)
+		assert.equal(restored.messages[2].content.type, DiracMessageType.MARKDOWN)
+		if (restored.messages[2].content.type !== DiracMessageType.MARKDOWN) throw new Error("Expected markdown")
+		assert.equal(restored.messages[2].content.content, "replacement branch")
+		assert.deepEqual(
+			(await getPresentationHistoryAtMessage(taskId, checkpoint.id)).map((message) => message.id),
+			[base.id, checkpoint.id],
+		)
+	})
+
+	it("ignores a validated stale cancellation tail at end of file", async () => {
+		const taskId = "presentation-stale-tail"
+		const staleStatus: DiracMessage = {
+			id: "tail-api",
+			ts: 1,
+			content: { type: DiracMessageType.API_STATUS, status: { request: "cancelled request" } },
+		}
+		await appendPresentationOperations(taskId, [
+			{ offset: 0, type: "create", message: staleStatus },
+			{ offset: 1, type: "reset", messages: [] },
+			{ offset: 1, type: "patch_api_status", id: staleStatus.id, patch: { cancelReason: "user_cancelled" } },
+			{ offset: 2, type: "patch_api_status", id: staleStatus.id, patch: { cost: 0 } },
+		])
+
+		const restored = await getSavedPresentationHistory(taskId)
+		assert.equal(restored.lastOffset, 1)
+		assert.deepEqual(restored.messages, [])
+	})
+
+	it("rejects an invalid stale-branch signature instead of masking corruption", async () => {
+		const taskId = "presentation-invalid-fork"
+		const canonicalMessage: DiracMessage = {
+			id: "canonical",
+			ts: 1,
+			content: { type: DiracMessageType.MARKDOWN, content: "canonical" },
+		}
+		await appendPresentationOperations(taskId, [
+			{ offset: 0, type: "reset", messages: [] },
+			{ offset: 1, type: "create", message: canonicalMessage },
+			{ offset: 0, type: "patch_message", id: "absent-before-reset", patch: { ts: 2 } },
+			{ offset: 2, type: "patch_message", id: "absent-before-reset", patch: { ts: 3 } },
+		])
+
+		await assert.rejects(getSavedPresentationHistory(taskId), /Failed to apply operation record/)
+	})
+
 })
 
 function cardMessage(id: string, header: string): DiracMessage {

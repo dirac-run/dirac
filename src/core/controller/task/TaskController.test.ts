@@ -113,6 +113,7 @@ describe("TaskController task replacement", () => {
 				return taskRun
 			}),
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		controller.task = task
 		let didReturn = false
@@ -141,6 +142,7 @@ describe("TaskController task replacement", () => {
 			taskState: { pendingTaskReplacement: undefined },
 			resumeTaskFromHistory: sinon.stub().rejects(failure),
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		controller.task = task
 
@@ -167,6 +169,7 @@ describe("TaskController task replacement", () => {
 				failedAt: 1,
 			}),
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		controller.task = task
 
@@ -190,6 +193,7 @@ describe("TaskController task replacement", () => {
 			taskState: { pendingTaskReplacement: undefined },
 			resumeTaskFromHistory: sinon.stub().returns(new Promise<void>(() => {})),
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		controller.task = task
 
@@ -217,6 +221,7 @@ describe("TaskController task replacement", () => {
 				return taskRun
 			}),
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		controller.task = task
 		const start = (controller as any).startHistoricalTaskAndWaitForRestore(task)
@@ -243,11 +248,13 @@ describe("TaskController task isolation", () => {
 			taskId: "old-task",
 			taskState: { isApiRequestActive: false },
 			abortTask: sinon.stub().returns(abortGate),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		const newTask = {
 			taskId: "new-task",
 			taskState: { isApiRequestActive: false },
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 		} as any
 		const controller = new (TaskController as any)({
 			task: oldTask,
@@ -272,8 +279,14 @@ describe("TaskController task isolation", () => {
 		const settingsGate = new Promise<void>((resolve) => {
 			releaseSettings = resolve
 		})
-		const oldTask = { abortTask: sinon.stub().resolves() } as any
-		const newTask = { abortTask: sinon.stub().resolves() } as any
+		const oldTask = {
+			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
+		} as any
+		const newTask = {
+			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
+		} as any
 		const controller = new (TaskController as any)({
 			task: oldTask,
 			clearTaskSettings: sinon.stub().returns(settingsGate),
@@ -286,7 +299,10 @@ describe("TaskController task isolation", () => {
 		await clearing
 
 		sinon.assert.calledOnce(oldTask.abortTask)
+		sinon.assert.calledOnce(oldTask.retirePersistence)
+		sinon.assert.callOrder(oldTask.abortTask, oldTask.retirePersistence)
 		sinon.assert.notCalled(newTask.abortTask)
+		sinon.assert.notCalled(newTask.retirePersistence)
 		assert.equal(controller.task, newTask)
 	})
 
@@ -407,6 +423,7 @@ describe("TaskController task isolation", () => {
 			taskId: historyItem.id,
 			taskState: { isApiRequestActive: false },
 			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().resolves(),
 			getWorkingConfiguration: () => latestWorkingConfiguration,
 		} as any
 		const postStateToWebview = sinon.stub().resolves()

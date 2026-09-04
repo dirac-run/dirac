@@ -112,8 +112,10 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	private uiFlushTimeout?: ReturnType<typeof setTimeout>
 	private uiFlushDeadline?: number
 	private apiHistoryFlushScheduled = false
+	private persistenceRetired = false
 
 	private recordPresentationOperation(operation: PresentationOperation): void {
+		if (this.persistenceRetired) return
 		const recordedOperation = structuredClone(operation)
 		const operationBytes = Buffer.byteLength(JSON.stringify(recordedOperation), "utf8")
 		this.pendingPresentationOperations.push(recordedOperation)
@@ -127,6 +129,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	}
 
 	private recordApiConversationOperation(operation: ApiConversationOperation): void {
+		if (this.persistenceRetired) return
 		const recordedOperation = structuredClone(operation)
 		this.pendingApiConversationOperations.push(recordedOperation)
 		this.pendingApiConversationBytes += Buffer.byteLength(JSON.stringify(recordedOperation), "utf8")
@@ -239,6 +242,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	/** Schedules a bounded UI snapshot flush without delaying live webview updates. */
 	private scheduleUiFlush(): void {
+		if (this.persistenceRetired) return
 		const now = performance.now()
 		this.uiFlushDeadline ??= now + UI_MESSAGES_FLUSH_MAX_DELAY_MS
 		const delay = Math.min(UI_MESSAGES_FLUSH_DEBOUNCE_MS, Math.max(0, this.uiFlushDeadline - now))
@@ -252,7 +256,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	/** Keeps API-history persistence at its existing same-turn cadence. */
 	private scheduleApiHistoryFlush(): void {
-		if (this.apiHistoryFlushScheduled) return
+		if (this.persistenceRetired || this.apiHistoryFlushScheduled) return
 		this.apiHistoryFlushScheduled = true
 		queueMicrotask(() => {
 			this.apiHistoryFlushScheduled = false
@@ -266,8 +270,27 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		this.uiFlushDeadline = undefined
 	}
 
+	/** Prevents this task instance from writing after a same-ID replacement takes ownership. */
+	async retirePersistence(): Promise<void> {
+		this.persistenceRetired = true
+		this.cancelScheduledUiFlush()
+		this.apiHistoryFlushScheduled = false
+		await this.persistenceMutex.withLock(() =>
+			this.withStateLock(() => {
+				this.pendingPresentationOperations = []
+				this.pendingPresentationPersistenceBytes = 0
+				this.pendingPresentationPublications = []
+				this.pendingPresentationPublicationBytes = 0
+				this.presentationPublicationGapThroughOffset = undefined
+				this.pendingApiConversationOperations = []
+				this.pendingApiConversationBytes = 0
+			}),
+		)
+	}
+
 	/** Captures pending records under the state lock, then appends them without blocking mutations. */
 	private async persistPendingOperations(): Promise<void> {
+		if (this.persistenceRetired) return
 		const pending = await this.withStateLock(() => {
 			const hasPendingApiConversation = this.pendingApiConversationOperations.length > 0
 			const captured = {
@@ -306,6 +329,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	}
 
 	private async createBaselinesWhenTailIsLarge(): Promise<void> {
+		if (this.persistenceRetired) return
 		const taskDirectory = await ensureTaskDirectoryExists(this.taskId)
 		const presentationTailPath = `${taskDirectory}/${GlobalFileNames.uiMessageOperations}`
 		const apiTailPath = `${taskDirectory}/${GlobalFileNames.apiConversationHistoryOperations}`
@@ -313,9 +337,10 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			operationLogExceedsBaselineThreshold(presentationTailPath),
 			operationLogExceedsBaselineThreshold(apiTailPath),
 		])
-		if (!presentationNeedsBaseline && !apiNeedsBaseline) return
+		if (this.persistenceRetired || (!presentationNeedsBaseline && !apiNeedsBaseline)) return
 
 		await this.withStateLock(async () => {
+			if (this.persistenceRetired) return
 			if (presentationNeedsBaseline && this.pendingPresentationOperations.length === 0) {
 				this.materializeAllPresentationAppends()
 				await createPresentationBaseline(this.taskId, this.diracMessages, this.presentationOffset)
@@ -328,10 +353,11 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	/**
 	 * Flush any pending dirty writes to disk without holding the message-state lock during I/O.
-	 * Safe to call at any time — no-op if nothing is dirty.
+	 * Safe to call at any time — no-op if nothing is dirty or this handler has been retired.
 	 */
 	async flushPendingWrites(): Promise<void> {
 		this.cancelScheduledUiFlush()
+		if (this.persistenceRetired) return
 		await this.persistenceMutex.withLock(() => this.persistPendingOperations())
 	}
 
@@ -341,7 +367,8 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	 */
 	async flushTaskHistory(): Promise<void> {
 		await this.flushPendingWrites()
-		await this.updateTaskHistoryInternal()
+		if (this.persistenceRetired) return
+		await this.persistenceMutex.withLock(() => this.updateTaskHistoryInternal())
 	}
 
 	getApiConversationHistory(): DiracStorageMessage[] {
@@ -366,9 +393,13 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	async overwriteApiConversationProviderState(state: ApiConversationProviderState): Promise<void> {
 		await this.flushPendingWrites()
-		await this.withStateLock(async () => {
-			this.apiConversationProviderState = state
-			await saveApiConversationProviderState(this.taskId, state)
+		if (this.persistenceRetired) return
+		await this.persistenceMutex.withLock(async () => {
+			if (this.persistenceRetired) return
+			await this.withStateLock(async () => {
+				this.apiConversationProviderState = state
+				await saveApiConversationProviderState(this.taskId, state)
+			})
 		})
 	}
 
@@ -499,6 +530,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	 * outside of the stateMutex lock when possible.
 	 */
 	private async updateTaskHistoryInternal(): Promise<void> {
+		if (this.persistenceRetired) return
 		try {
 			const taskMessage = this.diracMessages[0]
 			if (!taskMessage) return
@@ -510,6 +542,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 			const cwd = await getCwd(getDesktopDir())
 			const shadowGitConfigWorkTree = await this.checkpointTracker?.getShadowGitConfigWorkTree()
+			if (this.persistenceRetired) return
 
 			await this.updateTaskHistory({
 				id: this.taskId,
@@ -548,7 +581,8 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	 */
 	async saveDiracMessagesAndUpdateHistory(): Promise<void> {
 		await this.flushPendingWrites()
-		await this.updateTaskHistoryInternal()
+		if (this.persistenceRetired) return
+		await this.persistenceMutex.withLock(() => this.updateTaskHistoryInternal())
 	}
 
 	async addToApiConversationHistory(message: DiracStorageMessage) {
@@ -606,14 +640,18 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	async recordDeliveredSteeringMessageIds(messageIds: readonly string[]): Promise<void> {
 		await this.flushPendingWrites()
-		await this.withStateLock(async () => {
-			const deliveredIds = new Set(this.apiConversationProviderState.deliveredSteeringMessageIds ?? [])
-			for (const messageId of messageIds) deliveredIds.add(messageId)
-			this.apiConversationProviderState = {
-				...this.apiConversationProviderState,
-				deliveredSteeringMessageIds: [...deliveredIds],
-			}
-			await saveApiConversationProviderState(this.taskId, this.apiConversationProviderState)
+		if (this.persistenceRetired) return
+		await this.persistenceMutex.withLock(async () => {
+			if (this.persistenceRetired) return
+			await this.withStateLock(async () => {
+				const deliveredIds = new Set(this.apiConversationProviderState.deliveredSteeringMessageIds ?? [])
+				for (const messageId of messageIds) deliveredIds.add(messageId)
+				this.apiConversationProviderState = {
+					...this.apiConversationProviderState,
+					deliveredSteeringMessageIds: [...deliveredIds],
+				}
+				await saveApiConversationProviderState(this.taskId, this.apiConversationProviderState)
+			})
 		})
 	}
 

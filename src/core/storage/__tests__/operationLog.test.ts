@@ -63,6 +63,20 @@ describe("operationLog", () => {
 		)
 	})
 
+	it("distinguishes valid JSON that fails semantic replay", async () => {
+		await fs.writeFile(filePath, '{"offset":0}\n')
+
+		await assert.rejects(
+			replayOperationRecords(filePath, () => {
+				throw new Error("missing replay target")
+			}),
+			(error: Error) =>
+				error.message.includes("Failed to apply operation record") &&
+				error.cause instanceof Error &&
+				error.cause.message === "missing replay target",
+		)
+	})
+
 	it("truncates an incomplete tail before a later append", async () => {
 		await fs.writeFile(filePath, '{"offset":0,"value":"complete"}\n{"offset":1')
 

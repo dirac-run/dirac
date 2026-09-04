@@ -465,8 +465,20 @@ export class TaskController {
 		const task = this._task
 		if (task) {
 			await this.deps.clearTaskSettings()
+			let abortFailure: unknown
+			try {
+				await task.abortTask()
+			} catch (error) {
+				abortFailure = error
+			}
+			try {
+				await task.retirePersistence()
+			} catch (error) {
+				if (abortFailure) throw new AggregateError([abortFailure, error], "Task abort and persistence retirement failed")
+				throw error
+			}
+			if (abortFailure) throw abortFailure
 		}
-		await task?.abortTask()
 		if (this._task === task) {
 			this._task = undefined
 		}

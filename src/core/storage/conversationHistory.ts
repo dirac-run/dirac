@@ -143,20 +143,9 @@ export async function getSavedPresentationHistory(taskId: string): Promise<Saved
 	const taskDirectory = await ensureTaskDirectoryExists(taskId)
 	const filePath = path.join(taskDirectory, GlobalFileNames.uiMessages)
 	const baselinePath = path.join(taskDirectory, GlobalFileNames.uiMessagesBaseline)
-	let { messages, lastOffset } = await readPresentationBaseline(taskDirectory, filePath, baselinePath)
-	let messageIndexes = indexMessagesById(messages)
-	const appendChunks = new Map<string, string[]>()
+	const baseline = await readPresentationBaseline(taskDirectory, filePath, baselinePath)
 	const operationPath = path.join(taskDirectory, GlobalFileNames.uiMessageOperations)
-	await replayOperationRecords<PresentationOperation>(operationPath, (operation) => {
-		if (operation.offset <= lastOffset) return
-		assertNextOffset(operation.offset, lastOffset, operationPath, operation.type === "reset")
-		lastOffset = operation.offset
-		const applied = applyPresentationOperation(messages, messageIndexes, appendChunks, operation)
-		messages = applied.messages
-		messageIndexes = applied.messageIndexes
-	})
-	materializeAllPresentationAppends(messages, messageIndexes, appendChunks)
-	return { messages, lastOffset }
+	return replayPresentationOperationPaths([operationPath], baseline.messages, baseline.lastOffset)
 }
 
 export async function appendPresentationOperations(
@@ -185,31 +174,24 @@ export async function createPresentationBaseline(
 export async function getPresentationHistoryAtMessage(taskId: string, messageId: string): Promise<DiracMessage[]> {
 	const taskDirectory = await ensureTaskDirectoryExists(taskId)
 	const legacyPath = path.join(taskDirectory, GlobalFileNames.uiMessages)
-	let messages = (await fileExistsAtPath(legacyPath))
+	const messages = (await fileExistsAtPath(legacyPath))
 		? await parseSavedDiracMessages(await fs.readFile(legacyPath, "utf8"), legacyPath)
 		: []
 	const legacyTargetIndex = messages.findIndex((message) => message.id === messageId)
 	if (legacyTargetIndex !== -1) return structuredClone(messages.slice(0, legacyTargetIndex + 1))
 
-	let messageIndexes = indexMessagesById(messages)
-	const appendChunks = new Map<string, string[]>()
-	let lastOffset = -1
 	let targetState: DiracMessage[] | undefined
-	for (const operationPath of await presentationOperationHistoryPaths(taskDirectory)) {
-		await replayOperationRecords<PresentationOperation>(operationPath, (operation) => {
-			assertNextOffset(operation.offset, lastOffset, operationPath, operation.type === "reset")
-			lastOffset = operation.offset
+	await replayPresentationOperationPaths(
+		await presentationOperationHistoryPaths(taskDirectory),
+		messages,
+		-1,
+		(state) => {
 			if (targetState) return
-			const applied = applyPresentationOperation(messages, messageIndexes, appendChunks, operation)
-			messages = applied.messages
-			messageIndexes = applied.messageIndexes
-			const targetIndex = messageIndexes.get(messageId)
-			if (targetIndex !== undefined) {
-				materializeAllPresentationAppends(messages, messageIndexes, appendChunks)
-				targetState = structuredClone(messages.slice(0, targetIndex + 1))
-			}
-		})
-	}
+			const targetIndex = state.messageIndexes.get(messageId)
+			if (targetIndex === undefined) return
+			targetState = snapshotPresentationMessages(state).slice(0, targetIndex + 1)
+		},
+	)
 	if (!targetState) throw new Error(`Presentation checkpoint message ${messageId} is absent from task ${taskId}`)
 	return targetState
 }
@@ -294,6 +276,132 @@ function applyApiConversationOperation(
 		lastMessage.content.push(operation.content)
 	}
 	return messages
+}
+
+interface PresentationReplayState {
+	messages: DiracMessage[]
+	messageIndexes: Map<string, number>
+	appendChunks: Map<string, string[]>
+	lastOffset: number
+}
+
+function createPresentationReplayState(messages: DiracMessage[], lastOffset: number): PresentationReplayState {
+	return {
+		messages,
+		messageIndexes: indexMessagesById(messages),
+		appendChunks: new Map(),
+		lastOffset,
+	}
+}
+
+function clonePresentationReplayState(state: PresentationReplayState): PresentationReplayState {
+	const messages = structuredClone(state.messages)
+	return {
+		messages,
+		messageIndexes: indexMessagesById(messages),
+		appendChunks: new Map(
+			[...state.appendChunks].map(([messageId, chunks]) => [messageId, chunks.slice()] as const),
+		),
+		lastOffset: state.lastOffset,
+	}
+}
+
+function snapshotPresentationMessages(state: PresentationReplayState): DiracMessage[] {
+	const snapshot = clonePresentationReplayState(state)
+	materializeAllPresentationAppends(snapshot.messages, snapshot.messageIndexes, snapshot.appendChunks)
+	return snapshot.messages
+}
+
+function applyPresentationOperationToState(
+	state: PresentationReplayState,
+	operation: PresentationOperation,
+	operationPath: string,
+): void {
+	assertNextOffset(operation.offset, state.lastOffset, operationPath, operation.type === "reset")
+	const applied = applyPresentationOperation(state.messages, state.messageIndexes, state.appendChunks, operation)
+	state.messages = applied.messages
+	state.messageIndexes = applied.messageIndexes
+	state.lastOffset = operation.offset
+}
+
+/**
+ * Replays the canonical presentation branch while quarantining the stale writer branch produced by
+ * same-task cancellation recreation. Its first late mutation restarts at the latest reset's offset
+ * and targets state that existed immediately before that reset.
+ */
+async function replayPresentationOperationPaths(
+	operationPaths: readonly string[],
+	initialMessages: DiracMessage[],
+	initialOffset: number,
+	onCanonicalState?: (state: PresentationReplayState) => void,
+): Promise<SavedPresentationHistory> {
+	const canonical = createPresentationReplayState(initialMessages, initialOffset)
+	let resetCandidate: { offset: number; preResetState: PresentationReplayState } | undefined
+	let staleBranch: PresentationReplayState | undefined
+	let activeBranch: "canonical" | "stale" = "canonical"
+	let recoveredPath: string | undefined
+
+	const applyCanonical = (operation: PresentationOperation, operationPath: string): void => {
+		if (operation.offset <= canonical.lastOffset) return
+		const preResetState = operation.type === "reset" ? clonePresentationReplayState(canonical) : undefined
+		applyPresentationOperationToState(canonical, operation, operationPath)
+		if (preResetState) {
+			resetCandidate = { offset: operation.offset, preResetState }
+			staleBranch = undefined
+			activeBranch = "canonical"
+		}
+		onCanonicalState?.(canonical)
+	}
+
+	for (const operationPath of operationPaths) {
+		await replayOperationRecords<PresentationOperation>(operationPath, (operation) => {
+			if (operation.type === "reset") {
+				applyCanonical(operation, operationPath)
+				return
+			}
+
+			if (staleBranch) {
+				const activeState = activeBranch === "canonical" ? canonical : staleBranch
+				if (operation.offset === activeState.lastOffset + 1) {
+					applyPresentationOperationToState(activeState, operation, operationPath)
+					if (activeBranch === "canonical") onCanonicalState?.(canonical)
+					return
+				}
+
+				const nextBranch = activeBranch === "canonical" ? "stale" : "canonical"
+				const nextState = nextBranch === "canonical" ? canonical : staleBranch
+				if (operation.offset !== nextState.lastOffset + 1) {
+					throw new Error(
+						`Presentation operation offset ${operation.offset} continues neither the canonical branch after ${canonical.lastOffset} nor the stale branch after ${staleBranch.lastOffset}`,
+					)
+				}
+				activeBranch = nextBranch
+				applyPresentationOperationToState(nextState, operation, operationPath)
+				if (activeBranch === "canonical") onCanonicalState?.(canonical)
+				return
+			}
+
+			if (
+				resetCandidate &&
+				operation.type !== "create" &&
+				operation.offset === resetCandidate.offset &&
+				operation.offset <= canonical.lastOffset &&
+				resetCandidate.preResetState.messageIndexes.has(operation.id)
+			) {
+				staleBranch = clonePresentationReplayState(resetCandidate.preResetState)
+				applyPresentationOperationToState(staleBranch, operation, operationPath)
+				activeBranch = "stale"
+				recoveredPath ??= operationPath
+				return
+			}
+
+			applyCanonical(operation, operationPath)
+		})
+	}
+
+	if (recoveredPath) Logger.warn(`[Task History] Ignored stale presentation writes after reset in ${recoveredPath}`)
+	materializeAllPresentationAppends(canonical.messages, canonical.messageIndexes, canonical.appendChunks)
+	return { messages: canonical.messages, lastOffset: canonical.lastOffset }
 }
 
 function materializePresentationAppends(
