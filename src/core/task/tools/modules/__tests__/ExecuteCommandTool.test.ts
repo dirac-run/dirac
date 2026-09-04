@@ -371,4 +371,23 @@ describe("ExecuteCommandTool", () => {
 
 		assert.ok(mockCard.update.calledWithMatch({ header: "Approved: 2 commands", collapsed: true }))
 	})
+
+	it("strips workspace hint when checking command permissions", async () => {
+		const { tool, env, commandPermissionController } = createMocks()
+
+		await tool.processCall({ commands: ["@frontend:npm run build"] }, env as any)
+
+		sinon.assert.calledWith(commandPermissionController.validateCommand, "npm run build")
+	})
+
+	it("normalizes and executes a script with wrapped interpreter command", async () => {
+		const { tool, env } = createMocks()
+
+		await tool.processCall({ script: "print('hello')", language: "python" }, env as any)
+
+		sinon.assert.calledOnce(env.system.executeCommand as sinon.SinonStub)
+		const executed = (env.system.executeCommand as sinon.SinonStub).firstCall.args[0] as string
+		assert.ok(executed.startsWith("python3 << 'EOF_DIRAC_SCRIPT_"))
+		assert.ok(executed.includes("print('hello')"))
+	})
 })

@@ -21,6 +21,26 @@ interface CommandApprovalRequirement {
 	utilityEligible: boolean
 }
 
+export interface NormalizedCommand {
+	command: string
+	displayName: string
+	language?: string
+}
+
+interface WorkspaceHintMatch {
+	workspaceHint: string
+	command: string
+}
+
+function parseWorkspaceHint(cmd: string): WorkspaceHintMatch | null {
+	const match = cmd.match(/^@(\w+):(.+)$/)
+	if (!match) return null
+	return {
+		workspaceHint: match[1],
+		command: match[2].trim(),
+	}
+}
+
 export const execute_command_spec: DiracToolSpec = {
 	id: DiracDefaultTool.BASH,
 	name: "execute_command",
@@ -103,7 +123,7 @@ export class ExecuteCommandTool implements IDiracTool {
 		return results.join("\n\n")
 	}
 
-	private validateCommands(commands: { command: string; displayName: string; language?: string }[]): void {
+	private validateCommands(commands: NormalizedCommand[]): void {
 		for (const cmd of commands) {
 			const parts = cmd.command.split(/\s+/)
 			for (const part of parts) {
@@ -123,7 +143,7 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	private getCommandApprovalRequirement(
-		commands: { command: string; displayName: string; language?: string }[],
+		commands: NormalizedCommand[],
 		utilityPermissionHandlingEnabled: boolean,
 	): CommandApprovalRequirement {
 		if (!utilityPermissionHandlingEnabled) {
@@ -162,7 +182,7 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	private async requestApproval(
-		commands: { command: string; displayName: string; language?: string }[],
+		commands: NormalizedCommand[],
 		env: IToolEnvironment,
 		utilityEligible: boolean,
 		utilityPermissionHandlingEnabled: boolean,
@@ -176,7 +196,9 @@ export class ExecuteCommandTool implements IDiracTool {
 					icon: DiracIcon.COMMAND,
 					requireApproval: true,
 					permissionRequestKind:
-						utilityPermissionHandlingEnabled && !utilityEligible ? "manual_tool" : "tool",
+						utilityPermissionHandlingEnabled
+							? (!utilityEligible ? "manual_tool" : "tool")
+							: undefined,
 					renderType: "markdown",
 					maxHeight: 10000,
 					rawInput: {
@@ -222,7 +244,7 @@ export class ExecuteCommandTool implements IDiracTool {
 		return { approved: true }
 	}
 
-	private permissionCardLabel(commands: { command: string; displayName: string; language?: string }[], cwd?: string): string {
+	private permissionCardLabel(commands: NormalizedCommand[], cwd?: string): string {
 		return commands.length === 1 ? shortenCommandForDisplay(commands[0].displayName, cwd) : `${commands.length} commands`
 	}
 
@@ -242,7 +264,7 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	private async executeCommands(
-		commands: { command: string; displayName: string; language?: string }[],
+		commands: NormalizedCommand[],
 		env: IToolEnvironment,
 	): Promise<{ results: string[]; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
 		const results: string[] = []
@@ -266,16 +288,16 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	private async executeSingleCommand(
-		cmd: { command: string; displayName: string; language?: string },
+		cmd: NormalizedCommand,
 		index: number,
 		total: number,
 		env: IToolEnvironment,
 	): Promise<{ result: string; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
-		const header = `Executing command ${index} of ${total}: ${shortenCommandForDisplay(cmd.displayName, env.config.cwd)}`
+		const header = `Executing ${index} of ${total}: ${shortenCommandForDisplay(cmd.displayName, env.config.cwd)}`
 
 		const activeCard = !env.config.isSubagentExecution
 			? await env.ui.createCard({
-				header: header.replace("Executing command", "Executing"),
+				header,
 				icon: DiracIcon.COMMAND,
 				collapsed: true,
 				rawInput: { command: cmd.command, displayName: cmd.displayName, language: cmd.language ?? "bash" },
@@ -290,17 +312,16 @@ export class ExecuteCommandTool implements IDiracTool {
 			let executionDir
 
 			if (this.isMultiRootEnabled && this.workspaceManager) {
-				const commandMatch = cmd.command.match(/^@(\w+):(.+)$/)
-				if (commandMatch) {
+				const parsedHint = parseWorkspaceHint(cmd.command)
+				if (parsedHint) {
 					usedWorkspaceHint = true
-					const workspaceHint = commandMatch[1]
-					commandToExecute = commandMatch[2].trim()
+					commandToExecute = parsedHint.command
 					const adapter = new WorkspacePathAdapter({
 						cwd: env.config.cwd || process.cwd(),
 						isMultiRootEnabled: true,
 						workspaceManager: this.workspaceManager,
 					})
-					executionDir = adapter.resolvePath(".", workspaceHint)
+					executionDir = adapter.resolvePath(".", parsedHint.workspaceHint)
 					if (executionDir !== env.config.cwd) {
 						resolvedToNonPrimary = true
 					}
@@ -352,8 +373,8 @@ export class ExecuteCommandTool implements IDiracTool {
 		}
 	}
 
-	private normalizeCommands(args: any): { command: string; displayName: string; language?: string }[] {
-		const commands: { command: string; displayName: string; language?: string }[] = []
+	private normalizeCommands(args: any): NormalizedCommand[] {
+		const commands: NormalizedCommand[] = []
 		if (Array.isArray(args.commands)) {
 			args.commands.forEach((cmd: any) => {
 				if (typeof cmd === "string" && cmd.trim() !== "") {
@@ -377,8 +398,7 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	private stripWorkspaceHint(cmd: string): string {
-		const commandMatch = cmd.match(/^@(\w+):(.+)$/)
-		return commandMatch ? commandMatch[2].trim() : cmd
+		return parseWorkspaceHint(cmd)?.command ?? cmd
 	}
 
 	private wrapScript(script: string, language: string): string {
