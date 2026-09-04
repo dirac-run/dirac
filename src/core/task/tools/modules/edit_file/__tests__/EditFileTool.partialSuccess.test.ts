@@ -248,6 +248,7 @@ describe("EditFileTool.execute – partial success", () => {
 			result.includes("Do not retry the 2 applied edits"),
 			"Should include an explicit partial-success summary",
 		)
+		assert.equal(result.match(/Do not retry/g)?.length, 1, "Retry guidance should appear once per batch")
 		assert.ok(
 			result.includes('files[0].edits[1] (anchor: "123missing", end_anchor: "123missing") failed. Diagnostics:'),
 			"Should identify the failed edit by its original index",

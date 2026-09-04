@@ -556,8 +556,9 @@ describe("EditFileTool – characterization edge cases", () => {
 			assert.ok(result.includes("formatted line 1"), "formatted context should reflect final disk content")
 			assert.ok(result.includes("new line 2"), "edited line should reflect final disk content")
 			assert.ok(!/^[A-Z][a-zA-Z]*§/m.test(result), "edit results should not expose reusable coordinates")
-			assert.ok(result.includes("presentation-only"), "result should require a fresh anchored read before another edit")
-			assert.ok(!result.includes("auto-formatting"), "formatter changes should not add model-facing noise")
+			assert.ok(result.includes("(unanchored):"), "result should label plain content without reusable coordinates")
+			assert.ok(!result.includes("reread"), "successful edits should not repeat tool instructions")
+			assert.ok(!/auto-formatting/i.test(result), "formatter changes should not add model-facing noise")
 		})
 	})
 

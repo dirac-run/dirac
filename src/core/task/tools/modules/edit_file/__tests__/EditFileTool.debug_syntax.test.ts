@@ -191,7 +191,7 @@ describe("EditFileTool – debug syntax", () => {
 		const result = await handler.execute(config, block)
 		assert.ok(typeof result === "string")
 		assert.ok(result.includes("Applied 1 edit(s) successfully"))
-		assert.ok(result.includes("New problems detected after saving the file"))
+		assert.ok(result.includes("Diagnostics:"))
 		assert.ok(result.includes("Found 1 problems"))
 	})
 
@@ -274,7 +274,7 @@ describe("EditFileTool – debug syntax", () => {
 
 		assert.ok(typeof result === "string")
 		assert.ok(result.includes("Applied 1 edit(s) successfully"))
-		assert.ok(result.includes("New problems detected after saving the file"))
+		assert.ok(result.includes("Diagnostics:"))
 		assert.ok(result.includes("Found 1 problems"))
 	})
 })

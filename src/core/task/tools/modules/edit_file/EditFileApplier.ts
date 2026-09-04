@@ -5,10 +5,19 @@ import {
 	MAX_ANCHORED_FILE_BYTES,
 	MAX_ANCHORED_FILE_LINES,
 } from "@shared/anchor-limits"
-import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import type { IToolEnvironment, SaveResult } from "../../interfaces/IToolEnvironment"
 import type { ToolResponse } from "../../types/ToolResponse"
 import { PreparedFileBatch } from "./types"
 import { EditFormatter } from "./utils/EditFormatter"
+
+interface AppliedFileResult {
+	saveResult: SaveResult
+	finalContent: string
+	finalLines: string[]
+	newLineHashes: string[] | undefined
+	postSaveWarning: string | undefined
+	userModified: boolean
+}
 
 // Applies prepared batches to disk, formats files, and produces final diagnostic results.
 export class EditFileApplier {
@@ -19,8 +28,8 @@ export class EditFileApplier {
 		preparedBatches: PreparedFileBatch[],
 		cards: Record<string, any>,
 		userEdits?: Record<string, string>,
-	): Promise<Map<string, any>> {
-		const appliedResults = new Map<string, any>()
+	): Promise<Map<string, AppliedFileResult>> {
+		const appliedResults = new Map<string, AppliedFileResult>()
 		const filesToApply = preparedBatches.map((batch) => ({
 			path: batch.absolutePath,
 			content: userEdits?.[batch.displayPath] ?? batch.prepared!.finalContent,
@@ -72,6 +81,7 @@ export class EditFileApplier {
 
 				appliedResults.set(batch.absolutePath, {
 					saveResult,
+					userModified: saveResult.userEdits || userEdits?.[batch.displayPath] !== undefined,
 					finalContent,
 					finalLines,
 					newLineHashes,
@@ -112,7 +122,7 @@ export class EditFileApplier {
 	async finalizeResults(
 		env: IToolEnvironment,
 		preparedBatches: PreparedFileBatch[],
-		appliedResults: Map<string, any>,
+		appliedResults: Map<string, AppliedFileResult>,
 	): Promise<ToolResponse[]> {
 		const results: ToolResponse[] = []
 		const paths = preparedBatches.map((b) => b.absolutePath)
@@ -120,7 +130,7 @@ export class EditFileApplier {
 		const rawDiagnostics = await env.diagnostics.getRaw(paths)
 
 		for (const batch of preparedBatches) {
-			const applied = appliedResults.get(batch.absolutePath)
+			const applied = appliedResults.get(batch.absolutePath)!
 			const fileDiagnostics = rawDiagnostics.find((d) => d.filePath === batch.absolutePath)?.diagnostics || []
 			const fileContentMap = applied.newLineHashes
 				? new Map([[batch.absolutePath, { lines: applied.finalLines, hashes: applied.newLineHashes }]])
@@ -142,9 +152,8 @@ export class EditFileApplier {
 				applied.newLineHashes,
 				diagnosticsResult,
 				"full",
-				applied.saveResult?.autoFormattingEdits,
-				applied.saveResult?.userEdits,
-				false,
+				applied.saveResult.autoFormatting,
+				applied.userModified,
 				applied.postSaveWarning,
 			)
 			results.push(result)

@@ -244,29 +244,23 @@ export const formatResponse = {
 		autoFormattingEdits: string | undefined,
 		newProblemsMessage: string | undefined,
 	) =>
-		`The user made the following updates to your content:\n\n${userEdits}\n\n` +
-		(autoFormattingEdits
-			? `The user's editor also applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future edit_file operations to this file are accurate.)\n\n`
-			: "") +
-		`The updated content, which includes both your original modifications and the additional edits, has been successfully saved to ${relPath.toPosix()}.\n\n` +
-		`Please note:\n` +
-		`1. You do not need to re-write the file with these changes, as they have already been applied.\n` +
-		`2. Proceed with the task using this updated file state as the new baseline. (You should assume the file now contains your modifications, plus the user edits and any auto-formatting mentioned above.)\n` +
-		`3. If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.` +
-		`4. IMPORTANT: Always base your future edit_file operations on this updated file state. (If you need to verify the current file content for a future edit, you may use the read_file tool.)\n` +
-		`${newProblemsMessage}`,
+		[
+			`Saved ${relPath.toPosix()}.`,
+			`User changes (preserve these):\n${userEdits}`,
+			autoFormattingEdits ? `Auto-formatting:\n${autoFormattingEdits}` : undefined,
+			newProblemsMessage,
+		].filter(Boolean).join("\n\n"),
 
 	fileEditWithoutUserChanges: (
 		relPath: string,
 		autoFormattingEdits: string | undefined,
 		newProblemsMessage: string | undefined,
 	) =>
-		`The content was successfully saved to ${relPath.toPosix()}.\n\n` +
-		(autoFormattingEdits
-			? `Along with your edits, the user's editor applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future edit_file operations to this file are accurate.)\n\n`
-			: "") +
-		`IMPORTANT: Always base your future edit_file operations on this updated file state. (If you need to verify the current file content for a future edit, you may use the read_file tool.)\n\n` +
-		`${newProblemsMessage}`,
+		[
+			`Saved ${relPath.toPosix()}.`,
+			autoFormattingEdits ? `Auto-formatting:\n${autoFormattingEdits}` : undefined,
+			newProblemsMessage,
+		].filter(Boolean).join("\n\n"),
 
 	diracIgnoreInstructions: (content: string) =>
 		`# .diracignore\n\n(The following is provided by a root-level .diracignore file where the user has specified files and directories that should not be accessed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to access the file's contents e.g. through read_file will result in an error.)\n\n${content}\n.diracignore`,
@@ -293,15 +287,10 @@ export const formatResponse = {
 		`# AGENTS.md\n\nThe following is provided by AGENTS.md files found recursively throughout this working directory (${cwd.toPosix()}) where the user has specified instructions. Nested AGENTS.md will be combined below, and you should only apply the instructions for each AGENTS.md file that is directly applicable to the current task, i.e. if you are reading or writing to a file in that directory.\n\n${content}`,
 
 	fileContextWarning: (editedFiles: string[]): string => {
-		const fileCount = editedFiles.length
-		const fileVerb = fileCount === 1 ? "file has" : "files have"
-		const fileDemonstrativePronoun = fileCount === 1 ? "this file" : "these files"
-		const filePersonalPronoun = fileCount === 1 ? "it" : "they"
-
 		return (
-			`<explicit_instructions>\nCRITICAL FILE STATE ALERT: ${fileCount} ${fileVerb} been externally modified since your last interaction. Your cached understanding of ${fileDemonstrativePronoun} is now stale and unreliable. Before modifying ${fileDemonstrativePronoun}, read the current state. If you will use edit_file, call read_file with include_anchors: true so the result contains current complete edit coordinates:\n` +
+			`<explicit_instructions>\nExternally modified files:\n` +
 			`${editedFiles.map((file) => ` ${path.resolve(file).toPosix()}`).join("\n")}\n` +
-			`Editing from stale content or coordinates will fail. After any edit, obtain fresh anchored output before making another edit in the changed area.\n</explicit_instructions>`
+			`Read the current state before modifying these files; use include_anchors: true for edit_file coordinates.\n</explicit_instructions>`
 		)
 	},
 }

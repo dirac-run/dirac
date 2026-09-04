@@ -244,7 +244,7 @@ describe("EditFileTool.diagnostics", () => {
 		const result = await handler.execute(config, block)
 		assert.ok(typeof result === "string")
 		assert.ok(result.includes("Applied 1 edit(s) successfully"))
-		assert.ok(result.includes("New problems detected after saving the file"))
+		assert.ok(result.includes("Diagnostics:"))
 	})
 
 	it("reports new linter errors with anchored context", async () => {
@@ -350,7 +350,7 @@ describe("EditFileTool.diagnostics", () => {
 		assert.ok(typeof result === "string")
 		assert.ok(result.includes("Applied 1 edit(s) successfully"))
 		assert.ok(result.includes("Found 6 problems"))
-		assert.ok(result.includes("New problems detected after saving the file"))
+		assert.ok(result.includes("Diagnostics:"))
 	})
 
 	it("reports both fixed and new errors", async () => {
@@ -402,7 +402,7 @@ describe("EditFileTool.diagnostics", () => {
 
 		const result = await handler.execute(config, block)
 		assert.ok(typeof result === "string")
-		assert.ok(result.includes("New problems detected after saving the file"))
+		assert.ok(result.includes("Diagnostics:"))
 		assert.ok(result.includes("Found 1 problems"))
 	})
 

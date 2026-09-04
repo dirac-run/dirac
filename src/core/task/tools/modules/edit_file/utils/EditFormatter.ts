@@ -77,9 +77,8 @@ export class EditFormatter {
 		newLineHashes: string[] | undefined,
 		diagnosticsResult: { newProblemsMessage: string; fixedCount: number },
 		diffMode: "full" | "additions-only",
-		autoFormattingEdits?: string,
-		userEdits?: string,
-		wasStringified?: boolean,
+		autoFormatting?: boolean,
+		userModified?: boolean,
 		postSaveWarning?: string,
 	): ToolResponse {
 		const { resolvedEdits, failedEdits, appliedEdits, lines, lineHashes } = prepared
@@ -111,18 +110,18 @@ export class EditFormatter {
 			const totalDiffLines = appliedDiffs.reduce((acc, diff) => acc + diff.split("\n").length, 0)
 			const useFullFile = totalDiffLines > finalLines.length * 0.7 && finalLines.length > 0
 			if (useFullFile) {
-				results.push(
-					`Because the changes were extensive, the full updated file content is provided below for review. This plain output is not an edit_file coordinate; reread with include_anchors: true before another edit:\n\n${finalLines.join("\n")}`,
-				)
+				results.push(`Updated file content (unanchored):\n\n${finalLines.join("\n")}`)
 			} else {
-				results.push(...appliedDiffs)
+				results.push(`Diff (unanchored):\n\n${appliedDiffs.join("\n\n")}`)
 			}
 		} else {
 			for (const applied of appliedEdits) {
 				totalAdded += applied.linesAdded
 				totalRemoved += applied.linesDeleted
 			}
-			results.push(`Warning after saving: ${postSaveWarning ?? "Hash anchors are unavailable for the saved file."}`)
+			results.push(
+				`Warning after saving: ${postSaveWarning ?? "Hash anchors are unavailable for the saved file."} Anchored edit_file calls are unavailable; use execute_command for further changes.`,
+			)
 		}
 
 		for (const failed of failedEdits) {
@@ -136,31 +135,15 @@ export class EditFormatter {
 
 		if (diagnosticsResult.fixedCount > 0) results.push(`Fixed ${diagnosticsResult.fixedCount} linter error(s).`)
 		if (diagnosticsResult.newProblemsMessage.trim()) {
-			results.push(`New problems detected after saving the file:\n${diagnosticsResult.newProblemsMessage.trim()}`)
+			results.push(`Diagnostics:\n${diagnosticsResult.newProblemsMessage.trim()}`)
 		}
-		if (userEdits) {
-			results.push(
-				`*** User Modified File CRITICAL: The user manually modified the file during review. You MUST NOT revert these changes. If you need to fix syntax errors in the same area, you MUST incorporate the user's changes into your new edits.): ${prepared.displayPath}\n\n${userEdits}`,
-			)
-		}
-		if (autoFormattingEdits) {
-			results.push(
-				`The user's editor also applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future edit_file operations to this file are accurate.)`,
-			)
-		}
+		if (userModified) results.push("User modified this file during review; preserve their changes.")
+		if (autoFormatting) results.push("Auto-formatting applied.")
 
 		const lineChanges = ` (+${totalAdded}, -${totalRemoved} lines)`
-		const followUp = newLineHashes
-			? "Diff lines are presentation-only, not edit_file coordinates; reread with include_anchors: true before another edit."
-			: "The saved file no longer supports hash-anchored edit_file calls; use execute_command for further changes."
 		const summary = failedEdits.length > 0
-			? `Partial success in files[${prepared.fileIndex}] (${prepared.displayPath}): ${resolvedEdits.length} edit(s) applied${lineChanges}; ${failedEdits.length} failed. Do not retry the applied edits; retry only the indexed failures below. ${followUp}`
-			: `Applied ${resolvedEdits.length} edit(s) successfully${lineChanges}. ${followUp}`
-		if (wasStringified) {
-			results.push(
-				`Note: You provided the 'files' parameter as a stringified JSON array. While this was successfully parsed and applied, you should provide it as a native JSON array in the future.`,
-			)
-		}
+			? `Partial success in files[${prepared.fileIndex}] (${prepared.displayPath}): ${resolvedEdits.length} edit(s) applied${lineChanges}; ${failedEdits.length} failed.`
+			: `Applied ${resolvedEdits.length} edit(s) successfully${lineChanges}.`
 
 		return formatResponse.toolResult(`${summary}\n\n${results.join("\n\n---\n\n")}`)
 	}

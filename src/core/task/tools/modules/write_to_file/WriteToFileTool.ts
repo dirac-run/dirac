@@ -5,7 +5,7 @@ import { CardStatus } from "@/shared/ExtensionMessage"
 import { DiracIcon } from "@/shared/icons"
 import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { IDiracTool } from "../../interfaces/IDiracTool"
-import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import type { IToolEnvironment, SaveResult } from "../../interfaces/IToolEnvironment"
 import type { ToolPermissionDisposition } from "../../autoApprove"
 import { SurfaceType } from "../../interfaces/SurfaceType"
 import { captureAccepted, captureRejected, getModelInfo } from "../../utils/AiOutputTelemetry"
@@ -160,10 +160,10 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		permissionDisposition: ToolPermissionDisposition,
 		utilityPermissionHandlingEnabled: boolean,
 		card?: any,
-	): Promise<any | string> {
+	): Promise<SaveResult | string> {
 		const toolId = this.spec().id
 		const { modelId, providerId } = getModelInfo(env.config)
-		let saveResult: any
+		let saveResult: SaveResult
 
 		if (permissionDisposition === "auto_approve") {
 			if (card) {
@@ -290,14 +290,15 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		absolutePath: string,
 		relPath: string,
 		fileExists: boolean,
-		saveResult: any,
+		saveResult: SaveResult,
 		shouldAutoApprove: boolean,
 	) {
 		const toolId = this.spec().id
 		await env.editor.reset()
 		await env.diagnostics.prepare([absolutePath])
 		const diagnostics = await env.diagnostics.getRaw([absolutePath])
-		const newProblemsMessage = diagnostics.length > 0 ? `Found ${diagnostics.length} problems in ${relPath}` : undefined
+		const problemCount = diagnostics.reduce((count, file) => count + file.diagnostics.length, 0)
+		const newProblemsMessage = problemCount > 0 ? `Diagnostics: ${problemCount} problem(s) in ${relPath}.` : undefined
 
 		env.telemetry.captureCustomMetadata({
 			toolId,
@@ -312,14 +313,14 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			return formatResponse.fileEditWithUserChanges(
 				relPath,
 				"User made manual changes in the editor.",
-				saveResult.autoFormatting ? "Auto-formatting applied." : undefined,
+				saveResult.autoFormatting ? "Applied by the editor." : undefined,
 				newProblemsMessage,
 			)
 		}
 
 		return formatResponse.fileEditWithoutUserChanges(
 			relPath,
-			saveResult.autoFormatting ? "Auto-formatting applied." : undefined,
+			saveResult.autoFormatting ? "Applied by the editor." : undefined,
 			newProblemsMessage,
 		)
 	}
