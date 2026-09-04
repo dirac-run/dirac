@@ -142,6 +142,7 @@ async function runBuilderSubagentAttempt(
 		timeout: SUBAGENT_TIMEOUT_SECONDS,
 		allowedTools: BUILDER_ALLOWED_TOOLS,
 		systemSuffix: TOOL_BUILDER_SYSTEM_SUFFIX,
+		signal: env.config.taskState.abortSignal,
 		onUpdate: (update) => {
 			const trajectoryChanged = update.trajectoryEvent !== undefined || update.status !== undefined
 			if (trajectoryChanged) {

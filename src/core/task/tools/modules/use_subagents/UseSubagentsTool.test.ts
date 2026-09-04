@@ -3,6 +3,7 @@ import { CardStatus, SubagentExecutionStatus } from "@shared/ExtensionMessage"
 import { SubagentTrajectoryEventType } from "@shared/subagents"
 import { describe, it } from "mocha"
 import sinon from "sinon"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { UseSubagentsTool, use_subagents_spec } from "./UseSubagentsTool"
 
@@ -41,7 +42,11 @@ function createRecordedCardEnvironment(
 	const telemetryMetadata: Record<string, unknown> = {}
 	const env = {
 		toolName: "use_subagents",
-		config: { isSubagentExecution: false, ulid: "parent-task" },
+		config: {
+			isSubagentExecution: false,
+			ulid: "parent-task",
+			taskState: { abortSignal: new AbortController().signal },
+		},
 		orchestration: {
 			getHistory: () => [],
 			getTaskState: () => 0,
@@ -114,6 +119,7 @@ describe("UseSubagentsTool", () => {
 	})
 
 	it("finalizes from the returned result when no terminal progress update is emitted", async () => {
+		expectLoggerErrors()
 		const { env, cards } = createRecordedCardEnvironment(async () => ({
 			status: SubagentExecutionStatus.COMPLETED,
 			result: "done",

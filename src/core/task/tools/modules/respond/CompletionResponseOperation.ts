@@ -225,6 +225,7 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 			subagentName: "verifier",
 			agentIdentity: identity,
 			taskTitle,
+			signal: env.config.taskState.abortSignal,
 			onUpdate: (update) => {
 				if (update.trajectoryEvent === undefined && update.status === undefined) return
 				const status = recordSubagentProgress(trajectory, update)

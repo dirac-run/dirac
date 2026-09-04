@@ -511,6 +511,7 @@ export class UseSubagentsTool implements IDiracTool {
 					subagentName,
 					agentIdentity: { id: entry.index, name: entry.name },
 					taskTitle: request.taskTitle,
+					signal: env.config.taskState.abortSignal,
 					onUpdate: (update) => {
 						if (runSettled) return
 						const current = entries[index]
