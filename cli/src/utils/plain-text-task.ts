@@ -43,6 +43,63 @@ import { cardBodyForDisplay } from "./card-body"
 
 export { approveCardForPlainTextYolo } from "./standalone-card-policy"
 
+export interface TerminalStateEvaluation {
+	isTerminal: boolean
+	action?: "resolve" | "reject"
+	error?: Error
+}
+
+export function evaluatePlainTextTaskTerminalState(
+	state: ExtensionState,
+	isViewTaskOnly = false,
+): TerminalStateEvaluation {
+	const hasTaskFailedCard = (state.diracMessages ?? []).some(
+		(m) =>
+			m.content.type === DiracMessageType.CARD &&
+			m.content.card.header === "Task Failed" &&
+			m.content.card.status === CardStatus.ERROR,
+	)
+
+	if (hasTaskFailedCard) {
+		const failedCard = [...(state.diracMessages ?? [])]
+			.reverse()
+			.find(
+				(m) =>
+					m.content.type === DiracMessageType.CARD &&
+					m.content.card.header === "Task Failed" &&
+					m.content.card.status === CardStatus.ERROR,
+			)
+		const msg =
+			failedCard?.content.type === DiracMessageType.CARD && failedCard.content.card.body
+				? failedCard.content.card.body
+				: "Mistake limit reached. Task halted in YOLO mode."
+		return { isTerminal: true, action: "reject", error: new Error(msg) }
+	}
+
+	const globalButtons = state.uiActionState?.globalButtons || []
+	const cardButtons = state.uiActionState?.cardButtons || []
+	const hasNewTask = globalButtons.some((button) => button.action === UIActionButtonType.NEW_TASK)
+	const hasProceed = globalButtons.some((button) => button.action === UIActionButtonType.PROCEED)
+
+	if (hasNewTask && hasProceed) {
+		return { isTerminal: true, action: "reject", error: new Error("Mistake limit reached. Task halted in YOLO mode.") }
+	}
+	if (state.taskStatus === TaskStatus.COMPLETED || (hasNewTask && !hasProceed)) {
+		return { isTerminal: true, action: "resolve" }
+	}
+	if (state.taskStatus === TaskStatus.CANCELLED) {
+		if (isViewTaskOnly) {
+			return { isTerminal: true, action: "resolve" }
+		}
+		return { isTerminal: true, action: "reject", error: new Error("Task was cancelled.") }
+	}
+	if (isViewTaskOnly && cardButtons.length > 0) {
+		return { isTerminal: true, action: "resolve" }
+	}
+
+	return { isTerminal: false }
+}
+
 export interface PlainTextTaskOptions {
 	controller: Controller
 	/** Prompt for new task or message to send to resumed task */
@@ -203,6 +260,16 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 			}
 		}
 
+		// Check for task failure card (e.g. YOLO mistake limit reached)
+		if (
+			content.type === DiracMessageType.CARD &&
+			content.card.header === "Task Failed" &&
+			content.card.status === CardStatus.ERROR
+		) {
+			rejectCompletion(new Error(content.card.body || "Mistake limit reached. Task halted in YOLO mode."))
+			return
+		}
+
 		// Check for API failure (retries exhausted)
 		if (content.type === DiracMessageType.API_STATUS && content.status.cancelReason === "retries_exhausted") {
 			rejectCompletion(new Error("API request failed: retries exhausted"))
@@ -269,22 +336,14 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 						await processMessage(message, state)
 					}
 
-					// Check for terminal state via task status, retaining the mistake-limit projection.
-					const globalButtons = state.uiActionState?.globalButtons || []
-					const cardButtons = state.uiActionState?.cardButtons || []
-					const hasNewTask = globalButtons.some((button) => button.action === UIActionButtonType.NEW_TASK)
-					const hasProceed = globalButtons.some((button) => button.action === UIActionButtonType.PROCEED)
-
-					if (hasNewTask && hasProceed) {
-						rejectCompletion(new Error("Mistake limit reached. Task halted in YOLO mode."))
-					} else if (state.taskStatus === TaskStatus.COMPLETED || (hasNewTask && !hasProceed)) {
-						resolveCompletion()
-					} else if (state.taskStatus === TaskStatus.CANCELLED) {
-						if (isViewTaskOnly) resolveCompletion()
-						else rejectCompletion(new Error("Task was cancelled."))
-					} else if (isViewTaskOnly && cardButtons.length > 0) {
-						// Historical task loaded and waiting for interaction (e.g. Resume Task card)
-						resolveCompletion()
+					// Check for terminal state via task status and mistake-limit projection
+					const terminalCheck = evaluatePlainTextTaskTerminalState(state, isViewTaskOnly)
+					if (terminalCheck.isTerminal) {
+						if (terminalCheck.action === "resolve") {
+							resolveCompletion()
+						} else if (terminalCheck.action === "reject" && terminalCheck.error) {
+							rejectCompletion(terminalCheck.error)
+						}
 					}
 				} catch (error) {
 					rejectCompletion(error instanceof Error ? error : new Error(String(error)))
