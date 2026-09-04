@@ -18,11 +18,12 @@ import { HostProvider } from "@/hosts/host-provider"
 import { BannerService } from "@/services/banner/BannerService"
 import type { DiracExtensionContext } from "@/shared/dirac"
 import { Session } from "@/shared/services/Session"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import * as pathUtils from "@/utils/path"
+import { Logger } from "../../../shared/services/Logger"
 import { StateManager } from "../../storage/StateManager"
 import { Task } from "../../task"
 import { Controller } from "../index"
-import { expectLoggerErrors } from "@/test/loggerGuard"
 
 describe("Controller (original)", () => {
 	let sandbox: sinon.SinonSandbox
@@ -455,5 +456,14 @@ describe("Controller (original)", () => {
 		const c = new Controller(mockContext)
 		const m = await c.readOpenRouterModels()
 		;(m === undefined).should.be.true()
+	})
+
+	it("logs routine disposal at DEBUG level", async () => {
+		const c = new Controller(mockContext)
+		const debugStub = sandbox.stub(Logger, "debug")
+		const errorStub = sandbox.stub(Logger, "error")
+		await c.dispose()
+		sinon.assert.calledWith(debugStub, "Controller disposed")
+		sinon.assert.neverCalledWith(errorStub, "Controller disposed")
 	})
 })

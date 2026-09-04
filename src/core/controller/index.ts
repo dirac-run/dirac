@@ -173,7 +173,7 @@ export class Controller {
 		await this.goalController.dispose()
 		await this.taskController.clearTask()
 
-		Logger.error("Controller disposed")
+		Logger.debug("Controller disposed")
 	}
 
 	// Task lifecycle delegation (via TaskController)
