@@ -9,6 +9,7 @@
  */
 
 import type * as acp from "@agentclientprotocol/sdk"
+import { isSuccessfulTaskCompletionCard } from "@shared/cardIdentity"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType, isFinalStatus } from "@shared/ExtensionMessage"
 import { getBrowserActionKind } from "./browserActionTranslator.js"
@@ -353,6 +354,13 @@ function translateCardMessage(
 		if (!isFinalStatus(card.status)) {
 			sessionState.pendingToolCalls.set(toolCallId, toolCall)
 		}
+	}
+
+	if (isSuccessfulTaskCompletionCard(card) && card.body) {
+		updates.push({
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: card.body },
+		})
 	}
 
 	// Permission requests are exclusively for real approval decisions.

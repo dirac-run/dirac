@@ -109,6 +109,8 @@ export class TaskMessageBridge {
 	private interactionGeneration = 0;
 	/** Steering transcripts whose delivered status has already been reported to ACP. */
 	private readonly reportedSentSteeringMessages = new Set<string>();
+	/** Completion card IDs whose text has already been emitted to avoid duplicate streaming across card state transitions. */
+	private readonly emittedCompletionCardKeys = new Set<string>();
 
 	/** Latest cumulative snapshot for every model request observed in this ACP session. */
 	private readonly usageSnapshots = new Map<string, UsageSnapshot>();
@@ -1111,6 +1113,13 @@ export class TaskMessageBridge {
 
 			// Send all updates produced by the translator
 			for (const update of result.updates) {
+				if (update.sessionUpdate === "agent_message_chunk" && message.content.type === DiracMessageType.CARD) {
+					const cardKey = `${sessionId}:${message.content.card.id}`;
+					if (this.emittedCompletionCardKeys.has(cardKey)) {
+						continue;
+					}
+					this.emittedCompletionCardKeys.add(cardKey);
+				}
 				await this.emitSessionUpdate(sessionId, update);
 			}
 

@@ -1,12 +1,12 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import { DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
 import type { DiracMessage } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { ResponseOperation, responseCardInput } from "@shared/responseTool"
 import { beforeEach, describe, expect, it } from "vitest"
 import { translateMessage, translateMessages } from "./messageTranslator"
 import { handlePermissionResponse } from "./permissionHandler"
 import type { AcpSessionState } from "./public-types"
 import { AcpSessionStatus } from "./public-types"
-import { ResponseOperation, responseCardInput } from "@shared/responseTool"
 
 function createMarkdownMessage(content: string, isReasoning = false): DiracMessage {
 	return {
@@ -164,7 +164,6 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(result.permissionRequest).toBeUndefined()
 		})
 
-
 		it("reports file edits as ACP diff content with before and after text", () => {
 			const result = translateMessage(
 				createCardMessage({
@@ -307,6 +306,57 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(update.toolCallId).toBe("tool-1")
 			expect(update.status).toBe("completed")
 			expect(update.name).toBe("read_file")
+		})
+
+		it("emits agent_message_chunk with completion text when TASK_COMPLETION card succeeds", () => {
+			const card1 = {
+				id: "completion-1",
+				kind: CardKind.TASK_COMPLETION,
+				header: "Task Completed",
+				toolName: "respond",
+				status: CardStatus.RUNNING,
+				body: "Task is now complete.",
+			}
+			const runningResult = translateMessage(createCardMessage(card1), sessionState)
+			// Running status emits tool_call, no message chunk
+			expect(runningResult.updates).toHaveLength(2) // tool_call + tool_call_update(in_progress)
+			expect(runningResult.updates.every((u) => u.sessionUpdate !== "agent_message_chunk")).toBe(true)
+
+			const card2 = {
+				id: "completion-1",
+				kind: CardKind.TASK_COMPLETION,
+				header: "Task Completed",
+				toolName: "respond",
+				status: CardStatus.SUCCESS,
+				body: "Task is now complete.",
+			}
+			const successResult = translateMessage(createCardMessage(card2), sessionState)
+			expect(successResult.updates).toHaveLength(2)
+			expect(successResult.updates[0]).toMatchObject({
+				sessionUpdate: "tool_call_update",
+				toolCallId: "completion-1",
+				status: "completed",
+			})
+			expect(successResult.updates[1]).toEqual({
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "Task is now complete." },
+			})
+		})
+
+		it("translates legacy task completion card without kind field based on header", () => {
+			const card = {
+				id: "legacy-comp-1",
+				header: "Task Completed",
+				status: CardStatus.SUCCESS,
+				body: "Legacy task finished.",
+			}
+			const result = translateMessage(createCardMessage(card), sessionState)
+			expect(result.updates).toHaveLength(2)
+			expect(result.updates[0].sessionUpdate).toBe("tool_call")
+			expect(result.updates[1]).toEqual({
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "Legacy task finished." },
+			})
 		})
 
 		it("offers once and always choices for approval requests", () => {
