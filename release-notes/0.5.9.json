@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.9",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.5.8",
+  "analyzedCommit": "889c00dca884bd40e9ff6114476876ee22ccb981",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-889c00dc",
+      "title": "defer editor review until approval is resolved",
+      "category": "fix",
+      "evidence": [
+        "889c00dca884bd40e9ff6114476876ee22ccb981"
+      ]
+    },
+    {
+      "id": "fix-def917c2",
+      "title": "do not use a duplicate card for subagent cost. add a last line in subagent card",
+      "category": "fix",
+      "evidence": [
+        "def917c23b8bbb7120d6cf23d6078e5868ab6e32"
+      ]
+    }
+  ]
+}
