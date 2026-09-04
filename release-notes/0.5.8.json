@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.8",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.5.7",
+  "analyzedCommit": "0593807554e14e46440849c927251c6ec89382c8",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-58de8655",
+      "title": "remove misleading literal newline warning",
+      "category": "fix",
+      "evidence": [
+        "58de8655eb9949e2866ccefa8c622fe6abda3f08"
+      ]
+    },
+    {
+      "id": "fix-713c11f4",
+      "title": "unify task history metrics with subagent usage accounting",
+      "category": "fix",
+      "evidence": [
+        "713c11f463d343d3ef443a703c12b6974c291642"
+      ]
+    },
+    {
+      "id": "fix-18c871b0",
+      "title": "retire old persistence and replay checkpoints reliably",
+      "category": "fix",
+      "evidence": [
+        "18c871b0cab474d85ea00e40508e8c81630dab07"
+      ]
+    },
+    {
+      "id": "fix-6f28f647",
+      "title": "bound traversal entries in walk (FB-31)",
+      "category": "fix",
+      "evidence": [
+        "6f28f6478175617b79718d460c2e821e6c01b5bc"
+      ]
+    },
+    {
+      "id": "fix-21f4aa9a",
+      "title": "enforce gRPC SSL and matrix tests (FB-40)",
+      "category": "fix",
+      "evidence": [
+        "21f4aa9a7826789c910f552adb9720b8afc5a4cf"
+      ]
+    }
+  ]
+}
