@@ -4,7 +4,7 @@ import sinon from "sinon"
 import { WriteToFileTool } from "./WriteToFileTool"
 
 describe("WriteToFileTool mutation authorization", () => {
-	it("revalidates after approval and before entering any editor write boundary", async () => {
+	it("revalidates auto-approved writes before entering any editor write boundary", async () => {
 		const assertMutationAuthorized = sinon.stub().throws(new Error("Plan Mode revoked mutation"))
 		const editor = {
 			open: sinon.stub().resolves(),
@@ -32,7 +32,8 @@ describe("WriteToFileTool mutation authorization", () => {
 				"new content",
 				false,
 				"",
-				true,
+				"auto_approve",
+				false,
 			),
 			/Plan Mode revoked mutation/,
 		)

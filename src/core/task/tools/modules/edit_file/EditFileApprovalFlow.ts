@@ -18,8 +18,7 @@ export class EditFileApprovalFlow {
 		const permissionDisposition = await this.resolvePermissionDisposition(env, preparedBatches)
 		if (permissionDisposition === "auto_approve") return { approved: true }
 
-		await this.showReview(env, preparedBatches)
-		await env.editor.scrollToFirstDiff()
+		let reviewShown = false
 
 		while (true) {
 			const totalRequestedEdits = preparedBatches.reduce((acc, batch) => acc + batch.prepared!.resolvedEdits.length, 0)
@@ -43,12 +42,20 @@ export class EditFileApprovalFlow {
 				maxHeight: 10000,
 			})
 
+			// Card creation resolves utility approval before any manual review opens.
+			if (!reviewShown && card.requiresUserInteraction !== false) {
+				await this.showReview(env, preparedBatches)
+				await env.editor.scrollToFirstDiff()
+				reviewShown = true
+			}
+
 			const result = await card.waitForInteraction()
 
 			if (result.action === DiracAskResponse.EDIT || result.action === DiracAskResponse.VIEW) {
 				await card.finalize(CardStatus.CANCELLED)
 				await this.showReview(env, preparedBatches)
 				await env.editor.scrollToFirstDiff()
+				reviewShown = true
 				continue
 			}
 			if (result.action === DiracAskResponse.UNDO) {

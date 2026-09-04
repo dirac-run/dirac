@@ -45,15 +45,7 @@ export class AstEditApproval {
 		}
 
 		const diffs = this.formatter.diffs(plan)
-		await env.editor.showReview(
-			plan.files.map((file) => ({
-				absolutePath: file.absolutePath,
-				displayPath: file.displayPath,
-				content: file.content,
-				originalContent: file.originalContent,
-			})),
-		)
-		await env.editor.scrollToFirstDiff()
+		let reviewShown = false
 		await this.updateProgressCards(progressCards, "Plan validated. Waiting for approval...")
 
 		while (true) {
@@ -65,6 +57,20 @@ export class AstEditApproval {
 				permissionDisposition,
 				utilityPermissionHandlingEnabled,
 			)
+			// Card creation resolves utility approval before any manual review opens.
+			if (!reviewShown && approvalCard.requiresUserInteraction !== false) {
+				await env.editor.showReview(
+					plan.files.map((file) => ({
+						absolutePath: file.absolutePath,
+						displayPath: file.displayPath,
+						content: file.content,
+						originalContent: file.originalContent,
+					})),
+				)
+				await env.editor.scrollToFirstDiff()
+				reviewShown = true
+			}
+
 			let result: Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
 			try {
 				result = await approvalCard.waitForInteraction()
@@ -98,6 +104,7 @@ export class AstEditApproval {
 					})),
 				)
 				await env.editor.scrollToFirstDiff()
+				reviewShown = true
 				continue
 			}
 
