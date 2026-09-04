@@ -134,14 +134,6 @@ export class EditFormatter {
 			)
 		}
 
-		for (const applied of appliedEdits) {
-			if (applied.edit.text.includes("\\n")) {
-				results.push(
-					`Your edit inserted a '\\n' literal in the code because you supplied double backslash '\\\\n'. If you meant to add a newline character instead, use '\\n' in the next call. Replacement text does not require escaping newline characters.`,
-				)
-			}
-		}
-
 		if (diagnosticsResult.fixedCount > 0) results.push(`Fixed ${diagnosticsResult.fixedCount} linter error(s).`)
 		if (diagnosticsResult.newProblemsMessage.trim()) {
 			results.push(`New problems detected after saving the file:\n${diagnosticsResult.newProblemsMessage.trim()}`)
