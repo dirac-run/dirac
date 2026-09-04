@@ -7,6 +7,7 @@ import mammoth from "mammoth"
 import * as path from "path"
 // @ts-expect-error-next-line
 import pdf from "pdf-parse/lib/pdf-parse"
+import { fileURLToPath } from "url"
 import { truncateContent } from "@/shared/content-limits"
 import { Logger } from "@/shared/services/Logger"
 import { sanitizeNotebookForLLM } from "./notebook-utils"
@@ -26,6 +27,35 @@ export async function detectEncoding(fileBuffer: Buffer, fileExtension?: string)
 		}
 	}
 	return "utf8"
+}
+
+class FileResourceUnavailableError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "FileResourceUnavailableError"
+	}
+}
+
+function resolveFileUri(filePath: string): string {
+	const match = filePath.match(/^([a-z][a-z0-9+.-]*):\/\//i)
+	if (!match) {
+		return filePath
+	}
+
+	const scheme = match[1].toLowerCase()
+	if (scheme === "file") {
+		try {
+			return fileURLToPath(filePath)
+		} catch {
+			throw new Error(`Invalid file URL: ${filePath}`)
+		}
+	}
+
+	if (scheme === "space") {
+		throw new FileResourceUnavailableError(`Space resource unavailable: ${filePath}`)
+	}
+
+	throw new FileResourceUnavailableError(`Unsupported URI scheme "${scheme}": ${filePath}`)
 }
 
 export async function extractTextFromFile(filePath: string): Promise<string> {
@@ -198,14 +228,14 @@ async function extractTextFromExcel(filePath: string): Promise<string> {
 export async function processFilesIntoText(files: string[]): Promise<string> {
 	const fileContentsPromises = files.map(async (filePath) => {
 		try {
-			// Check if file exists and is binary
-			//const isBinary = await isBinaryFile(filePath).catch(() => false)
-			//if (isBinary) {
-			//	return `<file_content path="${filePath.toPosix()}">\n(Binary file, unable to display content)\n</file_content>`
-			//}
-			const content = await extractTextFromFile(filePath)
-			return `<file_content path="${filePath.toPosix()}">\n${content}\n</file_content>`
+			const resolvedPath = resolveFileUri(filePath)
+			const content = await extractTextFromFile(resolvedPath)
+			return `<file_content path="${resolvedPath.toPosix()}">\n${content}\n</file_content>`
 		} catch (error) {
+			if (error instanceof FileResourceUnavailableError) {
+				Logger.warn(`Skipping virtual file resource ${filePath}:`, error.message)
+				return `<file_content path="${filePath.toPosix()}">\n${error.message}\n</file_content>`
+			}
 			Logger.error(`Error processing file ${filePath}:`, error)
 			return `<file_content path="${filePath.toPosix()}">\nError fetching content: ${error.message}\n</file_content>`
 		}
