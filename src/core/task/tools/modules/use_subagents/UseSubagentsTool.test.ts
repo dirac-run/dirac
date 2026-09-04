@@ -83,6 +83,22 @@ function createRecordedCardEnvironment(
 }
 
 describe("UseSubagentsTool", () => {
+	for (const status of [SubagentExecutionStatus.COMPLETED, SubagentExecutionStatus.FAILED, SubagentExecutionStatus.CANCELLED]) {
+		it(`persists final usage inside the ${status} execution card`, async () => {
+			const usage = { inputTokens: 1234, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 25, totalCost: 0.125 }
+			const { env, cards } = createRecordedCardEnvironment(async () => ({
+				status, result: "done", stats: { ...EMPTY_STATS, ...usage },
+			}))
+			await new UseSubagentsTool().processCall({ subagents: [{ task_title: "Inspect usage", prompt: "Inspect" }] }, env)
+			const agentCard = cards.find((card) => card.params.rawInput?.isSubagent)
+			assert.ok(agentCard)
+			assert.deepEqual(agentCard.updates.at(-1).rawOutput.usage, usage)
+			assert.ok(agentCard.updates.at(-1).body.endsWith(
+				"Input: 1,234 · Output: 50 · Cache read: 1,000 · Cache write: 25 · Cost: $0.1250",
+			))
+		})
+	}
+
 	it("reports cancellations separately and keeps named trajectory cards collapsed", async () => {
 		const { env, cards } = createRecordedCardEnvironment(async (_prompt, options) => {
 			await options.onUpdate({ status: SubagentExecutionStatus.RUNNING, stats: EMPTY_STATS })

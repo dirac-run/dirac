@@ -31,6 +31,30 @@ describe("resolveCardBodyPresentation", () => {
 		expect(presentation.maxHeight).toBe(SUBAGENT_CARD_MAX_HEIGHT_PX)
 	})
 
+	it.each([
+		SubagentExecutionStatus.COMPLETED,
+		SubagentExecutionStatus.FAILED,
+		SubagentExecutionStatus.CANCELLED,
+	])("ends a %s subagent body with one usage row", (status) => {
+		const usage = {
+			inputTokens: 105062, outputTokens: 1995, cacheReadTokens: 80000, cacheWriteTokens: 0, totalCost: 0.0123,
+		}
+		const card: Card = {
+			id: "subagent", header: "Pauli", status: CardStatus.RUNNING, renderType: "markdown",
+			rawInput: createSubagentCardInput({ id: 2, name: "Pauli" }, "Inspect"),
+			rawOutput: createSubagentCardOutput(status, [], usage),
+		}
+		const body = resolveCardBodyPresentation(card).body!
+		expect(body.split("\n").at(-1)).toBe(
+			"Input: 105,062 · Output: 1,995 · Cache read: 80,000 · Cache write: 0 · Cost: $0.0123",
+		)
+		expect(body.match(/Cost:/g)).toHaveLength(1)
+		card.rawOutput = createSubagentCardOutput(SubagentExecutionStatus.RUNNING, [], usage)
+		expect(resolveCardBodyPresentation(card).body).not.toContain("Cost:")
+		card.rawOutput = createSubagentCardOutput(status, [])
+		expect(resolveCardBodyPresentation(card).body).not.toContain("Cost:")
+	})
+
 	it("preserves ordinary card bodies and height limits", () => {
 		const card: Card = {
 			id: "ordinary",

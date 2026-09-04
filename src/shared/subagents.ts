@@ -56,11 +56,21 @@ export interface SubagentTrajectoryEvent {
 	text: string
 }
 
+/** Display-only run totals; accounting remains in the separate usage record. */
+export interface SubagentCardUsage {
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	totalCost: number
+}
+
 export interface SubagentCardData extends SubagentIdentity {
 	taskTitle?: string
 	prompt: string
 	status: SubagentExecutionStatus
 	trajectory: SubagentTrajectoryEvent[]
+	usage?: SubagentCardUsage
 }
 
 interface SubagentProgressEvent {
@@ -112,12 +122,24 @@ export const SUBAGENT_TASK_TITLE_MAX_CHARS = 80
 export function createSubagentCardOutput(
 	status: SubagentExecutionStatus,
 	trajectory: SubagentTrajectoryEvent[],
+	usage?: SubagentCardUsage,
 ): Record<string, unknown> {
 	return {
 		status,
 		trajectory: trajectory
 			.slice(-SUBAGENT_TRAJECTORY_MAX_EVENTS)
 			.map((event) => createSubagentTrajectoryEvent(event.type, event.text)),
+		...(usage
+			? {
+					usage: {
+						inputTokens: usage.inputTokens,
+						outputTokens: usage.outputTokens,
+						cacheReadTokens: usage.cacheReadTokens,
+						cacheWriteTokens: usage.cacheWriteTokens,
+						totalCost: usage.totalCost,
+					},
+				}
+			: {}),
 	}
 }
 
@@ -186,7 +208,7 @@ export function readSubagentCardData(card: Card | undefined): SubagentCardData |
 	const output = card.rawOutput
 	const status = readStatus(output?.status, card.status)
 	const trajectory = Array.isArray(output?.trajectory) ? output.trajectory.filter(isTrajectoryEvent) : []
-	return { id, name, taskTitle, prompt, status, trajectory }
+	return { id, name, taskTitle, prompt, status, trajectory, usage: output?.usage as SubagentCardUsage | undefined }
 }
 
 export interface SubagentTrajectoryFormatOptions {
@@ -225,7 +247,18 @@ export function formatSubagentTrajectory(data: SubagentCardData, options: number
 			: [isTerminalSubagentStatus(data.status) ? "- No trajectory events were recorded." : "- Waiting to start…"]),
 	]
 		.map((renderedLine) => truncateLine(renderedLine, maxLineLength))
+		.concat(isTerminalSubagentStatus(data.status) && data.usage ? ["", formatSubagentUsage(data.usage)] : [])
 		.join("\n")
+}
+
+function formatSubagentUsage(usage: SubagentCardUsage): string {
+	return [
+		`Input: ${usage.inputTokens.toLocaleString("en-US")}`,
+		`Output: ${usage.outputTokens.toLocaleString("en-US")}`,
+		`Cache read: ${usage.cacheReadTokens.toLocaleString("en-US")}`,
+		`Cache write: ${usage.cacheWriteTokens.toLocaleString("en-US")}`,
+		`Cost: $${usage.totalCost.toFixed(4)}`,
+	].join(" · ")
 }
 
 function isTrajectoryEvent(value: unknown): value is SubagentTrajectoryEvent {

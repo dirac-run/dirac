@@ -594,10 +594,11 @@ export class UseSubagentsTool implements IDiracTool {
 								taskTitle: entry.taskTitle,
 								prompt: entry.prompt,
 								status: runResult.status,
+								usage: runResult.stats,
 								trajectory,
 							}),
 						),
-						rawOutput: createSubagentCardOutput(runResult.status, trajectory),
+						rawOutput: createSubagentCardOutput(runResult.status, trajectory, runResult.stats),
 					}
 					const applyTerminalCardState = async () => {
 						await runCardOperation(

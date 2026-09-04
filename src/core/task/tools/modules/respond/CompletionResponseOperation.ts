@@ -242,8 +242,14 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 		if (card) {
 			const finalPatch = {
 				status: subagentCardStatus(runResult.status),
-				body: formatSubagentTrajectory({ ...identity, prompt: subagentPrompt, status: runResult.status, trajectory }),
-				rawOutput: createSubagentCardOutput(runResult.status, trajectory),
+				body: formatSubagentTrajectory({
+					...identity,
+					prompt: subagentPrompt,
+					status: runResult.status,
+					trajectory,
+					usage: runResult.stats,
+				}),
+				rawOutput: createSubagentCardOutput(runResult.status, trajectory, runResult.stats),
 			}
 			const applyTerminalCardState = async () => {
 				await runCardOperation(card!.update(finalPatch), "Verification subagent final card update timed out.")

@@ -1,5 +1,6 @@
 import { CardKind, CardStatus, type DiracMessage, DiracMessageType, type ExtensionState } from "@shared/ExtensionMessage"
 import { act, renderHook } from "@testing-library/react"
+import { filterVisibleMessages } from "../../../modular-ui/chat/utils/messageUtils"
 import { useChatStore } from "../chatStore"
 
 function permissionCardMessage(status: CardStatus, collapsed: boolean): DiracMessage {
@@ -146,6 +147,18 @@ describe("useChatStore", () => {
 		expect(useChatStore.getState().cardUserToggledStates["card-1"]).toBe(true)
 	})
 
+	it("hides legacy usage cards without dropping their accounting", () => {
+		const usage = permissionCardMessage(CardStatus.SUCCESS, true)
+		if (usage.content.type !== DiracMessageType.CARD) throw new Error("Expected card")
+		usage.content.card.header = "Subagent Usage"
+		usage.content.card.body = JSON.stringify({ tokensIn: 10, cost: 0.5 })
+		const task: DiracMessage = { id: "task", ts: 0, content: { type: DiracMessageType.MARKDOWN, content: "task" } }
+		useChatStore.getState().setDiracMessages([task, usage])
+		expect(useChatStore.getState().visibleMessageIds).toEqual([])
+		expect(useChatStore.getState().apiMetrics.totalCost).toBe(0.5)
+		expect(filterVisibleMessages([usage])).toEqual([])
+	})
+
 	it("updates session cost from structured subagent snapshots without changing main context usage", () => {
 		const usage = { source: "subagents", tokensIn: 100, tokensOut: 20, cacheWrites: 0, cacheReads: 0, cost: 0.5 }
 		const main: DiracMessage = {
@@ -161,16 +174,29 @@ describe("useChatStore", () => {
 				}
 			},
 		}
+		const execution = permissionCardMessage(CardStatus.SUCCESS, true)
+		if (execution.content.type === DiracMessageType.CARD) execution.content.card.rawOutput = { usage }
+
 		useChatStore.getState().applyExtensionState({
-			diracMessages: [main, subagent], presentationSurfaceId: "task-1", presentationOffset: -1,
+			diracMessages: [main, execution, subagent], presentationSurfaceId: "task-1", presentationOffset: -1,
 		})
 		expect(useChatStore.getState().apiMetrics.totalCost).toBe(0.75)
+		expect(useChatStore.getState().visibleMessageIds).toEqual([execution.id])
+		expect(filterVisibleMessages([execution, subagent])).toEqual([execution])
 		useChatStore.getState().applyPresentationBatch({
 			surfaceId: "task-1",
 			operations: [{ offset: 0, type: "patch_card", id: subagent.id, patch: { rawOutput: { ...usage, cost: 1 } } }],
 		})
 		expect(useChatStore.getState().apiMetrics.totalCost).toBe(1.25)
 		expect(useChatStore.getState().lastApiReqInfo?.tokensIn).toBe(10)
+		expect(useChatStore.getState().visibleMessageIds).toEqual([execution.id])
+		useChatStore.getState().applyPresentationBatch({
+			surfaceId: "task-1",
+			operations: [{ offset: 1, type: "create", message: { ...subagent, id: "second-usage" } }],
+		})
+		expect(useChatStore.getState().visibleMessageIds).toEqual([execution.id])
+		expect(useChatStore.getState().apiMetrics.totalCost).toBe(1.75)
+		expect(useChatStore.getState().diracMessages).toHaveLength(4)
 	})
 
 

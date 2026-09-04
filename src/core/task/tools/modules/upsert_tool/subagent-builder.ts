@@ -176,8 +176,8 @@ async function runBuilderSubagentAttempt(
 	recordSubagentProgress(trajectory, result)
 	const finalPatch = {
 		status: subagentCardStatus(result.status),
-		body: formatSubagentTrajectory({ ...identity, prompt, status: result.status, trajectory }),
-		rawOutput: createSubagentCardOutput(result.status, trajectory),
+		body: formatSubagentTrajectory({ ...identity, prompt, status: result.status, trajectory, usage: result.stats }),
+		rawOutput: createSubagentCardOutput(result.status, trajectory, result.stats),
 	}
 	const finalProgressDetail = result.status === SubagentExecutionStatus.COMPLETED ? "completed" : result.error || result.status
 	const applyTerminalPresentationState = async () => {
