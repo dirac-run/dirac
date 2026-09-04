@@ -3,6 +3,7 @@ import OpenAI from "openai"
 import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { createOpenAIClient } from "@/shared/net"
+import { Logger } from "@/shared/services/Logger"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -98,6 +99,13 @@ export class NebiusHandler implements ApiHandler {
 
 		if (modelId !== undefined && modelId in nebiusModels) {
 			return { id: modelId, info: nebiusModels[modelId as NebiusModelId] }
+		}
+		if (modelId !== undefined) {
+			// Fail loudly: silently swapping the requested model for the default
+			// misattributes cost/behavior to a model the user never selected.
+			Logger.error(
+				`[NebiusHandler] Unknown Nebius model '${modelId}'; falling back to ${nebiusDefaultModelId}. Available: ${Object.keys(nebiusModels).join(", ")}`,
+			)
 		}
 		return { id: nebiusDefaultModelId, info: nebiusModels[nebiusDefaultModelId] }
 	}
