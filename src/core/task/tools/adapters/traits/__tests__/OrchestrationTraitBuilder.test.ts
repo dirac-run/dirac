@@ -4,6 +4,7 @@ import { AgentConfigLoader } from "@core/task/tools/subagent/AgentConfigLoader"
 import { SubagentRunner } from "@core/task/tools/subagent/SubagentRunner"
 import { SubagentRunRecorder } from "@core/task/tools/subagent/SubagentRunRecorder"
 import { SubagentExecutionStatus } from "@shared/ExtensionMessage"
+import { getApiMetrics } from "@shared/getApiMetrics"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { buildOrchestrationTrait } from "../OrchestrationTraitBuilder"
@@ -32,7 +33,10 @@ describe("OrchestrationTraitBuilder Utility subagent routing", () => {
 		const completedResult = {
 			status: SubagentExecutionStatus.COMPLETED,
 			result: "done",
-			stats: {},
+			stats: {
+				toolCalls: 0, inputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0,
+				totalCost: 0.5, contextTokens: 15, contextWindow: 1000, contextUsagePercentage: 1.5,
+			},
 		}
 		const run = sinon.stub(SubagentRunner.prototype, "run").resolves(completedResult as never)
 		const trait = buildOrchestrationTrait(config)
@@ -45,6 +49,8 @@ describe("OrchestrationTraitBuilder Utility subagent routing", () => {
 		})
 
 		assert.equal(result, completedResult)
+		const usageMessages = config.messageState.addToDiracMessages.args.map(([message]: [any]) => message)
+		assert.equal(getApiMetrics(usageMessages).totalCost, 0.5)
 		sinon.assert.calledOnceWithExactly(createSubagentRuntime, {
 			modelId: undefined,
 			utilityModelSelection,

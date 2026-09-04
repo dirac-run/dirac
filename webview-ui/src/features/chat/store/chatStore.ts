@@ -339,7 +339,7 @@ function updateDerivedPresentation(
 
 function operationCanChangeApiMetrics(operation: PresentationOperation): boolean {
 	if (operation.type === "create" || operation.type === "patch_message" || operation.type === "patch_api_status") return true
-	return operation.type === "patch_card" && (operation.patch.header !== undefined || operation.patch.body !== undefined)
+	return operation.type === "patch_card" && (operation.patch.header !== undefined || operation.patch.body !== undefined || operation.patch.rawOutput !== undefined)
 }
 
 function sameApiMetrics(left: ApiMetrics, right: ApiMetrics): boolean {

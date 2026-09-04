@@ -682,14 +682,16 @@ function apiAccountingSnapshot(task: Task): GoalAccounting | undefined {
 			0
 		)
 	})
-	const hasSubagentUsage = messages.some(
-		(message) => message.content.type === "card" && message.content.card.header === "Subagent Usage",
-	)
 	const subagentUsage = messages
-		.filter((message) => message.content.type === "card" && message.content.card.header === "Subagent Usage")
-		.map((message) =>
-			message.content.type === "card" ? parseSubagentUsage(message.content.card.body) : undefined,
-		)
+		.filter((message) => message.content.type === "card" && (
+			message.content.card.rawOutput?.source === "subagents" || message.content.card.header === "Subagent Usage"
+		))
+		.map((message) => {
+			if (message.content.type !== "card") return undefined
+			const card = message.content.card
+			return card.rawOutput?.source === "subagents" ? card.rawOutput : parseSubagentUsage(card.body)
+		})
+	const hasSubagentUsage = subagentUsage.length > 0
 	if (usageStatuses.length === 0 && !hasSubagentUsage) return undefined
 
 	const metrics = getApiMetrics(messages)

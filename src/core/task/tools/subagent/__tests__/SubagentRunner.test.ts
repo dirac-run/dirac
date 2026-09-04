@@ -188,6 +188,34 @@ describe("SubagentRunner", () => {
 		HostProvider.reset()
 	})
 
+	for (const terminal of ["failed", "cancelled"] as const) {
+		it(`retains reported request cost when a stream is ${terminal}`, async () => {
+			if (terminal === "failed") expectLoggerErrors()
+			const config = createTaskConfigWithListFilesSnapshot()
+			const createMessage = sinon.stub().callsFake(async function* () {
+				yield { type: "usage", inputTokens: 10, outputTokens: 0, totalCost: 0.1 }
+				if (terminal === "cancelled") config.taskState.abort = true
+				yield { type: "usage", inputTokens: 0, outputTokens: 5, totalCost: 0.2 }
+				throw new Error("stream interrupted")
+			})
+			sinon.stub(PromptRegistry.getInstance(), "get").resolves("system prompt")
+			sinon.stub(skills, "getOrDiscoverSkills").resolves([])
+			stubApiHandler(createMessage)
+			initializeHostProvider()
+			const costs: number[] = []
+			const result = await new SubagentRunner(config).run("Research", (update) => {
+				if (update.stats) costs.push(update.stats.totalCost)
+			})
+			assert.equal(result.status, terminal)
+			assert.equal(result.stats.totalCost, 0.2)
+			assert.equal(result.stats.inputTokens, 10)
+			assert.equal(result.stats.outputTokens, 5)
+			assert.ok(costs.includes(0.2))
+			sinon.assert.calledOnce(createMessage)
+		})
+	}
+
+
 	it("keeps inherited Utility permission handling live", () => {
 		let enabled = true
 		const permissionDecisionBinding = {

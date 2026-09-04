@@ -1,4 +1,5 @@
 import { DiracApiReqInfo, DiracMessage } from "./ExtensionMessage"
+import { getSubagentUsage } from "./subagentUsage"
 
 export interface ApiMetrics {
 	totalTokensIn: number
@@ -74,18 +75,14 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
 				if (typeof deletedMetrics.cacheReads === "number")
 					result.totalCacheReads = (result.totalCacheReads ?? 0) + deletedMetrics.cacheReads
 			}
-		} else if (message.content.type === "card" && message.content.card.header === "Subagent Usage") {
-			// Handle subagent usage cards
-			try {
-				const usage = JSON.parse(message.content.card.body || "{}")
-				if (usage.tokensIn) result.totalTokensIn += usage.tokensIn
-				if (usage.tokensOut) result.totalTokensOut += usage.tokensOut
-				if (usage.cacheWrites) result.totalCacheWrites = (result.totalCacheWrites ?? 0) + usage.cacheWrites
-				if (usage.cacheReads) result.totalCacheReads = (result.totalCacheReads ?? 0) + usage.cacheReads
-				if (usage.cost) result.totalCost += usage.cost
-			} catch {
-				// Ignore parse errors
-			}
+		} else if (message.content.type === "card") {
+			const usage = getSubagentUsage(message.content.card)
+			if (!usage) return
+			result.totalTokensIn += usage.tokensIn
+			result.totalTokensOut += usage.tokensOut
+			result.totalCacheWrites = (result.totalCacheWrites ?? 0) + usage.cacheWrites
+			result.totalCacheReads = (result.totalCacheReads ?? 0) + usage.cacheReads
+			result.totalCost += usage.cost
 		}
 	})
 

@@ -146,6 +146,34 @@ describe("useChatStore", () => {
 		expect(useChatStore.getState().cardUserToggledStates["card-1"]).toBe(true)
 	})
 
+	it("updates session cost from structured subagent snapshots without changing main context usage", () => {
+		const usage = { source: "subagents", tokensIn: 100, tokensOut: 20, cacheWrites: 0, cacheReads: 0, cost: 0.5 }
+		const main: DiracMessage = {
+			id: "main", ts: 1,
+			content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 10, tokensOut: 5, cost: 0.25 } },
+		}
+		const subagent: DiracMessage = {
+			id: "subagent", ts: 2,
+			content: {
+				type: DiracMessageType.CARD, card: {
+					id: "usage", header: "Localized label", body: "Not JSON", renderType: "text",
+					status: CardStatus.RUNNING, rawOutput: usage,
+				}
+			},
+		}
+		useChatStore.getState().applyExtensionState({
+			diracMessages: [main, subagent], presentationSurfaceId: "task-1", presentationOffset: -1,
+		})
+		expect(useChatStore.getState().apiMetrics.totalCost).toBe(0.75)
+		useChatStore.getState().applyPresentationBatch({
+			surfaceId: "task-1",
+			operations: [{ offset: 0, type: "patch_card", id: subagent.id, patch: { rawOutput: { ...usage, cost: 1 } } }],
+		})
+		expect(useChatStore.getState().apiMetrics.totalCost).toBe(1.25)
+		expect(useChatStore.getState().lastApiReqInfo?.tokensIn).toBe(10)
+	})
+
+
 	it("applies contiguous patches by ID without replacing an unchanged large body", () => {
 		const task: DiracMessage = {
 			id: "task",

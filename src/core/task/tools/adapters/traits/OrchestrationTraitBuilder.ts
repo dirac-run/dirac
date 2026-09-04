@@ -7,6 +7,7 @@ import type { IOrchestrationTrait } from "../../interfaces/IToolEnvironment"
 import { SubagentRunner } from "../../subagent/SubagentRunner"
 import { SubagentRunRecorder } from "../../subagent/SubagentRunRecorder"
 import type { TaskConfig } from "../../types/TaskConfig"
+import { SubagentUsagePublisher } from "./SubagentUsagePublisher"
 // Builds the orchestration trait — subagent execution, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
@@ -41,7 +42,13 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 				agentIdentity,
 				recorder,
 			})
-			return await runner.run(prompt, options?.onUpdate || (() => { }), options?.timeout, options?.includeHistory)
+			const usage = new SubagentUsagePublisher(config.messageState, config.callbacks.postStateToWebview, agentIdentity.name)
+			const result = await runner.run(prompt, async (update) => {
+				if (update.stats) await usage.update(update.stats)
+				await options?.onUpdate?.(update)
+			}, options?.timeout, options?.includeHistory)
+			await usage.finish(result.stats)
+			return result
 		},
 		runHook: async (name, input, options) => {
 			const { executeHook } = await import("@core/hooks/hook-executor")

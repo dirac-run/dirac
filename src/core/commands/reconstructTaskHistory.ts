@@ -9,6 +9,7 @@ import { GoalStore } from "@core/goal/GoalStore"
 import type { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import { HostProvider } from "@hosts/host-provider"
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
+import { getApiMetrics } from "@shared/getApiMetrics"
 import { HistoryItem } from "@shared/HistoryItem"
 import { ShowMessageType } from "@shared/proto/host/window"
 import { fileExistsAtPath } from "@utils/fs"
@@ -261,26 +262,13 @@ function extractTaskInformation(diracMessages: DiracMessage[], metadata: TaskMet
 		}
 	}
 
-	// Calculate token usage from API request messages
-	let tokensIn = 0
-	let tokensOut = 0
-	let cacheWrites = 0
-	let cacheReads = 0
-	let totalCost = 0
-
-	// Look for usage-carrying messages with token info
-	const apiReqMessages = diracMessages.filter((msg) => msg.content.type === DiracMessageType.API_STATUS)
-
-	for (const msg of apiReqMessages) {
-		if (msg.content.type === DiracMessageType.API_STATUS) {
-			const status = msg.content.status
-			tokensIn += status.tokensIn || 0
-			tokensOut += status.tokensOut || 0
-			cacheWrites += status.cacheWrites || 0
-			cacheReads += status.cacheReads || 0
-			totalCost += status.cost || 0
-		}
-	}
+	// Use the same accounting projection as live sessions, including subagent usage.
+	const metrics = getApiMetrics(diracMessages)
+	let tokensIn = metrics.totalTokensIn
+	let tokensOut = metrics.totalTokensOut
+	let cacheWrites = metrics.totalCacheWrites ?? 0
+	let cacheReads = metrics.totalCacheReads ?? 0
+	let totalCost = metrics.totalCost
 
 	// Use metadata if available and no tokens found in messages
 	if (tokensIn === 0 && tokensOut === 0 && metadata.model_usage) {

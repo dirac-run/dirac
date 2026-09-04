@@ -474,6 +474,7 @@ export class SubagentRunner {
 				const { toolUseHandler, reasonsHandler } = streamHandler.getHandlers()
 				usageState.currentRequest = createEmptyRequestUsageState()
 				const requestUsage = usageState.currentRequest
+				const costBeforeRequest = stats.totalCost
 
 				let assistantText = ""
 				let assistantTextSignature: string | undefined
@@ -510,6 +511,14 @@ export class SubagentRunner {
 									requestUsage.cacheWriteTokens +
 									requestUsage.cacheReadTokens
 								requestUsage.totalCost = chunk.totalCost ?? requestUsage.totalCost
+								// Account as usage arrives so aborts, stream failures, and wrap-up retain billed usage.
+								stats.totalCost = costBeforeRequest + (requestUsage.totalCost ?? calculateApiCostAnthropic(
+									context.providerInfo.model.info,
+									requestUsage.inputTokens,
+									requestUsage.outputTokens,
+									requestUsage.cacheWriteTokens,
+									requestUsage.cacheReadTokens,
+								) ?? 0)
 								stats.contextTokens = requestUsage.totalTokens
 								stats.contextUsagePercentage =
 									stats.contextWindow > 0 ? (stats.contextTokens / stats.contextWindow) * 100 : 0
@@ -566,21 +575,6 @@ export class SubagentRunner {
 					throw error
 				}
 
-				const calculatedRequestCost =
-					requestUsage.totalCost ??
-					calculateApiCostAnthropic(
-						context.providerInfo.model.info,
-						requestUsage.inputTokens,
-						requestUsage.outputTokens,
-						requestUsage.cacheWriteTokens,
-						requestUsage.cacheReadTokens,
-					)
-				requestUsage.totalTokens =
-					requestUsage.inputTokens +
-					requestUsage.outputTokens +
-					requestUsage.cacheWriteTokens +
-					requestUsage.cacheReadTokens
-				stats.totalCost += calculatedRequestCost || 0
 				usageState.lastRequest = { ...requestUsage }
 
 				const nativeFinalizedToolCalls = toolUseHandler.getAllFinalizedToolUses().map((toolCall, index) => ({
@@ -883,12 +877,14 @@ export class SubagentRunner {
 				enableNativeWebSearch,
 			})
 
+			let receivedChunk = false
 			try {
 				const stream = runtime.createMessage(systemPrompt, truncatedConversation, nativeTools, { enableNativeWebSearch })
 				const iterator = stream[Symbol.asyncIterator]()
 				const firstChunk = await iterator.next()
 				this.enterPhase("streaming_provider_response", "received first provider chunk", { attempt, providerId, modelId })
 				if (!firstChunk.done) {
+					receivedChunk = true
 					yield firstChunk.value
 				}
 
@@ -896,6 +892,8 @@ export class SubagentRunner {
 				this.markActivity("provider stream completed")
 				return
 			} catch (error) {
+				// Retrying a partially consumed stream merges distinct billed requests into one usage snapshot.
+				if (receivedChunk) throw error
 				if (checkContextWindowExceededError(error)) {
 					const compactResult = this.compactConversationForContextWindow(
 						contextManager,

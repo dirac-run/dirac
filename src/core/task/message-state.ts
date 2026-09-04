@@ -761,7 +761,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			this.materializePresentationAppends(message)
 			const before = this.historyProjectionBeforeMutation(message)
 			Object.assign(message.content.card, patch)
-			this.updateHistoryProjection(message, before, patch.header === undefined && patch.body === undefined)
+			this.updateHistoryProjection(message, before, patch.header === undefined && patch.body === undefined && patch.rawOutput === undefined)
 			this.recordPresentationOperation({
 				offset: ++this.presentationOffset,
 				type: "patch_card",
