@@ -21,12 +21,6 @@ function createEnvironmentManager(
 		api: {} as any,
 		messageStateHandler: {} as any,
 		getWorkingConfiguration: () => ({ settings: { mode: taskMode }, executionOptions: { multiRootEnabled: false } }) as any,
-		getRequestRuntime: () =>
-			requestMode
-				? ({
-						workingConfiguration: { settings: { mode: requestMode }, executionOptions: { multiRootEnabled: false } },
-					} as any)
-				: undefined,
 		getRequestRuntime: () => ({
 			requestId: "request-1",
 			workingConfiguration: { settings: { mode: requestMode }, executionOptions: { multiRootEnabled: false } },
