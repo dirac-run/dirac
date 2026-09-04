@@ -1,11 +1,12 @@
 import { promises as fs } from "node:fs"
-import { isBinaryFile } from "isbinaryfile"
 import { workspaceResolver } from "@core/workspace"
 import { isDirectory } from "@utils/fs"
 import { arePathsEqual } from "@utils/path"
 import { globby, Options } from "globby"
+import { isBinaryFile } from "isbinaryfile"
 import * as os from "os"
 import * as path from "path"
+import picomatch from "picomatch"
 import { Logger } from "@/shared/services/Logger"
 
 // Constants
@@ -66,11 +67,12 @@ function buildIgnorePatterns(absolutePath: string): string[] {
 		patterns.push(".*")
 	}
 
-	return patterns.map((pattern) => {
+	return patterns.flatMap((pattern) => {
 		if (pattern.includes("*")) {
 			return `**/${pattern}`
 		}
-		return `**/${pattern}/**`
+		// Match the directory itself and everything inside it so globby can prune early.
+		return [`**/${pattern}`, `**/${pattern}/**`]
 	})
 }
 
@@ -178,6 +180,7 @@ Breadth-first traversal of directory structure level by level up to a limit:
 async function globbyLevelByLevel(limit: number, options?: Options): Promise<any[]> {
 	const results: Map<string, any> = new Map()
 	const queue: string[] = ["*"]
+	const isIgnored = options?.ignore && options.ignore.length > 0 ? picomatch(options.ignore, { dot: true }) : () => false
 
 	const globbingProcess = async () => {
 		while (queue.length > 0 && results.size < limit) {
@@ -188,8 +191,16 @@ async function globbyLevelByLevel(limit: number, options?: Options): Promise<any
 				if (results.size >= limit) {
 					break
 				}
+
+				const isDirectory = entry.path.endsWith("/")
+				const cleanPath = isDirectory ? entry.path.slice(0, -1) : entry.path
+				if (isIgnored(cleanPath)) {
+					continue
+				}
+
 				results.set(entry.path, entry)
-				if (entry.path.endsWith("/")) {
+
+				if (isDirectory) {
 					// Escape parentheses in the path to prevent glob pattern interpretation
 					// This is crucial for NextJS folder naming conventions which use parentheses like (auth), (dashboard)
 					// Without escaping, glob treats parentheses as special pattern grouping characters
