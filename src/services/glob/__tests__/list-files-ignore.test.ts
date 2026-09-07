@@ -35,5 +35,48 @@ describe("listFiles ignore patterns", () => {
 		normalizedFiles.should.containEql(normalizeForComparison(txtFile))
 		normalizedFiles.should.not.containEql(normalizeForComparison(logFile))
 		normalizedFiles.should.not.containEql(normalizeForComparison(nodeModulesFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(nodeModulesDir))
+	})
+
+	it("prunes ignored directories before descending into them", async () => {
+		await fs.mkdir(tmpDir, { recursive: true })
+
+		const txtFile = path.join(tmpDir, "src", "main.ts")
+		const targetDepFile = path.join(tmpDir, "target", "dependency", "bad.jar")
+		const buildDepFile = path.join(tmpDir, "build", "dependencies", "bad.jar")
+
+		await fs.mkdir(path.join(tmpDir, "src"), { recursive: true })
+		await fs.mkdir(path.join(tmpDir, "target", "dependency"), { recursive: true })
+		await fs.mkdir(path.join(tmpDir, "build", "dependencies"), { recursive: true })
+		await fs.writeFile(txtFile, "export const ok = true\n")
+		await fs.writeFile(targetDepFile, "")
+		await fs.writeFile(buildDepFile, "")
+
+		const [files] = await listFiles(tmpDir, true, 200)
+		const normalizedFiles = files.map((f) => f.path).map(normalizeForComparison)
+
+		normalizedFiles.should.containEql(normalizeForComparison(txtFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(targetDepFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(buildDepFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(path.join(tmpDir, "target", "dependency")))
+	})
+
+	it("skips hidden directories when not explicitly targeting one", async () => {
+		await fs.mkdir(tmpDir, { recursive: true })
+
+		const visibleFile = path.join(tmpDir, "src", "main.ts")
+		const hiddenFile = path.join(tmpDir, ".hidden", "secret.ts")
+
+		await fs.mkdir(path.join(tmpDir, "src"), { recursive: true })
+		await fs.mkdir(path.join(tmpDir, ".hidden"), { recursive: true })
+		await fs.writeFile(visibleFile, "export const ok = true\n")
+		await fs.writeFile(hiddenFile, "export const secret = 1\n")
+
+		const [files] = await listFiles(tmpDir, true, 200)
+		const normalizedFiles = files.map((f) => f.path).map(normalizeForComparison)
+
+		normalizedFiles.should.containEql(normalizeForComparison(visibleFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(hiddenFile))
+		normalizedFiles.should.not.containEql(normalizeForComparison(path.join(tmpDir, ".hidden")))
 	})
 })
