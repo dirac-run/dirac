@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.12",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.5.11",
+  "analyzedCommit": "95e4e8a1e8af122f37b369b997e1eefccd632766",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "feat-af7de526",
+      "title": "deepseek flash 4.1 (defaults to deepseek flash), ds4  removed",
+      "category": "feat",
+      "evidence": [
+        "af7de526023dc7fae637d7c1da12da9286079711"
+      ]
+    },
+    {
+      "id": "fix-95e4e8a1",
+      "title": "ground generated commit messages in the supplied diff",
+      "category": "fix",
+      "evidence": [
+        "95e4e8a1e8af122f37b369b997e1eefccd632766"
+      ]
+    }
+  ]
+}
