@@ -37,8 +37,15 @@ const PROMPT = {
 The commit message should:
 1. Has a short title (50-72 characters)
 2. The commit message should adhere to the conventional commit format
-3. Describe what was changed and why
-4. Be clear and informative`,
+3. Describe what was changed; explain why only when supported by the diff or relevant developer notes
+4. Be clear and informative
+
+Ground the message in the provided diff:
+- Treat the diff as authoritative for what changed. Describe additions and removals, not unchanged functionality in surrounding context.
+- Distinguish new functionality from fixes, refactors, or modifications to existing functionality.
+- Use developer notes only to explain the intent of changes shown in the diff; do not expand the commit's scope based on notes.
+- Omit unsupported motivation rather than inventing an explanation.
+- If the diff is truncated, do not infer changes from the omitted portion.`,
 }
 
 export async function generateCommitMsg(controller: Controller, scm?: vscode.SourceControl) {
