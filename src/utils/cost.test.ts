@@ -150,18 +150,18 @@ describe("Cost Utilities", () => {
 			cost!.should.equal(0)
 		})
 
-		it("applies DeepSeek V4 peak pricing only during the published UTC windows", () => {
-			const modelInfo = deepSeekModels["deepseek-v4-flash"]
+		it("applies DeepSeek V4.1 Flash peak pricing only during the published UTC windows", () => {
+			const modelInfo = deepSeekModels["deepseek-flash"]
 			const examples = [
-				["2025-01-10T00:59:00Z", 0.7735],
-				["2025-01-10T01:00:00Z", 1.547],
-				["2025-01-10T03:59:00Z", 1.547],
-				["2025-01-10T04:00:00Z", 0.7735],
-				["2025-01-10T05:59:00Z", 0.7735],
-				["2025-01-10T06:00:00Z", 1.547],
-				["2025-01-10T09:59:00Z", 1.547],
-				["2025-01-10T10:00:00Z", 0.7735],
-				["2025-01-11T07:00:00Z", 0.7735],
+				["2026-09-11T00:59:00Z", 0.6765],
+				["2026-09-11T01:00:00Z", 1.353],
+				["2026-09-11T03:59:00Z", 1.353],
+				["2026-09-11T04:00:00Z", 0.6765],
+				["2026-09-11T05:59:00Z", 0.6765],
+				["2026-09-11T06:00:00Z", 1.353],
+				["2026-09-11T09:59:00Z", 1.353],
+				["2026-09-11T10:00:00Z", 0.6765],
+				["2026-09-12T07:00:00Z", 0.6765],
 			] as const
 
 			for (const [timestamp, expectedCost] of examples) {

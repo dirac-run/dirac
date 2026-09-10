@@ -2,10 +2,12 @@ import { expect } from "chai"
 import { describe, it } from "mocha"
 import {
 	buildLegacyAnthropicFastModeStateUpdates,
+	buildRetiredDeepSeekModelStateUpdates,
 	buildLegacyModelIdStateUpdates,
 	buildLegacySynthetic1mStateUpdates,
 	normalizeLegacyOpenRouterPinMap,
 	normalizeLegacySynthetic1mModelId,
+	normalizeRetiredDeepSeekModelId,
 } from "../legacy-model-id-migration"
 
 describe("legacy synthetic 1m model-id migration", () => {
@@ -102,6 +104,66 @@ describe("legacy Anthropic fast-mode migration", () => {
 		}).modelProviderPresets!
 		expect(preset.modelId).to.equal("claude-opus-4-8")
 		expect(preset.id).to.equal("anthropic::claude-opus-4-8")
+		expect(preset.modelInfo).to.equal(undefined)
+	})
+})
+
+describe("retired DeepSeek model migration", () => {
+	it("normalizes retired IDs and leaves the canonical ID unchanged", () => {
+		for (const modelId of [
+			"deepseek-v4-flash",
+			"deepseek-v4-flash-vision-exp",
+			"deepseek-v4-pro",
+			"deepseek-chat",
+			"deepseek-reasoner",
+		]) {
+			expect(normalizeRetiredDeepSeekModelId(modelId)).to.equal("deepseek-flash")
+		}
+		expect(normalizeRetiredDeepSeekModelId("deepseek-flash")).to.equal("deepseek-flash")
+	})
+
+	it("only migrates mode selections owned by the DeepSeek provider", () => {
+		expect(
+			buildRetiredDeepSeekModelStateUpdates({
+				planModeApiProvider: "deepseek",
+				planModeApiModelId: "deepseek-v4-pro",
+				actModeApiProvider: "openai-native",
+				actModeApiModelId: "deepseek-chat",
+			}),
+		).to.deep.equal({ planModeApiModelId: "deepseek-flash" })
+	})
+
+	it("migrates a saved DeepSeek utility-model selection", () => {
+		expect(
+			buildRetiredDeepSeekModelStateUpdates({
+				utilityModelSelection: {
+					provider: "deepseek",
+					modelId: "deepseek-reasoner",
+					modelInfo: { supportsPromptCache: true },
+				},
+			}),
+		).to.deep.equal({
+			utilityModelSelection: {
+				provider: "deepseek",
+				modelId: "deepseek-flash",
+				modelInfo: undefined,
+			},
+		})
+	})
+	it("migrates DeepSeek model-provider presets", () => {
+		const [preset] = buildLegacySynthetic1mStateUpdates({
+			modelProviderPresets: [
+				{
+					id: "deepseek::deepseek-v4-pro",
+					provider: "deepseek",
+					modelId: "deepseek-v4-pro",
+					modelInfo: { supportsPromptCache: true },
+					lastUsedAt: 1,
+				},
+			],
+		}).modelProviderPresets!
+		expect(preset.modelId).to.equal("deepseek-flash")
+		expect(preset.id).to.equal("deepseek::deepseek-flash")
 		expect(preset.modelInfo).to.equal(undefined)
 	})
 })

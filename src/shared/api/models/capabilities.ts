@@ -137,12 +137,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 		supportsImages: false,
 		supportsReasoning: true,
 	},
-	"deepseek-v4-flash-vision-exp": {
+	"deepseek-flash": {
 		maxTokens: 384_000,
 		contextWindow: 1_048_576,
 		supportsImages: true,
 		supportsReasoning: true,
 		supportsReasoningEffort: true,
+		reasoningEffortOptions: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+		defaultReasoningEffort: "high",
 		supportsTools: true,
 	},
 	"doubao-1-5-pro-256k-250115": {

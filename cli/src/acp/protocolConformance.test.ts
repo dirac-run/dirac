@@ -212,7 +212,7 @@ describe("ACP protocol conformance over raw stdio", () => {
 			"--provider",
 			"deepseek",
 			"--model",
-			"deepseek-v4-flash",
+			"deepseek-flash",
 			"--thinking",
 			"4096",
 			"--reasoning-effort",
@@ -235,11 +235,8 @@ describe("ACP protocol conformance over raw stdio", () => {
 		expect(modelOptions[0]).toMatchObject({
 			id: "model",
 			category: "model",
-			currentValue: "deepseek-v4-flash",
-			options: expect.arrayContaining([
-				expect.objectContaining({ value: "deepseek-v4-flash" }),
-				expect.objectContaining({ value: "deepseek-v4-flash-vision-exp" }),
-			]),
+			currentValue: "deepseek-flash",
+			options: [{ value: "deepseek-flash", name: "deepseek-flash" }],
 		})
 		expect((modelOptions[0].options as Array<Record<string, unknown>>).map((option) => option.value)).not.toContain(
 			"deepseek",
@@ -253,19 +250,11 @@ describe("ACP protocol conformance over raw stdio", () => {
 				expect.objectContaining({ id: "mode", currentValue: "act" }),
 				expect.objectContaining({ id: "auto_approve", currentValue: false }),
 				expect.objectContaining({ id: "yolo", currentValue: true }),
-				expect.objectContaining({ id: "thinking_budget", currentValue: "4096" }),
 				expect.objectContaining({ id: "reasoning_effort", currentValue: "high" }),
 			]),
 		)
+		expect(configOptions.find((option) => option.id === "thinking_budget")).toBeUndefined()
 
-		const configured = await client.request("session/set_config_option", {
-			sessionId,
-			configId: "model",
-			value: "deepseek-v4-flash-vision-exp",
-		})
-		expect(configured.result?.configOptions).toEqual(
-			expect.arrayContaining([expect.objectContaining({ id: "model", currentValue: "deepseek-v4-flash-vision-exp" })]),
-		)
 
 		await client.request("session/set_config_option", {
 			sessionId,
@@ -276,17 +265,17 @@ describe("ACP protocol conformance over raw stdio", () => {
 		expect(secondSession.result?.configOptions).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ id: "provider", currentValue: "deepseek" }),
-				expect.objectContaining({ id: "model", currentValue: "deepseek-v4-flash" }),
-				expect.objectContaining({ id: "thinking_budget", currentValue: "4096" }),
+				expect.objectContaining({ id: "model", currentValue: "deepseek-flash" }),
 				expect.objectContaining({ id: "reasoning_effort", currentValue: "high" }),
 			]),
 		)
+		expect((secondSession.result?.configOptions as Array<Record<string, unknown>>).find((option) => option.id === "thinking_budget")).toBeUndefined()
 	})
 
 	it("switches provider/model atomically and rejects incompatible model requests without mutation", async () => {
 		const configDir = await temporaryDirectory("dirac-acp-config-")
 		const cwd = await temporaryDirectory("dirac-acp-workspace-")
-		const client = createRawClient(configDir, cwd, ["--provider", "deepseek", "--model", "deepseek-v4-flash"])
+		const client = createRawClient(configDir, cwd, ["--provider", "deepseek", "--model", "deepseek-flash"])
 		await client.initialize()
 		const created = await client.request("session/new", { cwd, mcpServers: [] })
 		const sessionId = created.result?.sessionId as string
@@ -313,7 +302,7 @@ describe("ACP protocol conformance over raw stdio", () => {
 		expect(unchangedOptions).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ id: "provider", currentValue: "deepseek" }),
-				expect.objectContaining({ id: "model", currentValue: "deepseek-v4-flash" }),
+				expect.objectContaining({ id: "model", currentValue: "deepseek-flash" }),
 			]),
 		)
 
@@ -478,11 +467,11 @@ describe("ACP protocol conformance over raw stdio", () => {
 		})
 	})
 
-	it("repairs an incompatible persisted model before returning load state", async () => {
+	it("repairs a retired persisted DeepSeek model before returning load state", async () => {
 		const configDir = await temporaryDirectory("dirac-acp-config-")
 		const cwd = await temporaryDirectory("dirac-acp-workspace-")
 		const sessionId = crypto.randomUUID()
-		await seedPersistedSession(configDir, cwd, sessionId, "gpt-5.6-sol")
+		await seedPersistedSession(configDir, cwd, sessionId, "deepseek-v4-pro")
 
 		const client = createRawClient(configDir, cwd)
 		await client.initialize()
@@ -490,23 +479,18 @@ describe("ACP protocol conformance over raw stdio", () => {
 		const configOptions = loaded.result?.configOptions as Array<Record<string, unknown>>
 		assertProviderModelConfig(configOptions)
 		const model = configOptions.find((option) => option.id === "model")!
-		expect(model.currentValue).toBe("deepseek-v4-flash")
-		expect((model.options as Array<Record<string, unknown>>).map((option) => option.value)).not.toContain("gpt-5.6-sol")
+		expect(model.currentValue).toBe("deepseek-flash")
+		expect((model.options as Array<Record<string, unknown>>).map((option) => option.value)).not.toContain("deepseek-v4-pro")
 	})
 
 	it("restores a changed never-prompted task without recomputing startup defaults", async () => {
 		const configDir = await temporaryDirectory("dirac-acp-config-")
 		const cwd = await temporaryDirectory("dirac-acp-workspace-")
-		const first = createRawClient(configDir, cwd, ["--provider", "deepseek", "--model", "deepseek-v4-flash"])
+		const first = createRawClient(configDir, cwd, ["--provider", "deepseek", "--model", "deepseek-flash"])
 		await first.initialize()
 		const created = await first.request("session/new", { cwd, mcpServers: [] })
 		const sessionId = created.result?.sessionId as string
 
-		await first.request("session/set_config_option", {
-			sessionId,
-			configId: "model",
-			value: "deepseek-v4-pro",
-		})
 		await first.request("session/set_config_option", {
 			sessionId,
 			configId: "reasoning_effort",
@@ -537,7 +521,7 @@ describe("ACP protocol conformance over raw stdio", () => {
 				expect.objectContaining({ id: "auto_approve", currentValue: true }),
 				expect.objectContaining({ id: "yolo", currentValue: true }),
 				expect.objectContaining({ id: "provider", currentValue: "deepseek" }),
-				expect.objectContaining({ id: "model", currentValue: "deepseek-v4-pro" }),
+				expect.objectContaining({ id: "model", currentValue: "deepseek-flash" }),
 				expect.objectContaining({ id: "reasoning_effort", currentValue: "high" }),
 			]),
 		)
@@ -567,7 +551,7 @@ async function seedPersistedSession(
 	configDir: string,
 	cwd: string,
 	sessionId: string,
-	modelId = "deepseek-v4-flash",
+	modelId = "deepseek-flash",
 ): Promise<void> {
 	const timestamp = Date.now()
 	const taskDirectory = path.join(configDir, "data", "tasks", sessionId)

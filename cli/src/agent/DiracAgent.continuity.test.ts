@@ -430,7 +430,7 @@ describe("DiracAgent ACP conversation continuity", () => {
 			})
 			; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(
 				async (_session: unknown, overrides: Record<string, unknown>) => {
-					if (overrides.mode === "act") overrides.actModeApiModelId = "deepseek-v4-flash"
+					if (overrides.mode === "act") overrides.actModeApiModelId = "deepseek-flash"
 					return []
 				},
 			)
@@ -440,7 +440,7 @@ describe("DiracAgent ACP conversation continuity", () => {
 		expect(persistedSnapshots.at(-1)).toMatchObject({
 			mode: "act",
 			actModeApiProvider: "deepseek",
-			actModeApiModelId: "deepseek-v4-flash",
+			actModeApiModelId: "deepseek-flash",
 		})
 	})
 	it("applies in-turn auto-approve updates to the active Task before advertising them", async () => {

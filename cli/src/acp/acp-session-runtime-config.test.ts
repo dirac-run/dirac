@@ -78,7 +78,7 @@ describe("ACP session runtime configuration", () => {
 			settings: {
 				mode: "act",
 				actModeApiProvider: "deepseek",
-				actModeApiModelId: "deepseek-v4-flash",
+				actModeApiModelId: "deepseek-flash",
 			},
 			cwd: "/workspace",
 			createdAt: 123,
@@ -91,7 +91,7 @@ describe("ACP session runtime configuration", () => {
 			settings: {
 				mode: "act",
 				actModeApiProvider: "deepseek",
-				actModeApiModelId: "deepseek-v4-flash",
+				actModeApiModelId: "deepseek-flash",
 			},
 		})
 		for (const key of TASK_RUNTIME_SETTINGS_KEYS) {

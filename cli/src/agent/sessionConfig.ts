@@ -150,10 +150,34 @@ export class SessionConfigManager {
 		}
 		const inferenceSpeed = String(sessionOverrides[inferenceSpeedKey] ?? DEFAULT_INFERENCE_SPEED)
 		const thinkingKey = mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
+		const supportsThinkingBudget = currentProvider !== "deepseek"
+		if (!supportsThinkingBudget) {
+			this.setModeScopedSessionState(mode, sessionOverrides, (targetMode) => {
+				const key = targetMode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
+				;(sessionOverrides as Record<string, unknown>)[key] = 0
+			})
+		}
 		const thinkingBudget = String(sessionOverrides[thinkingKey] ?? 0)
 		const reasoningKey = mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort"
 		const reasoningEffort = String(sessionOverrides[reasoningKey] ?? DEFAULT_OPENAI_REASONING_EFFORT)
 		const providerOptions = await this.getProviderOptions(mode, sessionOverrides, modelCandidates)
+		const thinkingBudgetOptions: acp.SessionConfigOption[] = supportsThinkingBudget
+			? [
+					{
+						id: "thinking_budget",
+						name: "Thinking Budget",
+						description: "Extended thinking budget for models that support it",
+						type: "select",
+						category: "thought_level",
+						currentValue: thinkingBudget,
+						options: this.withCurrentSelectOption(
+							getThinkingBudgetOptions(currentModelInfo),
+							thinkingBudget,
+							`${thinkingBudget} tokens`,
+						),
+					},
+				]
+			: []
 
 		return [
 			{
@@ -223,19 +247,7 @@ export class SessionConfigManager {
 				currentValue: reasoningEffort,
 				options: REASONING_EFFORT_OPTIONS,
 			},
-			{
-				id: "thinking_budget",
-				name: "Thinking Budget",
-				description: "Extended thinking budget for models that support it",
-				type: "select",
-				category: "thought_level",
-				currentValue: thinkingBudget,
-				options: this.withCurrentSelectOption(
-					getThinkingBudgetOptions(currentModelInfo),
-					thinkingBudget,
-					`${thinkingBudget} tokens`,
-				),
-			},
+			...thinkingBudgetOptions,
 		]
 	}
 
@@ -390,6 +402,10 @@ export class SessionConfigManager {
 				overrides[customBaseModelKey] = undefined
 			}
 			const thinkingKey = mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
+			if (provider === "deepseek") {
+				overrides[thinkingKey] = 0
+				return
+			}
 			const currentBudget = overrides[thinkingKey] as number | undefined
 			if (currentBudget && currentBudget > 0) {
 				const info = openRouterModelInfo ?? getModelInfoForProvider(provider, modelId) ?? getModelInfo(modelId)

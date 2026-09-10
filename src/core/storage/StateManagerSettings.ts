@@ -8,6 +8,7 @@ import {
 import {
 	normalizeLegacyModelProviderPresets,
 	buildLegacyAnthropicFastModeStateUpdates,
+	buildRetiredDeepSeekModelStateUpdates,
 	normalizeLegacyOpenRouterPinMap,
 	normalizeLegacySynthetic1mModelId,
 } from "@shared/storage/legacy-model-id-migration"
@@ -52,6 +53,7 @@ export function normalizeLoadedSettings(settings: Partial<Settings>): Partial<Se
 		; (normalized as Record<string, unknown>)[key] = normalizeLoadedSetting(key as keyof Settings, value as never)
 	}
 	Object.assign(normalized, buildLegacyAnthropicFastModeStateUpdates(normalized))
+	Object.assign(normalized, buildRetiredDeepSeekModelStateUpdates(normalized))
 	return normalized
 }
 

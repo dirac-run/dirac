@@ -10,7 +10,7 @@ describe("ModelContentProcessor", () => {
 		CLAUDE_V2: "anthropic.claude-v2",
 		GEMINI: "gemini-pro",
 		GEMINI_FLASH: "gemini-2.0-flash-exp",
-		DEEPSEEK: "deepseek-chat",
+		DEEPSEEK: "deepseek-flash",
 		GPT4: TEST_MODEL_IDS.OPENAI,
 	} as const
 

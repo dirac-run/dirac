@@ -83,7 +83,7 @@ describe("Provider Registry", () => {
 		},
 		{
 			provider: "deepseek",
-			config: { deepSeekApiKey: "test-key", planModeApiModelId: "deepseek-chat", actModeApiModelId: "deepseek-chat" },
+			config: { deepSeekApiKey: "test-key", planModeApiModelId: "deepseek-flash", actModeApiModelId: "deepseek-flash" },
 		},
 		{
 			provider: "requesty",
@@ -478,12 +478,12 @@ describe("Provider Registry", () => {
 			validateApiConfiguration(
 				{
 					planModeApiProvider: "deepseek",
-					planModeApiModelId: "deepseek-v4-flash",
+					planModeApiModelId: "deepseek-flash",
 					planModeInferenceSpeed: "fast",
 				},
 				"plan",
 			),
-		).throw("Model deepseek-v4-flash does not support Fast mode")
+		).throw("Model deepseek-flash does not support Fast mode")
 	})
 
 	it("rejects Standard for providers without speed controls", () => {
@@ -491,7 +491,7 @@ describe("Provider Registry", () => {
 			validateApiConfiguration(
 				{
 					planModeApiProvider: "deepseek",
-					planModeApiModelId: "deepseek-v4-flash",
+					planModeApiModelId: "deepseek-flash",
 					planModeInferenceSpeed: "standard",
 				},
 				"plan",

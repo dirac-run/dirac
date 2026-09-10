@@ -57,8 +57,8 @@ function linkedDeepSeekRuntime(): Partial<Settings> {
 		planActSeparateModelsSetting: false,
 		planModeApiProvider: "deepseek",
 		actModeApiProvider: "deepseek",
-		planModeApiModelId: "deepseek-v4-flash",
-		actModeApiModelId: "deepseek-v4-flash",
+		planModeApiModelId: "deepseek-flash",
+		actModeApiModelId: "deepseek-flash",
 		planModeReasoningEffort: "medium",
 		actModeReasoningEffort: "medium",
 		planModeThinkingBudgetTokens: 0,
@@ -86,15 +86,28 @@ describe("SessionConfigManager task runtime behavior", () => {
 
 	it("updates both modes only when the task snapshot links their models", async () => {
 		const manager = new SessionConfigManager()
-		const linked = linkedDeepSeekRuntime()
-		await manager.applyModelConfigOption(session(), "deepseek-v4-pro", linked)
-		expect(linked.actModeApiModelId).toBe("deepseek-v4-pro")
-		expect(linked.planModeApiModelId).toBe("deepseek-v4-pro")
+		const linked: Partial<Settings> = {
+			...linkedDeepSeekRuntime(),
+			planModeApiProvider: "anthropic",
+			actModeApiProvider: "anthropic",
+			planModeApiModelId: "claude-sonnet-4-6",
+			actModeApiModelId: "claude-sonnet-4-6",
+		}
+		await manager.applyModelConfigOption(session(), "claude-haiku-4-5-20251001", linked)
+		expect(linked.actModeApiModelId).toBe("claude-haiku-4-5-20251001")
+		expect(linked.planModeApiModelId).toBe("claude-haiku-4-5-20251001")
 
-		const separate = { ...linkedDeepSeekRuntime(), planActSeparateModelsSetting: true }
-		await manager.applyModelConfigOption(session(), "deepseek-v4-pro", separate)
-		expect(separate.actModeApiModelId).toBe("deepseek-v4-pro")
-		expect(separate.planModeApiModelId).toBe("deepseek-v4-flash")
+		const separate: Partial<Settings> = {
+			...linkedDeepSeekRuntime(),
+			planActSeparateModelsSetting: true,
+			planModeApiProvider: "anthropic",
+			actModeApiProvider: "anthropic",
+			planModeApiModelId: "claude-sonnet-4-6",
+			actModeApiModelId: "claude-sonnet-4-6",
+		}
+		await manager.applyModelConfigOption(session(), "claude-haiku-4-5-20251001", separate)
+		expect(separate.actModeApiModelId).toBe("claude-haiku-4-5-20251001")
+		expect(separate.planModeApiModelId).toBe("claude-sonnet-4-6")
 	})
 
 	it("clears stale model metadata when an advertised model is selected", async () => {
@@ -146,16 +159,16 @@ describe("SessionConfigManager task runtime behavior", () => {
 		})
 	})
 
-	it("normalizes a removed historical model to the provider default", async () => {
+	it("normalizes a retired DeepSeek model to the provider default", async () => {
 		const manager = new SessionConfigManager()
 		const runtime = linkedDeepSeekRuntime()
-		runtime.actModeApiModelId = "removed-deepseek-model"
+		runtime.actModeApiModelId = "deepseek-v4-pro"
 
 		const options = await manager.getSessionConfigOptions(session(), runtime)
 		const model = selectOption(options, "model")
-		expect(model.currentValue).toBe("deepseek-v4-flash")
-		expect(optionValues(model)).not.toContain("removed-deepseek-model")
-		expect(runtime.actModeApiModelId).toBe("deepseek-v4-flash")
+		expect(model.currentValue).toBe("deepseek-flash")
+		expect(optionValues(model)).not.toContain("deepseek-v4-pro")
+		expect(runtime.actModeApiModelId).toBe("deepseek-flash")
 		await expect(manager.assertTaskRuntimeAvailable(session(), runtime)).resolves.toBeUndefined()
 	})
 
@@ -166,7 +179,7 @@ describe("SessionConfigManager task runtime behavior", () => {
 
 		const options = await manager.getSessionConfigOptions(session(), runtime)
 		const model = selectOption(options, "model")
-		expect(model.currentValue).toBe("deepseek-v4-flash")
+		expect(model.currentValue).toBe("deepseek-flash")
 		expect(optionValues(model)).not.toContain("gpt-5.6-sol")
 	})
 
@@ -204,7 +217,7 @@ describe("SessionConfigManager task runtime behavior", () => {
 		await manager.applyProviderConfigOption(session(), "openai", runtime)
 
 		expect(runtime.actModeApiProvider).toBe("openai")
-		expect(runtime.actModeOpenAiModelId).not.toBe("deepseek-v4-flash")
+		expect(runtime.actModeOpenAiModelId).not.toBe("deepseek-flash")
 	})
 
 	it("rejects an incompatible direct model request without mutation", async () => {
@@ -325,7 +338,6 @@ describe("SessionConfigManager task runtime behavior", () => {
 			["provider", "_provider"],
 			["model", "model"],
 			["reasoning_effort", "thought_level"],
-			["thinking_budget", "thought_level"],
 		])
 		expect(options.findIndex((option) => option.id === "provider")).toBeLessThan(
 			options.findIndex((option) => option.id === "model"),
@@ -342,8 +354,27 @@ describe("SessionConfigManager task runtime behavior", () => {
 		expect(options.find((option) => option.id === "yolo")).toMatchObject({ type: "boolean", currentValue: true })
 	})
 
-	it("includes 65,536 tokens tier in thinking budget options", async () => {
-		const options = await new SessionConfigManager().getSessionConfigOptions(session(), linkedDeepSeekRuntime())
+	it("does not advertise DeepSeek thinking budgets and clears saved values", async () => {
+		const runtime = {
+			...linkedDeepSeekRuntime(),
+			planModeThinkingBudgetTokens: 65_536,
+			actModeThinkingBudgetTokens: 65_536,
+		}
+		const options = await new SessionConfigManager().getSessionConfigOptions(session(), runtime)
+		expect(options.find((option) => option.id === "thinking_budget")).toBeUndefined()
+		expect(runtime.planModeThinkingBudgetTokens).toBe(0)
+		expect(runtime.actModeThinkingBudgetTokens).toBe(0)
+	})
+
+	it("continues advertising thinking budget tiers for other providers", async () => {
+		const runtime: Partial<Settings> = {
+			...linkedDeepSeekRuntime(),
+			planModeApiProvider: "anthropic",
+			actModeApiProvider: "anthropic",
+			planModeApiModelId: "claude-sonnet-5",
+			actModeApiModelId: "claude-sonnet-5",
+		}
+		const options = await new SessionConfigManager().getSessionConfigOptions(session(), runtime)
 		const thinkingOption = selectOption(options, "thinking_budget")
 		expect(optionValues(thinkingOption)).toContain("65536")
 	})

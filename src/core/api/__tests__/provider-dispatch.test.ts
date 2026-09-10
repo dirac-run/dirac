@@ -100,8 +100,8 @@ describe("API Provider Dispatch (original)", () => {
 		const config: ApiConfiguration = {
 			apiProvider: "deepseek",
 			deepSeekApiKey: "test-key",
-			planModeApiModelId: "deepseek-chat",
-			actModeApiModelId: "deepseek-chat",
+			planModeApiModelId: "deepseek-flash",
+			actModeApiModelId: "deepseek-flash",
 		}
 		const handler = buildApiHandler(config, "plan")
 		handler.should.not.be.undefined()

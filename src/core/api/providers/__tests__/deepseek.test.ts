@@ -12,19 +12,22 @@ const createAsyncIterable = (data: any[] = []) => ({
 describe("DeepSeekHandler", () => {
 	afterEach(() => sinon.restore())
 
-	it("registers DeepSeek V4 Flash Vision Exp with image support", () => {
-		deepSeekModels["deepseek-v4-flash-vision-exp"].should.deepEqual({
+	it("registers only DeepSeek V4.1 Flash with multimodal support and current pricing", () => {
+		Object.keys(deepSeekModels).should.deepEqual(["deepseek-flash"])
+		deepSeekModels["deepseek-flash"].should.deepEqual({
 			maxTokens: 384_000,
 			contextWindow: 1_048_576,
 			supportsImages: true,
 			supportsPromptCache: true,
 			supportsReasoning: true,
 			supportsReasoningEffort: true,
+			reasoningEffortOptions: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+			defaultReasoningEffort: "high",
 			supportsTools: true,
 			inputPrice: 0,
-			outputPrice: 0.66,
-			cacheWritesPrice: 0.22,
-			cacheReadsPrice: 0.007,
+			outputPrice: 0.6,
+			cacheWritesPrice: 0.15,
+			cacheReadsPrice: 0.003,
 			pricingSchedule: {
 				timeZone: "UTC",
 				defaultLabel: "Off-peak",
@@ -34,49 +37,37 @@ describe("DeepSeekHandler", () => {
 						weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
 						startMinuteUtc: 60,
 						endMinuteUtc: 240,
-						prices: { inputPrice: 0, outputPrice: 1.32, cacheWritesPrice: 0.44, cacheReadsPrice: 0.014 },
+						prices: { inputPrice: 0, outputPrice: 1.2, cacheWritesPrice: 0.3, cacheReadsPrice: 0.006 },
 					},
 					{
 						label: "Peak",
 						weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
 						startMinuteUtc: 360,
 						endMinuteUtc: 600,
-						prices: { inputPrice: 0, outputPrice: 1.32, cacheWritesPrice: 0.44, cacheReadsPrice: 0.014 },
+						prices: { inputPrice: 0, outputPrice: 1.2, cacheWritesPrice: 0.3, cacheReadsPrice: 0.006 },
 					},
 				],
 			},
 		})
 	})
 
-	it("registers the updated DeepSeek V4 Flash and Pro rates", () => {
-		const flash = deepSeekModels["deepseek-v4-flash"]
-		flash.outputPrice!.should.equal(0.66)
-		flash.cacheWritesPrice!.should.equal(0.22)
-		flash.cacheReadsPrice!.should.equal(0.007)
-		flash.pricingSchedule.periods[0].prices.should.deepEqual({
-			inputPrice: 0,
-			outputPrice: 1.32,
-			cacheWritesPrice: 0.44,
-			cacheReadsPrice: 0.014,
-		})
-
-		const pro = deepSeekModels["deepseek-v4-pro"]
-		pro.outputPrice!.should.equal(1.98)
-		pro.cacheWritesPrice!.should.equal(0.66)
-		pro.cacheReadsPrice!.should.equal(0.022)
-		pro.pricingSchedule.periods[0].prices.should.deepEqual({
-			inputPrice: 0,
-			outputPrice: 3.96,
-			cacheWritesPrice: 1.32,
-			cacheReadsPrice: 0.044,
-		})
+	it("normalizes retired DeepSeek model IDs to the canonical Flash model", () => {
+		for (const apiModelId of [
+			"deepseek-v4-flash",
+			"deepseek-v4-flash-vision-exp",
+			"deepseek-v4-pro",
+			"deepseek-chat",
+			"deepseek-reasoner",
+		]) {
+			new DeepSeekHandler({ deepSeekApiKey: "test-api-key", apiModelId }).getModel().id.should.equal("deepseek-flash")
+		}
 	})
 
-	it("sends images to DeepSeek V4 Flash Vision Exp as OpenAI image URL blocks", async () => {
+	it("sends images to DeepSeek V4.1 Flash as OpenAI image URL blocks", async () => {
 		const create = sinon.stub().resolves(createAsyncIterable())
 		const handler = new DeepSeekHandler({
 			deepSeekApiKey: "test-api-key",
-			apiModelId: "deepseek-v4-flash-vision-exp",
+			apiModelId: "deepseek-flash",
 		})
 		sinon.stub(handler as any, "ensureClient").returns({ chat: { completions: { create } } })
 
@@ -93,7 +84,7 @@ describe("DeepSeekHandler", () => {
 		}
 
 		const request = create.firstCall.args[0]
-		request.model.should.equal("deepseek-v4-flash-vision-exp")
+		request.model.should.equal("deepseek-flash")
 		request.max_tokens.should.equal(384_000)
 		request.messages.should.deepEqual([
 			{ role: "system", content: "system" },
@@ -111,7 +102,7 @@ describe("DeepSeekHandler", () => {
 		const create = sinon.stub().resolves(createAsyncIterable())
 		const handler = new DeepSeekHandler({
 			deepSeekApiKey: "test-api-key",
-			apiModelId: "deepseek-v4-flash-vision-exp",
+			apiModelId: "deepseek-flash",
 		})
 		sinon.stub(handler as any, "ensureClient").returns({ chat: { completions: { create } } })
 
@@ -159,4 +150,50 @@ describe("DeepSeekHandler", () => {
 			},
 		])
 	})
+
+	it("replays reasoning from every prior assistant turn when tools are present", async () => {
+		const create = sinon.stub().resolves(createAsyncIterable())
+		const handler = new DeepSeekHandler({
+			deepSeekApiKey: "test-api-key",
+			apiModelId: "deepseek-flash",
+		})
+		sinon.stub(handler as any, "ensureClient").returns({ chat: { completions: { create } } })
+
+		for await (const _chunk of handler.createMessage(
+			"system",
+			[
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "prior reasoning", signature: "" },
+						{ type: "text", text: "prior answer" },
+					],
+				},
+				{ role: "user", content: [{ type: "text", text: "continue" }] },
+			],
+			[
+				{
+					type: "function",
+					function: {
+						name: "lookup",
+						description: "Look something up",
+						parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+					},
+				},
+			],
+		)) {
+			// Consume the stream so the request is issued.
+		}
+
+		const request = create.firstCall.args[0]
+		request.messages[1].should.deepEqual({
+			role: "assistant",
+			content: "prior answer",
+			reasoning_content: "prior reasoning",
+		})
+		request.tools[0].function.strict.should.equal(true)
+		request.extra_body.should.deepEqual({ thinking: { type: "enabled" } })
+		request.should.not.have.property("budget_tokens")
+	})
+
 })

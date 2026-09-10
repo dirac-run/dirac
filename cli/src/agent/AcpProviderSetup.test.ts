@@ -38,7 +38,7 @@ describe("AcpProviderSetup", () => {
 				nonce,
 				provider: "deepseek",
 				apiKey: "secret-key",
-				modelId: "deepseek-chat",
+				modelId: "deepseek-flash",
 			}),
 		})
 
@@ -47,7 +47,7 @@ describe("AcpProviderSetup", () => {
 		expect(mocks.configureApiKeyProvider).toHaveBeenCalledWith({
 			provider: "deepseek",
 			apiKey: "secret-key",
-			modelId: "deepseek-chat",
+			modelId: "deepseek-flash",
 			baseUrl: undefined,
 			azureApiVersion: undefined,
 		})
@@ -78,7 +78,7 @@ describe("AcpProviderSetup", () => {
 				nonce,
 				provider: "deepseek",
 				apiKey: "secret-key",
-				modelId: "deepseek-chat",
+				modelId: "deepseek-flash",
 			}),
 		})
 		expect(successfulResponse.status).toBe(200)

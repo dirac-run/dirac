@@ -17,7 +17,7 @@ function modelIdSupportsReasoningEffort(modelId?: string): boolean {
 		id.includes("/o") ||
 		id.startsWith("o") ||
 		id.includes("grok") ||
-		id.includes("deepseek-v4")
+		id.includes("deepseek")
 	)
 }
 

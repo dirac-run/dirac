@@ -511,8 +511,8 @@ describe("shouldDoQuickAuth", () => {
 		// User's case: provider and modelid as flags, apikey inferred from env
 		expect(
 			shouldDoQuickAuth(
-				{ provider: "deepseek", modelid: "deepseek-v4-pro" },
-				{ provider: "deepseek", apikey: "sk-xxxx", modelid: "deepseek-v4-pro" },
+				{ provider: "deepseek", modelid: "deepseek-flash" },
+				{ provider: "deepseek", apikey: "sk-xxxx", modelid: "deepseek-flash" },
 			),
 		).toBe(true)
 	})

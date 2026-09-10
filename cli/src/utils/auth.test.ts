@@ -6,7 +6,7 @@ describe("isSelectedProviderConfigured", () => {
 	it("accepts a coherent DeepSeek configuration", () => {
 		const configuration = {
 			actModeApiProvider: "deepseek",
-			actModeApiModelId: "deepseek-chat",
+			actModeApiModelId: "deepseek-flash",
 			deepSeekApiKey: "deepseek-key",
 		} as ApiConfiguration
 

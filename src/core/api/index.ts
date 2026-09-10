@@ -319,7 +319,6 @@ const PROVIDER_REGISTRY: Record<
 			disableRetries: cfg.disableRetries,
 			deepSeekApiKey: cfg.deepSeekApiKey,
 			reasoningEffort: mc.reasoningEffort,
-			thinkingBudgetTokens: mc.thinkingBudgetTokens,
 			apiModelId: mc.apiModelId,
 		}),
 	requesty: (cfg, mc) =>

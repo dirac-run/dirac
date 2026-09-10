@@ -92,15 +92,15 @@ describe("DiracAgent ACP authentication", () => {
 			apiKey: process.env.DIRAC_API_KEY,
 		}
 		process.env.DIRAC_PROVIDER = "deepseek"
-		process.env.DIRAC_MODEL = "deepseek-chat"
+		process.env.DIRAC_MODEL = "deepseek-flash"
 		process.env.DIRAC_API_KEY = "deepseek-key"
 
 		try {
 			const overrides = (new DiracAgent({}) as any).createStartupSessionOverrides()
 			expect(overrides.actModeApiProvider).toBe("deepseek")
 			expect(overrides.planModeApiProvider).toBe("deepseek")
-			expect(overrides.actModeApiModelId).toBe("deepseek-chat")
-			expect(overrides.planModeApiModelId).toBe("deepseek-chat")
+			expect(overrides.actModeApiModelId).toBe("deepseek-flash")
+			expect(overrides.planModeApiModelId).toBe("deepseek-flash")
 		} finally {
 			if (previous.provider === undefined) delete process.env.DIRAC_PROVIDER
 			else process.env.DIRAC_PROVIDER = previous.provider

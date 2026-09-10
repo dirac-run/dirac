@@ -112,7 +112,7 @@ The generic `DIRAC_*` variables select one provider explicitly for both Act and 
 
 ```bash
 DIRAC_PROVIDER=deepseek \
-DIRAC_MODEL=deepseek-chat \
+DIRAC_MODEL=deepseek-flash \
 DIRAC_API_KEY="$DEEPSEEK_API_KEY" \
 dirac --acp
 ```

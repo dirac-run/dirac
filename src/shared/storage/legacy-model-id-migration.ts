@@ -12,6 +12,18 @@ const LEGACY_MODEL_ID_SETTINGS = [
 	"actModeVercelAiGatewayModelId",
 ] as const satisfies readonly SettingsKey[]
 
+const RETIRED_DEEPSEEK_MODEL_IDS = new Set([
+	"deepseek-v4-flash",
+	"deepseek-v4-flash-vision-exp",
+	"deepseek-v4-pro",
+	"deepseek-chat",
+	"deepseek-reasoner",
+])
+
+export function normalizeRetiredDeepSeekModelId(modelId: string): string {
+	return RETIRED_DEEPSEEK_MODEL_IDS.has(modelId) ? "deepseek-flash" : modelId
+}
+
 /**
  * Removes Dirac's retired `:1m` model-id segment while preserving real suffixes
  * such as Anthropic fast mode and OpenRouter presets.
@@ -51,12 +63,39 @@ export function buildLegacyModelIdStateUpdates(
 	state: Partial<GlobalStateAndSettings>,
 ): Partial<GlobalStateAndSettings> {
 	const synthetic1mUpdates = buildLegacySynthetic1mStateUpdates(state)
+	const normalizedState = { ...state, ...synthetic1mUpdates }
 	return {
 		...synthetic1mUpdates,
-		...buildLegacyAnthropicFastModeStateUpdates({ ...state, ...synthetic1mUpdates }),
+		...buildRetiredDeepSeekModelStateUpdates(normalizedState),
+		...buildLegacyAnthropicFastModeStateUpdates(normalizedState),
 	}
 }
-
+export function buildRetiredDeepSeekModelStateUpdates(
+	state: Partial<GlobalStateAndSettings>,
+): Partial<GlobalStateAndSettings> {
+	const updates: Partial<GlobalStateAndSettings> = {}
+	for (const mode of ["plan", "act"] as const) {
+		const providerKey = `${mode}ModeApiProvider` as const
+		const modelKey = `${mode}ModeApiModelId` as const
+		if (state[providerKey] !== "deepseek") continue
+		const modelId = state[modelKey]
+		if (!modelId) continue
+		const normalizedModelId = normalizeRetiredDeepSeekModelId(modelId)
+		if (normalizedModelId !== modelId) updates[modelKey] = normalizedModelId
+	}
+	const utilitySelection = state.utilityModelSelection
+	if (utilitySelection?.provider === "deepseek") {
+		const normalizedModelId = normalizeRetiredDeepSeekModelId(utilitySelection.modelId)
+		if (normalizedModelId !== utilitySelection.modelId) {
+			updates.utilityModelSelection = {
+				...utilitySelection,
+				modelId: normalizedModelId,
+				modelInfo: undefined,
+			}
+		}
+	}
+	return updates
+}
 export function normalizeLegacyOpenRouterPinMap(
 	pins: Record<string, string[]> | undefined,
 ): Record<string, string[]> | undefined {
@@ -129,7 +168,8 @@ export function normalizeLegacyModelProviderPresets(presets: ModelProviderPreset
 }
 
 function normalizeLegacyModelProviderPreset(preset: ModelProviderPreset): ModelProviderPreset {
-	const modelId = normalizeLegacyAnthropicFastModeModelId(normalizeLegacySynthetic1mModelId(preset.modelId))
+	const legacyModelId = normalizeLegacyAnthropicFastModeModelId(normalizeLegacySynthetic1mModelId(preset.modelId))
+	const modelId = preset.provider === "deepseek" ? normalizeRetiredDeepSeekModelId(legacyModelId) : legacyModelId
 	const awsBedrockCustomModelBaseId = preset.awsBedrockCustomModelBaseId
 		? normalizeLegacySynthetic1mModelId(preset.awsBedrockCustomModelBaseId)
 		: undefined
