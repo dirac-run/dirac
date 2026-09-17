@@ -19,6 +19,7 @@ interface ToolCallDelta {
  */
 export class ToolCallProcessor {
 	private toolCallStateByIndex: Map<number, { id: string; name: string }>
+	private lastActiveToolCallIndex?: number
 
 	constructor() {
 		this.toolCallStateByIndex = new Map()
@@ -55,32 +56,54 @@ export class ToolCallProcessor {
 				Logger.debug(`ToolCallProcessor: received function name "${toolCallDelta.function.name}"`)
 			}
 
+			if (toolCallState.id && toolCallState.name) {
+				this.lastActiveToolCallIndex = toolCallIndex
+			}
+
 			// Only yield when we have all required fields: id, name, and arguments (or web_search query)
 			const hasFunctionArgs = toolCallDelta.function?.arguments !== undefined
 			const hasWebSearchQuery = toolCallDelta.web_search?.query !== undefined
 
-			if (toolCallState.id && toolCallState.name && (hasFunctionArgs || hasWebSearchQuery)) {
+			let targetState = toolCallState
+			if ((!targetState.id || !targetState.name) && (hasFunctionArgs || hasWebSearchQuery)) {
+				if (this.lastActiveToolCallIndex !== undefined) {
+					const activeState = this.toolCallStateByIndex.get(this.lastActiveToolCallIndex)
+					if (activeState?.id && activeState?.name) {
+						Logger.warn(
+							`ToolCallProcessor: received arguments delta for index ${toolCallIndex} without tool id/name; re-attributing to active tool call index ${this.lastActiveToolCallIndex}`,
+						)
+						targetState = activeState
+					}
+				}
+				if (!targetState.id || !targetState.name) {
+					Logger.warn(
+						`ToolCallProcessor: dropping argument fragment for index ${toolCallIndex} with no active tool call id/name`,
+					)
+				}
+			}
+
+			if (targetState.id && targetState.name && (hasFunctionArgs || hasWebSearchQuery)) {
 				yield {
 					type: "tool_calls",
 					tool_call:
-						toolCallState.name === "web_search"
+						targetState.name === "web_search"
 							? {
-								call_id: toolCallState.id,
+								call_id: targetState.id,
 								type: "web_search",
 								web_search: toolCallDelta.web_search || { query: "" },
 								function: {
-									id: toolCallState.id,
+									id: targetState.id,
 									name: "web_search",
 									arguments: toolCallDelta.web_search?.query || "",
 								},
 							}
 							: {
 								...toolCallDelta,
-								call_id: toolCallState.id,
+								call_id: targetState.id,
 								function: {
 									...toolCallDelta.function,
-									id: toolCallState.id,
-									name: toolCallState.name,
+									id: targetState.id,
+									name: targetState.name,
 								},
 							},
 				}
@@ -104,6 +127,7 @@ export class ToolCallProcessor {
 	 */
 	reset(): void {
 		this.toolCallStateByIndex.clear()
+		this.lastActiveToolCallIndex = undefined
 	}
 
 	/**
