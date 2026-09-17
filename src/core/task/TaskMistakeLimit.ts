@@ -1,7 +1,7 @@
 import { formatResponse } from "@core/formatResponse"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { showSystemNotification } from "@integrations/notifications"
-import { CardStatus } from "@shared/ExtensionMessage"
+import { CardStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { DiracContent, type DiracUserContent } from "@shared/messages/content"
 import type { DeepReadonly } from "./runtime/TaskWorkingConfiguration"
@@ -14,6 +14,7 @@ export interface TaskMistakeLimitContext {
 	taskState: TaskState
 	settings: DeepReadonly<Settings>
 	taskMessenger: TaskMessenger
+	postStateToWebview?: () => Promise<void>
 }
 
 export async function handleMistakeLimitReached(
@@ -35,6 +36,8 @@ export async function handleMistakeLimitReached(
 			body: errorMessage,
 		})
 		await card.finalize(CardStatus.ERROR)
+		ctx.taskState.status = TaskStatus.CANCELLED
+		await ctx.postStateToWebview?.()
 		// End the task loop with failure
 		return { didEndLoop: true, userContent } // didEndLoop = true, signals task completion/failure
 	}

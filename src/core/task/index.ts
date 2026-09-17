@@ -1010,7 +1010,12 @@ export class Task {
 		userContent: DiracContent[],
 	): Promise<{ didEndLoop: boolean; userContent: DiracContent[] }> {
 		return handleMistakeLimitReached(
-			{ taskState: this.taskState, settings: this.workingConfiguration.settings, taskMessenger: this.taskMessenger },
+			{
+				taskState: this.taskState,
+				settings: this.workingConfiguration.settings,
+				taskMessenger: this.taskMessenger,
+				postStateToWebview: () => this.postStateToWebview(),
+			},
 			userContent,
 		)
 	}
