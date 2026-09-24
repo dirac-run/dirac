@@ -74,6 +74,33 @@ describe("GoalChildToolEnvironmentFactory", () => {
 		assert.equal(waits, 0)
 	})
 
+	// ToolExecutorCoordinator throws "left nonterminal card(s)" if the permission card is
+	// still waiting when a Goal child's custom tool returns.
+	for (const [action, expected] of [
+		[DiracAskResponse.APPROVE, CardStatus.SUCCESS],
+		[DiracAskResponse.REJECT, CardStatus.CANCELLED],
+		[DiracAskResponse.MESSAGE, CardStatus.SKIPPED],
+	] as const) {
+		it(`askPermission finalizes a child permission card as ${expected} after ${action}`, async () => {
+			const { config } = createMockTaskConfig({
+				overrides: {
+					yoloModeToggled: false,
+					isSubagentExecution: false,
+					autoApprover: { isUnrestrictedAutoApprove: () => false } as any,
+				},
+			})
+			const environment = new GoalChildToolEnvironmentFactory(
+				"child-1",
+				"task",
+				owner({ waitForInteraction: async () => ({ action, response: action }) }),
+			).create(config, "my_custom_tool")
+
+			const result = await environment.interaction.askPermission("May I?")
+
+			assert.equal(result.card.status, expected)
+		})
+	}
+
 	it("persists response cards with the recovery identity", async () => {
 		const { config, taskMessenger } = createMockTaskConfig({
 			overrides: { yoloModeToggled: false, isSubagentExecution: false },

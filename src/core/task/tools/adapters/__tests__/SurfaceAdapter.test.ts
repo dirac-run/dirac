@@ -537,6 +537,31 @@ describe("SurfaceAdapter", () => {
 			result.approved.should.equal(false)
 		})
 
+		// ToolExecutorCoordinator throws "left nonterminal card(s)" on any card still
+		// WAITING_FOR_INPUT when the tool returns. Custom tools call askPermission and return a
+		// string; none of them knows about that contract, so the trait has to close the card.
+		const finalizeCases = [
+			{ action: DiracAskResponse.APPROVE, expected: CardStatus.SUCCESS },
+			{ action: DiracAskResponse.REJECT, expected: CardStatus.CANCELLED },
+			{ action: DiracAskResponse.MESSAGE, expected: CardStatus.SKIPPED },
+		]
+		for (const { action, expected } of finalizeCases) {
+			it(`askPermission finalizes the card as ${expected} after ${action}`, async () => {
+				const fakeHandle = {
+					id: "card-1",
+					update: sinon.stub().resolves(),
+					appendBody: sinon.stub().resolves(),
+					finalize: sinon.stub().resolves(),
+					waitForInteraction: sinon.stub().resolves({ action }),
+				}
+				config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
+
+				await adapter.interaction.askPermission("May I?")
+
+				sinon.assert.calledOnceWithExactly(fakeHandle.finalize, expected, undefined)
+			})
+		}
+
 		it("attaches an effect preview diff and raw input to permission cards", async () => {
 			const fakeHandle = {
 				id: "card-1",

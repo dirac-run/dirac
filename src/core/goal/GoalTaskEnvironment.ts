@@ -17,6 +17,7 @@ import type {
 } from "@core/task/tools/interfaces/ToolEnvironmentFactory"
 import { SurfaceAdapter } from "@core/task/tools/adapters/SurfaceAdapter"
 import { DelegatingCardHandle } from "@core/task/tools/adapters/DelegatingCardHandle"
+import { askPermissionOnCard } from "@core/task/tools/adapters/traits/UiTraitBuilder"
 import type { TaskConfig } from "@core/task/tools/types/TaskConfig"
 
 export interface GoalChildInteractionResult {
@@ -153,28 +154,7 @@ class GoalChildToolEnvironment implements ToolExecutionEnvironment {
 			publishState: async () => undefined,
 		}
 		this.interaction = {
-			askPermission: async (message, preview) => {
-				const card = await this.ui.createCard({
-					header: "Permission Request",
-					body: message,
-					requireApproval: true,
-					permissionRequestKind: preview?.manualOnly ? "manual_tool" : "tool",
-					collapsed: false,
-					...(preview?.diffs ? { diffs: preview.diffs, renderType: "diff" as const } : {}),
-					...(preview?.rawInput ? { rawInput: preview.rawInput } : {}),
-				})
-				const result = await card.waitForInteraction()
-				return {
-					approved: result.action === DiracAskResponse.APPROVE,
-					action: result.action,
-					value: result.value,
-					text: result.text,
-					images: result.images,
-					files: result.files,
-					userEdits: result.userEdits,
-					card,
-				}
-			},
+			askPermission: (message, preview) => askPermissionOnCard((params) => this.ui.createCard(params), message, preview),
 		}
 		this.responseObserver = observeResponses
 			? {

@@ -1,6 +1,6 @@
 import type { UtilityPermissionRequest } from "@core/permissions/UtilityPermissionDecisionService"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-import { CardStatus } from "@shared/ExtensionMessage"
+import { CardStatus, isFinalStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import type { IUITrait, IInteractionTrait, ICardHandle, CardParams } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
@@ -32,28 +32,47 @@ export function buildInteractionTrait(
 	createCardFn: (params: CardParams) => Promise<ICardHandle>,
 ): IInteractionTrait {
 	return {
-		askPermission: async (message, preview) => {
-			const card = await createCardFn({
-				header: "Permission Request",
-				body: message,
-				requireApproval: true,
-				permissionRequestKind: preview?.manualOnly ? "manual_tool" : "tool",
-				collapsed: false,
-				...(preview?.diffs ? { diffs: preview.diffs, renderType: "diff" } : {}),
-				...(preview?.rawInput ? { rawInput: preview.rawInput } : {}),
-			})
-			const result = await card.waitForInteraction()
-			return {
-				approved: result.action === DiracAskResponse.APPROVE,
-				action: result.action,
-				value: result.value,
-				text: result.text,
-				images: result.images as string[] | undefined,
-				files: result.files as string[] | undefined,
-				userEdits: result.userEdits,
-				card,
-			}
-		},
+		askPermission: (message, preview) => askPermissionOnCard(createCardFn, message, preview),
+	}
+}
+
+// Shared by every IInteractionTrait (task and Goal child): shows the permission card,
+// waits for the answer, and finalizes the card.
+export async function askPermissionOnCard(
+	createCardFn: (params: CardParams) => Promise<ICardHandle>,
+	...[message, preview]: Parameters<IInteractionTrait["askPermission"]>
+): ReturnType<IInteractionTrait["askPermission"]> {
+	const card = await createCardFn({
+		header: "Permission Request",
+		body: message,
+		requireApproval: true,
+		permissionRequestKind: preview?.manualOnly ? "manual_tool" : "tool",
+		collapsed: false,
+		...(preview?.diffs ? { diffs: preview.diffs, renderType: "diff" } : {}),
+		...(preview?.rawInput ? { rawInput: preview.rawInput } : {}),
+	})
+	const result = await card.waitForInteraction()
+	// Finalize here, not in the tool. ToolExecutorCoordinator throws
+	// "left nonterminal card(s)" on any card still WAITING_FOR_INPUT when the tool
+	// returns, and a custom tool has no reason to know that — every custom tool that
+	// asked for permission and was answered by hand hit it.
+	// Mirrors WriteToFileTool: a message instead of an answer is SKIPPED.
+	if (!isFinalStatus(card.status)) {
+		if (result.action === DiracAskResponse.MESSAGE) {
+			await card.finalize(CardStatus.SKIPPED)
+		} else {
+			await card.finalize(result.action === DiracAskResponse.APPROVE ? CardStatus.SUCCESS : CardStatus.CANCELLED)
+		}
+	}
+	return {
+		approved: result.action === DiracAskResponse.APPROVE,
+		action: result.action,
+		value: result.value,
+		text: result.text,
+		images: result.images as string[] | undefined,
+		files: result.files as string[] | undefined,
+		userEdits: result.userEdits,
+		card,
 	}
 }
 
