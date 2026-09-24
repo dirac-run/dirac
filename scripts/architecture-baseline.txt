@@ -1,0 +1,240 @@
+# check_id	path:content — known-debt violations; shrink to zero as items land
+check_env_centralized	src/core/api/providers/openai-codex.ts
+check_env_centralized	src/core/controller/grpc-recorder/grpc-recorder.builder.ts
+check_env_centralized	src/core/controller/grpc-recorder/log-file-handler.ts
+check_env_centralized	src/core/hooks/HookDiscoveryCache.ts
+check_env_centralized	src/core/permissions/CommandPermissionController.ts
+check_env_centralized	src/core/prompts/system-prompt/registry/PromptBuilder.ts
+check_env_centralized	src/core/task/TaskPromptArtifacts.ts
+check_env_centralized	src/core/task/tools/context/DiracContext.ts
+check_env_centralized	src/core/task/tools/discovery/ToolDiscoveryService.ts
+check_env_centralized	src/core/task/tools/discovery/UserToolLoader.ts
+check_env_centralized	src/core/task/tools/modules/upsert_tool/UpsertTool.ts
+check_env_centralized	src/core/task/tools/subagent/AgentConfigLoader.ts
+check_env_centralized	src/core/webview/WebviewProvider.ts
+check_env_centralized	src/core/workspace/WorkspaceResolver.ts
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: usage.input_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:max_tokens: this.options.modelInfo?.maxTokens || 8192,
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:outputTokens: chunk.usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:outputTokens: usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/anthropic.ts:const budget_tokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/anthropic.ts:inputTokens: usage.input_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/anthropic.ts:max_tokens: model.info.maxTokens || 8192,
+check_no_numeric_or_default	src/core/api/providers/anthropic.ts:outputTokens: chunk.usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/anthropic.ts:outputTokens: usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/baseten.ts:const cost = calculateApiCostOpenAI(modelInfo, usage.prompt_tokens || 0, usage.completion_tokens || 0)
+check_no_numeric_or_default	src/core/api/providers/baseten.ts:inputTokens: usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/baseten.ts:outputTokens: usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/bedrock-converse-utils.ts:maxTokens: modelInfo.maxTokens || 8192,
+check_no_numeric_or_default	src/core/api/providers/bedrock-stream-parser.ts:const cacheReadInputTokens = usage.cacheReadInputTokens || 0
+check_no_numeric_or_default	src/core/api/providers/bedrock-stream-parser.ts:const cacheWriteInputTokens = usage.cacheWriteInputTokens || 0
+check_no_numeric_or_default	src/core/api/providers/bedrock-stream-parser.ts:const inputTokens = usage.inputTokens || 0
+check_no_numeric_or_default	src/core/api/providers/bedrock-stream-parser.ts:const outputTokens = usage.outputTokens || 0
+check_no_numeric_or_default	src/core/api/providers/bedrock.ts:const budget_tokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/bedrock.ts:inferenceConfig: getInferenceConfig(model.info, "anthropic", this.options.thinkingBudgetTokens || 0),
+check_no_numeric_or_default	src/core/api/providers/bedrock.ts:inferenceConfig: getInferenceConfig(model.info, "nova", this.options.thinkingBudgetTokens || 0),
+check_no_numeric_or_default	src/core/api/providers/bedrock.ts:inferenceConfig: { maxTokens: model.info.maxTokens || 8192, temperature: model.info.temperature ?? 0 },
+check_no_numeric_or_default	src/core/api/providers/bedrock.ts:max_tokens: model.info.maxTokens || 8000,
+check_no_numeric_or_default	src/core/api/providers/cerebras.ts:const inputPrice = model.info.inputPrice || 0
+check_no_numeric_or_default	src/core/api/providers/cerebras.ts:const outputPrice = model.info.outputPrice || 0
+check_no_numeric_or_default	src/core/api/providers/cerebras.ts:inputTokens: usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/cerebras.ts:outputTokens: usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/dify.ts:inputTokens: parsed.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/dify.ts:outputTokens: parsed.usage.completion_tokens || parsed.usage.total_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/dify.ts:totalCost: parsed.usage.total_price || 0,
+check_no_numeric_or_default	src/core/api/providers/doubao.ts:cacheReadTokens: chunk.usage.prompt_cache_hit_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/doubao.ts:cacheWriteTokens: chunk.usage.prompt_cache_miss_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/doubao.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/doubao.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/github-copilot.ts:max_tokens: modelData?.capabilities.limits.max_output_tokens || 4096,
+check_no_numeric_or_default	src/core/api/providers/github-copilot.ts:yield { type: "usage", inputTokens: json.usage.input_tokens || 0, outputTokens: json.usage.output_tokens || 0 }
+check_no_numeric_or_default	src/core/api/providers/github-copilot.ts:yield { type: "usage", inputTokens: json.usage.prompt_tokens || 0, outputTokens: json.usage.completion_tokens || 0 }
+check_no_numeric_or_default	src/core/api/providers/groq.ts:const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/groq.ts:const inputTokens = usage?.prompt_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/groq.ts:const outputTokens = usage?.completion_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/huawei-cloud-maas.ts:inputTokens: finalUsage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/huawei-cloud-maas.ts:outputTokens: finalUsage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/huggingface.ts:const inputTokens = usage.prompt_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/huggingface.ts:const outputTokens = usage.completion_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:)) || 0
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const budgetTokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const cacheCreationCost = (cache_creation_tokens || 0) * (costInfo.cacheCreationCostPerToken || 0)
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const cacheReadCost = (cache_read_tokens || 0) * (costInfo.cacheReadCostPerToken || 0)
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const cacheReadTokens = usage.cache_read_input_tokens || usage.prompt_cache_hit_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const cacheWriteTokens = usage.cache_creation_input_tokens || usage.prompt_cache_miss_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:const inputCost = Math.max(0, prompt_tokens - (cache_read_tokens || 0)) * costInfo.inputCostPerToken
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:contentIndex === (message.content?.length || 0) - 1
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:inputCostPerToken: matchingModel.model_info.input_cost_per_token || 0,
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:inputTokens: usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:outputCostPerToken: matchingModel.model_info.output_cost_per_token || 0,
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:outputTokens: usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/litellm.ts:usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/minimax.ts:const budget_tokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/minimax.ts:inputTokens: usage.input_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/minimax.ts:max_tokens: model.info.maxTokens || 8192,
+check_no_numeric_or_default	src/core/api/providers/minimax.ts:outputTokens: usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/minimax.ts:yield { type: "usage", inputTokens: chunk.usage.input_tokens || 0, outputTokens: chunk.usage.output_tokens || 0 }
+check_no_numeric_or_default	src/core/api/providers/mistral.ts:inputTokens: chunk.data.usage.promptTokens || 0,
+check_no_numeric_or_default	src/core/api/providers/mistral.ts:outputTokens: chunk.data.usage.completionTokens || 0,
+check_no_numeric_or_default	src/core/api/providers/moonshot.ts:inputTokens: (usage.prompt_tokens || 0) - (usage.cached_tokens ?? 0),
+check_no_numeric_or_default	src/core/api/providers/moonshot.ts:outputTokens: usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/nebius.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/nebius.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/nousresearch.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/nousresearch.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/openai-responses-utils.ts:const cacheReadTokens = usage.input_tokens_details?.cached_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/openai-responses-utils.ts:const cacheWriteTokens = usage.input_tokens_details?.cache_creation_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/openai-responses-utils.ts:const inputTokens = usage.input_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/openai-responses-utils.ts:const outputTokens = usage.output_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/openai-responses-utils.ts:const reasoningTokens = usage.output_tokens_details?.reasoning_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/qwen-code.ts:inputTokens: apiChunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/qwen-code.ts:outputTokens: apiChunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/qwen.ts:const budgetTokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/requesty.ts:const inputTokens = usage.prompt_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/requesty.ts:const outputTokens = usage.completion_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/requesty.ts:const thinkingBudget = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/sambanova.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/sambanova.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/vercel-ai-gateway.ts:cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/vercel-ai-gateway.ts:const totalCost = (chunk.usage.cost || 0) + (chunk.usage.cost_details?.upstream_inference_cost || 0)
+check_no_numeric_or_default	src/core/api/providers/vercel-ai-gateway.ts:inputTokens: (chunk.usage.prompt_tokens || 0) - (chunk.usage.prompt_tokens_details?.cached_tokens || 0),
+check_no_numeric_or_default	src/core/api/providers/vercel-ai-gateway.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/vertex.ts:const budget_tokens = this.options.thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/providers/vertex.ts:inputTokens: usage.input_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/vertex.ts:max_tokens: model.info.maxTokens || 8192,
+check_no_numeric_or_default	src/core/api/providers/vertex.ts:outputTokens: usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/vertex.ts:yield { type: "usage", inputTokens: 0, outputTokens: chunk.usage?.output_tokens || 0 }
+check_no_numeric_or_default	src/core/api/providers/wandb.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/wandb.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/xai.ts:cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/xai.ts:cacheWriteTokens: chunk.usage.prompt_cache_miss_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/xai.ts:inputTokens: chunk.usage.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/xai.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/zai.ts:const cacheReadTokens = chunk.usage.prompt_tokens_details?.cached_tokens || 0
+check_no_numeric_or_default	src/core/api/providers/zai.ts:inputTokens: Math.max(0, (chunk.usage.prompt_tokens || 0) - cacheReadTokens),
+check_no_numeric_or_default	src/core/api/providers/zai.ts:outputTokens: chunk.usage.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/providers/zai.ts:reasoningTokens: (chunk.usage as any).completion_tokens_details?.reasoning_tokens || 0,
+check_no_numeric_or_default	src/core/api/transform/openai-format.ts:input_tokens: completion.usage?.prompt_tokens || 0,
+check_no_numeric_or_default	src/core/api/transform/openai-format.ts:output_tokens: completion.usage?.completion_tokens || 0,
+check_no_numeric_or_default	src/core/api/transform/openai-usage.ts:const outputTokens = usage.completion_tokens || 0
+check_no_numeric_or_default	src/core/api/transform/openai-usage.ts:const totalInputTokens = usage.prompt_tokens || 0
+check_no_numeric_or_default	src/core/api/transform/vercel-ai-gateway-stream.ts:const budgetTokens = thinkingBudgetTokens || 0
+check_no_numeric_or_default	src/core/api/utils/messages_api_support.ts:inputTokens: usage.input_tokens || 0,
+check_no_numeric_or_default	src/core/api/utils/messages_api_support.ts:outputTokens: chunk.usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/utils/messages_api_support.ts:outputTokens: usage.output_tokens || 0,
+check_no_numeric_or_default	src/core/api/utils/responses_api_support.ts:const cacheReadTokens = usage.output_tokens_details?.reasoning_tokens || 0
+check_no_numeric_or_default	src/core/api/utils/responses_api_support.ts:const cacheWriteTokens = usage.input_tokens_details?.cached_tokens || 0
+check_no_numeric_or_default	src/core/api/utils/responses_api_support.ts:const inputTokens = usage.input_tokens || 0
+check_no_numeric_or_default	src/core/api/utils/responses_api_support.ts:const outputTokens = usage.output_tokens || 0
+check_no_numeric_or_default	src/core/api/utils/responses_api_support.ts:const totalTokens = usage.total_tokens || 0
+check_no_numeric_or_default	src/core/commands/reconstructTaskHistory.ts:cacheReads += usage.cacheReads || 0
+check_no_numeric_or_default	src/core/commands/reconstructTaskHistory.ts:cacheWrites += usage.cacheWrites || 0
+check_no_numeric_or_default	src/core/commands/reconstructTaskHistory.ts:tokensIn += usage.tokensIn || 0
+check_no_numeric_or_default	src/core/commands/reconstructTaskHistory.ts:tokensOut += usage.tokensOut || 0
+check_no_numeric_or_default	src/core/commands/reconstructTaskHistory.ts:totalCost += usage.totalCost || 0
+check_no_numeric_or_default	src/core/context/context-management/ContextManager.ts:const tokensUsed = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
+check_no_numeric_or_default	src/core/context/context-management/ContextManager.ts:const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
+check_no_numeric_or_default	src/core/context/context-management/context-window-utils.ts:let contextWindow = api.getModel().info.contextWindow || 256_000
+check_no_numeric_or_default	src/core/controller/file/searchFilesHelpers.ts:return searchWorkspaceFiles(request.query || "", workspacePath, request.limit || 20, selectedType)
+check_no_numeric_or_default	src/core/controller/file/searchFilesHelpers.ts:return searchWorkspaceFilesMultiroot(request.query || "", wm, request.limit || 20, selectedType, request.workspaceHint)
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:cacheReadsPrice: modelInfo.cacheReadsPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:cacheReadsPrice: staticModelInfo?.cacheReadsPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:cacheWritesPrice: modelInfo.cacheWritesPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:cacheWritesPrice: staticModelInfo?.cacheWritesPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:inputPrice: parsePrice(rawModel.pricing?.prompt) || staticModelInfo?.inputPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshBasetenModels.ts:outputPrice: parsePrice(rawModel.pricing?.completion) || staticModelInfo?.outputPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:cacheReadsPrice: modelInfo.cacheReadsPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:cacheReadsPrice: staticModelInfo?.cacheReadsPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:cacheWritesPrice: modelInfo.cacheWritesPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:cacheWritesPrice: staticModelInfo?.cacheWritesPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:const contextWindow = rawModel.context_window || 8192
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:contextWindow: rawModel.context_window || staticModelInfo?.contextWindow || 8192,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:inputPrice: staticModelInfo?.inputPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:maxTokens: rawModel.max_completion_tokens || staticModelInfo?.maxTokens || 8192,
+check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:outputPrice: staticModelInfo?.outputPrice || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:cacheReadsPrice: parsePrice(model.cached_price) || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:cacheWritesPrice: parsePrice(model.caching_price) || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:inputPrice: parsePrice(model.input_price) || 0,
+check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:outputPrice: parsePrice(model.output_price) || 0,
+check_no_numeric_or_default	src/core/controller/state/updateTerminalConnectionTimeout.ts:controller.stateManager.setGlobalState("shellIntegrationTimeout", timeoutMs || 4000)
+check_no_numeric_or_default	src/core/controller/task/getTotalTasksSize.ts:return { value: totalSize || 0 }
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:cacheReads: fetchedItem.cacheReads || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:cacheReads: historyItem.cacheReads || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:cacheWrites: fetchedItem.cacheWrites || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:cacheWrites: historyItem.cacheWrites || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:size: fetchedItem.size || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:size: historyItem.size || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:tokensIn: fetchedItem.tokensIn || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:tokensIn: historyItem.tokensIn || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:tokensOut: fetchedItem.tokensOut || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:tokensOut: historyItem.tokensOut || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:totalCost: fetchedItem.totalCost || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:totalCost: historyItem.totalCost || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:ts: fetchedItem.ts || 0,
+check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:ts: historyItem.ts || 0,
+check_no_numeric_or_default	src/core/controller/ui/assembleModelState.ts:lastDismissedCliBannerVersion: stateManager.getGlobalStateKey("lastDismissedCliBannerVersion") || 0,
+check_no_numeric_or_default	src/core/controller/ui/assembleModelState.ts:lastDismissedInfoBannerVersion: stateManager.getGlobalStateKey("lastDismissedInfoBannerVersion") || 0,
+check_no_numeric_or_default	src/core/controller/ui/assembleModelState.ts:lastDismissedModelBannerVersion: stateManager.getGlobalStateKey("lastDismissedModelBannerVersion") || 0,
+check_no_numeric_or_default	src/core/hooks/precompact-executor.ts:tokensIn: apiReqInfo.tokensIn || 0,
+check_no_numeric_or_default	src/core/hooks/precompact-executor.ts:tokensInCache: apiReqInfo.cacheWrites || 0,
+check_no_numeric_or_default	src/core/hooks/precompact-executor.ts:tokensOut: apiReqInfo.tokensOut || 0,
+check_no_numeric_or_default	src/core/hooks/precompact-executor.ts:tokensOutCache: apiReqInfo.cacheReads || 0,
+check_no_numeric_or_default	src/core/mentions/file-mention.ts:successful.reduce((sum, r) => sum + (r.content?.length || 0), 0),
+check_no_numeric_or_default	src/core/prompts/system-prompt/registry/PromptBuilder.ts:placeholders["AVAILABLE_CORES"] = this.context.availableCores || 1
+check_no_numeric_or_default	src/core/prompts/system-prompt/spec.ts:const height = context.browserSettings?.viewport?.height || 600
+check_no_numeric_or_default	src/core/prompts/system-prompt/spec.ts:const width = context.browserSettings?.viewport?.width || 900
+check_no_numeric_or_default	src/core/task/StreamingMetricsManager.ts:(this.metrics.cacheReadTokens || 0)
+check_no_numeric_or_default	src/core/task/StreamingMetricsManager.ts:(this.metrics.cacheWriteTokens || 0) +
+check_no_numeric_or_default	src/core/task/tools/modules/condense/CondenseTool.ts:env.config.model.info.contextWindow || 256_000,
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const cacheReads = entries.reduce((acc: number, e) => acc + (e.cacheReads || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const cacheWrites = entries.reduce((acc: number, e) => acc + (e.cacheWrites || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const contextWindow = entries.reduce((acc, entry) => Math.max(acc, entry.contextWindow || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const contextWindow = entries.reduce((acc: number, e) => Math.max(acc, e.contextWindow || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const inputTokens = entries.reduce((acc: number, e) => acc + (e.inputTokens || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextTokens = entries.reduce((acc, entry) => Math.max(acc, entry.contextTokens || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextTokens = entries.reduce((acc: number, e) => Math.max(acc, e.contextTokens || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextUsagePercentage = entries.reduce((acc, entry) => Math.max(acc, entry.contextUsagePercentage || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextUsagePercentage = entries.reduce((acc: number, e) => Math.max(acc, e.contextUsagePercentage || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const outputTokens = entries.reduce((acc: number, e) => acc + (e.outputTokens || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const toolCalls = entries.reduce((acc: number, e) => acc + (e.toolCalls || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalCacheReads = entries.reduce((acc, entry) => acc + (entry.cacheReads || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalCacheWrites = entries.reduce((acc, entry) => acc + (entry.cacheWrites || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalToolCalls = entries.reduce((acc, entry) => acc + (entry.toolCalls || 0), 0)
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:const contextWindow = configuredContextWindow || 256_000
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.cacheReadTokens += chunk.cacheReadTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.cacheWriteTokens += chunk.cacheWriteTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.inputTokens += chunk.inputTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.outputTokens += chunk.outputTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:stats.cacheReadTokens += chunk.cacheReadTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:stats.cacheWriteTokens += chunk.cacheWriteTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:stats.contextWindow = context.providerInfo.model.info.contextWindow || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:stats.inputTokens += chunk.inputTokens || 0
+check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:stats.outputTokens += chunk.outputTokens || 0
+check_no_numeric_or_default	src/integrations/checkpoints/CheckpointRestoreHandler.ts:const messageIndex = diracMessages.findIndex((m) => m.id === messageId) - (offset || 0)
+check_no_numeric_or_default	src/integrations/checkpoints/CheckpointRestoreHandler.ts:const newConversationHistory = apiConversationHistory.slice(0, (message.conversationHistoryIndex || 0) + 2)
+check_no_numeric_or_default	src/integrations/checkpoints/index.ts:const changedFilesCount = (await this.storage.getTracker()?.getDiffCount(previousCheckpointHash, hash)) || 0
+check_no_numeric_or_default	src/integrations/claude-code/run.ts:MAX_THINKING_TOKENS: (thinkingBudgetTokens || 0).toString(),
+check_no_numeric_or_default	src/integrations/editor/DiffContentManager.ts:lineCount += part.count || 0
+check_no_numeric_or_default	src/integrations/terminal/CommandExecutor.ts:this.standaloneManager.setShellIntegrationTimeout(tm.shellIntegrationTimeout || 4000)
+check_no_numeric_or_default	src/integrations/terminal/CommandExecutor.ts:this.standaloneManager.setTerminalOutputLineLimit(tm.terminalOutputLineLimit || 500)
+check_no_numeric_or_default	src/services/ripgrep/index.ts:const cappedContextLines = Math.max(0, Math.min(10, contextLines || 0))
+check_no_numeric_or_default	src/services/search/file-search.ts:pathCounts.set(result.path, (pathCounts.get(result.path) || 0) + 1)
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:Logger.log(`[OTEL DEBUG]   - Metric Export Interval: ${this.config.metricExportInterval || 60000}ms`)
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:const interval = this.config.metricExportInterval || 60000
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:maxExportBatchSize: this.config.logBatchSize || 512,
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:maxQueueSize: this.config.logMaxQueueSize || 2048,
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:scheduledDelayMillis: this.config.logBatchTimeout || 5000,
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/otel-exporter-diagnostics.ts:const logsCount = logs?.resourceLogs?.[0]?.scopeLogs?.[0]?.logRecords?.length || 0
+check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/otel-exporter-diagnostics.ts:const metricsCount = metrics?.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.length || 0
+check_no_numeric_or_default	src/services/test/TestServer.ts:cost: taskData?.totalCost || 0,
+check_no_numeric_or_default	src/services/test/TestServer.ts:tokensIn: taskData?.tokensIn || 0,
+check_no_numeric_or_default	src/services/test/TestServer.ts:tokensOut: taskData?.tokensOut || 0,
+check_no_numeric_or_default	src/shared/getApiMetrics.ts:const total = (info.tokensIn || 0) + (info.tokensOut || 0) + (info.cacheWrites || 0) + (info.cacheReads || 0)
+check_no_numeric_or_default	src/utils/cost.ts:const cacheCreationInputTokensNum = cacheCreationInputTokens || 0
+check_no_numeric_or_default	src/utils/cost.ts:const cacheReadInputTokensNum = cacheReadInputTokens || 0
+check_one_tool_taxonomy	cli/src/utils/tools.ts:export const FILE_EDIT_TOOLS = new Set([
+check_one_tool_taxonomy	cli/src/utils/tools.ts:export const FILE_SAVE_TOOLS = new Set([
+check_one_tool_taxonomy	cli/src/utils/tools.ts:export const TOOL_DESCRIPTIONS: Record<string, { ask: string; say: string }> = {
