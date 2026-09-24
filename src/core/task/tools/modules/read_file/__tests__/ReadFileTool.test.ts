@@ -709,4 +709,50 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 		assert.ok(result.includes(`--- ${smallFile} ---`))
 		assert.ok(result.includes("small succeeds"))
 	})
+
+	it("gives each card its own location when reading several files", async () => {
+		const { config, validator } = createConfig()
+		const uiConfig = { ...config, isSubagentExecution: false } as TaskConfig
+		const handler = new ReadFileToolHandler(validator)
+		const a = "multi-loc-a.md"
+		const b = "multi-loc-b.md"
+		await fs.writeFile(path.join(tmpDir, a), "alpha\n")
+		await fs.writeFile(path.join(tmpDir, b), "beta\n")
+
+		const created: Array<{ header: string; locations?: Array<{ path: string; line?: number }> }> = []
+		sandbox.stub(SurfaceAdapter.prototype, "createCard").callsFake(async (params: any) => {
+			created.push(params)
+			return { finalize: async () => { }, setBody: async () => { }, update: async () => { } } as any
+		})
+
+		await handler.execute(uiConfig, {
+			type: "tool_use",
+			name: DiracDefaultTool.FILE_READ,
+			params: { paths: [a, b] },
+		})
+
+		assert.equal(created.length, 2)
+		assert.equal(created[0].locations?.[0]?.path, a)
+		assert.equal(created[1].locations?.[0]?.path, b)
+	})
+
+	it("includes the requested start line in the card location", async () => {
+		const { config, validator } = createConfig()
+		const uiConfig = { ...config, isSubagentExecution: false } as TaskConfig
+		const handler = new ReadFileToolHandler(validator)
+		const realFile = "multi-loc-range.md"
+		await fs.writeFile(path.join(tmpDir, realFile), "one\ntwo\nthree\n")
+
+		const created: Array<{ locations?: Array<{ path: string; line?: number }> }> = []
+		sandbox.stub(SurfaceAdapter.prototype, "createCard").callsFake(async (params: any) => {
+			created.push(params)
+			return { finalize: async () => { }, setBody: async () => { }, update: async () => { } } as any
+		})
+
+		await handler.execute(uiConfig, makeBlock(realFile, { start_line: 2, end_line: 3 }))
+
+		assert.equal(created.length, 1)
+		assert.equal(created[0].locations?.[0]?.path, realFile)
+		assert.equal(created[0].locations?.[0]?.line, 2)
+	})
 })

@@ -181,6 +181,7 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 					header: rangeLabel ? `Reading ${rangeLabel} from ${displayPath}` : `Reading from ${displayPath}`,
 					icon: DiracIcon.FILE_READ,
 					collapsed: true,
+					locations: [{ path: relPath, ...(lineRange ? { line: lineRange.start } : {}) }],
 				})
 				: undefined
 
