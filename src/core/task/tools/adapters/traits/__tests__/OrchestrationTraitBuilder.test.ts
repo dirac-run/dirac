@@ -68,6 +68,19 @@ describe("OrchestrationTraitBuilder Utility subagent routing", () => {
 	})
 })
 
+// SubagentUsagePublisher formats these fields for the usage card, so fixtures need the full shape.
+const SUBAGENT_STATS = {
+	toolCalls: 0,
+	inputTokens: 10,
+	outputTokens: 5,
+	cacheWriteTokens: 0,
+	cacheReadTokens: 0,
+	totalCost: 0.5,
+	contextTokens: 15,
+	contextWindow: 1000,
+	contextUsagePercentage: 1.5,
+}
+
 describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)", () => {
 	let abortStub: sinon.SinonStub
 	let runStub: sinon.SinonStub
@@ -90,7 +103,7 @@ describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)
 		const controller = new AbortController()
 		controller.abort(new Error("Pre-aborted"))
 
-		runStub.resolves({ status: SubagentExecutionStatus.CANCELLED, stats: {} } as never)
+		runStub.resolves({ status: SubagentExecutionStatus.CANCELLED, stats: SUBAGENT_STATS } as never)
 
 		await trait.runSubagent("Investigate", { signal: controller.signal })
 
@@ -133,7 +146,7 @@ describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)
 
 		sinon.assert.calledOnce(abortStub)
 
-		releaseRun({ status: SubagentExecutionStatus.CANCELLED, stats: {} })
+		releaseRun({ status: SubagentExecutionStatus.CANCELLED, stats: SUBAGENT_STATS })
 		await runPromise
 	})
 
@@ -142,7 +155,7 @@ describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)
 		const trait = buildOrchestrationTrait(config)
 
 		const controller = new AbortController()
-		runStub.resolves({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: {} } as never)
+		runStub.resolves({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: SUBAGENT_STATS } as never)
 
 		await trait.runSubagent("Investigate", { signal: controller.signal })
 
@@ -156,7 +169,7 @@ describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)
 		const { config } = createMockTaskConfig()
 		const trait = buildOrchestrationTrait(config)
 
-		const completedResult = { status: SubagentExecutionStatus.COMPLETED, result: "done", stats: {} }
+		const completedResult = { status: SubagentExecutionStatus.COMPLETED, result: "done", stats: SUBAGENT_STATS }
 		runStub.resolves(completedResult as never)
 
 		const result = await trait.runSubagent("Investigate")
@@ -170,7 +183,7 @@ describe("OrchestrationTraitBuilder runSubagent abort signal propagation (FB-29)
 		const trait = buildOrchestrationTrait(config)
 
 		const controller = new AbortController()
-		runStub.resolves({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: {} } as never)
+		runStub.resolves({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: SUBAGENT_STATS } as never)
 
 		await trait.runSubagent("First run", { signal: controller.signal })
 		await trait.runSubagent("Second run", { signal: controller.signal })

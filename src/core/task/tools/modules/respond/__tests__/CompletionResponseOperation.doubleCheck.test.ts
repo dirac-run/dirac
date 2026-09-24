@@ -45,6 +45,7 @@ function makeEnvironment(options: {
 			executionProfile: "goal_child",
 			mode: "act",
 			autoApprovalSettings: { enableNotifications: false },
+			taskState: {},
 		},
 		orchestration: {
 			getTaskState: (key: keyof TaskState) => state[key],

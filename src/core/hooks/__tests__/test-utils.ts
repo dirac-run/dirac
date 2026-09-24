@@ -3,6 +3,7 @@ import * as os from "os"
 import * as path from "path"
 import should from "should"
 import sinon from "sinon"
+import { HostProvider } from "@/hosts/host-provider"
 import { HookOutput } from "../../../shared/proto/dirac/hooks"
 import * as diskModule from "../../storage/disk"
 import { StateManager } from "../../storage/StateManager"
@@ -74,6 +75,7 @@ export async function createHookTestEnv(): Promise<HookTestEnv> {
 	const sandbox = sinon.createSandbox()
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hook-test-"))
 	const hooksDir = await createHooksDirectory(tempDir)
+	const globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "hook-test-globalstorage-"))
 
 	sandbox.stub(StateManager, "get").returns({
 		getGlobalStateKey: (key: string) => {
@@ -84,6 +86,20 @@ export async function createHookTestEnv(): Promise<HookTestEnv> {
 				return 0
 			}
 			return undefined
+		},
+	} as any)
+
+	// Workspace hook scripts require an approval grant (WorkspaceCodeApproval), which reads
+	// HostProvider.get(). Stub it the way upstream's WorkspaceCodeApproval.test.ts does: a
+	// trusted, extension-hosted workspace whose approval prompt always answers "trust".
+	sandbox.stub(HostProvider, "get").returns({
+		globalStorageFsPath: globalStorageDir,
+		diracType: "extension",
+		isWorkspaceTrusted: () => true,
+		hostBridge: {
+			windowClient: {
+				showMessage: async () => ({ selectedOption: "Trust and run this code" }),
+			},
 		},
 	} as any)
 
@@ -98,6 +114,7 @@ export async function createHookTestEnv(): Promise<HookTestEnv> {
 			sandbox.restore()
 			resetHookCache()
 			await removeTempDirWithRetry(tempDir)
+			await removeTempDirWithRetry(globalStorageDir)
 		},
 	}
 }
