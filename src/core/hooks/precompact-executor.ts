@@ -1,10 +1,10 @@
 import { findLastIndex } from "@shared/array"
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
-import type { HookExecution } from "../task/types/HookExecution"
 import { Logger } from "@/shared/services/Logger"
 import type { ContextManager } from "../context/context-management/ContextManager"
 import type { MessageStateHandler } from "../task/message-state"
+import type { HookExecution } from "../task/types/HookExecution"
 import type { HookModelInputContext } from "./hook-factory"
 
 /**
@@ -97,7 +97,8 @@ export async function writePreCompactContextFiles(
  * Task state interface for cancellation handling
  */
 export interface TaskStateForCancellation {
-	didFinishAbortingStream: boolean
+	readonly didFinishAbortingStream: boolean
+	markStreamAbortFinished(): void
 }
 
 /**
@@ -248,7 +249,7 @@ export async function executePreCompactHookWithCleanup(params: PreCompactHookPar
 
 			if (params.cancelTaskOnCancellation !== false) {
 				// Always save state before cancelling, regardless of cancellation source
-				params.taskState.didFinishAbortingStream = true
+				params.taskState.markStreamAbortFinished()
 				await params.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 				await params.messageStateHandler.overwriteApiConversationHistory(
 					params.messageStateHandler.getApiConversationHistory(),

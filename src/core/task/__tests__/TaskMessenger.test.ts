@@ -1,11 +1,12 @@
 import { strict as assert } from "node:assert"
 import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { describe, it } from "mocha"
 import pWaitFor from "p-wait-for"
 import sinon from "sinon"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 import { TaskMessenger } from "../TaskMessenger"
+import { TaskState } from "../TaskState"
+import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 
 function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 	const messages: any[] = []
@@ -14,9 +15,11 @@ function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 			messages.push(message)
 		}),
 		findMessageIndexById: sinon.stub().callsFake((id: string) => messages.findIndex((message) => message.id === id)),
-		findMessageIndexByCardId: sinon.stub().callsFake((id: string) =>
-			messages.findIndex((message) => message.content.type === DiracMessageType.CARD && message.content.card.id === id),
-		),
+		findMessageIndexByCardId: sinon
+			.stub()
+			.callsFake((id: string) =>
+				messages.findIndex((message) => message.content.type === DiracMessageType.CARD && message.content.card.id === id),
+			),
 		getDiracMessages: sinon.stub().callsFake(() => messages),
 		updateDiracMessage: sinon.stub().resolves(),
 		appendMarkdownById: sinon.stub().callsFake(async (id: string, text: string) => {
@@ -59,10 +62,7 @@ function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 		}),
 		flushPendingWrites: sinon.stub().resolves(),
 	}
-	const taskState: any = { waitingCardIds: [], status: TaskStatus.IDLE }
-	Object.defineProperty(taskState, "lastWaitingCardId", {
-		get: () => taskState.waitingCardIds[0],
-	})
+	const taskState = new TaskState()
 	const messenger = new TaskMessenger({
 		taskState,
 		messageStateHandler,
@@ -266,5 +266,4 @@ describe("TaskMessenger text authorship", () => {
 		assert.equal(typeof result.askTs, "number")
 		assert.deepEqual(taskState.waitingCardIds, [])
 	})
-
 })

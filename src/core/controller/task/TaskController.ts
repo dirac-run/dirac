@@ -1,20 +1,20 @@
 import { cleanupLegacyCheckpoints } from "@integrations/checkpoints/CheckpointMigration"
 import type { HistoryItem } from "@shared/HistoryItem"
 import { type Settings } from "@shared/storage/state-keys"
-import {
-	createTaskWorkingConfiguration,
-	type TaskWorkingConfiguration,
-	type TaskWorkingConfigurationInput,
-} from "../../task/runtime/TaskWorkingConfiguration"
-import pWaitFor from "p-wait-for"
 import pTimeout from "p-timeout"
+import pWaitFor from "p-wait-for"
 import type { FolderLockWithRetryResult } from "@/core/locks/types"
 import { Logger } from "@/shared/services/Logger"
 import { getCwd, getDesktopDir } from "@/utils/path"
 import type { StateManager } from "../../storage/StateManager"
 import { Task } from "../../task"
-import { deserializeTaskError, type TaskRunOutcome } from "../../task/TaskRunOutcome"
+import {
+	createTaskWorkingConfiguration,
+	type TaskWorkingConfiguration,
+	type TaskWorkingConfigurationInput,
+} from "../../task/runtime/TaskWorkingConfiguration"
 import { releaseTaskLock, tryAcquireTaskLockWithRetry } from "../../task/TaskLockUtils"
+import { deserializeTaskError, type TaskRunOutcome } from "../../task/TaskRunOutcome"
 import { detectWorkspaceRoots } from "../../workspace/detection"
 import { setupWorkspaceManager } from "../../workspace/setup"
 import type { WorkspaceRootManager } from "../../workspace/WorkspaceRootManager"
@@ -139,7 +139,7 @@ export class TaskController {
 			runFailure = { error }
 		}
 
-		const replacement = task.taskState.pendingTaskReplacement
+		const replacement = task.stateView.pendingTaskReplacement
 		if (this._task !== task || !replacement) {
 			if (runFailure) throw runFailure.error
 			return
@@ -400,9 +400,9 @@ export class TaskController {
 
 			await pWaitFor(
 				() =>
-					task.taskState.isApiRequestActive === false ||
-					task.taskState.didFinishAbortingStream ||
-					task.taskState.isWaitingForFirstChunk,
+					task.stateView.isApiRequestActive === false ||
+					task.stateView.didFinishAbortingStream ||
+					task.stateView.isWaitingForFirstChunk,
 				{
 					timeout: 3_000,
 				},

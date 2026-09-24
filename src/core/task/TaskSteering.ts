@@ -250,7 +250,7 @@ export async function commitAttemptCompletion(
 		}
 		ctx.taskState.completionCommitted = true
 		ctx.taskState.didAttemptCompletion = true
-		ctx.taskState.completionResponse = response
+		ctx.taskState.commitCompletionResponse(response)
 		return { committed: true }
 	})
 }

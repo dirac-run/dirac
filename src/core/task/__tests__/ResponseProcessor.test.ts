@@ -1,8 +1,8 @@
 import "should"
 import { CardStatus, TaskStatus } from "@shared/ExtensionMessage"
-import { DiracAskResponse } from "@shared/WebviewMessage"
 import { ResponseOperation } from "@shared/responseTool"
 import { DiracDefaultTool } from "@shared/tools"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { expect } from "chai"
 import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
@@ -96,7 +96,7 @@ describe("ResponseProcessor", () => {
 		})
 
 		it("does not overwrite taskFirstTokenTimeMs if already set", async () => {
-			taskState.taskFirstTokenTimeMs = 42
+			taskState.recordFirstTokenAt(42)
 			const chunks = [{ type: "text", id: "t1", text: "x", signature: undefined }]
 			const coordinator = createCoordinator(chunks)
 			await processor.consumeStream(coordinator, createCallbacks())
@@ -484,7 +484,7 @@ describe("ResponseProcessor", () => {
 
 		it("processes text block and streams delta to assistantStreamManager", async () => {
 			taskState.assistantMessageContent = [{ type: "text", content: "hello world", isComplete: true, call_id: "t1" } as any]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			sinon.assert.called(deps.assistantStreamManager.handleChunk)
 			const firstCall = deps.assistantStreamManager.handleChunk.firstCall.args
@@ -496,7 +496,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "reasoning", reasoning: "deep thought", isComplete: true, call_id: "r1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			sinon.assert.calledWith(deps.assistantStreamManager.handleChunk, "deep thought", "reasoning")
 		})
@@ -505,7 +505,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "tool_use", name: "read_file", params: { path: "/x" }, isComplete: true, call_id: "call-1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			sinon.assert.calledOnce(deps.toolExecutor.executeTool)
 			const blockArg = deps.toolExecutor.executeTool.firstCall.args[0]
@@ -514,7 +514,7 @@ describe("ResponseProcessor", () => {
 
 		it("sets status to STREAMING_TEXT for incomplete text block", async () => {
 			taskState.assistantMessageContent = [{ type: "text", content: "partial", isComplete: false, call_id: "t1" } as any]
-			taskState.isApiRequestActive = true
+			taskState.beginApiRequest()
 			await processor.presentAssistantMessage()
 			taskState.status.should.equal(TaskStatus.STREAMING_TEXT)
 		})
@@ -523,7 +523,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "reasoning", reasoning: "partial", isComplete: false, call_id: "r1" } as any,
 			]
-			taskState.isApiRequestActive = true
+			taskState.beginApiRequest()
 			await processor.presentAssistantMessage()
 			taskState.status.should.equal(TaskStatus.THINKING)
 		})
@@ -532,7 +532,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "tool_use", name: "read_file", params: {}, isComplete: false, call_id: "c1" } as any,
 			]
-			taskState.isApiRequestActive = true
+			taskState.beginApiRequest()
 			await processor.presentAssistantMessage()
 			taskState.status.should.equal(TaskStatus.BUILDING_TOOL_CALL)
 		})
@@ -541,7 +541,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "tool_use", name: "read_file", params: {}, isComplete: true, call_id: "c1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			taskState.status.should.equal(TaskStatus.EXECUTING_TOOL)
 		})
@@ -549,15 +549,15 @@ describe("ResponseProcessor", () => {
 		it("skips text block streaming when didRejectTool is true", async () => {
 			taskState.assistantMessageContent = [{ type: "text", content: "hello", isComplete: true, call_id: "t1" } as any]
 			taskState.didRejectTool = true
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			sinon.assert.notCalled(deps.assistantStreamManager.handleChunk)
 		})
 
 		it("sets userMessageContentReady when all blocks processed and stream complete", async () => {
 			taskState.assistantMessageContent = [{ type: "text", content: "done", isComplete: true, call_id: "t1" } as any]
-			taskState.isApiRequestActive = false
-			taskState.didCompleteReadingStream = true
+			taskState.endApiRequest()
+			taskState.completeStreamRead()
 			await processor.presentAssistantMessage()
 			taskState.userMessageContentReady.should.be.true()
 		})
@@ -568,7 +568,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "tool_use", name: "write_file", params: {}, isComplete: true, call_id: "c1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			// Promise should be consumed and cleared
 			expect(taskState.initialCheckpointCommitPromise).to.be.undefined
@@ -580,7 +580,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "tool_use", name: "read_file", params: {}, isComplete: true, call_id: "c1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			// Promise should remain for read-only tools
 			expect(taskState.initialCheckpointCommitPromise).to.equal(checkpointPromise)
@@ -598,7 +598,7 @@ describe("ResponseProcessor", () => {
 					call_id: "c1",
 				} as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 
 			await processor.presentAssistantMessage()
 
@@ -617,7 +617,7 @@ describe("ResponseProcessor", () => {
 					call_id: "c1",
 				} as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 
 			await processor.presentAssistantMessage()
 
@@ -755,7 +755,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "text", content: "code\n```python", isComplete: true, call_id: "t1" } as any,
 			]
-			taskState.isApiRequestActive = false
+			taskState.endApiRequest()
 			await processor.presentAssistantMessage()
 			const streamedContent = deps.assistantStreamManager.handleChunk.firstCall.args[0]
 			expect(streamedContent).to.not.include("```python")
@@ -765,7 +765,7 @@ describe("ResponseProcessor", () => {
 			taskState.assistantMessageContent = [
 				{ type: "text", content: "code\n```python", isComplete: false, call_id: "t1" } as any,
 			]
-			taskState.isApiRequestActive = true
+			taskState.beginApiRequest()
 			await processor.presentAssistantMessage()
 			// Incomplete block: content streamed as-is (delta from lastProcessedContentLength)
 			sinon.assert.called(deps.assistantStreamManager.handleChunk)

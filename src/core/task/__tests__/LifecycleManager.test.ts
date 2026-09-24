@@ -5,6 +5,7 @@ import pWaitFor from "p-wait-for"
 import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { LifecycleManager } from "../LifecycleManager"
+import { TaskState } from "../TaskState"
 
 // Characterization tests for LifecycleManager — verifies task lifecycle:
 // checkpoint initialization, task start, resume from history, and abort.
@@ -484,10 +485,9 @@ describe("LifecycleManager", () => {
 		})
 
 		it("clears streaming state before publishing CANCELLED", async () => {
-			deps.taskState.isApiRequestActive = true
-			deps.taskState.activeVoiceStreamId = "voice-stream"
-			deps.taskState.isWaitingForFirstChunk = true
-			deps.taskState.didFinishAbortingStream = false
+			deps.taskState.beginApiRequest()
+			deps.taskState.attachVoiceStream("voice-stream")
+			deps.taskState.beginFirstChunkWait()
 
 			await manager.abortTask()
 
@@ -653,13 +653,7 @@ function createMockDeps(): any {
 	let apiConversationHistory: any[] = []
 	let apiConversationProviderState: any = {}
 	return {
-		taskState: {
-			isInitialized: false,
-			abort: false,
-			taskScopedToolIds: [],
-			activeSkillIds: [],
-			taskScopedSkillIds: [],
-		} as any,
+		taskState: new TaskState(),
 		messageStateHandler: {
 			setDiracMessages: sinon.stub().callsFake((messages: any[]) => {
 				diracMessages = messages

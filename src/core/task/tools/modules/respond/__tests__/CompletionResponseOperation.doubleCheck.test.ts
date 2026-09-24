@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert"
+import { type DiracMessage, DiracMessageType, SubagentExecutionStatus } from "@shared/ExtensionMessage"
 import { describe, it } from "mocha"
 import sinon from "sinon"
-import { DiracMessageType, SubagentExecutionStatus, type DiracMessage } from "@shared/ExtensionMessage"
 import { TaskState } from "../../../../TaskState"
 import { CompletionResponseOperation } from "../CompletionResponseOperation"
 
@@ -51,6 +51,7 @@ function makeEnvironment(options: {
 			setTaskState: (key: keyof TaskState, value: TaskState[keyof TaskState]) => {
 				;(state as any)[key] = value
 			},
+			commitCompletionResponse: (response: string) => state.commitCompletionResponse(response),
 			getHistory: () => history,
 			runSubagent,
 			commitAttemptCompletion,

@@ -390,11 +390,11 @@ export class Controller {
 		const state: Partial<ExtensionState> = controlState ?? {
 			presentationSurfaceId: surfaceId,
 			presentationOffset: task?.messageStateHandler.getPresentationOffset(),
-			activeVoiceStreamId: task?.taskState.activeVoiceStreamId,
-			isApiRequestActive: task?.taskState.isApiRequestActive ?? false,
-			taskStatus: task?.taskState.status ?? TaskStatus.IDLE,
+			activeVoiceStreamId: task?.stateView.activeVoiceStreamId,
+			isApiRequestActive: task?.stateView.isApiRequestActive ?? false,
+			taskStatus: task?.stateView.status ?? TaskStatus.IDLE,
 			uiActionState: projectUIActionState(
-				task?.taskState,
+				task?.stateView,
 				(id) => task?.messageStateHandler.getMessageById(id),
 				maxConsecutiveMistakes,
 			),

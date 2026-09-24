@@ -10,10 +10,10 @@ import {
 } from "@shared/ExtensionMessage"
 import { isBusyTaskStatus } from "@shared/taskStatusProjection"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-import { TaskState } from "../TaskState"
+import { ReadonlyTaskState } from "../TaskState"
 
 export function projectUIActionState(
-	state: TaskState | undefined,
+	state: ReadonlyTaskState | undefined,
 	messages: readonly DiracMessage[] | ((id: string) => DiracMessage | undefined),
 	maxConsecutiveMistakes: number,
 ): UIActionState {
@@ -45,9 +45,9 @@ export function projectUIActionState(
 				card.actions?.map(mapCardActionToUIButton) ||
 				(card.requireApproval
 					? [
-						{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-						{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-					]
+							{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+							{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+						]
 					: [])
 			return uiState
 		}

@@ -1,41 +1,31 @@
+import type { ModelContextTracker } from "@core/context/context-tracking/ModelContextTracker"
+import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 import { ErrorService } from "@services/error"
 import { telemetryService } from "@services/telemetry"
-
 import type { DiracApiReqCancelReason } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
-import { Session } from "@shared/services/Session"
-import { isLocalModel } from "@utils/model-utils"
-import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
-import type { LocalConversationCompaction } from "./LocalConversationCompaction"
-
-import type { ModelContextTracker } from "@core/context/context-tracking/ModelContextTracker"
-import type { ResponseProcessor } from "./ResponseProcessor"
-import { StreamChunkCoordinator } from "./StreamChunkCoordinator"
-import { StreamingMetricsManager } from "./StreamingMetricsManager"
-import type { StreamResponseHandler } from "./StreamResponseHandler"
-
 import type { DiracContent } from "@shared/messages/content"
 import type { DiracMessageModelInfo } from "@shared/messages/metrics"
 import { Logger } from "@shared/services/Logger"
-import { type TaskRequestBuilderContext } from "./TaskRequestBuilder"
-import {
-	persistApiStopReason,
-	processStreamResult,
-	type TaskRequestOutcomeContext,
-} from "./TaskRequestOutcome"
+import { Session } from "@shared/services/Session"
+import { isLocalModel } from "@utils/model-utils"
+import type { ApiConversationManager } from "./ApiConversationManager"
+import type { LocalConversationCompaction } from "./LocalConversationCompaction"
+import type { ResponseProcessor } from "./ResponseProcessor"
+import type { TaskRequestRuntime } from "./runtime/TaskRequestRuntime"
+import { StreamChunkCoordinator } from "./StreamChunkCoordinator"
+import { StreamingMetricsManager } from "./StreamingMetricsManager"
+import type { StreamResponseHandler } from "./StreamResponseHandler"
 import { attemptApiRequest } from "./TaskApiRequestAttempt"
+import { TaskConversationPersistence, type TaskConversationPersistenceHooks } from "./TaskConversationPersistence"
+import { type TaskRequestBuilderContext } from "./TaskRequestBuilder"
+import { persistApiStopReason, processStreamResult, type TaskRequestOutcomeContext } from "./TaskRequestOutcome"
 import {
 	appendQueuedSteeringToUserContent,
 	rollbackSteeringClaim,
 	settleConsumedSteeringClaim,
 	type TaskSteeringContext,
 } from "./TaskSteering"
-import type { ApiConversationManager } from "./ApiConversationManager"
-import type { TaskRequestRuntime } from "./runtime/TaskRequestRuntime"
-import {
-	TaskConversationPersistence,
-	type TaskConversationPersistenceHooks,
-} from "./TaskConversationPersistence"
 
 export interface TaskRequestLoopContext extends TaskRequestBuilderContext, TaskRequestOutcomeContext {
 	requestRuntime: TaskRequestRuntime
@@ -92,16 +82,13 @@ export async function recursivelyMakeDiracRequests(
 	userContent = mistakeResult.userContent
 
 	const previousApiStatus = ctx.messageStateHandler.getLatestApiStatusMessage()
-	const previousApiReqIndex = previousApiStatus
-		? ctx.messageStateHandler.findMessageIndexById(previousApiStatus.id)
-		: -1
+	const previousApiReqIndex = previousApiStatus ? ctx.messageStateHandler.findMessageIndexById(previousApiStatus.id) : -1
 	const isFirstRequest = previousApiStatus === undefined
 
 	await ctx.initializeCheckpoints(isFirstRequest)
 
 	const useCompactPrompt =
-		customPrompt === "compact" &&
-		isLocalModel({ model, providerId, customPrompt, mode, supportsNativeWebSearch: false })
+		customPrompt === "compact" && isLocalModel({ model, providerId, customPrompt, mode, supportsNativeWebSearch: false })
 	let shouldCompact = await ctx.determineContextCompaction(previousApiReqIndex)
 	if (shouldCompact && ctx.localConversationCompaction.isAvailable()) {
 		const continuation = await ctx.localConversationCompaction.run({
@@ -216,8 +203,7 @@ export async function recursivelyMakeDiracRequests(
 			if (cost !== undefined) ctx.taskState.totalCost += cost
 
 			if (ctx.messageStateHandler.getLatestApiStatusMessage()) {
-				ctx.taskState.isApiRequestActive = false
-				ctx.taskState.activeVoiceStreamId = undefined
+				ctx.taskState.endApiRequest()
 			}
 		}
 
@@ -228,8 +214,7 @@ export async function recursivelyMakeDiracRequests(
 				await ctx.diffViewProvider.revertChanges()
 			}
 
-			ctx.taskState.isApiRequestActive = false
-			ctx.taskState.activeVoiceStreamId = undefined
+			ctx.taskState.endApiRequest()
 			await finalizeApiReqMsg(cancelReason, streamingFailedMessage)
 			await ctx.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 
@@ -241,9 +226,10 @@ export async function recursivelyMakeDiracRequests(
 						type: "text",
 						text:
 							assistantMessage +
-							`\n\n[${cancelReason === "streaming_failed"
-								? "Response interrupted by API Error"
-								: "Response interrupted by user"
+							`\n\n[${
+								cancelReason === "streaming_failed"
+									? "Response interrupted by API Error"
+									: "Response interrupted by user"
 							}]`,
 					},
 				],
@@ -269,7 +255,7 @@ export async function recursivelyMakeDiracRequests(
 				ctx.taskState.useNativeToolCalls,
 			)
 
-			ctx.taskState.didFinishAbortingStream = true
+			ctx.taskState.markStreamAbortFinished()
 		}
 
 		await ctx.resetStreamingState()
@@ -317,12 +303,12 @@ export async function recursivelyMakeDiracRequests(
 				})
 			}
 			await ctx.postStateToWebview()
-			ctx.taskState.activeVoiceStreamId = undefined
+			ctx.taskState.detachVoiceStream()
 			return true
 		}
 
 		Session.get().startApiCall()
-		ctx.taskState.isApiRequestActive = true
+		ctx.taskState.beginApiRequest()
 		let streamCoordinator: StreamChunkCoordinator | undefined
 
 		try {

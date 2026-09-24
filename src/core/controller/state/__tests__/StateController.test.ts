@@ -1,6 +1,6 @@
 import "should"
-import sinon from "sinon"
 import { TaskStatus } from "@shared/ExtensionMessage"
+import sinon from "sinon"
 import { StateController } from "../StateController"
 
 describe("StateController", () => {
@@ -16,6 +16,9 @@ describe("StateController", () => {
 				status,
 				pendingModeNotice: undefined,
 				isAwaitingPlanResponse: false,
+			},
+			get stateView() {
+				return this.taskState
 			},
 		} as any
 		const stateManager = {

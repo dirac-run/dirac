@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
-import { TaskController } from "./TaskController"
 import { Logger } from "@/shared/services/Logger"
+import { TaskController } from "./TaskController"
 
 describe("TaskController task replacement", () => {
 	afterEach(() => sinon.restore())
@@ -23,6 +23,9 @@ describe("TaskController task replacement", () => {
 		} as any
 		const task = {
 			taskState: { pendingTaskReplacement: replacement },
+			get stateView() {
+				return this.taskState
+			},
 			getWorkingConfiguration: () => latestWorkingConfiguration,
 		} as any
 		controller.task = task
@@ -59,7 +62,12 @@ describe("TaskController task replacement", () => {
 	it("retains the approved replacement and surfaces replacement initialization failure", async () => {
 		const controller = createController()
 		const replacement = { context: "replacement context" }
-		const task = { taskState: { pendingTaskReplacement: replacement } } as any
+		const task = {
+			taskState: { pendingTaskReplacement: replacement },
+			get stateView() {
+				return this.taskState
+			},
+		} as any
 		controller.task = task
 		const initializationFailure = new Error("replacement initialization failed")
 		sinon.stub(controller, "initTask").rejects(initializationFailure)
@@ -73,7 +81,12 @@ describe("TaskController task replacement", () => {
 
 	it("propagates the old task failure when no replacement was approved", async () => {
 		const controller = createController()
-		const task = { taskState: { pendingTaskReplacement: undefined } } as any
+		const task = {
+			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
+		} as any
 		controller.task = task
 		const oldTaskFailure = new Error("old task failed")
 
@@ -108,6 +121,9 @@ describe("TaskController task replacement", () => {
 		const task = {
 			taskId: "history-task",
 			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
 			resumeTaskFromHistory: sinon.stub().callsFake((onRestored: () => void) => {
 				signalRestored = onRestored
 				return taskRun
@@ -140,6 +156,9 @@ describe("TaskController task replacement", () => {
 		const task = {
 			taskId: "broken-history-task",
 			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
 			resumeTaskFromHistory: sinon.stub().rejects(failure),
 			abortTask: sinon.stub().resolves(),
 			retirePersistence: sinon.stub().resolves(),
@@ -163,6 +182,9 @@ describe("TaskController task replacement", () => {
 		const task = {
 			taskId: "invalid-operation-history-task",
 			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
 			resumeTaskFromHistory: sinon.stub().resolves({
 				kind: "failed",
 				error: { name: "StorageReplayError", message: "Invalid operation record", stack },
@@ -191,6 +213,9 @@ describe("TaskController task replacement", () => {
 		const task = {
 			taskId: "stalled-history-task",
 			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
 			resumeTaskFromHistory: sinon.stub().returns(new Promise<void>(() => {})),
 			abortTask: sinon.stub().resolves(),
 			retirePersistence: sinon.stub().resolves(),
@@ -216,6 +241,9 @@ describe("TaskController task replacement", () => {
 		const task = {
 			taskId: "replaced-history-task",
 			taskState: { pendingTaskReplacement: undefined },
+			get stateView() {
+				return this.taskState
+			},
 			resumeTaskFromHistory: sinon.stub().callsFake((onRestored: () => void) => {
 				signalRestored = onRestored
 				return taskRun
@@ -247,12 +275,18 @@ describe("TaskController task isolation", () => {
 		const oldTask = {
 			taskId: "old-task",
 			taskState: { isApiRequestActive: false },
+			get stateView() {
+				return this.taskState
+			},
 			abortTask: sinon.stub().returns(abortGate),
 			retirePersistence: sinon.stub().resolves(),
 		} as any
 		const newTask = {
 			taskId: "new-task",
 			taskState: { isApiRequestActive: false },
+			get stateView() {
+				return this.taskState
+			},
 			abortTask: sinon.stub().resolves(),
 			retirePersistence: sinon.stub().resolves(),
 		} as any
@@ -422,6 +456,9 @@ describe("TaskController task isolation", () => {
 		const task = {
 			taskId: historyItem.id,
 			taskState: { isApiRequestActive: false },
+			get stateView() {
+				return this.taskState
+			},
 			abortTask: sinon.stub().resolves(),
 			retirePersistence: sinon.stub().resolves(),
 			getWorkingConfiguration: () => latestWorkingConfiguration,

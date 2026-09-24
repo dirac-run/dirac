@@ -3,8 +3,8 @@ import { singleFileDiagnosticsToProblemsString } from "@/integrations/diagnostic
 import { telemetryService } from "@/services/telemetry"
 import { CommandContext, Empty } from "@/shared/proto/index.dirac"
 import { Logger } from "@/shared/services/Logger"
-import { Controller } from "../index"
 import { DiracAskResponse } from "../../../shared/WebviewMessage"
+import { Controller } from "../index"
 
 import { sendAddToInputEvent } from "../ui/subscribeToAddToInput"
 
@@ -34,7 +34,7 @@ export async function addToDirac(controller: Controller, request: CommandContext
 
 	// Notebooks send immediately, regular adds just fill input
 	if (notebookContext && controller.task) {
-		const cardId = controller.task.taskState.lastWaitingCardId
+		const cardId = controller.task.stateView.lastWaitingCardId
 		if (cardId) {
 			await controller.task.submitCardResponse(cardId, DiracAskResponse.MESSAGE, input)
 		}
