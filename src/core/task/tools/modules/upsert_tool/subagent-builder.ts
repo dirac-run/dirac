@@ -27,7 +27,7 @@ const BUILDER_ALLOWED_TOOLS = [
 	DiracDefaultTool.FILE_READ,
 	DiracDefaultTool.EDIT_FILE,
 	DiracDefaultTool.FILE_NEW,
-	DiracDefaultTool.BASH,
+	DiracDefaultTool.EXECUTE_COMMAND,
 	`${RESPOND_TOOL_NAME}:${ResponseOperation.COMPLETE}`,
 ]
 

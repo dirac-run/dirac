@@ -90,12 +90,12 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(isRestricted(DiracDefaultTool.FILE_NEW), true)
 		assert.equal(isRestricted(DiracDefaultTool.EDIT_FILE), true)
 		assert.equal(isRestricted(DiracDefaultTool.EDIT_AST), true)
-		assert.equal(isRestricted(DiracDefaultTool.BASH), false)
+		assert.equal(isRestricted(DiracDefaultTool.EXECUTE_COMMAND), false)
 
 		const { harness, createCard, closeBrowser } = executionHarness("plan", "plan")
 		await (ToolExecutor.prototype as any).execute.call(
 			harness,
-			{ type: "tool_use", name: DiracDefaultTool.BASH, params: {}, isComplete: true },
+			{ type: "tool_use", name: DiracDefaultTool.EXECUTE_COMMAND, params: {}, isComplete: true },
 			true,
 		)
 

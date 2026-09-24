@@ -70,7 +70,7 @@ export class AutoApprove {
 				case DiracDefaultTool.USE_SKILL:
 					return [true, true]
 
-				case DiracDefaultTool.BASH:
+				case DiracDefaultTool.EXECUTE_COMMAND:
 				case DiracDefaultTool.BROWSER:
 					return true
 				default:
@@ -92,7 +92,7 @@ export class AutoApprove {
 				case DiracDefaultTool.USE_SKILL:
 					return [true, true]
 
-				case DiracDefaultTool.BASH:
+				case DiracDefaultTool.EXECUTE_COMMAND:
 				case DiracDefaultTool.BROWSER:
 					return true
 			}
@@ -115,7 +115,7 @@ export class AutoApprove {
 			case DiracDefaultTool.EDIT_AST:
 				return [autoApprovalSettings.actions.editFiles, autoApprovalSettings.actions.editFilesExternally ?? false]
 
-			case DiracDefaultTool.BASH:
+			case DiracDefaultTool.EXECUTE_COMMAND:
 				return autoApprovalSettings.actions.executeCommands ?? false
 			case DiracDefaultTool.BROWSER:
 				return autoApprovalSettings.actions.useBrowser
@@ -200,7 +200,7 @@ export class AutoApprove {
 
 	public isCommandAutoApproved(command: string): boolean {
 		const entries = this.setting("userApprovedCommands")
-		const autoApproveResult = this.shouldAutoApproveTool(DiracDefaultTool.BASH)
+		const autoApproveResult = this.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND)
 		const safeCommandAutoApprovalEnabled = Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult
 
 		if (safeCommandAutoApprovalEnabled && isSafeCommand(command)) return true

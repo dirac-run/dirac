@@ -35,7 +35,8 @@ const AgentConfigFrontmatterSchema = z.object({
 
 export type AgentBaseConfig = z.infer<typeof AgentBaseConfigSchema>
 
-function normalizeToolName(toolName: string): string[] {
+// Resolves legacy respond-tool aliases to `respond:<operation>`; unrelated to case normalization.
+function resolveToolAlias(toolName: string): string[] {
 	const trimmed = toolName.trim()
 	if (!trimmed) {
 		throw new Error("Tool name cannot be empty.")
@@ -54,7 +55,7 @@ function parseTools(tools: string | string[] | undefined): string[] {
 	if (rawTools.length === 0) {
 		return []
 	}
-	return Array.from(new Set(rawTools.flatMap(normalizeToolName)))
+	return Array.from(new Set(rawTools.flatMap(resolveToolAlias)))
 }
 
 function normalizeSkillName(skillName: string): string {

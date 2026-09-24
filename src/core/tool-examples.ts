@@ -9,7 +9,7 @@ export const TOOL_EXAMPLES: Partial<Record<DiracDefaultTool, string>> = {
 		'{"files": [{"path": "src/index.ts", "edits": [{"edit_type": "replace", "anchor": "...", "end_anchor": "...", "text": "new content"}]}]}',
 	[DiracDefaultTool.EDIT_AST]:
 		'{"operation": "replace", "targets": [{"path": "src/main.ts", "symbol": "main", "replacement": "..."}]}',
-	[DiracDefaultTool.BASH]: '{"commands": ["ls -R"]}',
+	[DiracDefaultTool.EXECUTE_COMMAND]: '{"commands": ["ls -R"]}',
 	[DiracDefaultTool.INSPECT_AST]: '{"operation": "implementation", "paths": ["src/main.ts"], "symbols": ["main"]}',
 	[DiracDefaultTool.LIST_FILES]: '{"paths": ["src"]}',
 	[DiracDefaultTool.NEW_TASK]: '{"context": "Detailed summary of the conversation..."}',

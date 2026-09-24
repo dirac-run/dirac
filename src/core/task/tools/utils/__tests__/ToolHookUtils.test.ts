@@ -78,7 +78,7 @@ describe("ToolHookUtils", () => {
 
 			const block: ToolUse = {
 				type: "tool_use",
-				name: DiracDefaultTool.BASH,
+				name: DiracDefaultTool.EXECUTE_COMMAND,
 				params: { command: "echo hello" },
 			}
 

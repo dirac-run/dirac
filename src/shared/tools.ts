@@ -44,7 +44,7 @@ export interface DiracToolSpec<TContext = any> {
 // Define available tool ids
 export enum DiracDefaultTool {
 	RESPOND = "respond",
-	BASH = "execute_command",
+	EXECUTE_COMMAND = "execute_command",
 	FILE_READ = "read_file",
 	FILE_NEW = "write_to_file",
 	SEARCH = "search_files",
@@ -101,7 +101,7 @@ export const MUTATING_TOOLS: DiracDefaultTool[] = [
 	DiracDefaultTool.FILE_NEW,
 	DiracDefaultTool.EDIT_FILE,
 	DiracDefaultTool.EDIT_AST,
-	DiracDefaultTool.BASH, // conservatively treat bash as it can modify the filesystem
+	DiracDefaultTool.EXECUTE_COMMAND, // conservatively treat bash as it can modify the filesystem
 ]
 
 export function isMutatingTool(toolName: string): boolean {

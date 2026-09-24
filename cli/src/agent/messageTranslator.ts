@@ -18,6 +18,7 @@ import { AcpSessionStatus } from "./types.js"
 
 /**
  * Maps Dirac tool types to ACP ToolKind values.
+ * camelCase keys exist for legacy persisted card data only — producers emit snake_case tool ids.
  */
 const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	// File operations

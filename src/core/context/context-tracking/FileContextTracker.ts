@@ -223,6 +223,7 @@ export class FileContextTracker {
 			if (message.content.type === DiracMessageType.CARD && message.content.card.body) {
 				try {
 					const toolData = JSON.parse(message.content.card.body)
+					// Legacy camelCase card `tool` values from persisted history — current producers emit snake_case tool ids.
 					if ((toolData.tool === "editedExistingFile" || toolData.tool === "newFileCreated") && toolData.path) {
 						if (!editedFiles.includes(toolData.path)) {
 							editedFiles.push(toolData.path)

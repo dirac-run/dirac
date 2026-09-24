@@ -8,10 +8,9 @@
 import { Text } from "ink"
 import { render } from "ink-testing-library"
 import React from "react"
-import { version as CLI_VERSION } from "../../package.json"
-import { QUOTES } from "@/shared/quotes"
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { QUOTES } from "@/shared/quotes"
+import { version as CLI_VERSION } from "../../package.json"
 import { ChatView } from "./ChatView"
 
 // Helper to wait for async state updates
@@ -30,7 +29,6 @@ const shutdownMockState = {
 		shutdownMockState.listeners = []
 	},
 }
-
 
 vi.mock("ink-picture", () => ({
 	TerminalInfoProvider: ({ children }: any) => children,
@@ -150,11 +148,6 @@ vi.mock("../utils/parser", () => ({
 	parseImagesFromInput: vi.fn((text: string) => ({ prompt: text, imagePaths: [] })),
 }))
 
-vi.mock("../utils/tools", () => ({
-	isFileEditTool: vi.fn(() => false),
-	parseToolFromMessage: vi.fn(() => null),
-}))
-
 vi.mock("../utils/display", () => ({
 	centerText: vi.fn((text: string) => text),
 	createContextBar: vi.fn(() => ({ filled: "", empty: "" })),
@@ -231,7 +224,6 @@ describe("ChatView Exit and Cleanup", () => {
 			expect(quoteIndex).toBeGreaterThan(logoIndex)
 			expect(questionIndex).toBeGreaterThan(quoteIndex)
 		})
-
 	})
 
 	describe("Shutdown event handling", () => {

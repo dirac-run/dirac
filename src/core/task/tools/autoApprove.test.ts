@@ -40,7 +40,7 @@ describe("AutoApprove.resolveToolPathPermission", () => {
 		const permissions = commandPermissionController({ allowed: false, reason: "denied" })
 		const autoApprove = new AutoApprove(permissions as any, currentSettings, false)
 
-		assert.equal(await autoApprove.resolveToolPathPermission(DiracDefaultTool.BASH, undefined), "manual_only")
+		assert.equal(await autoApprove.resolveToolPathPermission(DiracDefaultTool.EXECUTE_COMMAND, undefined), "manual_only")
 	})
 
 	it("marks residual local writes as Utility-eligible", async () => {
@@ -80,7 +80,7 @@ describe("AutoApprove.resolveToolPathPermission", () => {
 		const permissions = commandPermissionController({ allowed: false, reason: "denied" })
 		const autoApprove = new AutoApprove(permissions as any, currentSettings, false)
 
-		assert.equal(await autoApprove.shouldAutoApproveToolWithPath(DiracDefaultTool.BASH, undefined), true)
+		assert.equal(await autoApprove.shouldAutoApproveToolWithPath(DiracDefaultTool.EXECUTE_COMMAND, undefined), true)
 		sinon.assert.notCalled(permissions.validateTool)
 	})
 

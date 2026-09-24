@@ -16,7 +16,7 @@ export function buildSystemTrait(
 	return {
 		executeCommand: async (command, options) => {
 			if (config.mode !== "act") return executeCommandFn(command, options)
-			return config.callbacks.withMutationAuthorization(DiracDefaultTool.BASH, async () => {
+			return config.callbacks.withMutationAuthorization(DiracDefaultTool.EXECUTE_COMMAND, async () => {
 				const result = await executeCommandFn(command, options)
 				if (result.backgroundCompletion) config.callbacks.retainMutationUntil(result.backgroundCompletion)
 				return result

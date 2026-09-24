@@ -1,3 +1,4 @@
+import { DiracDefaultTool } from "@shared/tools"
 import * as diff from "diff"
 import { PreparedFileBatch } from "./types"
 
@@ -13,7 +14,7 @@ export class EditFileFormatter {
 		const totalRequestedEdits = batches.reduce((acc, b) => acc + b.prepared!.resolvedEdits.length, 0)
 		const diffs = batches.map((b) => b.prepared?.diff).join("\n\n")
 		return {
-			tool: "editFile",
+			tool: DiracDefaultTool.EDIT_FILE,
 			path: batches.length === 1 ? batches[0].displayPath : "Multiple files",
 			filesCount: batches.length,
 			editsCount: totalRequestedEdits,
