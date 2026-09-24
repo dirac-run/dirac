@@ -21,6 +21,7 @@ import { SkillMetadata } from "@/shared/skills"
 import { StateManager } from "../storage/StateManager"
 import { Task } from "../task"
 import type { PresentationSnapshot } from "../task/message-state"
+import type { ITaskHost } from "../task/types/task-host"
 import { AuthController } from "./auth/AuthController"
 import { Initializer, type InitializerConfig } from "./index-initializer"
 import { checkCliInstallation } from "./state/checkCliInstallation"
@@ -51,7 +52,7 @@ interface SelectedPresentation extends PresentationSnapshot {
 	source?: Task["messageStateHandler"]
 }
 
-export class Controller {
+export class Controller implements ITaskHost {
 	public discoveredSkillsCache?: SkillMetadata[]
 	readonly stateManager: StateManager
 	private availableToolsFingerprint?: string

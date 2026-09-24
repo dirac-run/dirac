@@ -54,8 +54,8 @@ import { ulid } from "ulid"
 import { getErrorMessage } from "@/shared/errors"
 import { type SkillMetadata } from "@/shared/skills"
 
-import { Controller } from "../controller"
 import { StateManager } from "../storage/StateManager"
+import type { ITaskHost } from "./types/task-host"
 import { ApiConversationManager } from "./ApiConversationManager"
 import { AssistantStreamManager } from "./AssistantStreamManager"
 import { activateTaskSkill } from "./activateTaskSkill"
@@ -124,7 +124,7 @@ import {
 export type ToolResponse = DiracToolResponseContent
 
 export type TaskParams = {
-	controller: Controller
+	controller: ITaskHost
 	updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
 	postStateToWebview: () => Promise<void>
 	postPresentationToWebview?: () => Promise<void>
@@ -343,7 +343,7 @@ export class Task {
 	}
 
 	// Core dependencies
-	private controller: Controller
+	private host: ITaskHost
 
 	// Service handlers
 	api: ApiHandler
@@ -446,7 +446,7 @@ export class Task {
 			throw new Error(`${this.executionProfile} Tasks require an Act-mode working configuration`)
 		}
 		this.contextCompactionObserver = params.onContextCompacted
-		this.controller = controller
+		this.host = controller
 		this.updateTaskHistory = updateTaskHistory
 		this.postStateToWebview = postStateToWebview
 		this.postPresentationToWebview = postPresentationToWebview ?? postStateToWebview
@@ -459,7 +459,7 @@ export class Task {
 		this.taskId = taskId
 		this.taskState.taskLockAcquired = taskLockAcquired
 		this.terminalExecutionMode = vscodeTerminalExecutionMode || "vscodeTerminal"
-		this.switchToActMode = params.switchToActMode ?? (() => this.controller.toggleActModeForYoloMode())
+		this.switchToActMode = params.switchToActMode ?? (() => this.host.toggleActModeForYoloMode())
 		this.enqueuePreRequestSteeringMessages = params.enqueuePreRequestSteeringMessages ?? (async () => undefined)
 		this.conversationPersistenceHooks = params.conversationPersistenceHooks
 
@@ -555,7 +555,7 @@ export class Task {
 		this.diracContext = new DiracContext(this.taskId, this.stateManager, this.ulid)
 
 		// Initialize context trackers
-		this.fileContextTracker = new FileContextTracker(controller, this.taskId)
+		this.fileContextTracker = new FileContextTracker(stateManager, this.taskId)
 		this.modelContextTracker = new ModelContextTracker(this.taskId)
 		this.environmentContextTracker = new EnvironmentContextTracker(this.taskId)
 
@@ -672,7 +672,7 @@ export class Task {
 		const commandExecutorCallbacks: CommandExecutorCallbacks = {
 			taskMessenger: this.taskMessenger,
 			updateBackgroundCommandState: (isRunning: boolean) =>
-				(updateBackgroundCommandState ?? this.controller.updateBackgroundCommandState.bind(this.controller))(
+				(updateBackgroundCommandState ?? this.host.updateBackgroundCommandState.bind(this.host))(
 					isRunning,
 					this.taskId,
 				),

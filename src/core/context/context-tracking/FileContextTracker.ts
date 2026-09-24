@@ -3,12 +3,17 @@ import { getTaskMetadata, readTaskHistoryFromState, updateTaskMetadata } from "@
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import chokidar, { FSWatcher } from "chokidar"
 import * as path from "path"
-import { Controller } from "@/core/controller"
-import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import { ChokidarWatcherCloser } from "@/shared/utils/ChokidarWatcherCloser"
 import { getCwd } from "@/utils/path"
 import type { FileMetadataEntry } from "./ContextTrackerTypes"
+
+/** Narrow workspace-state slice this tracker needs — decouples it from Controller/StateManager. */
+export interface FileContextStateStore {
+	getWorkspaceStateKey(key: string): unknown
+	setWorkspaceState(key: string, value: unknown): void
+	getAllWorkspaceStateEntries(): Record<string, unknown>
+}
 
 // This class is responsible for tracking file operations that may result in stale context.
 // If a user modifies a file outside of Dirac, the context may become stale and need to be updated.
@@ -25,7 +30,7 @@ If a file is modified outside of Dirac, we detect and track this change to preve
 This is used when restoring a task (non-git "checkpoint" restore), and mid-task.
 */
 export class FileContextTracker {
-	private controller: Controller
+	private stateStore: FileContextStateStore
 	readonly taskId: string
 
 	// File tracking and watching
@@ -35,11 +40,11 @@ export class FileContextTracker {
 	private recentlyEditedByDirac = new Set<string>()
 
 	constructor(
-		controller: Controller,
+		stateStore: FileContextStateStore,
 		taskId: string,
 		private watcherFactory: WatcherFactory = chokidar.watch,
 	) {
-		this.controller = controller
+		this.stateStore = stateStore
 		this.taskId = taskId
 	}
 
@@ -242,7 +247,7 @@ export class FileContextTracker {
 	async storePendingFileContextWarning(files: string[]): Promise<void> {
 		try {
 			const key = `pendingFileContextWarning_${this.taskId}`
-			this.controller.stateManager.setWorkspaceState(key, files)
+			this.stateStore.setWorkspaceState(key, files)
 		} catch (error) {
 			Logger.error("Error storing pending file context warning:", error)
 		}
@@ -254,7 +259,7 @@ export class FileContextTracker {
 	async retrievePendingFileContextWarning(): Promise<string[] | undefined> {
 		try {
 			const key = `pendingFileContextWarning_${this.taskId}`
-			const files = this.controller.stateManager.getWorkspaceStateKey(key) as string[] | undefined
+			const files = this.stateStore.getWorkspaceStateKey(key) as string[] | undefined
 			return files
 		} catch (error) {
 			Logger.error("Error retrieving pending file context warning:", error)
@@ -269,7 +274,7 @@ export class FileContextTracker {
 		try {
 			const files = await this.retrievePendingFileContextWarning()
 			if (files) {
-				this.controller.stateManager.setWorkspaceState(`pendingFileContextWarning_${this.taskId}`, undefined)
+				this.stateStore.setWorkspaceState(`pendingFileContextWarning_${this.taskId}`, undefined)
 				return files
 			}
 		} catch (error) {
@@ -282,12 +287,12 @@ export class FileContextTracker {
 	 * Static method to clean up orphaned pending file context warnings at startup
 	 * This removes warnings for tasks that may no longer exist
 	 */
-	static async cleanupOrphanedWarnings(stateManager: StateManager): Promise<void> {
+	static async cleanupOrphanedWarnings(stateStore: FileContextStateStore): Promise<void> {
 		const startTime = Date.now()
 		try {
 			const taskHistory = await readTaskHistoryFromState()
 			const existingTaskIds = new Set(taskHistory.map((task) => task.id))
-			const allStateKeys = Object.keys(stateManager.getAllWorkspaceStateEntries())
+			const allStateKeys = Object.keys(stateStore.getAllWorkspaceStateEntries())
 			const pendingWarningKeys = allStateKeys.filter((key) => key.startsWith("pendingFileContextWarning_"))
 
 			const orphanedPendingContextTasks: string[] = []
@@ -300,7 +305,7 @@ export class FileContextTracker {
 
 			if (orphanedPendingContextTasks.length > 0) {
 				for (const key of orphanedPendingContextTasks) {
-					await stateManager.setWorkspaceState(key, undefined)
+					await stateStore.setWorkspaceState(key, undefined)
 				}
 			}
 

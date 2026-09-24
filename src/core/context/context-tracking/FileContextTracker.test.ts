@@ -5,10 +5,9 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import * as path from "path"
 import * as sinon from "sinon"
 import * as vscode from "vscode"
-import { Controller } from "@/core/controller"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import type { FileMetadataEntry, TaskMetadata } from "./ContextTrackerTypes"
-import { FileContextTracker } from "./FileContextTracker"
+import { type FileContextStateStore, FileContextTracker } from "./FileContextTracker"
 
 describe("FileContextTracker", () => {
 	const filePath = "src/test-file.ts"
@@ -55,7 +54,7 @@ describe("FileContextTracker", () => {
 		setVscodeHostProviderMock()
 
 		// Create tracker instance
-		tracker = new FileContextTracker({} as Controller, taskId)
+		tracker = new FileContextTracker({} as FileContextStateStore, taskId)
 	})
 
 	afterEach(async () => {
