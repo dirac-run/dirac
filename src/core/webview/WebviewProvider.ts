@@ -231,7 +231,7 @@ export abstract class DiracWebviewProvider {
 		const stylesUrl = this.getExtensionUrl("webview-ui", "build", "assets", "index.css")
 		const codiconsUrl = this.getExtensionUrl("node_modules", "@vscode", "codicons", "dist", "codicon.css")
 
-		const scriptEntrypoint = "src/main.tsx"
+		const scriptEntrypoint = "src/app/main.tsx"
 		const scriptUrl = `http://${localServerUrl}/${scriptEntrypoint}`
 
 		const reactRefresh = /*html*/ `
