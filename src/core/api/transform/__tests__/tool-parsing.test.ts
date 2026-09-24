@@ -11,16 +11,15 @@
 
 import { describe, it } from "mocha"
 import "should"
-import { expectLoggerErrors } from "@/test/loggerGuard"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 import OpenAI from "openai"
 import {
-	DiracAssistantToolUseBlock,
-	DiracStorageMessage,
-	DiracTextContentBlock,
-	DiracUserToolResultContentBlock,
+    DiracAssistantToolUseBlock,
+    DiracStorageMessage,
+    DiracTextContentBlock,
+    DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
 import { convertToAnthropicMessage, convertToOpenAiMessages } from "../openai-format"
-import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 
 describe("Tool Call Parsing", () => {
 	describe("convertToOpenAiMessages - Tool Calls", () => {
@@ -213,8 +212,8 @@ describe("Tool Call Parsing", () => {
 			const result = convertToOpenAiMessages(messages)
 
 			const msg = result[0] as any
-				// Content should be null, not undefined or empty string
-				; (msg.content === null).should.be.true()
+			// Content should be null, not undefined or empty string
+			;(msg.content === null).should.be.true()
 		})
 	})
 
@@ -302,8 +301,7 @@ describe("Tool Call Parsing", () => {
 			toolUse.input.should.deepEqual({ path: "/test.ts" })
 		})
 
-		it("should handle malformed tool arguments gracefully", () => {
-			expectLoggerErrors()
+		it("should throw JsonParseError with a payload excerpt for malformed tool arguments", () => {
 			const completion: OpenAI.Chat.Completions.ChatCompletion = {
 				id: "chatcmpl-789",
 				object: "chat.completion",
@@ -333,12 +331,52 @@ describe("Tool Call Parsing", () => {
 				],
 			}
 
-			// Should not throw, should return empty input
-			const result = convertToAnthropicMessage(completion)
+			// Malformed tool args must fail loudly — never silently default to {}.
+			let thrown: unknown
+			try {
+				convertToAnthropicMessage(completion)
+			} catch (error) {
+				thrown = error
+			}
+			const error = thrown as Error
+			error.should.not.be.undefined
+			error.name.should.equal("JsonParseError")
+			error.message.should.match(/test_tool/)
+			error.message.should.match(/not valid json/)
+		})
 
-			const content = result.content as any[]
-			const toolUse = content.find((b) => b.type === "tool_use")
-			toolUse.input.should.deepEqual({})
+		it("should treat missing or empty tool arguments as an empty object", () => {
+			const completion = (argumentsValue?: string): OpenAI.Chat.Completions.ChatCompletion => ({
+				id: "chatcmpl-empty",
+				object: "chat.completion",
+				created: Date.now(),
+				model: TEST_MODEL_IDS.OPENAI_GPT4O,
+				choices: [
+					{
+						index: 0,
+						message: {
+							role: "assistant",
+							content: null,
+							tool_calls: [
+								{
+									id: "call_empty",
+									type: "function",
+									function: { name: "test_tool", arguments: argumentsValue as string },
+								},
+							],
+							refusal: null,
+						},
+						finish_reason: "tool_calls",
+						logprobs: null,
+					},
+				],
+			})
+
+			for (const args of [undefined, "", "   "]) {
+				const result = convertToAnthropicMessage(completion(args))
+				const toolUse = (result.content as any[]).find((b) => b.type === "tool_use")
+				toolUse.input.should.deepEqual({})
+			}
 		})
 
 		it("should map finish_reason correctly", () => {
@@ -366,8 +404,8 @@ describe("Tool Call Parsing", () => {
 				}
 
 				const result = convertToAnthropicMessage(completion)
-					// Using equality check since should.be.true() doesn't accept message arg
-					; (result.stop_reason === expected).should.be.true()
+				// Using equality check since should.be.true() doesn't accept message arg
+				;(result.stop_reason === expected).should.be.true()
 			}
 		})
 	})

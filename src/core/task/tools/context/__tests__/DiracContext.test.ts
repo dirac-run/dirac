@@ -2,9 +2,9 @@ import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
-import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { DiracContext } from "../DiracContext"
 
 const TASK_ID = "context-persistence"
@@ -76,6 +76,24 @@ describe("DiracContext persistence", () => {
 		sinon.assert.calledOnce(stateManager.flushPendingState)
 	})
 
+	it("rejects a legacy baseline that is not valid JSON", async () => {
+		const filePath = contextFile(diracHome)
+		await fs.mkdir(path.dirname(filePath), { recursive: true })
+		await fs.writeFile(filePath, '{"fileHashes": {')
+		const context = new DiracContext(TASK_ID, stateManager as any, CONVERSATION_ID)
+
+		await assert.rejects(context.task.get("fileHashes"), /malformed JSON.*payload:/s)
+	})
+
+	it("rejects a legacy baseline that is not a JSON object", async () => {
+		const filePath = contextFile(diracHome)
+		await fs.mkdir(path.dirname(filePath), { recursive: true })
+		await fs.writeFile(filePath, '"just a string"')
+		const context = new DiracContext(TASK_ID, stateManager as any, CONVERSATION_ID)
+
+		await assert.rejects(context.task.get("fileHashes"), /schema mismatch/)
+	})
+
 	it("persists changed anchor state and restores it lazily", async () => {
 		const sourcePath = path.join(diracHome, "workspace", "source.ts")
 		const context = new DiracContext(TASK_ID, stateManager as any, CONVERSATION_ID)
@@ -125,9 +143,13 @@ describe("DiracContext persistence", () => {
 		context.markAnchorStateDirty()
 
 		let releaseWrite!: () => void
-		const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve })
+		const writeReleased = new Promise<void>((resolve) => {
+			releaseWrite = resolve
+		})
 		let signalWriteStarted!: () => void
-		const writeStarted = new Promise<void>((resolve) => { signalWriteStarted = resolve })
+		const writeStarted = new Promise<void>((resolve) => {
+			signalWriteStarted = resolve
+		})
 		stateManager.flushPendingState.onSecondCall().callsFake(async () => {
 			signalWriteStarted()
 			await writeReleased
@@ -148,13 +170,11 @@ describe("DiracContext persistence", () => {
 		assert.deepEqual(await restored.task.get("fileHashes"), { first: "one", second: "two" })
 	})
 
-
 	it("replays anchor recency and evicts the oldest document at capacity", async () => {
 		const context = new DiracContext(TASK_ID, stateManager as any, CONVERSATION_ID)
 		await context.ensureAnchorState()
-		const paths = Array.from(
-			{ length: AnchorStateManager.MAX_TRACKED_FILES },
-			(_, index) => path.join(diracHome, "workspace", `source-${index}.ts`),
+		const paths = Array.from({ length: AnchorStateManager.MAX_TRACKED_FILES }, (_, index) =>
+			path.join(diracHome, "workspace", `source-${index}.ts`),
 		)
 		for (const sourcePath of paths) {
 			AnchorStateManager.reconcile(sourcePath, [sourcePath], CONVERSATION_ID)

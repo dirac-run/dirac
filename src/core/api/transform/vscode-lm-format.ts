@@ -1,5 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
+import { z } from "zod"
+import { safeParseJson } from "@/shared/safe-json-parse"
 import { Logger } from "@/shared/services/Logger"
 
 /**
@@ -14,7 +16,7 @@ export function asObjectSafe(value: unknown): object {
 	try {
 		// Handle strings that might be JSON
 		if (typeof value === "string") {
-			return JSON.parse(value)
+			return safeParseJson(z.unknown(), value, "vscode-lm tool arguments") as object
 		}
 
 		// Handle pre-existing objects
@@ -29,8 +31,7 @@ export function asObjectSafe(value: unknown): object {
 	}
 }
 
-type DiracTextImageBlockParam =
-	Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam
+type DiracTextImageBlockParam = Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam
 
 // Describes an unsupported image as a text placeholder for the VSCode LM API.
 function imagePlaceholder(source?: Anthropic.ImageBlockParam["source"]): string {

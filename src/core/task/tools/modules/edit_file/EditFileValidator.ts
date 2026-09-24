@@ -1,6 +1,22 @@
+import { z } from "zod"
 import { getErrorMessage } from "@/shared/errors"
+import { safeParseJson } from "@/shared/safe-json-parse"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import type { Edit, FileEdit } from "./types"
+
+// Elements stay unvalidated here: EditExecutor.validateEdit checks each edit separately so
+// one malformed edit fails alone instead of rejecting the whole batch.
+const editsSchema = z.array(z.unknown()).nonempty()
+
+// On the wire `edits` may be a JSON string or an already-parsed array.
+const fileEditsSchema = z
+	.array(
+		z.object({
+			path: z.string().refine((s) => s.trim().length > 0, { message: "must be a non-empty string" }),
+			edits: z.union([z.string(), editsSchema]),
+		}),
+	)
+	.nonempty()
 
 /** Validates and normalizes the file-level shape while preserving per-edit partial success. */
 export class EditFileValidator {
@@ -8,35 +24,28 @@ export class EditFileValidator {
 		let files: unknown = args?.files
 		if (typeof files === "string") {
 			try {
-				files = JSON.parse(files)
+				files = safeParseJson(z.unknown(), files, "edit_file 'files' parameter")
 			} catch (error) {
 				return this.fail(env, `The 'files' parameter contains invalid JSON: ${getErrorMessage(error)}`)
 			}
 		}
-		if (!Array.isArray(files) || files.length === 0) {
-			return this.fail(env, "The 'files' parameter must be a non-empty array of file objects.")
+
+		const parsed = fileEditsSchema.safeParse(files)
+		if (!parsed.success) {
+			const issue = parsed.error.issues[0]
+			const at = issue && issue.path.length > 0 ? `files[${issue.path.join(".")}]` : "The 'files' parameter"
+			return this.fail(env, `${at} ${issue?.message ?? "is invalid"}.`)
 		}
 
 		const normalized: FileEdit[] = []
-		for (const [fileIndex, candidate] of files.entries()) {
-			if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-				return this.fail(env, `files[${fileIndex}] must be an object.`)
-			}
-			const file = candidate as Record<string, unknown>
-			if (typeof file.path !== "string" || file.path.trim().length === 0) {
-				return this.fail(env, `files[${fileIndex}].path must be a non-empty string.`)
-			}
-
+		for (const [fileIndex, file] of parsed.data.entries()) {
 			let edits = file.edits
 			if (typeof edits === "string") {
 				try {
-					edits = JSON.parse(edits)
-				} catch {
-					return this.fail(env, `files[${fileIndex}].edits must be a valid JSON array of edit objects.`)
+					edits = safeParseJson(editsSchema, edits, `files[${fileIndex}].edits`)
+				} catch (error) {
+					return this.fail(env, `files[${fileIndex}].edits must be a valid JSON array of edit objects. ${getErrorMessage(error)}`)
 				}
-			}
-			if (!Array.isArray(edits) || edits.length === 0) {
-				return this.fail(env, `files[${fileIndex}].edits must be a non-empty array of edit objects.`)
 			}
 			normalized.push({ path: file.path, edits: edits as Edit[] })
 		}

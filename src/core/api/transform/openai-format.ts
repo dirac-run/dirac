@@ -1,5 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
+import { z } from "zod"
 import { ApiProvider } from "@/shared/api"
 import {
 	DiracAssistantRedactedThinkingBlock,
@@ -11,6 +12,7 @@ import {
 	DiracTextContentBlock,
 	DiracUserToolResultContentBlock,
 } from "@/shared/messages/content"
+import { JsonParseError, safeParseJson } from "@/shared/safe-json-parse"
 import { Logger } from "@/shared/services/Logger"
 
 // OpenAI API has a maximum tool call ID length of 40 characters
@@ -146,7 +148,9 @@ function collectReasoningDetails(nonToolMessages: DiracContent[], toolMessages: 
 		const toolId = toolMessage.id
 		if (!toolDetails) continue
 		if (Array.isArray(toolDetails)) {
-			const validDetails = toolDetails.filter((detail: unknown) => (detail as ReasoningDetail)?.id === toolId) as ReasoningDetail[]
+			const validDetails = toolDetails.filter(
+				(detail: unknown) => (detail as ReasoningDetail)?.id === toolId,
+			) as ReasoningDetail[]
 			if (validDetails.length > 0) reasoningDetails.push(...validDetails)
 		} else if ((toolDetails as ReasoningDetail | undefined)?.id === toolId) {
 			reasoningDetails.push(toolDetails)
@@ -218,9 +222,7 @@ function convertAssistantMessage(
 		role: "assistant",
 		content: finalContent,
 		tool_calls: tool_calls.length > 0 ? tool_calls : undefined,
-		...(consolidatedReasoningDetails.length > 0
-			? { reasoning_details: consolidatedReasoningDetails }
-			: {}),
+		...(consolidatedReasoningDetails.length > 0 ? { reasoning_details: consolidatedReasoningDetails } : {}),
 	})
 }
 
@@ -347,6 +349,9 @@ function consolidateReasoningDetails(reasoningDetails: ReasoningDetail[]): Reaso
 
 const UNIQUE_ERROR_TOOL_NAME = "_dirac_error_unknown_function_"
 
+// Tool call arguments must be a JSON object — anything else is a malformed model response.
+const toolArgumentsSchema = z.record(z.unknown())
+
 export function convertToAnthropicMessage(completion: OpenAI.Chat.Completions.ChatCompletion): Anthropic.Messages.Message {
 	const openAiMessage = completion.choices[0].message
 	const anthropicMessage: Anthropic.Messages.Message = {
@@ -396,25 +401,35 @@ export function convertToAnthropicMessage(completion: OpenAI.Chat.Completions.Ch
 			)
 			if (functionCalls.length > 0) {
 				anthropicMessage.content.push(
-					...functionCalls.map((toolCall: OpenAI.Chat.ChatCompletionMessageFunctionToolCall): Anthropic.ToolUseBlock => {
-						let parsedInput = {}
-						try {
-							parsedInput = JSON.parse(toolCall.function?.arguments || "{}")
-						} catch (error) {
-							Logger.error("Failed to parse tool arguments:", error)
-						}
-						return {
-							type: "tool_use",
-							id: toolCall.id,
-							name: toolCall.function?.name || UNIQUE_ERROR_TOOL_NAME,
-							input: parsedInput,
-							caller: { type: "direct" },
-						}
-					}),
+					...functionCalls.map(
+						(toolCall: OpenAI.Chat.ChatCompletionMessageFunctionToolCall): Anthropic.ToolUseBlock => {
+							const argsJson = toolCall.function?.arguments
+							// Missing/empty arguments are legitimately {}; malformed JSON must surface, never default silently.
+							const parsedInput =
+								argsJson == null || argsJson.trim() === ""
+									? {}
+									: safeParseJson(
+											toolArgumentsSchema,
+											argsJson,
+											`tool_call '${toolCall.function?.name ?? "unknown"}' arguments`,
+										)
+							return {
+								type: "tool_use",
+								id: toolCall.id,
+								name: toolCall.function?.name || UNIQUE_ERROR_TOOL_NAME,
+								input: parsedInput,
+								caller: { type: "direct" },
+							}
+						},
+					),
 				)
 			}
 		}
 	} catch (error) {
+		// Malformed tool arguments are a hard failure — do not let the generic converter log-swallow them.
+		if (error instanceof JsonParseError) {
+			throw error
+		}
 		Logger.error("Error converting OpenAI message to Anthropic format:", error)
 	}
 

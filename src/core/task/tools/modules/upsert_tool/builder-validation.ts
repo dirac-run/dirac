@@ -1,6 +1,8 @@
 import * as fs from "fs/promises"
 import * as path from "path"
+import { z } from "zod"
 import { getErrorMessage } from "@/shared/errors"
+import { safeParseJson } from "@/shared/safe-json-parse"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
 import { UserToolLoader } from "../../discovery/UserToolLoader"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
@@ -10,6 +12,9 @@ export interface StagedToolValidationResult {
 	tool?: DiscoveredTool
 	error?: string
 }
+
+// Smoke args must be a flat JSON object — the generated harness spreads them into processCall.
+const smokeArgsSchema = z.record(z.unknown())
 
 export async function validateStagedTool(
 	env: IToolEnvironment,
@@ -56,20 +61,14 @@ async function validateSmokeArguments(toolDir: string): Promise<string | undefin
 	}
 
 	try {
-		const parsed = JSON.parse(raw)
-		if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-			return `${SMOKE_ARGS_FILE} must contain a JSON object.`
-		}
+		safeParseJson(smokeArgsSchema, raw, SMOKE_ARGS_FILE)
 		return undefined
 	} catch (error) {
-		return `${SMOKE_ARGS_FILE} is not valid JSON: ${errorMessage(error)}`
+		return getErrorMessage(error)
 	}
 }
 
-async function runSmokeHarness(
-	env: IToolEnvironment,
-	toolDir: string,
-): Promise<string | undefined> {
+async function runSmokeHarness(env: IToolEnvironment, toolDir: string): Promise<string | undefined> {
 	const harnessPath = path.join(toolDir, "test-harness.ts")
 	const command = `npx tsx ${JSON.stringify(harnessPath)}`
 	const result = await env.system.executeCommand(command, { timeout: 60_000 })

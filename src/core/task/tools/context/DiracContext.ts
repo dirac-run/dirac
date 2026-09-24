@@ -3,6 +3,8 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import Mutex from "p-mutex"
+import { z } from "zod"
+import { safeParseJson } from "@/shared/safe-json-parse"
 import { StateManager } from "../../../storage/StateManager"
 import { GlobalFileNames } from "../../../storage/fileNames"
 import {
@@ -219,7 +221,12 @@ export class DiracContext implements IDiracContext {
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
 			try {
-				return { values: JSON.parse(await fs.readFile(this.taskPath, "utf8")), offset: -1 }
+				const values = safeParseJson(
+					z.record(z.unknown()),
+					await fs.readFile(this.taskPath, "utf8"),
+					`task context state '${this.taskPath}'`,
+				)
+				return { values, offset: -1 }
 			} catch (legacyError) {
 				if ((legacyError as NodeJS.ErrnoException).code === "ENOENT") return { values: {}, offset: -1 }
 				throw legacyError

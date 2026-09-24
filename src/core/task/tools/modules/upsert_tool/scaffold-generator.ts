@@ -123,7 +123,14 @@ const env = {
 async function main() {
   const tool = create()
   const argsJson = process.argv[2] || await fs.readFile(nodePath.join(harnessDir, "smoke-args.json"), "utf8")
-  const args = JSON.parse(argsJson)
+  let args
+  try {
+    args = JSON.parse(argsJson)
+  } catch (e) {
+    console.error("=== FAIL: tool args are not valid JSON:", e.message)
+    console.error("=== Offending payload:", String(argsJson).slice(0, 200))
+    process.exit(1)
+  }
 
   console.log("=== Test 1: Running with provided args")
   const r1 = await tool.processCall(args, env)
