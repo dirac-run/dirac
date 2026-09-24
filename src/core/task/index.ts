@@ -748,6 +748,7 @@ export class Task {
 			getWorkingConfiguration: () => this.workingConfiguration,
 			workspaceManager: this.workspaceManager,
 			getRequestRuntime: () => this.activeRequestRuntime,
+			diracIgnoreController: this.diracIgnoreController,
 		})
 
 		this.contextLoader = new ContextLoader({

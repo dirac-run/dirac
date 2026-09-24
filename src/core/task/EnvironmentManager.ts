@@ -5,6 +5,7 @@ import { getEditingFilesInstructions } from "@core/prompts/system-prompt/section
 import type { TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import type { TaskRequestRuntime } from "./runtime/TaskRequestRuntime"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
+import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 import { ITerminalManager } from "@integrations/terminal/types"
 import type { Dirent } from "fs"
 import fs from "fs/promises"
@@ -77,6 +78,8 @@ export interface EnvironmentManagerDependencies {
 	getWorkingConfiguration: () => TaskWorkingConfiguration
 	getRequestRuntime: () => TaskRequestRuntime | undefined
 	workspaceManager?: WorkspaceRootManager
+	/** Files it blocks are left out of the recent-files list: naming them invites a read that fails. */
+	diracIgnoreController?: DiracIgnoreController
 }
 
 export class EnvironmentManager {
@@ -127,6 +130,7 @@ export class EnvironmentManager {
 
 			const fileStats: { relativePath: string; mtime: Date }[] = []
 			for await (const absPath of this.walkCodeFiles(this.cwd, ignoredDirs)) {
+				if (this.dependencies.diracIgnoreController?.validateAccess(absPath) === false) continue
 				try {
 					const stat = await fs.stat(absPath)
 					fileStats.push({

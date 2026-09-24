@@ -9,7 +9,7 @@ import { TaskState } from "../TaskState"
 
 function createEnvironmentManager(
 	taskState: TaskState,
-	options: { taskMode?: "plan" | "act"; requestMode?: "plan" | "act"; cwd?: string } = {},
+	options: { taskMode?: "plan" | "act"; requestMode?: "plan" | "act"; cwd?: string; diracIgnoreController?: any } = {},
 ): EnvironmentManager {
 	const taskMode = options.taskMode ?? "act"
 	const requestMode = options.requestMode ?? taskMode
@@ -25,6 +25,7 @@ function createEnvironmentManager(
 			requestId: "request-1",
 			workingConfiguration: { settings: { mode: requestMode }, executionOptions: { multiRootEnabled: false } },
 		}) as any,
+		diracIgnoreController: options.diracIgnoreController,
 	})
 }
 
@@ -217,6 +218,21 @@ describe("EnvironmentManager recent-files bounded traversal (FB-31)", () => {
 			for (let i = 4; i >= 0; i--) {
 				assert.doesNotMatch(details, new RegExp(`file_${String(i).padStart(2, "0")}\\.ts`))
 			}
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true })
+		}
+	})
+	it("leaves files blocked by .diracignore out of the recent-files list", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-recent-ignore-"))
+		try {
+			await fs.mkdir(path.join(tempDir, "parsed"))
+			await fs.writeFile(path.join(tempDir, "parsed", "hidden.md"), "")
+			await fs.writeFile(path.join(tempDir, "visible.md"), "")
+			const diracIgnoreController = { validateAccess: (p: string) => !p.includes(`${path.sep}parsed${path.sep}`) }
+			const manager = createEnvironmentManager(new TaskState(), { cwd: tempDir, diracIgnoreController })
+			const details = await manager.getEnvironmentDetails(true)
+			assert.match(details, /visible\.md/)
+			assert.doesNotMatch(details, /hidden\.md/)
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		}
