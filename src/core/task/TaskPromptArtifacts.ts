@@ -1,9 +1,19 @@
 import { Logger } from "@shared/services/Logger"
+import { arePathsEqual, isLocatedInPath } from "@utils/path"
 import fs from "fs/promises"
 import * as path from "path"
 
+/** Resolve symlinks where possible; fall back to the given path when it does not exist yet. */
+async function realpathOrSelf(p: string): Promise<string> {
+	return fs.realpath(p).catch(() => p)
+}
+
 export interface TaskPromptArtifactsContext {
 	taskId: string
+	// Per-request sequence number (1-based). Included in the artifact filename so a
+	// multi-call turn (e.g. the noToolsUsed retry loop) leaves one file per API
+	// request instead of each write overwriting the previous one.
+	requestSeq: number
 	cwd: string
 	writePromptMetadataEnabled: boolean
 	writePromptMetadataDirectory?: string
@@ -31,12 +41,19 @@ export async function writePromptMetadataArtifacts(
 		// Env var is OS-level (user-controlled, safe to allow absolute); workspace setting is the exfiltration vector.
 		const envDir = process.env.DIRAC_PROMPT_ARTIFACT_DIR?.trim()
 		const settingDir = ctx.writePromptMetadataDirectory?.trim()
-		const cwdResolved = path.resolve(ctx.cwd)
+		// Resolve cwd through the filesystem, exactly as the artifact dir is resolved below. Comparing a
+		// realpath'd directory against a merely path.resolve'd cwd rejects legitimate layouts wherever the
+		// two spellings differ: a symlinked parent (/tmp -> /private/tmp on macOS) or, on Windows, the
+		// drive-letter case mismatch between vscode.Uri.fsPath and what the filesystem reports.
+		const cwdResolved = await realpathOrSelf(path.resolve(ctx.cwd))
 		// Setting-configured dirs must resolve under cwd to prevent workspace settings from exfiltrating prompts.
 		// Only validate the setting when no env var is provided — env takes precedence and is trusted.
 		if (!envDir && settingDir) {
 			const resolved = path.isAbsolute(settingDir) ? path.resolve(settingDir) : path.resolve(ctx.cwd, settingDir)
-			if (resolved !== cwdResolved && !resolved.startsWith(cwdResolved + path.sep)) {
+			// Compare via the shared helpers, not raw string prefixes: on Windows the workspace cwd
+			// (from vscode.Uri.fsPath) and a filesystem-resolved path can differ in drive-letter case,
+			// which made a case-sensitive startsWith reject the extension's own artifact directory.
+			if (!arePathsEqual(resolved, cwdResolved) && !isLocatedInPath(cwdResolved, resolved)) {
 				Logger.warn(`[Task ${ctx.taskId}] writePromptMetadataDirectory outside cwd rejected: ${resolved}`)
 				return
 			}
@@ -55,7 +72,7 @@ export async function writePromptMetadataArtifacts(
 		let writeDir = artifactDir
 		if (!envDir) {
 			const realArtifactDir = await fs.realpath(artifactDir)
-			if (realArtifactDir !== cwdResolved && !realArtifactDir.startsWith(cwdResolved + path.sep)) {
+			if (!arePathsEqual(realArtifactDir, cwdResolved) && !isLocatedInPath(cwdResolved, realArtifactDir)) {
 				Logger.warn(`[Task ${ctx.taskId}] artifact dir resolves outside cwd (symlink?), rejected: ${realArtifactDir}`)
 				return
 			}
@@ -65,7 +82,7 @@ export async function writePromptMetadataArtifacts(
 		const gitignorePath = path.join(writeDir, ".gitignore")
 		await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => {})
 
-		const debugPath = path.join(writeDir, `task-${ctx.taskId}-debug.md`)
+		const debugPath = path.join(writeDir, `task-${ctx.taskId}-debug-${String(ctx.requestSeq).padStart(3, "0")}.md`)
 
 		let markdown = `## System Prompt\n\n${params.systemPrompt}\n\n`
 

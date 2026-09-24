@@ -162,6 +162,9 @@ export type TaskParams = {
 export class Task {
 	// Core task variables
 	readonly taskId: string
+	// Sequence number for prompt-metadata debug artifacts — see promptArtifactsContext.
+	// Each API request within a task gets its own file instead of overwriting the last.
+	private promptArtifactSeq = 0
 	private diracContext: DiracContext
 	readonly ulid: string
 	private taskIsFavorited?: boolean
@@ -201,6 +204,10 @@ export class Task {
 	private get promptArtifactsContext(): TaskPromptArtifactsContext {
 		return {
 			taskId: this.taskId,
+			// Each call gets its own sequence number so a multi-call turn (e.g. the
+			// noToolsUsed retry loop) leaves one debug artifact per API request
+			// instead of the last request overwriting all earlier ones.
+			requestSeq: ++this.promptArtifactSeq,
 			cwd: this.cwd,
 			writePromptMetadataEnabled: this.workingConfiguration.settings.writePromptMetadataEnabled,
 			writePromptMetadataDirectory: this.workingConfiguration.settings.writePromptMetadataDirectory,
@@ -227,6 +234,7 @@ export class Task {
 				writePromptMetadataArtifacts(
 					{
 						taskId: this.taskId,
+						requestSeq: ++this.promptArtifactSeq,
 						cwd: this.cwd,
 						writePromptMetadataEnabled: requestRuntime.workingConfiguration.settings.writePromptMetadataEnabled,
 						writePromptMetadataDirectory: requestRuntime.workingConfiguration.settings.writePromptMetadataDirectory,

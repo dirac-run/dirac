@@ -1,4 +1,4 @@
-import { getCwd } from "@utils/path"
+import { getCwd, isLocatedInPath } from "@utils/path"
 
 import { status } from "@grpc/grpc-js"
 import { HostProvider } from "@/hosts/host-provider"
@@ -151,7 +151,9 @@ export class ExternalDiffViewProvider extends DiffViewProvider {
 		// Skip formatting for files outside the workspace (e.g. generated tools, .dirac data)
 		const fs = await import("fs/promises")
 		const cwd = await getCwd()
-		if (cwd && !path.startsWith(cwd)) {
+		// isLocatedInPath, not startsWith: see FileEditProvider.format — the raw prefix test
+		// matches sibling directories and misses Windows drive-letter case differences.
+		if (cwd && !isLocatedInPath(cwd, path)) {
 			return await fs.readFile(path, "utf-8")
 		}
 

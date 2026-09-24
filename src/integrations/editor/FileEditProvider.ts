@@ -1,4 +1,4 @@
-import { getCwd } from "@utils/path"
+import { getCwd, isLocatedInPath } from "@utils/path"
 
 import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 import { NodeTextFileAccess } from "@integrations/editor/NodeTextFileAccess"
@@ -176,7 +176,10 @@ export class FileEditProvider extends DiffViewProvider {
 
 		// Skip formatting for files outside the workspace (e.g. generated tools, .dirac data)
 		const cwd = await getCwd()
-		if (cwd && !path.startsWith(cwd)) {
+		// isLocatedInPath, not startsWith: the raw prefix test both matched sibling directories
+		// sharing a prefix (cwd `/a/proj` accepted `/a/proj-evil`) and missed Windows paths that
+		// differ from cwd only in drive-letter case.
+		if (cwd && !isLocatedInPath(cwd, path)) {
 			return await fs.readFile(path, "utf-8")
 		}
 
