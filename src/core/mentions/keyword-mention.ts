@@ -2,7 +2,6 @@ import { diagnosticsToProblemsString } from "@integrations/diagnostics"
 import { telemetryService } from "@services/telemetry"
 import { getCommitInfo, getWorkingState } from "@utils/git"
 import { HostProvider } from "@/hosts/host-provider"
-import { getLatestTerminalOutput } from "@/hosts/vscode/terminal/get-latest-output"
 import { DiagnosticSeverity } from "@/shared/proto/index.dirac"
 import { isGitCommitHash } from "./mention-parsers"
 
@@ -19,7 +18,11 @@ export async function expandProblemsMention(parsedText: string): Promise<string>
 
 export async function expandTerminalMention(parsedText: string): Promise<string> {
 	try {
-		const terminalOutput = await getLatestTerminalOutput()
+		const readTerminalOutput = HostProvider.get().capabilities.getLatestTerminalOutput
+		if (!readTerminalOutput) {
+			throw new Error("This host does not expose terminal contents")
+		}
+		const terminalOutput = await readTerminalOutput()
 		telemetryService.captureMentionUsed("terminal", terminalOutput.length)
 		return `${parsedText}\n\n<terminal_output>\n${terminalOutput}\n</terminal_output>`
 	} catch (error) {

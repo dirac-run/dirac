@@ -1,15 +1,22 @@
 import * as fs from "fs"
-import type { EnvironmentVariableMutator, EnvironmentVariableMutatorOptions, EnvironmentVariableScope } from "vscode"
-import * as vscode from "vscode"
-export class SecretStore implements vscode.SecretStorage {
+
+/** Minimal VS Code `Event<T>` shape — a subscribable callback returning a disposable. */
+export type Event<T> = (listener: (e: T) => any) => { dispose(): any }
+
+export interface SecretStorageChangeEvent {
+	key: string
+}
+
+/** File-backed secret store with the same shape VS Code's SecretStorage exposes. */
+export class SecretStore {
 	private data: JsonKeyValueStore<string>
-	private readonly _onDidChange = new EventEmitter<vscode.SecretStorageChangeEvent>()
+	private readonly _onDidChange = new EventEmitter<SecretStorageChangeEvent>()
 
 	constructor(filepath: string) {
 		this.data = new JsonKeyValueStore(filepath)
 	}
 
-	readonly onDidChange: vscode.Event<vscode.SecretStorageChangeEvent> = this._onDidChange.event
+	readonly onDidChange: Event<SecretStorageChangeEvent> = this._onDidChange.event
 
 	get(key: string): Thenable<string | undefined> {
 		return Promise.resolve(this.data.get(key))
@@ -28,8 +35,8 @@ export class SecretStore implements vscode.SecretStorage {
 	}
 }
 
-// Create a class that implements Memento interface with the required setKeysForSync method
-export class MementoStore implements vscode.Memento {
+// Create a class with the Memento surface (get/update/keys/setKeysForSync)
+export class MementoStore {
 	private data: JsonKeyValueStore<any>
 
 	constructor(filepath: string) {
@@ -50,12 +57,12 @@ export class MementoStore implements vscode.Memento {
 	}
 }
 
-// Simple implementation of VSCode's EventEmitter
+// Simple implementation of VS Code's EventEmitter
 type EventCallback<T> = (e: T) => any
 export class EventEmitter<T> {
 	private listeners: EventCallback<T>[] = []
 
-	event: vscode.Event<T> = (listener: EventCallback<T>) => {
+	event: Event<T> = (listener: EventCallback<T>) => {
 		this.listeners.push(listener)
 		return {
 			dispose: () => {
@@ -113,25 +120,22 @@ export class JsonKeyValueStore<T> {
 }
 
 /** This is not used in dirac, none of the methods are implemented. */
-export class EnvironmentVariableCollection implements EnvironmentVariableCollection {
+export class EnvironmentVariableCollection {
 	persistent = false
 	description: string | undefined = undefined
-	replace(_variable: string, _value: string, _options?: EnvironmentVariableMutatorOptions): void {
+	replace(_variable: string, _value: string, _options?: unknown): void {
 		throw new Error("Method not implemented.")
 	}
-	append(_variable: string, _value: string, _options?: EnvironmentVariableMutatorOptions): void {
+	append(_variable: string, _value: string, _options?: unknown): void {
 		throw new Error("Method not implemented.")
 	}
-	prepend(_variable: string, _value: string, _options?: EnvironmentVariableMutatorOptions): void {
+	prepend(_variable: string, _value: string, _options?: unknown): void {
 		throw new Error("Method not implemented.")
 	}
-	get(_variable: string): EnvironmentVariableMutator | undefined {
+	get(_variable: string): unknown {
 		throw new Error("Method not implemented.")
 	}
-	forEach(
-		_callback: (variable: string, mutator: EnvironmentVariableMutator, collection: EnvironmentVariableCollection) => any,
-		_thisArg?: any,
-	): void {
+	forEach(_callback: (variable: string, mutator: unknown, collection: EnvironmentVariableCollection) => any): void {
 		throw new Error("Method not implemented.")
 	}
 	delete(_variable: string): void {
@@ -140,10 +144,10 @@ export class EnvironmentVariableCollection implements EnvironmentVariableCollect
 	clear(): void {
 		throw new Error("Method not implemented.")
 	}
-	[Symbol.iterator](): Iterator<[variable: string, mutator: EnvironmentVariableMutator], any, any> {
+	[Symbol.iterator](): Iterator<[variable: string, mutator: unknown], any, any> {
 		throw new Error("Method not implemented.")
 	}
-	getScoped(_scope: EnvironmentVariableScope): EnvironmentVariableCollection {
+	getScoped(_scope: unknown): EnvironmentVariableCollection {
 		throw new Error("Method not implemented.")
 	}
 }

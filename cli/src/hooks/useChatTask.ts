@@ -1,14 +1,13 @@
-import React, { useCallback, useEffect, useState } from "react"
-import { useApp } from "ink"
-import { Logger } from "@/shared/services/Logger"
-import { telemetryService } from "@/services/telemetry"
-import { Session } from "@/shared/services/Session"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-
-import { shutdownEvent } from "../vscode-shim"
-import { showTaskWithId } from "@/core/controller/task/showTaskWithId"
 import { StringRequest } from "@shared/proto/dirac/common"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+import { useApp } from "ink"
+import React, { useCallback, useEffect, useState } from "react"
+import { showTaskWithId } from "@/core/controller/task/showTaskWithId"
+import { telemetryService } from "@/services/telemetry"
+import { Logger } from "@/shared/services/Logger"
+import { Session } from "@/shared/services/Session"
 import { setTerminalTitle } from "../utils/display"
+import { shutdownEvent } from "../utils/shutdown"
 
 interface UseChatTaskProps {
 	ctrl: any

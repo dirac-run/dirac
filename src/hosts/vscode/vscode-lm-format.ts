@@ -29,8 +29,7 @@ export function asObjectSafe(value: unknown): object {
 	}
 }
 
-type DiracTextImageBlockParam =
-	Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam
+type DiracTextImageBlockParam = Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam
 
 // Describes an unsupported image as a text placeholder for the VSCode LM API.
 function imagePlaceholder(source?: Anthropic.ImageBlockParam["source"]): string {

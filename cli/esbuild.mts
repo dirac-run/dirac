@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import dotenv from "dotenv"
 import * as esbuild from "esbuild"
-// @ts-ignore
+// @ts-expect-error
 import { copySourceCode } from "../scripts/copy-source.mjs"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -83,19 +83,6 @@ const aliasResolverPlugin: esbuild.Plugin = {
 				// If nothing worked, return the original path and let esbuild handle the error
 				return { path: importPath }
 			})
-		})
-	},
-}
-
-/**
- * Plugin to redirect vscode imports to our shim
- */
-const vscodeStubPlugin: esbuild.Plugin = {
-	name: "vscode-stub",
-	setup(build) {
-		// Redirect 'vscode' imports to our shim
-		build.onResolve({ filter: /^vscode$/ }, () => {
-			return { path: path.join(__dirname, "src", "vscode-shim.ts") }
 		})
 	},
 }
@@ -257,7 +244,7 @@ const sharedOptions: Partial<esbuild.BuildOptions> = {
 	logLevel: "silent",
 	define: buildEnvVars,
 	tsconfig: path.join(__dirname, "tsconfig.json"),
-	plugins: [copyWasmFiles, aliasResolverPlugin, vscodeStubPlugin, stubOptionalModulesPlugin, esbuildProblemMatcherPlugin],
+	plugins: [copyWasmFiles, aliasResolverPlugin, stubOptionalModulesPlugin, esbuildProblemMatcherPlugin],
 	format: "esm",
 	sourcesContent: false,
 	platform: "node",

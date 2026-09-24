@@ -3,22 +3,22 @@
  */
 
 import { exit } from "node:process"
+import { INFERENCE_SPEED_OPTIONS, OPENAI_REASONING_EFFORT_OPTIONS } from "@shared/storage/types"
 import { Command, Option } from "commander"
 import { version as CLI_VERSION } from "../package.json"
+import {
+    parseInferenceSpeed,
+    parsePositiveInteger,
+    parseReasoningEffort,
+    parseThinkingBudget,
+    parseToolIdentifiers,
+} from "./utils/command-parsers"
 import { suppressConsoleUnlessVerbose } from "./utils/console"
-import { getCliLogFilePath } from "./vscode-shim"
 import { setupSignalHandlers } from "./utils/errors"
 import { isGoalRequest, UNSUPPORTED_GOAL_CLI_MESSAGE } from "./utils/goals"
+import { getCliLogFilePath } from "./utils/output-channel"
 import { parseTimeoutSeconds } from "./utils/task-timeout"
-import {
-	parseInferenceSpeed,
-	parsePositiveInteger,
-	parseReasoningEffort,
-	parseThinkingBudget,
-	parseToolIdentifiers,
-} from "./utils/command-parsers"
 
-import { INFERENCE_SPEED_OPTIONS, OPENAI_REASONING_EFFORT_OPTIONS } from "@shared/storage/types"
 // CLI-only behavior: suppress console output unless verbose mode is enabled.
 // Kept explicit here so importing the library bundle does not mutate global console methods.
 suppressConsoleUnlessVerbose()
@@ -26,9 +26,9 @@ suppressConsoleUnlessVerbose()
 // Setup signal handlers for graceful shutdown
 const releaseCliSignalOwnership = setupSignalHandlers()
 
+export { hasExplicitAuthQuickSetupFlags, shouldDoQuickAuth } from "./commands/auth"
 // Re-export for backward compatibility and testing
 export { captureUnhandledException } from "./utils/errors"
-export { shouldDoQuickAuth, hasExplicitAuthQuickSetupFlags } from "./commands/auth"
 
 // Setup CLI commands
 const program = new Command()
@@ -55,11 +55,7 @@ program
 	.option("-c, --cwd <path>", "Working directory for the task")
 	.option("--config <path>", "Path to Dirac configuration directory")
 	.option("--thinking [tokens]", "Enable extended thinking (default: 1024 tokens)", parseThinkingBudget)
-	.option(
-		"--reasoning-effort <effort>",
-		`Reasoning effort: ${OPENAI_REASONING_EFFORT_OPTIONS.join("|")}`,
-		parseReasoningEffort,
-	)
+	.option("--reasoning-effort <effort>", `Reasoning effort: ${OPENAI_REASONING_EFFORT_OPTIONS.join("|")}`, parseReasoningEffort)
 	.option("--speed <speed>", `Inference speed: ${INFERENCE_SPEED_OPTIONS.join("|")}`, parseInferenceSpeed)
 	.option(
 		"--max-consecutive-mistakes <count>",
@@ -210,11 +206,7 @@ program
 	.option("-c, --cwd <path>", "Working directory")
 	.option("--config <path>", "Configuration directory")
 	.option("--thinking [tokens]", "Enable extended thinking (default: 1024 tokens)", parseThinkingBudget)
-	.option(
-		"--reasoning-effort <effort>",
-		`Reasoning effort: ${OPENAI_REASONING_EFFORT_OPTIONS.join("|")}`,
-		parseReasoningEffort,
-	)
+	.option("--reasoning-effort <effort>", `Reasoning effort: ${OPENAI_REASONING_EFFORT_OPTIONS.join("|")}`, parseReasoningEffort)
 	.option("--speed <speed>", `Inference speed: ${INFERENCE_SPEED_OPTIONS.join("|")}`, parseInferenceSpeed)
 	.option(
 		"--max-consecutive-mistakes <count>",

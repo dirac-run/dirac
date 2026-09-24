@@ -3,19 +3,74 @@
  * Provides mock implementations of VSCode extension context.
  */
 
+import fs, { existsSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import os from "os"
 import path from "path"
-import fs from "node:fs"
+import { URI } from "vscode-uri"
 import { ExtensionRegistryInfo } from "@/registry"
-import { DiracExtensionContext } from "@/shared/dirac"
+import { DiracExtensionContext, ExtensionKind, ExtensionMode } from "@/shared/dirac"
 import type { DiracMemento } from "@/shared/storage/DiracStorage"
 import { createStorageContext, type StorageContext } from "@/shared/storage/storage-context"
-import { EnvironmentVariableCollection, ExtensionKind, ExtensionMode, readJson, URI } from "./vscode-shim"
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+/** Safely read and parse a JSON file, returning a default value on failure. */
+function readJson<T = any>(filePath: string, defaultValue: T = {} as T): T {
+	try {
+		if (existsSync(filePath)) {
+			return JSON.parse(readFileSync(filePath, "utf8"))
+		}
+	} catch {
+		// Return default if file doesn't exist or is invalid
+	}
+	return defaultValue
+}
+
+/** Mock environment variable collection for non-VSCode environments. */
+class EnvironmentVariableCollection {
+	private variables = new Map<string, { value: string; type: string }>()
+	persistent = true
+	description = "CLI Environment Variables"
+
+	entries() {
+		return this.variables.entries()
+	}
+
+	replace(variable: string, value: string) {
+		this.variables.set(variable, { value, type: "replace" })
+	}
+
+	append(variable: string, value: string) {
+		this.variables.set(variable, { value, type: "append" })
+	}
+
+	prepend(variable: string, value: string) {
+		this.variables.set(variable, { value, type: "prepend" })
+	}
+
+	get(variable: string) {
+		return this.variables.get(variable)
+	}
+
+	forEach(callback: (variable: string, mutator: { value: string; type: string }, collection: this) => void) {
+		this.variables.forEach((mutator, variable) => callback(variable, mutator, this))
+	}
+
+	delete(variable: string) {
+		return this.variables.delete(variable)
+	}
+
+	clear() {
+		this.variables.clear()
+	}
+
+	getScoped(_scope: unknown) {
+		return this
+	}
+}
 
 /**
  * CLI-specific state overrides.

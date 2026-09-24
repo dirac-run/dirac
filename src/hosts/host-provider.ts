@@ -2,7 +2,7 @@ import { DiracWebviewProvider } from "@/core/webview"
 import { CommentReviewController } from "@/integrations/editor/CommentReviewController"
 import { DiffViewProvider } from "@/integrations/editor/DiffViewProvider"
 import { ITerminalManager } from "@/integrations/terminal/types"
-import { HostBridgeClientProvider } from "./host-provider-types"
+import { HostBridgeClientProvider, type HostCapabilities } from "./host-provider-types"
 /**
  * Singleton class that manages host-specific providers for dependency injection.
  *
@@ -51,6 +51,10 @@ export class HostProvider {
 	// The absolute file system path where the extension can store global state.
 	globalStorageFsPath: string
 
+	// Optional host-only capabilities (walkthrough UI, vscode.lm models, terminal
+	// contents capture). Empty on hosts that cannot provide them.
+	readonly capabilities: HostCapabilities
+
 	// Private constructor to enforce singleton pattern
 	private constructor(
 		diracType: "cli" | "extension",
@@ -66,6 +70,7 @@ export class HostProvider {
 		globalStorageFsPath: string,
 		getEnvironmentVariables: GetEnvironmentVariables,
 		isWorkspaceTrusted: () => boolean = () => true,
+		capabilities: HostCapabilities = {},
 	) {
 		this.diracType = diracType
 		this.createDiracWebviewProvider = createDiracWebviewProvider
@@ -80,6 +85,7 @@ export class HostProvider {
 		this.globalStorageFsPath = globalStorageFsPath
 		this.getEnvironmentVariables = getEnvironmentVariables
 		this.isWorkspaceTrusted = isWorkspaceTrusted
+		this.capabilities = capabilities
 	}
 
 	public static initialize(
@@ -96,6 +102,7 @@ export class HostProvider {
 		globalStorageFsPath: string,
 		getEnvironmentVariables: GetEnvironmentVariables,
 		isWorkspaceTrusted: () => boolean = () => true,
+		capabilities: HostCapabilities = {},
 	): HostProvider {
 		if (HostProvider.instance) {
 			throw new Error("Host provider has already been initialized.")
@@ -114,6 +121,7 @@ export class HostProvider {
 			globalStorageFsPath,
 			getEnvironmentVariables,
 			isWorkspaceTrusted,
+			capabilities,
 		)
 		return HostProvider.instance
 	}

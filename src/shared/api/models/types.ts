@@ -1,5 +1,6 @@
 import { ApiFormat } from "../../proto/dirac/models"
 import type { OpenaiReasoningEffort } from "../../storage/types"
+import type { LanguageModelChatSelector } from "../../vsCodeSelectorUtils"
 
 export interface PriceTier {
 	tokenLimit: number
@@ -96,7 +97,7 @@ export interface ModelProviderPreset {
 	modelId: string
 	modelInfo?: ModelInfo
 	openAiProfileName?: string
-	vsCodeLmModelSelector?: import("vscode").LanguageModelChatSelector
+	vsCodeLmModelSelector?: LanguageModelChatSelector
 	awsBedrockCustomSelected?: boolean
 	awsBedrockCustomModelBaseId?: string
 	lastUsedAt: number
@@ -127,7 +128,7 @@ export interface ModelProviderSelection {
 	modelId: string
 	modelInfo?: ModelInfo
 	openAiProfileName?: string
-	vsCodeLmModelSelector?: import("vscode").LanguageModelChatSelector
+	vsCodeLmModelSelector?: LanguageModelChatSelector
 	awsBedrockCustomSelected?: boolean
 	awsBedrockCustomModelBaseId?: string
 }

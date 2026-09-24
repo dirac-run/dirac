@@ -1,6 +1,6 @@
-import { userInfo } from "os"
 import * as fs from "fs"
-import * as vscode from "vscode"
+import { HostProvider } from "@/hosts/host-provider"
+import { userInfo } from "os"
 
 export const WINDOWS_POWERSHELL_7_PATH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
 export const WINDOWS_POWERSHELL_LEGACY_PATH = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
@@ -51,9 +51,10 @@ type LinuxTerminalProfiles = Record<string, LinuxTerminalProfile>
 
 function getWindowsTerminalConfig() {
 	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.windows")
-		const profiles = config.get<WindowsTerminalProfiles>("profiles.windows") || {}
+		// Hosts without workspace configuration (CLI, standalone) return no profiles.
+		const readConfig = HostProvider.get().capabilities.getWorkspaceConfig
+		const defaultProfileName = readConfig?.("terminal.integrated", "defaultProfile.windows") as string | undefined
+		const profiles = (readConfig?.("terminal.integrated", "profiles.windows") as WindowsTerminalProfiles | undefined) || {}
 		return { defaultProfileName, profiles }
 	} catch {
 		return { defaultProfileName: null, profiles: {} as WindowsTerminalProfiles }
@@ -62,9 +63,9 @@ function getWindowsTerminalConfig() {
 
 function getMacTerminalConfig() {
 	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.osx")
-		const profiles = config.get<MacTerminalProfiles>("profiles.osx") || {}
+		const readConfig = HostProvider.get().capabilities.getWorkspaceConfig
+		const defaultProfileName = readConfig?.("terminal.integrated", "defaultProfile.osx") as string | undefined
+		const profiles = (readConfig?.("terminal.integrated", "profiles.osx") as MacTerminalProfiles | undefined) || {}
 		return { defaultProfileName, profiles }
 	} catch {
 		return { defaultProfileName: null, profiles: {} as MacTerminalProfiles }
@@ -73,9 +74,9 @@ function getMacTerminalConfig() {
 
 function getLinuxTerminalConfig() {
 	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.linux")
-		const profiles = config.get<LinuxTerminalProfiles>("profiles.linux") || {}
+		const readConfig = HostProvider.get().capabilities.getWorkspaceConfig
+		const defaultProfileName = readConfig?.("terminal.integrated", "defaultProfile.linux") as string | undefined
+		const profiles = (readConfig?.("terminal.integrated", "profiles.linux") as LinuxTerminalProfiles | undefined) || {}
 		return { defaultProfileName, profiles }
 	} catch {
 		return { defaultProfileName: null, profiles: {} as LinuxTerminalProfiles }

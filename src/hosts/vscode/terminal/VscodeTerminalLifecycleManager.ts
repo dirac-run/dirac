@@ -1,5 +1,5 @@
 import { arePathsEqual } from "@utils/path"
-import { getPythonEnvironmentVariables } from "@utils/python"
+import { getPythonEnvironmentVariables } from "../python"
 import { getShellForProfile } from "@utils/shell"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"

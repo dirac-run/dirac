@@ -1,6 +1,6 @@
-import { shutdownEvent } from "../vscode-shim"
-import { activeContext, isShuttingDown, setIsShuttingDown, setShutdownExitCode } from "./state"
 import { disposeCliContext, drainOutput } from "./cleanup"
+import { shutdownEvent } from "./shutdown"
+import { activeContext, isShuttingDown, setIsShuttingDown, setShutdownExitCode } from "./state"
 
 export async function captureUnhandledException(reason: Error, context: string) {
 	try {

@@ -11,12 +11,13 @@ import { sendSettingsButtonClickedEvent } from "./core/controller/ui/subscribeTo
 import { sendWorktreesButtonClickedEvent } from "./core/controller/ui/subscribeToWorktreesButtonClicked"
 import { DiracWebviewProvider } from "./core/webview"
 import { createDiracAPI } from "./exports"
-import { initializeTestMode } from "./services/test/TestMode"
+import { initializeTestMode } from "./hosts/vscode/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
 import "./utils/path"; // necessary to have access to String.prototype.toPosix
 import { isDev } from "@shared/config/environment"
 import type { ExtensionContext } from "vscode"
 import { HostProvider } from "@/hosts/host-provider"
+import { vscodeHostCapabilities } from "@/hosts/vscode/host-capabilities"
 import { vscodeHostBridgeClient } from "@/hosts/vscode/hostbridge/client/host-grpc-client"
 import { getErrorMessage, toError } from "@/shared/errors"
 import { createStorageContext } from "@/shared/storage/storage-context"
@@ -30,18 +31,18 @@ import { sendAddToInputEvent } from "./core/controller/ui/subscribeToAddToInput"
 import { sendShowWebviewEvent } from "./core/controller/ui/subscribeToShowWebview"
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
 import {
-	cleanupOldApiKey,
-	migrateCustomInstructionsToGlobalRules,
-	migrateTaskHistoryToFile,
-	migrateWelcomeViewCompleted,
-	migrateWorkspaceToGlobalStorage,
+    cleanupOldApiKey,
+    migrateCustomInstructionsToGlobalRules,
+    migrateTaskHistoryToFile,
+    migrateWelcomeViewCompleted,
+    migrateWorkspaceToGlobalStorage,
 } from "./core/storage/state-migrations"
 import { findMatchingNotebookCell, getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
 import { abortCommitGeneration, generateCommitMsg } from "./hosts/vscode/commit-message-generator"
 import { registerDiracOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
 import {
-	disposeVscodeCommentReviewController,
-	getVscodeCommentReviewController,
+    disposeVscodeCommentReviewController,
+    getVscodeCommentReviewController,
 } from "./hosts/vscode/review/VscodeCommentReviewController"
 import { VscodeTerminalManager } from "./hosts/vscode/terminal/VscodeTerminalManager"
 import { VscodeDiffViewProvider } from "./hosts/vscode/VscodeDiffViewProvider"
@@ -626,7 +627,7 @@ async function setupHostProvider(context: ExtensionContext, globalStorageFsPath:
 	const createCommentReview = () => getVscodeCommentReviewController()
 	const createTerminalManager = () => new VscodeTerminalManager()
 	const getEnvironmentVariables = async (cwd: string) => {
-		const { getPythonEnvironmentVariables } = await import("@utils/python")
+		const { getPythonEnvironmentVariables } = await import("@/hosts/vscode/python")
 		return await getPythonEnvironmentVariables(vscode.Uri.file(cwd))
 	}
 
@@ -660,6 +661,7 @@ async function setupHostProvider(context: ExtensionContext, globalStorageFsPath:
 
 		getEnvironmentVariables,
 		() => vscode.workspace.isTrusted,
+		vscodeHostCapabilities,
 	)
 }
 

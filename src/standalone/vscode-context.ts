@@ -1,13 +1,26 @@
 import { mkdirSync } from "node:fs"
+import { isDev } from "@shared/config/environment"
 import os from "os"
 import path from "path"
-import type { Extension, ExtensionContext } from "vscode"
-import { ExtensionKind, ExtensionMode } from "vscode"
 import { URI } from "vscode-uri"
 import { ExtensionRegistryInfo } from "@/registry"
+import { DiracExtensionContext, Extension, ExtensionKind, ExtensionMode } from "@/shared/dirac"
 import { log } from "./utils"
 import { EnvironmentVariableCollection, MementoStore, readJson, SecretStore } from "./vscode-context-utils"
-import { isDev } from "@shared/config/environment"
+
+/**
+ * The standalone context: the shared host-agnostic extension context plus the
+ * file-backed KV stores that legacy code paths still read directly.
+ */
+export interface StandaloneExtensionContext extends DiracExtensionContext {
+	globalState: MementoStore
+	workspaceState: MementoStore
+	secrets: SecretStore
+	languageModelAccessInformation: {
+		onDidChange: () => { dispose: () => void }
+		canSendRequest: () => undefined
+	}
+}
 
 log("Running standalone dirac", ExtensionRegistryInfo.version)
 log(`DIRAC_ENVIRONMENT: ${process.env.DIRAC_ENVIRONMENT}`)
@@ -39,7 +52,7 @@ export function initializeContext(diracDir?: string) {
 		extensionKind: ExtensionKind.UI,
 	}
 
-	const extensionContext: ExtensionContext = {
+	const extensionContext: StandaloneExtensionContext = {
 		extension: extension,
 		extensionMode: EXTENSION_MODE,
 

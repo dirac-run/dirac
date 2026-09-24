@@ -5,7 +5,7 @@
 
 import { URI } from "vscode-uri"
 
-enum ExtensionMode {
+export enum ExtensionMode {
 	/**
 	 * The extension is installed normally (for example, from the marketplace
 	 * or VSIX) in the editor.
@@ -159,7 +159,7 @@ export enum ExtensionKind {
 	Workspace = 2,
 }
 
-interface Extension<T> {
+export interface Extension<T> {
 	/**
 	 * The canonical extension identifier in the form of: `publisher.name`.
 	 */

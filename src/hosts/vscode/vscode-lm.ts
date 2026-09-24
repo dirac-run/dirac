@@ -1,3 +1,6 @@
+import { ApiHandler, CommonApiHandlerOptions, SingleCompletionHandler } from "@core/api"
+import { withRetry } from "@core/api/retry"
+import { ApiStream } from "@core/api/transform/stream"
 import { ModelInfo, openAiModelInfoSaneDefaults } from "@shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "@shared/vsCodeSelectorUtils"
 import { calculateApiCostAnthropic } from "@utils/cost"
@@ -6,10 +9,7 @@ import { getErrorMessage } from "@/shared/errors"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
 import { DiracTool } from "@/shared/tools"
-import { ApiHandler, CommonApiHandlerOptions, SingleCompletionHandler } from "../"
-import { withRetry } from "../retry"
-import { ApiStream } from "../transform/stream"
-import { convertToVsCodeLmMessages } from "../transform/vscode-lm-format"
+import { convertToVsCodeLmMessages } from "./vscode-lm-format"
 
 interface VsCodeLmHandlerOptions extends CommonApiHandlerOptions {
 	vsCodeLmModelSelector?: any

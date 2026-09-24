@@ -1,11 +1,11 @@
 import {
-	CommentReviewControllerCreator,
-	DiffViewProviderCreator,
-	HostProvider,
-	TerminalManagerCreator,
-	DiracWebviewProviderCreator,
+    CommentReviewControllerCreator,
+    DiffViewProviderCreator,
+    DiracWebviewProviderCreator,
+    HostProvider,
+    TerminalManagerCreator,
 } from "@/hosts/host-provider"
-import { HostBridgeClientProvider } from "@/hosts/host-provider-types"
+import { HostBridgeClientProvider, HostCapabilities } from "@/hosts/host-provider-types"
 import { vscodeHostBridgeClient } from "@/hosts/vscode/hostbridge/client/host-grpc-client"
 import { ITerminalManager } from "@/integrations/terminal/types"
 
@@ -27,6 +27,8 @@ export function setVscodeHostProviderMock(options?: {
 	extensionFsPath?: string
 	globalStorageFsPath?: string
 	getEnvironmentVariables?: (cwd: string) => Promise<{ [key: string]: string | undefined } | undefined>
+	isWorkspaceTrusted?: () => boolean
+	capabilities?: HostCapabilities
 }) {
 	HostProvider.reset()
 	HostProvider.initialize(
@@ -42,5 +44,7 @@ export function setVscodeHostProviderMock(options?: {
 		options?.extensionFsPath ?? "/mock/path/to/extension",
 		options?.globalStorageFsPath ?? "/mock/path/to/globalstorage",
 		options?.getEnvironmentVariables ?? (async (_cwd: string) => undefined),
+		options?.isWorkspaceTrusted,
+		options?.capabilities,
 	)
 }

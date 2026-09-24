@@ -5,9 +5,9 @@ import { execSync } from "child_process"
 import fs from "fs"
 import { cp } from "fs/promises"
 import { glob } from "glob"
-import picomatch from "picomatch"
 import os from "os"
 import path from "path"
+import picomatch from "picomatch"
 import { rmrf } from "./file-utils.mjs"
 
 const BUILD_DIR = "dist-standalone"
@@ -48,10 +48,6 @@ async function installNodeDependencies() {
 
 	console.log("Running npm install in distribution directory...")
 	execSync("npm install", { stdio: "inherit", cwd: BUILD_DIR })
-
-	// Move the vscode directory into node_modules.
-	// It can't be installed using npm because it will create a symlink which cannot be unzipped correctly on windows.
-	fs.renameSync(`${BUILD_DIR}/vscode`, `${BUILD_DIR}/node_modules/vscode`)
 }
 
 /**

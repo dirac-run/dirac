@@ -3,6 +3,7 @@ import { expect } from "chai"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import { userInfo } from "os"
 import * as vscode from "vscode"
+import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 
 describe("Shell Detection Tests", () => {
 	let originalPlatform: string
@@ -32,6 +33,12 @@ describe("Shell Detection Tests", () => {
 		originalEnv = { ...process.env }
 		originalGetConfig = vscode.workspace.getConfiguration
 		originalUserInfo = userInfo
+
+		// getShell reads terminal profiles through the host capability; delegate to the
+		// vscode mock so mockVsCodeConfig() keeps driving the tests.
+		setVscodeHostProviderMock({
+			capabilities: { getWorkspaceConfig: (section, key) => vscode.workspace.getConfiguration(section).get(key) },
+		})
 
 		// Clear environment variables for a clean test
 		delete process.env.SHELL

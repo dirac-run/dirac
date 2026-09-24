@@ -1,23 +1,24 @@
 import {
-    ApiConfiguration,
-    type ApiProvider,
-    getModelInfo,
-    ModelInfo,
-    type ModelProviderSelection,
-    modelSupportsInferenceSpeed,
-    openAiModelInfoSaneDefaults,
-    providerSupportsInferenceSpeed,
-    QwenApiRegions,
+	ApiConfiguration,
+	type ApiProvider,
+	getModelInfo,
+	ModelInfo,
+	type ModelProviderSelection,
+	modelSupportsInferenceSpeed,
+	openAiModelInfoSaneDefaults,
+	providerSupportsInferenceSpeed,
+	QwenApiRegions,
 } from "@shared/api"
 import { DEFAULT_INFERENCE_SPEED, type InferenceSpeed, isInferenceSpeed, type Mode } from "@shared/storage/types"
+import { HostProvider } from "@/hosts/host-provider"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { Logger } from "@/shared/services/Logger"
 import { DiracTool } from "@/shared/tools"
 import { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigurationError"
 import type {
-    ApiConversationCompactionRequest,
-    ApiConversationCompactionResult,
-    ApiConversationRequestOptions,
+	ApiConversationCompactionRequest,
+	ApiConversationCompactionResult,
+	ApiConversationRequestOptions,
 } from "./conversation"
 import { modelProviderSelectionUpdates } from "./modelProviderSelection"
 import { AIhubmixHandler } from "./providers/aihubmix"
@@ -54,7 +55,6 @@ import { SambanovaHandler } from "./providers/sambanova"
 import { TogetherHandler } from "./providers/together"
 import { VercelAIGatewayHandler } from "./providers/vercel-ai-gateway"
 import { VertexHandler } from "./providers/vertex"
-import { VsCodeLmHandler } from "./providers/vscode-lm"
 import { WandbHandler } from "./providers/wandb"
 import { XAIHandler } from "./providers/xai"
 import { ZAiHandler } from "./providers/zai"
@@ -377,12 +377,18 @@ const PROVIDER_REGISTRY: Record<
 			mistralApiKey: cfg.mistralApiKey,
 			apiModelId: mc.apiModelId,
 		}),
-	"vscode-lm": (cfg, mc) =>
-		new VsCodeLmHandler({
+	// vscode-lm lives in the hosts layer — only the VS Code host can create it.
+	"vscode-lm": (cfg, mc) => {
+		const factory = HostProvider.get().capabilities.createVsCodeLmHandler
+		if (!factory) {
+			throw new Error("The vscode-lm provider is only available in the VS Code extension host")
+		}
+		return factory({
 			onRetryAttempt: cfg.onRetryAttempt,
 			disableRetries: cfg.disableRetries,
 			vsCodeLmModelSelector: mc.vsCodeLmModelSelector,
-		}),
+		})
+	},
 	"github-copilot": (cfg, mc) => new GithubCopilotHandler({ onRetryAttempt: cfg.onRetryAttempt, apiModelId: mc.apiModelId }),
 	litellm: (cfg, mc) =>
 		new LiteLlmHandler({

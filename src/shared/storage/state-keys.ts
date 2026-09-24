@@ -1,12 +1,12 @@
 import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import {
-	ApiProvider,
-	DEFAULT_API_PROVIDER,
-	LiteLLMModelInfo,
-	ModelInfo,
-	ModelProviderSelection,
-	OpenAiCompatibleModelInfo,
-	OpenAiCompatibleProfile,
+    ApiProvider,
+    DEFAULT_API_PROVIDER,
+    LiteLLMModelInfo,
+    ModelInfo,
+    ModelProviderSelection,
+    OpenAiCompatibleModelInfo,
+    OpenAiCompatibleProfile,
 } from "@shared/api"
 import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettings"
 import { DiracRulesToggles } from "@shared/dirac-rules"
@@ -16,7 +16,7 @@ import { WorkspaceRoot } from "@shared/multi-root/types"
 import { InferenceSpeed, Mode, normalizeInferenceSpeed } from "@shared/storage/types"
 import { TelemetrySetting } from "@shared/TelemetrySetting"
 import { normalizeUserApprovedCommands, type UserApprovedCommand } from "@shared/UserApprovedCommand"
-import { LanguageModelChatSelector } from "vscode"
+import { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH FOR STORAGE KEYS
