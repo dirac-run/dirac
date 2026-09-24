@@ -110,8 +110,8 @@ describe("pinned ACP messages", () => {
 		directories.push(cwd)
 		const agent = new DiracAgent({ cwd })
 			; (agent as any).ctx = { DATA_DIR: cwd }
-			; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
-			; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+			; (agent as any).catalog.sendAvailableCommands = vi.fn(async () => undefined)
+			; (agent as any).catalog.setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
 
 		const session = await agent.newSession({ cwd, mcpServers: [] } as any)
 		pinSessionMessage(session.sessionId, {

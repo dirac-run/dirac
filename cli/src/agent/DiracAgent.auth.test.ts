@@ -96,7 +96,7 @@ describe("DiracAgent ACP authentication", () => {
 		process.env.DIRAC_API_KEY = "deepseek-key"
 
 		try {
-			const overrides = (new DiracAgent({}) as any).createStartupSessionOverrides()
+			const overrides = (new DiracAgent({}) as any).runtime.createStartupSessionOverrides()
 			expect(overrides.actModeApiProvider).toBe("deepseek")
 			expect(overrides.planModeApiProvider).toBe("deepseek")
 			expect(overrides.actModeApiModelId).toBe("deepseek-flash")
