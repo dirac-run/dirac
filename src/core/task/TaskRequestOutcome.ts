@@ -8,6 +8,7 @@ import { DiracError, DiracErrorType } from "@services/error"
 import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracContent, DiracTextContentBlock } from "@shared/messages/content"
 import type { DiracMessageModelInfo } from "@shared/messages/metrics"
+import type { Mode } from "@shared/storage/types"
 import { isMutatingTool } from "@shared/tools"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
@@ -25,6 +26,7 @@ export interface TaskRequestOutcomeContext {
 	taskMessenger: TaskMessenger
 	api: ApiHandler
 	taskId: string
+	mode: Mode
 	executionProfile: TaskExecutionProfile
 	checkpointManager?: ICheckpointManager
 	postStateToWebview: () => Promise<void>
@@ -248,7 +250,7 @@ export async function processStreamResult(
 				type: "text",
 				text: hitTokenLimit
 					? "You reached the output token limit. Continue from where you stopped; restart an interrupted tool call, or call respond with operation 'complete' if finished."
-					: formatResponse.noToolsUsed(ctx.taskState.useNativeToolCalls),
+					: formatResponse.noToolsUsed(ctx.taskState.useNativeToolCalls, ctx.mode),
 			} as DiracTextContentBlock)
 			ctx.taskState.consecutiveMistakeCount++
 		}

@@ -95,6 +95,13 @@ describe("formatResponse", () => {
 				reminder.should.not.containEql(LegacyResponseTool.COMPLETE)
 			}
 		})
+
+		it("names the operation that ends the turn in the current mode", () => {
+			const inPlan = formatResponse.noToolsUsed(true, "plan")
+			inPlan.should.containEql("In PLAN MODE")
+			inPlan.should.containEql("operation 'plan' if finished")
+			formatResponse.noToolsUsed(true, "act").should.containEql("operation 'complete' if finished")
+		})
 	})
 
 	describe("tooManyMistakes", () => {

@@ -42,11 +42,11 @@ export const formatResponse = {
 	permissionDeniedError: (reason: string) =>
 		`Command execution blocked by DIRAC_COMMAND_PERMISSIONS: ${reason}. You must try a different approach or ask the user to update the permission settings.`,
 
-	noToolsUsed: (usingNativeToolCalls: boolean) =>
-		`[PROTOCOL REMINDER] Your previous response did not include any tool calls. In ACT MODE, every response MUST include at least one tool call to move the task forward.
+	noToolsUsed: (usingNativeToolCalls: boolean, mode: Mode = "act") =>
+		`[PROTOCOL REMINDER] Your previous response did not include any tool calls. In ${mode === "plan" ? "PLAN" : "ACT"} MODE, every response MUST include at least one tool call to move the task forward.
 
 # Next Steps
-- Use 'respond' with operation 'complete' if finished, 'question' for required input, or 'progress' for an update.
+- Use 'respond' with operation '${mode === "plan" ? "plan" : "complete"}' if finished, 'question' for required input, or 'progress' for an update.
 - Otherwise, proceed with the next step of the task using the appropriate tool.
 
 (This is an automated message, so do not respond to it conversationally.)`,
