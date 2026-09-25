@@ -6,6 +6,7 @@ import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { SurfaceType } from "../../interfaces/SurfaceType"
+import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import { ToolResponseCombiner } from "../../utils/ToolResponseCombiner"
 import { EditFileApplier } from "./EditFileApplier"
 import { EditFileApprovalFlow } from "./EditFileApprovalFlow"
@@ -172,6 +173,12 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
 
 			return ToolResponseCombiner.combine(results)
 		} catch (error) {
+			// Text typed on the waiting card: the coordinator skips the cards and forwards the text.
+			if (error instanceof ToolSkippedByUserMessage) {
+				// A failing cleanup must not replace the skip, or the typed text is lost.
+				await env.editor.hideReview().catch(() => {})
+				throw error
+			}
 			const executionError = toError(error)
 			const cleanupFailures: string[] = []
 

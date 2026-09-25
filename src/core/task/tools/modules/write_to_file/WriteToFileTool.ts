@@ -8,6 +8,7 @@ import { IDiracTool } from "../../interfaces/IDiracTool"
 import type { IToolEnvironment, SaveResult } from "../../interfaces/IToolEnvironment"
 import type { ToolPermissionDisposition } from "../../autoApprove"
 import { SurfaceType } from "../../interfaces/SurfaceType"
+import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import { captureAccepted, captureRejected, getModelInfo } from "../../utils/AiOutputTelemetry"
 import { applyModelContentFixes } from "../../utils/ModelContentProcessor"
 
@@ -80,6 +81,8 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				permissionDisposition === "auto_approve",
 			)
 		} catch (error) {
+			// Text typed on the waiting card: the coordinator skips the cards and forwards the text.
+			if (error instanceof ToolSkippedByUserMessage) throw error
 			return await this.finalizeCardWithError(error, env, card)
 		}
 	}
