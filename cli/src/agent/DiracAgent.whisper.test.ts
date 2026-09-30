@@ -20,13 +20,13 @@ describe("DiracAgent ACP whisper ownership", () => {
 
 		await agent.queueWhisper({ sessionId, text: "first" })
 		await agent.queueWhisper({ sessionId, text: "second" })
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["first", "second"])
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["first", "second"])
 
-		await (agent as any).bindPromptTask(sessionId, task)
+		await (agent as any).steering.bindPromptTask(sessionId, task)
 
 		expect(enqueueSteeringMessage.mock.calls.map((call) => call[0])).toEqual(["first", "second"])
-		expect((agent as any).pendingWhispers.has(sessionId)).toBe(false)
-		expect((agent as any).promptTasks.get(sessionId)).toBe(task)
+		expect((agent as any).steering.pendingWhispers.has(sessionId)).toBe(false)
+		expect((agent as any).steering.promptTasks.get(sessionId)).toBe(task)
 	})
 
 	it("does not remove a buffered whisper until Task accepts it", async () => {
@@ -35,8 +35,8 @@ describe("DiracAgent ACP whisper ownership", () => {
 		const enqueueSteeringMessage = vi.fn().mockRejectedValueOnce(new Error("not ready"))
 		const task = { canAcceptSteeringMessage: () => true, enqueueSteeringMessage }
 
-		await expect((agent as any).bindPromptTask(sessionId, task)).rejects.toThrow("not ready")
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["keep me"])
+		await expect((agent as any).steering.bindPromptTask(sessionId, task)).rejects.toThrow("not ready")
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["keep me"])
 	})
 
 	it("keeps pre-task guidance buffered when a stale task binds and drains it after replacement binding", async () => {
@@ -47,18 +47,18 @@ describe("DiracAgent ACP whisper ownership", () => {
 			canAcceptSteeringMessage: () => false,
 			enqueueSteeringMessage: vi.fn(),
 		}
-		await (agent as any).bindPromptTask(sessionId, staleTask)
+		await (agent as any).steering.bindPromptTask(sessionId, staleTask)
 		expect(staleTask.enqueueSteeringMessage).not.toHaveBeenCalled()
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["for replacement"])
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["for replacement"])
 
 		const replacementTask = {
 			canAcceptSteeringMessage: () => true,
 			enqueueSteeringMessage: vi.fn(async () => "steering-id"),
 		}
-		await (agent as any).bindPromptTask(sessionId, replacementTask)
+		await (agent as any).steering.bindPromptTask(sessionId, replacementTask)
 
 		expect(replacementTask.enqueueSteeringMessage).toHaveBeenCalledWith("for replacement")
-		expect((agent as any).promptTasks.get(sessionId)).toBe(replacementTask)
+		expect((agent as any).steering.promptTasks.get(sessionId)).toBe(replacementTask)
 	})
 
 	it("buffers guidance while the bound task is temporarily waiting for input", async () => {
@@ -68,19 +68,19 @@ describe("DiracAgent ACP whisper ownership", () => {
 			canAcceptSteeringMessage: () => false,
 			enqueueSteeringMessage: vi.fn(),
 		}
-		;(agent as any).promptTasks.set(sessionId, task)
+		;(agent as any).steering.promptTasks.set(sessionId, task)
 
 		await agent.queueWhisper({ sessionId, text: "answer after the card" })
 
 		expect(task.enqueueSteeringMessage).not.toHaveBeenCalled()
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["answer after the card"])
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["answer after the card"])
 	})
 
 	it("emits a queued steering acknowledgement after the task accepts guidance", async () => {
 		const { agent, sessionId } = processingAgent()
 		const updates: Array<Record<string, unknown>> = []
 		agent.emitterForSession(sessionId).on("steering_status", (payload) => updates.push(payload))
-		;(agent as any).promptTasks.set(sessionId, {
+		;(agent as any).steering.promptTasks.set(sessionId, {
 			canAcceptSteeringMessage: () => true,
 			enqueueSteeringMessage: vi.fn().mockResolvedValue("transcript-1"),
 		})
@@ -97,25 +97,25 @@ describe("DiracAgent ACP whisper ownership", () => {
 			canAcceptSteeringMessage: () => false,
 			enqueueSteeringMessage: vi.fn().mockRejectedValue(new Error("Task cannot accept steering")),
 		}
-			; (agent as any).promptTasks.set(sessionId, task)
+			; (agent as any).steering.promptTasks.set(sessionId, task)
 
 		await agent.queueWhisper({ sessionId, text: "preserve me" })
 
-		expect((agent as any).promptTasks.has(sessionId)).toBe(false)
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["preserve me"])
+		expect((agent as any).steering.promptTasks.has(sessionId)).toBe(false)
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["preserve me"])
 	})
 
 
 	it("preserves pre-task guidance across prompt unbinding and clears it on session release", async () => {
 		const { agent, sessionId } = processingAgent()
 		await agent.queueWhisper({ sessionId, text: "temporary" })
-			; (agent as any).promptTasks.set(sessionId, {})
+			; (agent as any).steering.promptTasks.set(sessionId, {})
 
-			; (agent as any).unbindPromptTask(sessionId)
-		expect((agent as any).pendingWhispers.get(sessionId)).toEqual(["temporary"])
-		expect((agent as any).promptTasks.has(sessionId)).toBe(false)
+			; (agent as any).steering.unbindPromptTask(sessionId)
+		expect((agent as any).steering.pendingWhispers.get(sessionId)).toEqual(["temporary"])
+		expect((agent as any).steering.promptTasks.has(sessionId)).toBe(false)
 
-			; (agent as any).releasePromptSteeringOwnership(sessionId)
-		expect((agent as any).pendingWhispers.has(sessionId)).toBe(false)
+			; (agent as any).steering.releasePromptSteeringOwnership(sessionId)
+		expect((agent as any).steering.pendingWhispers.has(sessionId)).toBe(false)
 	})
 })

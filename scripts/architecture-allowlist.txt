@@ -4,3 +4,5 @@
 # architecture-baseline.txt and shrinks to zero as plan items land.
 #
 # Planned entry (item 8 lands): check_env_centralized	src/core/config/
+check_any_ratchet	cli/src/agent/sessionCheckpoints.ts:			await controller.task.checkpointManager.restoreCheckpoint(message.id, restoreType as any, offset)
+check_any_ratchet	cli/src/agent/sessionPermissions.ts:		toolCall: any,
