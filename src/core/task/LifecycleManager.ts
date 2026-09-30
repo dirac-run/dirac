@@ -653,10 +653,9 @@ export class LifecycleManager {
 				cleanupFailures.push(error)
 			}
 
-			this.dependencies.taskState.isApiRequestActive = false
-			this.dependencies.taskState.activeVoiceStreamId = undefined
-			this.dependencies.taskState.isWaitingForFirstChunk = false
-			this.dependencies.taskState.didFinishAbortingStream = true
+			this.dependencies.taskState.endApiRequest()
+			this.dependencies.taskState.endFirstChunkWait()
+			this.dependencies.taskState.markStreamAbortFinished()
 			this.dependencies.taskState.status = TaskStatus.CANCELLED
 
 			try {

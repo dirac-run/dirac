@@ -46,6 +46,9 @@ describe("StateController active-task characterization", () => {
 						didRespondToPlanAskBySwitchingMode: false,
 						lastWaitingCardId: options?.lastWaitingCardId,
 					},
+					get stateView() {
+						return this.taskState
+					},
 				} as any)
 		const stateManager = {
 			setGlobalState: sinon.stub().callsFake(() => events.push("persist-global-mode")),

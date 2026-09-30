@@ -1,9 +1,5 @@
-import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { CardHeader } from "@shared/cardIdentity"
-import { DiracDefaultTool } from "@/shared/tools"
-import { DiracIcon } from "@/shared/icons"
 import { CardKind, CardStatus, SubagentExecutionStatus } from "@shared/ExtensionMessage"
-import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 import { ResponseOperation, responseCardInput } from "@shared/responseTool"
 import {
 	allocateSubagentIdentity,
@@ -12,9 +8,13 @@ import {
 	formatSubagentTrajectory,
 	isTerminalSubagentStatus,
 	recordSubagentProgress,
-	subagentCardStatus,
 	type SubagentTrajectoryEvent,
+	subagentCardStatus,
 } from "@shared/subagents"
+import { DiracIcon } from "@/shared/icons"
+import { DiracDefaultTool } from "@/shared/tools"
+import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 import {
 	completionVerificationCandidateFingerprint,
 	completionVerificationTaskPreview,
@@ -45,7 +45,7 @@ export class CompletionResponseOperation {
 		}
 		env.orchestration.setTaskState("completionCommitted", true)
 		env.orchestration.setTaskState("didAttemptCompletion", true)
-		env.orchestration.setTaskState("completionResponse", result)
+		env.orchestration.commitCompletionResponse(result)
 
 		if (env.config.executionProfile !== "goal_child") {
 			try {
@@ -125,11 +125,7 @@ ${COMPLETION_VERIFICATION_INSTRUCTIONS}
 If everything checks out, call respond with operation "complete" and your final result.`
 	}
 
-	private async runVerificationSubagent(
-		env: IToolEnvironment,
-		result: string,
-		taskPreview: string,
-	): Promise<any | undefined> {
+	private async runVerificationSubagent(env: IToolEnvironment, result: string, taskPreview: string): Promise<any | undefined> {
 		const history = env.orchestration.getHistory()
 		const previousFailure = env.orchestration.getTaskState("completionVerificationFailure")
 		if (previousFailure && !previousFailure.candidateFingerprint) {
@@ -303,7 +299,6 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 			return `${response}\n\nCompletion remains rejected, and further verification is blocked because the rejected candidate could not be fingerprinted safely.`
 		}
 	}
-
 
 	private async handleCompletionResult(env: IToolEnvironment, result: string): Promise<void> {
 		const card = await env.ui.createCard({

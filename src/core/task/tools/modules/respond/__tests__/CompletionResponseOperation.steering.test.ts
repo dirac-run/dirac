@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert"
+import { CardKind, CardStatus } from "@shared/ExtensionMessage"
+import { RESPOND_TOOL_NAME, ResponseOperation } from "@shared/responseTool"
 import { describe, it } from "mocha"
 import sinon from "sinon"
 import { CompletionResponseOperation } from "../CompletionResponseOperation"
-import { CardKind, CardStatus } from "@shared/ExtensionMessage"
-import { RESPOND_TOOL_NAME, ResponseOperation } from "@shared/responseTool"
 
 describe("completion response operation steering arbitration", () => {
 	it("skips every completion-only side effect when steering supersedes completion", async () => {
@@ -27,6 +27,9 @@ describe("completion response operation steering arbitration", () => {
 				getTaskState: (key: keyof typeof state) => state[key],
 				setTaskState: (key: keyof typeof state, value: number | boolean) => {
 					state[key] = value as never
+				},
+				commitCompletionResponse: (response: string) => {
+					;(state as Record<string, unknown>).completionResponse = response
 				},
 				commitAttemptCompletion,
 				saveCheckpoint,
@@ -69,6 +72,9 @@ describe("completion response operation steering arbitration", () => {
 					state.didAttemptCompletion = true
 					return { committed: true }
 				}),
+				commitCompletionResponse: (response: string) => {
+					;(state as Record<string, unknown>).completionResponse = response
+				},
 				runHook: sinon.stub(),
 			},
 		} as any
@@ -103,6 +109,9 @@ describe("completion response operation steering arbitration", () => {
 			orchestration: {
 				getTaskState: (key: keyof typeof state) => state[key],
 				setTaskState: (key: keyof typeof state, value: boolean) => (state[key] = value),
+				commitCompletionResponse: (response: string) => {
+					;(state as Record<string, unknown>).completionResponse = response
+				},
 				commitAttemptCompletion: sinon.stub().resolves({ committed: true }),
 				saveCheckpoint,
 				runHook,

@@ -1,11 +1,11 @@
 import { buildApiHandler } from "@core/api"
-import type { ChatContent } from "@shared/ChatContent"
-import type { TelemetrySetting } from "@shared/TelemetrySetting"
-import type { Mode } from "@shared/storage/types"
-import { DiracAskResponse } from "@shared/WebviewMessage"
-import { PlanInteractionResponse } from "@shared/responseTool"
-import { TaskStatus } from "@shared/ExtensionMessage"
 import type { StateManager } from "@core/storage/StateManager"
+import type { ChatContent } from "@shared/ChatContent"
+import { TaskStatus } from "@shared/ExtensionMessage"
+import { PlanInteractionResponse } from "@shared/responseTool"
+import type { Mode } from "@shared/storage/types"
+import type { TelemetrySetting } from "@shared/TelemetrySetting"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { telemetryService } from "@/services/telemetry"
 import { persistModeSelection } from "./persistModeSelection"
 
@@ -78,8 +78,8 @@ export class StateController {
 		await this.postStateToWebviewFn()
 
 		if (!task) return false
-		if (task.taskState.isAwaitingPlanResponse && didSwitchToActMode) {
-			const cardId = task.taskState.lastWaitingCardId
+		if (task.stateView.isAwaitingPlanResponse && didSwitchToActMode) {
+			const cardId = task.stateView.lastWaitingCardId
 			if (cardId) {
 				await task.submitCardResponse(
 					cardId,
@@ -91,7 +91,7 @@ export class StateController {
 			}
 			return true
 		}
-		if (task.taskState.status === TaskStatus.COMPLETED) return false
+		if (task.stateView.status === TaskStatus.COMPLETED) return false
 
 		await this.cancelTaskFn()
 		return false
