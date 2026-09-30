@@ -54,7 +54,7 @@ export async function retryWithBackoff<T>(operation: () => Promise<T>, options: 
 
 			const delayMs = Math.min(baseDelayMs * multiplier ** (attempt - 1), maxDelayMs)
 			await onRetry?.(error, attempt, maxAttempts, delayMs)
-			await new Promise((resolve) => setTimeout(resolve, delayMs))
+			await sleep(delayMs)
 		}
 	}
 
@@ -83,10 +83,15 @@ export async function retryOperation<T>(maxRetries: number, timeoutPerAttempt: n
 
 			if (attempt < maxRetries) {
 				// Brief delay before retry
-				await new Promise((resolve) => setTimeout(resolve, 500))
+				await sleep(500)
 			}
 		}
 	}
 
 	throw new Error(`Operation failed after ${maxRetries} attempts: ${lastError?.message}`)
+}
+
+/** Suspends for `ms` — the single sleep helper for the codebase (timers that schedule work, not sleeps, keep setTimeout). */
+export function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms))
 }

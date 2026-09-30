@@ -122,6 +122,16 @@ describe("searchFiles", () => {
 		expect(searchWorkspaceFilesStub.firstCall.args[2]).to.equal(20)
 	})
 
+	it("falls back to the default limit of 20 when limit is 0", async () => {
+		getWorkspacePathStub.resolves("/workspace")
+		searchWorkspaceFilesStub.resolves([])
+		convertStub.returns([] as any)
+
+		await searchFiles(mockController, makeRequest({ limit: 0 }))
+
+		expect(searchWorkspaceFilesStub.firstCall.args[2]).to.equal(20)
+	})
+
 	it("moves the active editor file to position 0 when prioritizeActiveFile is set", async () => {
 		getWorkspacePathStub.resolves("/workspace")
 		const results = [

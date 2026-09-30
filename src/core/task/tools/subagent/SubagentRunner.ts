@@ -12,6 +12,7 @@ import { ContextManager } from "@/core/context/context-management/ContextManager
 import { checkContextWindowExceededError } from "@/core/context/context-management/context-error-handling"
 import { DiracError, DiracErrorType } from "@/services/error"
 import { calculateApiCostAnthropic } from "@/utils/cost"
+import { sleep } from "@/utils/retry"
 import { TaskState } from "../../TaskState"
 import { excerpt } from "../../utils/excerpt"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
@@ -42,7 +43,6 @@ import type {
 } from "./SubagentRunTypes"
 import { SubagentToolExecutor } from "./SubagentToolExecutor"
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const MAX_EMPTY_ASSISTANT_RETRIES = 3
 const MAX_INITIAL_STREAM_ATTEMPTS = 3
 const INITIAL_STREAM_RETRY_BASE_DELAY_MS = 2_000
@@ -639,7 +639,7 @@ export class SubagentRunner {
 
 				if (finalizedToolCalls.length === 0) {
 					if (this.wrapUpRequested || this.isWrappingUp) {
-						await delay(0)
+						await sleep(0)
 						continue
 					}
 
@@ -677,7 +677,7 @@ export class SubagentRunner {
 							},
 						],
 					})
-					await delay(0)
+					await sleep(0)
 					continue
 				}
 				emptyAssistantResponseRetries = 0
@@ -710,7 +710,7 @@ export class SubagentRunner {
 
 				conversation.push({ role: "user", content: toolExecResult.toolResultBlocks })
 				if (this.wrapUpRequested || this.isWrappingUp) {
-					await delay(0)
+					await sleep(0)
 					continue
 				}
 
@@ -722,7 +722,7 @@ export class SubagentRunner {
 				systemPrompt = this.contextBuilder.appendExecutionDeadline(refreshedContext.systemPrompt, timeout)
 				this.markActivity("refreshed tool and provider context")
 
-				await delay(0)
+				await sleep(0)
 			}
 		} catch (error) {
 			if (this.shouldAbort()) {
@@ -940,7 +940,7 @@ export class SubagentRunner {
 					error,
 				})
 				Logger.warn(`[SubagentRunner] Initial stream failed. Retrying attempt ${attempt + 1}.`, error)
-				await delay(delayMs)
+				await sleep(delayMs)
 			}
 		}
 	}

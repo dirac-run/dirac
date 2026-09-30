@@ -52,17 +52,17 @@ export function isLocalModel(providerInfo: ApiProviderInfo): boolean {
 /**
  * Parses a price string and converts it from per-token to per-million-tokens
  * @param priceString The price string to parse (e.g. from API responses)
- * @returns The price multiplied by 1,000,000 for per-million-token pricing, or 0 if invalid
+ * @returns The price multiplied by 1,000,000 for per-million-token pricing, or undefined if absent or invalid
  */
-export function parsePrice(priceString: string | undefined): number {
-	if (!priceString || priceString === "" || priceString === "0") {
-		return 0
+export function parsePrice(priceString: string | undefined): number | undefined {
+	if (!priceString || priceString === "") {
+		return undefined
 	}
 	const parsed = Number.parseFloat(priceString)
 	if (Number.isNaN(parsed)) {
-		return 0
+		return undefined
 	}
-	// Convert from per-token to per-million-tokens (multiply by 1,000,000)
+	// Convert from per-token to per-million-tokens (multiply by 1,000,000); "0" yields a real 0 (free)
 	return parsed * 1_000_000
 }
 

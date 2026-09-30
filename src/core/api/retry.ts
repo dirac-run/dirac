@@ -1,4 +1,5 @@
 import { isRateLimited } from "@shared/net"
+import { sleep } from "@/utils/retry"
 import { Logger } from "@/shared/services/Logger"
 
 interface RetryOptions {
@@ -88,7 +89,7 @@ export function withRetry(options: RetryOptions = {}) {
 						}
 					}
 
-					await new Promise((resolve) => setTimeout(resolve, delay))
+					await sleep(delay)
 				}
 			}
 		}

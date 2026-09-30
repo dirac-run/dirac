@@ -164,10 +164,6 @@ check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:cont
 check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:inputPrice: staticModelInfo?.inputPrice || 0,
 check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:maxTokens: rawModel.max_completion_tokens || staticModelInfo?.maxTokens || 8192,
 check_no_numeric_or_default	src/core/controller/models/refreshGroqModels.ts:outputPrice: staticModelInfo?.outputPrice || 0,
-check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:cacheReadsPrice: parsePrice(model.cached_price) || 0,
-check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:cacheWritesPrice: parsePrice(model.caching_price) || 0,
-check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:inputPrice: parsePrice(model.input_price) || 0,
-check_no_numeric_or_default	src/core/controller/models/refreshRequestyModels.ts:outputPrice: parsePrice(model.output_price) || 0,
 check_no_numeric_or_default	src/core/controller/state/updateTerminalConnectionTimeout.ts:controller.stateManager.setGlobalState("shellIntegrationTimeout", timeoutMs || 4000)
 check_no_numeric_or_default	src/core/controller/task/getTotalTasksSize.ts:return { value: totalSize || 0 }
 check_no_numeric_or_default	src/core/controller/task/showTaskWithId.ts:cacheReads: fetchedItem.cacheReads || 0,
