@@ -1,7 +1,6 @@
 import type { EmptyRequest } from "@shared/proto/dirac/common"
 import { Empty } from "@shared/proto/dirac/common"
-import * as vscode from "vscode"
-import { ExtensionRegistryInfo } from "@/registry"
+import { HostProvider } from "@/hosts/host-provider"
 import { telemetryService } from "@/services/telemetry"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
@@ -14,10 +13,8 @@ import type { Controller } from "../index"
  */
 export async function openWalkthrough(_controller: Controller, _request: EmptyRequest): Promise<Empty> {
 	try {
-		await vscode.commands.executeCommand(
-			"workbench.action.openWalkthrough",
-			`dirac-run.${ExtensionRegistryInfo.name}#DiracWalkthrough`,
-		)
+		// No walkthrough exists outside the VS Code host — degrade to a no-op.
+		await HostProvider.get().capabilities.openWalkthrough?.()
 		telemetryService.captureButtonClick("webview_openWalkthrough")
 		return Empty.create({})
 	} catch (error) {

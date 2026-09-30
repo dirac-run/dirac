@@ -1,6 +1,6 @@
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import { VsCodeLmModelsArray } from "@shared/proto/dirac/models"
-import * as vscode from "vscode"
+import { HostProvider } from "@/hosts/host-provider"
 import { Logger } from "@/shared/services/Logger"
 import { convertVsCodeNativeModelsToProtoModels } from "../../../shared/proto-conversions/models/vscode-lm-models-conversion"
 import { Controller } from ".."
@@ -13,9 +13,10 @@ import { Controller } from ".."
  */
 export async function getVsCodeLmModels(_controller: Controller, _request: EmptyRequest): Promise<VsCodeLmModelsArray> {
 	try {
-		const models = await vscode.lm.selectChatModels({})
+		// Only the VS Code host provides a language-model API; other hosts return an empty list.
+		const models = (await HostProvider.get().capabilities.listVsCodeLmModels?.()) ?? []
 
-		const protoModels = convertVsCodeNativeModelsToProtoModels(models || [])
+		const protoModels = convertVsCodeNativeModelsToProtoModels(models)
 
 		return VsCodeLmModelsArray.create({ models: protoModels })
 	} catch (error) {

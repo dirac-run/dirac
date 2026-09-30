@@ -26,9 +26,6 @@
 		"useDefineForClassFields": true,
 		"useUnknownInCatchVariables": false,
 		"paths": {
-			"vscode": [
-				"./cli/src/vscode-shim.ts"
-			],
 			"@/*": [
 				"./src/*"
 			],
