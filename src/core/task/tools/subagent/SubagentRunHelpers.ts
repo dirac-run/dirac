@@ -169,7 +169,7 @@ export function getBestEffortResult(conversation: DiracStorageMessage[]): string
 		.filter((text) => text.length > 0)
 
 	if (assistantTexts.length === 0) {
-		return "No findings recorded."
+		return "No task results recorded."
 	}
 
 	return assistantTexts.join("\n")

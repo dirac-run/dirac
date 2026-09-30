@@ -42,7 +42,8 @@ export const FEATURE_SETTINGS = {
 		stateKey: "subagentsEnabled",
 		default: false,
 		label: "Subagents",
-		description: "Run focused subagents in parallel for independent exploration or analysis. This may increase token usage.",
+		description:
+			"Run focused subagents in parallel to research, edit files, run commands, and verify work. This may increase token usage.",
 	},
 	autoCondense: {
 		stateKey: "useAutoCondense",

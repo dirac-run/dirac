@@ -198,7 +198,7 @@ describe("UseSubagentsTool", () => {
 			await options.onUpdate({ status: SubagentExecutionStatus.RUNNING, stats: EMPTY_STATS })
 			await options.onUpdate({
 				isWrappingUp: true,
-				trajectoryEvent: { type: SubagentTrajectoryEventType.MESSAGE, text: "Time limit reached. Wrapping up findings." },
+				trajectoryEvent: { type: SubagentTrajectoryEventType.MESSAGE, text: "Time limit reached. Wrapping up task results." },
 				stats: EMPTY_STATS,
 			})
 			return { status: SubagentExecutionStatus.COMPLETED, result: "partial report", stats: EMPTY_STATS }

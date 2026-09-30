@@ -1077,7 +1077,7 @@ describe("SubagentRunner", () => {
 		}
 	})
 
-	it("preserves the request cache while wrapping up and blocks further research", async () => {
+	it("preserves the request cache while wrapping up and blocks further task execution", async () => {
 		let stopInitialStream!: () => void
 		let markInitialStreamStarted!: () => void
 		const initialStreamStarted = new Promise<void>((resolve) => {
@@ -1110,7 +1110,8 @@ describe("SubagentRunner", () => {
 			assert.equal(conversation.length, 2)
 			const finalInstruction = conversation.at(-1) as { role: string; content: Array<{ text?: string }> }
 			assert.equal(finalInstruction.role, "user")
-			assert.match(finalInstruction.content[0]?.text || "", /research deadline has elapsed/i)
+			assert.match(finalInstruction.content[0]?.text || "", /execution deadline has elapsed/i)
+			assert.match(finalInstruction.content[0]?.text || "", /changes made, verification results/i)
 			yield {
 				type: "tool_calls",
 				tool_call: {
@@ -1134,7 +1135,7 @@ describe("SubagentRunner", () => {
 				content: Array<{ type?: string; content?: string }>
 			}
 			assert.equal(deniedResearchResult.role, "user")
-			assert.match(deniedResearchResult.content[0]?.content || "", /research is no longer available/i)
+			assert.match(deniedResearchResult.content[0]?.content || "", /task execution is no longer available/i)
 			yield {
 				type: "tool_calls",
 				tool_call: {

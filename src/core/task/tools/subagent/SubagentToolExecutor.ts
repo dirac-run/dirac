@@ -117,7 +117,7 @@ export class SubagentToolExecutor {
 
 			if (isWrappingUp) {
 				const result = formatResponse.toolError(
-					'Research is no longer available because the deadline expired. Call respond with operation "complete" and your partial findings now.',
+					'Further task execution is no longer available because the deadline expired. Call respond with operation "complete" now, summarizing completed work, changes made, verification results, and any blockers or remaining work.',
 				)
 				recordToolResult(result)
 				onProgress({

@@ -38,7 +38,7 @@ const RunningTasksSection = ({ renderSectionHeader }: RunningTasksSectionProps) 
 			id: "subagents",
 			label: "Subagents",
 			description:
-				"Run focused subagents in parallel for independent exploration or analysis. This may increase token usage.",
+				"Run focused subagents in parallel to research, edit files, run commands, and verify work. This may increase token usage.",
 			settingKey: "subagentsEnabled",
 			checked: subagentsEnabled,
 		},

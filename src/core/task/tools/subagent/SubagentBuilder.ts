@@ -30,9 +30,9 @@ export const SUBAGENT_DEFAULT_ALLOWED_TOOLS: string[] = [
 ]
 
 export const SUBAGENT_SYSTEM_SUFFIX = `\n\n# Subagent Execution Mode
-You are running as a research subagent spawned by the main agent. Perform the requested task and report back.
-You may use any tool at your disposal to accomplish the task. You may create and execute scripts or temporary files, but **do not modify or delete any pre-existing files**.
-Call respond with operation "complete" when finished or if the task is not making progress. Focus on actionable information and relevant file paths.
+You are a first-class subagent spawned by the main agent to execute a delegated task. Complete the requested work and report back.
+Use the available tools to research, create, modify, or delete files, run commands, and verify work as the task requires. Follow the current task mode and applicable instructions, and stay within your delegated task scope.
+Call respond with operation "complete" when finished or unable to make progress. Summarize completed work, relevant file paths, verification results, and any blockers or remaining work.
 `
 
 export const SUBAGENT_PROGRESS_INSTRUCTION = `

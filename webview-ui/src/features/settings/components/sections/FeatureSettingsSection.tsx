@@ -41,7 +41,7 @@ const agentFeatures: FeatureToggle[] = [
 	{
 		id: "subagents",
 		label: "Subagents",
-		description: "Let Dirac run focused subagents in parallel to explore the codebase for you.",
+		description: "Let Dirac run focused subagents in parallel to research, edit files, run commands, and verify work.",
 		stateKey: "subagentsEnabled",
 		settingKey: "subagentsEnabled",
 	},

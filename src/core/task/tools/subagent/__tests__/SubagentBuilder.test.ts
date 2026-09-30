@@ -75,6 +75,8 @@ describe("SubagentBuilder", () => {
 		assert.match(prompt, /Description: cached description/)
 		assert.match(prompt, /cached system prompt/)
 		assert.match(prompt, new RegExp(SUBAGENT_SYSTEM_SUFFIX.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+		assert.match(prompt, /create, modify, or delete files/)
+		assert.doesNotMatch(prompt, /research subagent|do not modify or delete any pre-existing files/)
 		assert.match(prompt, /respond with operation "progress"/)
 		assert.match(prompt, /one or two lines/)
 	})
@@ -92,9 +94,17 @@ describe("SubagentBuilder", () => {
 		})
 
 		assert.deepEqual(builder.getAllowedTools(), SUBAGENT_DEFAULT_ALLOWED_TOOLS)
+		assert.ok(builder.getAllowedTools().includes(DiracDefaultTool.EDIT_FILE))
+		assert.ok(builder.getAllowedTools().includes(DiracDefaultTool.FILE_NEW))
+		assert.ok(builder.getAllowedTools().includes(DiracDefaultTool.EXECUTE_COMMAND))
 		assert.equal(builder.getAllowedTools().includes(DiracDefaultTool.NEW_TASK), false)
 		const prompt = builder.buildSystemPrompt("generated prompt")
 		assert.equal(prompt, `generated prompt${SUBAGENT_SYSTEM_SUFFIX}${SUBAGENT_PROGRESS_INSTRUCTION}`)
+		assert.match(prompt, /create, modify, or delete files/)
+		assert.match(prompt, /current task mode/)
+		assert.match(prompt, /delegated task scope/)
+		assert.match(prompt, /verification results/)
+		assert.doesNotMatch(prompt, /research subagent|do not modify or delete any pre-existing files/)
 	})
 
 	it("applies plan-mode openrouter model override fields", () => {

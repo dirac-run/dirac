@@ -49,7 +49,7 @@ const INITIAL_STREAM_RETRY_BASE_DELAY_MS = 2_000
 const PARENT_ABORT_POLL_INTERVAL_MS = 50
 const WRAP_UP_TIMEOUT_SECONDS = 90
 const WRAP_UP_PROMPT =
-	'The research deadline has elapsed. Stop investigating and summarize the concrete findings you already established. Call respond with operation "complete" now. Do not perform further research.'
+	'The execution deadline has elapsed. Stop further task execution and summarize completed work, changes made, verification results, and any blockers or remaining work. Call respond with operation "complete" now.'
 
 interface SubagentContextState {
 	conversationHistoryDeletedRange?: [number, number]
@@ -188,12 +188,12 @@ export class SubagentRunner {
 		if (this.wrapUpRequested || this.isWrappingUp || this.shouldAbort()) return
 		this.wrapUpRequested = true
 		this.enterPhase("wrapping_up", "execution deadline reached")
-		this.recordTranscript("progress", { text: "Time limit reached. Wrapping up findings." })
+		this.recordTranscript("progress", { text: "Time limit reached. Wrapping up task results." })
 		this.recordDiagnostic("abort_requested", "wrapping_up", { reason: "execution deadline reached" })
 		this.runProgress.enqueueExecutionProgress({
 			...this.getRuntimeProgress(),
 			isWrappingUp: true,
-			trajectoryEvent: { type: SubagentTrajectoryEventType.MESSAGE, text: "Time limit reached. Wrapping up findings." },
+			trajectoryEvent: { type: SubagentTrajectoryEventType.MESSAGE, text: "Time limit reached. Wrapping up task results." },
 			stats: { ...this.activeStats },
 		})
 		await this.stopActiveWork()
