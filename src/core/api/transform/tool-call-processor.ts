@@ -104,8 +104,9 @@ export class ToolCallProcessor {
 									...toolCallDelta.function,
 									id: targetState.id,
 									name: targetState.name,
+									arguments: toolCallDelta.function?.arguments ?? undefined,
 								},
-							},
+								},
 				}
 			}
 		}
@@ -138,7 +139,7 @@ export class ToolCallProcessor {
 }
 
 // ChatCompletionTool doesn't include web_search; define the shape we use
-interface WebSearchChatTool {
+export interface WebSearchChatTool {
 	type: "web_search"
 	search_context_size?: string
 	filters?: object
@@ -151,14 +152,14 @@ function isWebSearchTool(tool: OpenAITool | WebSearchChatTool): tool is WebSearc
 	return tool.type === "web_search"
 }
 
-export function getOpenAIToolParams(tools?: OpenAITool[], enableParallelToolCalls = false) {
+export function getOpenAIToolParams(tools?: (OpenAITool | WebSearchChatTool)[], enableParallelToolCalls = false) {
 	if (!tools?.length) {
 		return {
 			tools: undefined,
 		}
 	}
 
-	const mappedTools = (tools as (OpenAITool | WebSearchChatTool)[]).map((tool) => {
+	const mappedTools = tools.map((tool) => {
 		if (tool.type === "function") {
 			return tool
 		}

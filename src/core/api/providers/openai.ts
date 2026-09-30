@@ -1,5 +1,5 @@
 import { DefaultAzureCredential, getBearerTokenProvider } from "@azure/identity"
-import { azureOpenAiDefaultApiVersion, ModelInfo, OpenAiCompatibleModelInfo, openAiModelInfoSaneDefaults } from "@shared/api"
+import { azureOpenAiDefaultApiVersion, OpenAiCompatibleModelInfo, openAiModelInfoSaneDefaults } from "@shared/api"
 import { normalizeOpenaiReasoningEffort } from "@shared/storage/types"
 import OpenAI, { AzureOpenAI } from "openai"
 import type { ChatCompletionReasoningEffort, ChatCompletionTool } from "openai/resources/chat/completions"
@@ -12,7 +12,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addReasoningContent } from "../transform/r1-format"
 import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream } from "../transform/stream"
-import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
+import { getOpenAIToolParams, ToolCallProcessor, type WebSearchChatTool } from "../transform/tool-call-processor"
 import { formatOpenAiCompatibleUsage } from "../transform/openai-usage"
 import { isParallelToolCallingEnabled } from "@/utils/model-utils"
 
@@ -101,8 +101,8 @@ export class OpenAiHandler implements ApiHandler {
 						defaultHeaders: this.options.openAiHeaders,
 					})
 				}
-			} catch (error: any) {
-				throw new Error(`Error creating OpenAI client: ${error.message}`)
+			} catch (error) {
+				throw new Error(`Error creating OpenAI client: ${error instanceof Error ? error.message : String(error)}`)
 			}
 		}
 		return this.client
@@ -130,12 +130,12 @@ export class OpenAiHandler implements ApiHandler {
 		const client = this.ensureClient()
 
 		// Add web_search tool for OpenAI
-		const finalTools = [...(tools || [])]
+		const finalTools: (ChatCompletionTool | WebSearchChatTool)[] = [...(tools || [])]
 		const baseUrl = this.options.openAiBaseUrl?.trim() || ""
 		const isOfficialOpenAi = !baseUrl || baseUrl.includes("api.openai.com") || baseUrl.includes("azure.com")
 		const isResponsesApi = baseUrl.includes("responses")
 		if (isOfficialOpenAi || isResponsesApi) {
-			finalTools.push({ type: "web_search" } as any)
+			finalTools.push({ type: "web_search" })
 		}
 		const modelId = this.options.openAiModelId ?? ""
 		const isDeepseek = modelId.toLowerCase().includes("deepseek")
@@ -165,7 +165,7 @@ export class OpenAiHandler implements ApiHandler {
 
 		if (isDeepseek || isR1FormatRequired) {
 			const modelInfo = this.getModel().info
-			if ((modelInfo as any).supportsTools || (modelInfo as any).isR1FormatRequired) {
+			if (modelInfo.supportsTools || modelInfo.isR1FormatRequired) {
 				// If the model supports tools or specifically requires R1 format (which includes reasoning_content),
 				// we use convertToOpenAiMessages + addReasoningContent to preserve tool calls.
 				// convertToR1Format merges messages but loses tools.
@@ -261,7 +261,7 @@ export class OpenAiHandler implements ApiHandler {
 		this.abortController?.abort()
 	}
 
-	getModel(): { id: string; info: ModelInfo } {
+	getModel(): { id: string; info: OpenAiCompatibleModelInfo } {
 		return {
 			id: this.options.openAiModelId ?? "",
 			info: this.options.openAiModelInfo ?? openAiModelInfoSaneDefaults,

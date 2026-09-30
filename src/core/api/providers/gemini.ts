@@ -5,7 +5,11 @@ import {
 	type GenerateContentResponseUsageMetadata,
 	GoogleGenAI,
 	FunctionDeclaration as GoogleTool,
+	type GroundingChunk,
+	type GroundingMetadata,
+	type Part,
 	ThinkingLevel,
+	type ToolUnion,
 } from "@google/genai"
 import { GeminiModelId, geminiDefaultModelId, geminiModels, ModelInfo } from "@shared/api"
 import { isRateLimited } from "@shared/net"
@@ -18,7 +22,7 @@ import { ApiHandler, CommonApiHandlerOptions } from "../"
 import { RetriableError, withRetry } from "../retry"
 import { convertAnthropicMessagesToGemini } from "../transform/gemini-format"
 import { resolveGeminiImageSources } from "./gemini-image-resolver"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, ApiStreamChunk } from "../transform/stream"
 
 const rateLimitPatterns = [/got status: 429/i, /429 Too Many Requests/i, /rate limit exceeded/i, /too many requests/i]
 
@@ -228,7 +232,7 @@ export class GeminiHandler implements ApiHandler {
 		let ttftSdkMs: number | undefined
 		let apiSuccess = false
 		let apiError: string | undefined
-		let lastGroundingMetadata: any | undefined
+		let lastGroundingMetadata: GroundingMetadata | undefined
 
 		let promptTokens = 0
 		let outputTokens = 0
@@ -264,7 +268,9 @@ export class GeminiHandler implements ApiHandler {
 			topP: requestConfig.topP,
 			maxOutputTokens: requestConfig.maxOutputTokens,
 			thinkingConfig: requestConfig.thinkingConfig,
-			tools: requestConfig.tools?.map((t: any) => (t.functionDeclarations ? "tools" : Object.keys(t)[0])),
+			tools: requestConfig.tools?.map((t: ToolUnion) =>
+				"functionDeclarations" in t && t.functionDeclarations ? "tools" : Object.keys(t)[0],
+			),
 		})
 
 		requestConfig.abortSignal = signal
@@ -331,10 +337,11 @@ export class GeminiHandler implements ApiHandler {
 					stopReason,
 				}
 
-				if (lastGroundingMetadata && lastGroundingMetadata.groundingChunks?.length > 0) {
+				const groundingChunks = lastGroundingMetadata?.groundingChunks
+				if (groundingChunks && groundingChunks.length > 0) {
 					let sourcesMarkdown = "\n\n**Sources:**\n"
 
-					lastGroundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
+					groundingChunks.forEach((chunk: GroundingChunk, index: number) => {
 						if (chunk.web) {
 							sourcesMarkdown += `${index + 1}. [${chunk.web.title || chunk.web.uri}](${chunk.web.uri})\n`
 						}
@@ -364,7 +371,8 @@ export class GeminiHandler implements ApiHandler {
 
 							if (responseBody.error) {
 								const detail = responseBody.error.details?.find(
-									(d: any) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+									(d: { "@type"?: string; retryDelay?: string }) =>
+										d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
 								)
 
 								const detailedError = new RetriableError(
@@ -426,12 +434,12 @@ export class GeminiHandler implements ApiHandler {
 
 	// Parses a single Gemini response part (text, thought, or function call) into Dirac chunk(s).
 	private *parseGeminiPart(
-		part: any,
+		part: Part,
 		responseId: string | undefined,
 		signature: string | undefined,
 		responseKey: string,
 		responseToolCallCount: Map<string, number>,
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		if (part.thought && part.text) {
 			yield { type: "reasoning", id: responseId, reasoning: part.text || "", signature }
 		} else if (part.text) {
@@ -556,7 +564,7 @@ export class GeminiHandler implements ApiHandler {
 	/**
 	 * Count tokens in content using the Gemini API
 	 */
-	async countTokens(content: Array<any>): Promise<number> {
+	async countTokens(content: unknown[]): Promise<number> {
 		try {
 			const client = this.ensureClient()
 			const { id: model } = this.getModel()
@@ -590,9 +598,9 @@ export class GeminiHandler implements ApiHandler {
 	/**
 	 * Fallback token estimation method
 	 */
-	private estimateTokens(content: Array<any>): number {
+	private estimateTokens(content: unknown[]): number {
 		// Simple estimation: ~4 characters per token
-		const totalChars = content.reduce((total, block) => {
+		const totalChars = content.reduce<number>((total, block) => {
 			if (typeof block === "string") {
 				return total + block.length
 			}

@@ -1,17 +1,26 @@
 import {
+	ActionButton as AppActionButton,
 	Card as AppCard,
 	CardKind as AppCardKind,
 	CardStatus as AppCardStatus,
+	CleanupStrategy as AppCleanupStrategy,
+	DiracApiReqInfo as AppDiracApiReqInfo,
 	DiracMessage as AppDiracMessage,
 	DiracMessageType as AppDiracMessageType,
+	RenderType as AppRenderType,
 	SteeringTranscriptStatus as AppSteeringTranscriptStatus,
+	DiracApiReqCancelReason,
 } from "@shared/ExtensionMessage"
+import type { DiracMessageModelInfo } from "@shared/messages"
 
 import {
 	Card,
 	CardKind as ProtoCardKind,
 	CardStatus as ProtoCardStatus,
+	DiracApiReqCancelReason as ProtoDiracApiReqCancelReason,
+	DiracApiReqInfo as ProtoDiracApiReqInfo,
 	DiracMessage as ProtoDiracMessage,
+	DiracModelInfo as ProtoDiracModelInfo,
 	SteeringTranscriptStatus as ProtoSteeringTranscriptStatus,
 } from "@shared/proto/dirac/ui"
 
@@ -89,6 +98,106 @@ function parseLegacySteeringStatus(status: string | undefined): AppSteeringTrans
 	if (status === AppSteeringTranscriptStatus.QUEUED) return AppSteeringTranscriptStatus.QUEUED
 	if (status === AppSteeringTranscriptStatus.SENT) return AppSteeringTranscriptStatus.SENT
 	return undefined
+}
+
+// Proto wire fields are plain strings; narrow to the app unions, dropping unrecognized values.
+function toRenderType(value: string | undefined): AppRenderType | undefined {
+	switch (value) {
+		case "text":
+		case "markdown":
+		case "diff":
+			return value
+		default:
+			return undefined
+	}
+}
+
+function toCleanupStrategy(value: string | undefined): AppCleanupStrategy | undefined {
+	switch (value) {
+		case "abandon":
+		case "success":
+		case "error":
+		case "keep_running":
+			return value
+		default:
+			return undefined
+	}
+}
+
+function toActionStyle(value: string | undefined): AppActionButton["style"] {
+	switch (value) {
+		case "default":
+		case "danger":
+		case "secondary":
+			return value
+		default:
+			return undefined
+	}
+}
+
+// Proto cancel reason is a numeric enum; the app side uses the equivalent string union.
+function apiReqCancelReasonToProto(reason: DiracApiReqCancelReason | undefined): ProtoDiracApiReqCancelReason {
+	switch (reason) {
+		case "streaming_failed":
+			return ProtoDiracApiReqCancelReason.STREAMING_FAILED
+		case "user_cancelled":
+			return ProtoDiracApiReqCancelReason.USER_CANCELLED
+		case "retries_exhausted":
+			return ProtoDiracApiReqCancelReason.RETRIES_EXHAUSTED
+		default:
+			// proto3 encodes the zero value as absent, matching today's undefined behavior
+			return ProtoDiracApiReqCancelReason.STREAMING_FAILED
+	}
+}
+
+function protoToApiReqCancelReason(reason: ProtoDiracApiReqCancelReason): DiracApiReqCancelReason | undefined {
+	switch (reason) {
+		case ProtoDiracApiReqCancelReason.STREAMING_FAILED:
+			return "streaming_failed"
+		case ProtoDiracApiReqCancelReason.USER_CANCELLED:
+			return "user_cancelled"
+		case ProtoDiracApiReqCancelReason.RETRIES_EXHAUSTED:
+			return "retries_exhausted"
+		default:
+			return undefined
+	}
+}
+
+// Proto DiracApiReqInfo is narrower than the app type; fields with no wire slot are dropped.
+function convertApiReqInfoToProto(status: AppDiracApiReqInfo): ProtoDiracApiReqInfo {
+	return {
+		request: status.request ?? "",
+		tokensIn: status.tokensIn ?? 0,
+		tokensOut: status.tokensOut ?? 0,
+		cacheWrites: status.cacheWrites ?? 0,
+		cacheReads: status.cacheReads ?? 0,
+		cost: status.cost ?? 0,
+		cancelReason: apiReqCancelReasonToProto(status.cancelReason),
+		streamingFailedMessage: status.streamingFailedMessage ?? "",
+		retryStatus: status.retryStatus
+			? { ...status.retryStatus, errorSnippet: status.retryStatus.errorSnippet ?? "" }
+			: undefined,
+	}
+}
+
+function convertProtoToApiReqInfo(proto: ProtoDiracApiReqInfo): AppDiracApiReqInfo {
+	return {
+		request: proto.request,
+		tokensIn: proto.tokensIn,
+		tokensOut: proto.tokensOut,
+		cacheWrites: proto.cacheWrites,
+		cacheReads: proto.cacheReads,
+		cost: proto.cost,
+		cancelReason: protoToApiReqCancelReason(proto.cancelReason),
+		streamingFailedMessage: proto.streamingFailedMessage,
+		retryStatus: proto.retryStatus,
+	}
+}
+
+// Proto DiracModelInfo carries only ids; app-side mode is not on the wire.
+function convertProtoToModelInfo(proto: ProtoDiracModelInfo | undefined): DiracMessageModelInfo | undefined {
+	if (!proto) return undefined
+	return { modelId: proto.modelId, providerId: proto.providerId }
 }
 
 function convertProtoEnumToSteeringStatus(
@@ -182,12 +291,12 @@ function convertProtoToCard(protoCard: Card): AppCard {
 		collapsed: protoCard.collapsed ?? undefined,
 		icon: protoCard.icon ?? undefined,
 		do_not_auto_collapse: protoCard.doNotAutoCollapse ?? undefined,
-		renderType: (protoCard.renderType as any) ?? "text",
+		renderType: toRenderType(protoCard.renderType) ?? "text",
 		requireApproval: protoCard.requireApproval ?? undefined,
 		requireFeedback: protoCard.requireFeedback ?? undefined,
 		feedbackPlaceholder: protoCard.feedbackPlaceholder ?? undefined,
 		maxHeight: protoCard.maxHeight ?? undefined,
-		cleanupStrategy: (protoCard.cleanupStrategy as any) ?? undefined,
+		cleanupStrategy: toCleanupStrategy(protoCard.cleanupStrategy),
 		startTime: protoCard.startTimeMs ?? undefined,
 		endTime: protoCard.endTimeMs ?? undefined,
 		outcome: protoCard.outcome ?? undefined,
@@ -207,7 +316,7 @@ function convertProtoToCard(protoCard: Card): AppCard {
 				label: action.label,
 				value: action.value,
 				primary: action.primary ?? undefined,
-				style: action.style as any,
+				style: toActionStyle(action.style),
 				url: action.url ?? undefined,
 			})) ?? undefined,
 		autoScroll: protoCard.autoScroll ?? undefined,
@@ -268,10 +377,7 @@ export function convertDiracMessageToProto(message: AppDiracMessage): ProtoDirac
 			protoMessage.card = convertCardToProto(message.content.card)
 			break
 		case AppDiracMessageType.API_STATUS:
-			protoMessage.apiStatus = {
-				...message.content.status,
-				request: message.content.status.request ?? "",
-			} as any
+			protoMessage.apiStatus = convertApiReqInfoToProto(message.content.status)
 			break
 		case AppDiracMessageType.CHECKPOINT:
 			protoMessage.checkpoint = {
@@ -313,7 +419,7 @@ export function convertProtoToDiracMessage(protoMessage: ProtoDiracMessage): App
 	} else if (protoMessage.apiStatus) {
 		content = {
 			type: AppDiracMessageType.API_STATUS,
-			status: protoMessage.apiStatus as any,
+			status: convertProtoToApiReqInfo(protoMessage.apiStatus),
 		}
 	} else if (protoMessage.checkpoint) {
 		content = {
@@ -341,7 +447,7 @@ export function convertProtoToDiracMessage(protoMessage: ProtoDiracMessage): App
 		conversationHistoryDeletedRange: protoMessage.conversationHistoryDeletedRange
 			? [protoMessage.conversationHistoryDeletedRange.startIndex, protoMessage.conversationHistoryDeletedRange.endIndex]
 			: undefined,
-		modelInfo: protoMessage.modelInfo as any,
+		modelInfo: convertProtoToModelInfo(protoMessage.modelInfo),
 	}
 
 	return message

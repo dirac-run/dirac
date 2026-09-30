@@ -1,6 +1,9 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import type {
 	MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming,
+	BetaRawContentBlockDeltaEvent,
+	BetaRawContentBlockStartEvent,
+	BetaRawMessageStartEvent,
 	BetaRawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
@@ -22,7 +25,7 @@ import { getModelInfoForInferenceSpeed } from "@/utils/cost"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, ApiStreamChunk, ApiStreamUsageChunk } from "../transform/stream"
 
 export const ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01"
 
@@ -70,8 +73,8 @@ export class AnthropicHandler implements ApiHandler {
 					},
 					fetch,
 				})
-			} catch (error: any) {
-				throw new Error(`Error creating Anthropic client: ${error.message}`)
+			} catch (error) {
+				throw new Error(`Error creating Anthropic client: ${error instanceof Error ? error.message : String(error)}`)
 			}
 		}
 		return this.client
@@ -171,9 +174,9 @@ export class AnthropicHandler implements ApiHandler {
 	}
 
 	private *parseAnthropicChunk(
-		chunk: any,
+		chunk: Anthropic.RawMessageStreamEvent | BetaRawMessageStreamEvent,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		switch (chunk?.type) {
 			case "message_start":
 				yield this.parseAnthropicMessageStart(chunk)
@@ -200,9 +203,11 @@ export class AnthropicHandler implements ApiHandler {
 		}
 	}
 
-	private parseAnthropicMessageStart(chunk: any): any {
+	private parseAnthropicMessageStart(chunk: Anthropic.RawMessageStartEvent | BetaRawMessageStartEvent): ApiStreamUsageChunk {
 		const usage = chunk.message.usage
-		const inferenceSpeed = usage.speed === "fast" ? "fast" : usage.speed === "standard" ? "standard" : undefined
+		// `speed` is only present on beta (fast-mode) usage payloads
+		const speed = "speed" in usage ? usage.speed : undefined
+		const inferenceSpeed = speed === "fast" ? "fast" : speed === "standard" ? "standard" : undefined
 		this.deliveredInferenceSpeed = inferenceSpeed
 		return {
 			type: "usage",
@@ -215,9 +220,9 @@ export class AnthropicHandler implements ApiHandler {
 	}
 
 	private *parseAnthropicContentBlockStart(
-		chunk: any,
+		chunk: Anthropic.RawContentBlockStartEvent | BetaRawContentBlockStartEvent,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		switch (chunk.content_block.type) {
 			case "thinking":
 				yield {
@@ -251,9 +256,9 @@ export class AnthropicHandler implements ApiHandler {
 	}
 
 	private *parseAnthropicContentBlockDelta(
-		chunk: any,
+		chunk: Anthropic.RawContentBlockDeltaEvent | BetaRawContentBlockDeltaEvent,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		switch (chunk.delta.type) {
 			case "thinking_delta":
 				yield { type: "reasoning", reasoning: chunk.delta.thinking }

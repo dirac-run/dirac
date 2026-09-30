@@ -122,7 +122,7 @@ describe("UtilityPermissionDecisionService", () => {
 		const run = sinon.stub<[UtilityModelRequest], ApiStream>().returns(
 			stream({
 				type: "tool_calls",
-				tool_call: { function: { name: "execute_command", arguments: {} } },
+				tool_call: { function: { name: "execute_command", arguments: "{}" } },
 			}),
 		)
 		const service = new UtilityPermissionDecisionService({ run }, "policy")
