@@ -27,6 +27,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 }) => {
 	const {
 		virtuosoRef,
+		setScrollerEl,
 		toggleRowExpansion,
 		handleAtBottomStateChange,
 		handleListHeightChanged,
@@ -62,8 +63,8 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 				activeVoiceStreamId={activeVoiceStreamId}
 				expandedRows={expandedRows}
 				isLastMessage={index === renderedMessageIds.length - 1}
-				messageId={messageId}
 				messageHandlers={stableMessageHandlers}
+				messageId={messageId}
 				onSetQuote={setActiveQuote}
 				onToggleExpand={toggleRowExpansion}
 			/>
@@ -101,6 +102,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 				onTouchStartCapture={handleScrollTouchStart}
 				onWheelCapture={handleScrollWheel}
 				ref={virtuosoRef}
+				scrollerRef={setScrollerEl}
 				style={{
 					height: "100%",
 					overflowAnchor: "none",

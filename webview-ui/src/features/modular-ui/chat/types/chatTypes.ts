@@ -79,6 +79,7 @@ export interface MessageHandlers {
 export interface ScrollBehavior {
 	virtuosoRef: React.RefObject<VirtuosoHandle>
 	isFollowingRef: React.MutableRefObject<boolean>
+	setScrollerEl: (el: HTMLElement | Window | null) => void
 	scrollToBottomSmooth: () => void
 	scrollToBottomAuto: () => void
 	scrollToTop: () => void
