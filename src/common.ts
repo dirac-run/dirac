@@ -19,7 +19,7 @@ import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
 import { telemetryService } from "./services/telemetry"
 // Legacy telemetry removed
 import { DiracTempManager } from "./services/temp"
-import { cleanupTestMode } from "./services/test/TestMode"
+import { cleanupTestMode } from "./hosts/vscode/test/TestMode"
 import { ShowMessageType } from "./shared/proto/host/window"
 import { syncWorker } from "./shared/services/worker/sync"
 import { getBlobStoreSettingsFromEnv } from "./shared/services/worker/worker"

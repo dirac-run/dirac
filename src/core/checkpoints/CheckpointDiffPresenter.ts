@@ -5,7 +5,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { getErrorMessage } from "@/shared/errors"
 import { ShowMessageType } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
-import { MessageStateHandler } from "../../core/task/message-state"
+import { MessageStateHandler } from "../task/message-state"
 import type { CreateCheckpointTracker } from "./CheckpointRestoreHandler"
 import type { CheckpointStorageManager } from "./CheckpointStorageManager"
 

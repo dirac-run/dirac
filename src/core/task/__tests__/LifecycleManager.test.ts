@@ -52,7 +52,7 @@ describe("LifecycleManager", () => {
 			deps.checkpointManager.commit = sinon.stub().resolves("commit-hash")
 			deps.messageStateHandler.getDiracMessages = sinon.stub().returns([{ content: { type: "checkpoint" } }])
 			// Stub ensureCheckpointInitialized via module proxy
-			const initModule = require("@integrations/checkpoints/initializer")
+			const initModule = require("@core/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
 			initModule.ensureCheckpointInitialized = async () => {}
 			try {
@@ -70,7 +70,7 @@ describe("LifecycleManager", () => {
 				settings: { enableCheckpointsSetting: true, hooksEnabled: false, mode: "act" },
 				apiConfiguration: {},
 			})
-			const initModule = require("@integrations/checkpoints/initializer")
+			const initModule = require("@core/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
 			initModule.ensureCheckpointInitialized = async () => {
 				throw new Error("init failed")

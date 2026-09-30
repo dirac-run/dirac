@@ -10,10 +10,10 @@ Module.prototype.require = function (path: string) {
 		return require("./vscode-mock")
 	}
 	// Avoid pulling in VSCode-integrated checkpoint/editor code during unit tests
-	if (path === "@integrations/checkpoints") {
+	if (path === "@core/checkpoints") {
 		return {}
 	}
-	if (path === "@integrations/checkpoints/MultiRootCheckpointManager") {
+	if (path === "@core/checkpoints/MultiRootCheckpointManager") {
 		return { MultiRootCheckpointManager: class {} }
 	}
 

@@ -1,10 +1,9 @@
 import { setTimeout as setTimeoutPromise } from "node:timers/promises"
-import type { Controller } from "@core/controller"
 import { BrowserActionResult } from "@shared/ExtensionMessage"
 import pWaitFor from "p-wait-for"
 import type { ConsoleMessage, ScreenshotOptions } from "puppeteer-core"
 import { Page, TimeoutError } from "puppeteer-core"
-import type { StateManager } from "@/core/storage/StateManager"
+import type { StateAccess } from "@/shared/storage/state-access"
 import type { BrowserSettings } from "@shared/BrowserSettings"
 import { telemetryService } from "@/services/telemetry"
 import { getErrorMessage } from "@/shared/errors"
@@ -23,7 +22,7 @@ export class BrowserSession {
 	private currentMousePosition?: string
 	private useWebp: boolean
 
-	constructor(settingsSource: StateManager | BrowserSettings | (() => BrowserSettings), useWebp = true) {
+	constructor(settingsSource: StateAccess | BrowserSettings | (() => BrowserSettings), useWebp = true) {
 		this.connection = new BrowserConnectionManager(settingsSource)
 		this.useWebp = useWebp
 	}
@@ -42,8 +41,8 @@ export class BrowserSession {
 		return this.connection.getDetectedChromePath()
 	}
 
-	async relaunchChromeDebugMode(controller: Controller): Promise<string> {
-		return this.connection.relaunchChromeDebugMode(controller)
+	async relaunchChromeDebugMode(): Promise<string> {
+		return this.connection.relaunchChromeDebugMode()
 	}
 
 	async launchBrowser() {

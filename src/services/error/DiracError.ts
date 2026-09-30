@@ -1,5 +1,5 @@
 import { serializeError } from "serialize-error"
-import { checkContextWindowExceededError } from "../../core/context/context-management/context-error-handling"
+import { checkContextWindowExceededError } from "./context-error-handling"
 
 import { DIRAC_ACCOUNT_AUTH_ERROR_MESSAGE } from "../../shared/DiracAccount"
 

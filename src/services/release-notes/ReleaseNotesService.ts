@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { StateManager } from "@core/storage/StateManager"
+import type { StateAccess } from "@shared/storage/state-access"
 import type { ReleaseNotesDocument, ReleaseNotesView } from "@shared/release-notes"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
@@ -55,7 +55,7 @@ function readBundledDocuments(): ReleaseNotesDocument[] {
 		.filter((document): document is ReleaseNotesDocument => document !== undefined)
 }
 
-export function getPendingReleaseNotes(stateManager: StateManager): ReleaseNotesView | undefined {
+export function getPendingReleaseNotes(stateManager: StateAccess): ReleaseNotesView | undefined {
 	const fromVersion = stateManager.getGlobalStateKey("pendingReleaseNotesFromVersion")
 	if (!fromVersion) return undefined
 

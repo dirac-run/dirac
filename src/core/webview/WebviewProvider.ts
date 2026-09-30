@@ -6,6 +6,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { DiracExtensionContext } from "@/shared/dirac"
 import { ShowMessageType } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
+import { initializeUriCallbackTarget } from "@/shared/uri/uri-callback-target"
 import { getNonce } from "./getNonce"
 
 export abstract class DiracWebviewProvider {
@@ -294,3 +295,7 @@ export abstract class DiracWebviewProvider {
 		return this.getWebviewUrl(assetPath)
 	}
 }
+
+// Self-register so SharedUriHandler (services) reaches the visible controller
+// without importing core's DiracWebviewProvider/Controller.
+initializeUriCallbackTarget(() => DiracWebviewProvider.getVisibleInstance()?.controller)

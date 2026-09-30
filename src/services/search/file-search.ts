@@ -4,7 +4,10 @@ import * as fs from "fs"
 import type { FzfResultItem } from "fzf"
 import * as path from "path"
 import * as readline from "readline"
-import { WorkspaceRootManager } from "@/core/workspace"
+/** Narrow workspace-roots source — WorkspaceRootManager satisfies this structurally. */
+interface WorkspaceRootsSource {
+	getRoots(): WorkspaceRoot[]
+}
 import { HostProvider } from "@/hosts/host-provider"
 import { GetOpenTabsRequest } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
@@ -213,7 +216,7 @@ export const OrderbyMatchScore = (a: FzfResultItem<any>, b: FzfResultItem<any>) 
  */
 export async function searchWorkspaceFilesMultiroot(
 	query: string,
-	workspaceManager: WorkspaceRootManager,
+	workspaceManager: WorkspaceRootsSource,
 	limit = 20,
 	selectedType?: "file" | "folder",
 	workspaceHint?: string,

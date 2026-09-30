@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import "should"
-import { StateManager } from "@/core/storage/StateManager"
+import type { StateAccess } from "@/shared/storage/state-access"
+import { initializeStateAccess, resetStateAccess } from "@/shared/storage/state-access-provider"
 import { mockFetchForTesting } from "@/shared/net"
 import { OPENAI_CODEX_OAUTH_CONFIG, OpenAiCodexOAuthManager } from "../oauth"
 
@@ -41,10 +42,11 @@ describe("OpenAiCodexOAuthManager device auth", () => {
 
 	beforeEach(() => {
 		stateManager = new TestStateManager()
-		sinon.stub(StateManager, "get").returns(stateManager as unknown as StateManager)
+		initializeStateAccess(() => stateManager as unknown as StateAccess)
 	})
 
 	afterEach(() => {
+		resetStateAccess()
 		sinon.restore()
 	})
 

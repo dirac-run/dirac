@@ -1,4 +1,4 @@
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { Logger } from "@/shared/services/Logger"
 import {
 	isTokenExpired,
@@ -57,7 +57,7 @@ export class OAuthTokenManager {
 	 */
 	async loadCredentials(): Promise<OpenAiCodexCredentials | null> {
 		try {
-			const stateManager = StateManager.get()
+			const stateManager = requireStateAccess()
 			const credentialsJson = stateManager.getSecretKey(OPENAI_CODEX_CREDENTIALS_KEY)
 
 			if (!credentialsJson) {
@@ -77,7 +77,7 @@ export class OAuthTokenManager {
 	 * Save credentials to storage via StateManager
 	 */
 	async saveCredentials(credentials: OpenAiCodexCredentials): Promise<void> {
-		const stateManager = StateManager.get()
+		const stateManager = requireStateAccess()
 		stateManager.setSecret(OPENAI_CODEX_CREDENTIALS_KEY, JSON.stringify(credentials))
 		await stateManager.flushPendingState()
 		this.credentials = credentials
@@ -87,7 +87,7 @@ export class OAuthTokenManager {
 	 * Clear credentials from storage
 	 */
 	async clearCredentials(): Promise<void> {
-		const stateManager = StateManager.get()
+		const stateManager = requireStateAccess()
 		stateManager.setSecret(OPENAI_CODEX_CREDENTIALS_KEY, undefined)
 		await stateManager.flushPendingState()
 		this.credentials = null

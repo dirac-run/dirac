@@ -2,7 +2,7 @@ import { expect } from "chai"
 import type { SimpleGit } from "simple-git"
 import sinon from "sinon"
 import { getDefaultExclusions, getLfsPatterns } from "../CheckpointExclusions"
-import { DiffContentProvider } from "../CheckpointTracker"
+import { DiffContentProvider } from "../DiffContentProvider"
 
 // Stubbed subset of SimpleGit used by DiffContentProvider — type-safe on method names, stubs on values
 type MockGit = {

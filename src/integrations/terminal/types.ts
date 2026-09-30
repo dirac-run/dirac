@@ -339,10 +339,13 @@ export interface AskResponse {
  * These are bound methods from the Task class that allow CommandExecutor
  * to update UI and state without owning that state directly.
  */
-import { TaskMessenger } from "../../core/task/TaskMessenger"
+/** Narrow sink for assistant text updates — TaskMessenger satisfies this structurally. */
+export interface TaskTextSink {
+	upsertText(text: string): Promise<void>
+}
 export interface CommandExecutorCallbacks {
 	/** Task messenger for UI interaction */
-	taskMessenger: TaskMessenger
+	taskMessenger: TaskTextSink
 	/** Update the background command running state in the controller */
 	updateBackgroundCommandState: (running: boolean) => void
 	/**

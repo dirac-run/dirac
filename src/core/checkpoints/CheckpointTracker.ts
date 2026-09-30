@@ -1,4 +1,7 @@
 import { sendCheckpointEvent } from "@core/controller/checkpoints/subscribeToCheckpoints"
+import { getDefaultExclusions, getLfsPatterns } from "@integrations/checkpoints/CheckpointExclusions"
+import { GitOperations } from "@integrations/checkpoints/CheckpointGitOperations"
+import { getShadowGitPath, hashWorkingDir, validateWorkspacePath } from "@integrations/checkpoints/CheckpointUtils"
 import fs from "fs/promises"
 import { isBinaryFile } from "isbinaryfile"
 import * as path from "path"
@@ -7,10 +10,7 @@ import type { FolderLockWithRetryResult } from "@/core/locks/types"
 import { telemetryService } from "@/services/telemetry"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
-import { GitOperations } from "./CheckpointGitOperations"
-import { getDefaultExclusions, getLfsPatterns } from "./CheckpointExclusions"
 import { releaseCheckpointLock, tryAcquireCheckpointLockWithRetry } from "./CheckpointLockUtils"
-import { getShadowGitPath, hashWorkingDir, validateWorkspacePath } from "./CheckpointUtils"
 
 /**
  * Normalizes whitespace for diff comparison. Collapses all runs of whitespace
@@ -527,5 +527,3 @@ class CheckpointTracker {
 }
 
 export default CheckpointTracker
-
-export { DiffContentProvider, type DiffEntry } from "./DiffContentProvider"

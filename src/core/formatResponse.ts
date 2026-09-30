@@ -1,9 +1,9 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import * as diff from "diff"
-import * as path from "path"
-import { Mode } from "@shared/storage/types"
 import { DiracIgnoreController, LOCK_TEXT_SYMBOL } from "@core/ignore/DiracIgnoreController"
 import type { FileInfo } from "@services/glob/list-files"
+import { createPrettyPatch, formatImagesIntoBlocks, toolResult } from "@shared/format-response"
+import { Mode } from "@shared/storage/types"
+import * as path from "path"
 
 const CONTEXT_WINDOW_WARNING_THRESHOLD_PERCENT = 50
 
@@ -104,32 +104,7 @@ export const formatResponse = {
 		)
 	},
 
-	toolResult: (
-		text: string,
-		images?: string[],
-		fileString?: string,
-	): string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> => {
-		const toolResultOutput = []
-
-		if (!(images && images.length > 0) && !fileString) {
-			return text
-		}
-
-		const textBlock: Anthropic.TextBlockParam = { type: "text", text }
-		toolResultOutput.push(textBlock)
-
-		if (images && images.length > 0) {
-			const imageBlocks: Anthropic.ImageBlockParam[] = formatImagesIntoBlocks(images)
-			toolResultOutput.push(...imageBlocks)
-		}
-
-		if (fileString) {
-			const fileBlock: Anthropic.TextBlockParam = { type: "text", text: fileString }
-			toolResultOutput.push(fileBlock)
-		}
-
-		return toolResultOutput
-	},
+	toolResult,
 
 	imageBlocks: (images?: string[]): Anthropic.ImageBlockParam[] => {
 		return formatImagesIntoBlocks(images)
@@ -202,13 +177,7 @@ export const formatResponse = {
 		return `${note}${summary}\n\n${formatted.join("\n")}`
 	},
 
-	createPrettyPatch: (filename = "file", oldStr?: string, newStr?: string) => {
-		// strings cannot be undefined or diff throws exception
-		const patch = diff.createPatch(filename.toPosix(), oldStr || "", newStr || "")
-		const lines = patch.split("\n")
-		const prettyPatchLines = lines.slice(4)
-		return prettyPatchLines.join("\n")
-	},
+	createPrettyPatch,
 
 	taskResumption: (
 		mode: Mode,
@@ -220,10 +189,11 @@ export const formatResponse = {
 	): [string, string] => {
 		const taskResumptionMessage = wasRecent
 			? ""
-			: `[TASK RESUMPTION] (${agoText}) CWD: '${cwd.toPosix()}'\n\n${mode === "plan"
-				? "Note: Assume any previous tool use without a result failed. You are in PLAN MODE; use respond with operation 'plan'. Avoid redundant text."
-				: "Note: Assume any previous tool use without a result failed. Reassess the task context and continue if incomplete."
-			}`
+			: `[TASK RESUMPTION] (${agoText}) CWD: '${cwd.toPosix()}'\n\n${
+					mode === "plan"
+						? "Note: Assume any previous tool use without a result failed. You are in PLAN MODE; use respond with operation 'plan'. Avoid redundant text."
+						: "Note: Assume any previous tool use without a result failed. Reassess the task context and continue if incomplete."
+				}`
 
 		const userResponseMessage = responseText
 			? `${mode === "plan" ? "Respond to this message" : "New instructions"}:\n<user_message>\n${responseText}\n</user_message>`
@@ -249,7 +219,9 @@ export const formatResponse = {
 			`User changes (preserve these):\n${userEdits}`,
 			autoFormattingEdits ? `Auto-formatting:\n${autoFormattingEdits}` : undefined,
 			newProblemsMessage,
-		].filter(Boolean).join("\n\n"),
+		]
+			.filter(Boolean)
+			.join("\n\n"),
 
 	fileEditWithoutUserChanges: (
 		relPath: string,
@@ -260,7 +232,9 @@ export const formatResponse = {
 			`Saved ${relPath.toPosix()}.`,
 			autoFormattingEdits ? `Auto-formatting:\n${autoFormattingEdits}` : undefined,
 			newProblemsMessage,
-		].filter(Boolean).join("\n\n"),
+		]
+			.filter(Boolean)
+			.join("\n\n"),
 
 	diracIgnoreInstructions: (content: string) =>
 		`# .diracignore\n\n(The following is provided by a root-level .diracignore file where the user has specified files and directories that should not be accessed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to access the file's contents e.g. through read_file will result in an error.)\n\n${content}\n.diracignore`,
@@ -293,23 +267,4 @@ export const formatResponse = {
 			`Read the current state before modifying these files; use include_anchors: true for edit_file coordinates.\n</explicit_instructions>`
 		)
 	},
-}
-
-// to avoid circular dependency
-const formatImagesIntoBlocks = (images?: string[]): Anthropic.ImageBlockParam[] => {
-	return images
-		? images.map((dataUrl) => {
-			// data:image/png;base64,base64string
-			const [rest, base64] = dataUrl.split(",")
-			const mimeType = rest.split(":")[1].split(";")[0]
-			return {
-				type: "image",
-				source: {
-					type: "base64",
-					media_type: mimeType,
-					data: base64,
-				},
-			} as Anthropic.ImageBlockParam
-		})
-		: []
 }

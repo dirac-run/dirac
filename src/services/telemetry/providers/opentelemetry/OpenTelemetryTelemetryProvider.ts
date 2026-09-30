@@ -2,7 +2,7 @@ import { Meter } from "@opentelemetry/api"
 import type { Logger as OTELLogger } from "@opentelemetry/api-logs"
 import { LoggerProvider } from "@opentelemetry/sdk-logs"
 import { MeterProvider } from "@opentelemetry/sdk-metrics"
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { HostProvider } from "@/hosts/host-provider"
 import { getErrorLevelFromString } from "@/services/error"
 import { getDistinctId } from "@/services/logging/distinctId"
@@ -145,7 +145,7 @@ export class OpenTelemetryTelemetryProvider implements ITelemetryProvider {
 	public isEnabled(): boolean {
 		return (
 			this.bypassUserSettings ||
-			(StateManager.get().getGlobalSettingsKey("telemetrySetting") !== "disabled" && this.telemetrySettings.hostEnabled)
+			(requireStateAccess().getGlobalSettingsKey("telemetrySetting") !== "disabled" && this.telemetrySettings.hostEnabled)
 		)
 	}
 

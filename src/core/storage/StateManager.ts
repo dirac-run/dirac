@@ -1,60 +1,61 @@
 import type { ApiConfiguration, ModelInfo } from "@shared/api"
 import type { RunHistoryItem } from "@shared/HistoryItem"
 import { buildLegacyModelIdStateUpdates } from "@shared/storage/legacy-model-id-migration"
+import { initializeStateAccess } from "@shared/storage/state-access-provider"
 import {
-	type GlobalState,
-	type GlobalStateAndSettings,
-	type LocalState,
-	type Secrets,
-	type Settings,
+    type GlobalState,
+    type GlobalStateAndSettings,
+    type LocalState,
+    type Secrets,
+    type Settings,
 } from "@shared/storage/state-keys"
 import type { StorageContext } from "@shared/storage/storage-context"
 import { initializeDistinctId } from "@/services/logging/distinctId"
 import { Logger } from "@/shared/services/Logger"
+import {
+    createTaskWorkingConfiguration,
+    type TaskExecutionOptions,
+    type TaskWorkingConfiguration,
+} from "../task/runtime/TaskWorkingConfiguration"
 import { AgentConfigLoader } from "../task/tools/subagent/AgentConfigLoader"
 import {
-	createTaskWorkingConfiguration,
-	type TaskExecutionOptions,
-	type TaskWorkingConfiguration,
-} from "../task/runtime/TaskWorkingConfiguration"
-import {
-	getAllGlobalStateEntries,
-	getAllWorkspaceStateEntries,
-	getApiConfiguration,
-	getGlobalSettingsKey,
-	getGlobalStateKey,
-	getSecretKey,
-	getSystemDefaultSettingsKey,
-	getWorkspaceStateKey,
-	type StateManagerGetterCaches,
+    getAllGlobalStateEntries,
+    getAllWorkspaceStateEntries,
+    getApiConfiguration,
+    getGlobalSettingsKey,
+    getGlobalStateKey,
+    getSecretKey,
+    getSystemDefaultSettingsKey,
+    getWorkspaceStateKey,
+    type StateManagerGetterCaches,
 } from "./StateManagerGetters"
 import { getModelInfo, getModelsCache, type ModelCache, setModelsCache } from "./StateManagerModelCache"
 import {
-	clearTaskSettings,
-	clearSessionOverride,
-	loadTaskSettings,
-	mutateTaskHistory,
-	hasSessionOverride,
-	refreshModelProviderPresetsFromDisk,
-	type StateManagerSettersContext,
-	setApiConfiguration,
-	setGlobalState,
-	setGlobalStateBatch,
-	setSecret,
-	setSecretsBatch,
-	setSessionOverride,
-	setTaskSettings,
-	setTaskSettingsBatch,
-	clearTaskSetting,
-	getTaskSetting,
-	hasTaskSetting,
-	setWorkspaceState,
-	setWorkspaceStateBatch,
+    clearSessionOverride,
+    clearTaskSetting,
+    clearTaskSettings,
+    getTaskSetting,
+    hasSessionOverride,
+    hasTaskSetting,
+    loadTaskSettings,
+    mutateTaskHistory,
+    refreshModelProviderPresetsFromDisk,
+    type StateManagerSettersContext,
+    setApiConfiguration,
+    setGlobalState,
+    setGlobalStateBatch,
+    setSecret,
+    setSecretsBatch,
+    setSessionOverride,
+    setTaskSettings,
+    setTaskSettingsBatch,
+    setWorkspaceState,
+    setWorkspaceStateBatch,
 } from "./StateManagerSetters"
 import {
-	buildEffectiveApiConfigurationFromCache,
-	buildEffectiveSettingsFromCache,
-	type StateManagerSettingsCaches,
+    buildEffectiveApiConfigurationFromCache,
+    buildEffectiveSettingsFromCache,
+    type StateManagerSettingsCaches,
 } from "./StateManagerSettings"
 import { type PersistenceErrorEvent, StatePersistenceManager } from "./StatePersistenceManager"
 
@@ -223,6 +224,10 @@ export class StateManager {
 
 			StateManager.instance.isInitialized = true
 
+			// Register the leaf-facing state seam — services/integrations resolve state through
+			// shared/state-access-provider without importing core.
+			initializeStateAccess(() => (StateManager.isInitialized() ? StateManager.instance : undefined) ?? undefined)
+
 			await AgentConfigLoader.getInstance().ready()
 		} catch (error) {
 			Logger.error("[StateManager] Failed to initialize:", error)
@@ -357,7 +362,6 @@ export class StateManager {
 		setSessionOverride(this.settersContext, key, value)
 	}
 
-
 	hasSessionOverride<K extends keyof Settings>(key: K): boolean {
 		return hasSessionOverride(this.settersContext, key)
 	}
@@ -365,7 +369,6 @@ export class StateManager {
 	clearSessionOverride<K extends keyof Settings>(key: K): void {
 		clearSessionOverride(this.settersContext, key)
 	}
-
 
 	setModelsCache(provider: string, models: Record<string, ModelInfo>): void {
 		setModelsCache(this.modelInfoCache, provider, models)

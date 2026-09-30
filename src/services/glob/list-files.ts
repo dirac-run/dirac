@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs"
-import { workspaceResolver } from "@core/workspace"
+import { requireWorkspacePathResolver } from "@shared/workspace/workspace-path-resolver"
 import { isDirectory } from "@utils/fs"
 import { arePathsEqual } from "@utils/path"
 import { globby, Options } from "globby"
@@ -53,7 +53,7 @@ function isRestrictedPath(absolutePath: string): boolean {
 }
 
 function isTargetingHiddenDirectory(absolutePath: string): boolean {
-	const dirName = workspaceResolver.getBasename(absolutePath, "Services.glob.isTargetingHiddenDirectory")
+	const dirName = requireWorkspacePathResolver().getBasename(absolutePath, "Services.glob.isTargetingHiddenDirectory")
 	return dirName.startsWith(".")
 }
 
@@ -77,7 +77,7 @@ function buildIgnorePatterns(absolutePath: string): string[] {
 }
 
 export async function listFiles(dirPath: string, recursive: boolean, limit: number): Promise<[FileInfo[], boolean]> {
-	const absolutePathResult = workspaceResolver.resolveWorkspacePath(dirPath, "", "Services.glob.listFiles")
+	const absolutePathResult = requireWorkspacePathResolver().resolveWorkspacePath(dirPath, "", "Services.glob.listFiles")
 	const absolutePath = typeof absolutePathResult === "string" ? absolutePathResult : absolutePathResult.absolutePath
 
 	// Do not allow listing files in root or home directory

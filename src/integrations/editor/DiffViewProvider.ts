@@ -1,4 +1,4 @@
-import { workspaceResolver } from "@core/workspace"
+import { requireWorkspacePathResolver } from "@shared/workspace/workspace-path-resolver"
 import { getCwd } from "@utils/path"
 import { HostProvider } from "@/hosts/host-provider"
 import { getDiagnosticsProviders } from "@/integrations/diagnostics/getDiagnosticsProviders"
@@ -51,7 +51,7 @@ export abstract class DiffViewProvider {
 
 		try {
 			const cwd = await getCwd()
-			const absolutePathResolved = workspaceResolver.resolveWorkspacePath(cwd, relPath, "DiffViewProvider.open.absolutePath")
+			const absolutePathResolved = requireWorkspacePathResolver().resolveWorkspacePath(cwd, relPath, "DiffViewProvider.open.absolutePath")
 			this.absolutePath = typeof absolutePathResolved === "string" ? absolutePathResolved : absolutePathResolved.absolutePath
 			this.relPath = options?.displayPath ?? relPath
 			this.editType = editType

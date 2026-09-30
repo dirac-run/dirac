@@ -1,4 +1,3 @@
-import type { Controller } from "@core/controller"
 import { BrowserActionResult } from "@shared/ExtensionMessage"
 import { fileExistsAtPath } from "@utils/fs"
 import axios from "axios"
@@ -7,7 +6,7 @@ import * as chromeLauncher from "chrome-launcher"
 import os from "os"
 import * as path from "path"
 import { Browser, connect, launch, Page } from "puppeteer-core"
-import type { StateManager } from "@/core/storage/StateManager"
+import type { StateAccess } from "@/shared/storage/state-access"
 import type { BrowserSettings } from "@shared/BrowserSettings"
 import { telemetryService } from "@/services/telemetry"
 import { getErrorMessage } from "@/shared/errors"
@@ -47,7 +46,7 @@ export class BrowserConnectionManager {
 	private sessionStartTime = 0
 	private browserActions: string[] = []
 	private ulid?: string
-	constructor(private readonly settingsSource: StateManager | BrowserSettings | (() => BrowserSettings)) {}
+	constructor(private readonly settingsSource: StateAccess | BrowserSettings | (() => BrowserSettings)) {}
 
 	private get browserSettings(): BrowserSettings {
 		if (typeof this.settingsSource === "function") return this.settingsSource()
@@ -136,7 +135,7 @@ export class BrowserConnectionManager {
 		return { path: stats.executablePath, isBundled: true }
 	}
 
-	async relaunchChromeDebugMode(_controller: Controller): Promise<string> {
+	async relaunchChromeDebugMode(): Promise<string> {
 		try {
 			const userDataDir = path.join(os.tmpdir(), "chrome-debug-profile")
 			const installation = chromeLauncher.Launcher.getFirstInstallation()

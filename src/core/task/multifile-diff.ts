@@ -1,5 +1,5 @@
 import { HostProvider } from "@/hosts/host-provider"
-import CheckpointTracker from "@/integrations/checkpoints/CheckpointTracker"
+import CheckpointTracker from "@/core/checkpoints/CheckpointTracker"
 import { findLast } from "@/shared/array"
 import { isTaskCompletionCard } from "@/shared/cardIdentity"
 import { DiracMessageType } from "@/shared/ExtensionMessage"

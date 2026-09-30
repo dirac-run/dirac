@@ -1,10 +1,10 @@
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
-import CheckpointTracker from "@integrations/checkpoints/CheckpointTracker"
+import CheckpointTracker from "./CheckpointTracker"
 import pTimeout from "p-timeout"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
-import { MessageStateHandler } from "../../core/task/message-state"
-import { TaskState } from "../../core/task/TaskState"
+import { MessageStateHandler } from "../task/message-state"
+import { TaskState } from "../task/TaskState"
 
 interface CheckpointStorageConfig {
 	enableCheckpoints: boolean
@@ -193,7 +193,7 @@ export class CheckpointStorageManager {
 			}
 		}
 		// Fallback to the legacy CheckpointUtils implementation
-		const { getWorkingDirectory: getWorkingDirectoryImpl } = await import("./CheckpointUtils")
+		const { getWorkingDirectory: getWorkingDirectoryImpl } = await import("@integrations/checkpoints/CheckpointUtils")
 		return getWorkingDirectoryImpl()
 	}
 

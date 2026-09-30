@@ -1,8 +1,7 @@
 import type { Banner, BannerRules, BannersResponse } from "@shared/DiracBanner"
 import { fetch, isRateLimited, jsonHeaders } from "@shared/net"
 import { DiracEnv } from "@/config"
-import { Controller } from "@/core/controller"
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { HostInfo } from "@/registry"
 import { getErrorMessage } from "@/shared/errors"
 import { FeatureFlag } from "@/shared/services/feature-flags/feature-flags"
@@ -26,6 +25,11 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
 }
 
 /** Remote banner fetch, caching, backoff, and event reporting. */
+/** Narrow sink for "state changed" notification — Controller satisfies this structurally. */
+export interface WebviewStatePusher {
+	postStateToWebview(): Promise<void>
+}
+
 export class RemoteBannerService {
 	cachedBanners: Banner[] = []
 	lastFetchTime = 0
@@ -39,7 +43,7 @@ export class RemoteBannerService {
 	authFetchPending = false
 
 	constructor(
-		private readonly controller: Controller,
+		private readonly statePusher: WebviewStatePusher,
 		private readonly hostInfo: HostInfo,
 	) {
 		Logger.log("[RemoteBannerService] initialized")
@@ -192,7 +196,7 @@ export class RemoteBannerService {
 				)}`,
 			)
 
-			this.controller.postStateToWebview().catch((error) => {
+			this.statePusher.postStateToWebview().catch((error) => {
 				Logger.error("Failed to post state to webview after fetching banners:", error)
 			})
 			return banners
@@ -271,8 +275,8 @@ export class RemoteBannerService {
 			const rules: BannerRules = JSON.parse(banner.rulesJson || "{}")
 			if (!rules?.providers?.length) return true
 
-			const config = StateManager.get().getApiConfiguration()
-			const mode = StateManager.get().getGlobalSettingsKey("mode")
+			const config = requireStateAccess().getApiConfiguration()
+			const mode = requireStateAccess().getGlobalSettingsKey("mode")
 			const provider = mode === "plan" ? config?.planModeApiProvider : config?.actModeApiProvider
 
 			return rules.providers.some((ruleProvider) => {

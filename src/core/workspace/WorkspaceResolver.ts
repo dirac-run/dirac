@@ -6,6 +6,7 @@
  */
 
 import { WorkspaceRoot } from "@shared/multi-root/types"
+import { initializeWorkspacePathResolver } from "@shared/workspace/workspace-path-resolver"
 import * as path from "path"
 import { Logger } from "@/shared/services/Logger"
 import { MigrationReporter, type UsageStats } from "./MigrationReporter"
@@ -259,6 +260,10 @@ export function createWorkspaceResolver(migrationReporter?: MigrationReporter): 
 	return new WorkspaceResolver(migrationReporter)
 }
 export const workspaceResolver = createWorkspaceResolver()
+
+// Self-register so services/integrations can resolve paths through the shared seam
+// without importing core.
+initializeWorkspacePathResolver(() => workspaceResolver)
 
 /**
  * Result type for multi-root workspace path resolution

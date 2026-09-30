@@ -11,7 +11,7 @@ import { sendSettingsButtonClickedEvent } from "./core/controller/ui/subscribeTo
 import { sendWorktreesButtonClickedEvent } from "./core/controller/ui/subscribeToWorktreesButtonClicked"
 import { DiracWebviewProvider } from "./core/webview"
 import { createDiracAPI } from "./exports"
-import { initializeTestMode } from "./services/test/TestMode"
+import { initializeTestMode } from "./hosts/vscode/test/TestMode"
 import { DiracAskResponse } from "./shared/WebviewMessage"
 import "./utils/path"; // necessary to have access to String.prototype.toPosix
 import { isDev } from "@shared/config/environment"

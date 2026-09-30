@@ -1,5 +1,5 @@
 import type { ApiConversationProviderState } from "@core/api/conversation"
-import CheckpointTracker from "@integrations/checkpoints/CheckpointTracker"
+import CheckpointTracker from "@core/checkpoints/CheckpointTracker"
 import { EventEmitter } from "events"
 import getFolderSize from "get-folder-size"
 import Mutex from "p-mutex"
