@@ -1,10 +1,10 @@
 import * as crypto from "crypto"
 import * as fs from "fs/promises"
-import * as os from "os"
 import * as path from "path"
 import * as ts from "typescript"
 import { pathToFileURL } from "url"
 import { z } from "zod"
+import { diracHomeDir } from "@/shared/config/environment"
 import { getErrorMessage } from "@/shared/errors"
 import type { WorkspaceCodeSnapshot } from "@/core/security/WorkspaceCodeApproval"
 import { safeParseJson } from "@/shared/safe-json-parse"
@@ -254,6 +254,6 @@ export class UserToolLoader {
 	}
 
 	private static getDiracHomePath(): string {
-		return process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
+		return diracHomeDir()
 	}
 }

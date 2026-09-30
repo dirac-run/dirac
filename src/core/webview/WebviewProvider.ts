@@ -3,6 +3,7 @@ import { Controller } from "@core/controller/index"
 import axios from "axios"
 import { readFile } from "fs/promises"
 import { HostProvider } from "@/hosts/host-provider"
+import { isDev } from "@/shared/config/environment"
 import { DiracExtensionContext } from "@/shared/dirac"
 import { ShowMessageType } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
@@ -213,7 +214,7 @@ export abstract class DiracWebviewProvider {
 			await axios.get(`http://${localServerUrl}`)
 		} catch (_error) {
 			// Only show the error message when in development mode.
-			if (process.env.IS_DEV) {
+			if (isDev()) {
 				HostProvider.window.showMessage({
 					type: ShowMessageType.ERROR,
 					message:
@@ -257,7 +258,7 @@ export abstract class DiracWebviewProvider {
 			<!DOCTYPE html>
 			<html lang="en">
 				<head>
-					${process.env.IS_DEV ? '<script src="http://localhost:8097"></script>' : ""}
+					${isDev() ? '<script src="http://localhost:8097"></script>' : ""}
 					<meta charset="utf-8">
 					<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 					<meta http-equiv="Content-Security-Policy" content="${csp.join("; ")}">

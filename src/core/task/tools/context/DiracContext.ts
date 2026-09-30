@@ -1,9 +1,9 @@
 import * as fs from "node:fs/promises"
-import * as os from "node:os"
 import * as path from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import Mutex from "p-mutex"
 import { z } from "zod"
+import { diracHomeDir } from "@/shared/config/environment"
 import { safeParseJson } from "@/shared/safe-json-parse"
 import { StateManager } from "../../../storage/StateManager"
 import { GlobalFileNames } from "../../../storage/fileNames"
@@ -55,7 +55,7 @@ export class DiracContext implements IDiracContext {
 		private stateManager: StateManager,
 		private conversationUlid: string,
 	) {
-		const diracHome = process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
+		const diracHome = diracHomeDir()
 		const taskDirectory = path.join(diracHome, "data", "tasks", taskId)
 		this.taskPath = path.join(taskDirectory, GlobalFileNames.toolContext)
 		this.baselinePath = path.join(taskDirectory, GlobalFileNames.toolContextBaseline)

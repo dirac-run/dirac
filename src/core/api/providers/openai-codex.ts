@@ -16,6 +16,7 @@ import { openAiCodexUsageService } from "@/integrations/openai-codex/OpenAiCodex
 import { openAiCodexOAuthManager } from "@/integrations/openai-codex/oauth"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { featureFlagsService } from "@/services/feature-flags"
+import { npmPackageVersion } from "@/shared/config/environment"
 import { getErrorMessage } from "@/shared/errors"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { fetch } from "@/shared/net"
@@ -211,7 +212,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 				const codexHeaders: Record<string, string> = {
 					originator: "dirac",
 					session_id: this.sessionId,
-					"User-Agent": `dirac/${process.env.npm_package_version || "1.0.0"} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
+					"User-Agent": `dirac/${npmPackageVersion()} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
 					...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
 					...buildExternalBasicHeaders(),
 				}
@@ -437,7 +438,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 			const codexHeaders: Record<string, string> = {
 				originator: "dirac",
 				session_id: this.sessionId,
-				"User-Agent": `dirac/${process.env.npm_package_version || "1.0.0"} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
+				"User-Agent": `dirac/${npmPackageVersion()} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
 				...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
 				...buildExternalBasicHeaders(),
 			}
@@ -611,7 +612,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 			Authorization: `Bearer ${accessToken}`,
 			originator: "dirac",
 			session_id: this.sessionId,
-			"User-Agent": `dirac/${process.env.npm_package_version || "1.0.0"} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
+			"User-Agent": `dirac/${npmPackageVersion()} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
 			...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
 			...buildExternalBasicHeaders(),
 		}

@@ -2,6 +2,7 @@ import { writeFile } from "@utils/fs"
 import fs from "fs/promises"
 import * as path from "path"
 import { GrpcSessionLog } from "@/core/controller/grpc-recorder/types"
+import { devWorkspaceFolder, grpcRecorderFileName } from "@/shared/config/environment"
 
 const LOG_FILE_PREFIX = "grpc_recorded_session"
 
@@ -27,7 +28,7 @@ export class LogFileHandler implements ILogFileHandler {
 
 	constructor() {
 		const fileName = this.getFileName()
-		const workspaceFolder = process.env.DEV_WORKSPACE_FOLDER ?? process.cwd()
+		const workspaceFolder = devWorkspaceFolder()
 		const folderPath = path.join(workspaceFolder, "tests", "specs")
 		this.logFilePath = path.join(folderPath, fileName)
 	}
@@ -37,7 +38,7 @@ export class LogFileHandler implements ILogFileHandler {
 	}
 
 	public getFileName(): string {
-		const envFileName = path.basename(process.env.GRPC_RECORDER_FILE_NAME || "").replace(/[^a-zA-Z0-9-_]/g, "_")
+		const envFileName = path.basename(grpcRecorderFileName() || "").replace(/[^a-zA-Z0-9-_]/g, "_")
 		if (envFileName && envFileName.trim().length > 0) {
 			return `${LOG_FILE_PREFIX}_${envFileName}.json`
 		}

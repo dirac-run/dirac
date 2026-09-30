@@ -3,6 +3,7 @@ import { Controller } from "@/core/controller"
 import { GrpcRecorder, GrpcRecorderNoops, IRecorder } from "@/core/controller/grpc-recorder/grpc-recorder"
 import { LogFileHandler, LogFileHandlerNoops } from "@/core/controller/grpc-recorder/log-file-handler"
 import { testHooks } from "@/core/controller/grpc-recorder/test-hooks"
+import { isGrpcRecorderEnabled, isGrpcRecorderTestFiltersEnabled } from "@/shared/config/environment"
 import { isLocal } from "@shared/config/environment"
 
 /**
@@ -47,7 +48,7 @@ export class GrpcRecorderBuilder {
 	static getRecorder(controller: Controller): IRecorder {
 		if (!GrpcRecorderBuilder.recorder) {
 			GrpcRecorderBuilder.recorder = GrpcRecorder.builder()
-				.enableIf(process.env.GRPC_RECORDER_ENABLED === "true" && isLocal())
+				.enableIf(isGrpcRecorderEnabled() && isLocal())
 				.withLogFileHandler(new LogFileHandler())
 				.build(controller)
 		}
@@ -77,7 +78,7 @@ export class GrpcRecorderBuilder {
 function filtersFromEnv(): GrpcRequestFilter[] {
 	const filters: GrpcRequestFilter[] = []
 
-	if (process.env.GRPC_RECORDER_TESTS_FILTERS_ENABLED === "true") {
+	if (isGrpcRecorderTestFiltersEnabled()) {
 		filters.push(...testFilters())
 	}
 
@@ -107,7 +108,7 @@ function testFilters(): GrpcRequestFilter[] {
 function hooksFromEnv(controller?: Controller): GrpcPostRecordHook[] {
 	const hooks: GrpcPostRecordHook[] = []
 
-	if (controller && process.env.GRPC_RECORDER_TESTS_FILTERS_ENABLED === "true") {
+	if (controller && isGrpcRecorderTestFiltersEnabled()) {
 		hooks.push(...testHooks(controller))
 	}
 

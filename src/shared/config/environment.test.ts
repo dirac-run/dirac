@@ -4,7 +4,22 @@
  * Uses process.env mutation to test each scenario in isolation.
  */
 import "should"
-import { isDev, isTest, isE2E, isLocal, isDevelopmentMode } from "./environment"
+import {
+	diracHomeDir,
+	homeEnvDir,
+	isDev,
+	isDevelopmentMode,
+	isE2E,
+	isGrpcRecorderEnabled,
+	isHooksDebugEnabled,
+	isLocal,
+	isMultiRootTraceEnabled,
+	isPromptArtifactsEnvEnabled,
+	isTest,
+	npmPackageVersion,
+	promptArtifactsDir,
+	userShell,
+} from "./environment"
 
 describe("environment checks", () => {
 	const originalEnv = { ...process.env }
@@ -15,6 +30,8 @@ describe("environment checks", () => {
 		delete process.env.E2E_TEST
 		delete process.env.IS_TEST
 		delete process.env.DIRAC_ENVIRONMENT
+		delete process.env.MULTI_ROOT_TRACE
+		delete process.env.NODE_ENV
 		Object.assign(process.env, originalEnv)
 	})
 
@@ -137,6 +154,86 @@ describe("environment checks", () => {
 			delete process.env.IS_DEV
 			delete process.env.DIRAC_ENVIRONMENT
 			isDevelopmentMode().should.be.false()
+		})
+	})
+
+	describe("diracHomeDir", () => {
+		it("returns DIRAC_DIR when set (custom profile isolation)", () => {
+			process.env.DIRAC_DIR = "/tmp/custom-profile-dirac"
+			diracHomeDir().should.equal("/tmp/custom-profile-dirac")
+		})
+		it("defaults to ~/.dirac when DIRAC_DIR is unset", () => {
+			delete process.env.DIRAC_DIR
+			diracHomeDir().should.match(/\.dirac$/)
+			diracHomeDir().should.not.startWith("/tmp")
+		})
+		it("empty DIRAC_DIR falls back to ~/.dirac (empty string is not a dir)", () => {
+			process.env.DIRAC_DIR = ""
+			diracHomeDir().should.match(/\.dirac$/)
+		})
+	})
+
+	describe("absent vars never invent defaults", () => {
+		it("userShell is undefined when SHELL is unset", () => {
+			delete process.env.SHELL
+			;(userShell() === undefined).should.be.true()
+		})
+		it("homeEnvDir is undefined when HOME is unset", () => {
+			delete process.env.HOME
+			;(homeEnvDir() === undefined).should.be.true()
+		})
+		it("promptArtifactsDir is undefined when unset and trims when set", () => {
+			delete process.env.DIRAC_PROMPT_ARTIFACT_DIR
+			;(promptArtifactsDir() === undefined).should.be.true()
+			process.env.DIRAC_PROMPT_ARTIFACT_DIR = "  /tmp/artifacts  "
+			;(promptArtifactsDir() ?? "").should.equal("/tmp/artifacts")
+		})
+		it("grpcRecorderFileName/npmPackageVersion handle absence", () => {
+			delete process.env.npm_package_version
+			npmPackageVersion().should.equal("1.0.0")
+			process.env.npm_package_version = "9.9.9"
+			npmPackageVersion().should.equal("9.9.9")
+		})
+	})
+
+	describe("flag getters", () => {
+		it("isMultiRootTraceEnabled honors MULTI_ROOT_TRACE and NODE_ENV", () => {
+			delete process.env.MULTI_ROOT_TRACE
+			delete process.env.NODE_ENV
+			isMultiRootTraceEnabled().should.be.false()
+			process.env.MULTI_ROOT_TRACE = "true"
+			isMultiRootTraceEnabled().should.be.true()
+			delete process.env.MULTI_ROOT_TRACE
+			process.env.NODE_ENV = "development"
+			isMultiRootTraceEnabled().should.be.true()
+		})
+		it("isHooksDebugEnabled requires exact 'true'", () => {
+			delete process.env.DEBUG_HOOKS
+			isHooksDebugEnabled().should.be.false()
+			process.env.DEBUG_HOOKS = "1"
+			isHooksDebugEnabled().should.be.false()
+			process.env.DEBUG_HOOKS = "true"
+			isHooksDebugEnabled().should.be.true()
+		})
+		it("isGrpcRecorderEnabled requires exact 'true'", () => {
+			delete process.env.GRPC_RECORDER_ENABLED
+			isGrpcRecorderEnabled().should.be.false()
+			process.env.GRPC_RECORDER_ENABLED = "yes"
+			isGrpcRecorderEnabled().should.be.false()
+			process.env.GRPC_RECORDER_ENABLED = "true"
+			isGrpcRecorderEnabled().should.be.true()
+		})
+		it("isPromptArtifactsEnvEnabled accepts 1/true/yes and dev builds", () => {
+			delete process.env.DIRAC_WRITE_PROMPT_ARTIFACTS
+			delete process.env.IS_DEV
+			isPromptArtifactsEnvEnabled().should.be.false()
+			process.env.DIRAC_WRITE_PROMPT_ARTIFACTS = "yes"
+			isPromptArtifactsEnvEnabled().should.be.true()
+			process.env.DIRAC_WRITE_PROMPT_ARTIFACTS = "1"
+			isPromptArtifactsEnvEnabled().should.be.true()
+			delete process.env.DIRAC_WRITE_PROMPT_ARTIFACTS
+			process.env.IS_DEV = "true"
+			isPromptArtifactsEnvEnabled().should.be.true()
 		})
 	})
 })
