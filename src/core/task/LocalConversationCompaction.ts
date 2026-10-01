@@ -15,7 +15,12 @@ import {
 	getConfiguredUtilityModelSelection,
 	isUtilityTextCondensationAvailable,
 } from "@core/text-condensation/UtilityTextCondensationAvailability"
-import { UtilityModelCancelledError, UtilityModelRunner } from "@core/utility-model/UtilityModelRunner"
+import {
+	UtilityModelCancelledError,
+	UtilityModelRunner,
+	type UtilityModelHandlerFactory,
+	type UtilityModelRunnerOptions,
+} from "@core/utility-model/UtilityModelRunner"
 import type { ApiConfiguration, ModelProviderSelection } from "@shared/api"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
@@ -89,12 +94,11 @@ export class LocalConversationCompaction {
 
 		if (!selection || !this.isAvailable()) return undefined
 
-		let handler: ApiHandler
+		const configuration = structuredClone(this.dependencies.getWorkingConfiguration().apiConfiguration) as ApiConfiguration
+		const createHandler = () => buildApiHandlerForSelection(configuration, selection, { ulid: this.dependencies.ulid })
 		let identity: UtilityModelIdentity
 		try {
-			handler = buildApiHandlerForSelection(structuredClone(this.dependencies.getWorkingConfiguration().apiConfiguration) as ApiConfiguration, selection, {
-				ulid: this.dependencies.ulid,
-			})
+			const handler = createHandler()
 			identity = {
 				providerId: selection.provider,
 				modelId: handler.getModel().id,
@@ -114,7 +118,12 @@ export class LocalConversationCompaction {
 		let summary: string
 		let continuation: string
 		try {
-			summary = await this.generateSummary(selection, handler, templates)
+			summary = await this.generateSummary(selection, createHandler, templates, async ({ retryAttempt, maxRetries, delayMs, error }) => {
+				await card.update({
+					header: `Condensing Conversation (retry ${retryAttempt}/${maxRetries}) · ${this.formatIdentity(identity)}`,
+					body: `Utility request failed. Retrying in ${delayMs / 1000}s...\n\n${getErrorMessage(error)}`,
+				})
+			})
 			this.throwIfCancelled()
 			const range = this.dependencies.contextManager.getNextTruncationRange(
 				this.dependencies.messageStateHandler.getApiConversationHistory(),
@@ -178,10 +187,12 @@ export class LocalConversationCompaction {
 
 	private async generateSummary(
 		selection: ModelProviderSelection,
-		handler: ApiHandler,
+		createHandler: UtilityModelHandlerFactory,
 		templates: ReturnType<typeof createDefaultTextCondensationTemplateRegistry>,
+		onRetry: UtilityModelRunnerOptions["onRetry"],
 	): Promise<string> {
-		const runner = new UtilityModelRunner(selection, () => handler, {
+		const runner = new UtilityModelRunner(selection, createHandler, {
+			onRetry,
 			onUsage: (event) => recordUtilityModelUsage(this.dependencies.taskState, this.dependencies.ulid, event),
 		})
 		const textCondenser = new UtilityModelTextCondenser(runner, templates)

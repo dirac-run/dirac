@@ -1,5 +1,6 @@
 import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import type { ApiHandler } from "@core/api"
+import { getApiRequestRetryDelay, MAX_API_REQUEST_RETRIES } from "@core/api/ApiRequestRetryPolicy"
 import type { ApiStream } from "@core/api/transform/stream"
 import { formatResponse } from "@core/formatResponse"
 import type { ICheckpointManager } from "@integrations/checkpoints/types"
@@ -90,9 +91,9 @@ export async function handleApiRequestError(
 	const isPaymentError = diracError.isErrorType(DiracErrorType.Payment)
 
 	let response: DiracAskResponse
-	if (!isAuthError && !isPaymentError && ctx.taskState.apiErrorRetryAttempts < 3) {
+	if (!isAuthError && !isPaymentError && ctx.taskState.apiErrorRetryAttempts < MAX_API_REQUEST_RETRIES) {
 		ctx.taskState.apiErrorRetryAttempts++
-		const delay = 2000 * 2 ** (ctx.taskState.apiErrorRetryAttempts - 1)
+		const delay = getApiRequestRetryDelay(ctx.taskState.apiErrorRetryAttempts)
 
 		await updateApiReqMsg({
 			messageStateHandler: ctx.messageStateHandler,
@@ -114,7 +115,7 @@ export async function handleApiRequestError(
 		const autoRetryCard = await ctx.taskMessenger.createCard({
 			status: CardStatus.PENDING,
 			header: "API Error (Retrying)",
-			body: `API Error (attempt ${ctx.taskState.apiErrorRetryAttempts}/3). Retrying in ${delay / 1000}s...`,
+			body: `API Error (retry ${ctx.taskState.apiErrorRetryAttempts}/${MAX_API_REQUEST_RETRIES}). Retrying in ${delay / 1000}s...`,
 		})
 
 		const autoRetryApiStatus = ctx.messageStateHandler.getLatestApiStatusMessage()
@@ -130,19 +131,19 @@ export async function handleApiRequestError(
 		if (ctx.taskState.abort) {
 			await autoRetryCard.update({
 				header: "API Error (Cancelled)",
-				body: `API Error (attempt ${ctx.taskState.apiErrorRetryAttempts}/3). Cancelled.`,
+				body: `API Error (retry ${ctx.taskState.apiErrorRetryAttempts}/${MAX_API_REQUEST_RETRIES}). Cancelled.`,
 			})
 			await autoRetryCard.finalize(CardStatus.CANCELLED)
 			throw new Error("Task instance aborted")
 		}
-		await autoRetryCard.update({ body: `API Error (attempt ${ctx.taskState.apiErrorRetryAttempts}/3). Retrying...` })
+		await autoRetryCard.update({ body: `API Error (retry ${ctx.taskState.apiErrorRetryAttempts}/${MAX_API_REQUEST_RETRIES}). Retrying...` })
 		await autoRetryCard.finalize(CardStatus.ERROR)
 	} else {
 		if (!isAuthError && !isPaymentError) {
 			await ctx.taskMessenger.createCard({
 				status: CardStatus.ERROR,
 				header: "API Error (Retries Exhausted)",
-				body: `The API request failed after 3 attempts. ${diracError.toDisplayMessage()}`,
+				body: `The API request failed after ${MAX_API_REQUEST_RETRIES} retries. ${diracError.toDisplayMessage()}`,
 			})
 		}
 		if (isPaymentError) {

@@ -197,6 +197,14 @@ describe("Task (original)", () => {
 	})
 
 	it("routes automatic compaction to the active model when Utility condensation is unavailable", async () => {
+		const workingConfiguration = StateManager.get().captureEffectiveTaskConfiguration()
+		const settings = new Proxy(workingConfiguration.settings, {
+			get: (target, property, receiver) => {
+				if (property === "utilityModelUseCondense") return false
+				if (property === "utilityModelSelection") return { provider: "openai-codex", modelId: "luna" }
+				return Reflect.get(target, property, receiver)
+			},
+		})
 		const task = new Task({
 			controller: createMockController(),
 			updateTaskHistory: sandbox.stub().resolves([]),
@@ -213,14 +221,16 @@ describe("Task (original)", () => {
 			task: "test task",
 			taskId: "test-active-model-compaction-fallback",
 			taskLockAcquired: false,
-			workingConfiguration: StateManager.get().captureEffectiveTaskConfiguration(),
+			workingConfiguration: {
+				...workingConfiguration,
+				settings,
+				apiConfiguration: {
+					planModeApiProvider: "openai-codex", planModeApiModelId: "gpt-6-astra",
+					actModeApiProvider: "openai-codex", actModeApiModelId: "gpt-6.1-sol",
+				},
+			},
 		}) as any
 		const userContent = [{ type: "text", text: "continue" }]
-		sandbox.stub(task, "getCurrentProviderInfo").returns({
-			model: { id: "act-model", info: {} },
-			providerId: "anthropic",
-			mode: "act",
-		})
 		sandbox.stub(task.modelContextTracker, "recordModelUsage").resolves()
 		sandbox.stub(task, "handleMistakeLimitReached").resolves({ didEndLoop: false, userContent })
 		sandbox.stub(task.messageStateHandler, "getDiracMessages").returns([
@@ -228,7 +238,7 @@ describe("Task (original)", () => {
 		])
 		sandbox.stub(task, "initializeCheckpoints").resolves()
 		sandbox.stub(task, "determineContextCompaction").resolves(true)
-		sandbox.stub(task.localConversationCompaction, "isAvailable").returns(false)
+		assert.equal(task.localConversationCompaction.isAvailable(), false)
 		const utilityRun = sandbox.stub(task.localConversationCompaction, "run").resolves(undefined)
 		sandbox.stub(task, "appendQueuedSteeringToUserContent").resolves(undefined)
 		const prepareApiRequest = sandbox.stub(task.apiConversationManager, "prepareApiRequest").resolves({
@@ -241,6 +251,9 @@ describe("Task (original)", () => {
 		assert.equal(await task.recursivelyMakeDiracRequests(userContent), true)
 		assert.equal(utilityRun.callCount, 0)
 		assert.equal(prepareApiRequest.firstCall.args[0].shouldCompact, true)
+		assert.equal(prepareApiRequest.firstCall.args[0].providerId, "openai-codex")
+		assert.equal(prepareApiRequest.firstCall.args[0].modelId, "gpt-6.1-sol")
+		assert.equal(prepareApiRequest.firstCall.args[0].mode, "act")
 	})
 
 	it("clears an unconsumed automatic-condense source before a completion follow-up", async () => {

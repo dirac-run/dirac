@@ -250,22 +250,20 @@ export class GoalController {
 		const workspaceManager = await this.dependencies.controller.ensureWorkspaceManager()
 		if (!workspaceManager) throw new Error("A Goal requires an initialized workspace manager")
 		const cwd = workspaceManager.getPrimaryRoot()?.path ?? (await getCwd(getDesktopDir()))
-		const workingConfiguration = this.dependencies.stateManager.captureEffectiveTaskConfiguration({
-			mode: "act",
-		})
-		const taskFactory = new GoalTaskFactory({
-			controller: this.dependencies.controller,
-			stateManager: this.dependencies.stateManager,
-			workspaceManager,
-			cwd,
-			workingConfiguration,
-			postCoordinatorState: this.dependencies.postState,
-		})
 		return new GoalLoop({
 			goalId: record.id,
 			initialDisplayText,
 			store: this.store,
-			taskFactory,
+			// Capture settings when execution starts, not when an inactive Goal is selected.
+			// Children in this run share that snapshot; a later run captures a new one.
+			createTaskFactory: () => new GoalTaskFactory({
+				controller: this.dependencies.controller,
+				stateManager: this.dependencies.stateManager,
+				workspaceManager,
+				cwd,
+				workingConfiguration: this.dependencies.stateManager.captureEffectiveTaskConfiguration({ mode: "act" }),
+				postCoordinatorState: this.dependencies.postState,
+			}),
 			stateManager: this.dependencies.stateManager,
 			updateHistory: (item) => {
 				if (!isGoalHistoryItem(item)) throw new Error(`Goal ${goalId} produced a Task history item`)

@@ -103,7 +103,7 @@ async function createFollowUpHarness(status: "paused" | "achieved") {
 		goalId,
 		initialDisplayText,
 		store,
-		taskFactory,
+		createTaskFactory: () => taskFactory,
 		stateManager,
 		updateHistory: async (item) => {
 			history[0] = item

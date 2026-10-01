@@ -11,6 +11,10 @@ import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { GoalController } from "../GoalController"
 import { createGoalHistoryItem } from "../GoalHistory"
 import { GoalLoop } from "../GoalLoop"
+import { GoalTaskFactory } from "../GoalTaskFactory"
+import type { Task } from "@core/task"
+import type { TaskWorkingConfiguration } from "@core/task/runtime/TaskWorkingConfiguration"
+import pWaitFor from "p-wait-for"
 import { GoalStore } from "../GoalStore"
 
 describe("GoalController startup transaction", () => {
@@ -22,6 +26,7 @@ describe("GoalController startup transaction", () => {
 	})
 
 	afterEach(async () => {
+		sinon.restore()
 		await fs.rm(storagePath, { recursive: true, force: true })
 	})
 
@@ -138,6 +143,62 @@ describe("GoalController startup transaction", () => {
 		assert.equal(history[0].workspaceRootPath, "/workspace/original")
 		assert.equal(history[0].isFavorited, true)
 		assert.equal(history[0].runKind === "goal" ? history[0].status : undefined, "paused")
+	})
+
+	it("captures current Act settings for each follow-up after an inactive Goal's Utility setting changes", async () => {
+		const goalId = "1787700000888"
+		const store = new GoalStore()
+		const record = await store.create(goalId, "01M0TW092EXA0KHTW38ZXJ1GCQ", "Review Goal")
+		const history: HistoryItem[] = [createGoalHistoryItem(record, "Review Goal", "/workspace/dirac")]
+		let configuration = {
+			settings: { mode: "act", utilityModelUseCondense: true, utilityModelSelection: { provider: "openai-codex", modelId: "gpt-6-luna" } },
+			apiConfiguration: {
+				planModeApiProvider: "openai-codex", planModeApiModelId: "gpt-6-astra",
+				actModeApiProvider: "openai-codex", actModeApiModelId: "gpt-6.1-sol",
+			},
+		} as unknown as TaskWorkingConfiguration
+		const capture = sinon.stub().callsFake((overrides) => {
+			assert.deepEqual(overrides, { mode: "act" })
+			return configuration
+		})
+		const stateManager = {
+			getGlobalStateKey: () => history,
+			captureEffectiveTaskConfiguration: capture,
+		} as unknown as StateManager
+		const capturedConfigurations: TaskWorkingConfiguration[] = []
+		sinon.stub(GoalTaskFactory.prototype, "create").callsFake(async function (this: GoalTaskFactory, input) {
+			capturedConfigurations.push(this["workingConfiguration"](input.executionProfile, input.childRole))
+			return {
+				resumeTaskFromHistory: async () => ({ kind: "completed", response: "Done", completedAt: Date.now() }),
+			} as unknown as Task
+		})
+		const goalController = new GoalController({
+			controller: { ensureWorkspaceManager: async () => ({ getPrimaryRoot: () => ({ path: "/workspace/dirac" }) }) } as unknown as Controller,
+			stateManager,
+			getStandaloneTask: () => undefined,
+			clearStandaloneTask: async () => { },
+			updateGoalHistory: async (item) => { history[0] = item; return history },
+			postState: async () => { },
+		})
+
+		await goalController.select(goalId)
+		assert.equal(capture.callCount, 0)
+		await goalController.sendMessage(goalId, "Continue")
+		await pWaitFor(() => !goalController.hasRunningCoordinator)
+		assert.equal(capturedConfigurations[0].settings.utilityModelUseCondense, true)
+
+		configuration = {
+			...configuration,
+			settings: { ...configuration.settings, utilityModelUseCondense: false },
+		}
+		await goalController.sendMessage(goalId, "Continue without Utility")
+		await pWaitFor(() => !goalController.hasRunningCoordinator)
+
+		assert.equal(capture.callCount, 2)
+		assert.equal(capturedConfigurations[1].settings.utilityModelUseCondense, false)
+		assert.equal(capturedConfigurations[1].settings.mode, "act")
+		assert.equal(capturedConfigurations[1].apiConfiguration.actModeApiModelId, "gpt-6.1-sol")
+		assert.equal(capturedConfigurations[0].settings.utilityModelUseCondense, true)
 	})
 
 	it("loads with the existing task history when a persisted Goal has no matching entry", async () => {

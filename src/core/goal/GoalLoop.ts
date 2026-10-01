@@ -47,7 +47,7 @@ export interface GoalLoopDependencies {
 	goalId: string
 	initialDisplayText: string
 	store: GoalStore
-	taskFactory: GoalTaskFactory
+	createTaskFactory: () => GoalTaskFactory
 	stateManager: StateManager
 	updateHistory: (item: HistoryItem) => Promise<HistoryItem[]>
 	postState: () => Promise<void>
@@ -215,10 +215,11 @@ export class GoalLoop {
 		resume: boolean,
 		followUpMessage?: string,
 	): Promise<LiveGoalRuntime> {
+		const taskFactory = this.dependencies.createTaskFactory()
 		const coordinatorAuxiliarySourceId = `goal/aux:${ulid()}`
 		let host!: GoalTaskHost
 		host = new GoalTaskHost(this.goalId, this.dependencies.store, async (input) =>
-			this.dependencies.taskFactory.create({
+			taskFactory.create({
 				id: input.id,
 				conversationUlid: input.conversationUlid,
 				prompt: input.prompt,
@@ -242,7 +243,7 @@ export class GoalLoop {
 				duringUserInteraction: (operation) => this.duringCoordinatorInteraction(operation),
 			},
 		)
-		const coordinator = await this.dependencies.taskFactory.create({
+		const coordinator = await taskFactory.create({
 			id: this.goalId,
 			conversationUlid: record.conversationUlid,
 			...(resume || kind === "followup"

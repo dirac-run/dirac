@@ -113,6 +113,21 @@ describe("LocalConversationCompaction", () => {
 		assert.ok(card.finalize.calledWith(CardStatus.SUCCESS))
 	})
 
+	it("does not compact history when Utility retries are exhausted", async () => {
+		expectLoggerErrors()
+		const { card, compaction, messageStateHandler, taskState, getProviderState } = createMocks()
+		const previousProviderState = getProviderState()
+		sinon.stub(compaction as any, "generateSummary").rejects(new Error("final websocket failure"))
+
+		assert.equal(await compaction.run({ source: "automatic" }), undefined)
+		assert.equal(messageStateHandler.overwriteApiConversationProviderState.callCount, 0)
+		assert.equal(messageStateHandler.saveDiracMessagesAndUpdateHistory.callCount, 0)
+		assert.equal(taskState.conversationHistoryDeletedRange, undefined)
+		assert.equal(getProviderState(), previousProviderState)
+		assert.ok(card.finalize.calledWith(CardStatus.ERROR, true))
+		assert.match(card.update.firstCall.args[0].body, /final websocket failure/)
+	})
+
 	it("rolls back task and provider state when history persistence fails", async () => {
 		const { compaction, messageStateHandler, taskState, getProviderState } = createMocks()
 		const previousPending = {

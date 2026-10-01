@@ -90,7 +90,16 @@ describe("createApiConfigurationForModelProviderSelection", () => {
 		assert.equal(configuration.actModeOpenRouterModelId, "openrouter/utility")
 		assert.equal(configuration.actModeReasoningEffort, undefined)
 		assert.equal(configuration.actModeThinkingBudgetTokens, undefined)
-		assert.equal(configuration.disableRetries, true)
+		assert.equal(configuration.disableRetries, false)
 		assert.equal(configuration.ulid, "utility-invocation")
 	})
+
+	it("enables provider retries even when the active runtime disabled them", () => {
+		const base: ApiConfiguration = { disableRetries: true }
+		const configuration = createApiConfigurationForModelProviderSelection(base, selection("openai-codex", "gpt-6-luna"))
+
+		assert.equal(configuration.disableRetries, false)
+		assert.equal(configuration.actModeApiModelId, "gpt-6-luna")
+		assert.equal(base.disableRetries, true)
+})
 })

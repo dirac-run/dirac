@@ -4,7 +4,9 @@ import type { ApiStream, ApiStreamChunk } from "@core/api/transform/stream"
 import type { ModelProviderSelection } from "@shared/api"
 import type { DiracStorageMessage } from "@shared/messages/content"
 import type { DiracTool } from "@shared/tools"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
+import sinon from "sinon"
+import { ApiConfigurationError, ApiConfigurationErrorCode } from "@core/api/ApiConfigurationError"
 import { UtilityModelCancelledError, UtilityModelRunner } from "../UtilityModelRunner"
 
 const selection: ModelProviderSelection = {
@@ -27,6 +29,8 @@ function fakeHandler(createMessage: ApiHandler["createMessage"], abort?: () => v
 }
 
 describe("UtilityModelRunner", () => {
+	afterEach(() => sinon.restore())
+
 	it("builds its independent handler lazily and forwards the exact request without executing tool calls", async () => {
 		let handlerBuilds = 0
 		const calls: Parameters<ApiHandler["createMessage"]>[] = []
@@ -119,43 +123,115 @@ describe("UtilityModelRunner", () => {
 		assert.equal(handlerBuilds, 0)
 	})
 
-	it("aborts the handler and stops yielding when cancelled mid-stream", async () => {
+	it("aborts the handler and discards partial output when cancelled mid-stream", async () => {
 		const controller = new AbortController()
 		let aborts = 0
-		const runner = new UtilityModelRunner(selection, () =>
-			fakeHandler(() => streamChunks([{ type: "text", text: "first" }, { type: "text", text: "second" }]), () => {
-				aborts++
-			}),
-		)
+		let handlerBuilds = 0
+		const runner = new UtilityModelRunner(selection, () => {
+			handlerBuilds++
+			return fakeHandler(async function* () {
+				yield { type: "text", text: "partial" }
+				controller.abort()
+				yield { type: "text", text: "never accepted" }
+			}, () => { aborts++ })
+		})
 
 		const stream = runner.run({ systemPrompt: "prompt", messages: [], signal: controller.signal })
-		assert.deepEqual(await stream.next(), { value: { type: "text", text: "first" }, done: false })
-		controller.abort()
-
 		await assert.rejects(() => stream.next(), UtilityModelCancelledError)
 		assert.equal(aborts, 1)
+		assert.equal(handlerBuilds, 1)
 	})
 
-	it("does not retry or hide a provider failure", async () => {
+	it("retries provider failures three times with the normal backoff and surfaces the final error", async () => {
 		let calls = 0
+		let aborts = 0
 		const providerFailure = new Error("provider failed")
-		const runner = new UtilityModelRunner(selection, () =>
-			fakeHandler(() => {
-				calls++
-				return (async function* (): ApiStream {
-					throw providerFailure
-				})()
-			}),
-		)
+		const retryEvents: number[] = []
+		const runner = new UtilityModelRunner(selection, () => {
+			calls++
+			return fakeHandler(async function* () { throw providerFailure }, () => { aborts++ })
+		}, { onRetry: ({ retryAttempt }) => { retryEvents.push(retryAttempt) } })
+		const wait = sinon.stub(runner as any, "waitForRetry").resolves()
+
+		await assert.rejects(() => runner.run({ systemPrompt: "prompt", messages: [] }).next(), providerFailure)
+		assert.equal(calls, 4)
+		assert.equal(aborts, 4)
+		assert.deepEqual(retryEvents, [1, 2, 3])
+		assert.deepEqual(wait.args.map(([delay]) => delay), [2000, 4000, 8000])
+	})
+
+	it("publishes only the successful attempt's output while accounting for usage from failed attempts", async () => {
+		let calls = 0
+		let aborts = 0
+		const usages: number[] = []
+		const resolvedModels: string[] = []
+		const runner = new UtilityModelRunner(selection, () => {
+			const attempt = ++calls
+			return fakeHandler(async function* () {
+				yield { type: "usage", inputTokens: attempt, outputTokens: 1 }
+				if (attempt === 1) {
+					yield { type: "text", text: "discard me" }
+					yield { type: "tool_calls", tool_call: { function: { name: "discard-tool", arguments: "{}" } } }
+					throw new Error("websocket failed after output")
+				}
+				yield { type: "text", text: "complete summary" }
+			}, () => { aborts++ })
+		}, {
+			onUsage: ({ usage }) => usages.push(usage.inputTokens),
+			onModelResolved: ({ modelId }) => resolvedModels.push(modelId),
+		})
+		sinon.stub(runner as any, "waitForRetry").resolves()
+		const chunks: ApiStreamChunk[] = []
+		for await (const chunk of runner.run({ systemPrompt: "prompt", messages: [] })) chunks.push(chunk)
+
+		assert.equal(calls, 2)
+		assert.equal(aborts, 1)
+		assert.deepEqual(chunks, [
+			{ type: "usage", inputTokens: 2, outputTokens: 1 },
+			{ type: "text", text: "complete summary" },
+		])
+		assert.deepEqual(usages, [1, 2])
+		assert.deepEqual(resolvedModels, ["utility-model"])
+	})
+
+	it("cancels during backoff without starting another attempt", async () => {
+		const controller = new AbortController()
+		let calls = 0
+		const runner = new UtilityModelRunner(selection, () => {
+			calls++
+			return fakeHandler(async function* () { throw new Error("network failed") })
+		}, {
+			onRetry: () => { setTimeout(() => controller.abort(), 0) },
+		})
 
 		await assert.rejects(
-			async () => {
-				for await (const _chunk of runner.run({ systemPrompt: "prompt", messages: [] })) {
-					// The provider always fails.
-				}
-			},
-			providerFailure,
+			() => runner.run({ systemPrompt: "prompt", messages: [], signal: controller.signal }).next(),
+			UtilityModelCancelledError,
 		)
+		assert.equal(calls, 1)
+	})
+
+	for (const status of [401, 402, 403]) {
+		it(`does not retry authentication or payment errors (${status})`, async () => {
+			let calls = 0
+			const failure = Object.assign(new Error("access denied"), { status })
+			const runner = new UtilityModelRunner(selection, () => {
+				calls++
+				return fakeHandler(async function* () { throw failure })
+			})
+			await assert.rejects(() => runner.run({ systemPrompt: "prompt", messages: [] }).next(), failure)
+			assert.equal(calls, 1)
+		})
+	}
+
+	it("does not retry a handler configuration failure", async () => {
+		let calls = 0
+		const failure = new ApiConfigurationError(ApiConfigurationErrorCode.ModelUnavailable, "Unknown model: luna")
+		const runner = new UtilityModelRunner(selection, () => {
+			calls++
+			throw failure
+		})
+		await assert.rejects(() => runner.run({ systemPrompt: "prompt", messages: [] }).next(), failure)
 		assert.equal(calls, 1)
 	})
 })

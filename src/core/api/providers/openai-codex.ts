@@ -30,6 +30,7 @@ import {
 	ApiHandler,
 	CommonApiHandlerOptions,
 } from "../"
+import { ApiConfigurationError, ApiConfigurationErrorCode } from "../ApiConfigurationError"
 import { RetriableError } from "../retry"
 import { convertToOpenAIResponsesInput } from "../transform/openai-response-format"
 import { ApiStream } from "../transform/stream"
@@ -649,9 +650,15 @@ export class OpenAiCodexHandler implements ApiHandler {
 
 	getModel(): { id: OpenAiCodexModelId; info: OpenAiCodexModelInfo } {
 		const modelId = this.options.apiModelId
-		const id = modelId && modelId in openAiCodexModels ? (modelId as OpenAiCodexModelId) : openAiCodexDefaultModelId
+		if (modelId !== undefined && !Object.hasOwn(openAiCodexModels, modelId)) {
+			throw new ApiConfigurationError(
+				ApiConfigurationErrorCode.ModelUnavailable,
+				`Unknown OpenAI Codex model ID: ${modelId}`,
+				"Select a supported ChatGPT model ID before retrying (for example, gpt-6-luna rather than luna).",
+			)
+		}
+		const id = (modelId ?? openAiCodexDefaultModelId) as OpenAiCodexModelId
 		const info: OpenAiCodexModelInfo = openAiCodexModels[id]
-
 		return { id, info: { ...info, supportsStrictTools: true } }
 	}
 }

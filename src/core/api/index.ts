@@ -692,7 +692,7 @@ export function createApiConfigurationForModelProviderSelection(
 		...modelProviderSelectionUpdates("act", selection, baseConfiguration.actModeInferenceSpeed),
 		apiProvider: selection.provider,
 		ulid: options.ulid,
-		disableRetries: true,
+		disableRetries: false,
 		actModeThinkingBudgetTokens: undefined,
 		actModeReasoningEffort: undefined,
 		geminiSearchEnabled: false,
