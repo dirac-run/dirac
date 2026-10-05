@@ -56,6 +56,7 @@ export interface PresentationSnapshot {
 // Strongly-typed event emitter interface
 export interface MessageStateHandlerEvents {
 	diracMessagesChanged: [change: DiracMessageChange]
+	cardInteractionReady: [message: DiracMessage]
 }
 
 interface MessageStateHandlerParams {
@@ -214,6 +215,12 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	 */
 	private emitDiracMessagesChanged(change: DiracMessageChange): void {
 		this.emit("diracMessagesChanged", change)
+	}
+
+	/** Announce an armed FIFO interaction without mutating or persisting its card. */
+	publishCardInteractionReady(cardId: string): void {
+		const index = this.requireCardMessageIndex(cardId)
+		this.emit("cardInteractionReady", this.diracMessages[index])
 	}
 
 	setCheckpointTracker(tracker: CheckpointTracker | undefined) {

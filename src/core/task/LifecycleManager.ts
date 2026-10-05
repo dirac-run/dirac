@@ -30,6 +30,7 @@ import { getErrorMessage } from "@/shared/errors"
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { releaseTaskLock } from "./TaskLockUtils"
 import type { TaskRunOutcome } from "./TaskRunOutcome"
+import { clearAskResponse } from "./TaskUserInput"
 import { LifecycleManagerDependencies } from "./types/lifecycle-manager"
 import { buildUserFeedbackContent } from "./utils/buildUserFeedbackContent"
 
@@ -323,10 +324,7 @@ export class LifecycleManager {
 			isSuccessfulTaskCompletionCard(lastDiracMessage.content.card)
 		// Reset askResponse state before waiting. Completed tasks remain available for
 		// follow-up messages just like cancelled tasks; only their displayed status differs.
-		this.dependencies.taskState.askResponse = undefined
-		this.dependencies.taskState.askResponseText = undefined
-		this.dependencies.taskState.askResponseImages = undefined
-		this.dependencies.taskState.askResponseFiles = undefined
+		clearAskResponse(this.dependencies.taskState)
 
 		this.dependencies.taskState.status = completedTask ? TaskStatus.COMPLETED : TaskStatus.CANCELLED
 		await this.dependencies.postStateToWebview()

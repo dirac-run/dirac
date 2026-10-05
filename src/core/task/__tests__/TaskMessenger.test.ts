@@ -6,6 +6,8 @@ import sinon from "sinon"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 import { TaskMessenger } from "../TaskMessenger"
+import { TaskState } from "../TaskState"
+import { submitCardResponse } from "../TaskUserInput"
 
 function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 	const messages: any[] = []
@@ -58,11 +60,9 @@ function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 			return structuredClone(message.content.card)
 		}),
 		flushPendingWrites: sinon.stub().resolves(),
+		publishCardInteractionReady: sinon.stub(),
 	}
-	const taskState: any = { waitingCardIds: [], status: TaskStatus.IDLE }
-	Object.defineProperty(taskState, "lastWaitingCardId", {
-		get: () => taskState.waitingCardIds[0],
-	})
+	const taskState = new TaskState()
 	const messenger = new TaskMessenger({
 		taskState,
 		messageStateHandler,
@@ -73,6 +73,28 @@ function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 	} as any)
 	return { messenger, messages, taskState, messageStateHandler, postStateToWebview }
 }
+
+async function withInteractionTimeout<T>(taskState: TaskState, interaction: Promise<T>): Promise<T> {
+	const timer = setTimeout(() => {
+		taskState.abort = true
+	}, 1500)
+	try {
+		return await interaction
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+const responseFields = [
+	"askResponse",
+	"askResponseCardId",
+	"askResponseText",
+	"askResponseImages",
+	"askResponseFiles",
+	"askResponseUserEdits",
+	"askResponseAction",
+	"askResponseValue",
+] as const
 
 describe("TaskMessenger text authorship", () => {
 	it("defaults non-user text to assistant", async () => {
@@ -170,6 +192,147 @@ describe("TaskMessenger text authorship", () => {
 		const secondResult = await secondInteraction
 		assert.equal(secondResult.response, DiracAskResponse.REJECT)
 		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+
+	for (const stage of ["persistence", "presentation"]) {
+		for (const response of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
+			for (const explicitCardId of [true, false]) {
+				it(`keeps an immediate ${response} during ${stage} ${explicitCardId ? "with" : "without"} a card ID`, async () => {
+					let answered = false
+					const answer = async () => {
+						const cardId = taskState.lastWaitingCardId
+						if (!cardId || answered) return
+						answered = true
+						await submitCardResponse(
+							{ taskState },
+							{
+								cardId: explicitCardId ? cardId : "",
+								response,
+								images: ["preview.png"],
+								files: ["notes.txt"],
+								value: "selected-option",
+							},
+						)
+					}
+					const publication = sinon.stub().callsFake(stage === "presentation" ? answer : async () => {})
+					const { messenger, taskState, messageStateHandler } = createMessenger(publication)
+					if (stage === "persistence") messageStateHandler.flushPendingWrites.callsFake(answer)
+					const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+
+					const result = await withInteractionTimeout(taskState, card.waitForInteraction())
+
+					assert.equal(answered, true)
+					assert.equal(result.response, response)
+					assert.equal(result.action, response)
+					assert.equal(result.value, "selected-option")
+					assert.deepEqual(result.images, ["preview.png"])
+					assert.deepEqual(result.files, ["notes.txt"])
+					assert.deepEqual(taskState.waitingCardIds, [])
+					assert.equal(taskState.status, TaskStatus.IDLE)
+					for (const field of responseFields) assert.equal(taskState[field], undefined, field)
+				})
+			}
+		}
+	}
+
+	it("keeps an immediate chat message and its attachments while setting up the wait", async () => {
+		let answered = false
+		const publication = sinon.stub().callsFake(async () => {
+			const cardId = taskState.lastWaitingCardId
+			if (!cardId || answered) return
+			answered = true
+			await submitCardResponse(
+				{ taskState },
+				{
+					cardId,
+					response: DiracAskResponse.MESSAGE,
+					text: "Use another command",
+					images: ["preview.png"],
+					files: ["notes.txt"],
+				},
+			)
+		})
+		const { messenger, taskState, messages } = createMessenger(publication)
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+
+		await assert.rejects(withInteractionTimeout(taskState, card.waitForInteraction()), ToolSkippedByUserMessage)
+
+		assert.equal(answered, true)
+		assert.deepEqual(taskState.waitingCardIds, [])
+		assert.equal(taskState.didRejectTool, true)
+		assert.equal(messages.at(-1).content.role, "user")
+		assert.equal(messages.at(-1).content.content, "Use another command")
+		assert.deepEqual(messages.at(-1).content.images, ["preview.png"])
+		assert.deepEqual(messages.at(-1).content.files, ["notes.txt"])
+		for (const field of responseFields) assert.equal(taskState[field], undefined, field)
+	})
+
+	it("clears an early response when the card becomes terminal during setup", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		let answered = false
+		messageStateHandler.flushPendingWrites.callsFake(async () => {
+			if (answered) return
+			answered = true
+			await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.APPROVE, value: "early" })
+			await card.update({ status: CardStatus.CANCELLED })
+		})
+
+		await assert.rejects(withInteractionTimeout(taskState, card.waitForInteraction()), /became terminal/)
+
+		assert.deepEqual(taskState.waitingCardIds, [])
+		sinon.assert.notCalled(messageStateHandler.publishCardInteractionReady)
+		for (const field of responseFields) assert.equal(taskState[field], undefined, field)
+	})
+
+	it("discards all response fields belonging to another card", async () => {
+		const { messenger, taskState } = createMessenger()
+		Object.assign(taskState, {
+			askResponse: DiracAskResponse.APPROVE,
+			askResponseCardId: "earlier-card",
+			askResponseText: "stale text",
+			askResponseImages: ["stale.png"],
+			askResponseFiles: ["stale.txt"],
+			askResponseUserEdits: { "stale.txt": "edited" },
+			askResponseAction: DiracAskResponse.APPROVE,
+			askResponseValue: "stale-value",
+		})
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		const interaction = withInteractionTimeout(taskState, card.waitForInteraction())
+		await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT)
+
+		for (const field of responseFields) assert.equal(taskState[field], undefined, field)
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.REJECT })
+		const result = await interaction
+		assert.equal(result.response, DiracAskResponse.REJECT)
+		assert.equal(result.value, undefined)
+	})
+
+	it("keeps an immediate response during FIFO handoff without clearing the active response", async () => {
+		const answered = new Set<string>()
+		const publication = sinon.stub().callsFake(async () => {
+			const cardId = taskState.lastWaitingCardId
+			if (!cardId || answered.has(cardId)) return
+			answered.add(cardId)
+			await submitCardResponse(
+				{ taskState },
+				{ cardId, response: answered.size === 1 ? DiracAskResponse.APPROVE : DiracAskResponse.REJECT },
+			)
+		})
+		const { messenger, taskState } = createMessenger(publication)
+		const first = await messenger.createCard({ header: "First", requireApproval: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+
+		const [firstResult, secondResult] = await withInteractionTimeout(
+			taskState,
+			Promise.all([first.waitForInteraction(), second.waitForInteraction()]),
+		)
+
+		assert.equal(firstResult.response, DiracAskResponse.APPROVE)
+		assert.equal(secondResult.response, DiracAskResponse.REJECT)
+		assert.deepEqual([...answered], [first.id, second.id])
+		assert.deepEqual(taskState.waitingCardIds, [])
+		for (const field of responseFields) assert.equal(taskState[field], undefined, field)
 	})
 
 	it("lets a queued live approval resolve without taking over the active interaction", async () => {

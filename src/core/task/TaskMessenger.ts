@@ -20,6 +20,7 @@ import { Logger } from "@shared/services/Logger"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
+import { clearAskResponse } from "./TaskUserInput"
 import { TaskMessengerDependencies } from "./types/task-messenger"
 
 interface TaskCardParams extends CardParams {
@@ -259,11 +260,11 @@ export class TaskMessenger implements ITaskMessenger {
 						if (index === -1) throw new Error(`Card with id ${id} not found`)
 						const activeMessage = this.dependencies.messageStateHandler.getDiracMessages()[index]
 						const messageTs = activeMessage.ts
-						this.dependencies.taskState.askResponse = undefined
-						this.dependencies.taskState.askResponseText = undefined
-						this.dependencies.taskState.askResponseImages = undefined
-						this.dependencies.taskState.askResponseFiles = undefined
-						this.dependencies.taskState.askResponseUserEdits = undefined
+						// Registration exposes this card to clients before setup finishes. Keep any
+						// response already submitted for it, including an immediate FIFO handoff.
+						if (this.dependencies.taskState.askResponseCardId !== id) {
+							clearAskResponse(this.dependencies.taskState)
+						}
 						this.dependencies.taskState.lastMessageTs = messageTs
 
 						previousStatus = this.dependencies.taskState.status
@@ -275,6 +276,7 @@ export class TaskMessenger implements ITaskMessenger {
 						})
 
 						this.dependencies.taskState.status = TaskStatus.AWAITING_USER_INPUT
+						this.dependencies.messageStateHandler.publishCardInteractionReady(id)
 
 						await pWaitFor(
 							() => {
@@ -317,14 +319,7 @@ export class TaskMessenger implements ITaskMessenger {
 							userEdits: this.dependencies.taskState.askResponseUserEdits,
 							askTs: messageTs,
 						}
-						// Clean up ALL response fields to prevent stale data
-						this.dependencies.taskState.askResponse = undefined
-						this.dependencies.taskState.askResponseText = undefined
-						this.dependencies.taskState.askResponseImages = undefined
-						this.dependencies.taskState.askResponseFiles = undefined
-						this.dependencies.taskState.askResponseUserEdits = undefined
-						this.dependencies.taskState.askResponseAction = undefined
-						this.dependencies.taskState.askResponseValue = undefined
+						clearAskResponse(this.dependencies.taskState)
 
 						// If the user sent a chat message instead of responding to the card,
 						// this signals the tool should be skipped. Throw a typed error so the
@@ -343,6 +338,9 @@ export class TaskMessenger implements ITaskMessenger {
 
 						return result
 					} finally {
+						if (this.dependencies.taskState.askResponseCardId === id) {
+							clearAskResponse(this.dependencies.taskState)
+						}
 						if (!this.dependencies.taskState.abort && previousStatus !== undefined) {
 							this.dependencies.taskState.status = previousStatus
 						}

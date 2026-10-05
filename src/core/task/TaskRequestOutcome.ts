@@ -17,6 +17,7 @@ import type { MessageStateHandler } from "./message-state"
 import type { StreamingMetricsManager } from "./StreamingMetricsManager"
 import type { TaskMessenger } from "./TaskMessenger"
 import type { TaskState } from "./TaskState"
+import { clearAskResponse } from "./TaskUserInput"
 import { ToolSkippedByUserMessage } from "./tools/types/ToolSkippedByUserMessage"
 import { updateApiReqMsg } from "./utils"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
@@ -222,10 +223,7 @@ export async function processStreamResult(
 	},
 ): Promise<boolean> {
 	if (params.assistantHasContent) {
-		ctx.taskState.askResponse = undefined
-		ctx.taskState.askResponseText = undefined
-		ctx.taskState.askResponseImages = undefined
-		ctx.taskState.askResponseFiles = undefined
+		clearAskResponse(ctx.taskState)
 		ctx.taskState.status = TaskStatus.AWAITING_USER_INPUT
 
 		await pWaitFor(() => ctx.taskState.userMessageContentReady)

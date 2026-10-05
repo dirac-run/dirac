@@ -7,7 +7,7 @@ import { ResponseOperation, responseCardInput } from "@shared/responseTool";
 
 function questionCard(overrides: Record<string, unknown> = {}): DiracMessage {
 	return {
-		id: "question-1",
+		id: (overrides.id as string | undefined) ?? "question-1",
 		ts: 1,
 		content: {
 			type: DiracMessageType.CARD,
@@ -83,6 +83,8 @@ describe("TaskMessageBridge form elicitation", () => {
 	let requestElicitation: ReturnType<typeof vi.fn>;
 	let emitSessionUpdate: ReturnType<typeof vi.fn>;
 	let bridge: TaskMessageBridge;
+	let taskState: { lastWaitingCardId: string | undefined; abort: boolean };
+	let getMessageById: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
 		submitCardResponse = vi.fn().mockResolvedValue(undefined);
@@ -92,9 +94,12 @@ describe("TaskMessageBridge form elicitation", () => {
 			content: { optionId: "option-a" },
 		});
 		emitSessionUpdate = vi.fn().mockResolvedValue(undefined);
+		taskState = { lastWaitingCardId: "question-1", abort: false };
+		getMessageById = vi.fn((id: string) => questionCard({ id }));
+		const task = { submitCardResponse, taskState, messageStateHandler: { getMessageById } };
 		bridge = new TaskMessageBridge({
 			getSession: () => ({}) as any,
-			getController: () => ({ task: { submitCardResponse } }) as any,
+			getController: () => ({ task }) as any,
 			requestPermission,
 			emitSessionUpdate,
 			getClientCapabilities: () => ({ elicitation: { form: {} } }) as any,
@@ -360,6 +365,7 @@ describe("TaskMessageBridge form elicitation", () => {
 
 
 	it("keeps the ACP prompt active after an inline permission response", async () => {
+		taskState.lastWaitingCardId = "approval-1";
 		requestPermission.mockResolvedValueOnce({
 			outcome: { outcome: "selected", optionId: "allow_once" },
 		});
@@ -377,6 +383,79 @@ describe("TaskMessageBridge form elicitation", () => {
 		expect(requestPermission).toHaveBeenCalled();
 		expect(resolvePrompt).not.toHaveBeenCalled();
 		expect(promptResolved.value).toBe(false);
+	});
+
+	for (const createCard of [approvalCard, questionCard]) {
+		it(`defers ${createCard.name} client input until the card reaches the FIFO head`, async () => {
+			const message = createCard();
+			getMessageById.mockReturnValue(message);
+			taskState.lastWaitingCardId = "earlier-card";
+			requestPermission.mockResolvedValue({ outcome: { outcome: "selected", optionId: "allow_once" } });
+
+			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+			expect(requestPermission).not.toHaveBeenCalled();
+			expect(requestElicitation).not.toHaveBeenCalled();
+
+			taskState.lastWaitingCardId = message.id;
+			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+			expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.APPROVE, undefined, undefined, undefined, createCard === questionCard ? "option-a" : undefined);
+		});
+
+		it(`does not request input for ${createCard.name} that becomes terminal before activation`, async () => {
+			const message = createCard();
+			getMessageById.mockReturnValue(message);
+			taskState.lastWaitingCardId = undefined;
+			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+			if (message.content.type === DiracMessageType.CARD) message.content.card.status = CardStatus.SUCCESS;
+			taskState.lastWaitingCardId = message.id;
+			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+			expect(requestPermission).not.toHaveBeenCalled();
+			expect(requestElicitation).not.toHaveBeenCalled();
+			expect(submitCardResponse).not.toHaveBeenCalled();
+		});
+	}
+
+	it("does not block a ready card behind an earlier-created inactive card", async () => {
+		const first = questionCard();
+		const second = approvalCard();
+		getMessageById.mockImplementation((id: string) => id === first.id ? first : second);
+		taskState.lastWaitingCardId = second.id;
+		requestPermission.mockResolvedValue({ outcome: { outcome: "selected", optionId: "allow_once" } });
+
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), first);
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), second);
+		expect(requestPermission).toHaveBeenCalledTimes(1);
+		expect(requestElicitation).not.toHaveBeenCalled();
+
+		taskState.lastWaitingCardId = first.id;
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), first);
+		expect(requestElicitation).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not request input for an aborted task", async () => {
+		taskState.lastWaitingCardId = "approval-1";
+		taskState.abort = true;
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), approvalCard());
+
+		expect(requestPermission).not.toHaveBeenCalled();
+		expect(submitCardResponse).not.toHaveBeenCalled();
+	});
+
+	it("ignores a permission response that arrives after cancellation", async () => {
+		taskState.lastWaitingCardId = "approval-1";
+		let resolvePermission!: (response: unknown) => void;
+		requestPermission.mockImplementationOnce(() => new Promise((resolve) => { resolvePermission = resolve; }));
+		const processing = (bridge as any).processMessageWithDelta("session-1", sessionState(), approvalCard());
+		await vi.waitFor(() => expect(requestPermission).toHaveBeenCalledTimes(1));
+
+		bridge.invalidatePendingInteractions();
+		resolvePermission({ outcome: { outcome: "selected", optionId: "allow_once" } });
+		await processing;
+
+		expect(submitCardResponse).not.toHaveBeenCalled();
 	});
 
 	it("ignores an elicitation response that arrives after cancellation", async () => {

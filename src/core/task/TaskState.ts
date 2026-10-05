@@ -49,6 +49,8 @@ export class TaskState {
 
 	// Ask/Response handling
 	askResponse?: DiracAskResponse
+	/** Card owning the pending response, including responses received before its waiter finishes setup. */
+	askResponseCardId?: string
 	askResponseAction?: string
 	askResponseValue?: string
 

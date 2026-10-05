@@ -48,6 +48,17 @@ export async function waitForFollowUp(ctx: TaskUserInputContext): Promise<DiracC
 	return userContent
 }
 
+export function clearAskResponse(taskState: TaskState): void {
+	taskState.askResponse = undefined
+	taskState.askResponseCardId = undefined
+	taskState.askResponseText = undefined
+	taskState.askResponseImages = undefined
+	taskState.askResponseFiles = undefined
+	taskState.askResponseUserEdits = undefined
+	taskState.askResponseAction = undefined
+	taskState.askResponseValue = undefined
+}
+
 export async function submitCardResponse(
 	ctx: TaskUserInputContext,
 	params: {
@@ -66,6 +77,7 @@ export async function submitCardResponse(
 	}
 	const isStandardResponse = Object.values(DiracAskResponse).includes(response as DiracAskResponse)
 	ctx.taskState.askResponse = isStandardResponse ? (response as DiracAskResponse) : undefined
+	ctx.taskState.askResponseCardId = cardId || ctx.taskState.lastWaitingCardId
 	ctx.taskState.askResponseText = text
 	ctx.taskState.askResponseImages = images
 	ctx.taskState.askResponseFiles = files
