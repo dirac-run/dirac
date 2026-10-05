@@ -1,3 +1,4 @@
+import { isHooksDebugEnabled } from "@/shared/config/environment"
 import { Logger } from "@/shared/services/Logger"
 import { telemetryService } from "../../services/telemetry"
 import { getAllHooksDirs } from "../storage/disk"
@@ -68,7 +69,7 @@ export class HookDiscoveryCache {
 	private disposed = false
 
 	// Debug logging (enabled via DEBUG_HOOKS env var)
-	private debug = process.env.DEBUG_HOOKS === "true"
+	private debug = isHooksDebugEnabled()
 
 	private constructor() { }
 

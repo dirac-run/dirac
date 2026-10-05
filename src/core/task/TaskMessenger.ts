@@ -69,7 +69,7 @@ export class TaskMessenger implements ITaskMessenger {
 				role: "assistant",
 			},
 		}
-		this.dependencies.taskState.activeVoiceStreamId = id
+		this.dependencies.taskState.attachVoiceStream(id)
 		await this.dependencies.messageStateHandler.addToDiracMessages(message)
 		await this.postPresentationToWebview()
 
@@ -99,7 +99,7 @@ export class TaskMessenger implements ITaskMessenger {
 							content: { ...current.content },
 						})
 					}
-					this.dependencies.taskState.activeVoiceStreamId = undefined
+					this.dependencies.taskState.detachVoiceStream(id)
 					await this.postPresentationToWebview()
 				}
 
@@ -458,7 +458,7 @@ export class TaskMessenger implements ITaskMessenger {
 		}
 
 		if (isReasoning) {
-			this.dependencies.taskState.activeVoiceStreamId = id
+			this.dependencies.taskState.attachVoiceStream(id)
 		}
 
 		await this.dependencies.messageStateHandler.addToDiracMessages(message)

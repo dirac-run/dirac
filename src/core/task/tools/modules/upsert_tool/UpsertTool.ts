@@ -1,8 +1,8 @@
 import { CardStatus } from "@shared/ExtensionMessage"
 import { allocateSubagentIdentity, type SubagentIdentity } from "@shared/subagents"
 import * as fs from "fs/promises"
-import * as os from "os"
 import * as path from "path"
+import { diracHomeDir } from "@/shared/config/environment"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
 import { DiracToolSpec } from "@/shared/tools"
@@ -257,7 +257,7 @@ async function resolveToolDirectory(name: string, scope: ToolScope, env: IToolEn
 		}
 		dir = await resolveTaskToolDir(name, env.config.taskId)
 	} else {
-		const home = process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
+		const home = diracHomeDir()
 		dir = scope === "global"
 			? path.join(home, "tools", name)
 			: path.join(env.config.cwd, ".dirac", "tools", name)

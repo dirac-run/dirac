@@ -1,15 +1,28 @@
 /**
  * Tests for Provider Registry — behavioral spec for refactoring switch statement.
  */
-import { describe, it } from "mocha"
+import { beforeEach, describe, it } from "mocha"
 import "should"
-import sinon from "sinon"
-import { type ApiConfiguration, openAiModelInfoSaneDefaults, requestyDefaultModelInfo } from "@shared/api"
-import { buildApiHandler, createRegistryHandler, validateApiConfiguration } from "../index"
-import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
+import { type ApiConfiguration, type ModelInfo, openAiModelInfoSaneDefaults, requestyDefaultModelInfo } from "@shared/api"
 import { Logger } from "@shared/services/Logger"
+import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
+import { setVscodeHostProviderMock } from "@test/host-provider-test-utils"
+import sinon from "sinon"
+import { type ApiHandler, buildApiHandler, createRegistryHandler, validateApiConfiguration } from "../index"
+
+// Minimal vscode-lm handler stub — the real VsCodeLmHandler lives in src/hosts/vscode and imports "vscode".
+const stubVsCodeLmHandler: ApiHandler = {
+	createMessage: () => {
+		throw new Error("not implemented in test stub")
+	},
+	getModel: () => ({ id: "vscode-lm-stub", info: {} as ModelInfo }),
+}
 
 describe("Provider Registry", () => {
+	beforeEach(() => {
+		setVscodeHostProviderMock({ capabilities: { createVsCodeLmHandler: () => stubVsCodeLmHandler } })
+	})
+
 	const allKnownProviders = [
 		{
 			provider: "anthropic",

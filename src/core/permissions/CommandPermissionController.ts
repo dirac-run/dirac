@@ -3,6 +3,7 @@ import { fileExistsAtPath } from "@utils/fs"
 import chokidar, { FSWatcher } from "chokidar"
 import fs from "fs/promises"
 import path from "path"
+import { commandPermissionsEnv } from "@/shared/config/environment"
 import { Logger } from "@/shared/services/Logger"
 import { ChokidarWatcherCloser } from "@/shared/utils/ChokidarWatcherCloser"
 import { CommandParser, type ParsedCommand } from "./CommandParser"
@@ -176,7 +177,7 @@ export class CommandPermissionController {
 
 	/** Parse the DIRAC_COMMAND_PERMISSIONS environment variable. */
 	private parseConfigFromEnv(): CommandPermissionConfig | null {
-		const envValue = process.env[COMMAND_PERMISSIONS_ENV_VAR]
+		const envValue = commandPermissionsEnv()
 		if (!envValue) return null
 
 		try {

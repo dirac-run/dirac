@@ -1,4 +1,5 @@
 import { Logger } from "@/shared/services/Logger"
+import { sleep } from "@/utils/retry"
 import type { SqliteLockManager } from "./SqliteLockManager"
 import type { FolderLockOptions, FolderLockResult, FolderLockWithRetryResult } from "./types"
 
@@ -173,6 +174,6 @@ export async function retryFolderLockAcquisition(
 		}
 
 		Logger.log(`Folder lock held by another instance, retrying in ${delay}ms (attempt ${attemptCount})`)
-		await new Promise((resolve) => setTimeout(resolve, delay))
+		await sleep(delay)
 	}
 }

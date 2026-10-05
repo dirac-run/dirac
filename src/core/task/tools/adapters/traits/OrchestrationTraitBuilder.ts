@@ -98,6 +98,7 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 		setTaskState: (key, value) => {
 			config.taskState[key] = value
 		},
+		commitCompletionResponse: (response) => config.taskState.commitCompletionResponse(response),
 		requestTaskReplacement: (context, images, files) => {
 			config.taskState.pendingTaskReplacement = { context, images, files }
 			config.taskState.abort = true

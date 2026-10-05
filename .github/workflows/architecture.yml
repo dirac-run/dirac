@@ -1,0 +1,21 @@
+name: Architecture Boundary Checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  check-architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run protos
+      - run: npm run check:arch

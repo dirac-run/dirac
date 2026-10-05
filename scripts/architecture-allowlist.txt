@@ -1,0 +1,6 @@
+# architecture-allowlist.txt — permanent documented exceptions for check-architecture.sh
+# Format: check_id<TAB>substring — a normalized violation line containing the
+# substring is exempt. For *permanent* exceptions only; known debt belongs in
+# architecture-baseline.txt and shrinks to zero as plan items land.
+#
+# Planned entry (item 8 lands): check_env_centralized	src/core/config/

@@ -2,6 +2,7 @@ import { Logger } from "@shared/services/Logger"
 import { arePathsEqual, isLocatedInPath } from "@utils/path"
 import fs from "fs/promises"
 import * as path from "path"
+import { isPromptArtifactsEnvEnabled, promptArtifactsDir } from "@/shared/config/environment"
 
 /** Resolve symlinks where possible; fall back to the given path when it does not exist yet. */
 async function realpathOrSelf(p: string): Promise<string> {
@@ -30,16 +31,14 @@ export async function writePromptMetadataArtifacts(
 	},
 ): Promise<void> {
 	const enabledSetting = ctx.writePromptMetadataEnabled
-	const enabledFlag = process.env.DIRAC_WRITE_PROMPT_ARTIFACTS?.toLowerCase()
-	const enabled =
-		enabledSetting || enabledFlag === "1" || enabledFlag === "true" || enabledFlag === "yes" || process.env.IS_DEV === "true"
+	const enabled = enabledSetting || isPromptArtifactsEnvEnabled()
 	if (!enabled) {
 		return
 	}
 
 	try {
 		// Env var is OS-level (user-controlled, safe to allow absolute); workspace setting is the exfiltration vector.
-		const envDir = process.env.DIRAC_PROMPT_ARTIFACT_DIR?.trim()
+		const envDir = promptArtifactsDir()
 		const settingDir = ctx.writePromptMetadataDirectory?.trim()
 		// Resolve cwd through the filesystem, exactly as the artifact dir is resolved below. Comparing a
 		// realpath'd directory against a merely path.resolve'd cwd rejects legitimate layouts wherever the

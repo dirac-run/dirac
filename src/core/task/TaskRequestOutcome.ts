@@ -1,4 +1,3 @@
-import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import type { ApiHandler } from "@core/api"
 import { getApiRequestRetryDelay, MAX_API_REQUEST_RETRIES } from "@core/api/ApiRequestRetryPolicy"
 import type { ApiStream } from "@core/api/transform/stream"
@@ -13,6 +12,7 @@ import type { Mode } from "@shared/storage/types"
 import { isMutatingTool } from "@shared/tools"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
+import { sleep } from "@/utils/retry"
 import type { MessageStateHandler } from "./message-state"
 import type { StreamingMetricsManager } from "./StreamingMetricsManager"
 import type { TaskMessenger } from "./TaskMessenger"
@@ -126,7 +126,7 @@ export async function handleApiRequestError(
 
 		const deadline = Date.now() + delay
 		while (Date.now() < deadline && !ctx.taskState.abort) {
-			await setTimeoutPromise(Math.min(200, deadline - Date.now()))
+			await sleep(Math.min(200, deadline - Date.now()))
 		}
 		// If the user aborted during the retry delay, stop retrying
 		if (ctx.taskState.abort) {

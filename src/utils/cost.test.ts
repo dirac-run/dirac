@@ -342,3 +342,32 @@ describe("Cost Utilities", () => {
 		})
 	})
 })
+
+describe("numeric ?? defaults", () => {
+	const modelInfo: ModelInfo = {
+		supportsPromptCache: true,
+		inputPrice: 1.0,
+		outputPrice: 2.0,
+		cacheWritesPrice: 1.25,
+		cacheReadsPrice: 0.1,
+	}
+	const calculators = {
+		OpenAI: calculateApiCostOpenAI,
+		Anthropic: calculateApiCostAnthropic,
+		Qwen: calculateApiCostQwen,
+	}
+
+	for (const [name, calculate] of Object.entries(calculators)) {
+		it(`${name}: cache tokens of 0 and undefined give the same cost`, () => {
+			const withZeros = calculate(modelInfo, 1000, 500, 0, 0)
+			const withUndefined = calculate(modelInfo, 1000, 500, undefined, undefined)
+			withZeros!.should.equal(withUndefined!)
+		})
+
+		it(`${name}: a real 0 input with non-zero cache tokens still costs the cache tokens`, () => {
+			const cost = calculate(modelInfo, 0, 0, 100, 100)
+			Number.isFinite(cost!).should.be.true()
+			cost!.should.be.above(0)
+		})
+	}
+})

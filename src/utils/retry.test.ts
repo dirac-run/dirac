@@ -2,7 +2,7 @@ import { describe, it } from "mocha"
 import sinon from "sinon"
 import "should"
 import { getErrorMessage } from "@/shared/errors"
-import { retryWithBackoff } from "./retry"
+import { retryWithBackoff, sleep } from "./retry"
 
 describe("retryWithBackoff", () => {
 	it("returns immediately when operation succeeds on first attempt", async () => {
@@ -109,5 +109,13 @@ describe("retryWithBackoff", () => {
 		attempt.should.equal(3)
 		errorMessage.should.containEql("Always fails failed after 3 attempts")
 		errorMessage.should.containEql("fail 3")
+	})
+})
+
+describe("sleep", () => {
+	it("resolves after approximately the requested milliseconds", async () => {
+		const start = Date.now()
+		await sleep(30)
+		;(Date.now() - start >= 20).should.be.true()
 	})
 })

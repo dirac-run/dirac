@@ -1,6 +1,6 @@
-import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { sleep } from "@/utils/retry"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 import { ResponseProcessorDependencies } from "../types/response-processor"
 
@@ -78,7 +78,7 @@ export class EmptyResponseHandler {
 			}),
 			status: CardStatus.PENDING,
 		})
-		await setTimeoutPromise(delay)
+		await sleep(delay)
 		await card.finalize(CardStatus.SUCCESS)
 		return false // retry requested
 	}

@@ -31,7 +31,10 @@ describe("parseMentions characterization", () => {
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
-		setVscodeHostProviderMock()
+		// Route the terminal-output capability through the module so the sinon stub below still intercepts.
+		setVscodeHostProviderMock({
+			capabilities: { getLatestTerminalOutput: () => terminalModule.getLatestTerminalOutput() },
+		})
 		urlContentFetcherStub = {
 			launchBrowser: sandbox.stub().resolves(),
 			closeBrowser: sandbox.stub().resolves(),

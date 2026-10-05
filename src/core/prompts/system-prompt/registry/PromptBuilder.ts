@@ -1,6 +1,7 @@
 import { SYSTEM_PROMPT } from "../template"
 import { TemplateEngine } from "../templates/TemplateEngine"
 import type { SystemPromptContext } from "../types"
+import { homeEnvDir, userShell } from "@/shared/config/environment"
 import { SkillMetadata } from "@/shared/skills"
 
 export class PromptBuilder {
@@ -21,9 +22,9 @@ export class PromptBuilder {
 		const placeholders: Record<string, unknown> = {}
 
 		placeholders["OS"] = process.platform
-		placeholders["SHELL"] = this.context.activeShellPath || process.env.SHELL || "bash"
+		placeholders["SHELL"] = this.context.activeShellPath || userShell() || "bash"
 		placeholders["SHELL_TYPE"] = this.context.activeShellType || "bash"
-		placeholders["HOME_DIR"] = process.env.HOME || ""
+		placeholders["HOME_DIR"] = homeEnvDir() || ""
 		placeholders["CURRENT_DATE"] = new Date().toISOString().split("T")[0]
 		placeholders["AVAILABLE_CORES"] = this.context.availableCores || 1
 

@@ -11,7 +11,7 @@ export async function disposeCliLogging(): Promise<void> {
 	unsubscribeVerboseLogger?.()
 	unsubscribeVerboseLogger = undefined
 
-	const { disposeCliOutputLoggers } = await import("./vscode-shim")
+	const { disposeCliOutputLoggers } = await import("./utils/output-channel")
 	await disposeCliOutputLoggers()
 
 	const { DiracTempManager } = await import("@/services/temp")
@@ -22,7 +22,7 @@ export async function disposeCliLogging(): Promise<void> {
  * Initialize all CLI infrastructure and return context needed for commands
  */
 export async function initializeCli(options: InitOptions): Promise<CliContext> {
-	const { window } = await import("./vscode-shim")
+	const { createCliOutputChannel } = await import("./utils/output-channel")
 	const { setRuntimeHooksDir } = await import("@/core/storage/disk")
 	const { initializeCliContext } = await import("./vscode-context")
 	const { Logger } = await import("@/shared/services/Logger")
@@ -55,7 +55,7 @@ export async function initializeCli(options: InitOptions): Promise<CliContext> {
 	DiracTempManager.startPeriodicCleanup()
 
 	// Set up output channel and Logger early so DiracEndpoint.initialize logs are captured
-	const outputChannel = window.createOutputChannel("Dirac CLI")
+	const outputChannel = createCliOutputChannel("Dirac CLI")
 	const logToChannel = (message: string) => outputChannel.appendLine(message)
 
 	// Configure the shared Logging class early to capture all initialization logs

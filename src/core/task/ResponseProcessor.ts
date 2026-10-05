@@ -72,12 +72,7 @@ export class ResponseProcessor {
 		while (true) {
 			const chunk = await streamCoordinator.nextChunk()
 			if (!chunk) break
-			if (!this.dependencies.taskState.taskFirstTokenTimeMs) {
-				this.dependencies.taskState.taskFirstTokenTimeMs = Math.max(
-					0,
-					Date.now() - this.dependencies.taskState.taskStartTimeMs,
-				)
-			}
+			this.dependencies.taskState.recordFirstTokenAt(Math.max(0, Date.now() - this.dependencies.taskState.taskStartTimeMs))
 
 			switch (chunk.type) {
 				case "reasoning": {
@@ -195,7 +190,7 @@ export class ResponseProcessor {
 			}
 		}
 
-		this.dependencies.taskState.didCompleteReadingStream = true
+		this.dependencies.taskState.completeStreamRead()
 		const partialToolBlocks = params.toolUseHandler.getParsedToolUseStates(true)
 		await this.syncStreamState(params.assistantTextOnly, partialToolBlocks, true)
 

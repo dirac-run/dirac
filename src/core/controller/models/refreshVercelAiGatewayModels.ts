@@ -1,5 +1,6 @@
 import { GlobalFileNames } from "@core/storage/disk"
 import { ModelInfo } from "@shared/api"
+import { parsePrice } from "@utils/model-utils"
 import { Controller } from ".."
 import { fetchAndCacheModels } from "./fetchAndCacheModels"
 
@@ -47,7 +48,6 @@ export async function refreshVercelAiGatewayModels(_controller: Controller): Pro
 
 function parseVercelResponse(rawModels: any): Record<string, ModelInfo> {
 	const models: Record<string, ModelInfo> = {}
-	const parsePrice = (price: any) => (price ? Number.parseFloat(price) * 1_000_000 : undefined)
 	for (const rawModel of rawModels) {
 		if (rawModel.type === "embedding") continue
 		models[rawModel.id] = {
