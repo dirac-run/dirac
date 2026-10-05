@@ -4,8 +4,8 @@ import { telemetryService } from "@/services/telemetry"
 import { CommandContext, Empty } from "@/shared/proto/index.dirac"
 import { ShowMessageType } from "@/shared/proto/index.host"
 import { Logger } from "@/shared/services/Logger"
-import { Controller } from "../index"
 import { DiracAskResponse } from "../../../shared/WebviewMessage"
+import { Controller } from "../index"
 
 export async function improveWithDirac(
 	controller: Controller,
@@ -36,7 +36,7 @@ export async function improveWithDirac(
 
 	// Send: notebooks go to existing task if available, non-notebooks always create new task
 	if (notebookContext && controller.task) {
-		const cardId = controller.task.taskState.lastWaitingCardId
+		const cardId = controller.task.stateView.lastWaitingCardId
 		if (cardId) {
 			await controller.task.submitCardResponse(cardId, DiracAskResponse.MESSAGE, prompt)
 		}

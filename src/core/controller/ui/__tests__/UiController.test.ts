@@ -5,6 +5,7 @@
  */
 
 import * as skillsModule from "@core/context/instructions/user-instructions/skills"
+import { StateManager } from "@core/storage/StateManager"
 import * as registryRefresh from "@core/task/tools/registry/refreshToolRegistry"
 import * as ToolRegistryModule from "@core/task/tools/registry/ToolRegistry"
 // Modules stubbed via their exported namespace (ts-node/commonjs keeps live bindings)
@@ -21,7 +22,6 @@ import * as BannerServiceModule from "@/services/banner/BannerService"
 import * as featureFlagsIndex from "@/services/feature-flags"
 import * as distinctIdModule from "@/services/logging/distinctId"
 import * as announcementsModule from "@/utils/announcements"
-import { StateManager } from "@core/storage/StateManager"
 import { getStateToPostToWebview } from "../UiController"
 
 type StateManagerLike = any
@@ -102,7 +102,7 @@ function makeFakeStateManager(overrides?: {
 
 /** A fake task object satisfying the subset of Task used by getStateToPostToWebview. */
 function makeFakeTask(overrides?: { taskId?: string; cwd?: string; diracMessages?: any[]; taskState?: any }): any {
-	return {
+	const fake = {
 		taskId: overrides?.taskId,
 		cwd: overrides?.cwd ?? "/test/workspace",
 		taskState: {
@@ -112,12 +112,17 @@ function makeFakeTask(overrides?: { taskId?: string; cwd?: string; diracMessages
 			checkpointManagerErrorMessage: undefined,
 			...overrides?.taskState,
 		},
+		// Mirrors Task.stateView: the read-only surface production code consumes.
+		get stateView() {
+			return this.taskState
+		},
 		messageStateHandler: {
 			getDiracMessages: () => overrides?.diracMessages ?? [],
 			getMessageById: (id: string) => overrides?.diracMessages?.find((message) => message.id === id),
 			getPresentationOffset: () => 0,
 		},
 	}
+	return fake
 }
 
 function makeFakeWorkspaceManager(roots: string[] = ["/test/workspace"]): any {

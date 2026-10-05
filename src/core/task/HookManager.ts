@@ -1,17 +1,17 @@
 import { ApiHandler } from "@core/api"
 
 import { executeHook } from "@core/hooks/hook-executor"
-import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { isTaskCompletionCard } from "@shared/cardIdentity"
-import { DiracContent } from "@shared/messages/content"
 import { DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
+import { DiracContent } from "@shared/messages/content"
 import { Logger } from "@shared/services/Logger"
+import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { HookExecution } from "./types/HookExecution"
 import { HookManagerDependencies, UserPromptHookResult } from "./types/hook-manager"
 
 export class HookManager {
-	constructor(private dependencies: HookManagerDependencies) { }
+	constructor(private dependencies: HookManagerDependencies) {}
 
 	public setApi(api: ApiHandler) {
 		this.dependencies.api = api
@@ -122,7 +122,7 @@ export class HookManager {
 
 	public async handleHookCancellation(hookName: string, wasCancelled: boolean): Promise<void> {
 		// ALWAYS save state, regardless of cancellation source
-		this.dependencies.taskState.didFinishAbortingStream = true
+		this.dependencies.taskState.markStreamAbortFinished()
 
 		// Save conversation state to disk
 		await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
@@ -173,7 +173,7 @@ export class HookManager {
 		// Handle cancellation from hook
 		if (userPromptResult.cancel === true && userPromptResult.wasCancelled) {
 			// Set flag to allow Controller.cancelTask() to proceed
-			this.dependencies.taskState.didFinishAbortingStream = true
+			this.dependencies.taskState.markStreamAbortFinished()
 			// Save BOTH files so Controller.cancelTask() can find the task
 			await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 			await this.dependencies.messageStateHandler.overwriteApiConversationHistory(

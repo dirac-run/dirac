@@ -1,5 +1,4 @@
 import type { TextCondensationTemplateId } from "@core/text-condensation/TextCondenser"
-import type { TextFileWindow, TextFileWindowOptions } from "@shared/text-file-window"
 import type {
 	AstImplementationRequest,
 	AstImplementationResult,
@@ -11,36 +10,31 @@ import type {
 	AstReplacementRequest,
 	SourceMutationPlan,
 } from "@services/source-ast/types"
+import type { GoalChildRecord, GoalChildRole, GoalChildStatus, GoalObjectiveRevision, GoalTaskSummary } from "@shared/goal"
 import { FileDiagnostics } from "@shared/proto/index.dirac"
+import type { ResponseArguments } from "@shared/responseTool"
 import type { SubagentIdentity } from "@shared/subagents"
+import type { TextFileWindow, TextFileWindowOptions } from "@shared/text-file-window"
 import { FileInfo } from "../../../../services/glob/list-files"
 import {
 	ActionButton,
 	BrowserActionResult,
 	Card,
-	CardParams as SharedCardParams,
 	CardLocation,
 	CardStatus,
 	CleanupStrategy,
 	DiracMessage,
 	RenderType,
+	CardParams as SharedCardParams,
 } from "../../../../shared/ExtensionMessage"
+import type { DiracStorageMessage } from "../../../../shared/messages/content"
 import { SkillContent, SkillMetadata } from "../../../../shared/skills"
 import { DiracAskResponse } from "../../../../shared/WebviewMessage"
-import type { DiracStorageMessage } from "../../../../shared/messages/content"
 import { HookExecutionResult } from "../../../hooks/hook-executor"
-import { TaskState } from "../../TaskState"
+import { TaskState, type TaskStateWritableKey } from "../../TaskState"
 import { SubagentProgressUpdate, SubagentRunResult } from "../subagent/SubagentRunner"
 import { TaskConfig } from "../types/TaskConfig"
 import { IDiracContext } from "./IDiracContext"
-import type {
-	GoalChildRecord,
-	GoalChildRole,
-	GoalChildStatus,
-	GoalObjectiveRevision,
-	GoalTaskSummary,
-} from "@shared/goal"
-import type { ResponseArguments } from "@shared/responseTool"
 
 export interface ICardHandle {
 	readonly collapsed: boolean
@@ -378,9 +372,15 @@ export interface IOrchestrationTrait {
 	getTaskState<T extends keyof TaskState>(key: T): TaskState[T]
 
 	/**
-	 * Updates the runtime task state.
+	 * Updates the runtime task state. Only plain writable fields are accepted:
+	 * transition-gated fields are written through their named TaskState
+	 * transitions, method keys are not data, and getter-only keys
+	 * (abortSignal, lastWaitingCardId) have no setter at all.
 	 */
-	setTaskState<T extends keyof TaskState>(key: T, value: TaskState[T]): void
+	setTaskState<T extends TaskStateWritableKey>(key: T, value: TaskState[T]): void
+
+	/** Records the accepted completion response on task state. */
+	commitCompletionResponse(response: string): void
 
 	/** Ends the current task and asks its controller to start a replacement after unwind. */
 	requestTaskReplacement(context: string, images?: string[], files?: string[]): void
