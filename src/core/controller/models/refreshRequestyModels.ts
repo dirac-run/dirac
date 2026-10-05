@@ -1,5 +1,6 @@
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import { OpenRouterCompatibleModelInfo, OpenRouterModelInfo } from "@shared/proto/dirac/models"
+import { parsePrice } from "@utils/model-utils"
 import axios from "axios"
 import { toRequestyServiceUrl } from "@/shared/clients/requesty"
 import { getAxiosSettings } from "@/shared/net"
@@ -13,13 +14,6 @@ import { Controller } from ".."
  * @returns Response containing the Requesty models
  */
 export async function refreshRequestyModels(controller: Controller, _: EmptyRequest): Promise<OpenRouterCompatibleModelInfo> {
-	const parsePrice = (price: any) => {
-		if (price) {
-			return Number.parseFloat(price) * 1_000_000
-		}
-		return undefined
-	}
-
 	const models: Record<string, OpenRouterModelInfo> = {}
 	try {
 		const apiKey = controller.stateManager.getSecretKey("requestyApiKey")
@@ -43,10 +37,10 @@ export async function refreshRequestyModels(controller: Controller, _: EmptyRequ
 					contextWindow: model.context_window,
 					supportsImages: model.supports_vision || undefined,
 					supportsPromptCache: model.supports_caching || undefined,
-					inputPrice: parsePrice(model.input_price) || 0,
-					outputPrice: parsePrice(model.output_price) || 0,
-					cacheWritesPrice: parsePrice(model.caching_price) || 0,
-					cacheReadsPrice: parsePrice(model.cached_price) || 0,
+					inputPrice: parsePrice(model.input_price) ?? 0,
+					outputPrice: parsePrice(model.output_price) ?? 0,
+					cacheWritesPrice: parsePrice(model.caching_price) ?? 0,
+					cacheReadsPrice: parsePrice(model.cached_price) ?? 0,
 					description: model.description,
 				})
 				models[model.id] = modelInfo
