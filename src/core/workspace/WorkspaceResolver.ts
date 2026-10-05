@@ -7,6 +7,7 @@
 
 import { WorkspaceRoot } from "@shared/multi-root/types"
 import * as path from "path"
+import { isMultiRootTraceEnabled } from "@/shared/config/environment"
 import { Logger } from "@/shared/services/Logger"
 import { MigrationReporter, type UsageStats } from "./MigrationReporter"
 import { parseWorkspaceInlinePath } from "./utils/parseWorkspaceInlinePath"
@@ -21,7 +22,7 @@ const MAX_EXAMPLE_PATHS = 5
 
 export class WorkspaceResolver {
 	private usageMap = new Map<string, UsageStats>()
-	private traceEnabled = process.env.MULTI_ROOT_TRACE === "true" || process.env.NODE_ENV === "development"
+	private traceEnabled = isMultiRootTraceEnabled()
 	private readonly migrationReporter: MigrationReporter
 
 	constructor(migrationReporter: MigrationReporter = new MigrationReporter()) {
@@ -338,7 +339,7 @@ export function resolveWorkspacePath(
  * Helper to check if we're in trace mode
  */
 export function isWorkspaceTraceEnabled(): boolean {
-	return process.env.MULTI_ROOT_TRACE === "true" || process.env.NODE_ENV === "development"
+	return isMultiRootTraceEnabled()
 }
 
 /**

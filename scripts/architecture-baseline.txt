@@ -1,27 +1,6 @@
 # check_id	path:content — known-debt violations; shrink to zero as items land
-check_env_centralized	src/core/api/providers/openai-codex.ts:"User-Agent": `dirac/${process.env.npm_package_version || "1.0.0"} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
-check_env_centralized	src/core/controller/grpc-recorder/grpc-recorder.builder.ts:.enableIf(process.env.GRPC_RECORDER_ENABLED === "true" && isLocal())
-check_env_centralized	src/core/controller/grpc-recorder/grpc-recorder.builder.ts:if (controller && process.env.GRPC_RECORDER_TESTS_FILTERS_ENABLED === "true") {
-check_env_centralized	src/core/controller/grpc-recorder/grpc-recorder.builder.ts:if (process.env.GRPC_RECORDER_TESTS_FILTERS_ENABLED === "true") {
-check_env_centralized	src/core/controller/grpc-recorder/log-file-handler.ts:const envFileName = path.basename(process.env.GRPC_RECORDER_FILE_NAME || "").replace(/[^a-zA-Z0-9-_]/g, "_")
-check_env_centralized	src/core/controller/grpc-recorder/log-file-handler.ts:const workspaceFolder = process.env.DEV_WORKSPACE_FOLDER ?? process.cwd()
 check_env_centralized	src/core/controller/models/signOutUnbiased.ts:if (process.env.UNBIASED_API_KEY) throw new Error("Remove UNBIASED_API_KEY from the environment to sign out.")
-check_env_centralized	src/core/hooks/HookDiscoveryCache.ts:private debug = process.env.DEBUG_HOOKS === "true"
-check_env_centralized	src/core/permissions/CommandPermissionController.ts:const envValue = process.env[COMMAND_PERMISSIONS_ENV_VAR]
-check_env_centralized	src/core/prompts/system-prompt/registry/PromptBuilder.ts:placeholders["HOME_DIR"] = process.env.HOME || ""
-check_env_centralized	src/core/prompts/system-prompt/registry/PromptBuilder.ts:placeholders["SHELL"] = this.context.activeShellPath || process.env.SHELL || "bash"
-check_env_centralized	src/core/task/TaskPromptArtifacts.ts:const enabledFlag = process.env.DIRAC_WRITE_PROMPT_ARTIFACTS?.toLowerCase()
-check_env_centralized	src/core/task/TaskPromptArtifacts.ts:const envDir = process.env.DIRAC_PROMPT_ARTIFACT_DIR?.trim()
-check_env_centralized	src/core/task/TaskPromptArtifacts.ts:enabledSetting || enabledFlag === "1" || enabledFlag === "true" || enabledFlag === "yes" || process.env.IS_DEV === "true"
-check_env_centralized	src/core/task/tools/context/DiracContext.ts:const diracHome = process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
-check_env_centralized	src/core/task/tools/discovery/ToolDiscoveryService.ts:const globalDir = path.join(process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac"), "tools")
-check_env_centralized	src/core/task/tools/discovery/UserToolLoader.ts:return process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
-check_env_centralized	src/core/task/tools/modules/upsert_tool/UpsertTool.ts:const home = process.env.DIRAC_DIR || path.join(os.homedir(), ".dirac")
 check_env_centralized	src/core/task/tools/subagent/AgentConfigLoader.ts:const baseDir = process.env.DIRAC_DIR || path.join(homeDir, ".dirac")
-check_env_centralized	src/core/webview/WebviewProvider.ts:${process.env.IS_DEV ? '<script src="http://localhost:8097"></script>' : ""}
-check_env_centralized	src/core/webview/WebviewProvider.ts:if (process.env.IS_DEV) {
-check_env_centralized	src/core/workspace/WorkspaceResolver.ts:private traceEnabled = process.env.MULTI_ROOT_TRACE === "true" || process.env.NODE_ENV === "development"
-check_env_centralized	src/core/workspace/WorkspaceResolver.ts:return process.env.MULTI_ROOT_TRACE === "true" || process.env.NODE_ENV === "development"
 check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: chunk.usage.prompt_tokens || 0,
 check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: usage.input_tokens || 0,
 check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:max_tokens: this.options.modelInfo?.maxTokens || 8192,
