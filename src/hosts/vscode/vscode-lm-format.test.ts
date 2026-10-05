@@ -1,5 +1,5 @@
 // This file contains `declare module "vscode"` so we must import it.
-import "../providers/vscode-lm"
+import "./vscode-lm"
 import { describe, it } from "mocha"
 import "should"
 import { Anthropic } from "@anthropic-ai/sdk"

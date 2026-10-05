@@ -16,7 +16,7 @@ import { WorkspaceRoot } from "@shared/multi-root/types"
 import { InferenceSpeed, Mode, normalizeInferenceSpeed } from "@shared/storage/types"
 import { TelemetrySetting } from "@shared/TelemetrySetting"
 import { normalizeUserApprovedCommands, type UserApprovedCommand } from "@shared/UserApprovedCommand"
-import { LanguageModelChatSelector } from "vscode"
+import { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH FOR STORAGE KEYS

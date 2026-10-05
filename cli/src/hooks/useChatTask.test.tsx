@@ -12,7 +12,7 @@ vi.mock("@/core/controller/task/showTaskWithId", () => ({
 	showTaskWithId: mocks.showTaskWithId,
 }))
 
-vi.mock("../vscode-shim", () => ({
+vi.mock("../utils/shutdown", () => ({
 	shutdownEvent: {
 		event: () => ({ dispose: vi.fn() }),
 	},

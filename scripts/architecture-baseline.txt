@@ -213,9 +213,9 @@ check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenT
 check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/OpenTelemetryClientProvider.ts:scheduledDelayMillis: this.config.logBatchTimeout || 5000,
 check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/otel-exporter-diagnostics.ts:const logsCount = logs?.resourceLogs?.[0]?.scopeLogs?.[0]?.logRecords?.length || 0
 check_no_numeric_or_default	src/services/telemetry/providers/opentelemetry/otel-exporter-diagnostics.ts:const metricsCount = metrics?.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.length || 0
-check_no_numeric_or_default	src/services/test/TestServer.ts:cost: taskData?.totalCost || 0,
-check_no_numeric_or_default	src/services/test/TestServer.ts:tokensIn: taskData?.tokensIn || 0,
-check_no_numeric_or_default	src/services/test/TestServer.ts:tokensOut: taskData?.tokensOut || 0,
+check_no_numeric_or_default	src/hosts/vscode/test/TestServer.ts:cost: taskData?.totalCost || 0,
+check_no_numeric_or_default	src/hosts/vscode/test/TestServer.ts:tokensIn: taskData?.tokensIn || 0,
+check_no_numeric_or_default	src/hosts/vscode/test/TestServer.ts:tokensOut: taskData?.tokensOut || 0,
 check_no_numeric_or_default	src/shared/getApiMetrics.ts:const total = (info.tokensIn || 0) + (info.tokensOut || 0) + (info.cacheWrites || 0) + (info.cacheReads || 0)
 check_no_numeric_or_default	src/utils/cost.ts:const cacheCreationInputTokensNum = cacheCreationInputTokens || 0
 check_no_numeric_or_default	src/utils/cost.ts:const cacheReadInputTokensNum = cacheReadInputTokens || 0

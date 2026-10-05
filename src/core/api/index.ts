@@ -1,24 +1,17 @@
 import {
-    ApiConfiguration,
-    type ApiProvider,
-    getModelInfo,
-    ModelInfo,
-    type ModelProviderSelection,
-    modelSupportsInferenceSpeed,
-    openAiModelInfoSaneDefaults,
-    providerSupportsInferenceSpeed,
-    QwenApiRegions,
+	ApiConfiguration,
+	type ApiProvider,
+	getModelInfo,
+	type ModelProviderSelection,
+	modelSupportsInferenceSpeed,
+	openAiModelInfoSaneDefaults,
+	providerSupportsInferenceSpeed,
+	QwenApiRegions,
 } from "@shared/api"
-import { DEFAULT_INFERENCE_SPEED, type InferenceSpeed, isInferenceSpeed, type Mode } from "@shared/storage/types"
-import { DiracStorageMessage } from "@/shared/messages/content"
+import { DEFAULT_INFERENCE_SPEED, isInferenceSpeed, type Mode } from "@shared/storage/types"
+import { getHostCapabilities } from "@/hosts/host-capabilities"
 import { Logger } from "@/shared/services/Logger"
-import { DiracTool } from "@/shared/tools"
 import { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigurationError"
-import type {
-    ApiConversationCompactionRequest,
-    ApiConversationCompactionResult,
-    ApiConversationRequestOptions,
-} from "./conversation"
 import { modelProviderSelectionUpdates } from "./modelProviderSelection"
 import { AIhubmixHandler } from "./providers/aihubmix"
 import { AnthropicHandler } from "./providers/anthropic"
@@ -27,7 +20,6 @@ import { AwsBedrockHandler } from "./providers/bedrock"
 import { CerebrasHandler } from "./providers/cerebras"
 import { ClaudeCodeHandler } from "./providers/claude-code"
 import { DeepSeekHandler } from "./providers/deepseek"
-import { UnbiasedHandler } from "./providers/unbiased"
 import { DifyHandler } from "./providers/dify"
 import { DoubaoHandler } from "./providers/doubao"
 import { FireworksHandler } from "./providers/fireworks"
@@ -53,13 +45,13 @@ import { QwenCodeHandler } from "./providers/qwen-code"
 import { RequestyHandler } from "./providers/requesty"
 import { SambanovaHandler } from "./providers/sambanova"
 import { TogetherHandler } from "./providers/together"
+import { UnbiasedHandler } from "./providers/unbiased"
 import { VercelAIGatewayHandler } from "./providers/vercel-ai-gateway"
 import { VertexHandler } from "./providers/vertex"
-import { VsCodeLmHandler } from "./providers/vscode-lm"
 import { WandbHandler } from "./providers/wandb"
 import { XAIHandler } from "./providers/xai"
 import { ZAiHandler } from "./providers/zai"
-import { ApiStream, ApiStreamUsageChunk } from "./transform/stream"
+import type { ApiHandler } from "./types"
 
 export { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigurationError"
 export type {
@@ -71,45 +63,13 @@ export type {
 	ApiConversationRequestOptions,
 	PendingApiConversationCompaction,
 } from "./conversation"
-export type CommonApiHandlerOptions = {
-	onRetryAttempt?: ApiConfiguration["onRetryAttempt"]
-	disableRetries?: boolean
-	enableParallelToolCalling?: boolean
-	inferenceSpeed?: InferenceSpeed
-}
-export interface ApiHandler {
-	createMessage(
-		systemPrompt: string,
-		messages: DiracStorageMessage[],
-		tools?: DiracTool[],
-		options?: ApiConversationRequestOptions,
-	): ApiStream
-	compactConversation?(request: ApiConversationCompactionRequest): Promise<ApiConversationCompactionResult>
-	supportsNativeWebSearch?(): boolean
-	/** Whether Dirac may estimate cost when the provider omits it. Defaults to true. */
-	shouldEstimateCost?(): boolean
-	getModel(): ApiHandlerModel
-	getApiStreamUsage?(): Promise<ApiStreamUsageChunk | undefined>
-	abort?(): void
-}
-
-export interface ApiHandlerModel {
-	id: string
-	info: ModelInfo
-}
-
-export interface ApiProviderInfo {
-	providerId: string
-	model: ApiHandlerModel
-	mode: Mode
-	customPrompt?: string // "compact"
-	supportsNativeWebSearch?: boolean
-}
-
-export interface SingleCompletionHandler {
-	completePrompt(prompt: string): Promise<string>
-}
-
+export type {
+	ApiHandler,
+	ApiHandlerModel,
+	ApiProviderInfo,
+	CommonApiHandlerOptions,
+	SingleCompletionHandler,
+} from "./types"
 /** Resolves all mode-specific fields from config so provider cases use plain properties. */
 export function resolveModeConfig(options: Omit<ApiConfiguration, "apiProvider">, mode: Mode) {
 	const isPlan = mode === "plan"
@@ -384,12 +344,22 @@ const PROVIDER_REGISTRY: Record<
 			mistralApiKey: cfg.mistralApiKey,
 			apiModelId: mc.apiModelId,
 		}),
-	"vscode-lm": (cfg, mc) =>
-		new VsCodeLmHandler({
+	// vscode-lm lives in the hosts layer — only the VS Code host can create it.
+	"vscode-lm": (cfg, mc) => {
+		const factory = getHostCapabilities().createVsCodeLmHandler
+		if (!factory) {
+			throw new ApiConfigurationError(
+				ApiConfigurationErrorCode.ProviderUnsupported,
+				"The vscode-lm provider is only available in the VS Code extension host",
+				"Select another provider.",
+			)
+		}
+		return factory({
 			onRetryAttempt: cfg.onRetryAttempt,
 			disableRetries: cfg.disableRetries,
 			vsCodeLmModelSelector: mc.vsCodeLmModelSelector,
-		}),
+		})
+	},
 	"github-copilot": (cfg, mc) => new GithubCopilotHandler({ onRetryAttempt: cfg.onRetryAttempt, apiModelId: mc.apiModelId }),
 	litellm: (cfg, mc) =>
 		new LiteLlmHandler({

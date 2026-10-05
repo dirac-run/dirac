@@ -6,16 +6,27 @@
  */
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
-import type { ApiConfiguration } from "@shared/api"
-import sinon from "sinon"
-import { buildApiHandler } from "../index"
+import type { ApiConfiguration, ModelInfo } from "@shared/api"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
+import { setVscodeHostProviderMock } from "@test/host-provider-test-utils"
+import sinon from "sinon"
+import { ApiConfigurationError, ApiConfigurationErrorCode } from "../ApiConfigurationError"
+import { type ApiHandler, buildApiHandler } from "../index"
+
+// Minimal vscode-lm handler stub — the real VsCodeLmHandler lives in src/hosts/vscode and imports "vscode".
+const stubVsCodeLmHandler: ApiHandler = {
+	createMessage: () => {
+		throw new Error("not implemented in test stub")
+	},
+	getModel: () => ({ id: "vscode-lm-stub", info: {} as ModelInfo }),
+}
 
 describe("API Provider Dispatch (original)", () => {
 	let sandbox: sinon.SinonSandbox
 
 	beforeEach(() => {
 		sandbox = sinon.createSandbox()
+		setVscodeHostProviderMock({ capabilities: { createVsCodeLmHandler: () => stubVsCodeLmHandler } })
 	})
 
 	afterEach(() => {
@@ -440,6 +451,23 @@ describe("API Provider Dispatch (original)", () => {
 		const handler = buildApiHandler(config, "plan")
 		handler.should.not.be.undefined()
 		handler.should.have.property("createMessage")
+	})
+
+	it("throws ApiConfigurationError ProviderUnsupported for vscode-lm when the host cannot create it", () => {
+		setVscodeHostProviderMock({})
+		const config: ApiConfiguration = {
+			apiProvider: "vscode-lm",
+			planModeVsCodeLmModelSelector: { family: TEST_MODEL_IDS.OPENAI },
+			actModeVsCodeLmModelSelector: { family: TEST_MODEL_IDS.OPENAI },
+		}
+		let thrown: unknown
+		try {
+			buildApiHandler(config, "plan")
+		} catch (error) {
+			thrown = error
+		}
+		should(thrown).be.instanceOf(ApiConfigurationError)
+		;(thrown as ApiConfigurationError).code.should.equal(ApiConfigurationErrorCode.ProviderUnsupported)
 	})
 
 	it("returns a handler for openai-native provider", () => {

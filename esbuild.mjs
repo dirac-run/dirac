@@ -1,9 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { copySourceCode } from "./scripts/copy-source.mjs"
-
 import * as esbuild from "esbuild"
+import { copySourceCode } from "./scripts/copy-source.mjs"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -156,7 +155,6 @@ const copyAssets = {
 
 			// Copy source code for /askDirac command
 			copySourceCode(__dirname, path.join(__dirname, destDir))
-
 		})
 	},
 }
@@ -242,7 +240,7 @@ const standaloneConfig = {
 	outfile: `${destDir}/dirac-core.js`,
 	// These modules need to load files from the module directory at runtime,
 	// so they cannot be bundled.
-	external: ["vscode", "web-tree-sitter", "@grpc/reflection", "grpc-health-check"],
+	external: ["web-tree-sitter", "@grpc/reflection", "grpc-health-check"],
 }
 
 // E2E build script configuration
