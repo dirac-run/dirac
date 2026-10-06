@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.18",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.5.17",
+  "analyzedCommit": "bc6f1514fda42ad3c728d3f6bef954851d8c26c4",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-c0f15dfe",
+      "title": "defer card input until its task queue turn",
+      "category": "fix",
+      "evidence": [
+        "c0f15dfea2df6eda3366620c6928ae332ccbd1df"
+      ]
+    },
+    {
+      "id": "fix-5dbc266e",
+      "title": "use correct retry mechanism in utility model",
+      "category": "fix",
+      "evidence": [
+        "5dbc266efaa9b41677ff153099318483d2eb388f"
+      ]
+    },
+    {
+      "id": "fix-79ec1cd0",
+      "title": "remove legacy instructions",
+      "category": "fix",
+      "evidence": [
+        "79ec1cd044a2199ae325ecfea0ebae94ed014b23"
+      ]
+    },
+    {
+      "id": "fix-bb4aaf46",
+      "title": "restrict setTaskState to plain writable TaskState keys",
+      "category": "fix",
+      "evidence": [
+        "bb4aaf46ec7f161024cffa207408bd730e71ffb4"
+      ]
+    },
+    {
+      "id": "fix-e49a05b5",
+      "title": "export TaskStateTransition for the sync-lock test",
+      "category": "fix",
+      "evidence": [
+        "e49a05b561d85ea6e6fe92d84ae83c1443838020"
+      ]
+    }
+  ]
+}
