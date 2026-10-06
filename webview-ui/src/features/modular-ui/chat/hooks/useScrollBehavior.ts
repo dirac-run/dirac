@@ -1,9 +1,9 @@
 import { CardStatus, DiracMessage } from "@shared/ExtensionMessage"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { VirtuosoHandle } from "react-virtuoso"
+import { useChatStore } from "@/features/chat/store/chatStore"
 import { CHAT_CONSTANTS } from "../constants"
 import { ScrollBehavior } from "../types/chatTypes"
-import { useChatStore } from "@/features/chat/store/chatStore"
 
 export function useScrollBehavior(
 	messages: DiracMessage[],
@@ -19,7 +19,10 @@ export function useScrollBehavior(
 	const messageScrollRafIdRef = useRef(0)
 	const listHeightRafIdRef = useRef(0)
 	const scrollIntentRafIdRef = useRef(0)
-	const lastListHeightRef = useRef(0)
+	const scrollerElRef = useRef<HTMLElement | null>(null)
+	const removeScrollListenerRef = useRef<(() => void) | null>(null)
+	// Set while a smooth bottom-seek is in flight; suppresses button re-shows on intermediate scroll events.
+	const programmaticScrollRef = useRef(false)
 	const scrollbarPointerRef = useRef(false)
 	const touchYRef = useRef<number | null>(null)
 	const messagesRef = useRef(messages)
@@ -35,6 +38,8 @@ export function useScrollBehavior(
 
 	const stopFollowing = useCallback(() => {
 		isFollowingRef.current = false
+		// A deliberate gesture cancels an in-flight smooth scroll's button suppression.
+		programmaticScrollRef.current = false
 		if (!isAtBottomRef.current) {
 			setShowScrollToBottom(true)
 		}
@@ -44,6 +49,41 @@ export function useScrollBehavior(
 		isFollowingRef.current = true
 		setShowScrollToBottom(false)
 	}, [])
+
+	// Sole writer of isAtBottomRef and the scroll-to-bottom button; the DOM scroller is the authority.
+	const updateAtBottomState = useCallback(
+		(el: HTMLElement) => {
+			const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+			const atBottom = distanceFromBottom <= CHAT_CONSTANTS.AT_BOTTOM_THRESHOLD
+			// Edge-triggered: re-arm only when entering the bottom band, so a trackpad scroll-up
+			// inside the band keeps the pin released.
+			const enteredBottom = atBottom && !isAtBottomRef.current
+			isAtBottomRef.current = atBottom
+			if (atBottom) {
+				programmaticScrollRef.current = false
+				setShowScrollToBottom(false)
+				if (enteredBottom) startFollowing()
+			} else if (!programmaticScrollRef.current) {
+				setShowScrollToBottom(messagesRef.current.length > 0)
+			}
+		},
+		[startFollowing],
+	)
+
+	// Virtuoso fires this callback prop on mount and on remount; re-attach the passive listener.
+	const setScrollerEl = useCallback(
+		(el: HTMLElement | Window | null) => {
+			removeScrollListenerRef.current?.()
+			removeScrollListenerRef.current = null
+			scrollerElRef.current = el instanceof HTMLElement ? el : null
+			const scroller = scrollerElRef.current
+			if (!scroller) return
+			const onScroll = () => updateAtBottomState(scroller)
+			scroller.addEventListener("scroll", onScroll, { passive: true })
+			removeScrollListenerRef.current = () => scroller.removeEventListener("scroll", onScroll)
+		},
+		[updateAtBottomState],
+	)
 
 	const resumeFollowingIfAtBottom = useCallback(
 		(scroller: HTMLElement) => {
@@ -63,11 +103,14 @@ export function useScrollBehavior(
 			startFollowing()
 			cancelAnimationFrame(scrollRafIdRef.current)
 			scrollRafIdRef.current = requestAnimationFrame(() => {
-				virtuosoRef.current?.scrollToIndex({
-					index: "LAST",
-					align: "end",
-					behavior,
-				})
+				// Scoped to bottom-seeking writes: a gesture between schedule and fire drops the write.
+				// scrollToTop/scrollToMessage are not guarded — they call stopFollowing() before
+				// scheduling, so a blanket guard would turn them into silent no-ops.
+				if (!isFollowingRef.current) return
+				const scroller = scrollerElRef.current
+				if (!scroller) return
+				programmaticScrollRef.current = behavior === "smooth"
+				scroller.scrollTo({ top: scroller.scrollHeight, behavior })
 			})
 		},
 		[startFollowing],
@@ -182,35 +225,29 @@ export function useScrollBehavior(
 		lastCardStatusRef.current = currentStatus
 	}, [lastRenderedMessage, scrollToBottomAuto])
 
-	const handleAtBottomStateChange = useCallback((isAtBottom: boolean) => {
-		isAtBottomRef.current = isAtBottom
-		if (isAtBottom) {
-			isFollowingRef.current = true
-			setShowScrollToBottom(false)
-			return
-		}
-		if (!isFollowingRef.current) {
-			setShowScrollToBottom(true)
-		}
-	}, [])
+	// Virtuoso's estimate-derived flag is not trusted in either direction; the DOM is authoritative.
+	const handleAtBottomStateChange = useCallback(
+		(_isAtBottom: boolean) => {
+			if (scrollerElRef.current) updateAtBottomState(scrollerElRef.current)
+		},
+		[updateAtBottomState],
+	)
 
-	const handleListHeightChanged = useCallback((height: number) => {
-		const listGrew = height > lastListHeightRef.current
-		const listShrunk = height < lastListHeightRef.current
-		lastListHeightRef.current = height
-		if (!isFollowingRef.current) return
-
-		cancelAnimationFrame(listHeightRafIdRef.current)
-		listHeightRafIdRef.current = requestAnimationFrame(() => {
-			if (listGrew) {
-				virtuosoRef.current?.autoscrollToBottom()
-			} else if (listShrunk) {
-				// autoscrollToBottom only works when notAtBottomBecause === "SIZE_INCREASED";
-				// on shrink it would no-op, so re-anchor explicitly to the new last item.
-				virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" })
-			}
-		})
-	}, [])
+	const handleListHeightChanged = useCallback(
+		(_height: number) => {
+			cancelAnimationFrame(listHeightRafIdRef.current)
+			listHeightRafIdRef.current = requestAnimationFrame(() => {
+				const scroller = scrollerElRef.current
+				if (!scroller) return
+				if (isFollowingRef.current) {
+					scroller.scrollTo({ top: scroller.scrollHeight })
+				}
+				// Geometry can change with no scroll event; recompute at-bottom state regardless.
+				updateAtBottomState(scroller)
+			})
+		},
+		[updateAtBottomState],
+	)
 
 	const handleScrollWheel = useCallback(
 		(event: React.WheelEvent) => {
@@ -307,7 +344,7 @@ export function useScrollBehavior(
 	useEffect(() => {
 		isFollowingRef.current = true
 		isAtBottomRef.current = false
-		lastListHeightRef.current = 0
+		programmaticScrollRef.current = false
 		lastCardStatusRef.current = undefined
 		scrollbarPointerRef.current = false
 		touchYRef.current = null
@@ -323,6 +360,7 @@ export function useScrollBehavior(
 	return {
 		virtuosoRef,
 		isFollowingRef,
+		setScrollerEl,
 		scrollToBottomSmooth,
 		scrollToBottomAuto,
 		scrollToTop,
