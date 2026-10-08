@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest"
+import { type ModelInfo, unbiasedModels } from "@shared/api"
 import { UnbiasedAuthEvent } from "@shared/proto/dirac/models"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 	authenticate: vi.fn(),
 	signOut: vi.fn(),
 	cancel: vi.fn(),
+	modelInfo: vi.fn((_props: { modelInfo: ModelInfo }) => null),
 	settings: {
 		apiConfiguration: { unbiasedApiKey: "" },
 		unbiasedWorkloadName: null as string | null,
@@ -27,17 +29,17 @@ vi.mock("../utils/useApiConfigurationHandlers", () => ({
 	useApiConfigurationHandlers: () => ({ handleFieldChange: vi.fn(), handleModeFieldChange: vi.fn() }),
 }))
 vi.mock("@/features/settings/components/utils/providerUtils", () => ({
-	normalizeApiConfiguration: () => ({ selectedModelId: "pareto", selectedModelInfo: {} }),
+	normalizeApiConfiguration: () => ({ selectedModelId: "pareto", selectedModelInfo: unbiasedModels.pareto }),
 }))
 vi.mock("../common/ApiKeyField", () => ({ ApiKeyField: () => null }))
-vi.mock("../common/ModelInfoView", () => ({ ModelInfoView: () => null }))
+vi.mock("../common/ModelInfoView", () => ({ ModelInfoView: mocks.modelInfo }))
 vi.mock("../common/ModelSelector", () => ({ ModelSelector: () => null }))
 
 function callbacks(index = 0): Callbacks<UnbiasedAuthEvent> {
 	return mocks.authenticate.mock.calls[index][1]
 }
-function mount() {
-	return render(<UnbiasedProvider showModelOptions={false} currentMode="act" />)
+function mount(showModelOptions = false) {
+	return render(<UnbiasedProvider currentMode="act" showModelOptions={showModelOptions} />)
 }
 function start() {
 	const view = mount()
@@ -54,6 +56,42 @@ beforeEach(() => {
 	mocks.signOut.mockResolvedValue(undefined)
 })
 afterEach(cleanup)
+
+describe("Unbiased pricing presentation", () => {
+	it.each(["Dirac workload", ""])("shows subscription coverage for an OAuth account named %s", (workloadName) => {
+		mocks.settings.apiConfiguration.unbiasedApiKey = "oauth-key"
+		mocks.settings.unbiasedWorkloadName = workloadName
+		mount(true)
+		expect(screen.getByText(/Covered by your Unbiased subscription/)).toHaveTextContent(
+			"$0 incremental token cost, excluding the monthly fee",
+		)
+		expect(screen.queryByText(/pay-as-you-go/)).not.toBeInTheDocument()
+		expect(mocks.modelInfo.mock.calls.at(-1)![0].modelInfo).toEqual({
+			...unbiasedModels.pareto,
+			inputPrice: undefined,
+			outputPrice: undefined,
+			cacheReadsPrice: undefined,
+			cacheWritesPrice: undefined,
+		})
+	})
+
+	it("shows PAYG prices for a manually configured or environment-overridden key", () => {
+		mocks.settings.apiConfiguration.unbiasedApiKey = "manual-key"
+		mount(true)
+		expect(screen.getByText(/pay-as-you-go estimates for API-key usage/)).toBeInTheDocument()
+		expect(screen.queryByText(/Covered by your Unbiased subscription/)).not.toBeInTheDocument()
+		expect(mocks.modelInfo.mock.calls.at(-1)![0].modelInfo).toEqual(unbiasedModels.pareto)
+	})
+
+	it("restores PAYG prices while an OAuth key is being replaced manually", () => {
+		mocks.settings.apiConfiguration.unbiasedApiKey = "replacement-key"
+		mocks.settings.unbiasedWorkloadName = "Old workload"
+		mocks.settings.pendingApiConfigurationUpdates = { unbiasedApiKey: "replacement-key" }
+		mount(true)
+		expect(screen.getByText(/pay-as-you-go estimates for API-key usage/)).toBeInTheDocument()
+		expect(mocks.modelInfo.mock.calls.at(-1)![0].modelInfo).toEqual(unbiasedModels.pareto)
+	})
+})
 
 describe("Unbiased account presentation", () => {
 	it.each([null, "Dirac workload"])("recognizes a saved login with workload %s when settings reopen", (workloadName) => {

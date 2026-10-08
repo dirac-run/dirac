@@ -1,6 +1,8 @@
+import { StateManager } from "@core/storage/StateManager"
 import { type ModelInfo, unbiasedDefaultModelId, unbiasedModels } from "@shared/api"
 import OpenAI from "openai"
 import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
+import { isUnbiasedOAuthApiKey } from "@/integrations/unbiased/oauth-account"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { createOpenAIClient } from "@/shared/net"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
@@ -17,8 +19,14 @@ interface UnbiasedHandlerOptions extends CommonApiHandlerOptions {
 export class UnbiasedHandler implements ApiHandler {
 	private client: OpenAI | undefined
 	private abortController: AbortController | undefined
+	private readonly isSubscription: boolean
 
-	constructor(private readonly options: UnbiasedHandlerOptions) { }
+	constructor(private readonly options: UnbiasedHandlerOptions) {
+		// Bind pricing to this handler's key so later default-account changes cannot alter an in-flight request.
+		this.isSubscription =
+			StateManager.isInitialized() &&
+			isUnbiasedOAuthApiKey(options.unbiasedApiKey, StateManager.get().getGlobalStateKey("unbiasedOAuthApiKeyHash"))
+	}
 
 	private ensureClient(): OpenAI {
 		if (!this.options.unbiasedApiKey) throw new Error("Unbiased API key is required. Sign in or enter a key in settings.")
@@ -47,10 +55,11 @@ export class UnbiasedHandler implements ApiHandler {
 		signal: AbortSignal,
 	): ApiStream {
 		signal.throwIfAborted()
+		const model = this.getModel()
 		const stream = await this.ensureClient().chat.completions.create(
 			{
 				model: unbiasedDefaultModelId,
-				max_tokens: this.getModel().info.maxTokens,
+				max_tokens: model.info.maxTokens,
 				messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, true)],
 				stream: true,
 				stream_options: { include_usage: true },
@@ -63,7 +72,12 @@ export class UnbiasedHandler implements ApiHandler {
 			const delta = chunk.choices?.[0]?.delta
 			if (delta?.content) yield { type: "text", text: delta.content }
 			if (delta?.tool_calls) yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
-			if (chunk.usage) yield formatOpenAiCompatibleUsage(chunk.usage, unbiasedModels.pareto)
+			if (chunk.usage) {
+				const usage = formatOpenAiCompatibleUsage(chunk.usage, model.info)
+				// A provider-reported API value is not an incremental charge on the monthly plan.
+				if (this.isSubscription) usage.totalCost = 0
+				yield usage
+			}
 		}
 	}
 
@@ -74,6 +88,9 @@ export class UnbiasedHandler implements ApiHandler {
 	getModel(): { id: string; info: ModelInfo } {
 		// Other providers may leave their model ID in the shared mode field.
 		// Unbiased accepts only pareto, regardless of the previous selection.
-		return { id: unbiasedDefaultModelId, info: unbiasedModels.pareto }
+		const info = this.isSubscription
+			? { ...unbiasedModels.pareto, inputPrice: 0, outputPrice: 0, cacheReadsPrice: 0, cacheWritesPrice: 0 }
+			: unbiasedModels.pareto
+		return { id: unbiasedDefaultModelId, info }
 	}
 }

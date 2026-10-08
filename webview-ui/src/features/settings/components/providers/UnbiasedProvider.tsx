@@ -3,10 +3,10 @@ import { Mode } from "@shared/ExtensionMessage"
 import { EmptyRequest, StringRequest } from "@shared/proto/dirac/common"
 import { UnbiasedAuthEvent } from "@shared/proto/dirac/models"
 import { useEffect, useRef, useState } from "react"
-import { FileServiceClient, ModelsServiceClient, UiServiceClient } from "@/shared/api/grpc-client"
-import { Button } from "@/shared/ui/button"
 import { normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import { FileServiceClient, ModelsServiceClient, UiServiceClient } from "@/shared/api/grpc-client"
+import { Button } from "@/shared/ui/button"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { ModelInfoView } from "../common/ModelInfoView"
 import { ModelSelector } from "../common/ModelSelector"
@@ -24,6 +24,17 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 	const workloadName = Object.hasOwn(pendingApiConfigurationUpdates, "unbiasedApiKey") ? undefined : unbiasedWorkloadName
 	const { handleFieldChange, handleModeFieldChange } = useApiConfigurationHandlers()
 	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
+	const isSubscription = isAuthenticated && workloadName != null
+	// Hide per-token prices rather than labeling a paid monthly subscription as "Free".
+	const modelInfo = isSubscription
+		? {
+				...selectedModelInfo,
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheReadsPrice: undefined,
+				cacheWritesPrice: undefined,
+			}
+		: selectedModelInfo
 	const [instructions, setInstructions] = useState<UnbiasedAuthEvent>()
 	const [isSigningIn, setIsSigningIn] = useState(false)
 	const [isSigningOut, setIsSigningOut] = useState(false)
@@ -155,12 +166,12 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 					</Button>
 				)}
 				{notice && (
-					<p role="status" className="text-xs">
+					<p className="text-xs" role="status">
 						{notice}
 					</p>
 				)}
 				{error && (
-					<p role="alert" className="text-xs">
+					<p className="text-xs" role="alert">
 						{error}
 					</p>
 				)}
@@ -186,8 +197,12 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 						}
 						selectedModelId={selectedModelId}
 					/>
-					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
-					<p className="text-xs">Prices shown are pay-as-you-go estimates; subscriptions use plan quotas.</p>
+					<ModelInfoView isPopup={isPopup} modelInfo={modelInfo} selectedModelId={selectedModelId} />
+					<p className="text-xs">
+						{isSubscription
+							? "Covered by your Unbiased subscription; plan quotas apply. Dirac records $0 incremental token cost, excluding the monthly fee."
+							: "Prices shown are pay-as-you-go estimates for API-key usage."}
+					</p>
 				</>
 			)}
 		</div>
