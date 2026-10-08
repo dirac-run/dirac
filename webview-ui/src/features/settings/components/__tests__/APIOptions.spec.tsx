@@ -75,7 +75,6 @@ describe("ApiOptions Component", () => {
 	})
 })
 
-
 describe("OpenRouter provider selection", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -237,5 +236,31 @@ describe("ApiOptions Component", () => {
 		const modelIdSelect = screen.getByLabelText("Model")
 		expect(modelIdSelect).toBeInTheDocument()
 		expect(modelIdSelect).toHaveValue("openai/gpt-oss-120b")
+	})
+})
+
+describe("ApiOptions Component - Atlas Cloud", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		//@ts-expect-error - vscode is not defined in the global namespace in test environment
+		global.vscode = { postMessage: vi.fn() }
+
+		mockExtensionState({
+			planModeApiProvider: "atlascloud",
+			actModeApiProvider: "atlascloud",
+			atlascloudApiKey: "",
+		})
+	})
+
+	it("renders Atlas Cloud API Key input", () => {
+		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
+		expect(screen.getByPlaceholderText("Enter API Key...")).toBeInTheDocument()
+	})
+
+	it("renders Atlas Cloud Model ID select with the default model", () => {
+		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
+		const modelIdSelect = screen.getByLabelText("Model")
+		expect(modelIdSelect).toBeInTheDocument()
+		expect(modelIdSelect).toHaveValue("deepseek-ai/deepseek-v4-flash")
 	})
 })

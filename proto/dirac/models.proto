@@ -272,6 +272,7 @@ message ModelsApiSecrets {
   optional string doubao_api_key = 18;
   optional string mistral_api_key = 19;
   optional string nebius_api_key = 20;
+  optional string atlascloud_api_key = 41;
   reserved 21; // was asksage_api_key
   optional string xai_api_key = 22;
   optional string sambanova_api_key = 23;
@@ -540,6 +541,7 @@ enum ApiProvider {
   GITHUB_COPILOT = 42;
   OCA = 43;
   UNBIASED = 44;
+  ATLASCLOUD = 45;
 }
 
 enum ApiFormat {
@@ -650,6 +652,7 @@ message ModelsApiConfiguration {
   optional string azure_api_version = 41;
   optional string qwen_api_line = 42;
   optional string nebius_api_key = 43;
+  optional string atlascloud_api_key = 244;
   reserved 44; // was asksage_api_url
   reserved 45; // was asksage_api_key
   optional string xai_api_key = 46;

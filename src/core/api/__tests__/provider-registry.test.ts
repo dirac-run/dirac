@@ -175,6 +175,14 @@ describe("Provider Registry", () => {
 				actModeApiModelId: "meta-llama/Meta-Llama-3.1-70B-Instruct",
 			},
 		},
+		{
+			provider: "atlascloud",
+			config: {
+				atlascloudApiKey: "test-key",
+				planModeApiModelId: "deepseek-ai/deepseek-v4-flash",
+				actModeApiModelId: "deepseek-ai/deepseek-v4-flash",
+			},
+		},
 		{ provider: "xai", config: { xaiApiKey: "test-key", planModeApiModelId: "grok-beta", actModeApiModelId: "grok-beta" } },
 		{
 			provider: "sambanova",
@@ -538,7 +546,7 @@ describe("Provider Registry", () => {
 	})
 
 	it("registry returns same number of providers as switch cases in buildApiHandler", () => {
-		// The registry must cover all 37 supported providers.
-		allKnownProviders.length.should.equal(37)
+		// The registry must cover all 38 supported providers.
+		allKnownProviders.length.should.equal(38)
 	})
 })

@@ -31,6 +31,7 @@ export const ENV_VAR_TO_SECRET_KEY: Record<string, keyof Secrets> = {
 	TOGETHER_API_KEY: "togetherApiKey",
 	FIREWORKS_API_KEY: "fireworksApiKey",
 	NEBIUS_API_KEY: "nebiusApiKey",
+	ATLASCLOUD_API_KEY: "atlascloudApiKey",
 	OPENAI_COMPATIBLE_CUSTOM_KEY: "openAiCompatibleCustomApiKey",
 	// AWS credentials for Bedrock (picked up by the SDK provider chain, but also stored explicitly)
 	AWS_ACCESS_KEY_ID: "awsAccessKey",
@@ -180,6 +181,7 @@ export function getProviderFromEnv(): ApiProvider | undefined {
 	if (process.env.TOGETHER_API_KEY) return "together"
 	if (process.env.FIREWORKS_API_KEY) return "fireworks"
 	if (process.env.NEBIUS_API_KEY) return "nebius"
+	if (process.env.ATLASCLOUD_API_KEY) return "atlascloud"
 	if (process.env.OPENAI_COMPATIBLE_CUSTOM_KEY || process.env.OPENAI_API_BASE) return "openai"
 	return undefined
 }
