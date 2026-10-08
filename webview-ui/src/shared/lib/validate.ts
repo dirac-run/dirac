@@ -19,7 +19,10 @@ export function validateApiConfiguration(currentMode: Mode, apiConfiguration?: A
 				}
 				break
 			case "openrouter":
-				if (!apiConfiguration.openRouterApiKey || !getModeSpecificFields(apiConfiguration, currentMode).openRouterModelId) {
+				if (
+					!apiConfiguration.openRouterApiKey ||
+					!getModeSpecificFields(apiConfiguration, currentMode).openRouterModelId
+				) {
 					return "You must provide a valid API key and model ID or choose a different provider."
 				}
 				break
@@ -111,6 +114,11 @@ export function validateApiConfiguration(currentMode: Mode, apiConfiguration?: A
 				break
 			case "nebius":
 				if (!apiConfiguration.nebiusApiKey) {
+					return "You must provide a valid API key or choose a different provider."
+				}
+				break
+			case "atlascloud":
+				if (!apiConfiguration.atlascloudApiKey) {
 					return "You must provide a valid API key or choose a different provider."
 				}
 				break

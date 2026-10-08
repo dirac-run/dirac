@@ -104,6 +104,11 @@ export function getConfiguredProviders(
 		configured.push("nebius")
 	}
 
+	// Atlas Cloud - requires API key
+	if (apiConfiguration.atlascloudApiKey) {
+		configured.push("atlascloud")
+	}
+
 	// SambaNova - requires API key
 	if (apiConfiguration.sambanovaApiKey) {
 		configured.push("sambanova")

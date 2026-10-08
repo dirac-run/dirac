@@ -13,6 +13,7 @@ src/shared/ExtensionMessage.ts
 src/shared/HistoryItem.ts
 src/shared/api.ts
 src/shared/api/models/anthropic.ts
+src/shared/api/models/atlascloud.ts
 src/shared/api/models/baseten.ts
 src/shared/api/models/bedrock.ts
 src/shared/api/models/capabilities.ts
@@ -57,6 +58,7 @@ esbuild.mjs
 src/core/api/index.ts
 src/core/api/providers/aihubmix.ts
 src/core/api/providers/anthropic.ts
+src/core/api/providers/atlascloud.ts
 src/core/api/providers/baseten.ts
 src/core/api/providers/bedrock.ts
 src/core/api/providers/cerebras.ts

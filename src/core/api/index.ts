@@ -15,6 +15,7 @@ import { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigura
 import { modelProviderSelectionUpdates } from "./modelProviderSelection"
 import { AIhubmixHandler } from "./providers/aihubmix"
 import { AnthropicHandler } from "./providers/anthropic"
+import { AtlasCloudHandler } from "./providers/atlascloud"
 import { BasetenHandler } from "./providers/baseten"
 import { AwsBedrockHandler } from "./providers/bedrock"
 import { CerebrasHandler } from "./providers/cerebras"
@@ -394,6 +395,13 @@ const PROVIDER_REGISTRY: Record<
 			onRetryAttempt: cfg.onRetryAttempt,
 			disableRetries: cfg.disableRetries,
 			nebiusApiKey: cfg.nebiusApiKey,
+			apiModelId: mc.apiModelId,
+		}),
+	atlascloud: (cfg, mc) =>
+		new AtlasCloudHandler({
+			onRetryAttempt: cfg.onRetryAttempt,
+			disableRetries: cfg.disableRetries,
+			atlascloudApiKey: cfg.atlascloudApiKey,
 			apiModelId: mc.apiModelId,
 		}),
 	xai: (cfg, mc) =>

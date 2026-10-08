@@ -84,6 +84,7 @@ export const ProviderToApiKeyMap: Partial<Record<ApiProvider, keyof Secrets | (k
 	litellm: "liteLlmApiKey",
 	moonshot: "moonshotApiKey",
 	nebius: "nebiusApiKey",
+	atlascloud: "atlascloudApiKey",
 	fireworks: "fireworksApiKey",
 	xai: "xaiApiKey",
 	sambanova: "sambanovaApiKey",

@@ -238,6 +238,18 @@ describe("API Provider Dispatch (original)", () => {
 		handler.should.have.property("createMessage")
 	})
 
+	it("returns a handler for atlascloud provider", () => {
+		const config: ApiConfiguration = {
+			apiProvider: "atlascloud",
+			atlascloudApiKey: "test-key",
+			planModeApiModelId: "deepseek-ai/deepseek-v4-flash",
+			actModeApiModelId: "deepseek-ai/deepseek-v4-flash",
+		}
+		const handler = buildApiHandler(config, "plan")
+		handler.should.not.be.undefined()
+		handler.should.have.property("createMessage")
+	})
+
 	it("returns a handler for xai provider", () => {
 		const config: ApiConfiguration = {
 			apiProvider: "xai",

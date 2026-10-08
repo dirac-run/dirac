@@ -41,6 +41,7 @@ export type ApiProvider =
 	| "litellm"
 	| "moonshot"
 	| "nebius"
+	| "atlascloud"
 	| "fireworks"
 	| "xai"
 	| "sambanova"
@@ -82,6 +83,7 @@ export const ALL_PROVIDERS: ApiProvider[] = [
 	"litellm",
 	"moonshot",
 	"nebius",
+	"atlascloud",
 	"fireworks",
 	"xai",
 	"sambanova",
@@ -141,6 +143,7 @@ import {
     mistralModels,
     moonshotModels,
     nebiusModels,
+    atlascloudModels,
     nousResearchModels,
     openAiCodexModels,
     openAiNativeModels,
@@ -171,6 +174,7 @@ export const ALL_MODEL_MAPS: [ApiProvider, Record<string, ModelInfo>][] = [
 	["doubao", doubaoModels],
 	["mistral", mistralModels],
 	["nebius", nebiusModels],
+	["atlascloud", atlascloudModels],
 	["wandb", wandbModels],
 	["xai", xaiModels],
 	["sambanova", sambanovaModels],

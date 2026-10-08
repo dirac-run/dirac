@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import { OPENROUTER_MODEL_PICKER_Z_INDEX } from "./OpenRouterModelPicker"
 import { AIhubmixProvider } from "./providers/AihubmixProvider"
 import { AnthropicProvider } from "./providers/AnthropicProvider"
+import { AtlasCloudProvider } from "./providers/AtlasCloudProvider"
 import { BasetenProvider } from "./providers/BasetenProvider"
 import { GithubCopilotProvider } from "./providers/GithubCopilotProvider"
 import { BedrockProvider } from "./providers/BedrockProvider"
@@ -483,6 +484,10 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 
 			{apiConfiguration && selectedProvider === "nebius" && (
 				<NebiusProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
+			)}
+
+			{apiConfiguration && selectedProvider === "atlascloud" && (
+				<AtlasCloudProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
 			)}
 
 			{apiConfiguration && selectedProvider === "wandb" && (

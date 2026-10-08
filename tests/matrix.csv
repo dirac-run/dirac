@@ -61,6 +61,7 @@ API-DISPATCH-037,src/core/api/__tests__/provider-dispatch.test.ts,returns a hand
 API-DISPATCH-038,src/core/api/__tests__/provider-dispatch.test.ts,selects plan mode model IDs when mode is plan,unit,Provider Dispatch,1,0
 API-DISPATCH-039,src/core/api/__tests__/provider-dispatch.test.ts,selects act mode model IDs when mode is act,unit,Provider Dispatch,1,0
 API-DISPATCH-040,src/core/api/__tests__/provider-dispatch.test.ts,handles undefined apiProvider gracefully,unit,Provider Dispatch,1,0
+API-DISPATCH-041,src/core/api/__tests__/provider-dispatch.test.ts,returns a handler for atlascloud provider,unit,Provider Dispatch,1,0
 MODE-CONFIG-001,src/core/api/__tests__/mode-config.test.ts,selects plan mode model ID when mode is plan,unit,Mode Config,1,0
 MODE-CONFIG-002,src/core/api/__tests__/mode-config.test.ts,selects act mode model ID when mode is act,unit,Mode Config,1,0
 MODE-CONFIG-003,src/core/api/__tests__/mode-config.test.ts,selects plan mode thinking budget when mode is plan,unit,Mode Config,1,0

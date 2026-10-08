@@ -55,6 +55,8 @@ function isProviderConfigured(providerId: string, config: ApiConfiguration): boo
 			return !!config.moonshotApiKey
 		case "nebius":
 			return !!config.nebiusApiKey
+		case "atlascloud":
+			return !!config.atlascloudApiKey
 		case "sambanova":
 			return !!config.sambanovaApiKey
 		case "cerebras":

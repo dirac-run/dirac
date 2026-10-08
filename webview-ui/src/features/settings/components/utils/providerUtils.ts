@@ -3,6 +3,8 @@ import {
 	ApiProvider,
 	anthropicDefaultModelId,
 	anthropicModels,
+	atlascloudDefaultModelId,
+	atlascloudModels,
 	basetenDefaultModelId,
 	basetenModels,
 	bedrockDefaultModelId,
@@ -152,6 +154,8 @@ export function getModelsForProvider(
 			return moonshotModels
 		case "nebius":
 			return nebiusModels
+		case "atlascloud":
+			return atlascloudModels
 		case "wandb":
 			return wandbModels
 		case "sambanova":
@@ -346,6 +350,8 @@ export function normalizeApiConfiguration(
 			}
 		case "nebius":
 			return getProviderData(nebiusModels, nebiusDefaultModelId)
+		case "atlascloud":
+			return getProviderData(atlascloudModels, atlascloudDefaultModelId)
 		case "wandb":
 			return getProviderData(wandbModels, wandbDefaultModelId)
 		case "sambanova":
@@ -711,6 +717,7 @@ export async function syncModeConfigurations(
 		case "mistral":
 		case "xai":
 		case "nebius":
+		case "atlascloud":
 		case "wandb":
 		case "sambanova":
 		case "cerebras":

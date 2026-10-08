@@ -10,6 +10,8 @@ export {
 	getAnthropicReasoningEffort,
 	isAnthropicAdaptiveThinkingSupported,
 } from "./anthropic"
+// Atlas Cloud
+export { type AtlasCloudModelId, atlascloudDefaultModelId, atlascloudModels } from "./atlascloud"
 // Baseten
 export { type BasetenModelId, basetenDefaultModelId, basetenModels } from "./baseten"
 // AWS Bedrock

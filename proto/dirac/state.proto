@@ -103,6 +103,7 @@ message Secrets {
   optional string zai_api_key = 24;
   optional string hugging_face_api_key = 25;
   optional string nebius_api_key = 26;
+  optional string atlascloud_api_key = 57;
   optional string sambanova_api_key = 27;
   optional string cerebras_api_key = 28;
   optional string groq_api_key = 31;

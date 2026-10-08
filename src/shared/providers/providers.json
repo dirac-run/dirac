@@ -155,6 +155,10 @@
 		{
 			"value": "wandb",
 			"label": "W&B Inference by CoreWeave"
+		},
+		{
+			"value": "atlascloud",
+			"label": "Atlas Cloud"
 		}
 	]
 }

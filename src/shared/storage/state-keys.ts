@@ -337,6 +337,7 @@ const SECRETS_KEYS = [
 	"zaiApiKey",
 	"huggingFaceApiKey",
 	"nebiusApiKey",
+	"atlascloudApiKey",
 	"sambanovaApiKey",
 	"cerebrasApiKey",
 	"groqApiKey",

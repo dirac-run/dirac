@@ -9,6 +9,8 @@ import {
 	type ApiProvider,
 	anthropicDefaultModelId,
 	anthropicModels,
+	atlascloudDefaultModelId,
+	atlascloudModels,
 	basetenDefaultModelId,
 	basetenModels,
 	bedrockDefaultModelId,
@@ -63,12 +65,13 @@ import {
 	wandbModels,
 	xaiDefaultModelId,
 	xaiModels,
-} from "@/shared/api";
-import { getProviderDefaultModelId } from "@/shared/storage/provider-keys";
-import { usesOpenRouterModels } from "./openrouter-models";
+} from "@/shared/api"
+import { getProviderDefaultModelId } from "@/shared/storage/provider-keys"
+import { usesOpenRouterModels } from "./openrouter-models"
 
 export const providerModels: Record<string, { models: Record<string, unknown>; defaultId: string }> = {
 	anthropic: { models: anthropicModels, defaultId: anthropicDefaultModelId },
+	atlascloud: { models: atlascloudModels, defaultId: atlascloudDefaultModelId },
 	baseten: { models: basetenModels, defaultId: basetenDefaultModelId },
 	bedrock: { models: bedrockModels, defaultId: bedrockDefaultModelId },
 	cerebras: { models: cerebrasModels, defaultId: cerebrasDefaultModelId },

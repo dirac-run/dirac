@@ -357,6 +357,8 @@ export function convertApiProviderToProto(provider: ApiProvider | undefined): Pr
 			return ProtoApiProvider.HUGGINGFACE
 		case "nebius":
 			return ProtoApiProvider.NEBIUS
+		case "atlascloud":
+			return ProtoApiProvider.ATLASCLOUD
 		case "wandb":
 			return ProtoApiProvider.WANDB
 		case "fireworks":
@@ -466,6 +468,8 @@ export function convertProtoToApiProvider(provider: ProtoApiProvider): ApiProvid
 			return "huggingface"
 		case ProtoApiProvider.NEBIUS:
 			return "nebius"
+		case ProtoApiProvider.ATLASCLOUD:
+			return "atlascloud"
 		case ProtoApiProvider.WANDB:
 			return "wandb"
 		case ProtoApiProvider.FIREWORKS:
@@ -561,6 +565,7 @@ export function convertApiConfigurationToProto(config: ApiConfiguration): ProtoA
 		moonshotApiKey: config.moonshotApiKey,
 		huggingFaceApiKey: config.huggingFaceApiKey,
 		nebiusApiKey: config.nebiusApiKey,
+		atlascloudApiKey: config.atlascloudApiKey,
 		wandbApiKey: config.wandbApiKey,
 		xaiApiKey: config.xaiApiKey,
 		sambanovaApiKey: config.sambanovaApiKey,
