@@ -4,6 +4,7 @@ import { UnbiasedAuthEvent } from "@shared/proto/dirac/models"
 import { applyApiConfigurationTransaction } from "./apiConfigurationTransaction"
 import { persistApiConfigurationPatch } from "./apiConfigurationPersistence"
 import { pollUnbiasedDeviceAuth, startUnbiasedDeviceAuth } from "@/integrations/unbiased/device-auth"
+import { saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { fetch } from "@/shared/net"
 import { getRequestRegistry, type StreamingResponseHandler } from "../grpc-handler"
 import type { Controller } from "../index"
@@ -42,6 +43,7 @@ export async function authenticateUnbiased(
 		const patch = { unbiasedApiKey: token.accessToken }
 		const stateManager = controller.stateManager
 		persistApiConfigurationPatch(stateManager, patch)
+		saveUnbiasedOAuthAccount(stateManager, token)
 		await stateManager.flushPendingState()
 		try {
 			if (!abortController.signal.aborted && generation === (signOutGeneration.get(stateManager) ?? 0)) {

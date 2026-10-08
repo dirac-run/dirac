@@ -38,6 +38,7 @@ export interface UseSettingsItemsProps {
 	autoCondenseContextLimit: number
 	openAiCodexIsAuthenticated: boolean
 	unbiasedIsAuthenticated: boolean
+	unbiasedWorkloadName?: string
 	openAiCodexEmail?: string
 	githubIsAuthenticated: boolean
 	githubEmail?: string
@@ -85,6 +86,7 @@ function createModelItems(props: UseSettingsItemsProps): ListItem[] {
 		openAiHeaders,
 		openAiCodexIsAuthenticated,
 		unbiasedIsAuthenticated,
+		unbiasedWorkloadName,
 		openAiCodexEmail,
 		githubIsAuthenticated,
 		githubEmail,
@@ -206,12 +208,17 @@ function createModelItems(props: UseSettingsItemsProps): ListItem[] {
 			]
 			: []),
 		...(provider === "unbiased"
-			? [
-				{ key: "unbiasedSignIn", label: "Sign in with Unbiased", type: SettingsItemType.ACTION, value: "" },
-				...(unbiasedIsAuthenticated
-					? [{ key: "unbiasedSignOut", label: "Sign out on this device", type: SettingsItemType.ACTION, value: "" }]
-					: []),
-			]
+			? unbiasedIsAuthenticated
+				? [
+					{
+						key: "unbiasedAccount",
+						label: "Signed in to",
+						type: SettingsItemType.READONLY,
+						value: unbiasedWorkloadName || "Unbiased",
+					},
+					{ key: "unbiasedSignOut", label: "Sign out on this device", type: SettingsItemType.ACTION, value: "" },
+				]
+				: [{ key: "unbiasedSignIn", label: "Sign in with Unbiased", type: SettingsItemType.ACTION, value: "" }]
 			: []),
 		...(provider === "openai-codex" && openAiCodexIsAuthenticated
 			? [
@@ -716,6 +723,7 @@ export function useSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 			props.autoCondenseContextLimit,
 			props.openAiCodexIsAuthenticated,
 			props.unbiasedIsAuthenticated,
+			props.unbiasedWorkloadName,
 			props.openAiCodexEmail,
 			props.githubIsAuthenticated,
 			props.githubEmail,

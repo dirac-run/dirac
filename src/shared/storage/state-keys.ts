@@ -80,6 +80,8 @@ const GLOBAL_STATE_FIELDS = {
 	// Path to worktree that should auto-open Dirac sidebar when launched
 	worktreeAutoOpenPath: { default: undefined as string | undefined },
 	uiActionState: { default: undefined as UIActionState | undefined },
+	unbiasedOAuthApiKeyHash: { default: undefined as string | undefined },
+	unbiasedOAuthWorkloadName: { default: undefined as string | undefined },
 } satisfies FieldDefinitions
 
 // Fields that map directly to ApiHandlerOptions in @shared/api.ts

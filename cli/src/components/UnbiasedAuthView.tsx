@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink"
 import Spinner from "ink-spinner"
 import React, { useEffect, useRef, useState } from "react"
 import { startUnbiasedDeviceAuth, pollUnbiasedDeviceAuth, type UnbiasedDeviceGrant } from "@/integrations/unbiased/device-auth"
+import { saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { fetch } from "@/shared/net"
 import { openExternal } from "@/utils/env"
 import { theme } from "../constants/theme"
@@ -37,6 +38,7 @@ export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, 
 		setIsCommitting(false)
 		setGrant(undefined)
 		setError(undefined)
+		setNotice(undefined)
 		void (async () => {
 			try {
 				const options = { fetcher: fetch, signal: abort.signal }
@@ -46,12 +48,13 @@ export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, 
 				const token = await pollUnbiasedDeviceAuth(instructions, options)
 				// A 200 is one-shot. Save the key before any provider switch can fail.
 				const stateManager = StateManager.get()
+				committingRef.current = !abort.signal.aborted
+				setIsCommitting(committingRef.current)
 				stateManager.setSecret("unbiasedApiKey", token.accessToken)
+				saveUnbiasedOAuthAccount(stateManager, token)
 				await stateManager.flushPendingState()
 				// A cancelled sign-in may still issue a key; save it, but do not switch providers.
 				if (abort.signal.aborted) return
-				committingRef.current = true
-				setIsCommitting(true)
 				await applyProviderConfig({ providerId: "unbiased", apiKey: token.accessToken, modelId: "pareto", controller })
 				await completeRef.current()
 			} catch (failure) {

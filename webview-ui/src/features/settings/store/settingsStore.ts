@@ -77,6 +77,7 @@ interface SettingsState {
 	githubCopilotModels: any
 	githubCopilotIsAuthenticated: boolean
 	githubCopilotEmail?: string
+	unbiasedWorkloadName?: string | null
 	openAiCodexIsAuthenticated: boolean
 	openAiCodexEmail?: string
 	openAiCodexUsage?: OpenAiCodexUsageSnapshot
@@ -415,6 +416,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 	openAiModels: {},
 	githubCopilotIsAuthenticated: false,
 	githubCopilotEmail: undefined,
+	unbiasedWorkloadName: null,
 	openAiCodexIsAuthenticated: false,
 	openAiCodexEmail: undefined,
 	openAiCodexUsage: undefined,

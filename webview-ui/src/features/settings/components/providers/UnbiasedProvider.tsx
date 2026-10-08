@@ -19,7 +19,9 @@ interface UnbiasedProviderProps {
 }
 
 export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: UnbiasedProviderProps) {
-	const { apiConfiguration } = useSettingsStore()
+	const { apiConfiguration, unbiasedWorkloadName, pendingApiConfigurationUpdates } = useSettingsStore()
+	const isAuthenticated = !!apiConfiguration?.unbiasedApiKey
+	const workloadName = Object.hasOwn(pendingApiConfigurationUpdates, "unbiasedApiKey") ? undefined : unbiasedWorkloadName
 	const { handleFieldChange, handleModeFieldChange } = useApiConfigurationHandlers()
 	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
 	const [instructions, setInstructions] = useState<UnbiasedAuthEvent>()
@@ -99,9 +101,28 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 	return (
 		<div className="space-y-3">
 			<div className="space-y-2">
-				<Button disabled={isSigningIn || isSigningOut} onClick={signIn} size="sm" type="button">
-					Sign in with Unbiased
-				</Button>
+				{isAuthenticated ? (
+					<section aria-label="Unbiased account" className="rounded-md border border-(--vscode-panel-border) p-3">
+						<div className="flex min-w-0 items-center justify-between gap-3">
+							<div className="min-w-0">
+								<p className="m-0 text-sm font-medium">Connected to Unbiased</p>
+								<p className="mb-0 mt-1 break-all text-xs">Signed in to {workloadName || "Unbiased"}</p>
+							</div>
+							<Button
+								disabled={isSigningIn || isSigningOut}
+								onClick={() => void signOut()}
+								size="sm"
+								type="button"
+								variant="outline">
+								{isSigningOut ? "Signing out…" : "Sign out on this device"}
+							</Button>
+						</div>
+					</section>
+				) : (
+					<Button disabled={isSigningIn || isSigningOut} onClick={signIn} size="sm" type="button">
+						Sign in with Unbiased
+					</Button>
+				)}
 				{isSigningIn && <p className="text-xs">{instructions ? "Waiting for approval…" : "Preparing sign-in…"}</p>}
 				{instructions && (
 					<div className="space-y-2 text-xs">
@@ -151,11 +172,6 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 				providerName="Unbiased"
 				signupUrl="https://platform.unbiased.ai"
 			/>
-			{apiConfiguration?.unbiasedApiKey && (
-				<Button disabled={isSigningIn || isSigningOut} size="sm" type="button" variant="outline" onClick={() => void signOut()}>
-					Sign out on this device
-				</Button>
-			)}
 			{showModelOptions && (
 				<>
 					<ModelSelector

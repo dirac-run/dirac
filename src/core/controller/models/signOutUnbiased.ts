@@ -14,14 +14,20 @@ export async function signOutUnbiasedKey(stateManager: StateManager, task?: ApiC
 
 	invalidateUnbiasedSignIns(stateManager)
 	const previousKey = stateManager.getSecretKey("unbiasedApiKey")
+	const previousAccount = {
+		unbiasedOAuthApiKeyHash: stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+		unbiasedOAuthWorkloadName: stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+	}
 	await commitWorkingConfigurationUpdate(
 		{ stateManager, task },
 		async () => {
 			stateManager.setSecret("unbiasedApiKey", undefined)
+			stateManager.setGlobalStateBatch({ unbiasedOAuthApiKeyHash: undefined, unbiasedOAuthWorkloadName: undefined })
 			try {
 				await stateManager.flushPendingState()
 			} catch (error) {
 				stateManager.setSecret("unbiasedApiKey", previousKey)
+				stateManager.setGlobalStateBatch(previousAccount)
 				try {
 					await stateManager.flushPendingState()
 				} catch (rollbackError) {

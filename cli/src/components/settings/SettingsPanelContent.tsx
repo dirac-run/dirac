@@ -11,6 +11,7 @@ import { Box, Text, useInput } from "ink"
 import React, { useCallback, useMemo, useState } from "react"
 import { StateManager } from "@/core/storage/StateManager"
 import { signOutUnbiasedKey } from "@/core/controller/models/signOutUnbiased"
+import { getUnbiasedOAuthWorkloadName } from "@/integrations/unbiased/oauth-account"
 import type { TaskWorkingConfigurationPatch } from "@/core/task/runtime/TaskWorkingConfiguration"
 import { ToolRegistry } from "@/core/task/tools/registry/ToolRegistry"
 import { Logger } from "@/shared/services/Logger"
@@ -286,7 +287,8 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		openAiHeaders,
 		autoCondenseContextLimit,
 		openAiCodexIsAuthenticated,
-		unbiasedIsAuthenticated: !!stateManager.getSecretKey("unbiasedApiKey"),
+		unbiasedIsAuthenticated: !!stateManager.getApiConfiguration().unbiasedApiKey,
+		unbiasedWorkloadName: getUnbiasedOAuthWorkloadName(stateManager),
 		openAiCodexEmail,
 		githubIsAuthenticated,
 		githubEmail,
