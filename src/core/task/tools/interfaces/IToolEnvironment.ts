@@ -354,6 +354,8 @@ export interface IOrchestrationTrait {
 	 * Returns the conversation history.
 	 */
 	getHistory(): DiracMessage[]
+	/** Original delivered user requests since the latest successful completion, independent of API truncation. */
+	getCurrentTurnUserRequests(): string[]
 
 	/**
 	 * Updates the conversation history truncation range.

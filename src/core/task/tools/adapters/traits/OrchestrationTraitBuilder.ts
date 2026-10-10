@@ -1,5 +1,6 @@
 import type { Hooks } from "@core/hooks/hook-factory"
 import { activateTaskSkill } from "@core/task/activateTaskSkill"
+import { getCurrentTurnUserRequests } from "@core/text-condensation/CurrentTurnUserRequests"
 import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { Logger } from "@shared/services/Logger"
@@ -85,6 +86,7 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 		saveCheckpoint: (isTaskComplete, messageTs) => config.callbacks.saveCheckpoint(isTaskComplete, messageTs),
 		commitAttemptCompletion: (response) => config.callbacks.commitAttemptCompletion(response),
 		getHistory: () => config.messageState.getDiracMessages(),
+		getCurrentTurnUserRequests: () => getCurrentTurnUserRequests(config.messageState.getDiracMessages()),
 		setTruncationRange: (range) => {
 			config.taskState.conversationHistoryDeletedRange = range
 		},

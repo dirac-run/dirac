@@ -6,6 +6,7 @@ import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/h
 import { continuationPrompt } from "@core/prompts/contextManagement"
 import type { TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import { ConversationCondensationService } from "@core/text-condensation/ConversationCondensationService"
+import { formatCurrentTurnUserRequests, getCurrentTurnUserRequests } from "@core/text-condensation/CurrentTurnUserRequests"
 import {
 	CONVERSATION_CONTINUATION_TEMPLATE_ID,
 	createDefaultTextCondensationTemplateRegistry,
@@ -23,6 +24,7 @@ import {
 } from "@core/utility-model/UtilityModelRunner"
 import type { ApiConfiguration, ModelProviderSelection } from "@shared/api"
 import { CardStatus } from "@shared/ExtensionMessage"
+import type { DiracContent } from "@shared/messages/content"
 import { DiracIcon } from "@shared/icons"
 import { Logger } from "@shared/services/Logger"
 import { stripHashes } from "@shared/utils/line-hashing"
@@ -54,6 +56,7 @@ interface LocalConversationCompactionDependencies {
 interface LocalConversationCompactionOptions {
 	source: LocalConversationCompactionSource
 	triggerApiRequestIndex?: number
+	pendingUserContent?: readonly DiracContent[]
 }
 
 interface UtilityModelIdentity {
@@ -118,12 +121,22 @@ export class LocalConversationCompaction {
 		let summary: string
 		let continuation: string
 		try {
-			summary = await this.generateSummary(selection, createHandler, templates, async ({ retryAttempt, maxRetries, delayMs, error }) => {
-				await card.update({
-					header: `Condensing Conversation (retry ${retryAttempt}/${maxRetries}) · ${this.formatIdentity(identity)}`,
-					body: `Utility request failed. Retrying in ${delayMs / 1000}s...\n\n${getErrorMessage(error)}`,
-				})
-			})
+			const currentTurnUserRequests = getCurrentTurnUserRequests(
+				this.dependencies.messageStateHandler.getDiracMessages(),
+				options.pendingUserContent,
+			)
+			summary = await this.generateSummary(
+				selection,
+				createHandler,
+				templates,
+				async ({ retryAttempt, maxRetries, delayMs, error }) => {
+					await card.update({
+						header: `Condensing Conversation (retry ${retryAttempt}/${maxRetries}) · ${this.formatIdentity(identity)}`,
+						body: `Utility request failed. Retrying in ${delayMs / 1000}s...\n\n${getErrorMessage(error)}`,
+					})
+				},
+				currentTurnUserRequests,
+			)
 			this.throwIfCancelled()
 			const range = this.dependencies.contextManager.getNextTruncationRange(
 				this.dependencies.messageStateHandler.getApiConversationHistory(),
@@ -133,7 +146,7 @@ export class LocalConversationCompaction {
 			const contextModification = await this.runPreCompactHook(options.source, range)
 			this.throwIfCancelled()
 
-			continuation = continuationPrompt(summary)
+			continuation = continuationPrompt(summary, currentTurnUserRequests)
 			if (contextModification) {
 				continuation += `\n\n[Context Modification from PreCompact Hook]\n${contextModification}`
 			}
@@ -190,6 +203,7 @@ export class LocalConversationCompaction {
 		createHandler: UtilityModelHandlerFactory,
 		templates: ReturnType<typeof createDefaultTextCondensationTemplateRegistry>,
 		onRetry: UtilityModelRunnerOptions["onRetry"],
+		currentTurnUserRequests: readonly string[],
 	): Promise<string> {
 		const runner = new UtilityModelRunner(selection, createHandler, {
 			onRetry,
@@ -205,6 +219,7 @@ export class LocalConversationCompaction {
 		return await service.condenseConversation(CONVERSATION_CONTINUATION_TEMPLATE_ID, {
 			historyScope: "effective",
 			signal: this.dependencies.taskState.abortSignal,
+			additionalSourceText: formatCurrentTurnUserRequests(currentTurnUserRequests),
 		})
 	}
 

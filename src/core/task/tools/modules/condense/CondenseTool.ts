@@ -1,5 +1,6 @@
 import { formatResponse } from "@core/formatResponse"
 import { continuationPrompt } from "@core/prompts/contextManagement"
+import { formatCurrentTurnUserRequests } from "@core/text-condensation/CurrentTurnUserRequests"
 import { CONVERSATION_CONTINUATION_TEMPLATE_ID } from "@core/text-condensation/templates"
 import { showSystemNotification } from "@integrations/notifications"
 import { CardStatus } from "@shared/ExtensionMessage"
@@ -41,7 +42,8 @@ export class CondenseTool implements IDiracTool {
 	async processCall(args: any, env: IToolEnvironment): Promise<any> {
 		const source = this.getSource(env)
 		const signal = env.orchestration.getTaskState("abortSignal")
-		const context = await this.resolveContext(args.context, signal, env)
+		const currentTurnUserRequests = env.orchestration.getCurrentTurnUserRequests()
+		const context = await this.resolveContext(args.context, currentTurnUserRequests, signal, env)
 		this.throwIfCancelled(signal)
 		if (context === null) {
 			return formatResponse.toolResult(
@@ -76,7 +78,7 @@ export class CondenseTool implements IDiracTool {
 			return formatResponse.toolError("Context compaction was cancelled by PreCompact hook.")
 		}
 
-		let result = continuationPrompt(context)
+		let result = continuationPrompt(context, currentTurnUserRequests)
 		if (hookResult.contextModification) {
 			result += `\n\n[Context Modification from PreCompact Hook]\n${hookResult.contextModification}`
 		}
@@ -132,6 +134,7 @@ export class CondenseTool implements IDiracTool {
 
 	private async resolveContext(
 		context: unknown,
+		currentTurnUserRequests: readonly string[],
 		signal: AbortSignal,
 		env: IToolEnvironment,
 	): Promise<string | null | undefined> {
@@ -144,6 +147,7 @@ export class CondenseTool implements IDiracTool {
 			const result = await condensation.condenseConversation(CONVERSATION_CONTINUATION_TEMPLATE_ID, {
 				historyScope: "effective",
 				signal,
+				additionalSourceText: formatCurrentTurnUserRequests(currentTurnUserRequests),
 			})
 			if (signal.aborted) throw new Error("Task instance aborted")
 			if (result.text.trim().length === 0) {

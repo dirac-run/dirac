@@ -205,6 +205,20 @@ describe("ConversationCondensationTraitBuilder", () => {
 		sinon.assert.notCalled(getTruncatedMessages)
 	})
 
+	it("exposes original current-turn requests through orchestration independently of effective API history", () => {
+		const { config } = createEnvironment([{ role: "user", content: "old API context" }])
+		config.messageState.getDiracMessages.returns([
+			{ content: { type: "markdown", role: "user", content: "Task A" } },
+			{ content: { type: "card", card: { kind: "task_completion", status: "success" } } },
+			{ content: { type: "markdown", role: "user", content: "Task B" } },
+			{ content: { type: "markdown", role: "user", content: "Clarification for B" } },
+		])
+		const environment = new SurfaceAdapter(config)
+
+		assert.deepEqual(environment.orchestration.getCurrentTurnUserRequests(), ["Task B", "Clarification for B"])
+		sinon.assert.notCalled(config.messageState.getApiConversationHistory)
+	})
+
 	it("exposes a narrow facade for parent tasks and no capability for subagents", () => {
 		const { config } = createEnvironment()
 		config.isSubagentExecution = false

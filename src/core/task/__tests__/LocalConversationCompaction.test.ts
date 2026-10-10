@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert"
-import { CardStatus } from "@shared/ExtensionMessage"
+import { ConversationCondensationService } from "@core/text-condensation/ConversationCondensationService"
+import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
@@ -72,6 +73,39 @@ function createMocks() {
 
 describe("LocalConversationCompaction", () => {
 	afterEach(() => sinon.restore())
+
+	it("preserves a follow-up hidden from effective API history when the Utility summary only mentions the initial task", async () => {
+		const { compaction, messageStateHandler } = createMocks()
+		messageStateHandler.getDiracMessages.returns([
+			{ content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Task A" } },
+			{ content: { type: DiracMessageType.CARD, card: { kind: CardKind.TASK_COMPLETION, status: CardStatus.SUCCESS } } },
+			{ content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Implement task B" } },
+			{ content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Use TypeScript" } },
+		])
+		const condense = sinon.stub(ConversationCondensationService.prototype, "condenseConversation").resolves("Task A is complete")
+
+		for (let index = 0; index < 2; index++) {
+			const continuation = await compaction.run({ source: "automatic" })
+			assert.ok(continuation?.includes(JSON.stringify(["Implement task B", "Use TypeScript"])))
+			assert.ok(condense.getCall(index).args[1].additionalSourceText?.includes('"Implement task B"'))
+		}
+	})
+
+	it("includes an incoming follow-up before it is appended to API history without mutating that history", async () => {
+		const { compaction, messageStateHandler } = createMocks()
+		const apiHistory = messageStateHandler.getApiConversationHistory()
+		const originalHistory = structuredClone(apiHistory)
+		const condense = sinon.stub(ConversationCondensationService.prototype, "condenseConversation").resolves("Task A is complete")
+
+		const continuation = await compaction.run({
+			source: "automatic",
+			pendingUserContent: [{ type: "text", text: "<feedback>\nImplement task B\n</feedback>", isUserInput: true }],
+		})
+
+		assert.ok(condense.firstCall.args[1].additionalSourceText?.includes('"Implement task B"'))
+		assert.ok(continuation?.includes('["Implement task B"]'))
+		assert.deepEqual(apiHistory, originalHistory)
+	})
 
 	it("silently declines when no Utility model is configured", async () => {
 		const { card, compaction, dependencies } = createMocks()

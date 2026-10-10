@@ -94,6 +94,7 @@ export async function recursivelyMakeDiracRequests(
 		const continuation = await ctx.localConversationCompaction.run({
 			source: "automatic",
 			triggerApiRequestIndex: previousApiReqIndex,
+			pendingUserContent: userContent,
 		})
 		if (!continuation) return true
 

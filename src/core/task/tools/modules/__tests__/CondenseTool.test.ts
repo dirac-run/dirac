@@ -29,6 +29,7 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 		conversationCondensation,
 		logging: { warn: sinon.stub() },
 		orchestration: {
+			getCurrentTurnUserRequests: sinon.stub().returns([]),
 			getTaskState: sinon.stub().callsFake((key: string) => state[key]),
 			setTaskState: sinon.stub().callsFake((key: string, value: unknown) => {
 				state[key] = value
@@ -68,6 +69,35 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 
 describe("CondenseTool", () => {
 	afterEach(() => sinon.restore())
+
+	it("preserves current intent independently of stale active-model summaries across repeated condensations", async () => {
+		const { env, state } = createMocks("automatic")
+		const requests = ["Implement task B", "Use TypeScript"]
+		env.orchestration.getCurrentTurnUserRequests.returns(requests)
+
+		for (let index = 0; index < 2; index++) {
+			state.pendingCondenseSource = "automatic"
+			const result = await new CondenseTool().processCall({ context: "Task A is complete" }, env as any)
+			assert.ok(result.indexOf(JSON.stringify(requests)) > result.indexOf("Task A is complete"))
+		}
+		assert.equal(env.orchestration.getCurrentTurnUserRequests.callCount, 2)
+	})
+
+	it("includes original current-turn requests in Utility input and output even if its summary omits them", async () => {
+		const { env, conversationCondensation } = createMocks("automatic")
+		const requests = ["Implement task B", "Use TypeScript"]
+		env.orchestration.getCurrentTurnUserRequests.returns(requests)
+		conversationCondensation.isAvailable.returns(true)
+		conversationCondensation.condenseConversation.resolves({
+			text: "Task A is complete",
+			modelIdentity: { providerId: "openai", modelId: "utility-model" },
+		})
+
+		const result = await new CondenseTool().processCall({}, env as any)
+		const options = conversationCondensation.condenseConversation.firstCall.args[1]
+		assert.ok(options.additionalSourceText.includes(JSON.stringify(requests)))
+		assert.ok(result.includes(JSON.stringify(requests)))
+	})
 
 	it("automatically condenses without waiting for user approval", async () => {
 		const { card, env, state, getProviderState } = createMocks("automatic")
@@ -150,6 +180,17 @@ describe("CondenseTool", () => {
 		assert.equal(env.orchestration.setTruncationRange.callCount, 0)
 		assert.equal(state.pendingApiConversationCompaction, undefined)
 		assert.equal(env.orchestration.notifyContextCompacted.callCount, 0)
+	})
+
+	it("preserves the active task after an approved manual compaction", async () => {
+		const { env, card } = createMocks("user")
+		env.orchestration.getCurrentTurnUserRequests.returns(["Implement task B", "Use TypeScript"])
+
+		const result = await new CondenseTool().processCall({ context: "Task A is complete" }, env as any)
+
+		assert.equal(card.waitForInteraction.callCount, 1)
+		assert.ok(result.includes('["Implement task B","Use TypeScript"]'))
+		assert.ok(result.includes('do not ask the user to repeat them'))
 	})
 
 	it("runs the hook before applying an approved user condense", async () => {
