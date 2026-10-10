@@ -59,6 +59,8 @@ const mocks = vi.hoisted(() => {
 			task.taskState.didAttemptCompletion = true
 			task.taskState.status = TaskStatus.COMPLETED
 		})
+		prepareTaskForFollowUp = vi.fn(async (..._args: unknown[]) => this.task!)
+		getTaskWithId = vi.fn(async (..._args: unknown[]) => ({}))
 		cancelTask = vi.fn(async () => {
 			this.task = task
 			task.taskState.lastWaitingCardId = undefined
@@ -251,19 +253,25 @@ describe("DiracAgent ACP conversation continuity", () => {
 			stopReason: "end_turn",
 		})
 
-		mocks.task.taskState.status = TaskStatus.EXECUTING_TOOL
+		let publishCompletion!: () => void
+		mocks.controllers[0].prepareTaskForFollowUp.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					publishCompletion = () => resolve(mocks.task)
+				}),
+		)
 		const followUp = agent.prompt({ sessionId, prompt: [{ type: "text", text: "continue" }] } as any)
 		await secondTurnSetup
 		await new Promise<void>((resolve) => setImmediate(resolve))
 
 		expect(mocks.task.submitCardResponse).not.toHaveBeenCalled()
 
-		mocks.task.taskState.status = TaskStatus.COMPLETED
+		publishCompletion()
 		await expect(followUp).resolves.toEqual({ stopReason: "end_turn" })
 		expect(mocks.task.submitCardResponse).toHaveBeenCalledWith("", DiracAskResponse.MESSAGE, "continue", [], [])
 	})
 
-	it("starts a new task for the first prompt after loading completed history", async () => {
+	it.each([TaskStatus.COMPLETED, TaskStatus.CANCELLED])("continues loaded %s history without a resume card", async (status) => {
 		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
 			; (agent as any).ctx = { extensionContext: {}, DATA_DIR: "/tmp/dirac-test-data" }
 			; (agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
@@ -277,23 +285,93 @@ describe("DiracAgent ACP conversation continuity", () => {
 		const session = (agent as any).sessions.get(sessionId)
 		session.isLoadedFromHistory = true
 		session.loadedTaskId = "completed-task"
+		controller.reinitExistingTaskFromId.mockImplementationOnce(async () => {
+			controller.task = mocks.task
+			mocks.task.taskState.status = status
+		})
 
 		await expect(agent.prompt({ sessionId, prompt: [{ type: "text", text: "start a follow-up" }] } as any)).resolves.toEqual({
 			stopReason: "end_turn",
 		})
 
 		expect(controller.reinitExistingTaskFromId).toHaveBeenCalledWith("completed-task", expect.any(Object))
-		expect(controller.initTask).toHaveBeenCalledWith(
-			"start a follow-up",
-			[],
-			[],
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			expect.any(Object),
-		)
+		expect(controller.initTask).not.toHaveBeenCalled()
+		expect(mocks.task.submitCardResponse).toHaveBeenCalledWith("", DiracAskResponse.MESSAGE, "start a follow-up", [], [])
+		expect(controller.task?.conversationHistory).toEqual(["remember: established context"])
+		expect(session.isLoadedFromHistory).toBe(false)
+		expect(session.loadedTaskId).toBeUndefined()
+	})
+
+	it("keeps loaded history retryable when restoration fails", async () => {
+		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
+			; (agent as any).ctx = { extensionContext: {}, DATA_DIR: "/tmp/dirac-test-data" }
+			; (agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+			; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			; (agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "act", availableModes: [] }))
+			; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+			; (agent as any).emitSessionUpdate = vi.fn(async () => undefined)
+		const { sessionId } = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+		const controller = mocks.controllers[0]
+		const session = (agent as any).sessions.get(sessionId)
+		session.isLoadedFromHistory = true
+		session.loadedTaskId = "saved-task"
+		controller.reinitExistingTaskFromId.mockRejectedValueOnce(new Error("restore failed"))
+		const prompt = { sessionId, prompt: [{ type: "text", text: "continue" }] } as any
+		await expect(agent.prompt(prompt)).rejects.toThrow("restore failed")
+		expect(session.isLoadedFromHistory).toBe(true)
+		expect(session.loadedTaskId).toBe("saved-task")
+		await expect(agent.prompt(prompt)).resolves.toEqual({ stopReason: "end_turn" })
+		expect(controller.reinitExistingTaskFromId).toHaveBeenCalledTimes(2)
+		expect(controller.initTask).not.toHaveBeenCalled()
+		expect(mocks.task.submitCardResponse).toHaveBeenCalledWith("", DiracAskResponse.MESSAGE, "continue", [], [])
+	})
+
+	it("retries the same conversation when follow-up restoration clears the task and fails", async () => {
+		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
+			; (agent as any).ctx = { extensionContext: {}, DATA_DIR: "/tmp/dirac-test-data" }
+			; (agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+			; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			; (agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "act", availableModes: [] }))
+			; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+			; (agent as any).emitSessionUpdate = vi.fn(async () => undefined)
+
+		const { sessionId } = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+		const controller = mocks.controllers[0]
+		const session = (agent as any).sessions.get(sessionId)
+		await expect(
+			agent.prompt({ sessionId, prompt: [{ type: "text", text: "remember this context" }] } as any),
+		).resolves.toEqual({ stopReason: "end_turn" })
+		const backingTaskId = controller.task!.taskId
+		controller.prepareTaskForFollowUp.mockImplementationOnce(async () => {
+			controller.task = undefined
+			throw new Error("history unreadable")
+		})
+
+		const prompt = { sessionId, prompt: [{ type: "text", text: "continue using prior context" }] } as any
+		await expect(agent.prompt(prompt)).rejects.toThrow("history unreadable")
+		expect(controller.task).toBeUndefined()
+		expect(session.taskId).toBe(backingTaskId)
+		expect(session.isLoadedFromHistory).toBe(true)
+		expect(session.loadedTaskId).toBe(backingTaskId)
 		expect(mocks.task.submitCardResponse).not.toHaveBeenCalled()
+
+		await expect(agent.prompt(prompt)).resolves.toEqual({ stopReason: "end_turn" })
+		expect(controller.prepareTaskForFollowUp).toHaveBeenCalledOnce()
+		expect(controller.reinitExistingTaskFromId).toHaveBeenCalledOnce()
+		expect(controller.reinitExistingTaskFromId).toHaveBeenLastCalledWith(backingTaskId, expect.any(Object))
+		expect(controller.initTask).toHaveBeenCalledOnce()
+		expect(controller.task?.conversationHistory).toEqual(["remember: established context"])
+		expect(mocks.task.submitCardResponse).toHaveBeenCalledWith(
+			"",
+			DiracAskResponse.MESSAGE,
+			"continue using prior context",
+			[],
+			[],
+		)
+		expect(session.isLoadedFromHistory).toBe(false)
+		expect(session.loadedTaskId).toBeUndefined()
 	})
 
 	it("resumes the reinitialized task after cancellation without a historical resume card", async () => {
@@ -733,15 +811,8 @@ describe("DiracAgent ACP conversation continuity", () => {
 			autoApproveAllToggled: true,
 			yoloModeToggled: false,
 		})
-		const completedContinuationOptions = (controller.initTask.mock.calls as unknown[][]).at(-1)?.[7]
-		expect(
-			findRuntimeSettings(completedContinuationOptions),
-			"new task after completed history must retain the owning ACP runtime",
-		).toMatchObject({
-			mode: "plan",
-			autoApproveAllToggled: true,
-			yoloModeToggled: false,
-		})
+		expect(controller.initTask).toHaveBeenCalledTimes(1)
+		expect(mocks.task.submitCardResponse).toHaveBeenCalledWith("", DiracAskResponse.MESSAGE, "resume in Plan", [], [])
 	})
 
 	it("forces cleanup during shutdown while preserving close-session guards", async () => {

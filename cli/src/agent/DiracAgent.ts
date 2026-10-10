@@ -15,16 +15,9 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import type * as acp from "@agentclientprotocol/sdk"
 import { PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk"
-import type { DiracMessageChange } from "@core/task/message-state"
-import {
-	modelSupportsInferenceSpeed,
-	providerSupportsInferenceSpeed,
-	type ApiConfiguration,
-	type ApiProvider,
-} from "@shared/api"
-import { isResumePromptCard } from "@shared/cardIdentity"
+import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { DiracMessage } from "@shared/ExtensionMessage"
-import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
+import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import { isPlanResponseCard } from "@shared/responseTool"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getExplicitDiracSettingsFromEnv, getProviderFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
@@ -110,6 +103,7 @@ import {
 	getTaskIdsForSession,
 	historyItemToSessionInfo,
 	listLatestConversationHistoryItems,
+	resolveHistorySession,
 } from "./sessionHistory.js"
 import { TaskMessageBridge } from "./taskMessageBridge.js"
 import { type AcpSessionState } from "./types.js"
@@ -534,6 +528,11 @@ export class DiracAgent implements acp.Agent {
 
 	private async bindPromptTask(sessionId: string, task: NonNullable<Controller["task"]>): Promise<void> {
 		this.promptTasks.set(sessionId, task)
+		const session = this.sessions.get(sessionId)!
+		if (session.taskId !== task.taskId) {
+			session.taskId = task.taskId
+			this.persistSessionOverrides(sessionId)
+		}
 		if (!task.canAcceptSteeringMessage()) return
 
 		const whispers = this.pendingWhispers.get(sessionId)
@@ -845,6 +844,7 @@ export class DiracAgent implements acp.Agent {
 			settings: overrides,
 			cwd: session.cwd,
 			createdAt: session.createdAt,
+			taskId: session.taskId,
 		})
 	}
 
@@ -1299,7 +1299,6 @@ export class DiracAgent implements acp.Agent {
 			mode: sessionOverrides.mode as "act" | "plan",
 			createdAt: Date.now(),
 			lastActivityAt: Date.now(),
-			reservedTaskId: sessionId,
 		}
 
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sessionOverrides)
@@ -1340,7 +1339,7 @@ export class DiracAgent implements acp.Agent {
 	/**
 	 * Load an existing session from task history.
 	 *
-	 * The ACP LoadSessionRequest sessionId is treated as the historical task ID.
+	 * Resolve the stable conversation ID to its latest backing task.
 	 * The task is rehydrated lazily on first prompt to align with the ACP flow.
 	 */
 	async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
@@ -1376,13 +1375,20 @@ export class DiracAgent implements acp.Agent {
 			)
 		}
 
-		// Resolve the actual taskId: check the replacement-task map first (multi-task session),
-		// then fall back to sessionId itself (the common single-task case where taskId === sessionId).
-		const resolvedTaskId = getLatestTaskIdForSession(sessionId) ?? sessionId
-
-		const persistedHistory = (StateManager.get().getGlobalStateKey("taskHistory") || []).find(
-			(item) => item.id === resolvedTaskId,
-		)
+		const history = resolveHistorySession(sessionId, persistedRuntimeConfig.taskId ?? getLatestTaskIdForSession(sessionId))
+		if (
+			!history &&
+			getSessionUpdates(sessionId).some(
+				(entry) =>
+					entry.kind === "session_update" &&
+					["user_message_chunk", "agent_message_chunk", "tool_call", "tool_call_update"].includes(
+						entry.update.sessionUpdate,
+					),
+			)
+		) {
+			throw new Error(`Persisted conversation history not found for ACP session ${sessionId}`)
+		}
+		const persistedHistory = history?.historyItem
 
 		const ownedWorktree = getSessionWorktree(sessionId)
 		if (ownedWorktree) {
@@ -1415,17 +1421,18 @@ export class DiracAgent implements acp.Agent {
 			...(persistedHistory
 				? {
 					isLoadedFromHistory: true,
-					loadedTaskId: resolvedTaskId,
+					loadedTaskId: history!.taskId,
+					taskId: history!.taskId,
 				}
-				: { reservedTaskId: sessionId }),
+				: {}),
 		}
 		const sessionOverrides = copyTaskRuntimeSettings(persistedRuntimeConfig.settings)
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sessionOverrides)
 		const loadRuntime = StateManager.get().captureEffectiveTaskConfiguration(sessionOverrides)
 		validateApiConfiguration(loadRuntime.apiConfiguration as ApiConfiguration, persistedMode)
 
-		if (persistedHistory) {
-			await controller.getTaskWithId(resolvedTaskId)
+		if (history) {
+			await controller.getTaskWithId(history.taskId)
 		}
 
 		this.#sessionControllers.set(session, controller)
@@ -1650,6 +1657,7 @@ export class DiracAgent implements acp.Agent {
 			await bridge.cancelInFlightToolCalls(params.sessionId, sessionState)
 			await recordTaskForSession(params.sessionId, taskId)
 			session.taskId = taskId
+			this.persistSessionOverrides(params.sessionId)
 			subscribedTask = undefined
 			const replacementTask = controller.task
 			if (!replacementTask) return
@@ -1709,92 +1717,17 @@ export class DiracAgent implements acp.Agent {
 				await this.bindPromptTask(params.sessionId, controller.task)
 				await controller.task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
 				session.awaitingCancelledTaskResume = false
-			} else if (isLoadedSession && !hasActiveTask) {
-				// First prompt on a loaded session - resume the task from history.
-				Logger.debug("[DiracAgent] Resuming loaded session:", params.sessionId)
-
-				// Clear the flag so subsequent prompts are handled normally.
-				session.isLoadedFromHistory = false
-
-				// Use loadedTaskId if set (multi-task session resolved in loadSession),
-				// otherwise fall back to sessionId (common case where taskId === sessionId).
-				const taskIdToResume = session.loadedTaskId ?? params.sessionId
-				session.loadedTaskId = undefined
-
+			} else if (isLoadedSession) {
+				// Reinitialization returns only once the persisted conversation is restored.
+				const taskIdToResume = session.loadedTaskId!
 				await controller.reinitExistingTaskFromId(
 					taskIdToResume,
 					this.activePromptInitializationOptions(params.sessionId),
 				)
-
-				if (controller.task) {
-					const task = controller.task
-					const resumeResult = await new Promise<"completed" | "resumed">((resolve, reject) => {
-						let settled = false
-						const finish = (result: "completed" | "resumed") => {
-							if (settled) return
-							settled = true
-							clearInterval(statusPoll)
-							task.messageStateHandler.off("diracMessagesChanged", onChanged)
-							resolve(result)
-						}
-						const onRunPromiseError = (err: unknown) => {
-							if (settled) return
-							settled = true
-							clearInterval(statusPoll)
-							task.messageStateHandler.off("diracMessagesChanged", onChanged)
-							reject(err instanceof Error ? err : new Error(String(err)))
-						}
-						const hasResumeCard = () =>
-							task.messageStateHandler
-								.getDiracMessages()
-								.some(
-									(message) =>
-										message.content.type === DiracMessageType.CARD &&
-										isResumePromptCard(message.content.card),
-								)
-						const checkResumeState = () => {
-							if (task.taskState.status === TaskStatus.COMPLETED) return finish("completed")
-							if (hasResumeCard()) finish("resumed")
-						}
-						const onChanged = (change: DiracMessageChange) => {
-							if (
-								change.type === "add" &&
-								change.message?.content.type === DiracMessageType.CARD &&
-								isResumePromptCard(change.message.content.card)
-							) {
-								finish("resumed")
-							}
-						}
-						const statusPoll = setInterval(checkResumeState, 10)
-						task.messageStateHandler.on("diracMessagesChanged", onChanged)
-						Promise.resolve(controller.taskRunPromise).catch(onRunPromiseError)
-						checkResumeState()
-					})
-
-					if (resumeResult === "completed") {
-						// Completed history is terminal: resumeTaskFromHistory() intentionally does
-						// not issue a resume card or wait for a response. Start a fresh task for
-						// the first new ACP prompt rather than waiting forever for that card.
-						Logger.debug("[DiracAgent] Starting a new task from completed loaded session:", taskIdToResume)
-						await controller.initTask(
-							textContent,
-							imageContent,
-							fileResources,
-							undefined,
-							undefined,
-							undefined,
-							undefined,
-							this.activePromptInitializationOptions(params.sessionId),
-						)
-						if (controller.task) {
-							await recordTaskForSession(params.sessionId, controller.task.taskId)
-							session.taskId = controller.task.taskId
-						}
-					} else {
-						subscribeToCurrentTask()
-						await task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
-					}
-				}
+				const task = controller.task!
+				subscribeToCurrentTask()
+				await this.bindPromptTask(params.sessionId, task)
+				await task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
 			} else if (hasActiveTask && controller.task) {
 				// Continue existing task - respond to pending ask
 				Logger.debug("[DiracAgent] Continuing existing task:", controller.task.taskId)
@@ -1820,65 +1753,17 @@ export class DiracAgent implements acp.Agent {
 						imageContent,
 						fileResources,
 					)
-				} else if (controller.task.taskState.didAttemptCompletion) {
-					// The completion card resolves session/prompt slightly before the core task
-					// finishes publishing its terminal state. Wait until that handoff clears stale
-					// response fields before submitting the follow-up. Completed tasks intentionally
-					// retain COMPLETED while waitForFollowUp() accepts the next message.
-					await pWaitFor(
-						() => {
-							const status = controller.task?.taskState.status
-							return status === TaskStatus.COMPLETED || status === TaskStatus.AWAITING_USER_INPUT
-						},
-						{ interval: 10 },
-					)
-
-					// A completion response ends the ACP turn, not the conversation. The core
-					// task remains alive in waitForFollowUp() so the next session/prompt can
-					// continue with the same API conversation history.
-					Logger.debug("[DiracAgent] Continuing completed task in existing ACP session:", controller.task.taskId)
-					subscribeToCurrentTask()
-					await controller.task.submitCardResponse(
-						"",
-						DiracAskResponse.MESSAGE,
-						textContent,
-						imageContent,
-						fileResources,
-					)
 				} else {
-					Logger.debug("[DiracAgent] Starting new task (active task cannot accept a follow-up)")
-					await controller.initTask(
-						textContent,
-						imageContent,
-						fileResources,
-						undefined,
-						undefined,
-						undefined,
-						undefined,
-						this.activePromptInitializationOptions(params.sessionId),
-					)
-					if (controller.task) {
-						await recordTaskForSession(params.sessionId, controller.task.taskId)
-						session.taskId = controller.task.taskId
-						const replayEndIndex = controller.task.messageStateHandler.getDiracMessages().length
-						subscribeToCurrentTask()
-						await bridge.replayTaskMessages(
-							controller,
-							params.sessionId,
-							sessionState,
-							resolvePrompt!,
-							rejectPrompt!,
-							promptResolved,
-							0,
-							replayEndIndex,
-						)
-					}
+					// Restoration can clear the live task on failure; retain its ID for the next prompt's retry.
+					session.isLoadedFromHistory = true
+					session.loadedTaskId = controller.task.taskId
+					const task = await controller.prepareTaskForFollowUp(this.activePromptInitializationOptions(params.sessionId))
+					subscribeToCurrentTask()
+					await this.bindPromptTask(params.sessionId, task)
+					await task.submitCardResponse("", DiracAskResponse.MESSAGE, textContent, imageContent, fileResources)
 				}
 			} else {
-				// Start new task — consume reservedTaskId (sessionId) so the task's taskId
-				// equals the sessionId, enabling loadSession to find it without a map lookup.
-				const taskIdOverride = session.reservedTaskId
-				session.reservedTaskId = undefined
+				// The ACP session ID is the stable conversation ULID, not the backing task ID.
 				Logger.debug("[DiracAgent] Starting new task")
 				await controller.initTask(
 					textContent,
@@ -1886,12 +1771,15 @@ export class DiracAgent implements acp.Agent {
 					fileResources,
 					undefined,
 					undefined,
-					taskIdOverride,
+					params.sessionId,
 					undefined,
 					this.activePromptInitializationOptions(params.sessionId),
 				)
 				session.taskId = controller.task?.taskId
+				this.persistSessionOverrides(params.sessionId)
 			}
+			session.isLoadedFromHistory = false
+			session.loadedTaskId = undefined
 
 			if (controller.task && !subscribedTask) {
 				const replayEndIndex = controller.task.messageStateHandler.getDiracMessages().length

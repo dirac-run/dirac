@@ -54,6 +54,8 @@ export type SessionRuntimeConfig = {
 	settings: Partial<Settings>
 	cwd?: string
 	createdAt?: number
+	/** Backing task ID, absent only before the first prompt or in legacy records. */
+	taskId?: string
 }
 
 type PersistedSessionRuntimeConfigV1 = {
@@ -61,6 +63,7 @@ type PersistedSessionRuntimeConfigV1 = {
 	settings: Partial<Settings>
 	cwd?: string
 	createdAt?: number
+	taskId?: string
 }
 
 type PersistedSessionRuntimeConfigMap = Record<string, PersistedSessionRuntimeConfigV1>
@@ -95,11 +98,7 @@ function readPersistedRuntimeConfig(dataDir: string, sessionId: string): Persist
 	}
 }
 
-function writePersistedRuntimeConfig(
-	dataDir: string,
-	sessionId: string,
-	config: PersistedSessionRuntimeConfigV1 | null,
-): void {
+function writePersistedRuntimeConfig(dataDir: string, sessionId: string, config: PersistedSessionRuntimeConfigV1 | null): void {
 	const filePath = sessionRuntimeConfigPath(dataDir, sessionId)
 	fs.mkdirSync(path.dirname(filePath), { recursive: true })
 	const temporaryPath = `${filePath}.${process.pid}.tmp`
@@ -142,6 +141,7 @@ export function getSessionRuntimeConfig(dataDir: string, sessionId: string): Ses
 		settings: copyTaskRuntimeSettings(persisted.settings),
 		cwd: persisted.cwd,
 		createdAt: persisted.createdAt,
+		taskId: persisted.taskId,
 	}
 }
 
@@ -151,6 +151,7 @@ export function setSessionRuntimeConfig(dataDir: string, sessionId: string, runt
 		settings: copyTaskRuntimeSettings(runtimeConfig.settings),
 		cwd: runtimeConfig.cwd,
 		createdAt: runtimeConfig.createdAt,
+		taskId: runtimeConfig.taskId,
 	})
 }
 

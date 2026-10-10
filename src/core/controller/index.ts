@@ -233,6 +233,10 @@ export class Controller implements ITaskHost {
 		return this.taskController.reinitExistingTaskFromId(taskId, this.resolveTaskInitializationOptions(initializationOptions))
 	}
 
+	async prepareTaskForFollowUp(initializationOptions?: TaskInitializationOptions): Promise<Task> {
+		return this.taskController.prepareTaskForFollowUp(this.resolveTaskInitializationOptions(initializationOptions))
+	}
+
 	async cancelTask(): Promise<void> {
 		if (this.goalController.hasRunningCoordinator) {
 			await this.goalController.cancelCurrentExecution("Cancelled by user")

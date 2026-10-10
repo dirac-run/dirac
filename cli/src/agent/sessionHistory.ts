@@ -41,15 +41,16 @@ function getTaskHistory(): HistoryItem[] {
 	return (StateManager.get().getGlobalStateKey("taskHistory") || []) as HistoryItem[]
 }
 
-export function resolveHistorySession(sessionId: string): HistorySessionResolution {
+export function resolveHistorySession(sessionId: string, taskId?: string): HistorySessionResolution | undefined {
 	const taskHistory = getTaskHistory()
-	const matchingConversationItems = taskHistory
-		.filter((item) => item.ulid === sessionId)
-		.sort((a, b) => (b.ts || 0) - (a.ts || 0))
-	const historyItem = matchingConversationItems[0] || taskHistory.find((item) => item.id === sessionId)
+	const historyItem = taskId
+		? taskHistory.find((item) => item.id === taskId)
+		: taskHistory.filter((item) => item.ulid === sessionId).sort((a, b) => (b.ts || 0) - (a.ts || 0))[0] ||
+			taskHistory.find((item) => item.id === sessionId)
 
 	if (!historyItem) {
-		throw new Error(`Session not found: ${sessionId}`)
+		if (taskId) throw new Error(`Task ${taskId} not found for ACP session ${sessionId}`)
+		return undefined
 	}
 
 	return {

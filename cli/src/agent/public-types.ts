@@ -169,11 +169,9 @@ export interface DiracAcpSession {
 	lastActivityAt: number
 	/** Human-readable title derived from the first user exchange. */
 	title?: string
-	/** Whether this session was loaded from history (needs resume on first prompt) */
+	/** Whether the next prompt must restore history, including retries after a failed follow-up restoration. */
 	isLoadedFromHistory?: boolean
-	/** TaskId reserved for the first initTask call in this session (sessionId itself). Consumed on first use. */
-	reservedTaskId?: string
-	/** Resolved taskId stashed by loadSession for use by the first prompt's resume path. */
+	/** Backing task ID retained until history restoration and follow-up submission succeed. */
 	loadedTaskId?: string
 	/** Whether cancelTask() reinitialized persisted history and the next ACP prompt must wake that resume flow. */
 	awaitingCancelledTaskResume?: boolean

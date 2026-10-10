@@ -12,6 +12,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QUOTES } from "@/shared/quotes"
 import { version as CLI_VERSION } from "../../package.json"
 import { ChatView } from "./ChatView"
+import { TaskStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+import { useTaskContext, useTaskState } from "../context/TaskContext"
+
+type ChatInputProps = Parameters<typeof import("../hooks/useChatInputHandler").useChatInputHandler>[0]
+let latestChatInputProps: ChatInputProps
+vi.mock("../hooks/useChatInputHandler", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../hooks/useChatInputHandler")>()
+	return {
+		useChatInputHandler: (props: ChatInputProps) => {
+			latestChatInputProps = props
+			return actual.useChatInputHandler(props)
+		},
+	}
+})
 
 // Helper to wait for async state updates
 const delay = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -146,6 +161,7 @@ vi.mock("../utils/input", () => ({
 vi.mock("../utils/parser", () => ({
 	jsonParseSafe: vi.fn((_text: string, defaultValue: unknown) => defaultValue),
 	parseImagesFromInput: vi.fn((text: string) => ({ prompt: text, imagePaths: [] })),
+	processImagePaths: vi.fn(async (images: string[]) => images),
 }))
 
 vi.mock("../utils/display", () => ({
@@ -319,5 +335,61 @@ describe("ChatView UI State During Exit", () => {
 		expect(frameAfter).toContain("Auto-approve")
 		// Input should be hidden
 		expect(frameAfter).not.toContain("Input:")
+	})
+})
+describe("ChatView conversation follow-ups", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		shutdownMockState.reset()
+	})
+
+	it.each([
+		TaskStatus.COMPLETED,
+		TaskStatus.CANCELLED,
+		TaskStatus.IDLE,
+	])("submits input to the existing %s conversation rather than starting a new task", async (taskStatus) => {
+		const task = { taskId: "original-task", submitCardResponse: vi.fn(async () => undefined) }
+		const controller = { task, initTask: vi.fn(), prepareTaskForFollowUp: vi.fn(async () => task) }
+		vi.mocked(useTaskState).mockReturnValue({ diracMessages: [], mode: "act", taskStatus } as any)
+		vi.mocked(useTaskContext).mockReturnValue({ controller } as any)
+		const { unmount } = render(<ChatView controller={controller} />)
+		await latestChatInputProps.handleSubmit("follow up using prior context", [])
+		expect(controller.prepareTaskForFollowUp).toHaveBeenCalledOnce()
+		expect(task.submitCardResponse).toHaveBeenCalledWith(
+			"",
+			DiracAskResponse.MESSAGE,
+			"follow up using prior context",
+			undefined,
+		)
+		expect(controller.initTask).not.toHaveBeenCalled()
+		unmount()
+	})
+
+	it("submits a reopened completed chat to the restored backing task", async () => {
+		const oldTask = { taskId: "saved-task", submitCardResponse: vi.fn() }
+		const restored = { taskId: "saved-task", submitCardResponse: vi.fn(async () => undefined) }
+		const controller = {
+			task: oldTask,
+			initTask: vi.fn(),
+			prepareTaskForFollowUp: vi.fn(async () => restored),
+		}
+		vi.mocked(useTaskState).mockReturnValue({ diracMessages: [], mode: "act", taskStatus: TaskStatus.COMPLETED } as any)
+		vi.mocked(useTaskContext).mockReturnValue({ controller } as any)
+		const { unmount } = render(<ChatView controller={controller} />)
+		await latestChatInputProps.handleSubmit("continue tomorrow", ["image.png"])
+		expect(restored.submitCardResponse).toHaveBeenCalledWith("", DiracAskResponse.MESSAGE, "continue tomorrow", ["image.png"])
+		expect(oldTask.submitCardResponse).not.toHaveBeenCalled()
+		expect(controller.initTask).not.toHaveBeenCalled()
+		unmount()
+	})
+
+	it("starts a task only when there is no active conversation", async () => {
+		const controller = { initTask: vi.fn(async () => undefined) }
+		vi.mocked(useTaskState).mockReturnValue({ diracMessages: [], mode: "act", taskStatus: TaskStatus.IDLE } as any)
+		vi.mocked(useTaskContext).mockReturnValue({ controller } as any)
+		const { unmount } = render(<ChatView controller={controller} />)
+		await latestChatInputProps.handleSubmit("new conversation", [])
+		expect(controller.initTask).toHaveBeenCalledWith("new conversation", undefined)
+		unmount()
 	})
 })

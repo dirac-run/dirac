@@ -37,6 +37,8 @@ vi.mock("@/core/controller", () => ({
 		dispose = vi.fn()
 		initTask = vi.fn(async (...args: any[]) => {
 			this.task = {
+				taskId: "pinned-task",
+				submitCardResponse: vi.fn(async () => undefined),
 				taskState: { pinnedContext: args[7]?.pinnedContext },
 				messageStateHandler: {
 					getDiracMessages: vi.fn(() => []),
@@ -53,6 +55,8 @@ vi.mock("@/core/controller", () => ({
 		})
 		reinitExistingTaskFromId = vi.fn(async (...args: any[]) => {
 			this.task = {
+				taskId: args[0],
+				submitCardResponse: vi.fn(async () => undefined),
 				taskState: { pinnedContext: args[1]?.pinnedContext, status: "completed" },
 				messageStateHandler: {
 					getDiracMessages: vi.fn(() => []),
@@ -63,6 +67,10 @@ vi.mock("@/core/controller", () => ({
 				canAcceptSteeringMessage: vi.fn(() => false),
 			}
 			this.taskRunPromise = Promise.resolve()
+		})
+		prepareTaskForFollowUp = vi.fn(async (options: any) => {
+			await this.reinitExistingTaskFromId(this.task.taskId, options)
+			return this.task
 		})
 		onTaskReplaced = vi.fn(() => () => undefined)
 		constructor() {
@@ -137,7 +145,8 @@ describe("pinned ACP messages", () => {
 			sessionId: session.sessionId,
 			prompt: [{ type: "text", text: "replacement" }],
 		})
-		expect(controller.initTask.mock.calls[1][7].pinnedContext).toContain("Use the pinned requirement.")
+		expect(controller.initTask).toHaveBeenCalledOnce()
+		expect(controller.reinitExistingTaskFromId.mock.calls[0][1].pinnedContext).toContain("Use the pinned requirement.")
 
 		const loadedSession = await agent.newSession({ cwd, mcpServers: [] } as any)
 		const loadedController = controllerInstances.at(-1)

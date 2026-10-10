@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
@@ -272,7 +273,11 @@ describe("ACP protocol conformance over raw stdio", () => {
 				expect.objectContaining({ id: "reasoning_effort", currentValue: "high" }),
 			]),
 		)
-		expect((secondSession.result?.configOptions as Array<Record<string, unknown>>).find((option) => option.id === "thinking_budget")).toBeUndefined()
+		expect(
+			(secondSession.result?.configOptions as Array<Record<string, unknown>>).find(
+				(option) => option.id === "thinking_budget",
+			),
+		).toBeUndefined()
 	})
 
 	it("switches provider/model atomically and rejects incompatible model requests without mutation", async () => {
@@ -438,6 +443,78 @@ describe("ACP protocol conformance over raw stdio", () => {
 		45_000,
 	)
 
+	it("sends saved model context on the first follow-up after a process restart", async () => {
+		const requests: Array<{ messages: unknown[] }> = []
+		const server = createServer(async (request, response) => {
+			if (request.method === "GET") {
+				response.setHeader("Content-Type", "application/json")
+				response.end(JSON.stringify({ data: [{ id: "test-model", object: "model" }] }))
+				return
+			}
+			let body = ""
+			for await (const chunk of request) body += chunk
+			requests.push(JSON.parse(body))
+			response.setHeader("Content-Type", "text/event-stream")
+			response.end(
+				`data: ${JSON.stringify({
+					id: `completion-${requests.length}`,
+					object: "chat.completion.chunk",
+					choices: [
+						{
+							index: 0,
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: `respond-${requests.length}`,
+										type: "function",
+										function: {
+											name: "respond",
+											arguments: JSON.stringify({ operation: "complete", text: "Follow-up complete." }),
+										},
+									},
+								],
+							},
+							finish_reason: "tool_calls",
+						},
+					],
+				})}\n\ndata: [DONE]\n\n`,
+			)
+		})
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+		const address = server.address() as { port: number }
+		try {
+			const configDir = await temporaryDirectory("dirac-acp-config-")
+			const cwd = await temporaryDirectory("dirac-acp-workspace-")
+			const sessionId = crypto.randomUUID()
+			await seedPersistedSession(configDir, cwd, sessionId, "test-model", "openai")
+			const client = createRawClient(configDir, cwd)
+			await client.initialize()
+			await client.request("providers/set", {
+				providerId: "openai",
+				apiType: "openai",
+				baseUrl: `http://127.0.0.1:${address.port}/v1`,
+				headers: { Authorization: "Bearer local-test" },
+			})
+			expect(await client.request("session/load", { sessionId, cwd, mcpServers: [] })).toHaveProperty("result")
+			const followUp = await client.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "Continue the saved work." }],
+			})
+			expect(followUp).toMatchObject({ result: { stopReason: "end_turn" } })
+			expect(requests.length).toBeGreaterThan(0)
+			const modelContext = JSON.stringify(requests[0].messages)
+			expect(modelContext).toContain("Remember the established context: continuity-marker-257")
+			expect(modelContext).toContain("Previous assistant response")
+			expect(modelContext).toContain("Continue the saved work.")
+			await client.request("session/close", { sessionId })
+			await client.close()
+		} finally {
+			server.closeAllConnections()
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+		}
+	}, 30_000)
+
 	it("loads and replays a persisted session in a new ACP process", async () => {
 		const configDir = await temporaryDirectory("dirac-acp-config-")
 		const cwd = await temporaryDirectory("dirac-acp-workspace-")
@@ -572,16 +649,18 @@ async function seedPersistedSession(
 	cwd: string,
 	sessionId: string,
 	modelId = "deepseek-flash",
+	provider = "deepseek",
 ): Promise<void> {
 	const timestamp = Date.now()
-	const taskDirectory = path.join(configDir, "data", "tasks", sessionId)
+	const taskId = `persisted-task-${timestamp}`
+	const taskDirectory = path.join(configDir, "data", "tasks", taskId)
 	await mkdir(path.join(configDir, "data", "state"), { recursive: true })
 	await mkdir(taskDirectory, { recursive: true })
 	await writeFile(
 		path.join(configDir, "data", "state", "taskHistory.json"),
 		JSON.stringify([
 			{
-				id: sessionId,
+				id: taskId,
 				ulid: sessionId,
 				ts: timestamp,
 				task: "Persisted ACP session",
@@ -593,7 +672,13 @@ async function seedPersistedSession(
 			},
 		]),
 	)
-	await writeFile(path.join(taskDirectory, "api_conversation_history.json"), "[]")
+	await writeFile(
+		path.join(taskDirectory, "api_conversation_history.json"),
+		JSON.stringify([
+			{ role: "user", content: [{ type: "text", text: "Remember the established context: continuity-marker-257" }] },
+			{ role: "assistant", content: [{ type: "text", text: "Previous assistant response" }] },
+		]),
+	)
 	await writeFile(
 		path.join(configDir, "data", "acp-session-runtime-config.json"),
 		JSON.stringify({
@@ -606,8 +691,12 @@ async function seedPersistedSession(
 					autoApproveAllToggled: false,
 					yoloModeToggled: false,
 					planActSeparateModelsSetting: false,
-					planModeApiProvider: "deepseek",
-					actModeApiProvider: "deepseek",
+					planModeApiProvider: provider,
+					actModeApiProvider: provider,
+					planModeOpenAiModelId: modelId,
+					actModeOpenAiModelId: modelId,
+					planModeOpenAiModelInfo: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true },
+					actModeOpenAiModelInfo: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true },
 					planModeApiModelId: modelId,
 					actModeApiModelId: modelId,
 					planModeThinkingBudgetTokens: 0,

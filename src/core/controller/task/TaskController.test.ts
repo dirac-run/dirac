@@ -485,3 +485,66 @@ describe("TaskController task isolation", () => {
 		sinon.assert.calledOnce(postStateToWebview)
 	})
 })
+describe("TaskController follow-up readiness", () => {
+	afterEach(() => sinon.restore())
+
+	function taskAt(status: string, runOutcome?: object) {
+		return {
+			taskId: "persisted-task",
+			stateView: { status, runOutcome, didAttemptCompletion: false },
+		} as any
+	}
+
+	it("keeps live completed and restored cancelled tasks waiting on the same conversation", async () => {
+		const controller = new (TaskController as any)({}) as TaskController
+		const restore = sinon.stub(controller, "reinitExistingTaskFromId")
+		for (const status of ["completed", "cancelled", "awaiting_user_input"]) {
+			const task = taskAt(status)
+			controller.task = task
+			assert.equal(await controller.prepareTaskForFollowUp(), task)
+		}
+		sinon.assert.notCalled(restore)
+	})
+
+	it("waits for completion publication before accepting a live follow-up", async () => {
+		const clock = sinon.useFakeTimers()
+		const controller = new (TaskController as any)({}) as TaskController
+		const task = taskAt("executing_tool")
+		task.stateView.didAttemptCompletion = true
+		controller.task = task
+		let ready = false
+		const preparation = controller.prepareTaskForFollowUp().then(() => {
+			ready = true
+		})
+		await clock.tickAsync(10)
+		assert.equal(ready, false)
+		task.stateView.status = "completed"
+		await clock.tickAsync(10)
+		await preparation
+		assert.equal(ready, true)
+	})
+
+	it("restores ended runs using the same task ID and owning runtime", async () => {
+		const controller = new (TaskController as any)({}) as TaskController
+		const runtime = { runtimeConfigurationOverrides: { mode: "plan" } } as const
+		const restored = taskAt("cancelled")
+		const restore = sinon.stub(controller, "reinitExistingTaskFromId").callsFake(async () => {
+			controller.task = restored
+		})
+		for (const kind of ["completed", "failed", "cancelled", "interrupted"]) {
+			controller.task = taskAt("completed", { kind })
+			assert.equal(await controller.prepareTaskForFollowUp(runtime), restored)
+			sinon.assert.calledWithExactly(restore, "persisted-task", runtime)
+		}
+		assert.equal(restore.callCount, 4)
+	})
+
+	it("surfaces restoration failures instead of starting a fresh task", async () => {
+		const controller = new (TaskController as any)({}) as TaskController
+		controller.task = taskAt("idle", { kind: "failed" })
+		const initTask = sinon.stub(controller, "initTask")
+		sinon.stub(controller, "reinitExistingTaskFromId").rejects(new Error("history unreadable"))
+		await assert.rejects(controller.prepareTaskForFollowUp(), /history unreadable/)
+		sinon.assert.notCalled(initTask)
+	})
+})

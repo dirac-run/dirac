@@ -82,12 +82,14 @@ describe("ACP session runtime configuration", () => {
 			},
 			cwd: "/workspace",
 			createdAt: 123,
+			taskId: "timestamp-task-id",
 		})
 
 		const restored = getSessionRuntimeConfig(dataDir, sessionId)
 		expect(restored).toMatchObject({
 			cwd: "/workspace",
 			createdAt: 123,
+			taskId: "timestamp-task-id",
 			settings: {
 				mode: "act",
 				actModeApiProvider: "deepseek",
@@ -144,11 +146,10 @@ describe("ACP session runtime configuration", () => {
 		fs.writeFileSync(path.join(runtimeDirectory, "malformed.json"), "{not-json")
 		expect(() => getSessionRuntimeConfig(dataDir, "malformed")).toThrow("runtime configuration is malformed")
 
-		fs.writeFileSync(
-			path.join(runtimeDirectory, "future.json"),
-			JSON.stringify({ version: 2, settings: { mode: "act" } }),
+		fs.writeFileSync(path.join(runtimeDirectory, "future.json"), JSON.stringify({ version: 2, settings: { mode: "act" } }))
+		expect(() => getSessionRuntimeConfig(dataDir, "future")).toThrow(
+			"Unsupported ACP session runtime configuration version: 2",
 		)
-		expect(() => getSessionRuntimeConfig(dataDir, "future")).toThrow("Unsupported ACP session runtime configuration version: 2")
 	})
 
 

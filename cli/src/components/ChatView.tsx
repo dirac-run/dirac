@@ -536,7 +536,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			if (!ctrl?.task) return
 			const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
 			setLastError(null)
-			await ctrl.task.submitCardResponse("", responseType, expandedText, images)
+			const task = await ctrl.prepareTaskForFollowUp()
+			await task.submitCardResponse("", responseType, expandedText, images)
 			resetInput()
 		},
 		[ctrl, pastedTexts, resetInput, setLastError],
@@ -553,18 +554,30 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	const isResumeChoiceActive = taskState.taskStatus === TaskStatus.CANCELLED
 	const submitResumeTextResponse = useCallback(
 		async (text: string, images: string[]) => {
-			if (!isResumeChoiceActive) return false
+			if (!isResumeChoiceActive && !isCompletionChoiceActive) return false
 			const trimmedText = text.trim()
 			const normalizedText = trimmedText.toLowerCase()
 			if (normalizedText === "q" || normalizedText === "quit" || normalizedText === "exit") {
 				handleExit()
 				return true
 			}
-			const validImages = images.length > 0 ? await processImagePaths(images, footerStatus.workspacePath) : undefined
-			await submitResumeResponse(DiracAskResponse.MESSAGE, trimmedText, validImages)
-			return true
+			setIsProcessing(true)
+			try {
+				const validImages = images.length > 0 ? await processImagePaths(images, footerStatus.workspacePath) : undefined
+				await submitResumeResponse(DiracAskResponse.MESSAGE, trimmedText, validImages)
+				return true
+			} finally {
+				setIsProcessing(false)
+			}
 		},
-		[isResumeChoiceActive, submitResumeResponse, handleExit, footerStatus.workspacePath],
+		[
+			isResumeChoiceActive,
+			isCompletionChoiceActive,
+			submitResumeResponse,
+			handleExit,
+			footerStatus.workspacePath,
+			setIsProcessing,
+		],
 	)
 
 	useEffect(() => {
@@ -751,10 +764,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			try {
 				const validImages = await processImagePaths(images, footerStatus.workspacePath)
 				setTerminalTitle(expandedText.trim())
-				await ctrl.initTask(expandedText.trim(), validImages.length > 0 ? validImages : undefined)
+				if (ctrl.task) {
+					const task = await ctrl.prepareTaskForFollowUp()
+					await task.submitCardResponse(
+						"",
+						DiracAskResponse.MESSAGE,
+						expandedText.trim(),
+						validImages.length > 0 ? validImages : undefined,
+					)
+				} else {
+					await ctrl.initTask(expandedText.trim(), validImages.length > 0 ? validImages : undefined)
+				}
 				resetInput()
 			} catch (_error) {
-				reportInteractionError("Failed to start task", _error)
+				reportInteractionError("Failed to send message", _error)
 			} finally {
 				setIsProcessing(false)
 			}

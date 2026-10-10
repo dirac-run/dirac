@@ -1,5 +1,6 @@
 import { cleanupLegacyCheckpoints } from "@integrations/checkpoints/CheckpointMigration"
 import type { HistoryItem } from "@shared/HistoryItem"
+import { TaskStatus } from "@shared/ExtensionMessage"
 import { type Settings } from "@shared/storage/state-keys"
 import pTimeout from "p-timeout"
 import pWaitFor from "p-wait-for"
@@ -117,6 +118,35 @@ export class TaskController {
 	onTaskReplaced(listener: (taskId: string) => void | Promise<void>): () => void {
 		this.taskReplacementListeners.add(listener)
 		return () => this.taskReplacementListeners.delete(listener)
+	}
+
+	/** Return a live task ready for follow-up input, restoring ended runs without losing their conversation. */
+	async prepareTaskForFollowUp(initializationOptions?: TaskInitializationOptions): Promise<Task> {
+		const task = this._task
+		if (!task) throw new Error("No task available for follow-up")
+
+		// Completion output can reach the client before the loop clears its previous response.
+		if (task.stateView.didAttemptCompletion && !task.stateView.runOutcome) {
+			await pWaitFor(
+				() =>
+					this._task !== task ||
+					task.stateView.runOutcome !== undefined ||
+					task.stateView.status === TaskStatus.COMPLETED ||
+					task.stateView.status === TaskStatus.AWAITING_USER_INPUT,
+				{ interval: 10 },
+			)
+		}
+		if (this._task !== task) throw new Error(`Task ${task.taskId} changed while preparing a follow-up`)
+
+		const waitingForInput =
+			task.stateView.status === TaskStatus.COMPLETED ||
+			task.stateView.status === TaskStatus.CANCELLED ||
+			task.stateView.status === TaskStatus.AWAITING_USER_INPUT
+		if (!task.stateView.runOutcome && waitingForInput) return task
+
+		await this.reinitExistingTaskFromId(task.taskId, initializationOptions)
+		if (!this._task) throw new Error(`Task ${task.taskId} was not restored for follow-up`)
+		return this._task
 	}
 
 	private reconstructionInitializationOptions(task: Task): TaskInitializationOptions {
@@ -344,6 +374,8 @@ export class TaskController {
 			}
 			throw error
 		}
+
+		this.currentConversationUlid = this._task.ulid
 
 		if (historyItem) {
 			await this.startHistoricalTaskAndWaitForRestore(this._task)
