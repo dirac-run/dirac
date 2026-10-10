@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.19",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.5.18",
+  "analyzedCommit": "224b8acbdf5609d417dada1a2cb27a011382ceb2",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-224b8acb",
+      "title": "persist task IDs and reinitialize restored sessions",
+      "category": "fix",
+      "evidence": [
+        "224b8acbdf5609d417dada1a2cb27a011382ceb2"
+      ]
+    },
+    {
+      "id": "fix-3da9e1c4",
+      "title": "preserve current user requests across compaction",
+      "category": "fix",
+      "evidence": [
+        "3da9e1c445e7c94de85f622892a2ae5b5840509b"
+      ]
+    },
+    {
+      "id": "fix-65d52c5a",
+      "title": "add unbiased automatic model fetch",
+      "category": "fix",
+      "evidence": [
+        "65d52c5a043c321bfe21b16ad96248323907201f"
+      ]
+    },
+    {
+      "id": "fix-9d95c740",
+      "title": "add account persistence",
+      "category": "fix",
+      "evidence": [
+        "9d95c7407e279d3e7463b5c25d722d6d0896f5f8"
+      ]
+    }
+  ]
+}
