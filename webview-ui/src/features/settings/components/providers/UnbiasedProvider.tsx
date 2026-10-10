@@ -1,9 +1,9 @@
-import { unbiasedModels } from "@shared/api"
+import { type ModelInfo, unbiasedDefaultModelId, unbiasedModels } from "@shared/api"
 import { Mode } from "@shared/ExtensionMessage"
 import { EmptyRequest, StringRequest } from "@shared/proto/dirac/common"
 import { UnbiasedAuthEvent } from "@shared/proto/dirac/models"
 import { useEffect, useRef, useState } from "react"
-import { normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
+import { fromProtobufModelInfo } from "@shared/proto-conversions/models/typeConversion"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { FileServiceClient, ModelsServiceClient, UiServiceClient } from "@/shared/api/grpc-client"
 import { Button } from "@/shared/ui/button"
@@ -20,10 +20,60 @@ interface UnbiasedProviderProps {
 
 export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: UnbiasedProviderProps) {
 	const { apiConfiguration, unbiasedWorkloadName, pendingApiConfigurationUpdates } = useSettingsStore()
-	const isAuthenticated = !!apiConfiguration?.unbiasedApiKey
-	const workloadName = Object.hasOwn(pendingApiConfigurationUpdates, "unbiasedApiKey") ? undefined : unbiasedWorkloadName
+	const apiKey = apiConfiguration?.unbiasedApiKey
+	const isAuthenticated = !!apiKey
+	const isKeyPending = Object.hasOwn(pendingApiConfigurationUpdates, "unbiasedApiKey")
+	const workloadName = isKeyPending ? undefined : unbiasedWorkloadName
 	const { handleFieldChange, handleModeFieldChange } = useApiConfigurationHandlers()
-	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
+	const [catalog, setCatalog] = useState<{ apiKey: string; models: Record<string, ModelInfo> }>()
+	const [isLoadingModels, setIsLoadingModels] = useState(false)
+	const [modelsError, setModelsError] = useState<string>()
+	const models: Record<string, ModelInfo> =
+		catalog && catalog.apiKey === apiKey && !isKeyPending ? catalog.models : unbiasedModels
+	const configuredId = currentMode === "plan" ? apiConfiguration?.planModeApiModelId : apiConfiguration?.actModeApiModelId
+	const selectedModelId =
+		configuredId && (models[configuredId] || configuredId === "pareto" || configuredId.startsWith("pareto-"))
+			? configuredId
+			: unbiasedDefaultModelId
+	const selectedModelInfo: ModelInfo = models[selectedModelId] || { supportsPromptCache: false }
+
+	useEffect(() => {
+		setModelsError(undefined)
+		if (!apiKey || isKeyPending || !showModelOptions) {
+			setCatalog(undefined)
+			setIsLoadingModels(false)
+			return
+		}
+		let cancelled = false
+		setIsLoadingModels(true)
+		ModelsServiceClient.refreshUnbiasedModelsRpc(EmptyRequest.create({})).then(
+			(response) => {
+				if (cancelled) return
+				setCatalog({
+					apiKey,
+					models: Object.fromEntries(
+						Object.entries(response.models).map(([id, info]) => [
+							id,
+							{
+								...fromProtobufModelInfo(info),
+								name: info.name,
+								supportsTools: info.supportsTools,
+							},
+						]),
+					),
+				})
+				setIsLoadingModels(false)
+			},
+			() => {
+				if (cancelled) return
+				setModelsError("Could not load Unbiased models; showing default metadata.")
+				setIsLoadingModels(false)
+			},
+		)
+		return () => {
+			cancelled = true
+		}
+	}, [apiKey, isKeyPending, showModelOptions])
 	const isSubscription = isAuthenticated && workloadName != null
 	// Hide per-token prices rather than labeling a paid monthly subscription as "Free".
 	const modelInfo = isSubscription
@@ -187,7 +237,8 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 				<>
 					<ModelSelector
 						label="Model"
-						models={unbiasedModels}
+						key={Object.keys(models).join(",")}
+						models={models}
 						onChange={(event: any) =>
 							handleModeFieldChange(
 								{ plan: "planModeApiModelId", act: "actModeApiModelId" },
@@ -197,6 +248,16 @@ export function UnbiasedProvider({ showModelOptions, isPopup, currentMode }: Unb
 						}
 						selectedModelId={selectedModelId}
 					/>
+					{isLoadingModels && (
+						<p className="text-xs" role="status">
+							Loading Unbiased models…
+						</p>
+					)}
+					{modelsError && (
+						<p className="text-xs" role="alert">
+							{modelsError}
+						</p>
+					)}
 					<ModelInfoView isPopup={isPopup} modelInfo={modelInfo} selectedModelId={selectedModelId} />
 					<p className="text-xs">
 						{isSubscription

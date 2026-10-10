@@ -11,9 +11,11 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { formatOpenAiCompatibleUsage } from "../transform/openai-usage"
 import { ApiStream } from "../transform/stream"
 import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
+import { getCachedUnbiasedModels } from "../unbiased/unbiased-models"
 
 interface UnbiasedHandlerOptions extends CommonApiHandlerOptions {
 	unbiasedApiKey?: string
+	apiModelId?: string
 }
 
 export class UnbiasedHandler implements ApiHandler {
@@ -58,7 +60,7 @@ export class UnbiasedHandler implements ApiHandler {
 		const model = this.getModel()
 		const stream = await this.ensureClient().chat.completions.create(
 			{
-				model: unbiasedDefaultModelId,
+				model: model.id,
 				max_tokens: model.info.maxTokens,
 				messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages, undefined, true)],
 				stream: true,
@@ -86,11 +88,18 @@ export class UnbiasedHandler implements ApiHandler {
 	}
 
 	getModel(): { id: string; info: ModelInfo } {
-		// Other providers may leave their model ID in the shared mode field.
-		// Unbiased accepts only pareto, regardless of the previous selection.
+		const models = getCachedUnbiasedModels(this.options.unbiasedApiKey)
+		const configuredId = this.options.apiModelId
+		// Ignore an unrelated provider's shared mode ID, but retain Pareto versions across cache expiry/restarts.
+		const id =
+			configuredId && (models?.[configuredId] || configuredId === "pareto" || configuredId.startsWith("pareto-"))
+				? configuredId
+				: unbiasedDefaultModelId
+		const modelInfo: ModelInfo =
+			models?.[id] || (id === unbiasedDefaultModelId ? unbiasedModels.pareto : { supportsPromptCache: false })
 		const info = this.isSubscription
-			? { ...unbiasedModels.pareto, inputPrice: 0, outputPrice: 0, cacheReadsPrice: 0, cacheWritesPrice: 0 }
-			: unbiasedModels.pareto
-		return { id: unbiasedDefaultModelId, info }
+			? { ...modelInfo, inputPrice: 0, outputPrice: 0, cacheReadsPrice: 0, cacheWritesPrice: 0 }
+			: modelInfo
+		return { id, info }
 	}
 }

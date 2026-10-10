@@ -283,11 +283,12 @@ const PROVIDER_REGISTRY: Record<
 			reasoningEffort: mc.reasoningEffort,
 			apiModelId: mc.apiModelId,
 		}),
-	unbiased: (cfg) =>
+	unbiased: (cfg, mc) =>
 		new UnbiasedHandler({
 			onRetryAttempt: cfg.onRetryAttempt,
 			disableRetries: cfg.disableRetries,
 			unbiasedApiKey: cfg.unbiasedApiKey,
+			apiModelId: mc.apiModelId,
 		}),
 	requesty: (cfg, mc) =>
 		new RequestyHandler({

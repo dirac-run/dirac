@@ -8,6 +8,7 @@ import { saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { calculateApiCostAnthropic } from "@/utils/cost"
 import { buildApiHandler, buildApiHandlerForSelection } from "../../index"
 import type { ApiStreamUsageChunk } from "../../transform/stream"
+import * as unbiasedCatalog from "../../unbiased/unbiased-models"
 import { UnbiasedHandler } from "../unbiased"
 
 const emptyStream = { [Symbol.asyncIterator]: async function* () {} }
@@ -70,6 +71,7 @@ describe("Unbiased authentication-specific pricing", () => {
 		globalState = {}
 		const stateManager = {
 			getGlobalStateKey: (key: keyof GlobalState) => globalState[key],
+			getModelsCache: () => null,
 			setGlobalStateBatch: (updates: Partial<GlobalState>) => Object.assign(globalState, updates),
 		} as unknown as StateManager
 		sandbox.stub(StateManager, "isInitialized").returns(true)
@@ -169,9 +171,84 @@ describe("Unbiased authentication-specific pricing", () => {
 		)
 	})
 
+	it("applies subscription accounting to fetched preview metadata without mutating PAYG prices", async () => {
+		const previewId = "pareto-26.10-preview"
+		const previewInfo = {
+			...unbiasedModels.pareto,
+			contextWindow: 1_048_576,
+			inputPrice: 0.8,
+			outputPrice: 3.2,
+			cacheReadsPrice: 0.03,
+		}
+		sandbox.stub(unbiasedCatalog, "getCachedUnbiasedModels").returns({ [previewId]: previewInfo })
+		const handler = new UnbiasedHandler({ unbiasedApiKey: oauthKey, apiModelId: previewId })
+		assert.equal(handler.getModel().id, previewId)
+		assert.equal(handler.getModel().info.contextWindow, 1_048_576)
+		assert.equal(handler.getModel().info.inputPrice, 0)
+		assert.equal((await requestUsage(handler, 4.2)).totalCost, 0)
+		assert.equal(previewInfo.inputPrice, 0.8)
+	})
+
 	it("supports model discovery before account storage is initialized", () => {
 		;(StateManager.isInitialized as sinon.SinonStub).returns(false)
 		assert.deepEqual(new UnbiasedHandler({}).getModel().info, unbiasedModels.pareto)
 		assert.equal((StateManager.get as sinon.SinonStub).called, false)
+	})
+})
+describe("Unbiased dynamic model selection", () => {
+	const previewId = "pareto-26.10-preview"
+	const previewInfo = {
+		...unbiasedModels.pareto,
+		contextWindow: 1_048_576,
+		inputPrice: 0.8,
+		outputPrice: 3.2,
+		cacheReadsPrice: 0.03,
+	}
+
+	beforeEach(() => {
+		sinon.stub(StateManager, "isInitialized").returns(false)
+		sinon.stub(unbiasedCatalog, "getCachedUnbiasedModels").returns({ [previewId]: previewInfo })
+	})
+	afterEach(() => sinon.restore())
+
+	it("sends the selected model ID and its fetched output limit", async () => {
+		const handler = new UnbiasedHandler({ unbiasedApiKey: "private-key", apiModelId: previewId })
+		assert.deepEqual(handler.getModel(), { id: previewId, info: previewInfo })
+		const create = sinon.stub().resolves(emptyStream)
+		Object.defineProperty(handler, "client", { value: { chat: { completions: { create } } } })
+		for await (const _chunk of handler.createMessage("system", [])) {
+		}
+		assert.equal(create.firstCall.args[0].model, previewId)
+		assert.equal(create.firstCall.args[0].max_tokens, 131_072)
+	})
+
+	it("retains a saved Pareto version without fresh catalog metadata", () => {
+		;(unbiasedCatalog.getCachedUnbiasedModels as sinon.SinonStub).returns(undefined)
+		assert.deepEqual(new UnbiasedHandler({ apiModelId: previewId }).getModel(), {
+			id: previewId,
+			info: { supportsPromptCache: false },
+		})
+	})
+
+	it("ignores a different provider's leftover generic model ID", () => {
+		assert.deepEqual(new UnbiasedHandler({ apiModelId: "claude-sonnet-4-6" }).getModel(), {
+			id: "pareto",
+			info: unbiasedModels.pareto,
+		})
+	})
+
+	it("uses the selected IDs through Plan, Act, and Utility dispatch", () => {
+		const configuration = {
+			apiProvider: "unbiased" as const,
+			unbiasedApiKey: "private-key",
+			planModeApiModelId: "pareto-26.9",
+			actModeApiModelId: previewId,
+		}
+		assert.equal(buildApiHandler(configuration, "plan").getModel().id, "pareto-26.9")
+		assert.equal(buildApiHandler(configuration, "act").getModel().id, previewId)
+		assert.equal(
+			buildApiHandlerForSelection(configuration, { provider: "unbiased", modelId: previewId }).getModel().id,
+			previewId,
+		)
 	})
 })

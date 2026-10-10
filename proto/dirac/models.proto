@@ -17,6 +17,8 @@ service ModelsService {
   rpc getVsCodeLmModels(EmptyRequest) returns (VsCodeLmModelsArray);
   // Refreshes and returns OpenRouter models
   rpc refreshOpenRouterModelsRpc(EmptyRequest) returns (OpenRouterCompatibleModelInfo);
+  // Refreshes and returns the authenticated Unbiased model catalog.
+  rpc refreshUnbiasedModelsRpc(EmptyRequest) returns (OpenRouterCompatibleModelInfo);
   // Fetches optional OpenRouter model popularity rankings
   rpc fetchOpenRouterModelRankings(EmptyRequest) returns (StringArray);
   // Refreshes and returns Hugging Face models
