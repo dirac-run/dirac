@@ -18,6 +18,7 @@ import {
 	IUITrait,
 	IWorkspaceTrait,
 	IResponseObserverTrait,
+	TelemetryMetadata,
 } from "../interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment, ToolEnvironmentFactory } from "../interfaces/ToolEnvironmentFactory"
 import { TaskConfig } from "../types/TaskConfig"
@@ -64,7 +65,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 	public readonly logging: ILoggingTrait
 	public readonly context: IDiracContext
 
-	public customMetadata: Record<string, any> = {}
+	public customMetadata: TelemetryMetadata = {}
 	private createdCards: CardHandle[] = []
 
 	constructor(
@@ -107,7 +108,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 			: buildConversationCondensationTrait(config)
 	}
 
-	public getCustomMetadata(): Record<string, any> {
+	public getCustomMetadata(): TelemetryMetadata {
 		return this.customMetadata
 	}
 

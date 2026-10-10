@@ -1,4 +1,10 @@
-import type { MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/beta/messages/messages"
+import type {
+	MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming,
+	BetaRawContentBlockDeltaEvent,
+	BetaRawContentBlockStartEvent,
+	BetaRawMessageStartEvent,
+	BetaRawMessageStreamEvent,
+} from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
 import { FunctionDeclaration as GoogleTool } from "@google/genai"
@@ -16,7 +22,7 @@ import { DiracTool } from "@/shared/tools"
 import { ApiHandler, CommonApiHandlerOptions } from "../"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, ApiStreamChunk, ApiStreamUsageChunk } from "../transform/stream"
 import { GeminiHandler } from "./gemini"
 
 // The installed SDK types do not yet include xhigh, which the API accepts for Opus 5.5.
@@ -51,8 +57,10 @@ export class VertexHandler implements ApiHandler {
 					...this.options,
 					isVertex: true,
 				})
-			} catch (error: any) {
-				throw new Error(`Error creating Vertex AI Gemini handler: ${error.message}`)
+			} catch (error) {
+				throw new Error(
+					`Error creating Vertex AI Gemini handler: ${error instanceof Error ? error.message : String(error)}`,
+				)
 			}
 		}
 		return this.geminiHandler
@@ -79,8 +87,10 @@ export class VertexHandler implements ApiHandler {
 					region: this.options.vertexRegion,
 					defaultHeaders: externalHeaders,
 				})
-			} catch (error: any) {
-				throw new Error(`Error creating Vertex AI Anthropic client: ${error.message}`)
+			} catch (error) {
+				throw new Error(
+					`Error creating Vertex AI Anthropic client: ${error instanceof Error ? error.message : String(error)}`,
+				)
 			}
 		}
 		return this.clientAnthropic
@@ -172,7 +182,10 @@ export class VertexHandler implements ApiHandler {
 	}
 
 	// Parses a single Anthropic stream chunk into Dirac ApiStreamChunk(s).
-	private *parseVertexChunk(chunk: any, lastStartedToolCall: { id: string; name: string; arguments: string }): Generator<any> {
+	private *parseVertexChunk(
+		chunk: BetaRawMessageStreamEvent,
+		lastStartedToolCall: { id: string; name: string; arguments: string },
+	): Generator<ApiStreamChunk> {
 		switch (chunk?.type) {
 			case "message_start":
 				yield this.parseVertexMessageStart(chunk)
@@ -194,7 +207,7 @@ export class VertexHandler implements ApiHandler {
 		}
 	}
 
-	private parseVertexMessageStart(chunk: any): any {
+	private parseVertexMessageStart(chunk: BetaRawMessageStartEvent): ApiStreamUsageChunk {
 		const usage = chunk.message.usage
 		return {
 			type: "usage",
@@ -206,9 +219,9 @@ export class VertexHandler implements ApiHandler {
 	}
 
 	private *parseVertexContentBlockStart(
-		chunk: any,
+		chunk: BetaRawContentBlockStartEvent,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		switch (chunk.content_block.type) {
 			case "thinking":
 				yield { type: "reasoning", reasoning: chunk.content_block.thinking || "" }
@@ -231,9 +244,9 @@ export class VertexHandler implements ApiHandler {
 	}
 
 	private *parseVertexContentBlockDelta(
-		chunk: any,
+		chunk: BetaRawContentBlockDeltaEvent,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
-	): Generator<any> {
+	): Generator<ApiStreamChunk> {
 		switch (chunk.delta.type) {
 			case "signature_delta":
 				yield { type: "reasoning", reasoning: "", signature: chunk.delta.signature }

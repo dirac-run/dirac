@@ -8,14 +8,54 @@ import { MessageEvent as UndiciMessageEvent, WebSocket as UndiciWebSocket } from
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { getErrorMessage } from "@/shared/errors"
 
-// ChatCompletionTool doesn't include web_search; define the shape we use
-interface WebSearchChatTool {
-	type: "web_search"
-	search_context_size?: string
-	filters?: object
-	user_location?: object
-	external_web_access?: boolean
+import type { ApiStreamChunk } from "../transform/stream"
+import type { WebSearchChatTool } from "../transform/tool-call-processor"
+
+/** Loose usage shape: Codex responses add cache_creation_tokens beyond the SDK's ResponseUsage. */
+interface ResponsesUsageDetails {
+	input_tokens?: number
+	output_tokens?: number
+	input_tokens_details?: { cached_tokens?: number; cache_creation_tokens?: number } | null
+	output_tokens_details?: { reasoning_tokens?: number } | null
 }
+
+/** Codex streams emit richer error payloads than the SDK's ResponseErrorEvent declares. */
+interface CodexStreamErrorEvent {
+	type: "error"
+	code?: string | null
+	message?: string
+	param?: string | null
+	status?: number | string
+	status_code?: number | string
+	error?: {
+		message?: string
+		code?: string
+		status?: number | string
+		status_code?: number | string
+		param?: string
+		details?: { param?: string }
+	} | null
+}
+
+/** Codex adds status_code and error.param to the failed Response object. */
+interface CodexResponseExtensions {
+	status_code?: number
+	error?: {
+		message?: string
+		code?: string
+		param?: string
+		status?: number | string
+		status_code?: number | string
+	} | null
+}
+
+interface CodexRateLimitsEvent {
+	type: "codex.rate_limits"
+	[key: string]: unknown
+}
+
+/** Stream event union: SDK events plus the Codex extension events this client parses. */
+export type ResponsesStreamEvent = OpenAI.Responses.ResponseStreamEvent | CodexStreamErrorEvent | CodexRateLimitsEvent
 
 export type OpenAIServiceTier = "default" | "fast" | "priority"
 
@@ -50,7 +90,12 @@ export interface ResponsesWebsocketOptions {
 	extraHeaders?: Record<string, string>
 }
 
-export async function* yieldUsage(info: ModelInfo, usage: any, id?: string, serviceTier?: unknown): AsyncGenerator<any> {
+export async function* yieldUsage(
+	info: ModelInfo,
+	usage: ResponsesUsageDetails | undefined,
+	id?: string,
+	serviceTier?: unknown,
+): AsyncGenerator<ApiStreamChunk> {
 	if (!usage) return
 	const inputTokens = usage.input_tokens || 0
 	const outputTokens = usage.output_tokens || 0
@@ -82,8 +127,8 @@ export async function* yieldUsage(info: ModelInfo, usage: any, id?: string, serv
 	}
 }
 
-export function mapResponseTools(tools: ChatCompletionTool[], strict = false): OpenAI.Responses.Tool[] {
-	const mapped = (tools as (ChatCompletionTool | WebSearchChatTool)[]).map((tool): OpenAI.Responses.Tool | undefined => {
+export function mapResponseTools(tools: (ChatCompletionTool | WebSearchChatTool)[], strict = false): OpenAI.Responses.Tool[] {
+	const mapped = tools.map((tool): OpenAI.Responses.Tool | undefined => {
 		if (tool.type === "function") {
 			return {
 				type: "function" as const,
@@ -144,11 +189,11 @@ export function buildResponseCreateParams(args: {
 			: {}),
 		...(args.store !== undefined ? { store: args.store } : { store: !args.previousResponseId }),
 		...(args.previousResponseId ? { previous_response_id: args.previousResponseId } : {}),
-		...(reasoning ? { reasoning: reasoning as any } : {}),
+		...(reasoning ? { reasoning } : {}),
 	} as OpenAI.Responses.ResponseCreateParamsStreaming
 }
 
-export async function* parseSseResponse(body: ReadableStream<Uint8Array>): AsyncIterable<any> {
+export async function* parseSseResponse(body: ReadableStream<Uint8Array>): AsyncIterable<ResponsesStreamEvent> {
 	const reader = body.getReader()
 	const decoder = new TextDecoder()
 	let buffer = ""
@@ -196,14 +241,14 @@ interface FunctionCallStreamState {
 }
 
 export async function* processResponsesEvents(
-	stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>,
+	stream: AsyncIterable<ResponsesStreamEvent>,
 	modelInfo: ModelInfo,
 	options: ProcessResponsesEventsOptions = {},
-): AsyncGenerator<any> {
+): AsyncGenerator<ApiStreamChunk> {
 	const functionCallByItemId = new Map<string, FunctionCallStreamState>()
 
 	for await (const chunk of stream) {
-		if ((chunk as { type?: string }).type === "codex.rate_limits") {
+		if (chunk.type === "codex.rate_limits") {
 			options.onRateLimits?.(chunk)
 			continue
 		}
@@ -212,11 +257,11 @@ export async function* processResponsesEvents(
 }
 // Dispatches a single Responses API stream event to the appropriate handler.
 async function* processResponseEvent(
-	chunk: any,
+	chunk: Exclude<ResponsesStreamEvent, CodexRateLimitsEvent>,
 	functionCallByItemId: Map<string, FunctionCallStreamState>,
 	modelInfo: ModelInfo,
 	options: ProcessResponsesEventsOptions,
-): AsyncGenerator<any> {
+): AsyncGenerator<ApiStreamChunk> {
 	switch (chunk.type) {
 		case "response.output_item.added":
 			yield* handleOutputItemAdded(chunk.item, functionCallByItemId)
@@ -248,12 +293,14 @@ async function* processResponseEvent(
 			yield* handleFunctionCallArgumentsDone(chunk, functionCallByItemId)
 			break
 		case "response.failed": {
+			// Codex adds status_code and error.param beyond the SDK's Response shape
+			const response = chunk.response as OpenAI.Responses.Response & CodexResponseExtensions
 			const error: Error & { code?: string; status?: number; details?: { param?: string } } = new Error(
-				`Codex API response failed: ${chunk.response?.error?.message || chunk.response?.status || "Response failed"}`,
+				`Codex API response failed: ${response?.error?.message || response?.status || "Response failed"}`,
 			)
-			error.code = chunk.response?.error?.code
-			if (typeof chunk.response?.status_code === "number") error.status = chunk.response.status_code
-			if (typeof chunk.response?.error?.param === "string") error.details = { param: chunk.response.error.param }
+			error.code = response?.error?.code
+			if (typeof response?.status_code === "number") error.status = response.status_code
+			if (typeof response?.error?.param === "string") error.details = { param: response.error.param }
 			throw error
 		}
 		case "response.completed":
@@ -263,15 +310,17 @@ async function* processResponseEvent(
 			}
 			break
 		case "error": {
-			const errMsg = chunk.message || chunk.error?.message || "Unknown API error"
+			// Codex stream errors carry fields the SDK's ResponseErrorEvent doesn't declare
+			const evt = chunk as CodexStreamErrorEvent
+			const errMsg = evt.message || evt.error?.message || "Unknown API error"
 			const error: Error & {
 				code?: string
 				status?: number | string
 				details?: { param?: string }
 			} = new Error(`Codex API stream error: ${errMsg}`)
-			const code = chunk.code ?? chunk.error?.code
-			const status = chunk.status ?? chunk.status_code ?? chunk.error?.status ?? chunk.error?.status_code
-			const param = chunk.param ?? chunk.error?.param ?? chunk.error?.details?.param
+			const code = evt.code ?? evt.error?.code
+			const status = evt.status ?? evt.status_code ?? evt.error?.status ?? evt.error?.status_code
+			const param = evt.param ?? evt.error?.param ?? evt.error?.details?.param
 			if (typeof code === "string") error.code = code
 			if (typeof status === "number" || typeof status === "string") error.status = status
 			if (typeof param === "string") error.details = { param }
@@ -281,7 +330,10 @@ async function* processResponseEvent(
 }
 
 // Handles response.output_item.added: function_call, reasoning (redacted), web_search_call.
-function* handleOutputItemAdded(item: any, functionCallByItemId: Map<string, FunctionCallStreamState>): Generator<any> {
+function* handleOutputItemAdded(
+	item: OpenAI.Responses.ResponseOutputItem,
+	functionCallByItemId: Map<string, FunctionCallStreamState>,
+): Generator<ApiStreamChunk> {
 	if (item.type === "function_call" && item.id) {
 		functionCallByItemId.set(item.id, {
 			call_id: item.call_id,
@@ -296,15 +348,19 @@ function* handleOutputItemAdded(item: any, functionCallByItemId: Map<string, Fun
 		}
 	}
 	if (item.type === "reasoning" && item.encrypted_content && item.id) {
-		yield { type: "reasoning", id: item.id, reasoning: "", redacted_data: item.encrypted_content }
+		yield { type: "reasoning", id: item.id, reasoning: "", redacted_data: item.encrypted_content ?? undefined }
 	}
 	if (item.type === "web_search_call" && item.id) {
-		yield { id: item.id, type: "text", text: `\n[Web Search: ${item.action?.query || "Searching..."}]\n` }
+		const query = item.action?.type === "search" ? item.action.query : undefined
+		yield { id: item.id, type: "text", text: `\n[Web Search: ${query || "Searching..."}]\n` }
 	}
 }
 
 // Handles response.output_item.done: function_call (final), reasoning (summary).
-function* handleOutputItemDone(item: any, functionCallByItemId: Map<string, FunctionCallStreamState>): Generator<any> {
+function* handleOutputItemDone(
+	item: OpenAI.Responses.ResponseOutputItem,
+	functionCallByItemId: Map<string, FunctionCallStreamState>,
+): Generator<ApiStreamChunk> {
 	if (item.type === "function_call") {
 		const pendingCall = item.id ? functionCallByItemId.get(item.id) : undefined
 		if (!pendingCall || (!pendingCall.didEmitArgumentContent && item.arguments)) {
@@ -323,9 +379,9 @@ function* handleOutputItemDone(item: any, functionCallByItemId: Map<string, Func
 
 // Handles streaming function call argument deltas.
 function* handleFunctionCallArgumentsDelta(
-	chunk: any,
+	chunk: OpenAI.Responses.ResponseFunctionCallArgumentsDeltaEvent,
 	functionCallByItemId: Map<string, FunctionCallStreamState>,
-): Generator<any> {
+): Generator<ApiStreamChunk> {
 	const pendingCall = functionCallByItemId.get(chunk.item_id)
 	if (pendingCall && chunk.delta) pendingCall.didEmitArgumentContent = true
 	const functionId = pendingCall?.id || chunk.item_id
@@ -341,9 +397,9 @@ function* handleFunctionCallArgumentsDelta(
 
 // Handles completed function call arguments.
 function* handleFunctionCallArgumentsDone(
-	chunk: any,
+	chunk: OpenAI.Responses.ResponseFunctionCallArgumentsDoneEvent,
 	functionCallByItemId: Map<string, FunctionCallStreamState>,
-): Generator<any> {
+): Generator<ApiStreamChunk> {
 	if (!chunk.item_id || !chunk.name || !chunk.arguments) return
 	const pendingCall = functionCallByItemId.get(chunk.item_id)
 	if (pendingCall?.didEmitArgumentContent) return

@@ -196,7 +196,7 @@ describe("processResponsesEvents", () => {
 
 		const argumentsChunks: string[] = []
 		for await (const chunk of processResponsesEvents(stream() as any, {} as any)) {
-			if (chunk.type === "tool_calls") argumentsChunks.push(chunk.tool_call.function.arguments)
+			if (chunk.type === "tool_calls") argumentsChunks.push(chunk.tool_call.function.arguments ?? "")
 		}
 
 		argumentsChunks.join("").should.equal('{"path":"a"}')
@@ -222,7 +222,7 @@ describe("processResponsesEvents", () => {
 
 		const argumentsChunks: string[] = []
 		for await (const chunk of processResponsesEvents(stream() as any, {} as any)) {
-			if (chunk.type === "tool_calls") argumentsChunks.push(chunk.tool_call.function.arguments)
+			if (chunk.type === "tool_calls") argumentsChunks.push(chunk.tool_call.function.arguments ?? "")
 		}
 
 		argumentsChunks.join("").should.equal('{"path":"a"}')
