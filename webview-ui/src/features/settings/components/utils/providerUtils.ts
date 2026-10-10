@@ -247,6 +247,14 @@ export function normalizeApiConfiguration(
 		case "deepseek":
 			return getProviderData(deepSeekModels, deepSeekDefaultModelId)
 		case "unbiased":
+			// Preserve discovered Pareto versions even when their metadata is not available here.
+			if (modelId?.startsWith("pareto-")) {
+				return {
+					selectedProvider: provider,
+					selectedModelId: modelId,
+					selectedModelInfo: dynamicModelInfoDefaults,
+				}
+			}
 			return getProviderData(unbiasedModels, unbiasedDefaultModelId)
 		case "qwen":
 			const qwenModels = apiConfiguration?.qwenApiLine === "china" ? mainlandQwenModels : internationalQwenModels
