@@ -3,7 +3,7 @@ import { Box, Text, useInput } from "ink"
 import Spinner from "ink-spinner"
 import React, { useEffect, useRef, useState } from "react"
 import { startUnbiasedDeviceAuth, pollUnbiasedDeviceAuth, type UnbiasedDeviceGrant } from "@/integrations/unbiased/device-auth"
-import { saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
+import { createUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { fetch } from "@/shared/net"
 import { openExternal } from "@/utils/env"
 import { theme } from "../constants/theme"
@@ -51,7 +51,7 @@ export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, 
 				committingRef.current = !abort.signal.aborted
 				setIsCommitting(committingRef.current)
 				stateManager.setSecret("unbiasedApiKey", token.accessToken)
-				saveUnbiasedOAuthAccount(stateManager, token)
+				stateManager.setGlobalStateBatch(createUnbiasedOAuthAccount(token))
 				await stateManager.flushPendingState()
 				// A cancelled sign-in may still issue a key; save it, but do not switch providers.
 				if (abort.signal.aborted) return

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import * as disk from "@core/storage/disk"
-import { StateManager } from "@core/storage/StateManager"
+import type { StateManager } from "@core/storage/StateManager"
 import { getModelsCache, type ModelCache, setModelsCache } from "@core/storage/StateManagerModelCache"
 import { unbiasedModels } from "@shared/api"
 import * as fsUtils from "@utils/fs"
@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import type { Controller } from "@/core/controller"
 import { refreshUnbiasedModelsRpc } from "@/core/controller/models/refreshUnbiasedModelsRpc"
+import { getAxiosSettings } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
-import { fetchUnbiasedModels, getCachedUnbiasedModels } from "../unbiased-models"
+import { fetchUnbiasedModels, getCachedUnbiasedModels, type UnbiasedModelDiscoveryOptions } from "../unbiased-models"
 
 const fixture = {
 	id: "pareto-26.10-preview",
@@ -29,6 +30,7 @@ describe("Unbiased model discovery", () => {
 	let write: sinon.SinonStub
 	let warning: sinon.SinonStub
 	let stateManager: StateManager
+	let options: UnbiasedModelDiscoveryOptions
 	let clock: sinon.SinonFakeTimers
 
 	beforeEach(() => {
@@ -39,10 +41,14 @@ describe("Unbiased model discovery", () => {
 			setModelsCache: (provider, models) => setModelsCache(cache, provider, models),
 			getApiConfiguration: () => ({ unbiasedApiKey: "saved-private-key" }),
 		} as StateManager
-		sinon.stub(StateManager, "isInitialized").returns(true)
-		sinon.stub(StateManager, "get").returns(stateManager)
 		sinon.stub(disk, "ensureCacheDirectoryExists").resolves("/tmp/unbiased-discovery")
 		sinon.stub(fsUtils, "fileExistsAtPath").resolves(false)
+		options = {
+			cache: stateManager,
+			cacheFilePath: async () => "/tmp/unbiased-discovery/unbiased_models.json",
+			fileExists: fsUtils.fileExistsAtPath,
+			axiosSettings: getAxiosSettings(),
+		}
 		write = sinon.stub(fs, "writeFile").resolves()
 		warning = sinon.stub(Logger, "warn")
 		get = sinon.stub(axios, "get").resolves({ data: { data: [fixture] } })
@@ -50,8 +56,12 @@ describe("Unbiased model discovery", () => {
 
 	afterEach(() => sinon.restore())
 
+	it("returns no catalog when account storage is unavailable", () => {
+		assert.equal(getCachedUnbiasedModels("private-key", undefined), undefined)
+	})
+
 	it("authenticates, converts token limits/capabilities/prices, and writes normalized metadata", async () => {
-		const models = await fetchUnbiasedModels("private-key")
+		const models = await fetchUnbiasedModels("private-key", options)
 		assert.equal(get.firstCall.args[0], "https://api.unbiased.ai/v1/models")
 		assert.equal(get.firstCall.args[1].headers.Authorization, "Bearer private-key")
 		assert.equal(get.firstCall.args[1].timeout, 10_000)
@@ -74,12 +84,12 @@ describe("Unbiased model discovery", () => {
 		})
 		assert.equal(write.firstCall.args[0], "/tmp/unbiased-discovery/unbiased_models.json")
 		assert.deepEqual(JSON.parse(write.firstCall.args[1]), JSON.parse(JSON.stringify(models)))
-		assert.deepEqual(getCachedUnbiasedModels("private-key"), models)
+		assert.deepEqual(getCachedUnbiasedModels("private-key", stateManager), models)
 	})
 
 	it("keeps free prices at zero and absent prices unknown", async () => {
 		get.resolves({ data: { data: [{ ...fixture, pricing: { prompt: "0", completion: "0" } }] } })
-		const info = (await fetchUnbiasedModels("private-key"))[fixture.id]
+		const info = (await fetchUnbiasedModels("private-key", options))[fixture.id]
 		assert.equal(info.inputPrice, 0)
 		assert.equal(info.outputPrice, 0)
 		assert.equal(info.cacheReadsPrice, undefined)
@@ -87,32 +97,32 @@ describe("Unbiased model discovery", () => {
 	})
 
 	it("skips unauthenticated discovery without preventing a later authenticated fetch", async () => {
-		assert.deepEqual(await fetchUnbiasedModels(undefined), unbiasedModels)
-		assert.equal(getCachedUnbiasedModels(undefined), undefined)
+		assert.deepEqual(await fetchUnbiasedModels(undefined, options), unbiasedModels)
+		assert.equal(getCachedUnbiasedModels(undefined, stateManager), undefined)
 		sinon.assert.notCalled(get)
-		assert.ok((await fetchUnbiasedModels("new-key"))[fixture.id])
+		assert.ok((await fetchUnbiasedModels("new-key", options))[fixture.id])
 		sinon.assert.calledOnce(get)
 	})
 
 	it("deduplicates concurrent calls and honors the existing one-hour TTL", async () => {
-		const first = fetchUnbiasedModels("private-key")
-		assert.equal(fetchUnbiasedModels("private-key"), first)
+		const first = fetchUnbiasedModels("private-key", options)
+		assert.equal(fetchUnbiasedModels("private-key", options), first)
 		await first
-		await fetchUnbiasedModels("private-key")
+		await fetchUnbiasedModels("private-key", options)
 		sinon.assert.calledOnce(get)
 		clock.tick(60 * 60 * 1_000 + 1)
-		assert.equal(getCachedUnbiasedModels("private-key"), undefined)
-		await fetchUnbiasedModels("private-key")
+		assert.equal(getCachedUnbiasedModels("private-key", stateManager), undefined)
+		await fetchUnbiasedModels("private-key", options)
 		sinon.assert.calledTwice(get)
 	})
 
 	it("fetches again for a replacement credential and keeps catalogs isolated", async () => {
-		await fetchUnbiasedModels("first-key")
+		await fetchUnbiasedModels("first-key", options)
 		get.resolves({ data: { data: [{ ...fixture, id: "pareto" }] } })
-		await fetchUnbiasedModels("second-key")
+		await fetchUnbiasedModels("second-key", options)
 		sinon.assert.calledTwice(get)
-		assert.equal(getCachedUnbiasedModels("first-key")?.pareto, undefined)
-		assert.ok(getCachedUnbiasedModels("second-key")?.pareto)
+		assert.equal(getCachedUnbiasedModels("first-key", stateManager)?.pareto, undefined)
+		assert.ok(getCachedUnbiasedModels("second-key", stateManager)?.pareto)
 	})
 
 	it("uses disk fallback on authentication failure without logging credentials", async () => {
@@ -123,8 +133,8 @@ describe("Unbiased model discovery", () => {
 		get.rejects(failure)
 		;(fsUtils.fileExistsAtPath as sinon.SinonStub).resolves(true)
 		sinon.stub(fs, "readFile").resolves(JSON.stringify(unbiasedModels))
-		assert.deepEqual(await fetchUnbiasedModels("private-key"), unbiasedModels)
-		assert.deepEqual(getCachedUnbiasedModels("private-key"), unbiasedModels)
+		assert.deepEqual(await fetchUnbiasedModels("private-key", options), unbiasedModels)
+		assert.deepEqual(getCachedUnbiasedModels("private-key", stateManager), unbiasedModels)
 		assert.match(warning.firstCall.args[0], /HTTP 401/)
 		assert.ok(!JSON.stringify(warning.args).includes("private-key"))
 		sinon.assert.notCalled(write)
@@ -132,7 +142,7 @@ describe("Unbiased model discovery", () => {
 
 	it("falls back to static Pareto metadata on a failed or malformed response", async () => {
 		get.resolves({ data: { data: [{ ...fixture, pricing: { prompt: "invalid" } }] } })
-		assert.deepEqual(await fetchUnbiasedModels("private-key"), unbiasedModels)
+		assert.deepEqual(await fetchUnbiasedModels("private-key", options), unbiasedModels)
 		sinon.assert.notCalled(write)
 		sinon.assert.calledOnce(warning)
 	})

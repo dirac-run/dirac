@@ -1,9 +1,7 @@
 import assert from "node:assert/strict"
-import type { StateManager } from "@core/storage/StateManager"
-import type { GlobalState } from "@shared/storage/state-keys"
 import { describe, it } from "mocha"
 import type { UnbiasedDeviceToken } from "./device-auth"
-import { getUnbiasedOAuthWorkloadName, isUnbiasedOAuthApiKey, saveUnbiasedOAuthAccount } from "./oauth-account"
+import { createUnbiasedOAuthAccount, getUnbiasedOAuthWorkloadName, isUnbiasedOAuthApiKey } from "./oauth-account"
 
 const token: UnbiasedDeviceToken = {
 	accessToken: "private-oauth-key",
@@ -13,70 +11,60 @@ const token: UnbiasedDeviceToken = {
 	keyName: "Dirac key",
 }
 
-function accountStore(apiKey: string | undefined, persisted: Partial<GlobalState> = {}) {
-	const globalState = { ...persisted }
-	const apiConfiguration = { unbiasedApiKey: apiKey }
-	const stateManager = {
-		getApiConfiguration: () => apiConfiguration,
-		getGlobalStateKey: (key: keyof GlobalState) => globalState[key],
-		setGlobalStateBatch: (updates: Partial<GlobalState>) => Object.assign(globalState, updates),
-	} as unknown as StateManager
-	return { stateManager, globalState, apiConfiguration }
-}
-
 describe("Unbiased OAuth account identity", () => {
-	it("persists the workload for a matching key and restores it from a fresh state cache", () => {
-		const store = accountStore(token.accessToken)
-		saveUnbiasedOAuthAccount(store.stateManager, token)
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), token.workloadName)
-		assert.equal(JSON.stringify(store.globalState).includes(token.accessToken), false)
-		assert.match(store.globalState.unbiasedOAuthApiKeyHash!, /^[a-f0-9]{64}$/)
-		const reopened = accountStore(token.accessToken, store.globalState)
-		assert.equal(getUnbiasedOAuthWorkloadName(reopened.stateManager), token.workloadName)
-		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, reopened.globalState.unbiasedOAuthApiKeyHash), true)
+	it("creates serializable account identity without copying the credential", () => {
+		const account = createUnbiasedOAuthAccount(token)
+		assert.equal(JSON.stringify(account).includes(token.accessToken), false)
+		assert.match(account.unbiasedOAuthApiKeyHash, /^[a-f0-9]{64}$/)
+		const reopened = JSON.parse(JSON.stringify(account)) as typeof account
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(token.accessToken, reopened.unbiasedOAuthApiKeyHash, reopened.unbiasedOAuthWorkloadName),
+			token.workloadName,
+		)
 	})
 
 	it("supports existing and manually configured keys without inventing an OAuth identity", () => {
-		const store = accountStore("existing-private-key")
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), undefined)
+		assert.equal(getUnbiasedOAuthWorkloadName("existing-private-key", undefined, undefined), undefined)
 	})
 
 	it("does not attribute the old workload to a replacement or environment-overridden key", () => {
-		const store = accountStore(token.accessToken)
-		saveUnbiasedOAuthAccount(store.stateManager, token)
-		store.apiConfiguration.unbiasedApiKey = "different-effective-key"
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), undefined)
-		store.apiConfiguration.unbiasedApiKey = undefined
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), undefined)
+		const account = createUnbiasedOAuthAccount(token)
+		for (const apiKey of ["different-effective-key", undefined]) {
+			assert.equal(
+				getUnbiasedOAuthWorkloadName(apiKey, account.unbiasedOAuthApiKeyHash, account.unbiasedOAuthWorkloadName),
+				undefined,
+			)
+		}
 	})
 
-	it("replaces account identity on the next OAuth login", () => {
-		const store = accountStore(token.accessToken)
-		saveUnbiasedOAuthAccount(store.stateManager, token)
+	it("creates replacement account identity for the next OAuth login", () => {
 		const replacement = { ...token, accessToken: "new-private-key", workloadName: "New workload" }
-		store.apiConfiguration.unbiasedApiKey = replacement.accessToken
-		saveUnbiasedOAuthAccount(store.stateManager, replacement)
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), replacement.workloadName)
+		const account = createUnbiasedOAuthAccount(replacement)
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				replacement.accessToken,
+				account.unbiasedOAuthApiKeyHash,
+				account.unbiasedOAuthWorkloadName,
+			),
+			replacement.workloadName,
+		)
+		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, account.unbiasedOAuthApiKeyHash), false)
 	})
 })
 
 describe("Unbiased OAuth key matching", () => {
 	it("matches an explicit request key independently of the current default account", () => {
-		const store = accountStore(token.accessToken)
-		saveUnbiasedOAuthAccount(store.stateManager, token)
-		store.apiConfiguration.unbiasedApiKey = "replacement-or-environment-key"
-		const hash = store.globalState.unbiasedOAuthApiKeyHash
+		const { unbiasedOAuthApiKeyHash: hash } = createUnbiasedOAuthAccount(token)
 		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, hash), true)
-		assert.equal(isUnbiasedOAuthApiKey(store.apiConfiguration.unbiasedApiKey, hash), false)
+		assert.equal(isUnbiasedOAuthApiKey("replacement-or-environment-key", hash), false)
 		assert.equal(isUnbiasedOAuthApiKey(undefined, hash), false)
 		assert.equal(isUnbiasedOAuthApiKey("", hash), false)
 		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, undefined), false)
 	})
 
 	it("does not depend on a nonempty workload display name", () => {
-		const store = accountStore(token.accessToken)
-		saveUnbiasedOAuthAccount(store.stateManager, { ...token, workloadName: "" })
-		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, store.globalState.unbiasedOAuthApiKeyHash), true)
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), "")
+		const account = createUnbiasedOAuthAccount({ ...token, workloadName: "" })
+		assert.equal(isUnbiasedOAuthApiKey(token.accessToken, account.unbiasedOAuthApiKeyHash), true)
+		assert.equal(getUnbiasedOAuthWorkloadName(token.accessToken, account.unbiasedOAuthApiKeyHash, ""), "")
 	})
 })

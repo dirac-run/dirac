@@ -288,7 +288,11 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		autoCondenseContextLimit,
 		openAiCodexIsAuthenticated,
 		unbiasedIsAuthenticated: !!stateManager.getApiConfiguration().unbiasedApiKey,
-		unbiasedWorkloadName: getUnbiasedOAuthWorkloadName(stateManager),
+		unbiasedWorkloadName: getUnbiasedOAuthWorkloadName(
+			stateManager.getApiConfiguration().unbiasedApiKey,
+			stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+			stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+		),
 		openAiCodexEmail,
 		githubIsAuthenticated,
 		githubEmail,

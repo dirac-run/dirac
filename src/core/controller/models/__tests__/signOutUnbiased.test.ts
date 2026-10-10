@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import type { StateManager } from "@core/storage/StateManager"
 import type { GlobalState } from "@shared/storage/state-keys"
-import { getUnbiasedOAuthWorkloadName, saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
+import { getUnbiasedOAuthWorkloadName, createUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { signOutUnbiasedKey } from "../signOutUnbiased"
 
 function createAccountStore() {
@@ -20,13 +20,15 @@ function createAccountStore() {
 		setGlobalStateBatch: (updates: Partial<GlobalState>) => Object.assign(globalState, updates),
 		flushPendingState: flush,
 	} as unknown as StateManager
-	saveUnbiasedOAuthAccount(stateManager, {
-		accessToken: apiKey,
-		organizationId: "organization",
-		workloadId: "workload",
-		workloadName: "Dirac workload",
-		keyName: "Dirac key",
-	})
+	stateManager.setGlobalStateBatch(
+		createUnbiasedOAuthAccount({
+			accessToken: apiKey,
+			organizationId: "organization",
+			workloadId: "workload",
+			workloadName: "Dirac workload",
+			keyName: "Dirac key",
+		}),
+	)
 	return { stateManager, globalState, flush }
 }
 
@@ -52,7 +54,14 @@ describe("Unbiased account sign-out", () => {
 		assert.equal(store.stateManager.getSecretKey("unbiasedApiKey"), undefined)
 		assert.equal(store.globalState.unbiasedOAuthApiKeyHash, undefined)
 		assert.equal(store.globalState.unbiasedOAuthWorkloadName, undefined)
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), undefined)
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				store.stateManager.getApiConfiguration().unbiasedApiKey,
+				store.stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				store.stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			),
+			undefined,
+		)
 		assert.equal(store.flush.callCount, 1)
 	})
 
@@ -63,7 +72,14 @@ describe("Unbiased account sign-out", () => {
 		await assert.rejects(signOutUnbiasedKey(store.stateManager), /disk write failed/)
 		assert.equal(store.stateManager.getSecretKey("unbiasedApiKey"), "private-oauth-key")
 		assert.deepEqual(store.globalState, previousAccount)
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), "Dirac workload")
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				store.stateManager.getApiConfiguration().unbiasedApiKey,
+				store.stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				store.stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			),
+			"Dirac workload",
+		)
 		assert.equal(store.flush.callCount, 2)
 	})
 
@@ -72,7 +88,14 @@ describe("Unbiased account sign-out", () => {
 		process.env.UNBIASED_API_KEY = "environment-private-key"
 		await assert.rejects(signOutUnbiasedKey(store.stateManager), /Remove UNBIASED_API_KEY/)
 		assert.equal(store.stateManager.getSecretKey("unbiasedApiKey"), "private-oauth-key")
-		assert.equal(getUnbiasedOAuthWorkloadName(store.stateManager), "Dirac workload")
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				store.stateManager.getApiConfiguration().unbiasedApiKey,
+				store.stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				store.stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			),
+			"Dirac workload",
+		)
 		assert.equal(store.flush.callCount, 0)
 	})
 })

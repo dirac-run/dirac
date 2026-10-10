@@ -39,12 +39,12 @@ Tools are self-contained units dispatched by `ToolExecutorCoordinator`. Once cal
 > Legacy code may violate these. Flag violations and propose fixes when you encounter them.
 
 ## Dev Flow
-## 🛠️ Dev Flow
 - Setup: `npm run install:all`
 - Protobufs: `npm run protos` (Required before build)
 - Compile: `npm run compile` for backend, `npm run cli:build` for cli, `npm run build:webview` for webview
 - Test: `npm test` (do not run tests automatically, only if user asked)
 - Lint: `npm run lint`
+- Architecture: Run `npm run check:arch` after code changes and before finishing a task. Fix new violations; do not regenerate architecture baselines just to make the check pass.
 
 ## Note on grep/search
 Skip these when grepping or searching - generated/binary content only:

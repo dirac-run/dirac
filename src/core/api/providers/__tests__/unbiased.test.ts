@@ -4,7 +4,7 @@ import { unbiasedModels } from "@shared/api"
 import type { GlobalState } from "@shared/storage/state-keys"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
-import { saveUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
+import { createUnbiasedOAuthAccount } from "@/integrations/unbiased/oauth-account"
 import { calculateApiCostAnthropic } from "@/utils/cost"
 import { buildApiHandler, buildApiHandlerForSelection } from "../../index"
 import type { ApiStreamUsageChunk } from "../../transform/stream"
@@ -76,13 +76,15 @@ describe("Unbiased authentication-specific pricing", () => {
 		} as unknown as StateManager
 		sandbox.stub(StateManager, "isInitialized").returns(true)
 		sandbox.stub(StateManager, "get").returns(stateManager)
-		saveUnbiasedOAuthAccount(stateManager, {
-			accessToken: oauthKey,
-			organizationId: "organization",
-			workloadId: "workload",
-			workloadName: "Dirac workload",
-			keyName: "Dirac key",
-		})
+		stateManager.setGlobalStateBatch(
+			createUnbiasedOAuthAccount({
+				accessToken: oauthKey,
+				organizationId: "organization",
+				workloadId: "workload",
+				workloadName: "Dirac workload",
+				keyName: "Dirac key",
+			}),
+		)
 	})
 
 	afterEach(() => sandbox.restore())

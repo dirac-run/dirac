@@ -5,7 +5,7 @@ import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/com
 import { isUnbiasedOAuthApiKey } from "@/integrations/unbiased/oauth-account"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { createOpenAIClient } from "@/shared/net"
-import { ApiHandler, CommonApiHandlerOptions } from "../index"
+import type { ApiHandler, CommonApiHandlerOptions } from "../types"
 import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { formatOpenAiCompatibleUsage } from "../transform/openai-usage"
@@ -88,7 +88,10 @@ export class UnbiasedHandler implements ApiHandler {
 	}
 
 	getModel(): { id: string; info: ModelInfo } {
-		const models = getCachedUnbiasedModels(this.options.unbiasedApiKey)
+		const models = getCachedUnbiasedModels(
+			this.options.unbiasedApiKey,
+			StateManager.isInitialized() ? StateManager.get() : undefined,
+		)
 		const configuredId = this.options.apiModelId
 		// Ignore an unrelated provider's shared mode ID, but retain Pareto versions across cache expiry/restarts.
 		const id =

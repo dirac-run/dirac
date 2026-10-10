@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
-import path from "node:path"
-import { StateManager } from "@core/storage/StateManager"
-import { ensureCacheDirectoryExists, GlobalFileNames } from "@core/storage/disk"
 import { type ModelInfo, unbiasedModels } from "@shared/api"
-import { fileExistsAtPath } from "@utils/fs"
-import axios from "axios"
-import { getAxiosSettings } from "@/shared/net"
+import axios, { type AxiosRequestConfig } from "axios"
 import { Logger } from "@/shared/services/Logger"
+
+export interface UnbiasedModelsCache {
+	getModelsCache(key: string): Record<string, ModelInfo> | null
+	setModelsCache(key: string, models: Record<string, ModelInfo>): void
+}
+
+export interface UnbiasedModelDiscoveryOptions {
+	cache: UnbiasedModelsCache
+	cacheFilePath(): Promise<string>
+	fileExists(path: string): Promise<boolean>
+	axiosSettings: Pick<AxiosRequestConfig, "adapter"> & { fetch?: typeof globalThis.fetch }
+}
 
 interface UnbiasedRawModel {
 	id: string
@@ -32,34 +39,44 @@ function modelsCacheKey(apiKey: string): string {
 	return `unbiased:${createHash("sha256").update(apiKey).digest("hex")}`
 }
 
-export function getCachedUnbiasedModels(apiKey: string | undefined): Record<string, ModelInfo> | undefined {
-	if (!apiKey || !StateManager.isInitialized()) return undefined
-	return StateManager.get().getModelsCache(modelsCacheKey(apiKey)) ?? undefined
+export function getCachedUnbiasedModels(
+	apiKey: string | undefined,
+	cache: UnbiasedModelsCache | undefined,
+): Record<string, ModelInfo> | undefined {
+	if (!apiKey || !cache) return undefined
+	return cache.getModelsCache(modelsCacheKey(apiKey)) ?? undefined
 }
 
-export function fetchUnbiasedModels(apiKey: string | undefined): Promise<Record<string, ModelInfo>> {
+export function fetchUnbiasedModels(
+	apiKey: string | undefined,
+	options: UnbiasedModelDiscoveryOptions,
+): Promise<Record<string, ModelInfo>> {
 	// Do not cache an unauthenticated fallback: signing in must trigger discovery.
 	if (!apiKey) return Promise.resolve(unbiasedModels)
-	const cached = getCachedUnbiasedModels(apiKey)
+	const cached = getCachedUnbiasedModels(apiKey, options.cache)
 	if (cached) return Promise.resolve(cached)
 
 	const cacheKey = modelsCacheKey(apiKey)
 	const pending = pendingRequests.get(cacheKey)
 	if (pending) return pending
 
-	const request = fetchAndCacheUnbiasedModels(apiKey, cacheKey).finally(() => pendingRequests.delete(cacheKey))
+	const request = fetchAndCacheUnbiasedModels(apiKey, cacheKey, options).finally(() => pendingRequests.delete(cacheKey))
 	pendingRequests.set(cacheKey, request)
 	return request
 }
 
-async function fetchAndCacheUnbiasedModels(apiKey: string, cacheKey: string): Promise<Record<string, ModelInfo>> {
-	const cacheFilePath = path.join(await ensureCacheDirectoryExists(), GlobalFileNames.unbiasedModels)
+async function fetchAndCacheUnbiasedModels(
+	apiKey: string,
+	cacheKey: string,
+	options: UnbiasedModelDiscoveryOptions,
+): Promise<Record<string, ModelInfo>> {
+	const cacheFilePath = await options.cacheFilePath()
 	let models: Record<string, ModelInfo>
 	try {
 		const response = await axios.get<{ data: UnbiasedRawModel[] }>("https://api.unbiased.ai/v1/models", {
 			headers: { Authorization: `Bearer ${apiKey}` },
 			timeout: 10_000,
-			...getAxiosSettings(),
+			...options.axiosSettings,
 		})
 		if (!Array.isArray(response.data?.data) || !response.data.data.length) {
 			throw new Error("Unbiased returned no models")
@@ -70,9 +87,9 @@ async function fetchAndCacheUnbiasedModels(apiKey: string, cacheKey: string): Pr
 		// Never log an Axios error object: it contains the Authorization header.
 		const status = axios.isAxiosError(error) ? error.response?.status : undefined
 		Logger.warn(`Unbiased model discovery failed${status ? ` (HTTP ${status})` : ""}; using cached or default metadata.`)
-		models = (await fileExistsAtPath(cacheFilePath)) ? JSON.parse(await fs.readFile(cacheFilePath, "utf8")) : unbiasedModels
+		models = (await options.fileExists(cacheFilePath)) ? JSON.parse(await fs.readFile(cacheFilePath, "utf8")) : unbiasedModels
 	}
-	StateManager.get().setModelsCache(cacheKey, models)
+	options.cache.setModelsCache(cacheKey, models)
 	return models
 }
 

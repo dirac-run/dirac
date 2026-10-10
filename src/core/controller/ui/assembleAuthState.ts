@@ -26,6 +26,11 @@ export async function assembleAuthState(stateManager: StateManager) {
 		githubCopilotIsAuthenticated: await githubCopilotAuthManager.isAuthenticated(),
 		githubCopilotEmail: (await githubCopilotAuthManager.getEmail()) ?? undefined,
 		githubCopilotModels,
-		unbiasedWorkloadName: getUnbiasedOAuthWorkloadName(stateManager) ?? null,
+		unbiasedWorkloadName:
+			getUnbiasedOAuthWorkloadName(
+				stateManager.getApiConfiguration().unbiasedApiKey,
+				stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			) ?? null,
 	}
 }

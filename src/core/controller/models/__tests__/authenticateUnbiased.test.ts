@@ -70,7 +70,14 @@ describe("Unbiased sign-in local completion", () => {
 		})
 		await authenticateUnbiased(harness.controller, EmptyRequest.create({}), harness.stream)
 		assert.equal(harness.key(), token.accessToken)
-		assert.equal(getUnbiasedOAuthWorkloadName(harness.controller.stateManager), token.workloadName)
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				harness.controller.stateManager.getApiConfiguration().unbiasedApiKey,
+				harness.controller.stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				harness.controller.stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			),
+			token.workloadName,
+		)
 		assert.deepEqual(harness.events, ["credentials_saved", "configuration_applied", "state_published", "completed"])
 		assert.equal(harness.responses.at(-1)?.completed, true)
 	})
@@ -83,7 +90,14 @@ describe("Unbiased sign-in local completion", () => {
 			/configuration rejected/,
 		)
 		assert.equal(harness.key(), token.accessToken)
-		assert.equal(getUnbiasedOAuthWorkloadName(harness.controller.stateManager), token.workloadName)
+		assert.equal(
+			getUnbiasedOAuthWorkloadName(
+				harness.controller.stateManager.getApiConfiguration().unbiasedApiKey,
+				harness.controller.stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
+				harness.controller.stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
+			),
+			token.workloadName,
+		)
 		assert.deepEqual(harness.events, ["credentials_saved", "state_published"])
 		assert.equal(
 			harness.responses.some((event) => event.completed),

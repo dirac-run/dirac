@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto"
-import type { StateManager } from "@core/storage/StateManager"
 import type { UnbiasedDeviceToken } from "./device-auth"
 
 function hashApiKey(apiKey: string): string {
@@ -12,16 +11,19 @@ export function isUnbiasedOAuthApiKey(apiKey: string | undefined, oauthApiKeyHas
 }
 
 /** Bind the OAuth workload name to its key without storing another copy of the key. */
-export function saveUnbiasedOAuthAccount(stateManager: StateManager, token: UnbiasedDeviceToken): void {
-	stateManager.setGlobalStateBatch({
+export function createUnbiasedOAuthAccount(token: UnbiasedDeviceToken) {
+	return {
 		unbiasedOAuthApiKeyHash: hashApiKey(token.accessToken),
 		unbiasedOAuthWorkloadName: token.workloadName,
-	})
+	}
 }
 
 /** Only show OAuth identity when it belongs to the effective key, including environment overrides. */
-export function getUnbiasedOAuthWorkloadName(stateManager: StateManager): string | undefined {
-	const apiKey = stateManager.getApiConfiguration().unbiasedApiKey
-	if (!isUnbiasedOAuthApiKey(apiKey, stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"))) return undefined
-	return stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName")
+export function getUnbiasedOAuthWorkloadName(
+	apiKey: string | undefined,
+	oauthApiKeyHash: string | undefined,
+	workloadName: string | undefined,
+): string | undefined {
+	if (!isUnbiasedOAuthApiKey(apiKey, oauthApiKeyHash)) return undefined
+	return workloadName
 }
