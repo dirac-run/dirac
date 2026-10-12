@@ -3,7 +3,8 @@ import { Mode } from "../storage/types"
 export interface DiracMessageModelInfo {
 	modelId: string
 	providerId: string
-	mode: Mode
+	/** Absent on values decoded from proto, which does not carry mode. */
+	mode?: Mode
 }
 
 interface DiracTokensInfo {
