@@ -63,10 +63,7 @@ describe("refreshOpenAiModels", () => {
 			data: { data: [{ id: "qwen2.5-coder:32b" }] },
 		})
 
-		const result = await refreshOpenAiModels(
-			undefined,
-			OpenAiModelsRequest.create({ baseUrl: "http://localhost:11434" }),
-		)
+		const result = await refreshOpenAiModels(undefined, OpenAiModelsRequest.create({ baseUrl: "http://localhost:11434" }))
 
 		result.values.should.deepEqual(["qwen2.5-coder:32b"])
 		sinon.assert.calledTwice(get)

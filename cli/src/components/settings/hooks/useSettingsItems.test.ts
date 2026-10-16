@@ -1,6 +1,8 @@
-import { openAiNativeDefaultModelId } from "@shared/api"
+import { openAiModelInfoSaneDefaults, openAiNativeDefaultModelId } from "@shared/api"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
 import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
+import { render } from "ink-testing-library"
+import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import {
 	getCustomModelLabel,
@@ -9,9 +11,19 @@ import {
 	hasModelPicker,
 	hasStaticModels,
 } from "../../../utils/model-metadata"
-import { CUSTOM_MODEL_ID } from "../../ModelPicker"
+import { CUSTOM_MODEL_ID, ModelPicker } from "../../ModelPicker"
 import { SettingsItemType, SettingsTab } from "../types"
 import { createSettingsItems, createSettingsSearchResults, createToolItems, type UseSettingsItemsProps } from "./useSettingsItems"
+
+const getOpenAiModelsMock = vi.hoisted(() => vi.fn())
+
+vi.mock("@/core/controller/models/refreshOpenAiModels", () => ({
+	getOpenAiModels: getOpenAiModelsMock,
+}))
+
+vi.mock("../../../context/StdinContext", () => ({
+	useStdinContext: () => ({ isRawModeSupported: true }),
+}))
 
 vi.mock("@/core/storage/StateManager", () => ({
 	StateManager: { get: () => ({ getGlobalSettingsKey: () => undefined }) },
@@ -148,5 +160,56 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 		const customItems = createSettingsItems({ ...openAiSettingsProps, actModelId: CUSTOM_MODEL_ID })
 		expect(customItems.find((item) => item.key === "actModelId")?.value).toBe("Custom")
 		expect(customItems.find((item) => item.key === "actCustomModelId")?.value).toBe("")
+	})
+
+	it("renders discovered models and Custom Model ID / Preset in ModelPicker for openai", async () => {
+		getOpenAiModelsMock.mockResolvedValue({
+			"qwen2.5-coder:32b": openAiModelInfoSaneDefaults,
+			"llama3.3:70b": openAiModelInfoSaneDefaults,
+		})
+
+		const { lastFrame, unmount } = render(
+			React.createElement(ModelPicker, {
+				provider: "openai",
+				baseUrl: "http://localhost:11434/v1",
+				apiKey: "test-key",
+				onChange: () => {},
+				onSubmit: () => {},
+			}),
+		)
+
+		await vi.waitFor(() => {
+			const frame = lastFrame() || ""
+			expect(frame).toContain("qwen2.5-coder:32b")
+			expect(frame).toContain("llama3.3:70b")
+			expect(frame).toContain("Custom Model ID / Preset")
+		})
+		expect(getOpenAiModelsMock).toHaveBeenCalledWith({
+			controller: undefined,
+			baseUrl: "http://localhost:11434/v1",
+			apiKey: "test-key",
+		})
+		unmount()
+	})
+
+	it("renders fallback model and warning banner when OpenAI-compatible discovery returns no models", async () => {
+		getOpenAiModelsMock.mockResolvedValue({})
+
+		const { lastFrame, unmount } = render(
+			React.createElement(ModelPicker, {
+				provider: "openai",
+				baseUrl: "http://localhost:11434/v1",
+				onChange: () => {},
+				onSubmit: () => {},
+			}),
+		)
+
+		await vi.waitFor(() => {
+			const frame = lastFrame() || ""
+			expect(frame).toContain("Model list unavailable; showing fallback models.")
+			expect(frame).toContain(openAiNativeDefaultModelId)
+			expect(frame).toContain("Custom Model ID / Preset")
+		})
+		unmount()
 	})
 })
