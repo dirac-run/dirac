@@ -376,6 +376,7 @@ export class AcpAgent implements acp.Agent {
 		this.assertConnected()
 		const response = await this.diracAgent.unstable_forkSession(params)
 		this.subscribeToSessionEvents(response.sessionId)
+		// Skip replayLoadedSessionHistory: per ACP spec, session/fork (like session/resume) does not stream historical chunks on fork.
 		this.scheduleSessionSetupUpdates(response.sessionId)
 		return response
 	}

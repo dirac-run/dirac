@@ -18,7 +18,6 @@ import { PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk"
 import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
-import type { RunHistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
 import { isPlanResponseCard } from "@shared/responseTool"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getExplicitDiracSettingsFromEnv, getProviderFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
@@ -71,7 +70,6 @@ import {
 } from "../acp/acp-session-runtime-config.js"
 import { deleteTasksForSession, getLatestTaskIdForSession, recordTaskForSession } from "../acp/acp-session-tasks.js"
 import {
-	copySessionUpdates,
 	deleteSessionUpdates,
 	getSessionUpdates,
 	recordClientAnnotation,
@@ -101,10 +99,12 @@ import { AcpSessionStatus } from "./public-types.js"
 import { ACP_REVIEW_COMMANDS, handleAcpReviewCommand } from "./review.js"
 import { type AcpModeId, SessionConfigManager } from "./sessionConfig.js"
 import {
+	cloneForkedSessionArtifacts,
 	getHistoryItemCwd,
 	getTaskIdsForSession,
 	historyItemToSessionInfo,
 	listLatestConversationHistoryItems,
+	resolveForkSourceState,
 	resolveHistorySession,
 } from "./sessionHistory.js"
 import { TaskMessageBridge } from "./taskMessageBridge.js"
@@ -175,25 +175,6 @@ function worktreeProvisioningRequest(params: acp.NewSessionRequest): WorktreePro
  *
  * For stdio-based ACP communication, use the AcpAgent wrapper class.
  */
-// ---------------------------------------------------------------- fork helpers
-
-const TASKS_DIR_NAME = "tasks"
-
-/** Returns the on-disk directory for a task id under dataDir/tasks. */
-function taskDirectory(dataDir: string, taskId: string): string {
-	return path.join(dataDir, TASKS_DIR_NAME, taskId)
-}
-
-/**
- * Upsert a task history item under the task-history inventory lock and flush
- * the pending state so the forked session appears in history listings.
- */
-async function upsertHistoryItem(item: TaskHistoryItem): Promise<void> {
-	const stateManager = StateManager.get()
-	stateManager.upsertTaskHistoryItem(item as unknown as RunHistoryItem)
-	await stateManager.flushPendingState()
-}
-
 export class DiracAgent implements acp.Agent {
 	async shutdown() {
 		try {
@@ -1500,80 +1481,50 @@ export class DiracAgent implements acp.Agent {
 			throw new Error(`Cannot fork session ${sourceSessionId} while a prompt is in progress`)
 		}
 
-		const cloneSourceState = async () => {
-			const activeSource = this.sessions.get(sourceSessionId)
-			const persistedConfig = activeSource ? undefined : getSessionRuntimeConfig(this.ctx.DATA_DIR, sourceSessionId)
-			if (!activeSource && !persistedConfig) {
-				throw new Error(`Source session ${sourceSessionId} not found`)
-			}
-
-			const rawOverrides = activeSource ? this.acpSessionOverrides.get(sourceSessionId) : persistedConfig?.settings
-			if (!rawOverrides) {
-				throw new Error(`Source session ${sourceSessionId} has no runtime overrides`)
-			}
-
-			const sourceMode: "act" | "plan" =
-				activeSource?.mode ?? (rawOverrides.mode === "plan" ? "plan" : "act")
-			const resolvedHistory = activeSource
-				? resolveHistorySession(sourceSessionId)
-				: resolveHistorySession(sourceSessionId, persistedConfig?.taskId ?? getLatestTaskIdForSession(sourceSessionId))
-			const sourceTaskId = activeSource?.taskId ?? activeSource?.loadedTaskId ?? resolvedHistory?.taskId ?? persistedConfig?.taskId
-			const sourceTitle = activeSource?.title ?? resolvedHistory?.historyItem.task
-			const sourceCwd =
-				params.cwd ||
-				activeSource?.cwd ||
-				(resolvedHistory ? getHistoryItemCwd(resolvedHistory.historyItem, params.cwd, this.options.cwd) : undefined) ||
-				persistedConfig?.cwd ||
-				this.options.cwd ||
-				process.cwd()
-
-			return {
-				sourceOverrides: copyTaskRuntimeSettings(rawOverrides),
-				sourceMode,
-				sourceTaskId,
-				sourceTitle,
-				sourceCwd,
-				sourceHistoryItem: resolvedHistory?.historyItem,
-			}
-		}
-
-		// Synchronize against active runtime mutations when the source session is loaded in memory.
-		const { sourceOverrides, sourceMode, sourceTaskId, sourceTitle, sourceCwd, sourceHistoryItem } =
-			this.sessionStates.has(sourceSessionId)
-				? await this.runSessionRuntimeMutation(sourceSessionId, cloneSourceState)
-				: await cloneSourceState()
-
-		const newSessionId = crypto.randomUUID()
-		const forkTitle = sourceTitle ? `Fork of ${sourceTitle}` : `Fork of ${sourceSessionId.slice(0, 8)}`
-		let newTaskId: string | undefined
-
-		// Copy the source task directory and journal when the source session has a backing task.
-		if (sourceTaskId) {
-			newTaskId = crypto.randomUUID()
-			const sourceTaskDir = taskDirectory(this.ctx.DATA_DIR, sourceTaskId)
-			const newTaskDir = taskDirectory(this.ctx.DATA_DIR, newTaskId)
-			await fs.mkdir(path.dirname(newTaskDir), { recursive: true })
-			await fs.cp(sourceTaskDir, newTaskDir, { recursive: true })
-
-			await withTaskHistoryInventoryLock(async () => {
-				const historyItem: TaskHistoryItem = {
-					id: newTaskId!,
-					ulid: newSessionId,
-					ts: Date.now(),
-					task: forkTitle,
-					tokensIn: (sourceHistoryItem as TaskHistoryItem | undefined)?.tokensIn ?? 0,
-					tokensOut: (sourceHistoryItem as TaskHistoryItem | undefined)?.tokensOut ?? 0,
-					totalCost: (sourceHistoryItem as TaskHistoryItem | undefined)?.totalCost ?? 0,
-					cwdOnTaskInitialization: sourceCwd,
-					workspaceRootPath: sourceCwd,
-					runKind: "task",
-				}
-				await upsertHistoryItem(historyItem)
+		const readSourceState = async () =>
+			resolveForkSourceState({
+				dataDir: this.ctx.DATA_DIR,
+				sourceSessionId,
+				requestedCwd: params.cwd,
+				defaultCwd: this.options.cwd,
+				activeSource: this.sessions.get(sourceSessionId),
+				activeOverrides: this.acpSessionOverrides.get(sourceSessionId),
 			})
 
-			copySessionUpdates(sourceSessionId, newSessionId)
-		}
+		// Synchronize against active runtime mutations when the source session is loaded in memory.
+		const sourceState = this.sessionStates.has(sourceSessionId)
+			? await this.runSessionRuntimeMutation(sourceSessionId, readSourceState)
+			: await readSourceState()
 
+		const newSessionId = crypto.randomUUID()
+		const forkTitle = sourceState.sourceTitle
+			? `Fork of ${sourceState.sourceTitle}`
+			: `Fork of ${sourceSessionId.slice(0, 8)}`
+		const newTaskId = await cloneForkedSessionArtifacts({
+			dataDir: this.ctx.DATA_DIR,
+			sourceSessionId,
+			newSessionId,
+			sourceState,
+			forkTitle,
+		})
+
+		return this.registerForkedSession({
+			newSessionId,
+			forkTitle,
+			newTaskId,
+			sourceState,
+		})
+	}
+
+	/** Register a newly forked ACP session, its controller, and its runtime overrides. */
+	private async registerForkedSession(options: {
+		newSessionId: string
+		forkTitle: string
+		newTaskId?: string
+		sourceState: ReturnType<typeof resolveForkSourceState>
+	}): Promise<acp.ForkSessionResponse> {
+		const { newSessionId, forkTitle, newTaskId, sourceState } = options
+		const { sourceOverrides, sourceMode, sourceCwd } = sourceState
 		const controller = new Controller(this.ctx.extensionContext, {
 			workspaceCwd: sourceCwd,
 		})
@@ -1595,6 +1546,7 @@ export class DiracAgent implements acp.Agent {
 		}
 
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sourceOverrides)
+		// Validate that the cloned task exists in task history before registering the session.
 		if (newTaskId) {
 			await controller.getTaskWithId(newTaskId)
 		}
@@ -2418,13 +2370,10 @@ export class DiracAgent implements acp.Agent {
 				(cmd) => cmd.cliCompatible && !cliOnlyNames.has(cmd.name) && !vscodeOnlyNames.has(cmd.name),
 			)
 
-			// Convert to ACP AvailableCommand format
+			// Convert to ACP AvailableCommand format (omit redundant input.hint duplicating cmd.description)
 			const availableCommands: acp.AvailableCommand[] = filteredCommands.map((cmd) => ({
 				name: cmd.name,
 				description: cmd.description,
-				input: {
-					hint: cmd.description,
-				},
 			}))
 
 			for (const reviewCommand of ACP_REVIEW_COMMANDS) {

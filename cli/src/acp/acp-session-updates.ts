@@ -696,7 +696,7 @@ export function copySessionUpdates(sourceSessionId: string, targetSessionId: str
 					update: {
 						...entry.update,
 						_meta: {
-							...entry.update._meta,
+							...(isObject(entry.update._meta) ? entry.update._meta : {}),
 							[SEQUENCE_META_KEY]: sequenceNumber,
 						},
 					},
@@ -708,7 +708,7 @@ export function copySessionUpdates(sourceSessionId: string, targetSessionId: str
 				annotation: {
 					...entry.annotation,
 					_meta: {
-						...(entry.annotation._meta as Record<string, unknown> | undefined),
+						...(isObject(entry.annotation._meta) ? entry.annotation._meta : {}),
 						[SEQUENCE_META_KEY]: sequenceNumber,
 					},
 				},
