@@ -118,8 +118,13 @@ export class TaskHistoryController {
 			.slice(0, 20)
 		const prompts = await Promise.all(
 			runs.map(async (run) => {
-				const saved = getUserPrompts(await getSavedDiracMessages(run.id))
-				return saved.length > 0 ? saved : run.task.trim() ? [{ text: run.task, ts: run.ts }] : []
+				try {
+					const saved = getUserPrompts(await getSavedDiracMessages(run.id))
+					if (saved.length > 0) return saved
+				} catch (error) {
+					Logger.warn(`[TaskHistoryController] Skipping unreadable transcript for task ${run.id}:`, error)
+				}
+				return run.task.trim() ? [{ text: run.task, ts: run.ts }] : []
 			}),
 		)
 		return prompts.flat()

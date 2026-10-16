@@ -1,8 +1,12 @@
+import * as disk from "@core/storage/disk"
 import type { HistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
 import { GetTaskHistoryRequest } from "@shared/proto/dirac/task"
 import { expect } from "chai"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
+import sinon from "sinon"
+import { Logger } from "@/shared/services/Logger"
 import type { Controller } from ".."
+import { TaskHistoryController } from "../TaskHistoryController"
 import { processTaskHistory } from "../ui/processTaskHistory"
 import { getTaskHistory } from "./getTaskHistory"
 
@@ -81,5 +85,41 @@ describe("getTaskHistory workspace filtering", () => {
 		expect(fullHistory.tasks.slice(0, 3).map((item) => item.id)).to.deep.equal(
 			previewHistory.slice(0, 3).map((item) => item.id),
 		)
+	})
+
+	describe("getPromptHistory resilience", () => {
+		afterEach(() => sinon.restore())
+
+		it("falls back to the summary task prompt when a legacy transcript is unreadable", async () => {
+			const warn = sinon.stub(Logger, "warn")
+			const getSavedDiracMessages = sinon.stub(disk, "getSavedDiracMessages")
+			getSavedDiracMessages
+				.withArgs("legacy-unreadable")
+				.rejects(new Error("Saved task transcript uses an unsupported or unreadable format"))
+			getSavedDiracMessages.withArgs("valid-empty").resolves([])
+
+			const historyController = new TaskHistoryController({
+				getGlobalStateKey: () => [
+					task("legacy-unreadable", {
+						ts: 20,
+						task: "legacy prompt text",
+						workspaceRootPath: "/workspace/current",
+					}),
+					task("valid-empty", {
+						ts: 10,
+						task: "second prompt text",
+						workspaceRootPath: "/workspace/current",
+					}),
+				],
+			} as any)
+
+			const prompts = await historyController.getPromptHistory("/workspace/current")
+
+			expect(prompts).to.deep.equal([
+				{ text: "legacy prompt text", ts: 20 },
+				{ text: "second prompt text", ts: 10 },
+			])
+			sinon.assert.calledOnce(warn)
+		})
 	})
 })
