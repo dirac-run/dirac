@@ -112,6 +112,8 @@ describe("OpenRouter provider selection", () => {
 				actModeOpenRouterModelId: "anthropic/test",
 				planModeOpenRouterModelInfo: { supportsPromptCache: false },
 				actModeOpenRouterModelInfo: { supportsPromptCache: false },
+				planModeInferenceSpeed: "default",
+				actModeInferenceSpeed: "default",
 			})
 		})
 	})
@@ -208,6 +210,49 @@ describe("OpenApiInfoOptions", () => {
 		fireEvent.click(screen.getByText("Model Configuration"))
 		const modelInput = screen.getByText("Max Output")
 		expect(modelInput).toBeInTheDocument()
+	})
+
+	it("auto-fetches OpenAI-compatible models on mount when openAiBaseUrl is configured", () => {
+		const refreshOpenAiModels = vi.fn()
+		useSettingsStore.setState({
+			apiConfiguration: {
+				planModeApiProvider: "openai",
+				actModeApiProvider: "openai",
+				openAiBaseUrl: "http://localhost:11434/v1",
+			},
+			refreshOpenAiModels,
+		} as any)
+
+		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
+		expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", undefined)
+	})
+
+	it("refreshes OpenAI-compatible models when switching saved profiles", async () => {
+		const refreshOpenAiModels = vi.fn()
+		useSettingsStore.setState({
+			apiConfiguration: {
+				planModeApiProvider: "openai",
+				actModeApiProvider: "openai",
+				openAiCompatibleProfiles: [
+					{
+						name: "Local Ollama",
+						baseUrl: "http://localhost:11434/v1",
+						apiKey: "",
+						modelId: "qwen2.5-coder:32b",
+					},
+				],
+			},
+			refreshOpenAiModels,
+		} as any)
+
+		const { container } = render(<ApiOptions currentMode="plan" showModelOptions={true} />)
+		const dropdown = container.querySelector("vscode-dropdown") as any
+		dropdown.value = "Local Ollama"
+		fireEvent(dropdown, new Event("change", { bubbles: true }))
+
+		await waitFor(() => {
+			expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", "")
+		})
 	})
 })
 

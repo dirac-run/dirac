@@ -14,6 +14,7 @@ import { getProviderModelIdKey, getProviderModelInfoKey } from "@shared/storage/
 import type { Settings } from "@shared/storage/state-keys"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
 import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
+import { getOpenAiModels } from "@/core/controller/models/refreshOpenAiModels"
 import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import {
@@ -542,6 +543,11 @@ export class SessionConfigManager {
 					if (provider === "github-copilot") {
 						return refreshDynamicCatalog
 							? Object.keys(await refreshGithubCopilotModels()).sort((a, b) => a.localeCompare(b))
+							: []
+					}
+					if (provider === "openai") {
+						return refreshDynamicCatalog
+							? Object.keys(await getOpenAiModels()).sort((a, b) => a.localeCompare(b))
 							: []
 					}
 					if (hasStaticModels(provider)) return getModelList(provider)

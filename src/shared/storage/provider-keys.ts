@@ -55,7 +55,6 @@ const ProviderModelInfoKeyMap: Partial<Record<ApiProvider, string>> = {
 
 export const ProviderToBaseUrlKeyMap: Partial<Record<ApiProvider, SettingsKey>> = {
 	openai: "openAiBaseUrl",
-	"openai-native": "openAiBaseUrl",
 	litellm: "liteLlmBaseUrl",
 	lmstudio: "lmStudioBaseUrl",
 	anthropic: "anthropicBaseUrl",

@@ -73,7 +73,7 @@ interface SettingsState {
 	huggingFaceModels: any
 	requestyModels: any
 	openAiModels: any
-	refreshOpenAiModels: (baseUrl: string, apiKey: string) => Promise<void>
+	refreshOpenAiModels: (baseUrl?: string, apiKey?: string) => Promise<void>
 	githubCopilotModels: any
 	githubCopilotIsAuthenticated: boolean
 	githubCopilotEmail?: string
@@ -353,12 +353,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 			set({ openRouterModelRankings: [] })
 		}
 	},
-	refreshOpenAiModels: async (baseUrl: string, apiKey: string) => {
+	refreshOpenAiModels: async (baseUrl?: string, apiKey?: string) => {
+		if (!baseUrl && !apiKey) return
 		try {
 			const response = await ModelsServiceClient.refreshOpenAiModels(
 				OpenAiModelsRequest.create({
-					baseUrl,
-					apiKey,
+					baseUrl: baseUrl || "",
+					apiKey: apiKey || "",
 				}),
 			)
 			if (response?.values) {

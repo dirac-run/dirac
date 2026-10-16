@@ -160,6 +160,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 	)
 	const [apiKey, setApiKey] = useState("")
 	const [modelId, setModelId] = useState("")
+	const [isEnteringCustomModel, setIsEnteringCustomModel] = useState(false)
 	const [baseUrl, setBaseUrl] = useState("")
 	const [errorMessage, setErrorMessage] = useState("")
 	const [providerSearch, setProviderSearch] = useState("")
@@ -286,7 +287,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 
 			// Store in local state - will be saved via StateManager in saveConfiguration
 			setApiKey(value)
-			setStep("modelid")
+			// Collect Base URL before ModelPicker so OpenAI-compatible discovery can query <baseUrl>/models
+			if (ProviderToBaseUrlKeyMap[selectedProvider as ApiProvider]) {
+				setStep("baseurl")
+			} else {
+				setStep("modelid")
+			}
 		},
 		[selectedProvider],
 	)
@@ -357,28 +363,28 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				setStep("bedrock_custom")
 				return
 			}
+			// Switch from ModelPicker to the existing Model ID text input when Custom Model ID is chosen
+			if (value === CUSTOM_MODEL_ID) {
+				setModelId("")
+				setIsEnteringCustomModel(true)
+				return
+			}
 
 			if (value.trim()) {
 				setModelId(value)
 			}
-			// Only show baseurl step for providers that support it
-			if (ProviderToBaseUrlKeyMap[selectedProvider as ApiProvider]) {
-				setStep("baseurl")
-			} else {
-				setStep("saving")
-				saveConfiguration(value, "")
-			}
+			setStep("saving")
+			saveConfiguration(value, baseUrl)
 		},
-		[selectedProvider, saveConfiguration],
+		[selectedProvider, baseUrl, saveConfiguration],
 	)
 
 	const handleBaseUrlSubmit = useCallback(
 		(value: string) => {
 			setBaseUrl(value)
-			setStep("saving")
-			saveConfiguration(modelId, value)
+			setStep("modelid")
 		},
-		[modelId, saveConfiguration],
+		[],
 	)
 
 	const handleBedrockComplete = useCallback((config: BedrockConfig) => {
@@ -453,16 +459,22 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				break
 			case "modelid":
 				setModelId("")
+				if (isEnteringCustomModel) {
+					setIsEnteringCustomModel(false)
+					break
+				}
 				if (selectedProvider === "bedrock") {
 					// Bedrock skips the API key step — go back to Bedrock setup
 					setStep("bedrock")
+				} else if (ProviderToBaseUrlKeyMap[selectedProvider as ApiProvider]) {
+					setStep("baseurl")
 				} else {
 					setStep("apikey")
 				}
 				break
 			case "baseurl":
 				setBaseUrl("")
-				setStep("modelid")
+				setStep("apikey")
 				break
 			case "openai_codex_auth":
 				setStep("menu")
@@ -487,7 +499,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				break
 			// menu, saving, success - no back action
 		}
-	}, [step, selectedProvider])
+	}, [step, selectedProvider, isEnteringCustomModel])
 
 	// Render the auth box content based on current step
 	// Note: "menu" step is rendered separately in the main return for proper menuIndex tracking
@@ -541,13 +553,15 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				)
 
 			case "modelid":
-				// Show model picker for providers with static model lists
-				if (hasModelPicker(selectedProvider)) {
+				// Show model picker for providers with static or dynamic model lists unless entering a custom model ID
+				if (hasModelPicker(selectedProvider) && !isEnteringCustomModel) {
 					return (
 						<Box flexDirection="column">
 							<Text color={theme.text}>Select a model</Text>
 							<Text> </Text>
 							<ModelPicker
+								apiKey={apiKey}
+								baseUrl={baseUrl}
 								controller={controller}
 								isActive={step === "modelid"}
 								onChange={setModelId}
@@ -559,7 +573,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 						</Box>
 					)
 				}
-				// Fall back to text input for providers without static model lists
+				// Fall back to text input for custom model IDs or providers without model lists
 				return (
 					<Box flexDirection="column">
 						<Text color={theme.text}>Model ID</Text>

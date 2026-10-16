@@ -51,7 +51,9 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 	// Debounced function to refresh OpenAI models (prevents excessive API calls while typing)
 	const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
+	// Auto-fetch models on mount when a base URL or API key is already configured
 	useEffect(() => {
+		void refreshOpenAiModels(apiConfiguration?.openAiBaseUrl, apiConfiguration?.openAiApiKey)
 		return () => {
 			if (debounceTimerRef.current) {
 				clearTimeout(debounceTimerRef.current)
@@ -98,6 +100,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 			if (!didPersist) return
 			previousProfileNameRef.current = name
 			setProfileNameInput(name)
+			await refreshOpenAiModels(profile.baseUrl, profile.apiKey)
 		}
 	}
 
@@ -197,7 +200,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 				clearTimeout(debounceTimerRef.current)
 			}
 
-			if (baseUrl && apiKey) {
+			if (baseUrl || apiKey) {
 				debounceTimerRef.current = setTimeout(() => {
 					refreshOpenAiModels(baseUrl, apiKey)
 				}, 500)

@@ -1,5 +1,15 @@
+import { openAiNativeDefaultModelId } from "@shared/api"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
+import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
 import { describe, expect, it, vi } from "vitest"
+import {
+	getCustomModelLabel,
+	getModelList,
+	hasDynamicModels,
+	hasModelPicker,
+	hasStaticModels,
+} from "../../../utils/model-metadata"
+import { CUSTOM_MODEL_ID } from "../../ModelPicker"
 import { SettingsItemType, SettingsTab } from "../types"
 import { createSettingsItems, createSettingsSearchResults, createToolItems, type UseSettingsItemsProps } from "./useSettingsItems"
 
@@ -100,5 +110,43 @@ describe("CLI Vim editing preference", () => {
 		const results = createSettingsSearchResults(props, [SettingsTab.TERMINAL])
 		const setting = results.find((result) => result.item.key === "vimModeEnabled")
 		for (const keyword of ["vi", "vim", "bindings", "normal", "insert"]) expect(setting?.searchText).toContain(keyword)
+	})
+})
+
+describe("OpenAI-compatible model metadata and settings presentation", () => {
+	const openAiSettingsProps = {
+		...props,
+		currentTab: SettingsTab.MODELS_API,
+		provider: "openai",
+		actModelId: "qwen2.5-coder:32b",
+		planModelId: "qwen2.5-coder:32b",
+		separateModels: false,
+		actReasoningEffort: "medium",
+		planReasoningEffort: "medium",
+		openAiHeaders: {},
+		openRouterPinnedProviders: {},
+	} as UseSettingsItemsProps
+
+	it("enables dynamic model picker for openai while keeping openai-native static-only", () => {
+		expect(hasDynamicModels("openai")).toBe(true)
+		expect(hasModelPicker("openai")).toBe(true)
+		expect(getCustomModelLabel("openai")).toBe("Custom Model ID / Preset")
+		expect(getModelList("openai")).toEqual([openAiNativeDefaultModelId])
+
+		expect(hasDynamicModels("openai-native")).toBe(false)
+		expect(hasStaticModels("openai-native")).toBe(true)
+		expect(hasModelPicker("openai-native")).toBe(true)
+		expect(ProviderToBaseUrlKeyMap["openai-native"]).toBeUndefined()
+		expect(ProviderToBaseUrlKeyMap.openai).toBe("openAiBaseUrl")
+	})
+
+	it("displays discovered or arbitrary OpenAI-compatible model IDs directly instead of Custom", () => {
+		const items = createSettingsItems(openAiSettingsProps)
+		expect(items.find((item) => item.key === "actModelId")?.value).toBe("qwen2.5-coder:32b")
+		expect(items.find((item) => item.key === "actCustomModelId")).toBeUndefined()
+
+		const customItems = createSettingsItems({ ...openAiSettingsProps, actModelId: CUSTOM_MODEL_ID })
+		expect(customItems.find((item) => item.key === "actModelId")?.value).toBe("Custom")
+		expect(customItems.find((item) => item.key === "actCustomModelId")?.value).toBe("")
 	})
 })

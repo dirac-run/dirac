@@ -97,12 +97,28 @@ export const providerModels: Record<string, { models: Record<string, unknown>; d
 	zai: { models: { ...internationalZAiModels, ...mainlandZAiModels }, defaultId: internationalZAiDefaultModelId },
 }
 
+const DYNAMIC_MODEL_PROVIDERS = new Set<string>(["openrouter", "huggingface", "github-copilot", "openai"])
+
+const CUSTOM_MODEL_LABELS: Record<string, string> = {
+	bedrock: "Custom (ARN / Inference Profile)",
+	openrouter: "Custom Model ID / Preset",
+	openai: "Custom Model ID / Preset",
+}
+
 export function hasStaticModels(provider: string): boolean {
 	return provider in providerModels
 }
 
+export function hasDynamicModels(provider: string): boolean {
+	return DYNAMIC_MODEL_PROVIDERS.has(provider)
+}
+
 export function hasModelPicker(provider: string): boolean {
-	return hasStaticModels(provider) || usesOpenRouterModels(provider) || provider === "github-copilot"
+	return hasStaticModels(provider) || hasDynamicModels(provider)
+}
+
+export function getCustomModelLabel(provider: string): string | undefined {
+	return CUSTOM_MODEL_LABELS[provider]
 }
 
 export function getDefaultModelId(provider: string): string {
@@ -113,6 +129,10 @@ export function getDefaultModelId(provider: string): string {
 }
 
 export function getModelList(provider: string): string[] {
+	if (provider === "openai") {
+		const defaultId = getDefaultModelId("openai")
+		return defaultId ? [defaultId] : []
+	}
 	if (!hasStaticModels(provider)) return []
 	if (provider === "huggingface") {
 		return Object.entries(huggingFaceModels)
