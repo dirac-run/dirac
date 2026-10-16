@@ -6,7 +6,7 @@ import axios, { HttpStatusCode } from "axios"
 import sinon from "sinon"
 import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
-import { getOpenAiModels, refreshOpenAiModels } from "../refreshOpenAiModels"
+import { classifyOpenAiModelsError, getOpenAiModels, refreshOpenAiModels } from "../refreshOpenAiModels"
 
 describe("refreshOpenAiModels", () => {
 	afterEach(() => sinon.restore())
@@ -35,22 +35,13 @@ describe("refreshOpenAiModels", () => {
 		)
 	})
 
-	it("defaults baseUrl to https://api.openai.com/v1 when baseUrl is empty and apiKey is provided", async () => {
-		const get = sinon.stub(axios, "get").resolves({ data: { data: [{ id: "discovered-model" }] } })
+	it("returns empty models without making network requests when baseUrl is empty", async () => {
+		const get = sinon.stub(axios, "get")
 
 		const models = await getOpenAiModels({ baseUrl: "", apiKey: "sk-test" })
 
-		models.should.deepEqual({
-			"discovered-model": { ...openAiModelInfoSaneDefaults },
-		})
-		sinon.assert.calledOnceWithExactly(
-			get,
-			"https://api.openai.com/v1/models",
-			sinon.match({
-				headers: { Authorization: "Bearer sk-test" },
-				timeout: 5000,
-			}),
-		)
+		models.should.deepEqual({})
+		sinon.assert.notCalled(get)
 	})
 
 	it("retries /v1/models when /models returns 404 and baseUrl omits /v1", async () => {
@@ -86,7 +77,7 @@ describe("refreshOpenAiModels", () => {
 		sinon.assert.calledOnce(get)
 		sinon.assert.calledOnceWithExactly(
 			warn,
-			"Configured OpenAI-compatible provider does not support model discovery at /models",
+			"Configured OpenAI-compatible provider does not support model discovery at /models.",
 		)
 		sinon.assert.notCalled(error)
 	})
@@ -121,22 +112,45 @@ describe("refreshOpenAiModels", () => {
 		})
 	})
 
-	it("warns without logging an error when authentication fails with HTTP 401 or 403", async () => {
-		for (const status of [HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden]) {
-			sinon.restore()
-			const warn = sinon.stub(Logger, "warn")
-			const error = sinon.stub(Logger, "error")
-			sinon.stub(axios, "get").rejects({ isAxiosError: true, response: { status } })
+	it("warns without logging an error when authentication fails with HTTP 401", async () => {
+		const warn = sinon.stub(Logger, "warn")
+		const error = sinon.stub(Logger, "error")
+		const authError = { isAxiosError: true, response: { status: HttpStatusCode.Unauthorized } }
+		sinon.stub(axios, "get").rejects(authError)
 
-			const models = await getOpenAiModels({ baseUrl: "https://provider.example/v1" })
+		classifyOpenAiModelsError(authError).should.deepEqual({
+			message: "OpenAI-compatible /models endpoint rejected authentication (HTTP 401).",
+			isExpectedWarning: true,
+		})
+		const result = await refreshOpenAiModels(
+			undefined,
+			OpenAiModelsRequest.create({ baseUrl: "https://provider.example/v1" }),
+		)
 
-			models.should.deepEqual({})
-			sinon.assert.calledOnceWithExactly(
-				warn,
-				`OpenAI-compatible /models endpoint rejected authentication (HTTP ${status})`,
-			)
-			sinon.assert.notCalled(error)
-		}
+		result.values.should.deepEqual([])
+		sinon.assert.calledOnceWithExactly(
+			warn,
+			"OpenAI-compatible /models endpoint rejected authentication (HTTP 401).",
+		)
+		sinon.assert.notCalled(error)
+	})
+
+	it("warns without logging an error when authentication fails with HTTP 403", async () => {
+		const warn = sinon.stub(Logger, "warn")
+		const error = sinon.stub(Logger, "error")
+		sinon.stub(axios, "get").rejects({ isAxiosError: true, response: { status: HttpStatusCode.Forbidden } })
+
+		const result = await refreshOpenAiModels(
+			undefined,
+			OpenAiModelsRequest.create({ baseUrl: "https://provider.example/v1" }),
+		)
+
+		result.values.should.deepEqual([])
+		sinon.assert.calledOnceWithExactly(
+			warn,
+			"OpenAI-compatible /models endpoint rejected authentication (HTTP 403).",
+		)
+		sinon.assert.notCalled(error)
 	})
 
 	it("logs network timeouts and HTTP 400 responses as errors and returns empty fallback", async () => {

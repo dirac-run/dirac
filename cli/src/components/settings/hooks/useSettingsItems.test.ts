@@ -15,10 +15,16 @@ import { CUSTOM_MODEL_ID, ModelPicker } from "../../ModelPicker"
 import { SettingsItemType, SettingsTab } from "../types"
 import { createSettingsItems, createSettingsSearchResults, createToolItems, type UseSettingsItemsProps } from "./useSettingsItems"
 
-const getOpenAiModelsMock = vi.hoisted(() => vi.fn())
+const { getOpenAiModelsMock, logOpenAiModelsErrorMock } = vi.hoisted(() => ({
+	getOpenAiModelsMock: vi.fn(),
+	logOpenAiModelsErrorMock: vi.fn(
+		() => "Configured OpenAI-compatible provider does not support model discovery at /models.",
+	),
+}))
 
 vi.mock("@/core/controller/models/refreshOpenAiModels", () => ({
 	getOpenAiModels: getOpenAiModelsMock,
+	logOpenAiModelsError: logOpenAiModelsErrorMock,
 }))
 
 vi.mock("../../../context/StdinContext", () => ({
@@ -139,11 +145,11 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 		openRouterPinnedProviders: {},
 	} as UseSettingsItemsProps
 
-	it("enables dynamic model picker for openai while keeping openai-native static-only", () => {
+	it("enables dynamic model picker for openai with no static fallback models while keeping openai-native static-only", () => {
 		expect(hasDynamicModels("openai")).toBe(true)
 		expect(hasModelPicker("openai")).toBe(true)
 		expect(getCustomModelLabel("openai")).toBe("Custom Model ID / Preset")
-		expect(getModelList("openai")).toEqual([openAiNativeDefaultModelId])
+		expect(getModelList("openai")).toEqual([])
 
 		expect(hasDynamicModels("openai-native")).toBe(false)
 		expect(hasStaticModels("openai-native")).toBe(true)
@@ -192,8 +198,8 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 		unmount()
 	})
 
-	it("renders fallback model and warning banner when OpenAI-compatible discovery returns no models", async () => {
-		getOpenAiModelsMock.mockResolvedValue({})
+	it("renders classified error map message and only Custom Model ID / Preset when /models returns 404", async () => {
+		getOpenAiModelsMock.mockRejectedValueOnce({ isAxiosError: true, response: { status: 404 } })
 
 		const { lastFrame, unmount } = render(
 			React.createElement(ModelPicker, {
@@ -205,9 +211,11 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 		)
 
 		await vi.waitFor(() => {
-			const frame = lastFrame() || ""
-			expect(frame).toContain("Model list unavailable; showing fallback models.")
-			expect(frame).toContain(openAiNativeDefaultModelId)
+			const frame = (lastFrame() || "").replace(/\s+/g, " ")
+			expect(frame).toContain(
+				"Configured OpenAI-compatible provider does not support model discovery at /models. Select Custom Model ID / Preset below.",
+			)
+			expect(frame).not.toContain(openAiNativeDefaultModelId)
 			expect(frame).toContain("Custom Model ID / Preset")
 		})
 		unmount()

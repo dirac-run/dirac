@@ -230,8 +230,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 		setProviderIndex(0)
 	}, [providerSearch])
 
-	// Set default model when entering model step
+	// Reset custom model input mode whenever the step changes, and set default model when entering model step
 	useEffect(() => {
+		setIsEnteringCustomModel(false)
 		if (step === "modelid" && hasModelPicker(selectedProvider)) {
 			setModelId(getDefaultModelId(selectedProvider))
 		}

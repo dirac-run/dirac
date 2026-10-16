@@ -354,12 +354,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 		}
 	},
 	refreshOpenAiModels: async (baseUrl?: string, apiKey?: string) => {
-		if (!baseUrl && !apiKey) return
+		if (!baseUrl) return
 		try {
 			const response = await ModelsServiceClient.refreshOpenAiModels(
 				OpenAiModelsRequest.create({
-					baseUrl: baseUrl || "",
-					apiKey: apiKey || "",
+					baseUrl: baseUrl ?? "",
+					apiKey: apiKey ?? "",
 				}),
 			)
 			if (response?.values) {

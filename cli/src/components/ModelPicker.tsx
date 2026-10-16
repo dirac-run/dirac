@@ -8,15 +8,13 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import React, { useEffect, useMemo, useState } from "react"
 import type { Controller } from "@/core/controller"
-import { getOpenAiModels } from "@/core/controller/models/refreshOpenAiModels"
-import { refreshOpenRouterModels } from "@/core/controller/models/refreshOpenRouterModels"
-import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
-import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
+import { logOpenAiModelsError } from "@/core/controller/models/refreshOpenAiModels"
 import { type ApiProvider } from "@/shared/api"
 import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { COLORS } from "../constants/colors"
 import { Logger } from "@/shared/services/Logger"
 import {
+	fetchDynamicModels,
 	getCustomModelLabel,
 	getDefaultModelId,
 	getModelList,
@@ -41,25 +39,6 @@ interface ModelPickerProps {
 	isActive?: boolean
 	baseUrl?: string
 	apiKey?: string
-}
-
-// Dispatches dynamic catalog loading for providers backed by remote model endpoints.
-function fetchDynamicModels(
-	provider: string,
-	options: { controller?: Controller; baseUrl?: string; apiKey?: string },
-): Promise<Record<string, unknown>> {
-	switch (provider) {
-		case "openrouter":
-			return refreshOpenRouterModels(options.controller)
-		case "huggingface":
-			return getHuggingFaceModels()
-		case "openai":
-			return getOpenAiModels(options)
-		case "github-copilot":
-			return refreshGithubCopilotModels()
-		default:
-			return Promise.resolve({})
-	}
 }
 
 export const ModelPicker: React.FC<ModelPickerProps> = ({
@@ -102,9 +81,15 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 				setIsLoading(false)
 			},
 			(error) => {
-				Logger.error(`Failed to load models for ${provider}:`, error)
+				const message =
+					provider === "openai"
+						? logOpenAiModelsError(error)
+						: error instanceof Error
+							? error.message
+							: String(error)
+				if (provider !== "openai") Logger.error(`Failed to load models for ${provider}:`, error)
 				if (cancelled) return
-				setLoadError(error instanceof Error ? error.message : String(error))
+				setLoadError(message)
 				setIsLoading(false)
 			},
 		)
@@ -114,7 +99,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 		}
 	}, [provider, controller, baseUrl, apiKey])
 
-	const fallbackModels = useMemo(() => getModelList(provider), [provider, asyncModels])
+	const fallbackModels = useMemo(() => getModelList(provider), [provider])
 	const modelList = useMemo(() => {
 		if (!hasDynamicModels(provider)) return fallbackModels
 		return asyncModels.length ? asyncModels : fallbackModels
@@ -164,7 +149,9 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 				<Text color={theme.warning}>
 					{fallbackModels.length
 						? "Model list unavailable; showing fallback models."
-						: "Model list unavailable; enter a custom model ID."}
+						: provider === "openai"
+							? `${loadError} Select Custom Model ID / Preset below.`
+							: "Model list unavailable; enter a custom model ID."}
 				</Text>
 			)}
 			<SearchableList

@@ -546,9 +546,9 @@ export class SessionConfigManager {
 							: []
 					}
 					if (provider === "openai") {
-						return refreshDynamicCatalog
-							? Object.keys(await getOpenAiModels()).sort((a, b) => a.localeCompare(b))
-							: []
+						if (!refreshDynamicCatalog) return []
+						const openAiModels = await getOpenAiModels()
+						return Object.keys(openAiModels).sort((a, b) => a.localeCompare(b))
 					}
 					if (hasStaticModels(provider)) return getModelList(provider)
 					if (provider === "dify") return ["dify-workflow"]
