@@ -372,6 +372,15 @@ export class AcpAgent implements acp.Agent {
 		return response
 	}
 
+	async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+		this.assertConnected()
+		const response = await this.diracAgent.unstable_forkSession(params)
+		this.subscribeToSessionEvents(response.sessionId)
+		// Skip replayLoadedSessionHistory: per ACP spec, session/fork (like session/resume) does not stream historical chunks on fork.
+		this.scheduleSessionSetupUpdates(response.sessionId)
+		return response
+	}
+
 	async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
 		this.assertConnected()
 		return this.diracAgent.unstable_listSessions(params)

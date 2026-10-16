@@ -1,7 +1,15 @@
+import * as fs from "node:fs/promises"
+import path from "node:path"
 import type * as acp from "@agentclientprotocol/sdk"
-import type { HistoryItem } from "@shared/HistoryItem"
+import { withTaskHistoryInventoryLock } from "@/core/storage/taskHistory"
+import type { HistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
+import type { Settings } from "@shared/storage/state-keys"
 import { StateManager } from "@/core/storage/StateManager"
 import { arePathsEqual } from "@/utils/path"
+import { copyTaskRuntimeSettings, getSessionRuntimeConfig } from "../acp/acp-session-runtime-config.js"
+import { getLatestTaskIdForSession } from "../acp/acp-session-tasks.js"
+import { copySessionUpdates } from "../acp/acp-session-updates.js"
+import type { DiracAcpSession } from "./public-types.js"
 
 export type HistorySessionResolution = {
 	sessionId: string
@@ -86,4 +94,118 @@ export function getTaskIdsForSession(sessionId: string): string[] {
 	return getTaskHistory()
 		.filter((item) => getHistoryItemSessionId(item) === sessionId)
 		.map((item) => item.id)
+}
+
+export interface ForkSourceState {
+	sourceOverrides: Partial<Settings>
+	sourceMode: "act" | "plan"
+	sourceTaskId?: string
+	sourceTitle?: string
+	sourceCwd: string
+	sourceHistoryItem?: HistoryItem
+}
+
+/** Resolve the working directory for a forked session using explicit request, active session, or persisted history fallbacks. */
+export function resolveForkSourceCwd(options: {
+	requestedCwd?: string
+	activeSessionCwd?: string
+	resolvedHistory?: HistorySessionResolution
+	persistedConfigCwd?: string
+	defaultCwd?: string
+}): string {
+	return (
+		options.requestedCwd ||
+		options.activeSessionCwd ||
+		(options.resolvedHistory
+			? getHistoryItemCwd(options.resolvedHistory.historyItem, options.requestedCwd, options.defaultCwd)
+			: undefined) ||
+		options.persistedConfigCwd ||
+		options.defaultCwd ||
+		process.cwd()
+	)
+}
+
+/** Extract the source session's runtime overrides, mode, backing task ID, and working directory for forking. */
+export function resolveForkSourceState(options: {
+	dataDir: string
+	sourceSessionId: string
+	requestedCwd?: string
+	defaultCwd?: string
+	activeSource?: DiracAcpSession
+	activeOverrides?: Partial<Settings>
+}): ForkSourceState {
+	const { dataDir, sourceSessionId, requestedCwd, defaultCwd, activeSource, activeOverrides } = options
+	const persistedConfig = activeSource ? undefined : getSessionRuntimeConfig(dataDir, sourceSessionId)
+	if (!activeSource && !persistedConfig) {
+		throw new Error(`Source session ${sourceSessionId} not found`)
+	}
+
+	const rawOverrides = activeSource ? activeOverrides : persistedConfig?.settings
+	if (!rawOverrides) {
+		throw new Error(`Source session ${sourceSessionId} has no runtime overrides`)
+	}
+
+	const sourceMode: "act" | "plan" = activeSource?.mode ?? (rawOverrides.mode === "plan" ? "plan" : "act")
+	const resolvedHistory = activeSource
+		? resolveHistorySession(sourceSessionId)
+		: resolveHistorySession(sourceSessionId, persistedConfig?.taskId ?? getLatestTaskIdForSession(sourceSessionId))
+	const sourceTaskId =
+		activeSource?.taskId ?? activeSource?.loadedTaskId ?? resolvedHistory?.taskId ?? persistedConfig?.taskId
+	const sourceTitle = activeSource?.title ?? resolvedHistory?.historyItem.task
+	const sourceCwd = resolveForkSourceCwd({
+		requestedCwd,
+		activeSessionCwd: activeSource?.cwd,
+		resolvedHistory,
+		persistedConfigCwd: persistedConfig?.cwd,
+		defaultCwd,
+	})
+
+	return {
+		sourceOverrides: copyTaskRuntimeSettings(rawOverrides),
+		sourceMode,
+		sourceTaskId,
+		sourceTitle,
+		sourceCwd,
+		sourceHistoryItem: resolvedHistory?.historyItem,
+	}
+}
+
+/** Clone a source session's backing task directory, taskHistory entry, and ACP update journal onto a new session ID. */
+export async function cloneForkedSessionArtifacts(options: {
+	dataDir: string
+	sourceSessionId: string
+	newSessionId: string
+	sourceState: ForkSourceState
+	forkTitle: string
+}): Promise<string | undefined> {
+	const { dataDir, sourceSessionId, newSessionId, sourceState, forkTitle } = options
+	if (!sourceState.sourceTaskId) return undefined
+
+	const newTaskId = crypto.randomUUID()
+	const sourceTaskDir = path.join(dataDir, "tasks", sourceState.sourceTaskId)
+	const newTaskDir = path.join(dataDir, "tasks", newTaskId)
+	await fs.mkdir(path.dirname(newTaskDir), { recursive: true })
+	await fs.cp(sourceTaskDir, newTaskDir, { recursive: true })
+
+	const sourceTaskHistory = sourceState.sourceHistoryItem as TaskHistoryItem | undefined
+	await withTaskHistoryInventoryLock(async () => {
+		const historyItem: TaskHistoryItem = {
+			id: newTaskId,
+			ulid: newSessionId,
+			ts: Date.now(),
+			task: forkTitle,
+			tokensIn: sourceTaskHistory?.tokensIn ?? 0,
+			tokensOut: sourceTaskHistory?.tokensOut ?? 0,
+			totalCost: sourceTaskHistory?.totalCost ?? 0,
+			cwdOnTaskInitialization: sourceState.sourceCwd,
+			workspaceRootPath: sourceState.sourceCwd,
+			runKind: "task",
+		}
+		const stateManager = StateManager.get()
+		stateManager.upsertTaskHistoryItem(historyItem)
+		await stateManager.flushPendingState()
+	})
+
+	copySessionUpdates(sourceSessionId, newSessionId)
+	return newTaskId
 }

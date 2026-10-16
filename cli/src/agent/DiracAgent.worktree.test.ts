@@ -137,7 +137,7 @@ describe("DiracAgent ACP worktrees", () => {
 		])
 		expect(capabilities.loadSession).toBe(true)
 		expect(capabilities.providers).toEqual({})
-		expect(capabilities.sessionCapabilities).toEqual({ resume: {}, close: {}, delete: {} })
+		expect(capabilities.sessionCapabilities).toEqual({ list: {}, resume: {}, close: {}, delete: {}, fork: {} })
 		expect(capabilities.promptCapabilities).toEqual({ image: true, audio: false, embeddedContext: true })
 		expect(Object.keys(capabilities._meta).sort()).toEqual([
 			"dev.dirac/auth.logout",

@@ -1,3 +1,6 @@
+import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -130,6 +133,7 @@ const stateManager: any = {
 	}),
 	getApiConfiguration: vi.fn(() => ({})),
 	getGlobalStateKey: vi.fn(() => []),
+	upsertTaskHistoryItem: vi.fn(),
 	flushPendingState: vi.fn(async () => undefined),
 	captureEffectiveTaskConfiguration: vi.fn((explicitOverrides: Record<string, unknown>) => ({
 		settings: structuredClone(explicitOverrides),
@@ -139,6 +143,9 @@ const stateManager: any = {
 
 vi.mock("@/core/controller", () => ({ Controller: mocks.MockController }))
 vi.mock("@/core/storage/disk", () => ({ setRuntimeHooksDir: vi.fn() }))
+vi.mock("@/core/storage/taskHistory", () => ({
+	withTaskHistoryInventoryLock: vi.fn(async (action: () => Promise<unknown>) => await action()),
+}))
 vi.mock("@/core/storage/StateManager", () => ({ StateManager: { get: vi.fn(() => stateManager) } }))
 vi.mock("./taskMessageBridge.js", () => ({ TaskMessageBridge: mocks.MockTaskMessageBridge }))
 
@@ -826,5 +833,65 @@ describe("DiracAgent ACP conversation continuity", () => {
 		await expect(agent.shutdown()).resolves.toBeUndefined()
 		expect(controller.dispose).toHaveBeenCalledOnce()
 		expect((agent as any).sessions.has(sessionId)).toBe(false)
+	})
+
+	it("forks an active session with a fresh sessionId, isolated runtime state, and copied task directory", async () => {
+		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-test-"))
+		try {
+			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
+				; (agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
+				; (agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+				; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [{ id: "mode", currentValue: "plan" }])
+				; (agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "plan", availableModes: [] }))
+				; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+				; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+
+			const { sessionId: sourceSessionId } = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			await expect(
+				agent.prompt({ sessionId: sourceSessionId, prompt: [{ type: "text", text: "initial turn" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+
+			const sourceTaskDir = path.join(tempDataDir, "tasks", mocks.task.taskId)
+			fs.mkdirSync(sourceTaskDir, { recursive: true })
+			fs.writeFileSync(path.join(sourceTaskDir, "ui_messages.json"), "[]")
+
+			const forkResponse = await agent.unstable_forkSession({
+				sessionId: sourceSessionId,
+				cwd: "/tmp/workspace",
+				mcpServers: [],
+			})
+
+			expect(forkResponse.sessionId).not.toBe(sourceSessionId)
+			expect(forkResponse.modes).toEqual({ currentModeId: "plan", availableModes: [] })
+			expect(forkResponse.configOptions).toEqual([{ id: "mode", currentValue: "plan" }])
+			expect((agent as any).sessions.has(sourceSessionId)).toBe(true)
+			expect((agent as any).sessionStates.has(forkResponse.sessionId)).toBe(true)
+
+			const forkedSession = (agent as any).sessions.get(forkResponse.sessionId)
+			const forkedTaskId = forkedSession.loadedTaskId
+			expect(forkedSession.isLoadedFromHistory).toBe(true)
+			expect(forkedTaskId).toBeDefined()
+			expect(forkedTaskId).not.toBe(mocks.task.taskId)
+			expect(fs.existsSync(path.join(tempDataDir, "tasks", forkedTaskId, "ui_messages.json"))).toBe(true)
+			expect(stateManager.upsertTaskHistoryItem).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: forkedTaskId,
+					ulid: forkResponse.sessionId,
+				}),
+			)
+
+			// Prompting the forked session must reinitialize the cloned task rather than starting a blank initTask.
+			const forkedController = mocks.controllers[1]
+			await expect(
+				agent.prompt({ sessionId: forkResponse.sessionId, prompt: [{ type: "text", text: "forked follow-up" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+			expect(forkedController.reinitExistingTaskFromId).toHaveBeenCalledWith(
+				forkedTaskId,
+				expect.any(Object),
+			)
+			expect(forkedController.initTask).not.toHaveBeenCalled()
+		} finally {
+			fs.rmSync(tempDataDir, { recursive: true, force: true })
+		}
 	})
 })

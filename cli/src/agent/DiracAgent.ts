@@ -99,10 +99,12 @@ import { AcpSessionStatus } from "./public-types.js"
 import { ACP_REVIEW_COMMANDS, handleAcpReviewCommand } from "./review.js"
 import { type AcpModeId, SessionConfigManager } from "./sessionConfig.js"
 import {
+	cloneForkedSessionArtifacts,
 	getHistoryItemCwd,
 	getTaskIdsForSession,
 	historyItemToSessionInfo,
 	listLatestConversationHistoryItems,
+	resolveForkSourceState,
 	resolveHistorySession,
 } from "./sessionHistory.js"
 import { TaskMessageBridge } from "./taskMessageBridge.js"
@@ -1196,9 +1198,11 @@ export class DiracAgent implements acp.Agent {
 				auth: { logout: {} },
 				providers: {},
 				sessionCapabilities: {
+					list: {},
 					resume: {},
 					close: {},
 					delete: {},
+					fork: {},
 				},
 				promptCapabilities: {
 					image: true,
@@ -1463,6 +1467,105 @@ export class DiracAgent implements acp.Agent {
 			cwd: params.cwd,
 			mcpServers: params.mcpServers ?? [],
 		})
+	}
+
+	/**
+	 * Fork a session. The forked session starts from the source session's state
+	 * and inherits its task history and ACP update journal, but it is a fully
+	 * independent session: it has its own task id, its own runtime overrides, and
+	 * its own persisted journal that subsequent appends will never mutate.
+	 */
+	async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+		const sourceSessionId = params.sessionId
+		if (this.sessionStates.get(sourceSessionId)?.status === AcpSessionStatus.Processing) {
+			throw new Error(`Cannot fork session ${sourceSessionId} while a prompt is in progress`)
+		}
+
+		const readSourceState = async () =>
+			resolveForkSourceState({
+				dataDir: this.ctx.DATA_DIR,
+				sourceSessionId,
+				requestedCwd: params.cwd,
+				defaultCwd: this.options.cwd,
+				activeSource: this.sessions.get(sourceSessionId),
+				activeOverrides: this.acpSessionOverrides.get(sourceSessionId),
+			})
+
+		// Synchronize against active runtime mutations when the source session is loaded in memory.
+		const sourceState = this.sessionStates.has(sourceSessionId)
+			? await this.runSessionRuntimeMutation(sourceSessionId, readSourceState)
+			: await readSourceState()
+
+		const newSessionId = crypto.randomUUID()
+		const forkTitle = sourceState.sourceTitle
+			? `Fork of ${sourceState.sourceTitle}`
+			: `Fork of ${sourceSessionId.slice(0, 8)}`
+		const newTaskId = await cloneForkedSessionArtifacts({
+			dataDir: this.ctx.DATA_DIR,
+			sourceSessionId,
+			newSessionId,
+			sourceState,
+			forkTitle,
+		})
+
+		return this.registerForkedSession({
+			newSessionId,
+			forkTitle,
+			newTaskId,
+			sourceState,
+		})
+	}
+
+	/** Register a newly forked ACP session, its controller, and its runtime overrides. */
+	private async registerForkedSession(options: {
+		newSessionId: string
+		forkTitle: string
+		newTaskId?: string
+		sourceState: ReturnType<typeof resolveForkSourceState>
+	}): Promise<acp.ForkSessionResponse> {
+		const { newSessionId, forkTitle, newTaskId, sourceState } = options
+		const { sourceOverrides, sourceMode, sourceCwd } = sourceState
+		const controller = new Controller(this.ctx.extensionContext, {
+			workspaceCwd: sourceCwd,
+		})
+		const now = Date.now()
+		const session: DiracAcpSession = {
+			sessionId: newSessionId,
+			cwd: sourceCwd,
+			mode: sourceMode,
+			title: forkTitle,
+			createdAt: now,
+			lastActivityAt: now,
+			...(newTaskId
+				? {
+						isLoadedFromHistory: true,
+						loadedTaskId: newTaskId,
+						taskId: newTaskId,
+					}
+				: {}),
+		}
+
+		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sourceOverrides)
+		// Validate that the cloned task exists in task history before registering the session.
+		if (newTaskId) {
+			await controller.getTaskWithId(newTaskId)
+		}
+
+		this.#sessionControllers.set(session, controller)
+		this.sessions.set(newSessionId, session)
+		this.initializeSessionOverrides(newSessionId, sourceOverrides)
+		this.sessionStates.set(newSessionId, {
+			sessionId: newSessionId,
+			status: AcpSessionStatus.Idle,
+			pendingToolCalls: new Map(),
+		})
+		this.persistSessionOverrides(newSessionId)
+
+		return {
+			sessionId: newSessionId,
+			modes: this.sessionConfig.getSessionModeState(session.mode, sourceOverrides),
+			configOptions,
+		}
 	}
 
 	/**
@@ -2267,13 +2370,10 @@ export class DiracAgent implements acp.Agent {
 				(cmd) => cmd.cliCompatible && !cliOnlyNames.has(cmd.name) && !vscodeOnlyNames.has(cmd.name),
 			)
 
-			// Convert to ACP AvailableCommand format
+			// Convert to ACP AvailableCommand format (omit redundant input.hint duplicating cmd.description)
 			const availableCommands: acp.AvailableCommand[] = filteredCommands.map((cmd) => ({
 				name: cmd.name,
 				description: cmd.description,
-				input: {
-					hint: cmd.description,
-				},
 			}))
 
 			for (const reviewCommand of ACP_REVIEW_COMMANDS) {
