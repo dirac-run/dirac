@@ -21,12 +21,18 @@ import {
 	formatPreviousVerificationFailures,
 } from "./CompletionVerificationContext"
 
-const COMPLETION_VERIFICATION_INSTRUCTIONS = `1. All requested changes have been made (verify using a test script/\`execute_command\` when possible)
+const COMPLETION_VERIFICATION_INSTRUCTIONS = `1. All requested changes have been made (use \`read_file\` and \`search_files\` to inspect files, and reserve \`execute_command\` for running test scripts or \`git diff\`)
 2. No steps were skipped or partially completed
 3. Edge cases and error handling are addressed
 4. The solution matches what was asked for, not just what was convenient
 5. Output files contain exactly what was specified - no extra columns, fields, debug output, or commentary
 6. If the task specifies numerical thresholds or accuracy targets, verify your result meets the criteria. If close but not passing, iterate rather than declaring completion`
+
+// Accepts verifier responses starting with VERIFICATION: SUCCESS even when followed by an explanation, unless VERIFICATION: FAILED is present.
+export function isVerificationSubagentSuccess(result: string | undefined): boolean {
+	const normalized = result?.trim() ?? ""
+	return /^VERIFICATION:\s*SUCCESS\b/i.test(normalized) && !/\bVERIFICATION:\s*FAILED\b/i.test(normalized)
+}
 
 export class CompletionResponseOperation {
 	async execute(result: string, env: IToolEnvironment): Promise<any> {
@@ -273,7 +279,7 @@ Otherwise, respond with "VERIFICATION: FAILED" followed by all the details on wh
 			const report = `Verification subagent execution failed: ${runResult.error ?? "Unknown error"}`
 			return await this.recordVerificationFailure(env, result, report, `Verification Subagent Failed:\n${runResult.error}`)
 		}
-		if (runResult.result?.trim() === "VERIFICATION: SUCCESS") {
+		if (isVerificationSubagentSuccess(runResult.result)) {
 			env.orchestration.setTaskState("completionVerificationFailure", undefined)
 			return undefined
 		}

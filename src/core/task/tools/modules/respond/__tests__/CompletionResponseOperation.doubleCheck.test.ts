@@ -197,4 +197,37 @@ describe("CompletionResponseOperation double-check completion", () => {
 		assert.equal(runSubagent.callCount, 1)
 		assert.equal(state.completionVerificationFailure?.candidateFingerprint, undefined)
 	})
+
+	it("accepts VERIFICATION: SUCCESS even when the verifier appends a summary explanation", async () => {
+		const runSubagent = sinon.stub().resolves({
+			status: SubagentExecutionStatus.COMPLETED,
+			result: "VERIFICATION: SUCCESS\n\nAll requested changes and edge cases have been verified against the diff.",
+		})
+		const { env, state, commitAttemptCompletion } = makeEnvironment({
+			initialTask: "Verify the implementation.",
+			runSubagent,
+		})
+
+		const response = await new CompletionResponseOperation().execute("Done", env)
+
+		assert.equal(response, "Done")
+		assert.equal(commitAttemptCompletion.calledOnceWithExactly("Done"), true)
+		assert.equal(state.completionVerificationFailure, undefined)
+	})
+
+	it("rejects verifier output that mentions VERIFICATION: SUCCESS but concludes with VERIFICATION: FAILED", async () => {
+		const runSubagent = sinon.stub().resolves({
+			status: SubagentExecutionStatus.COMPLETED,
+			result: "VERIFICATION: SUCCESS on item 1, but overall VERIFICATION: FAILED due to missing test.",
+		})
+		const { env, commitAttemptCompletion } = makeEnvironment({
+			initialTask: "Verify the implementation.",
+			runSubagent,
+		})
+
+		const response = await new CompletionResponseOperation().execute("Done", env)
+
+		assert.match(response, /The solution could not be verified successfully/)
+		assert.equal(commitAttemptCompletion.called, false)
+	})
 })
