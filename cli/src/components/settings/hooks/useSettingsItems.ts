@@ -98,8 +98,11 @@ function createModelItems(props: UseSettingsItemsProps): ListItem[] {
 	} = props
 	const stateManager = StateManager.get()
 	const modelList = usesOpenRouterModels(provider) ? openRouterModels || [] : getModelList(provider)
-	const isActCustom = actModelId === CUSTOM_MODEL_ID || Boolean(actModelId && !modelList.includes(actModelId))
-	const isPlanCustom = planModelId === CUSTOM_MODEL_ID || Boolean(planModelId && !modelList.includes(planModelId))
+	// OpenAI-compatible endpoints expose arbitrary server-defined model IDs, so only explicit CUSTOM_MODEL_ID is treated as custom.
+	const isCustomModelId = (modelId: string) =>
+		modelId === CUSTOM_MODEL_ID || Boolean(modelId && provider !== "openai" && !modelList.includes(modelId))
+	const isActCustom = isCustomModelId(actModelId)
+	const isPlanCustom = isCustomModelId(planModelId)
 	const providerId = provider as ApiProvider
 	const actModelInfo = getModelInfoForProvider(providerId, actModelId)
 	const planModelInfo = getModelInfoForProvider(providerId, planModelId)

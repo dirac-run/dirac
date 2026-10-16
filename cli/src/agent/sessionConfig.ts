@@ -14,6 +14,7 @@ import { getProviderModelIdKey, getProviderModelInfoKey } from "@shared/storage/
 import type { Settings } from "@shared/storage/state-keys"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
 import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
+import { getOpenAiModels } from "@/core/controller/models/refreshOpenAiModels"
 import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import {
@@ -543,6 +544,11 @@ export class SessionConfigManager {
 						return refreshDynamicCatalog
 							? Object.keys(await refreshGithubCopilotModels()).sort((a, b) => a.localeCompare(b))
 							: []
+					}
+					if (provider === "openai") {
+						if (!refreshDynamicCatalog) return []
+						const openAiModels = await getOpenAiModels()
+						return Object.keys(openAiModels).sort((a, b) => a.localeCompare(b))
 					}
 					if (hasStaticModels(provider)) return getModelList(provider)
 					if (provider === "dify") return ["dify-workflow"]

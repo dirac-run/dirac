@@ -5,6 +5,11 @@
  * the same provider/model lists as the interactive CLI.
  */
 
+import type { Controller } from "@/core/controller";
+import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels";
+import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels";
+import { getOpenAiModels } from "@/core/controller/models/refreshOpenAiModels";
+import { refreshOpenRouterModels } from "@/core/controller/models/refreshOpenRouterModels";
 import {
 	type ApiProvider,
 	anthropicDefaultModelId,
@@ -97,12 +102,49 @@ export const providerModels: Record<string, { models: Record<string, unknown>; d
 	zai: { models: { ...internationalZAiModels, ...mainlandZAiModels }, defaultId: internationalZAiDefaultModelId },
 }
 
+export interface DynamicModelFetchOptions {
+	controller?: Controller
+	baseUrl?: string
+	apiKey?: string
+}
+
+// Single source of truth mapping dynamic providers to their remote catalog loaders.
+const DYNAMIC_MODEL_LOADERS: Record<string, (options: DynamicModelFetchOptions) => Promise<Record<string, unknown>>> = {
+	openrouter: (options) => refreshOpenRouterModels(options.controller),
+	huggingface: () => getHuggingFaceModels(),
+	"github-copilot": () => refreshGithubCopilotModels(),
+	openai: (options) => getOpenAiModels(options),
+}
+
+const CUSTOM_MODEL_LABELS: Record<string, string> = {
+	bedrock: "Custom (ARN / Inference Profile)",
+	openrouter: "Custom Model ID / Preset",
+	openai: "Custom Model ID / Preset",
+}
+
 export function hasStaticModels(provider: string): boolean {
 	return provider in providerModels
 }
 
+export function hasDynamicModels(provider: string): boolean {
+	return provider in DYNAMIC_MODEL_LOADERS
+}
+
+export function fetchDynamicModels(
+	provider: string,
+	options: DynamicModelFetchOptions = {},
+): Promise<Record<string, unknown>> {
+	const loader = DYNAMIC_MODEL_LOADERS[provider]
+	if (!loader) throw new Error(`Provider ${provider} does not support dynamic model discovery`)
+	return loader(options)
+}
+
 export function hasModelPicker(provider: string): boolean {
-	return hasStaticModels(provider) || usesOpenRouterModels(provider) || provider === "github-copilot"
+	return hasStaticModels(provider) || hasDynamicModels(provider)
+}
+
+export function getCustomModelLabel(provider: string): string | undefined {
+	return CUSTOM_MODEL_LABELS[provider]
 }
 
 export function getDefaultModelId(provider: string): string {

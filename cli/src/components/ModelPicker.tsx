@@ -7,14 +7,22 @@ import { theme } from "../constants/theme"
 import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import React, { useEffect, useMemo, useState } from "react"
-import { refreshOpenRouterModels } from "@/core/controller/models/refreshOpenRouterModels"
-import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
-import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
+import type { Controller } from "@/core/controller"
+import { logOpenAiModelsError } from "@/core/controller/models/refreshOpenAiModels"
 import { type ApiProvider } from "@/shared/api"
 import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { COLORS } from "../constants/colors"
 import { Logger } from "@/shared/services/Logger"
-import { getDefaultModelId, getModelList, hasModelPicker, hasStaticModels, providerModels } from "../utils/model-metadata"
+import {
+	fetchDynamicModels,
+	getCustomModelLabel,
+	getDefaultModelId,
+	getModelList,
+	hasDynamicModels,
+	hasModelPicker,
+	hasStaticModels,
+	providerModels,
+} from "../utils/model-metadata"
 import { usesOpenRouterModels } from "../utils/openrouter-models"
 import { SearchableList, SearchableListItem } from "./SearchableList"
 
@@ -25,23 +33,30 @@ export { getDefaultModelId, getModelList, hasModelPicker, hasStaticModels, provi
 
 interface ModelPickerProps {
 	provider: string
-	controller: any
+	controller?: Controller
 	onChange: (modelId: string) => void
 	onSubmit: (modelId: string) => void
 	isActive?: boolean
+	baseUrl?: string
+	apiKey?: string
 }
 
-export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, onChange, onSubmit, isActive = true }) => {
+export const ModelPicker: React.FC<ModelPickerProps> = ({
+	provider,
+	controller,
+	onChange,
+	onSubmit,
+	isActive = true,
+	baseUrl,
+	apiKey,
+}) => {
 	const [isLoading, setIsLoading] = useState(false)
 	const [asyncModels, setAsyncModels] = useState<string[]>([])
 	const [loadError, setLoadError] = useState<string | null>(null)
 
 	// Fetch dynamic models when needed
 	useEffect(() => {
-		const loadsOpenRouterModels = usesOpenRouterModels(provider)
-		const loadsGithubModels = provider === "github-copilot"
-		const loadsHuggingFaceModels = provider === "huggingface"
-		if (!loadsOpenRouterModels && !loadsGithubModels && !loadsHuggingFaceModels) {
+		if (!hasDynamicModels(provider)) {
 			setAsyncModels([])
 			setLoadError(null)
 			setIsLoading(false)
@@ -53,12 +68,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, 
 		setLoadError(null)
 		setIsLoading(true)
 
-		const loadModels = loadsOpenRouterModels
-			? refreshOpenRouterModels(controller)
-			: loadsHuggingFaceModels
-				? getHuggingFaceModels()
-				: refreshGithubCopilotModels()
-		loadModels.then(
+		fetchDynamicModels(provider, { controller, baseUrl, apiKey }).then(
 			(models) => {
 				if (cancelled) return
 				const modelIds = Object.keys(models).sort((a, b) => a.localeCompare(b))
@@ -66,14 +76,20 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, 
 					setLoadError("The provider returned no models.")
 				}
 				setAsyncModels(
-					loadsOpenRouterModels ? filterOpenRouterModelIds(modelIds, provider as ApiProvider) : modelIds,
+					usesOpenRouterModels(provider) ? filterOpenRouterModelIds(modelIds, provider as ApiProvider) : modelIds,
 				)
 				setIsLoading(false)
 			},
 			(error) => {
-				Logger.error(`Failed to load models for ${provider}:`, error)
+				const message =
+					provider === "openai"
+						? logOpenAiModelsError(error)
+						: error instanceof Error
+							? error.message
+							: String(error)
+				if (provider !== "openai") Logger.error(`Failed to load models for ${provider}:`, error)
 				if (cancelled) return
-				setLoadError(error instanceof Error ? error.message : String(error))
+				setLoadError(message)
 				setIsLoading(false)
 			},
 		)
@@ -81,32 +97,30 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, 
 		return () => {
 			cancelled = true
 		}
-	}, [provider, controller])
+	}, [provider, controller, baseUrl, apiKey])
 
+	const fallbackModels = useMemo(() => getModelList(provider), [provider])
 	const modelList = useMemo(() => {
-		if (provider === "huggingface") return asyncModels.length ? asyncModels : getModelList(provider)
-		if (usesOpenRouterModels(provider) || provider === "github-copilot") return asyncModels
-		return getModelList(provider)
-	}, [provider, asyncModels])
+		if (!hasDynamicModels(provider)) return fallbackModels
+		return asyncModels.length ? asyncModels : fallbackModels
+	}, [provider, asyncModels, fallbackModels])
 
-	// Providers that support custom model IDs (e.g., Bedrock Application Inference Profiles)
-	const supportsCustomModel = provider === "bedrock" || usesOpenRouterModels(provider)
+	const customModelLabel = getCustomModelLabel(provider)
+	const supportsCustomModel = Boolean(customModelLabel)
 
 	const items: SearchableListItem[] = useMemo(() => {
 		const list = modelList.map((modelId) => ({
 			id: modelId,
 			label: modelId,
 		}))
-		// Add "Custom" option at the end for providers that support it
-		if (supportsCustomModel) {
-			const label = usesOpenRouterModels(provider) ? "Custom Model ID / Preset" : "Custom (ARN / Inference Profile)"
+		if (customModelLabel) {
 			list.push({
 				id: CUSTOM_MODEL_ID,
-				label,
+				label: customModelLabel,
 			})
 		}
 		return list
-	}, [modelList, supportsCustomModel, provider])
+	}, [modelList, customModelLabel])
 
 	// For providers without a model picker, render nothing
 	if (!hasModelPicker(provider)) {
@@ -125,7 +139,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, 
 		)
 	}
 
-	if (loadError && !supportsCustomModel && provider !== "huggingface") {
+	if (loadError && !supportsCustomModel && !fallbackModels.length) {
 		return <Text color={theme.error}>Could not load models: {loadError}</Text>
 	}
 
@@ -133,9 +147,11 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, controller, 
 		<Box flexDirection="column">
 			{loadError && (
 				<Text color={theme.warning}>
-					{provider === "huggingface"
+					{fallbackModels.length
 						? "Model list unavailable; showing fallback models."
-						: "Model list unavailable; enter a custom model ID."}
+						: provider === "openai"
+							? `${loadError} Select Custom Model ID / Preset below.`
+							: "Model list unavailable; enter a custom model ID."}
 				</Text>
 			)}
 			<SearchableList
