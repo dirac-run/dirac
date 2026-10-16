@@ -231,7 +231,7 @@ export class SessionConfigManager {
 							name: "Inference Speed",
 							description: "Provider processing tier for the current model",
 							type: "select" as const,
-							category: "model",
+							category: "model_config",
 							currentValue: inferenceSpeed,
 							options: this.modelSupportsFastMode(currentProvider, currentModelId)
 								? ACP_INFERENCE_SPEED_OPTIONS

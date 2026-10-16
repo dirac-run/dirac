@@ -18,6 +18,7 @@ import { PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk"
 import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import type { RunHistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
 import { isPlanResponseCard } from "@shared/responseTool"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getExplicitDiracSettingsFromEnv, getProviderFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
@@ -70,6 +71,7 @@ import {
 } from "../acp/acp-session-runtime-config.js"
 import { deleteTasksForSession, getLatestTaskIdForSession, recordTaskForSession } from "../acp/acp-session-tasks.js"
 import {
+	copySessionUpdates,
 	deleteSessionUpdates,
 	getSessionUpdates,
 	recordClientAnnotation,
@@ -173,6 +175,25 @@ function worktreeProvisioningRequest(params: acp.NewSessionRequest): WorktreePro
  *
  * For stdio-based ACP communication, use the AcpAgent wrapper class.
  */
+// ---------------------------------------------------------------- fork helpers
+
+const TASKS_DIR_NAME = "tasks"
+
+/** Returns the on-disk directory for a task id under dataDir/tasks. */
+function taskDirectory(dataDir: string, taskId: string): string {
+	return path.join(dataDir, TASKS_DIR_NAME, taskId)
+}
+
+/**
+ * Upsert a task history item under the task-history inventory lock and flush
+ * the pending state so the forked session appears in history listings.
+ */
+async function upsertHistoryItem(item: TaskHistoryItem): Promise<void> {
+	const stateManager = StateManager.get()
+	stateManager.upsertTaskHistoryItem(item as unknown as RunHistoryItem)
+	await stateManager.flushPendingState()
+}
+
 export class DiracAgent implements acp.Agent {
 	async shutdown() {
 		try {
@@ -1196,9 +1217,11 @@ export class DiracAgent implements acp.Agent {
 				auth: { logout: {} },
 				providers: {},
 				sessionCapabilities: {
+					list: {},
 					resume: {},
 					close: {},
 					delete: {},
+					fork: {},
 				},
 				promptCapabilities: {
 					image: true,
@@ -1463,6 +1486,134 @@ export class DiracAgent implements acp.Agent {
 			cwd: params.cwd,
 			mcpServers: params.mcpServers ?? [],
 		})
+	}
+
+	/**
+	 * Fork a session. The forked session starts from the source session's state
+	 * and inherits its task history and ACP update journal, but it is a fully
+	 * independent session: it has its own task id, its own runtime overrides, and
+	 * its own persisted journal that subsequent appends will never mutate.
+	 */
+	async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+		const sourceSessionId = params.sessionId
+		if (this.sessionStates.get(sourceSessionId)?.status === AcpSessionStatus.Processing) {
+			throw new Error(`Cannot fork session ${sourceSessionId} while a prompt is in progress`)
+		}
+
+		const cloneSourceState = async () => {
+			const activeSource = this.sessions.get(sourceSessionId)
+			const persistedConfig = activeSource ? undefined : getSessionRuntimeConfig(this.ctx.DATA_DIR, sourceSessionId)
+			if (!activeSource && !persistedConfig) {
+				throw new Error(`Source session ${sourceSessionId} not found`)
+			}
+
+			const rawOverrides = activeSource ? this.acpSessionOverrides.get(sourceSessionId) : persistedConfig?.settings
+			if (!rawOverrides) {
+				throw new Error(`Source session ${sourceSessionId} has no runtime overrides`)
+			}
+
+			const sourceMode: "act" | "plan" =
+				activeSource?.mode ?? (rawOverrides.mode === "plan" ? "plan" : "act")
+			const resolvedHistory = activeSource
+				? resolveHistorySession(sourceSessionId)
+				: resolveHistorySession(sourceSessionId, persistedConfig?.taskId ?? getLatestTaskIdForSession(sourceSessionId))
+			const sourceTaskId = activeSource?.taskId ?? activeSource?.loadedTaskId ?? resolvedHistory?.taskId ?? persistedConfig?.taskId
+			const sourceTitle = activeSource?.title ?? resolvedHistory?.historyItem.task
+			const sourceCwd =
+				params.cwd ||
+				activeSource?.cwd ||
+				(resolvedHistory ? getHistoryItemCwd(resolvedHistory.historyItem, params.cwd, this.options.cwd) : undefined) ||
+				persistedConfig?.cwd ||
+				this.options.cwd ||
+				process.cwd()
+
+			return {
+				sourceOverrides: copyTaskRuntimeSettings(rawOverrides),
+				sourceMode,
+				sourceTaskId,
+				sourceTitle,
+				sourceCwd,
+				sourceHistoryItem: resolvedHistory?.historyItem,
+			}
+		}
+
+		// Synchronize against active runtime mutations when the source session is loaded in memory.
+		const { sourceOverrides, sourceMode, sourceTaskId, sourceTitle, sourceCwd, sourceHistoryItem } =
+			this.sessionStates.has(sourceSessionId)
+				? await this.runSessionRuntimeMutation(sourceSessionId, cloneSourceState)
+				: await cloneSourceState()
+
+		const newSessionId = crypto.randomUUID()
+		const forkTitle = sourceTitle ? `Fork of ${sourceTitle}` : `Fork of ${sourceSessionId.slice(0, 8)}`
+		let newTaskId: string | undefined
+
+		// Copy the source task directory and journal when the source session has a backing task.
+		if (sourceTaskId) {
+			newTaskId = crypto.randomUUID()
+			const sourceTaskDir = taskDirectory(this.ctx.DATA_DIR, sourceTaskId)
+			const newTaskDir = taskDirectory(this.ctx.DATA_DIR, newTaskId)
+			await fs.mkdir(path.dirname(newTaskDir), { recursive: true })
+			await fs.cp(sourceTaskDir, newTaskDir, { recursive: true })
+
+			await withTaskHistoryInventoryLock(async () => {
+				const historyItem: TaskHistoryItem = {
+					id: newTaskId!,
+					ulid: newSessionId,
+					ts: Date.now(),
+					task: forkTitle,
+					tokensIn: (sourceHistoryItem as TaskHistoryItem | undefined)?.tokensIn ?? 0,
+					tokensOut: (sourceHistoryItem as TaskHistoryItem | undefined)?.tokensOut ?? 0,
+					totalCost: (sourceHistoryItem as TaskHistoryItem | undefined)?.totalCost ?? 0,
+					cwdOnTaskInitialization: sourceCwd,
+					workspaceRootPath: sourceCwd,
+					runKind: "task",
+				}
+				await upsertHistoryItem(historyItem)
+			})
+
+			copySessionUpdates(sourceSessionId, newSessionId)
+		}
+
+		const controller = new Controller(this.ctx.extensionContext, {
+			workspaceCwd: sourceCwd,
+		})
+		const now = Date.now()
+		const session: DiracAcpSession = {
+			sessionId: newSessionId,
+			cwd: sourceCwd,
+			mode: sourceMode,
+			title: forkTitle,
+			createdAt: now,
+			lastActivityAt: now,
+			...(newTaskId
+				? {
+						isLoadedFromHistory: true,
+						loadedTaskId: newTaskId,
+						taskId: newTaskId,
+					}
+				: {}),
+		}
+
+		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sourceOverrides)
+		if (newTaskId) {
+			await controller.getTaskWithId(newTaskId)
+		}
+
+		this.#sessionControllers.set(session, controller)
+		this.sessions.set(newSessionId, session)
+		this.initializeSessionOverrides(newSessionId, sourceOverrides)
+		this.sessionStates.set(newSessionId, {
+			sessionId: newSessionId,
+			status: AcpSessionStatus.Idle,
+			pendingToolCalls: new Map(),
+		})
+		this.persistSessionOverrides(newSessionId)
+
+		return {
+			sessionId: newSessionId,
+			modes: this.sessionConfig.getSessionModeState(session.mode, sourceOverrides),
+			configOptions,
+		}
 	}
 
 	/**

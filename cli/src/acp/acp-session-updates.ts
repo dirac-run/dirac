@@ -667,3 +667,55 @@ export function deleteSessionUpdates(sessionId: string): void {
 		fsyncDirectory(SESSION_UPDATES_DIRECTORY)
 	})
 }
+
+/**
+ * Copy the update journal from one session to another under per-session locks,
+ * renumbering sequence numbers and embedded sequence metadata so the forked
+ * journal is a valid, self-contained append-only log.
+ */
+export function copySessionUpdates(sourceSessionId: string, targetSessionId: string): void {
+	if (sourceSessionId === targetSessionId) {
+		throw new Error(`Cannot copy ACP session updates onto the same session: ${sourceSessionId}`)
+	}
+
+	const sourceEntries = getSessionUpdates(sourceSessionId)
+	if (sourceEntries.length === 0) return
+
+	withLock(sessionLockDirectory(targetSessionId), () => {
+		const filePath = journalFilePath(targetSessionId)
+		migrateLegacyIsolatedJournal(targetSessionId)
+		const existingLastSequence = readLastSequence(filePath)
+
+		// Renumber 0-based index continuously after existingLastSequence and stamp inner _meta[SEQUENCE_META_KEY].
+		const renumbered: PersistedSessionUpdate[] = sourceEntries.map((entry, index) => {
+			const sequenceNumber = existingLastSequence + index + 1
+			if (entry.kind === "session_update") {
+				return {
+					kind: "session_update",
+					sequenceNumber,
+					update: {
+						...entry.update,
+						_meta: {
+							...entry.update._meta,
+							[SEQUENCE_META_KEY]: sequenceNumber,
+						},
+					},
+				}
+			}
+			return {
+				kind: "client_annotation",
+				sequenceNumber,
+				annotation: {
+					...entry.annotation,
+					_meta: {
+						...(entry.annotation._meta as Record<string, unknown> | undefined),
+						[SEQUENCE_META_KEY]: sequenceNumber,
+					},
+				},
+			}
+		})
+
+		const size = appendRow(filePath, renumbered.map(serializeRow).join(""))
+		compactIfNeeded(filePath, size)
+	})
+}

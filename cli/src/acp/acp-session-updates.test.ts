@@ -686,4 +686,56 @@ describe("ACP session update journal", () => {
 			} as any),
 		).toThrow(/DIRAC_ACP_SESSION_UPDATES_MAX_BYTES must be a positive integer/)
 	})
+
+	it("copies a compacted session journal to a forked session with contiguous renumbered sequences and _meta", async () => {
+		const dataDirectory = process.env.DIRAC_DATA_DIR!
+		const sourceSessionId = "compacted-source-session"
+		const targetSessionId = "forked-target-session"
+		const sourcePath = journalFilePath(dataDirectory, sourceSessionId)
+		fs.mkdirSync(path.dirname(sourcePath), { recursive: true })
+		// Simulate a compacted journal whose leading entries (1..4) were dropped so sequences start at 5.
+		fs.writeFileSync(
+			sourcePath,
+			[
+				JSON.stringify({
+					kind: "session_update",
+					sequenceNumber: 5,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "retained chunk" },
+						_meta: { "dev.dirac/seq": 5 },
+					},
+				}),
+				JSON.stringify({
+					kind: "client_annotation",
+					sequenceNumber: 6,
+					annotation: { note: "pinned", _meta: { "dev.dirac/seq": 6 } },
+				}),
+			].join("\n") + "\n",
+		)
+
+		const journal = await import("./acp-session-updates.js")
+		expect(() => journal.copySessionUpdates(sourceSessionId, sourceSessionId)).toThrow(
+			/Cannot copy ACP session updates onto the same session/,
+		)
+
+		journal.copySessionUpdates(sourceSessionId, targetSessionId)
+		const forkedEntries = journal.getSessionUpdates(targetSessionId)
+		expect(forkedEntries).toEqual([
+			{
+				kind: "session_update",
+				sequenceNumber: 1,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "retained chunk" },
+					_meta: { "dev.dirac/seq": 1 },
+				},
+			},
+			{
+				kind: "client_annotation",
+				sequenceNumber: 2,
+				annotation: { note: "pinned", _meta: { "dev.dirac/seq": 2 } },
+			},
+		])
+	})
 })

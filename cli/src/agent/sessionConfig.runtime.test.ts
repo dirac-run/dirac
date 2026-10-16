@@ -344,15 +344,29 @@ describe("SessionConfigManager task runtime behavior", () => {
 	})
 
 	it("uses standard ACP categories with provider before model", async () => {
-		const options = await new SessionConfigManager().getSessionConfigOptions(session(), linkedDeepSeekRuntime())
+		const runtime: Partial<Settings> = {
+			mode: "act",
+			planActSeparateModelsSetting: false,
+			planModeApiProvider: "openai-native",
+			actModeApiProvider: "openai-native",
+			planModeApiModelId: "gpt-5.4",
+			actModeApiModelId: "gpt-5.4",
+		}
+		const options = await new SessionConfigManager().getSessionConfigOptions(session(), runtime)
 		expect(options.map(({ id, category }) => [id, category])).toEqual([
 			["mode", "mode"],
 			["auto_approve", "mode"],
 			["yolo", "mode"],
 			["provider", "_provider"],
 			["model", "model"],
+			["inference_speed", "model_config"],
 			["reasoning_effort", "thought_level"],
+			["thinking_budget", "thought_level"],
 		])
+		const speed = selectOption(options, "inference_speed")
+		const model = selectOption(options, "model")
+		expect(speed.category).toBe("model_config")
+		expect(model.category).toBe("model")
 		expect(options.findIndex((option) => option.id === "provider")).toBeLessThan(
 			options.findIndex((option) => option.id === "model"),
 		)
