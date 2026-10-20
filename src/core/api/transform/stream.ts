@@ -71,7 +71,7 @@ export interface ApiStreamToolCall {
 		/**
 		 * The arguments passed to the tool execution
 		 */
-		arguments?: any
+		arguments?: string
 	}
 }
 

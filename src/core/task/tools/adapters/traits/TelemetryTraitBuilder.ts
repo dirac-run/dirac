@@ -1,10 +1,10 @@
 import { telemetryService } from "@services/telemetry"
-import type { ITelemetryTrait } from "../../interfaces/IToolEnvironment"
+import type { ITelemetryTrait, TelemetryMetadata } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 import { getTaskCompletionTelemetry } from "../../utils"
 
 export function buildTelemetryTrait(
-	metadataHolder: { customMetadata: Record<string, any> },
+	metadataHolder: { customMetadata: TelemetryMetadata },
 	config: TaskConfig,
 ): ITelemetryTrait {
 	return {

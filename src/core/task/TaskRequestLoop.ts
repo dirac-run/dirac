@@ -133,7 +133,7 @@ export async function recursivelyMakeDiracRequests(
 			isFirstRequest,
 			providerId,
 			modelId: model.id,
-			mode: modelInfo.mode,
+			mode,
 			requestId: ctx.requestRuntime.requestId,
 			afterUserContentPersisted: async () => {
 				await conversationPersistence.persist(() => ctx.messageStateHandler.flushPendingWrites())
@@ -276,7 +276,7 @@ export async function recursivelyMakeDiracRequests(
 				providerId,
 				modelInfo.modelId,
 				"assistant",
-				modelInfo.mode,
+				mode,
 				undefined,
 				ctx.taskState.useNativeToolCalls,
 			)
@@ -434,7 +434,7 @@ export async function recursivelyMakeDiracRequests(
 			assistantMessageId,
 			providerId,
 			modelId: model.id,
-			mode: modelInfo.mode,
+			mode,
 			taskMetrics: metricsManager.getMetrics(),
 			modelInfo,
 			toolUseHandler,
