@@ -1,3 +1,6 @@
+import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -129,6 +132,8 @@ const stateManager: any = {
 	}),
 	getApiConfiguration: vi.fn(() => ({})),
 	getGlobalStateKey: vi.fn(() => []),
+	upsertTaskHistoryItem: vi.fn(),
+	removeTaskHistoryItems: vi.fn(),
 	flushPendingState: vi.fn(async () => undefined),
 	captureEffectiveTaskConfiguration: vi.fn((explicitOverrides: Record<string, unknown>) => ({
 		settings: structuredClone(explicitOverrides),
@@ -136,12 +141,49 @@ const stateManager: any = {
 	})),
 }
 
+let inventoryLockTail = Promise.resolve()
+let fsCpInterceptor: ((actualCp: typeof fs.promises.cp, ...args: Parameters<typeof fs.promises.cp>) => Promise<void>) | undefined
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs/promises")>()
+	return {
+		...actual,
+		cp: vi.fn(async (...args: Parameters<typeof actual.cp>) => {
+			const interceptor = fsCpInterceptor
+			if (interceptor) {
+				fsCpInterceptor = undefined
+				await interceptor(actual.cp, ...args)
+				return
+			}
+			await actual.cp(...args)
+		}),
+	}
+})
 vi.mock("@/core/controller", () => ({ Controller: mocks.MockController }))
 vi.mock("@/core/storage/disk", () => ({ setRuntimeHooksDir: vi.fn() }))
+vi.mock("@/core/storage/taskHistory", () => ({
+	withTaskHistoryInventoryLock: vi.fn(async (action: () => Promise<unknown>) => {
+		const previous = inventoryLockTail
+		let release!: () => void
+		inventoryLockTail = previous.then(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
+		await previous
+		try {
+			return await action()
+		} finally {
+			release()
+		}
+	}),
+}))
 vi.mock("@/core/storage/StateManager", () => ({ StateManager: { get: vi.fn(() => stateManager) } }))
 vi.mock("./taskMessageBridge.js", () => ({ TaskMessageBridge: mocks.MockTaskMessageBridge }))
 
 const { DiracAgent } = await import("./DiracAgent.js")
+const { deleteSessionUpdates, getSessionUpdates, recordSessionUpdate } = await import("../acp/acp-session-updates.js")
 describe("DiracAgent active prompt runtime construction", () => {
 	it("reads the latest explicitly transitioned mode at the construction boundary", () => {
 		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
@@ -825,5 +867,319 @@ describe("DiracAgent ACP conversation continuity", () => {
 		await expect(agent.shutdown()).resolves.toBeUndefined()
 		expect(controller.dispose).toHaveBeenCalledOnce()
 		expect((agent as any).sessions.has(sessionId)).toBe(false)
+	})
+
+	it("forks an active session with a fresh sessionId, isolated runtime state, and copied task directory", async () => {
+		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-test-"))
+		try {
+			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
+				; (agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
+				; (agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+				; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [{ id: "mode", currentValue: "plan" }])
+				; (agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "plan", availableModes: [] }))
+				; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+				; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+
+			const { sessionId: sourceSessionId } = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			await expect(
+				agent.prompt({ sessionId: sourceSessionId, prompt: [{ type: "text", text: "initial turn" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+
+			const sourceTaskDir = path.join(tempDataDir, "tasks", mocks.task.taskId)
+			fs.mkdirSync(sourceTaskDir, { recursive: true })
+			fs.writeFileSync(path.join(sourceTaskDir, "ui_messages.json"), "[]")
+
+			const forkResponse = await agent.unstable_forkSession({
+				sessionId: sourceSessionId,
+				cwd: "/tmp/workspace",
+				mcpServers: [],
+			})
+
+			expect(forkResponse.sessionId).not.toBe(sourceSessionId)
+			expect(forkResponse.modes).toEqual({ currentModeId: "plan", availableModes: [] })
+			expect(forkResponse.configOptions).toEqual([{ id: "mode", currentValue: "plan" }])
+			expect((agent as any).sessions.has(sourceSessionId)).toBe(true)
+			expect((agent as any).sessionStates.has(forkResponse.sessionId)).toBe(true)
+
+			const forkedSession = (agent as any).sessions.get(forkResponse.sessionId)
+			const forkedTaskId = forkedSession.loadedTaskId
+			expect(forkedSession.isLoadedFromHistory).toBe(true)
+			expect(forkedTaskId).toBeDefined()
+			expect(forkedTaskId).not.toBe(mocks.task.taskId)
+			expect(fs.existsSync(path.join(tempDataDir, "tasks", forkedTaskId, "ui_messages.json"))).toBe(true)
+			expect(stateManager.upsertTaskHistoryItem).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: forkedTaskId,
+					ulid: forkResponse.sessionId,
+				}),
+			)
+
+			// Prompting the forked session must reinitialize the cloned task rather than starting a blank initTask.
+			const forkedController = mocks.controllers[1]
+			await expect(
+				agent.prompt({ sessionId: forkResponse.sessionId, prompt: [{ type: "text", text: "forked follow-up" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+			expect(forkedController.reinitExistingTaskFromId).toHaveBeenCalledWith(
+				forkedTaskId,
+				expect.any(Object),
+			)
+			expect(forkedController.initTask).not.toHaveBeenCalled()
+		} finally {
+			fs.rmSync(tempDataDir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects forking when a prompt is already initializing before the fork enters synchronization", async () => {
+		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-init-race-"))
+		let sourceSessionId: string | undefined
+		try {
+			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
+			;(agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
+			;(agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+			;(agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			;(agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "plan", availableModes: [] }))
+			;(agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			;(agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+
+			const created = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			sourceSessionId = created.sessionId
+
+			let markAssertionEntered!: () => void
+			const assertionEntered = new Promise<void>((resolve) => {
+				markAssertionEntered = resolve
+			})
+			let releaseAssertion!: () => void
+			const assertionGate = new Promise<void>((resolve) => {
+				releaseAssertion = resolve
+			})
+			;(agent as any).sessionConfig.assertTaskRuntimeAvailable = vi.fn(async () => {
+				markAssertionEntered()
+				await assertionGate
+			})
+
+			const promptPromise = agent.prompt({
+				sessionId: sourceSessionId,
+				prompt: [{ type: "text", text: "initializing turn" }],
+			} as any)
+			await assertionEntered
+
+			// At this point prompt() is inside runSessionRuntimeMutation, while status is still Idle.
+			expect((agent as any).sessionStates.get(sourceSessionId)?.status).toBe("idle")
+			const forkPromise = agent.unstable_forkSession({
+				sessionId: sourceSessionId,
+				cwd: "/tmp/workspace",
+				mcpServers: [],
+			})
+
+			releaseAssertion()
+			await expect(forkPromise).rejects.toThrow(`Cannot fork session ${sourceSessionId} while a prompt is in progress`)
+			await expect(promptPromise).resolves.toEqual({ stopReason: "end_turn" })
+		} finally {
+			if (sourceSessionId) deleteSessionUpdates(sourceSessionId)
+			fs.rmSync(tempDataDir, { recursive: true, force: true })
+		}
+	})
+
+	it("serializes a prompt starting during snapshot copy so task files and journal stay consistent", async () => {
+		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-copy-prompt-race-"))
+		let sourceSessionId: string | undefined
+		let forkedSessionId: string | undefined
+		try {
+			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
+			;(agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
+			;(agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+			;(agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			;(agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "plan", availableModes: [] }))
+			;(agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			;(agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+
+			const created = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			sourceSessionId = created.sessionId
+			await expect(
+				agent.prompt({ sessionId: sourceSessionId, prompt: [{ type: "text", text: "turn 1" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+
+			const sourceTaskDir = path.join(tempDataDir, "tasks", mocks.task.taskId)
+			fs.mkdirSync(sourceTaskDir, { recursive: true })
+			fs.writeFileSync(path.join(sourceTaskDir, "ui_messages.json"), JSON.stringify([{ id: "m1", text: "turn 1" }]))
+			deleteSessionUpdates(sourceSessionId)
+			recordSessionUpdate(sourceSessionId, {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "turn 1" },
+			} as any)
+
+			let markCopyStarted!: () => void
+			const copyStarted = new Promise<void>((resolve) => {
+				markCopyStarted = resolve
+			})
+			let releaseCopy!: () => void
+			const copyGate = new Promise<void>((resolve) => {
+				releaseCopy = resolve
+			})
+			fsCpInterceptor = async (actualCp, src, dest, opts) => {
+				await actualCp(src, dest, opts)
+				markCopyStarted()
+				await copyGate
+			}
+
+			let secondPromptEnteredTask = false
+			mocks.controllers[0].prepareTaskForFollowUp.mockImplementationOnce(async () => {
+				secondPromptEnteredTask = true
+				fs.writeFileSync(
+					path.join(sourceTaskDir, "ui_messages.json"),
+					JSON.stringify([
+						{ id: "m1", text: "turn 1" },
+						{ id: "m2", text: "turn 2" },
+					]),
+				)
+				recordSessionUpdate(sourceSessionId!, {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "turn 2" },
+				} as any)
+				return mocks.task
+			})
+
+			const forkPromise = agent.unstable_forkSession({
+				sessionId: sourceSessionId,
+				cwd: "/tmp/workspace",
+				mcpServers: [],
+			})
+			await copyStarted
+
+			const secondPromptPromise = agent.prompt({
+				sessionId: sourceSessionId,
+				prompt: [{ type: "text", text: "turn 2" }],
+			} as any)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// The concurrent prompt must not enter task execution or mutate source artifacts while copy is in progress.
+			expect(secondPromptEnteredTask).toBe(false)
+			expect((agent as any).sessionStates.get(sourceSessionId)?.status).toBe("idle")
+
+			releaseCopy()
+			const [forkResponse, promptResult] = await Promise.all([forkPromise, secondPromptPromise])
+			forkedSessionId = forkResponse.sessionId
+			expect(promptResult).toEqual({ stopReason: "end_turn" })
+			expect(secondPromptEnteredTask).toBe(true)
+
+			const forkedSession = (agent as any).sessions.get(forkedSessionId)
+			const forkedMessages = JSON.parse(
+				fs.readFileSync(path.join(tempDataDir, "tasks", forkedSession.loadedTaskId, "ui_messages.json"), "utf8"),
+			)
+			const forkedJournal = getSessionUpdates(forkedSessionId)
+			expect(forkedMessages).toEqual([{ id: "m1", text: "turn 1" }])
+			expect(forkedJournal).toHaveLength(1)
+			expect((forkedJournal[0] as any).update.content.text).toBe("turn 1")
+		} finally {
+			if (sourceSessionId) deleteSessionUpdates(sourceSessionId)
+			if (forkedSessionId) deleteSessionUpdates(forkedSessionId)
+			fs.rmSync(tempDataDir, { recursive: true, force: true })
+		}
+	})
+
+	it("protects an in-flight fork snapshot when the source session is deleted during the copy", async () => {
+		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-copy-delete-race-"))
+		const historyRecords: any[] = []
+		let sourceSessionId: string | undefined
+		let forkedSessionId: string | undefined
+		try {
+			stateManager.getGlobalStateKey.mockImplementation((key: string) => (key === "taskHistory" ? historyRecords : []))
+			stateManager.upsertTaskHistoryItem.mockImplementation((item: any) => {
+				const idx = historyRecords.findIndex((candidate) => candidate.id === item.id)
+				if (idx === -1) historyRecords.push(item)
+				else historyRecords[idx] = item
+			})
+			stateManager.removeTaskHistoryItems.mockImplementation((ids: string[]) => {
+				const removeSet = new Set(ids)
+				for (let idx = historyRecords.length - 1; idx >= 0; idx -= 1) {
+					if (removeSet.has(historyRecords[idx].id)) historyRecords.splice(idx, 1)
+				}
+			})
+
+			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
+			;(agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
+			;(agent as any).providerConfiguration.assertProviderEnabled = vi.fn()
+			;(agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			;(agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "plan", availableModes: [] }))
+			;(agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			;(agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+
+			const created = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			sourceSessionId = created.sessionId
+			await expect(
+				agent.prompt({ sessionId: sourceSessionId, prompt: [{ type: "text", text: "turn 1" }] } as any),
+			).resolves.toEqual({ stopReason: "end_turn" })
+
+			const sourceTaskDir = path.join(tempDataDir, "tasks", mocks.task.taskId)
+			fs.mkdirSync(sourceTaskDir, { recursive: true })
+			fs.writeFileSync(path.join(sourceTaskDir, "ui_messages.json"), JSON.stringify([{ id: "m1", text: "snapshot" }]))
+			historyRecords.push({
+				id: mocks.task.taskId,
+				ulid: sourceSessionId,
+				ts: Date.now(),
+				task: "turn 1",
+				cwdOnTaskInitialization: "/tmp/workspace",
+				workspaceRootPath: "/tmp/workspace",
+				runKind: "task",
+			})
+			deleteSessionUpdates(sourceSessionId)
+			recordSessionUpdate(sourceSessionId, {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "snapshot" },
+			} as any)
+
+			let markCopyStarted!: () => void
+			const copyStarted = new Promise<void>((resolve) => {
+				markCopyStarted = resolve
+			})
+			let releaseCopy!: () => void
+			const copyGate = new Promise<void>((resolve) => {
+				releaseCopy = resolve
+			})
+			fsCpInterceptor = async (actualCp, src, dest, opts) => {
+				markCopyStarted()
+				await copyGate
+				await actualCp(src, dest, opts)
+			}
+
+			const forkPromise = agent.unstable_forkSession({
+				sessionId: sourceSessionId,
+				cwd: "/tmp/workspace",
+				mcpServers: [],
+			})
+			await copyStarted
+
+			const deletePromise = agent.deleteSession({ sessionId: sourceSessionId })
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect((agent as any).sessions.has(sourceSessionId)).toBe(true)
+
+			// Source task directory and journal must remain intact until the snapshot copy completes.
+			expect(fs.existsSync(path.join(sourceTaskDir, "ui_messages.json"))).toBe(true)
+			expect(getSessionUpdates(sourceSessionId)).toHaveLength(1)
+
+			releaseCopy()
+			const [forkResponse] = await Promise.all([forkPromise, deletePromise])
+			forkedSessionId = forkResponse.sessionId
+
+			expect((agent as any).sessions.has(sourceSessionId)).toBe(false)
+			expect(fs.existsSync(sourceTaskDir)).toBe(false)
+			expect(getSessionUpdates(sourceSessionId)).toEqual([])
+
+			const forkedSession = (agent as any).sessions.get(forkedSessionId)
+			expect(forkedSession).toBeDefined()
+			expect(
+				JSON.parse(
+					fs.readFileSync(path.join(tempDataDir, "tasks", forkedSession.loadedTaskId, "ui_messages.json"), "utf8"),
+				),
+			).toEqual([{ id: "m1", text: "snapshot" }])
+			const forkedJournal = getSessionUpdates(forkedSessionId)
+			expect(forkedJournal).toHaveLength(1)
+			expect((forkedJournal[0] as any).update.content.text).toBe("snapshot")
+		} finally {
+			stateManager.getGlobalStateKey.mockReturnValue([])
+			if (sourceSessionId) deleteSessionUpdates(sourceSessionId)
+			if (forkedSessionId) deleteSessionUpdates(forkedSessionId)
+			fs.rmSync(tempDataDir, { recursive: true, force: true })
+		}
 	})
 })

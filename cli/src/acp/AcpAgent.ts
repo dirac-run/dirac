@@ -364,12 +364,29 @@ export class AcpAgent implements acp.Agent {
 		return response
 	}
 
+	async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+		return this.unstable_resumeSession(params)
+	}
+
 	async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
 		this.assertConnected()
 		const response = await this.diracAgent.unstable_resumeSession(params)
 		this.subscribeToSessionEvents(params.sessionId)
 		this.scheduleSessionSetupUpdates(params.sessionId)
 		return response
+	}
+
+	async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+		this.assertConnected()
+		const response = await this.diracAgent.unstable_forkSession(params)
+		this.subscribeToSessionEvents(response.sessionId)
+		// Skip replayLoadedSessionHistory: per ACP spec, session/fork (like session/resume) does not stream historical chunks on fork.
+		this.scheduleSessionSetupUpdates(response.sessionId)
+		return response
+	}
+
+	async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+		return this.unstable_listSessions(params)
 	}
 
 	async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
