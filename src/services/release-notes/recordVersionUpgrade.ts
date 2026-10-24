@@ -1,6 +1,6 @@
-import type { StateManager } from "@core/storage/StateManager"
 import { ExtensionRegistryInfo } from "@/registry"
 import { Logger } from "@/shared/services/Logger"
+import type { StateAccess } from "@/shared/storage/state-access"
 
 const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/
 
@@ -15,7 +15,7 @@ function compareVersions(left: string, right: string): number | undefined {
 	return 0
 }
 
-export async function recordVersionUpgrade(stateManager: StateManager): Promise<void> {
+export async function recordVersionUpgrade(stateManager: StateAccess): Promise<void> {
 	const currentVersion = ExtensionRegistryInfo.version
 	const previousVersion = stateManager.getGlobalStateKey("diracVersion")
 	if (previousVersion === currentVersion) return

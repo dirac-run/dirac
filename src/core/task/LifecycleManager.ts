@@ -9,7 +9,7 @@ import {
 	getTaskMetadata,
 } from "@core/storage/disk"
 import { HostProvider } from "@hosts/host-provider"
-import { ensureCheckpointInitialized } from "@integrations/checkpoints/initializer"
+import { ensureCheckpointInitialized } from "@core/checkpoints/initializer"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
 import type { BrowserSession } from "@services/browser/BrowserSession"
 import { findLastIndex } from "@shared/array"

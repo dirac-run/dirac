@@ -1,4 +1,4 @@
-import { DiracWebviewProvider } from "@/core/webview"
+import { getUriCallbackTarget } from "@/shared/uri/uri-callback-target"
 import { Logger } from "@/shared/services/Logger"
 
 export const TASK_URI_PATH = "/task"
@@ -30,9 +30,9 @@ export class SharedUriHandler {
 				}),
 		)
 
-		const visibleWebview = DiracWebviewProvider.getVisibleInstance()
+		const callbackTarget = getUriCallbackTarget()
 
-		if (!visibleWebview) {
+		if (!callbackTarget) {
 			Logger.warn("SharedUriHandler: No visible webview found")
 			return false
 		}
@@ -42,7 +42,7 @@ export class SharedUriHandler {
 				case "/openrouter": {
 					const code = query.get("code")
 					if (code) {
-						await visibleWebview.controller.completeOpenRouterAuth(code)
+						await callbackTarget.completeOpenRouterAuth(code)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing code parameter for OpenRouter callback")
@@ -51,7 +51,7 @@ export class SharedUriHandler {
 				case "/requesty": {
 					const code = query.get("code")
 					if (code) {
-						await visibleWebview.controller.completeRequestyAuth(code)
+						await callbackTarget.completeRequestyAuth(code)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing code parameter for Requesty callback")
@@ -60,7 +60,7 @@ export class SharedUriHandler {
 				case TASK_URI_PATH: {
 					const prompt = query.get("prompt")
 					if (prompt) {
-						await visibleWebview.controller.createTask(prompt)
+						await callbackTarget.createTask(prompt)
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing prompt parameter for task creation")

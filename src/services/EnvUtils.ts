@@ -1,4 +1,4 @@
-import { isMultiRootWorkspace } from "@/core/workspace/utils/workspace-detection"
+import { isMultiRootWorkspace } from "./workspace-detection"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
 import { EmptyRequest } from "@/shared/proto/dirac/common"

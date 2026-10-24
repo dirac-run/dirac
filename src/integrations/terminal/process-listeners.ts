@@ -5,13 +5,13 @@
  */
 
 import { TerminalHangStage, telemetryService } from "@/services/telemetry"
-import type { TaskMessenger } from "../../core/task/TaskMessenger"
+import type { TaskTextSink } from "./types"
 import { COMPLETION_TIMEOUT_MS } from "./constants"
 import type { TerminalCompletionDetails, TerminalProcessResultPromise } from "./types"
 
 export interface ListenerConfig {
 	process: TerminalProcessResultPromise
-	taskMessenger: TaskMessenger
+	taskMessenger: TaskTextSink
 	terminalType: "vscode" | "standalone"
 	showShellIntegrationSuggestion?: boolean
 	suppressUserInteraction?: boolean
