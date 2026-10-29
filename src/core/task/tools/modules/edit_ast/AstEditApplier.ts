@@ -3,7 +3,7 @@ import { DiagnosticSeverity, type FileDiagnostics } from "@shared/proto/index.di
 import { getErrorMessage } from "@/shared/errors"
 import type { IToolEnvironment, SaveResult } from "../../interfaces/IToolEnvironment"
 
-export type AstEditDiagnosticsStatus = "not_run" | "clean" | "problems" | "failed"
+export type AstEditDiagnosticsStatus = "not_run" | "unavailable" | "clean" | "problems" | "failed"
 
 export interface AstEditFileApplyResult {
 	file: SourceFileChange
@@ -77,6 +77,17 @@ export class AstEditApplier {
 			}
 
 			const finalContent = saveResult.content ?? approvedContent
+			if (!env.diagnostics) {
+				files.push({
+					file,
+					status: "saved",
+					finalContent,
+					saveResult,
+					diagnosticsStatus: "unavailable",
+					errorCount: 0,
+				})
+				continue
+			}
 			try {
 				await env.diagnostics.prepare([file.absolutePath])
 				const diagnostics = await env.diagnostics.getRaw([file.absolutePath])

@@ -60,7 +60,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 	public readonly workspace: IWorkspaceTrait
 	public readonly sourceAst: ISourceAstTrait
 	public readonly anchors: IAnchorTrait
-	public readonly diagnostics: IDiagnosticsTrait
+	public readonly diagnostics?: IDiagnosticsTrait
 	public readonly editor: IEditorTrait
 	public readonly browser: IBrowserTrait
 	public readonly skills: ISkillsTrait

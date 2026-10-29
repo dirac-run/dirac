@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
+import { setHostCapabilities } from "@/hosts/host-capabilities"
+import { diagnostics_scan_spec, DiagnosticsScanTool } from "../modules/diagnostics_scan"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { ToolDiscoveryService } from "../discovery/ToolDiscoveryService"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
@@ -55,7 +57,34 @@ describe("ToolSnapshotManager task isolation", () => {
 		sinon.stub(ToolDiscoveryService, "scanGlobalUserTools").resolves([])
 	})
 
-	afterEach(() => sinon.restore())
+	afterEach(() => {
+		sinon.restore()
+		setHostCapabilities(undefined)
+	})
+
+	for (const available of [false, true]) {
+		it(`${available ? "exposes" : "omits"} diagnostics in the model and runtime when host support is ${available}`, async () => {
+			setHostCapabilities(available ? { editorDiagnostics: true } : {})
+			ToolRegistry.getInstance().registerBuiltin({
+				...makeTool("diagnostics_scan"),
+				spec: diagnostics_scan_spec,
+				factory: () => new DiagnosticsScanTool(),
+			})
+			sinon.stub(ToolDiscoveryService, "scanWorkspaceTools").resolves([])
+			const snapshot = await createManager(
+				{ diagnostics_scan: true },
+				"task-id",
+				"/test-workspace",
+				{ mode: "delta", enabledToolIds: ["diagnostics_scan"], disabledToolIds: [] },
+			).getSnapshotForRequest(context, { requestId: `diagnostics-${available}`, configurationRevision: 1 })
+
+			assert.equal(snapshot.promptVisibleSpecs.some((spec) => spec.name === "diagnostics_scan"), available)
+			assert.equal(snapshot.nativeTools.some((tool) => "name" in tool && tool.name === "diagnostics_scan"), available)
+			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.id === "diagnostics_scan"), available)
+			assert.equal(snapshot.executableToolNames.has("diagnostics_scan"), available)
+			assert.equal(snapshot.coordinator.has("diagnostics_scan"), available)
+		})
+	}
 
 	it("applies invocation selection after configured toggles", async () => {
 		const exact = createManager(

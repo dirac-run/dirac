@@ -278,10 +278,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 	) {
 		const toolId = this.spec().id
 		await env.editor.reset()
-		await env.diagnostics.prepare([absolutePath])
-		const diagnostics = await env.diagnostics.getRaw([absolutePath])
-		const problemCount = diagnostics.reduce((count, file) => count + file.diagnostics.length, 0)
-		const newProblemsMessage = problemCount > 0 ? `Diagnostics: ${problemCount} problem(s) in ${relPath}.` : undefined
+		const newProblemsMessage = await this.collectDiagnosticsMessage(env, absolutePath, relPath)
 
 		env.telemetry.captureCustomMetadata({
 			toolId,
@@ -306,6 +303,15 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			saveResult.autoFormatting ? "Applied by the editor." : undefined,
 			newProblemsMessage,
 		)
+	}
+
+	private async collectDiagnosticsMessage(env: IToolEnvironment, absolutePath: string, relPath: string): Promise<string | undefined> {
+		if (!env.diagnostics) return "Diagnostics not available on this host."
+
+		await env.diagnostics.prepare([absolutePath])
+		const diagnostics = await env.diagnostics.getRaw([absolutePath])
+		const problemCount = diagnostics.reduce((count, file) => count + file.diagnostics.length, 0)
+		return problemCount > 0 ? `Diagnostics: ${problemCount} problem(s) in ${relPath}.` : undefined
 	}
 
 	private async finalizeCardWithError(error: any, env: IToolEnvironment, card?: any): Promise<string> {

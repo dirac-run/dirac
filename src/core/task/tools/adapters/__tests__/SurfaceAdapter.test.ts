@@ -5,6 +5,7 @@ import { DiracIcon } from "@shared/icons"
 import { expect } from "chai"
 import sinon from "sinon"
 import { Logger } from "@/shared/services/Logger"
+import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { SurfaceAdapter } from "../SurfaceAdapter"
 
 // Characterization tests for SurfaceAdapter — verifies that each trait method
@@ -15,11 +16,15 @@ describe("SurfaceAdapter", () => {
 	let adapter: SurfaceAdapter
 
 	beforeEach(() => {
+		setHostCapabilities({})
 		config = createMockConfig()
 		adapter = new SurfaceAdapter(config, "test-tool")
 	})
 
-	afterEach(() => sinon.restore())
+	afterEach(() => {
+		sinon.restore()
+		setHostCapabilities(undefined)
+	})
 
 	describe("constructor", () => {
 		it("stores config and toolName", () => {
@@ -32,6 +37,15 @@ describe("SurfaceAdapter", () => {
 			a.toolName.should.equal("")
 		})
 
+		it("omits diagnostics on unsupported hosts", () => {
+			expect(adapter.diagnostics).to.be.undefined
+		})
+
+		it("exposes diagnostics when the host advertises support", () => {
+			setHostCapabilities({ editorDiagnostics: true })
+			expect(new SurfaceAdapter(config).diagnostics).to.not.be.undefined
+		})
+
 		it("exposes all required traits", () => {
 			const traits = [
 				"ui",
@@ -42,7 +56,6 @@ describe("SurfaceAdapter", () => {
 				"workspace",
 				"sourceAst",
 				"anchors",
-				"diagnostics",
 				"editor",
 				"browser",
 				"skills",

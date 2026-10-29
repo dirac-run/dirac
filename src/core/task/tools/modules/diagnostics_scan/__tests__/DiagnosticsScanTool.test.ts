@@ -6,10 +6,12 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracDefaultTool } from "@shared/tools"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
+import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { HostProvider } from "@/hosts/host-provider"
 import { DiagnosticSeverity } from "@/shared/proto/index.dirac"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { ToolExecutorCoordinator } from "../../../ToolExecutorCoordinator"
+import { SurfaceAdapter } from "../../../adapters/SurfaceAdapter"
 import { createMockTaskConfig } from "../../../__tests__/helpers/mockTaskConfig"
 import { DiagnosticsScanTool } from "../index"
 
@@ -27,6 +29,7 @@ describe("DiagnosticsScanTool", () => {
 		getDiagnosticsStub = sandbox.stub().resolves({ fileDiagnostics: [] })
 
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					prepareDiagnostics: prepareDiagnosticsStub,
@@ -39,7 +42,7 @@ describe("DiagnosticsScanTool", () => {
 	afterEach(async () => {
 		sandbox.restore()
 		HostProvider.reset()
-		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { })
 	})
 
 	function createConfig(abortSignal?: AbortSignal) {
@@ -69,6 +72,20 @@ describe("DiagnosticsScanTool", () => {
 			params,
 		}
 	}
+
+	it("rejects direct execution on unsupported hosts without collecting diagnostics", async () => {
+		setHostCapabilities({})
+		const { config } = createConfig()
+		const env = new SurfaceAdapter(config, "diagnostics_scan")
+
+		await assert.rejects(
+			new DiagnosticsScanTool().processCall({ paths: ["file.ts"] }, env),
+			/Diagnostics not available on this host\./,
+		)
+		sinon.assert.notCalled(prepareDiagnosticsStub)
+		sinon.assert.notCalled(getDiagnosticsStub)
+		sinon.assert.notCalled(config.taskMessenger.createCard)
+	})
 
 	it("increments consecutiveMistakeCount when paths parameter is missing or empty", async () => {
 		const { config, taskState } = createConfig()
@@ -216,7 +233,7 @@ describe("DiagnosticsScanTool", () => {
 	it("polls and sleeps between iterations until diagnostics appear", async () => {
 		const { config } = createConfig()
 		const handler = new DiagnosticsScanTool()
-		;(handler as any).diagnosticsDelayMs = 10
+			; (handler as any).diagnosticsDelayMs = 10
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
 
@@ -255,7 +272,7 @@ describe("DiagnosticsScanTool", () => {
 		const abortController = new AbortController()
 		const { config } = createConfig(abortController.signal)
 		const handler = new DiagnosticsScanTool()
-		;(handler as any).diagnosticsDelayMs = 50
+			; (handler as any).diagnosticsDelayMs = 50
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
 
@@ -282,8 +299,8 @@ describe("DiagnosticsScanTool", () => {
 	it("handles mixed valid and invalid files", async () => {
 		const { config } = createConfig()
 		const handler = new DiagnosticsScanTool()
-		;(handler as any).baseDiagnosticsTimeoutMs = 30
-		;(handler as any).diagnosticsDelayMs = 10
+			; (handler as any).baseDiagnosticsTimeoutMs = 30
+			; (handler as any).diagnosticsDelayMs = 10
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
 
@@ -309,8 +326,8 @@ describe("DiagnosticsScanTool", () => {
 			overrides: { isSubagentExecution: true },
 		})
 		const handler = new DiagnosticsScanTool()
-		;(handler as any).baseDiagnosticsTimeoutMs = 30
-		;(handler as any).diagnosticsDelayMs = 10
+			; (handler as any).baseDiagnosticsTimeoutMs = 30
+			; (handler as any).diagnosticsDelayMs = 10
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
 

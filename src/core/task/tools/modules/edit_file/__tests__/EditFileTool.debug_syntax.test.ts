@@ -115,6 +115,7 @@ describe("EditFileTool – debug syntax", () => {
 		getDiagnosticsStub = sandbox.stub().resolves({ fileDiagnostics: [] })
 
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: getDiagnosticsStub,

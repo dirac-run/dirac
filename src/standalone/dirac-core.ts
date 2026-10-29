@@ -1,16 +1,9 @@
-import { ExternalCommentReviewController } from "@hosts/external/ExternalCommentReviewController"
-import { ExternalDiffViewProvider } from "@hosts/external/ExternalDiffviewProvider"
-import { ExternalDiracWebviewProvider } from "@hosts/external/ExternalWebviewProvider"
-import { ExternalHostBridgeClientManager } from "@hosts/external/host-bridge-client-manager"
+import { initializeExternalHostProvider } from "@hosts/external/initializeExternalHostProvider"
 import { retryOperation } from "@utils/retry"
-import * as path from "path"
 import { initialize, tearDown } from "@/common"
 import { SqliteLockManager } from "@/core/locks/SqliteLockManager"
-import { DiracWebviewProvider } from "@/core/webview"
 import { AuthHandler } from "@/hosts/external/AuthHandler"
 import { HostProvider } from "@/hosts/host-provider"
-import { DiffViewProvider } from "@/integrations/editor/DiffViewProvider"
-import { StandaloneTerminalManager } from "@/integrations/terminal"
 import { Logger } from "@/shared/services/Logger"
 import { createStorageContext } from "@/shared/storage/storage-context"
 import { HOSTBRIDGE_PORT, waitForHostBridgeReady } from "./hostbridge-client"
@@ -59,7 +52,7 @@ async function main() {
 		const hostAddress = await waitForHostBridgeReady()
 
 		// The host bridge should be available before creating the host provider because it depends on the host bridge.
-		setupHostProvider(extensionContext, EXTENSION_DIR, DATA_DIR)
+		initializeExternalHostProvider(extensionContext, EXTENSION_DIR, DATA_DIR)
 
 		// Create shared file-backed storage
 		const storageContext = createStorageContext({ diracDir: args.config })
@@ -99,38 +92,6 @@ async function main() {
 		await shutdownGracefully(globalLockManager)
 		process.exit(1)
 	}
-}
-
-function setupHostProvider(extensionContext: any, extensionDir: string, dataDir: string) {
-	const createWebview = (): DiracWebviewProvider => {
-		return new ExternalDiracWebviewProvider(extensionContext)
-	}
-	const createDiffView = (): DiffViewProvider => {
-		return new ExternalDiffViewProvider()
-	}
-	const createCommentReview = () => new ExternalCommentReviewController()
-	const createTerminalManager = () => new StandaloneTerminalManager()
-	const getCallbackUrl = (path: string, preferredPort?: number): Promise<string> => {
-		return AuthHandler.getInstance().getCallbackUrl(path, preferredPort)
-	}
-	// dirac-core expects the binaries to be unpacked in the directory where it is running.
-	const getBinaryLocation = async (name: string): Promise<string> => path.join(process.cwd(), name)
-	const getEnvironmentVariables = async (_cwd: string) => undefined
-
-	HostProvider.initialize(
-		"extension",
-		createWebview,
-		createDiffView,
-		createCommentReview,
-		createTerminalManager,
-		new ExternalHostBridgeClientManager(),
-		log,
-		getCallbackUrl,
-		getBinaryLocation,
-		extensionDir,
-		dataDir,
-		getEnvironmentVariables,
-	)
 }
 
 /**

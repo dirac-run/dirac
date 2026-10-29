@@ -428,7 +428,8 @@ export interface IToolEnvironment {
 	readonly system: ISystemTrait
 	readonly workspace: IWorkspaceTrait
 	readonly sourceAst: ISourceAstTrait
-	readonly diagnostics: IDiagnosticsTrait
+	/** Absent when the host cannot supply editor diagnostics. */
+	readonly diagnostics?: IDiagnosticsTrait
 
 	readonly anchors: IAnchorTrait
 	readonly editor: IEditorTrait

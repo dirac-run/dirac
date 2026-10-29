@@ -10,6 +10,7 @@ import { VsCodeLmHandler } from "./vscode-lm"
  * Keeps every `vscode.*` API call inside the hosts layer — core never imports vscode.
  */
 export const vscodeHostCapabilities: HostCapabilities = {
+	editorDiagnostics: true,
 	architectureViewer: {
 		openSelection: async (selection) => {
 			const { DiracWebviewProvider } = await import("@core/webview")

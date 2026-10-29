@@ -99,6 +99,7 @@ export class AstEditFormatter {
 		let text = `Saved ${result.file.displayPath} (${result.file.editCount} edit(s))${
 			annotations.length ? ` — ${annotations.join(", ")}` : ""
 		}.`
+		if (result.diagnosticsStatus === "unavailable") text += " Diagnostics not available on this host."
 		if (result.diagnosticsStatus === "clean") text += " No diagnostics problems reported."
 		if (result.diagnosticsStatus === "failed") {
 			text += ` Diagnostics collection failed: ${result.diagnosticsError}`

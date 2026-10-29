@@ -193,6 +193,7 @@ describe("EditFileTool.execute – partial success", () => {
 		])
 
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: sandbox.stub().resolves({ fileDiagnostics: [] }),

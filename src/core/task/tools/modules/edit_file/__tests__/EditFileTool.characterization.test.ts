@@ -155,6 +155,7 @@ describe("EditFileTool – characterization edge cases", () => {
 			} as any,
 		])
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: sandbox.stub().resolves({ fileDiagnostics: [] }),
@@ -210,6 +211,7 @@ describe("EditFileTool – characterization edge cases", () => {
 			return { wasSaved: true }
 		})
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: sandbox.stub().resolves({ fileDiagnostics: [] }),

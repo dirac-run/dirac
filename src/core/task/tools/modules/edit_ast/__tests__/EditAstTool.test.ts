@@ -133,6 +133,27 @@ describe("EditAstTool", () => {
 		sinon.assert.calledWith(env.config.callbacks.shouldAutoApproveToolWithPath as sinon.SinonStub, "edit_ast", "src/a.ts")
 	})
 
+	it("saves successfully but reports diagnostics as unavailable on an unsupported host", async () => {
+		const { env, progressCard } = makeEnv()
+		const diagnostics = env.diagnostics!
+		Object.assign(env, { diagnostics: undefined })
+		const planRename = env.sourceAst.planRename as sinon.SinonStub
+		planRename.resolves(renamePlan)
+
+		const result = await tool.processCall(
+			{ operation: "rename", targets: [{ path: "src", symbol: "oldName", replacement: "newName" }] },
+			env,
+		)
+
+		assert.match(result, /Rename completed/)
+		assert.match(result, /Diagnostics not available on this host\./)
+		assert.doesNotMatch(result, /No diagnostics problems reported|Diagnostics collection failed/)
+		sinon.assert.calledOnce(env.editor.applyAndSaveSilently as sinon.SinonStub)
+		sinon.assert.notCalled(diagnostics.prepare as sinon.SinonStub)
+		sinon.assert.notCalled(diagnostics.getRaw as sinon.SinonStub)
+		sinon.assert.calledWith(progressCard.finalize, CardStatus.SUCCESS)
+	})
+
 	it("stops before the AST applier when mutation consent is revoked after approval", async () => {
 		const { env } = makeEnv()
 		;(env.sourceAst.planRename as sinon.SinonStub).resolves(renamePlan)

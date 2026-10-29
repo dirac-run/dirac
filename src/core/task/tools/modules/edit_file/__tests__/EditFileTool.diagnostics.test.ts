@@ -171,6 +171,7 @@ describe("EditFileTool.diagnostics", () => {
 		})
 
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: getDiagnosticsStub,

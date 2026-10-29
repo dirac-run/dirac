@@ -27,6 +27,21 @@ function createEnvironment(problemCount: number): IToolEnvironment {
 const cleanSave: SaveResult = { content: "saved", userEdits: false, autoFormatting: false }
 
 describe("WriteToFileTool results", () => {
+	it("reports unavailable diagnostics without changing a successful save into a failure", async () => {
+		const env = createEnvironment(0)
+		Object.assign(env, { diagnostics: undefined })
+		const result = await new WriteToFileTool()["finalizeResults"](
+			env,
+			"/workspace/file.ts",
+			"file.ts",
+			true,
+			cleanSave,
+			true,
+		)
+		assert.equal(result, "Saved file.ts.\n\nDiagnostics not available on this host.")
+		sinon.assert.calledOnce(env.editor.reset as sinon.SinonStub)
+	})
+
 	it("does not count an empty diagnostic file group as a problem", async () => {
 		const result = await new WriteToFileTool()["finalizeResults"](
 			createEnvironment(0),

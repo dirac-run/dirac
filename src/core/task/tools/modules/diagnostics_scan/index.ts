@@ -13,9 +13,10 @@ import { DiagnosticFormatter } from "../../utils/DiagnosticFormatter"
 
 export const diagnostics_scan_spec: DiracToolSpec = {
 	id: DiracDefaultTool.DIAGNOSTICS_SCAN,
+	requiredHostCapability: "editorDiagnostics",
 	name: "diagnostics_scan",
 	description:
-		"Runs diagnostics (linter and syntax checks) on the specified files and returns the results. This is useful for checking if recent changes introduced any errors or for getting a summary of existing problems in specific files.",
+		"Collects diagnostics reported by the host's editor and language services for the specified files. Does not run build or lint commands; an empty result does not establish that those checks passed.",
 	parameters: [
 		{
 			name: "paths",
@@ -44,6 +45,9 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 	}
 
 	async processCall(args: DiagnosticsScanArgs, env: IToolEnvironment): Promise<string> {
+		const diagnostics = env.diagnostics
+		if (!diagnostics) throw new Error("Diagnostics not available on this host.")
+
 		const { paths: relPaths } = args
 
 		if (!relPaths || relPaths.length === 0) {
@@ -85,7 +89,7 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 			}
 
 			// Prepare diagnostics
-			await deadline.run("preparing diagnostics", () => env.diagnostics.prepare(validFiles.map((f) => f.absolutePath)))
+			await deadline.run("preparing diagnostics", () => diagnostics.prepare(validFiles.map((f) => f.absolutePath)))
 
 			// Polling logic
 			const totalLines = validFiles.reduce((sum, f) => sum + f.content.split(/\r?\n/).length, 0)
@@ -95,7 +99,7 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 
 			while (Date.now() - startTime < timeoutMs && !cancellationSignal?.aborted) {
 				allDiagnostics = await deadline.run("collecting diagnostics", () =>
-					env.diagnostics.getRaw(validFiles.map((f) => f.absolutePath)),
+					diagnostics.getRaw(validFiles.map((f) => f.absolutePath)),
 				)
 
 				if (this.hasDiagnostics(validFiles, allDiagnostics)) {

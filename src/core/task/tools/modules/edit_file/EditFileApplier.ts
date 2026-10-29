@@ -126,8 +126,9 @@ export class EditFileApplier {
 	): Promise<ToolResponse[]> {
 		const results: ToolResponse[] = []
 		const paths = preparedBatches.map((b) => b.absolutePath)
-		await env.diagnostics.prepare(paths)
-		const rawDiagnostics = await env.diagnostics.getRaw(paths)
+		const diagnostics = env.diagnostics
+		if (diagnostics) await diagnostics.prepare(paths)
+		const rawDiagnostics = diagnostics ? await diagnostics.getRaw(paths) : []
 
 		for (const batch of preparedBatches) {
 			const applied = appliedResults.get(batch.absolutePath)!
@@ -135,13 +136,16 @@ export class EditFileApplier {
 			const fileContentMap = applied.newLineHashes
 				? new Map([[batch.absolutePath, { lines: applied.finalLines, hashes: applied.newLineHashes }]])
 				: undefined
-			const diagnosticDetails = await env.diagnostics.formatProblems(
-				[{ filePath: batch.absolutePath, diagnostics: fileDiagnostics }],
-				fileContentMap,
-			)
+			const diagnosticDetails = diagnostics
+				? await diagnostics.formatProblems(
+					[{ filePath: batch.absolutePath, diagnostics: fileDiagnostics }],
+					fileContentMap,
+				)
+				: ""
 			const diagnosticsResult = {
-				newProblemsMessage:
-					fileDiagnostics.length > 0
+				newProblemsMessage: !diagnostics
+					? "Diagnostics not available on this host."
+					: fileDiagnostics.length > 0
 						? `Found ${fileDiagnostics.length} problems${diagnosticDetails ? `\n${diagnosticDetails}` : ""}`
 						: "",
 				fixedCount: 0,

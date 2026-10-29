@@ -29,6 +29,8 @@ export type VsCodeLmHandlerFactoryOptions = CommonApiHandlerOptions & { vsCodeLm
  * handle absence (typically by degrading or throwing a descriptive error).
  */
 export interface HostCapabilities {
+	/** Supplies diagnostics from the host's editor/language services through the workspace bridge. */
+	editorDiagnostics?: true
 	architectureViewer?: import("@shared/architecture/panel").ArchitectureViewer
 	/** Opens the product walkthrough UI (VS Code only). */
 	openWalkthrough?: () => Promise<void>

@@ -159,6 +159,7 @@ describe("EditFileTool.execute – validation", () => {
 		])
 
 		setVscodeHostProviderMock({
+			capabilities: { editorDiagnostics: true },
 			hostBridgeClient: {
 				workspaceClient: {
 					getDiagnostics: sandbox.stub().resolves({ fileDiagnostics: [] }),
