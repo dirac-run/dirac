@@ -16,6 +16,7 @@ import { calculateApiCostAnthropic } from "@/utils/cost"
 import { sleep } from "@/utils/retry"
 import { TaskState } from "../../TaskState"
 import { excerpt } from "../../utils/excerpt"
+import { SubagentToolContext } from "../context/SubagentToolContext"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import type { SubagentRuntime, TaskConfig } from "../types/TaskConfig"
 import { SubagentAbortHandler } from "./SubagentAbortHandler"
@@ -61,6 +62,7 @@ export class SubagentRunner {
 	private readonly runtime: SubagentRuntime
 	private readonly allowedTools: string[]
 	private readonly contextBuilder: SubagentContextBuilder
+	private readonly toolContext: SubagentToolContext
 	private readonly abortHandler: SubagentAbortHandler
 	private readonly toolExecutor: SubagentToolExecutor
 	private activeApiAbort: (() => void) | undefined
@@ -80,6 +82,7 @@ export class SubagentRunner {
 		private readonly options: SubagentBuilderOptions = {},
 	) {
 		this.agent = new SubagentBuilder(baseConfig, subagentName, options)
+		this.toolContext = new SubagentToolContext(baseConfig.context)
 		this.subagentName = subagentName
 		this.runtime = this.agent.getRuntime()
 		this.allowedTools = this.agent.getAllowedTools()
@@ -765,7 +768,7 @@ export class SubagentRunner {
 
 		return {
 			...this.baseConfig,
-			context: this.baseConfig.context,
+			context: this.toolContext,
 			providerId: this.runtime.providerId,
 			model: this.runtime.model,
 			supportsNativeWebSearch: this.runtime.supportsNativeWebSearch,

@@ -16,6 +16,7 @@ import sinon from "sinon"
 import { TaskState } from "../../../../TaskState"
 import { createMockContext, createMockTaskMessenger } from "../../../__tests__/helpers/mockTaskConfig"
 import { SurfaceAdapter } from "../../../adapters/SurfaceAdapter"
+import { SubagentToolContext } from "../../../context/SubagentToolContext"
 import type { TaskConfig } from "../../../types/TaskConfig"
 import { ReadFileTool } from "../ReadFileTool"
 
@@ -342,6 +343,38 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 			name: DiracDefaultTool.FILE_READ,
 			params: includeAnchors === undefined ? { paths: [relPath] } : { paths: [relPath], include_anchors: includeAnchors },
 		}
+	}
+
+	for (const order of [["subagent", "main", "sibling"], ["main", "subagent", "sibling"]] as const) {
+		it(`isolates full-read history in ${order.join(" → ")} order`, async () => {
+			const { config } = createConfig()
+			config.isSubagentExecution = false
+			const configs = {
+				main: config,
+				subagent: { ...config, isSubagentExecution: true, context: new SubagentToolContext(config.context) },
+				sibling: { ...config, isSubagentExecution: true, context: new SubagentToolContext(config.context) },
+			}
+			const realFile = "agent-read-history.ts"
+			await fs.writeFile(path.join(tmpDir, realFile), "const original = true")
+
+			for (const agent of order) {
+				const firstRead = await new ReadFileToolHandler().execute(configs[agent], makeReadBlock(realFile))
+				assert.match(firstRead, /const original = true/)
+				const repeatedRead = await new ReadFileToolHandler().execute(configs[agent], makeReadBlock(realFile))
+				assert.match(repeatedRead, /no changes have been made/)
+			}
+
+			await fs.writeFile(path.join(tmpDir, realFile), "const updated = true")
+			const anchoredResults: string[] = []
+			for (const agent of order) {
+				const changedRead = await new ReadFileToolHandler().execute(configs[agent], makeReadBlock(realFile))
+				assert.match(changedRead, /const updated = true/)
+				const anchoredRead = await new ReadFileToolHandler().execute(configs[agent], makeReadBlock(realFile, true))
+				assert.match(anchoredRead, /^[A-Z][a-zA-Z]*§const updated = true/m)
+				anchoredResults.push(anchoredRead)
+			}
+			assert.equal(new Set(anchoredResults).size, 1, "all agents must share the same source anchors")
+		})
 	}
 
 	it("defaults to plain output while allowing a later anchored read of unchanged content", async () => {

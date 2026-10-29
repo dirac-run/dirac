@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
+import { SubagentToolContext } from "../../../context/SubagentToolContext"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
 import { InspectAstTool, inspect_ast_spec } from "../InspectAstTool"
 
@@ -330,6 +331,47 @@ describe("InspectAstTool", () => {
 		assert.match(output, /function main/)
 		assert.match(output, /card creation failed/)
 	})
+
+	for (const order of [["subagent", "main", "sibling"], ["main", "subagent", "sibling"]] as const) {
+		it(`isolates implementation-read history in ${order.join(" → ")} order`, async () => {
+			const main = definition()
+			const target = {
+				path: "src/a.ts",
+				absolutePath: "/repo/src/a.ts",
+				symbol: "main",
+				status: "success",
+				definition: main,
+				contentHash: "original-hash",
+				lines: [{ lineNumber: 1, text: "function main() {}", anchor: "Apple" }],
+			}
+			const implementationResult = { targets: [target] }
+			const parent = createEnvironment({ implementationResult }).env
+			const subagent = createEnvironment({ subagent: true, implementationResult }).env
+			const sibling = createEnvironment({ subagent: true, implementationResult }).env
+			const environments = {
+				main: parent,
+				subagent: { ...subagent, context: new SubagentToolContext(parent.context) },
+				sibling: { ...sibling, context: new SubagentToolContext(parent.context) },
+			}
+			const args = { operation: "implementation" as const, paths: ["src/a.ts"], symbols: ["main"] }
+
+			for (const agent of order) {
+				const firstRead = await new InspectAstTool().processCall(args, environments[agent])
+				assert.match(firstRead, /function main\(\) \{\}/)
+				const repeatedRead = await new InspectAstTool().processCall(args, environments[agent])
+				assert.match(repeatedRead, /unchanged/)
+			}
+
+			target.contentHash = "updated-hash"
+			target.lines[0].text = "function main() { return 1 }"
+			for (const agent of order) {
+				const changedRead = await new InspectAstTool().processCall(args, environments[agent])
+				assert.match(changedRead, /return 1/)
+				const anchoredRead = await new InspectAstTool().processCall({ ...args, include_anchors: true }, environments[agent])
+				assert.match(anchoredRead, /Apple§function main\(\) \{ return 1 \}/)
+			}
+		})
+	}
 
 	it("does not create interactive cards during subagent execution", async () => {
 		const { env, cards } = createEnvironment({ subagent: true })

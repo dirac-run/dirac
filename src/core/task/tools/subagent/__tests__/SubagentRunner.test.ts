@@ -19,6 +19,7 @@ import { Logger } from "@/shared/services/Logger"
 import { DiracDefaultTool } from "@/shared/tools"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../../../TaskState"
+import { createMockTaskConfig } from "../../__tests__/helpers/mockTaskConfig"
 import { ListFilesTool, list_files_spec } from "../../modules/list_files"
 import { RespondTool, respondSpec } from "../../modules/respond/RespondTool"
 import { SubagentBuilder } from "../SubagentBuilder"
@@ -218,6 +219,23 @@ describe("SubagentRunner", () => {
 		})
 	}
 
+
+	it("reuses local read history within a subagent but not across same-named runs", async () => {
+		const config = createMockTaskConfig().config
+		const firstRunner = new SubagentRunner(config, "researcher")
+		const secondRunner = new SubagentRunner(config, "researcher")
+		const first = (firstRunner as any).createSubagentTaskConfig(new TaskState(), config.coordinator) as TaskConfig
+		const nextTurn = (firstRunner as any).createSubagentTaskConfig(new TaskState(), config.coordinator) as TaskConfig
+		const second = (secondRunner as any).createSubagentTaskConfig(new TaskState(), config.coordinator) as TaskConfig
+
+		assert.equal(first.context, nextTurn.context)
+		assert.notEqual(first.context, config.context)
+		assert.notEqual(first.context, second.context)
+		await first.context.task.updateEntries("fileHashes", { source: "hash" })
+		assert.equal(await nextTurn.context.task.getEntry("fileHashes", "source"), "hash")
+		assert.equal(await second.context.task.getEntry("fileHashes", "source"), undefined)
+		assert.equal(await config.context.task.getEntry("fileHashes", "source"), undefined)
+	})
 
 	it("keeps inherited Utility permission handling live", () => {
 		let enabled = true
