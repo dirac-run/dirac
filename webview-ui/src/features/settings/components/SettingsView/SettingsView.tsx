@@ -79,7 +79,6 @@ const TARGET_ALIASES: Record<string, ResolvedTarget> = {
 	"low-verbosity-responses": { tab: "responses-context", focusId: "low-verbosity-responses" },
 	subagents: { tab: "running-tasks", focusId: "subagents" },
 	"parallel-tool-calling": { tab: "running-tasks", focusId: "parallel-tool-calling" },
-	"double-check-completion": { tab: "running-tasks", focusId: "double-check-completion" },
 	"background-edit": { tab: "running-tasks", focusId: "background-edit" },
 	checkpoints: { tab: "running-tasks", focusId: "checkpoints" },
 	worktrees: { tab: "running-tasks", focusId: "worktrees" },

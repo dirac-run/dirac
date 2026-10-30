@@ -173,7 +173,7 @@ describe("GoalController startup transaction", () => {
 		} as unknown as StateManager
 		const capturedConfigurations: TaskWorkingConfiguration[] = []
 		sinon.stub(GoalTaskFactory.prototype, "create").callsFake(async function (this: GoalTaskFactory, input) {
-			capturedConfigurations.push(this["workingConfiguration"](input.executionProfile, input.childRole))
+			capturedConfigurations.push(this["workingConfiguration"](input.executionProfile))
 			return {
 				resumeTaskFromHistory: async () => ({ kind: "completed", response: "Done", completedAt: Date.now() }),
 			} as unknown as Task

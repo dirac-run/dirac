@@ -95,7 +95,6 @@ function createConfig(opts: { isSubagent?: boolean; diracIgnore?: any } = {}) {
 		mode: "act",
 		strictPlanModeEnabled: false,
 		yoloModeToggled: true,
-		doubleCheckCompletionEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: true,
 		isSubagentExecution: opts.isSubagent ?? true,

@@ -13,12 +13,10 @@ describe("completion response operation steering arbitration", () => {
 		const commitAttemptCompletion = sinon.stub().resolves({ committed: false, error: "steered" })
 		const state = {
 			consecutiveMistakeCount: 0,
-			doubleCheckCompletionPending: false,
 		}
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				doubleCheckCompletionEnabled: false,
 				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: false },
 			},
@@ -48,14 +46,12 @@ describe("completion response operation steering arbitration", () => {
 	it("keeps completion committed when presentation fails after arbitration", async () => {
 		const state = {
 			consecutiveMistakeCount: 0,
-			doubleCheckCompletionPending: false,
 			completionCommitted: false,
 			didAttemptCompletion: false,
 		}
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				doubleCheckCompletionEnabled: false,
 				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: false },
 			},
@@ -91,11 +87,10 @@ describe("completion response operation steering arbitration", () => {
 		const showNotification = sinon.stub()
 		const captureTaskCompleted = sinon.stub()
 		const captureCustomMetadata = sinon.stub()
-		const state = { doubleCheckCompletionPending: false }
+		const state = { completionCommitted: false, didAttemptCompletion: false }
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				doubleCheckCompletionEnabled: false,
 				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: true },
 				taskId: "task",

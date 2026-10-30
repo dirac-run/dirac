@@ -11,7 +11,6 @@ import type { TaskExecutionProfile } from "@core/task/TaskExecutionProfile"
 import { acquireTaskLock } from "@core/task/TaskLockUtils"
 import type { ToolEnvironmentFactory } from "@core/task/tools/interfaces/ToolEnvironmentFactory"
 import type { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
-import type { GoalChildRole } from "@shared/goal"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { Settings } from "@shared/storage/state-keys"
 
@@ -26,11 +25,9 @@ interface GoalTaskBaseConstruction {
 	conversationPersistenceHooks?: TaskParams["conversationPersistenceHooks"]
 }
 
-export type GoalTaskConstruction = GoalTaskBaseConstruction &
-	(
-		| { executionProfile: "goal_child"; childRole: GoalChildRole }
-		| { executionProfile: Extract<TaskExecutionProfile, "goal_coordinator" | "goal_followup">; childRole?: never }
-	)
+export type GoalTaskConstruction = GoalTaskBaseConstruction & {
+	executionProfile: Exclude<TaskExecutionProfile, "standalone">
+}
 
 export interface GoalTaskFactoryDependencies {
 	controller: Controller
@@ -52,7 +49,7 @@ export class GoalTaskFactory {
 
 		let task!: Task
 		try {
-			const workingConfiguration = this.workingConfiguration(input.executionProfile, input.childRole)
+			const workingConfiguration = this.workingConfiguration(input.executionProfile)
 			const params: TaskParams = {
 				controller: this.dependencies.controller,
 				updateTaskHistory: async (item) => {
@@ -100,21 +97,15 @@ export class GoalTaskFactory {
 		}
 	}
 
-	private workingConfiguration(
-		executionProfile: GoalTaskConstruction["executionProfile"],
-		childRole?: GoalChildRole,
-	): TaskWorkingConfiguration {
+	private workingConfiguration(executionProfile: GoalTaskConstruction["executionProfile"]): TaskWorkingConfiguration {
 		const source = this.dependencies.workingConfiguration
 		if (executionProfile !== "goal_child") return source
-		if (!source.settings.hooksEnabled && (childRole !== "verification" || !source.settings.doubleCheckCompletionEnabled)) {
-			return source
-		}
+		if (!source.settings.hooksEnabled) return source
 		return createTaskWorkingConfiguration({
 			revision: source.revision,
 			settings: {
 				...(structuredClone(source.settings) as Settings),
 				hooksEnabled: false,
-				...(childRole === "verification" ? { doubleCheckCompletionEnabled: false } : {}),
 			},
 			apiConfiguration: structuredClone(source.apiConfiguration) as TaskWorkingConfigurationInput["apiConfiguration"],
 			workspaceConfiguration: structuredClone(

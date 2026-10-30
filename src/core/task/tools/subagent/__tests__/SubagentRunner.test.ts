@@ -62,7 +62,6 @@ function createTaskConfig(): TaskConfig {
 		strictPlanModeEnabled: false,
 		yoloModeToggled: false,
 		lowVerbosityEnabled: true,
-		doubleCheckCompletionEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: false,
 		isSubagentExecution: false,

@@ -9,9 +9,9 @@ import {
 } from "@core/task/runtime/TaskWorkingConfiguration"
 import { GoalTaskFactory } from "../GoalTaskFactory"
 
-function configuration(hooksEnabled: boolean, doubleCheckCompletionEnabled: boolean): TaskWorkingConfiguration {
+function configuration(hooksEnabled: boolean): TaskWorkingConfiguration {
 	return createTaskWorkingConfiguration({
-		settings: { hooksEnabled, doubleCheckCompletionEnabled } as Settings,
+		settings: { hooksEnabled } as Settings,
 		apiConfiguration: {} as ApiConfiguration,
 		workspaceConfiguration: {} as TaskWorkingConfigurationInput["workspaceConfiguration"],
 		executionOptions: {
@@ -23,28 +23,22 @@ function configuration(hooksEnabled: boolean, doubleCheckCompletionEnabled: bool
 }
 
 describe("GoalTaskFactory working configuration", () => {
-	it("disables nested completion checks only for verification children", () => {
-		const source = configuration(true, true)
+	it("disables hooks for children without changing the owning Goal configuration", () => {
+		const source = configuration(true)
 		const factory = new GoalTaskFactory({ workingConfiguration: source } as ConstructorParameters<typeof GoalTaskFactory>[0])
 		const workingConfiguration = factory["workingConfiguration"].bind(factory)
 
-		const verifier = workingConfiguration("goal_child", "verification")
-		const worker = workingConfiguration("goal_child", "task")
-		assert.equal(verifier.settings.doubleCheckCompletionEnabled, false)
-		assert.equal(verifier.settings.hooksEnabled, false)
-		assert.equal(worker.settings.doubleCheckCompletionEnabled, true)
-		assert.equal(worker.settings.hooksEnabled, false)
+		const child = workingConfiguration("goal_child")
+		assert.equal(child.settings.hooksEnabled, false)
 		assert.strictEqual(workingConfiguration("goal_coordinator"), source)
 		assert.strictEqual(workingConfiguration("goal_followup"), source)
-		assert.equal(source.settings.doubleCheckCompletionEnabled, true)
+		assert.equal(source.settings.hooksEnabled, true)
 	})
 
-	it("isolates verification without requiring hooks to be enabled", () => {
-		const source = configuration(false, true)
+	it("reuses the configuration when child hooks are already disabled", () => {
+		const source = configuration(false)
 		const factory = new GoalTaskFactory({ workingConfiguration: source } as ConstructorParameters<typeof GoalTaskFactory>[0])
-		const workingConfiguration = factory["workingConfiguration"].bind(factory)
 
-		assert.equal(workingConfiguration("goal_child", "verification").settings.doubleCheckCompletionEnabled, false)
-		assert.strictEqual(workingConfiguration("goal_child", "task"), source)
+		assert.strictEqual(factory["workingConfiguration"]("goal_child"), source)
 	})
 })

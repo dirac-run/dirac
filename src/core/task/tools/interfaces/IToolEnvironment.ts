@@ -189,9 +189,6 @@ export interface IWorkspaceTrait {
 	 */
 	getFileInfo(path: string): Promise<{ size: number; isFile: boolean; exists: boolean }>
 
-	/** Fingerprints workspace file paths and bytes for completion-verification retry arbitration. */
-	fingerprintWorkspace(): Promise<string>
-
 	/**
 	 * Writes content to a file.
 	 */

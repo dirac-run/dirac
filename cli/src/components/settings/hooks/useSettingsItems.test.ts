@@ -79,6 +79,14 @@ describe("CLI tool settings presentation", () => {
 		expect(autoCondense?.searchText).toContain("auto compact")
 		expect(autoCondense?.searchText).toContain("auto-compact")
 	})
+
+	it("does not expose removed completion checking in settings or search", () => {
+		const items = createSettingsItems({ ...props, currentTab: SettingsTab.RUNNING_TASKS })
+		const results = createSettingsSearchResults(props, [SettingsTab.RUNNING_TASKS])
+
+		expect(items.some((item) => item.key === "doubleCheckCompletion")).toBe(false)
+		expect(results.some((result) => result.searchText.includes("double-check-completion"))).toBe(false)
+	})
 })
 
 describe("CLI Unbiased account presentation", () => {

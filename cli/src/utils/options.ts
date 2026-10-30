@@ -222,11 +222,6 @@ export async function applyTaskOptions(options: TaskOptions, workspaceRoot: stri
 		telemetryService.captureHostEvent("auto_approve_all_flag", "true")
 	}
 
-	// Set double-check completion based on flag
-	if (options.doubleCheckCompletion) {
-		stateManager.setSessionOverride("doubleCheckCompletionEnabled", true)
-		telemetryService.captureHostEvent("double_check_completion_flag", "true")
-	}
 
 	if (options.subagents) {
 		stateManager.setSessionOverride("subagentsEnabled", true)

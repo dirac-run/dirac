@@ -561,12 +561,6 @@ function createRunningTaskItems(props: UseSettingsItemsProps): ListItem[] {
 			features.parallelToolCalling,
 			FEATURE_SETTINGS.parallelToolCalling.description,
 		),
-		checkbox(
-			"doubleCheckCompletion",
-			FEATURE_SETTINGS.doubleCheckCompletion.label,
-			features.doubleCheckCompletion,
-			FEATURE_SETTINGS.doubleCheckCompletion.description,
-		),
 	]
 }
 
@@ -753,7 +747,6 @@ const SETTINGS_SEARCH_ALIASES: Record<string, string[]> = {
 	lowVerbosity: ["low-verbosity responses", "low-verbosity-responses"],
 	autoCondense: ["Auto Compact", "auto-compact", "auto-condense-conversations"],
 	parallelToolCalling: ["parallel-tool-calling"],
-	doubleCheckCompletion: ["double-check-completion"],
 	webTools: ["Dirac web tools", "dirac-web-tools"],
 	lightTerminalTheme: ["terminal theme"],
 }

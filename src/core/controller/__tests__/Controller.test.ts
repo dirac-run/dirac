@@ -119,7 +119,6 @@ describe("Controller (original)", () => {
 			shellIntegrationTimeout: 5000,
 			terminalOutputLineLimit: 500,
 			maxConsecutiveMistakes: 3,
-			doubleCheckCompletionEnabled: false,
 			useAutoCondense: false,
 			subagentsEnabled: false,
 			preferredLanguage: "en",

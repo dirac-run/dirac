@@ -186,9 +186,7 @@ Plan, Act, and Utility work can use separate model configurations. Reviewed hand
 </details>
 
 <details>
-<summary><strong>Completion checks and restore points</strong></summary>
-
-The optional completion verifier reviews acceptance criteria and claimed validation in a separate model pass. If a required criterion is missing, it returns concrete follow-up work to the active task. This model-based check does not replace tests or human review.
+<summary><strong>Restore points</strong></summary>
 
 Checkpoints capture workspace files and operational task state. Restore can apply to the workspace, the task, or both, including queued steering, active skills, task tools, and context tracking.
 

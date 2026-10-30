@@ -203,7 +203,6 @@ export function createMockTaskConfig(options: MockTaskConfigOptions = {}) {
 		strictPlanModeEnabled: false,
 		yoloModeToggled: true,
 		lowVerbosityEnabled: true,
-		doubleCheckCompletionEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec" as const,
 		enableParallelToolCalling: true,
 		isSubagentExecution: true,

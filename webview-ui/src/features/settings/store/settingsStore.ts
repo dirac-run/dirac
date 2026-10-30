@@ -122,7 +122,6 @@ interface SettingsState {
 	backgroundCommandTaskId?: string
 	lastDismissedCliBannerVersion: number
 	backgroundEditEnabled: boolean
-	doubleCheckCompletionEnabled: boolean
 	lowVerbosityEnabled: boolean
 
 	// Toggles
@@ -234,7 +233,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 	backgroundCommandTaskId: undefined,
 	lastDismissedCliBannerVersion: 0,
 	backgroundEditEnabled: false,
-	doubleCheckCompletionEnabled: false,
 	lowVerbosityEnabled: true,
 
 	globalDiracRulesToggles: {},

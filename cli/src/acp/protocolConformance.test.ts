@@ -574,7 +574,6 @@ describe("ACP protocol conformance over raw stdio", () => {
 				openAiBaseUrl: `http://127.0.0.1:${address.port}/v1`,
 				telemetrySetting: "disabled",
 				openTelemetryEnabled: false,
-				doubleCheckCompletionEnabled: false,
 				utilityModelUseCases: { condense: false, approval: false, earlyExit: false },
 			}))
 			await writeFile(path.join(configDir, "data/secrets.json"), JSON.stringify({ openAiApiKey: "local-ignore-fixture" }))

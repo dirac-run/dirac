@@ -193,8 +193,6 @@ These options apply to both **dirac** [*prompt*] and **dirac task** [*prompt*], 
 **--json**
 : Select standalone mode and emit newline-delimited JSON events.
 
-**--double-check-completion**
-: Reject the first completion attempt so the agent must re-verify its result.
 
 **--auto-condense**
 : Use AI-powered context compaction instead of mechanical truncation.

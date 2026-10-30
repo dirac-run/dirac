@@ -18,6 +18,7 @@ function environment(mode: "plan" | "act") {
 		},
 		ui: { upsertText: sinon.stub().resolves(), createCard: sinon.stub().resolves(card) },
 		telemetry: { captureCustomMetadata: sinon.stub() },
+		responseObserver: { recordResponse: sinon.stub().resolves() },
 		orchestration: {
 			getTaskState: () => consecutiveMistakeCount,
 			setTaskState: (_key: string, value: number) => {

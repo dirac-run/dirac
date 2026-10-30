@@ -134,6 +134,8 @@ message UserApprovedCommand {
 message Settings {
   reserved 209;
   reserved "utility_model_use_new_task";
+  reserved 176;
+  reserved "double_check_completion_enabled";
   optional string lite_llm_base_url = 1;
   optional bool lite_llm_use_prompt_cache = 2;
   optional string anthropic_base_url = 4;
@@ -271,7 +273,6 @@ message Settings {
   optional int32 open_telemetry_log_max_queue_size = 171;
   optional bool worktrees_enabled = 172;
   optional bool auto_approve_all_toggled = 174;
-  optional bool double_check_completion_enabled = 176;
   map<string, string> open_ai_headers = 177;
   optional string plan_mode_dirac_model_id = 178;
   optional OpenRouterModelInfo plan_mode_dirac_model_info = 179;
@@ -440,7 +441,8 @@ message UpdateSettingsRequest {
   optional bool enable_parallel_tool_calling = 35;
   optional bool background_edit_enabled = 36;
   optional bool worktrees_enabled = 40;
-  optional bool double_check_completion_enabled = 41;
+  reserved 41;
+  reserved "double_check_completion_enabled";
   optional bool write_prompt_metadata_enabled = 42;
   optional string write_prompt_metadata_directory = 43;
   optional bool auto_approve_all_toggled = 44;

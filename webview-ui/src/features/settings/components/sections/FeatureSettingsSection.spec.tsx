@@ -18,7 +18,6 @@ vi.mock("@/features/settings/store/settingsStore", () => ({
 		remoteConfigSettings: {},
 		enableParallelToolCalling: false,
 		backgroundEditEnabled: false,
-		doubleCheckCompletionEnabled: false,
 		lowVerbosityEnabled: true,
 	})),
 }))
@@ -56,6 +55,13 @@ describe("FeatureSettingsSection", () => {
 		fireEvent.click(screen.getByRole("switch", { name: "Low-verbosity responses" }))
 
 		expect(mockUpdateSetting).toHaveBeenCalledWith("lowVerbosityEnabled", false)
+	})
+
+	it("does not render the removed completion double-check toggle", () => {
+		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
+
+		expect(screen.queryByRole("switch", { name: /double-check completion/i })).not.toBeInTheDocument()
+		expect(container.querySelector("#double-check-completion")).not.toBeInTheDocument()
 	})
 
 	it("does not render the Utility Model toggle", () => {

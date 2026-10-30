@@ -426,6 +426,6 @@ describe("Goal-only tools", () => {
 		assert.deepEqual(registry.getConfigurableTools(), [])
 		assert.equal(registry.getEnabledTools().length, GOAL_TOOL_NAMES.length)
 		assert.equal(registry.scopeToolForSubagent(tools[0], GOAL_TOOL_NAMES), undefined)
-		assert.throws(() => registry.disable(tools[0].id), /Profile-only tool/)
+		assert.throws(() => registry.disable(tools[0].id), /\(profile_only\) cannot be enabled or disabled directly/)
 	})
 })

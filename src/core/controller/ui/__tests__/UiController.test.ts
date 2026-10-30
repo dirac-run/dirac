@@ -71,7 +71,6 @@ function makeFakeStateManager(overrides?: {
 		customPrompt: undefined,
 		terminalOutputLineLimit: 500,
 		maxConsecutiveMistakes: 3,
-		doubleCheckCompletionEnabled: false,
 		lowVerbosityEnabled: true,
 		toolToggles: {},
 		hooksEnabled: true,

@@ -37,7 +37,6 @@ describe("CLI Commands", () => {
 			.option("--reasoning-effort <effort>", "Reasoning effort")
 			.option("--speed <speed>", "Inference speed")
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
-			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
 			.option("--auto-condense-at <tokens>", "Auto-condense at a token count", Number)
 			.addOption(new Option("--enable-tool <tools>").argParser(parseToolIdentifiers).conflicts("onlyTools"))
@@ -101,7 +100,6 @@ describe("CLI Commands", () => {
 			.option("--reasoning-effort <effort>", "Reasoning effort")
 			.option("--speed <speed>", "Inference speed")
 			.option("--max-consecutive-mistakes <count>", "Maximum consecutive mistakes")
-			.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 			.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
 			.addOption(new Option("--enable-tool <tools>").argParser(parseToolIdentifiers).conflicts("onlyTools"))
 			.addOption(new Option("--disable-tool <tools>").argParser(parseToolIdentifiers).conflicts("onlyTools"))
@@ -253,11 +251,13 @@ describe("CLI Commands", () => {
 			expect(taskCmd.opts().hooksDir).toBe("/tmp/hooks")
 		})
 
-		it("should parse --double-check-completion flag", () => {
-			const taskCmd = program.commands.find((c) => c.name() === "task")!
-			const args = ["test prompt", "--double-check-completion"]
-			taskCmd.parse(args, { from: "user" })
-			expect(taskCmd.opts().doubleCheckCompletion).toBe(true)
+		it.each(["task", "default"])("rejects the removed completion-check flag for the %s command", (commandName) => {
+			const command = commandName === "task" ? program.commands.find((c) => c.name() === "task")! : program
+			command.exitOverride().configureOutput({ writeErr: vi.fn() })
+			expect(() => command.parse(["test prompt", "--double-check-completion"], { from: "user" })).toThrow(
+				"unknown option '--double-check-completion'",
+			)
+			expect(command.helpInformation()).not.toContain("--double-check-completion")
 		})
 
 		it("should parse --auto-condense flag", () => {

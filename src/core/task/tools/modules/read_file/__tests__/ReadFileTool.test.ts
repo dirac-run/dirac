@@ -77,7 +77,6 @@ function createConfig(supportsImages = false) {
 		mode: "act",
 		strictPlanModeEnabled: false,
 		yoloModeToggled: true,
-		doubleCheckCompletionEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: true,
 		isSubagentExecution: true, // skip UI calls and approval flow

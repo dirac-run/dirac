@@ -63,7 +63,6 @@ program
 		parsePositiveInteger,
 	)
 	.option("--json", "Output messages as JSON instead of styled text")
-	.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 	.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
 	.option("--auto-condense-at <tokens>", "Auto-condense when provider context reaches this token count", parsePositiveInteger)
 	.option("--subagents", "Enable subagents for the task")
@@ -214,7 +213,6 @@ program
 		parsePositiveInteger,
 	)
 	.option("--json", "Output messages as JSON instead of styled text")
-	.option("--double-check-completion", "Reject first completion attempt to force re-verification")
 	.option("--auto-condense", "Enable AI-powered context compaction instead of mechanical truncation")
 	.option("--auto-condense-at <tokens>", "Auto-condense when provider context reaches this token count", parsePositiveInteger)
 	.option("--subagents", "Enable subagents for the task")

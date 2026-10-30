@@ -8,12 +8,6 @@ import type { SteeringMessage } from "./steering"
 import type { SerializedTaskError, TaskCancellationIntent, TaskRunOutcome } from "./TaskRunOutcome"
 import type { HookExecution } from "./types/HookExecution"
 
-export interface CompletionVerificationFailure {
-	candidateFingerprint?: string
-	reports: string[]
-}
-
-
 export class TaskState {
 	status: TaskStatus = TaskStatus.IDLE
 
@@ -114,8 +108,6 @@ export class TaskState {
 	conversationHistoryDeletedRange?: [number, number]
 	/** Session-owned snapshots injected into every compacted request. */
 	pinnedContext?: string
-	/** Canonical task text supplied when this Task lifecycle was created. */
-	initialTask?: string
 
 	// Tool execution flags
 	didRejectTool = false
@@ -124,13 +116,10 @@ export class TaskState {
 
 	// Error tracking
 	consecutiveMistakeCount = 0
-	doubleCheckCompletionPending = false
 	didAttemptCompletion = false
 	/** Completion side effects are committed; steering is sealed until the task loop publishes completion. */
 	completionCommitted = false
 	checkpointManagerErrorMessage?: string
-	/** Last rejected completion candidate and all verifier reports that it must address. */
-	completionVerificationFailure?: CompletionVerificationFailure
 
 	// Retry tracking — separate counters for independent failure modes
 	apiErrorRetryAttempts = 0

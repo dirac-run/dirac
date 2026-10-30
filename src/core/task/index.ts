@@ -451,7 +451,6 @@ export class Task {
 		this.taskInitializationStartTime = performance.now()
 		this.taskState = new TaskState()
 		this.taskState.pinnedContext = params.pinnedContext
-		this.taskState.initialTask = task ?? historyItem?.task
 		this.executionProfile = params.executionProfile ?? "standalone"
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
 		if (this.executionProfile !== "standalone" && workingConfiguration.settings.mode !== "act") {

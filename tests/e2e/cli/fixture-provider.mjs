@@ -185,7 +185,6 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 			openAiBaseUrl: baseUrl,
 			telemetrySetting: "disabled",
 			openTelemetryEnabled: false,
-			doubleCheckCompletionEnabled: false,
 			utilityModelUseCases: { condense: false, approval: false, earlyExit: false },
 			cliTerminalColorMode: "dark",
 			cliVimMode: vimMode,

@@ -279,7 +279,6 @@ const USER_SETTINGS_FIELDS = {
 	customPrompt: { default: undefined as "compact" | undefined },
 	backgroundEditEnabled: { default: false as boolean },
 	optOutOfRemoteConfig: { default: false as boolean },
-	doubleCheckCompletionEnabled: { default: false as boolean },
 	lowVerbosityEnabled: { default: true as boolean },
 	cliTerminalColorMode: { default: undefined as "dark" | "light" | undefined },
 	cliVimMode: { default: false as boolean },

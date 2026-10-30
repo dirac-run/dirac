@@ -70,13 +70,6 @@ export const FEATURE_SETTINGS = {
 		label: "Parallel tool calling",
 		description: "Run independent tool calls concurrently. Execution order is not guaranteed and resource use may increase.",
 	},
-	doubleCheckCompletion: {
-		stateKey: "doubleCheckCompletionEnabled",
-		default: false,
-		label: "Double-check completion",
-		description:
-			"Require an additional verification pass before accepting completion. This adds latency and may use more tokens.",
-	},
 } as const
 
 export type FeatureKey = keyof typeof FEATURE_SETTINGS
