@@ -31,6 +31,13 @@ describe("Task execution profiles", () => {
 		assert.equal(isToolAvailableToTaskProfile("goal_child", "start_task"), false)
 	})
 
+	it("restricts the subagent dispatcher to standalone Tasks", () => {
+		for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child"] as const) {
+			assert.equal(isToolAvailableToTaskProfile(profile, "use_subagents"), profile === "standalone")
+			assert.equal(isToolAvailableToTaskProfile(profile, "read_file"), true)
+		}
+	})
+
 	it("enforces declared profile-only exposure independently of tool naming", () => {
 		const tool = profileTool(["goal_child"])
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("standalone", tool), false)
@@ -52,7 +59,7 @@ describe("Task execution profiles", () => {
 
 		assert.match(instructions ?? "", /user opening it during the run can quickly understand/)
 		assert.match(instructions ?? "", /Most should remain private; synthesize only information/)
-		assert.match(instructions ?? "", /post merely because a heartbeat occurred/)
+		assert.match(instructions ?? "", /Do not mechanically forward child messages or narrate routine tool activity/)
 		assert.match(instructions ?? "", /normally one sentence, sometimes two, and only rarely three/)
 	})
 

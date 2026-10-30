@@ -45,7 +45,7 @@ describe("DiracToolSet Utility subagent routing", () => {
 
 		assert.deepEqual(properties.use_utility_model, {
 			type: "boolean",
-			description: "Run this subagent using the configured Utility model. Default: false.",
+			description: "Run this subagent using the configured Utility model. 'Utility model' is a pre-configured model that is cost effective and fast, but unsuitable for complex tasks. Default: false.",
 		})
 	})
 
@@ -109,7 +109,7 @@ describe("DiracToolSet Utility subagent routing", () => {
 		assert.equal(strictItems.required.includes("use_utility_model"), true)
 		assert.deepEqual(anthropicItems.properties.use_utility_model, {
 			type: "boolean",
-			description: "Run this subagent using the configured Utility model. Default: false.",
+			description: "Run this subagent using the configured Utility model. 'Utility model' is a pre-configured model that is cost effective and fast, but unsuitable for complex tasks. Default: false.",
 		})
 		assert.deepEqual(anthropicItems.required, ["task_title", "prompt"])
 	})
