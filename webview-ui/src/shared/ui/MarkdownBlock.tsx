@@ -4,11 +4,11 @@ import { SquareArrowOutUpRightIcon } from "lucide-react"
 import { marked } from "marked"
 import type { ComponentProps } from "react"
 import React, { memo, useEffect, useMemo, useRef, useState } from "react"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { type ExtraProps } from "react-markdown"
 import rehypeHighlight, { Options } from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 import type { Node, Parent } from "unist"
-import { visit } from "unist-util-visit"
+import { SKIP, visit } from "unist-util-visit"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { useChatStore } from "@/features/chat/store/chatStore"
 import { cn } from "@/lib/utils"
@@ -42,10 +42,6 @@ interface CodeNode extends UnistNode {
 	value: string
 }
 
-interface InlineCodeNode extends UnistNode {
-	type: "inlineCode"
-	value: string
-}
 
 interface StrongNode extends UnistNode {
 	type: "strong"
@@ -57,6 +53,29 @@ interface StrongNode extends UnistNode {
 const FILE_PATH_REGEX = /^(?!\/)[\w\-./]+(?<!\/)$/
 
 // --- Helper Components ---
+
+const MarkdownLink = ({ node: _node, href, ...props }: ComponentProps<"a"> & ExtraProps) => {
+	// ReactMarkdown has already filtered unsafe URL schemes. Only local paths use the editor bridge.
+	const isLocalPath = href && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#|\?)/i.test(href)
+	if (!isLocalPath) return <a {...props} href={href} />
+
+	return (
+		<a
+			{...props}
+			href={href}
+			onClick={async (event) => {
+				event.preventDefault()
+				try {
+					// Fragments and queries are URL metadata, not part of the filename.
+					const filePath = decodeURIComponent(href.split(/[?#]/, 1)[0])
+					await FileServiceClient.openFileRelativePath({ value: filePath })
+				} catch (error) {
+					console.error(`Failed to open Markdown file link ${href}:`, error)
+				}
+			}}
+		/>
+	)
+}
 
 const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLPreElement>) => {
 	const preRef = useRef<HTMLPreElement>(null)
@@ -403,7 +422,10 @@ const remarkPreventBoldFilenames = () => {
  */
 const remarkMarkPotentialFilePaths = () => {
 	return (tree: Node) => {
-		visit(tree, "inlineCode", (node: InlineCodeNode) => {
+		visit(tree as UnistNode, (node) => {
+			// A linked code label already has an action; do not nest a file button inside its anchor.
+			if (node.type === "link" || node.type === "linkReference") return SKIP
+			if (node.type !== "inlineCode" || typeof node.value !== "string") return
 			if (FILE_PATH_REGEX.test(node.value) && !node.value.includes("\n")) {
 				node.data = node.data || {}
 				node.data.hProperties = node.data.hProperties || {}
@@ -441,6 +463,7 @@ function parseMarkdownIntoBlocks(markdown: string): string[] {
 
 // biome-ignore lint/suspicious/noExplicitAny: react-markdown component props are complex
 const MARKDOWN_COMPONENTS = {
+	a: MarkdownLink,
 	pre: ({ children, ...preProps }: any) => {
 		if (Array.isArray(children) && children.length === 1 && React.isValidElement(children[0])) {
 			const child = children[0] as React.ReactElement<{ className?: string }>
