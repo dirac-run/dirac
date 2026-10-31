@@ -15,7 +15,7 @@ import {
 import type { PresentationOperation } from "@/shared/PresentationOperation"
 import { Logger } from "@/shared/services/Logger"
 import { getCwd, getDesktopDir } from "@/utils/path"
-import { readPresentationHistory, type ApiConversationOperation } from "../storage/conversationHistory"
+import { type ApiConversationOperation, readPresentationHistory } from "../storage/conversationHistory"
 import {
 	appendApiConversationOperations,
 	appendPresentationOperations,
@@ -26,6 +26,7 @@ import {
 } from "../storage/disk"
 import { GlobalFileNames } from "../storage/fileNames"
 import { operationLogExceedsBaselineThreshold } from "../storage/operationLog"
+import type { TaskStorageAddress } from "../storage/taskDirectory"
 import { TaskState } from "./TaskState"
 
 // Event types for diracMessages changes
@@ -61,6 +62,8 @@ export interface MessageStateHandlerEvents {
 
 interface MessageStateHandlerParams {
 	taskId: string
+	/** Defaults to ordinary Task storage; contained executions supply their root-qualified address. */
+	storageAddress?: TaskStorageAddress
 	ulid: string
 	taskIsFavorited?: boolean
 	workspaceRootPath?: string
@@ -90,6 +93,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	private checkpointTracker: CheckpointTracker | undefined
 	private updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
 	private taskId: string
+	private readonly storageAddress: TaskStorageAddress
 	private ulid: string
 	private taskState: TaskState
 	private apiMetrics = getApiMetrics([])
@@ -216,6 +220,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	constructor(params: MessageStateHandlerParams) {
 		super()
 		this.taskId = params.taskId
+		this.storageAddress = params.storageAddress ?? { kind: "task", taskId: params.taskId }
 		this.ulid = params.ulid
 		this.taskState = params.taskState
 		this.taskIsFavorited = params.taskIsFavorited ?? false
@@ -329,7 +334,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 		let firstError: unknown
 		try {
-			await appendPresentationOperations(this.taskId, pending.presentation)
+			await appendPresentationOperations(this.storageAddress, pending.presentation)
 		} catch (error) {
 			firstError = error
 			await this.withStateLock(() => {
@@ -338,7 +343,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			})
 		}
 		try {
-			await appendApiConversationOperations(this.taskId, pending.apiConversation, pending.apiConversationSnapshot)
+			await appendApiConversationOperations(this.storageAddress, pending.apiConversation, pending.apiConversationSnapshot)
 		} catch (error) {
 			firstError ??= error
 			await this.withStateLock(() => {
@@ -352,7 +357,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	private async createBaselinesWhenTailIsLarge(): Promise<void> {
 		if (this.persistenceRetired) return
-		const taskDirectory = await ensureTaskDirectoryExists(this.taskId)
+		const taskDirectory = await ensureTaskDirectoryExists(this.storageAddress)
 		const presentationTailPath = `${taskDirectory}/${GlobalFileNames.uiMessageOperations}`
 		const apiTailPath = `${taskDirectory}/${GlobalFileNames.apiConversationHistoryOperations}`
 		const [presentationNeedsBaseline, apiNeedsBaseline] = await Promise.all([
@@ -365,10 +370,10 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			if (this.persistenceRetired) return
 			if (presentationNeedsBaseline && this.pendingPresentationOperations.length === 0) {
 				this.materializeAllPresentationAppends()
-				await createPresentationBaseline(this.taskId, this.diracMessages, this.presentationOffset)
+				await createPresentationBaseline(this.storageAddress, this.diracMessages, this.presentationOffset)
 			}
 			if (apiNeedsBaseline && this.pendingApiConversationOperations.length === 0) {
-				await createApiConversationBaseline(this.taskId, this.apiConversationHistory, this.apiHistoryOffset)
+				await createApiConversationBaseline(this.storageAddress, this.apiConversationHistory, this.apiHistoryOffset)
 			}
 		})
 	}
@@ -420,7 +425,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			if (this.persistenceRetired) return
 			await this.withStateLock(async () => {
 				this.apiConversationProviderState = state
-				await saveApiConversationProviderState(this.taskId, state)
+				await saveApiConversationProviderState(this.storageAddress, state)
 			})
 		})
 	}
@@ -553,13 +558,15 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	 */
 	private async updateTaskHistoryInternal(): Promise<void> {
 		if (this.persistenceRetired) return
+		// Contained conversations must not publish entries in the ordinary Task inventory.
+		if (this.storageAddress.kind === "tasklet") return
 		try {
 			const taskMessage = this.diracMessages[0]
 			if (!taskMessage) return
 			const lastRelevantMessage =
 				(this.lastRelevantMessageId ? this.getMessageById(this.lastRelevantMessageId) : undefined) ?? taskMessage
 			const apiMetrics = this.apiMetrics
-			const taskDirectory = await ensureTaskDirectoryExists(this.taskId)
+			const taskDirectory = await ensureTaskDirectoryExists(this.storageAddress)
 			const taskDirectorySize = await getFolderSize.loose(taskDirectory)
 
 			const cwd = await getCwd(getDesktopDir())
@@ -672,7 +679,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 					...this.apiConversationProviderState,
 					deliveredSteeringMessageIds: [...deliveredIds],
 				}
-				await saveApiConversationProviderState(this.taskId, this.apiConversationProviderState)
+				await saveApiConversationProviderState(this.storageAddress, this.apiConversationProviderState)
 			})
 		})
 	}
@@ -686,7 +693,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		await this.persistenceMutex.withLock(async () => {
 			// Compaction is unrelated to accepting input and must not delay its short state transition.
 			await this.persistPendingOperations(false)
-			const taskDirectory = await ensureTaskDirectoryExists(this.taskId)
+			const taskDirectory = await ensureTaskDirectoryExists(this.storageAddress)
 			const reserved = await this.withStateLock(() => {
 				if (this.persistenceRetired) throw new Error("Conversation persistence was retired")
 				assertCurrent()
@@ -710,7 +717,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 				return { input, operations }
 			})
 			try {
-				await appendPresentationOperations(this.taskId, reserved.operations)
+				await appendPresentationOperations(this.storageAddress, reserved.operations)
 			} catch (error) {
 				if (!(await this.reconcileDurableInput(reserved.input))) throw error
 				return

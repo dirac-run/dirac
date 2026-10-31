@@ -2,13 +2,13 @@ import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import sinon from "sinon"
-import * as disk from "@core/storage/disk"
 import * as history from "@core/storage/conversationHistory"
-import { appendOperationRecords } from "@core/storage/operationLog"
+import * as disk from "@core/storage/disk"
 import { GlobalFileNames } from "@core/storage/fileNames"
-import { DiracMessageType, type DiracMessage } from "@shared/ExtensionMessage"
+import { appendOperationRecords } from "@core/storage/operationLog"
+import { type DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import type { PresentationOperation } from "@shared/PresentationOperation"
+import sinon from "sinon"
 import { MessageStateHandler } from "../message-state"
 import { TaskState } from "../TaskState"
 
@@ -44,7 +44,7 @@ describe("Durable user input message-state isolation", () => {
 	let root: string
 	let handler: MessageStateHandler
 	let append: sinon.SinonStub
-	const write = async (_id: string, operations: readonly unknown[]) =>
+	const write = async (_address: unknown, operations: readonly unknown[]) =>
 		appendOperationRecords(path.join(root, GlobalFileNames.uiMessageOperations), operations)
 	beforeEach(async () => {
 		root = await fs.mkdtemp(path.join(os.tmpdir(), "durable-input-"))
