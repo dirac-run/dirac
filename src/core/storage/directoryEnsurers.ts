@@ -4,10 +4,13 @@ import * as path from "path"
 import { Logger } from "@/shared/services/Logger"
 import { getGlobalStorageDir } from "./globalStorageDir"
 import { getDiracHomePath, getDocumentsPath } from "./paths"
+import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
 
-// Ensures the per-task directory exists and returns its path.
-export async function ensureTaskDirectoryExists(taskId: string): Promise<string> {
-	return getGlobalStorageDir("tasks", taskId)
+// Ensures the addressed execution directory exists and returns its path.
+export async function ensureTaskDirectoryExists(address: string | TaskStorageAddress): Promise<string> {
+	const directory = getTaskDirectoryPath(address)
+	await fs.mkdir(directory, { recursive: true })
+	return directory
 }
 
 // Expected legacy-path errors: ENOENT (dir missing), EPERM/EACCES (TCC-protected ~/Documents).
