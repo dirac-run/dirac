@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import * as path from "path"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 
@@ -171,9 +172,9 @@ export interface ManifestData {
 	parameters?: DiracToolSpec["parameters"]
 }
 
-export async function resolveTaskToolDir(name: string, taskId: string): Promise<string> {
+export async function resolveTaskToolDir(name: string, address: string | TaskStorageAddress): Promise<string> {
 	const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
-	const taskDir = await ensureTaskDirectoryExists(taskId)
+	const taskDir = await ensureTaskDirectoryExists(address)
 	return path.join(taskDir, "tools", name)
 }
 

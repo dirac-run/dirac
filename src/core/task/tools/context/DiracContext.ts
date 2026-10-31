@@ -1,11 +1,11 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import { isDeepStrictEqual } from "node:util"
+import { AnchorStateManager, PersistedAnchorDocument, PersistedAnchorState } from "@utils/AnchorStateManager"
 import Mutex from "p-mutex"
 import { z } from "zod"
 import { diracHomeDir } from "@/shared/config/environment"
 import { safeParseJson } from "@/shared/safe-json-parse"
-import { StateManager } from "../../../storage/StateManager"
 import { GlobalFileNames } from "../../../storage/fileNames"
 import {
 	appendOperationRecords,
@@ -14,7 +14,8 @@ import {
 	replayOperationRecords,
 	writeFramedBaseline,
 } from "../../../storage/operationLog"
-import { AnchorStateManager, PersistedAnchorDocument, PersistedAnchorState } from "@utils/AnchorStateManager"
+import { StateManager } from "../../../storage/StateManager"
+import { getTaskDirectoryPath, type TaskStorageAddress } from "../../../storage/taskDirectory"
 import { IDiracContext } from "../interfaces/IDiracContext"
 
 const ANCHOR_STATE_KEY = "anchorState"
@@ -51,12 +52,16 @@ export class DiracContext implements IDiracContext {
 	private stateMutex = new Mutex()
 
 	constructor(
-		private taskId: string,
+		address: string | TaskStorageAddress,
 		private stateManager: StateManager,
 		private conversationUlid: string,
 	) {
-		const diracHome = diracHomeDir()
-		const taskDirectory = path.join(diracHome, "data", "tasks", taskId)
+		const addressedDirectory = getTaskDirectoryPath(address)
+		// Root contexts retain their historical base until a separate storage migration is approved.
+		const taskDirectory =
+			typeof address !== "string" && address.kind === "tasklet"
+				? addressedDirectory
+				: path.join(diracHomeDir(), "data", "tasks", typeof address === "string" ? address : address.taskId)
 		this.taskPath = path.join(taskDirectory, GlobalFileNames.toolContext)
 		this.baselinePath = path.join(taskDirectory, GlobalFileNames.toolContextBaseline)
 		this.operationPath = path.join(taskDirectory, GlobalFileNames.toolContextOperations)
@@ -106,8 +111,7 @@ export class DiracContext implements IDiracContext {
 			version: 1,
 			documents: [],
 		}
-		const absolutePath =
-			operation.type === "set_anchor_document" ? operation.document.absolutePath : operation.absolutePath
+		const absolutePath = operation.type === "set_anchor_document" ? operation.document.absolutePath : operation.absolutePath
 		const documentIndex = anchorState.documents.findIndex((document) => document.absolutePath === absolutePath)
 		if (documentIndex !== -1) anchorState.documents.splice(documentIndex, 1)
 		if (operation.type === "set_anchor_document") {
@@ -275,7 +279,7 @@ export class DiracContext implements IDiracContext {
 				wroteAnchorState = true
 				const anchorState = this.anchorStateLoaded
 					? AnchorStateManager.exportState(this.conversationUlid)
-					: value as PersistedAnchorState
+					: (value as PersistedAnchorState)
 				yield { type: "anchor", version: anchorState.version }
 				for (const document of anchorState.documents) yield { type: "anchor_document", document }
 				continue

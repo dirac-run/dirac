@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { findLastIndex } from "@shared/array"
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
@@ -73,12 +74,12 @@ export interface PreCompactContextFiles {
 
 /**
  * Write context files for PreCompact hook access
- * @param taskId Task identifier
+ * @param address Task storage location
  * @param currentContext Current conversation context
  * @returns Paths to written files and timestamp
  */
 export async function writePreCompactContextFiles(
-	taskId: string,
+	address: string | TaskStorageAddress,
 	currentContext: DiracStorageMessage[],
 ): Promise<PreCompactContextFiles> {
 	const { writeConversationHistoryJson, writeConversationHistoryText } = await import("../storage/disk")
@@ -87,8 +88,8 @@ export async function writePreCompactContextFiles(
 	const hookTimestamp = Date.now()
 
 	// Write context files for hook access
-	const contextJsonPath = await writeConversationHistoryJson(taskId, currentContext, hookTimestamp)
-	const contextRawPath = await writeConversationHistoryText(taskId, currentContext, hookTimestamp)
+	const contextJsonPath = await writeConversationHistoryJson(address, currentContext, hookTimestamp)
+	const contextRawPath = await writeConversationHistoryText(address, currentContext, hookTimestamp)
 
 	return { contextJsonPath, contextRawPath, hookTimestamp }
 }
@@ -109,6 +110,8 @@ export interface PreCompactHookParams {
 	// Task identification
 	/** Task identifier */
 	taskId: string
+	/** Storage location, separate from the hook payload identity. Defaults to taskId. */
+	storageAddress?: TaskStorageAddress
 	/** ULID for telemetry */
 	ulid: string
 	/** Active hook model context */
@@ -192,7 +195,10 @@ export async function executePreCompactHookWithCleanup(params: PreCompactHookPar
 		)
 
 		// Write context files for hook access
-		const contextFiles = await writePreCompactContextFiles(params.taskId, currentContext as any)
+		const contextFiles = await writePreCompactContextFiles(
+			params.storageAddress ?? params.taskId,
+			currentContext as DiracStorageMessage[],
+		)
 		contextJsonPath = contextFiles.contextJsonPath
 		contextRawPath = contextFiles.contextRawPath
 

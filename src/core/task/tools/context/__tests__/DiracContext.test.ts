@@ -5,6 +5,8 @@ import path from "node:path"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
+import { HostProvider } from "@/hosts/host-provider"
+import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { DiracContext } from "../DiracContext"
 
 const TASK_ID = "context-persistence"
@@ -27,12 +29,14 @@ describe("DiracContext persistence", () => {
 		diracHome = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-context-"))
 		previousDiracHome = process.env.DIRAC_DIR
 		process.env.DIRAC_DIR = diracHome
+		setVscodeHostProviderMock({ globalStorageFsPath: path.join(diracHome, "data") })
 		stateManager = { flushPendingState: sinon.stub().resolves() }
 		AnchorStateManager.reset(CONVERSATION_ID)
 	})
 
 	afterEach(async () => {
 		AnchorStateManager.reset(CONVERSATION_ID)
+		HostProvider.reset()
 		if (previousDiracHome === undefined) delete process.env.DIRAC_DIR
 		else process.env.DIRAC_DIR = previousDiracHome
 		await fs.rm(diracHome, { recursive: true, force: true })

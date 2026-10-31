@@ -17,6 +17,7 @@ import * as path from "path"
 import { ulid } from "ulid"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
+import { TASKLET_ID_PREFIX } from "@/shared/taskletId"
 import { withTaskHistoryInventoryLock } from "@core/storage/taskHistory"
 
 export interface TaskReconstructionResult {
@@ -182,7 +183,9 @@ async function scanTaskDirectories(tasksDir: string): Promise<string[]> {
 
 	try {
 		const entries = await fs.readdir(tasksDir, { withFileTypes: true })
-		return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+		return entries
+			.filter((entry) => entry.isDirectory() && !entry.name.startsWith(TASKLET_ID_PREFIX))
+			.map((entry) => entry.name)
 	} catch (error) {
 		throw new Error(`Failed to scan tasks directory: ${error}`)
 	}

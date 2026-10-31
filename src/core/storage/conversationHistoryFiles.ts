@@ -5,14 +5,18 @@ import * as path from "path"
 import { Logger } from "@/shared/services/Logger"
 import { atomicWriteFile } from "./atomicWrite"
 import { ensureTaskDirectoryExists } from "./directoryEnsurers"
+import type { TaskStorageAddress } from "./taskDirectory"
+
+// Addresses locate artifacts, not authorize access. Hook filenames are scoped to an execution;
+// callers must avoid same-format/same-timestamp collisions there. Cleanup remains best-effort and path-based.
 
 // Writes conversation history to a temp JSON file for PreCompact hook consumption, returning its path.
 export async function writeConversationHistoryJson(
-	taskId: string,
+	address: string | TaskStorageAddress,
 	apiConversationHistory: Anthropic.MessageParam[],
 	timestamp?: number,
 ): Promise<string> {
-	const taskDir = await ensureTaskDirectoryExists(taskId)
+	const taskDir = await ensureTaskDirectoryExists(address)
 	const fileTimestamp = timestamp ?? Date.now()
 	const tempFilePath = path.join(taskDir, `conversation_history_${fileTimestamp}.json`)
 	try {
@@ -37,11 +41,11 @@ export async function cleanupConversationHistoryFile(filePath: string): Promise<
 
 // Writes conversation history in human-readable text format to a temp file for hook consumption.
 export async function writeConversationHistoryText(
-	taskId: string,
+	address: string | TaskStorageAddress,
 	conversationHistory: Anthropic.MessageParam[],
 	timestamp?: number,
 ): Promise<string> {
-	const taskDir = await ensureTaskDirectoryExists(taskId)
+	const taskDir = await ensureTaskDirectoryExists(address)
 	const fileTimestamp = timestamp ?? Date.now()
 	const tempFilePath = path.join(taskDir, `conversation_history_${fileTimestamp}.txt`)
 	try {

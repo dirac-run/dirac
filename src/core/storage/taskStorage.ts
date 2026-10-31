@@ -2,37 +2,39 @@ import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes
 import { GlobalState, Settings } from "@shared/storage/state-keys"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
-import * as path from "path"
 import Mutex from "p-mutex"
+import * as path from "path"
 import { Logger } from "@/shared/services/Logger"
 import { atomicWriteFile } from "./atomicWrite"
-import { GlobalFileNames } from "./fileNames"
 import { ensureTaskDirectoryExists } from "./directoryEnsurers"
+import { GlobalFileNames } from "./fileNames"
+import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
 
+// Process-local locks only; address resolution is not ownership authorization or filesystem isolation.
 const taskMetadataLocks = new Map<string, Mutex>()
 const taskSettingsLocks = new Map<string, Mutex>()
 
-function getTaskMetadataLock(taskId: string): Mutex {
-	let lock = taskMetadataLocks.get(taskId)
+function getTaskMetadataLock(taskDirectory: string): Mutex {
+	let lock = taskMetadataLocks.get(taskDirectory)
 	if (!lock) {
 		lock = new Mutex()
-		taskMetadataLocks.set(taskId, lock)
+		taskMetadataLocks.set(taskDirectory, lock)
 	}
 	return lock
 }
 
-function getTaskSettingsLock(taskId: string): Mutex {
-	let lock = taskSettingsLocks.get(taskId)
+function getTaskSettingsLock(taskDirectory: string): Mutex {
+	let lock = taskSettingsLocks.get(taskDirectory)
 	if (!lock) {
 		lock = new Mutex()
-		taskSettingsLocks.set(taskId, lock)
+		taskSettingsLocks.set(taskDirectory, lock)
 	}
 	return lock
 }
 
 // Reads task metadata for a task, returning an empty default if absent or unreadable.
-export async function getTaskMetadata(taskId: string): Promise<TaskMetadata> {
-	const filePath = path.join(await ensureTaskDirectoryExists(taskId), GlobalFileNames.taskMetadata)
+export async function getTaskMetadata(address: string | TaskStorageAddress): Promise<TaskMetadata> {
+	const filePath = path.join(await ensureTaskDirectoryExists(address), GlobalFileNames.taskMetadata)
 	try {
 		if (await fileExistsAtPath(filePath)) {
 			return JSON.parse(await fs.readFile(filePath, "utf8"))
@@ -43,16 +45,16 @@ export async function getTaskMetadata(taskId: string): Promise<TaskMetadata> {
 	return { files_in_context: [], model_usage: [], environment_history: [] }
 }
 
-async function writeTaskMetadata(taskId: string, metadata: TaskMetadata): Promise<void> {
-	const taskDir = await ensureTaskDirectoryExists(taskId)
+async function writeTaskMetadata(address: string | TaskStorageAddress, metadata: TaskMetadata): Promise<void> {
+	const taskDir = await ensureTaskDirectoryExists(address)
 	const filePath = path.join(taskDir, GlobalFileNames.taskMetadata)
 	await atomicWriteFile(filePath, JSON.stringify(metadata, null, 2))
 }
 
-// Persists task metadata for a task.
-export async function saveTaskMetadata(taskId: string, metadata: TaskMetadata): Promise<void> {
+// Legacy best-effort save: logs failures without rejecting; use updateTaskMetadata for propagating failures.
+export async function saveTaskMetadata(address: string | TaskStorageAddress, metadata: TaskMetadata): Promise<void> {
 	try {
-		await getTaskMetadataLock(taskId).withLock(() => writeTaskMetadata(taskId, metadata))
+		await getTaskMetadataLock(getTaskDirectoryPath(address)).withLock(() => writeTaskMetadata(address, metadata))
 	} catch (error) {
 		Logger.error("Failed to save task metadata:", error)
 	}
@@ -60,21 +62,21 @@ export async function saveTaskMetadata(taskId: string, metadata: TaskMetadata): 
 
 /** Atomically reads, mutates, and persists task metadata for one task. */
 export async function updateTaskMetadata(
-	taskId: string,
+	address: string | TaskStorageAddress,
 	update: (metadata: TaskMetadata) => void | Promise<void>,
 ): Promise<TaskMetadata> {
-	return getTaskMetadataLock(taskId).withLock(async () => {
-		const metadata = await getTaskMetadata(taskId)
+	return getTaskMetadataLock(getTaskDirectoryPath(address)).withLock(async () => {
+		const metadata = await getTaskMetadata(address)
 		await update(metadata)
-		await writeTaskMetadata(taskId, metadata)
+		await writeTaskMetadata(address, metadata)
 		return metadata
 	})
 }
 
 // Reads per-task settings from storage, returning {} for a new task.
-export async function readTaskSettingsFromStorage(taskId: string): Promise<Partial<GlobalState>> {
+export async function readTaskSettingsFromStorage(address: string | TaskStorageAddress): Promise<Partial<GlobalState>> {
 	try {
-		const taskDirectoryFilePath = await ensureTaskDirectoryExists(taskId)
+		const taskDirectoryFilePath = await ensureTaskDirectoryExists(address)
 		const settingsFilePath = path.join(taskDirectoryFilePath, "settings.json")
 		if (await fileExistsAtPath(settingsFilePath)) {
 			const settingsContent = await fs.readFile(settingsFilePath, "utf8")
@@ -88,10 +90,10 @@ export async function readTaskSettingsFromStorage(taskId: string): Promise<Parti
 }
 
 // Merges and persists per-task settings into the task's settings.json.
-export async function writeTaskSettingsToStorage(taskId: string, settings: Partial<Settings>) {
+export async function writeTaskSettingsToStorage(address: string | TaskStorageAddress, settings: Partial<Settings>) {
 	try {
-		await getTaskSettingsLock(taskId).withLock(async () => {
-			const taskDirectoryFilePath = await ensureTaskDirectoryExists(taskId)
+		await getTaskSettingsLock(getTaskDirectoryPath(address)).withLock(async () => {
+			const taskDirectoryFilePath = await ensureTaskDirectoryExists(address)
 			const settingsFilePath = path.join(taskDirectoryFilePath, "settings.json")
 			let existingSettings = {}
 			if (await fileExistsAtPath(settingsFilePath)) {

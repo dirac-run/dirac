@@ -7,6 +7,7 @@ import { lock, type LockOptions, type ReleaseLock } from "proper-lockfile"
 import Mutex from "p-mutex"
 import { telemetryService } from "@/services/telemetry"
 import { Logger } from "@/shared/services/Logger"
+import { TASKLET_ID_PREFIX } from "@/shared/taskletId"
 import { reconstructTaskHistory } from "../commands/reconstructTaskHistory"
 import { atomicWriteFile } from "./atomicWrite"
 import { ensureStateDirectoryExists } from "./directoryEnsurers"
@@ -102,6 +103,7 @@ async function parseTaskHistoryContents(filePath: string, contents: string): Pro
 
 	const historyItems: RunHistoryItem[] = []
 	for (const [index, item] of parsed.entries()) {
+		if (hasTaskletHistoryId(item)) continue
 		if (isExplicitGoalRecord(item)) {
 			assertReadableGoalHistoryItem(item, index)
 			historyItems.push(item)
@@ -120,6 +122,12 @@ async function parseTaskHistoryContents(filePath: string, contents: string): Pro
 		Logger.warn(`[Task History] Skipped ${skippedItems} unreadable entr${skippedItems === 1 ? "y" : "ies"}`)
 	}
 	return historyItems
+}
+
+function hasTaskletHistoryId(value: unknown): boolean {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false
+	const id = (value as Record<string, unknown>).id
+	return typeof id === "string" && id.startsWith(TASKLET_ID_PREFIX)
 }
 
 function isExplicitGoalRecord(value: unknown): value is Record<string, unknown> & { runKind: "goal" } {
@@ -281,6 +289,9 @@ export function applyTaskHistoryMutations(
 				break
 		}
 	}
+	for (const item of items) {
+		if (hasTaskletHistoryId(item)) throw new Error(`Tasklet ${item.id} cannot be persisted in top-level history`)
+	}
 	return items
 }
 
@@ -319,6 +330,7 @@ async function readTaskHistoryFileWithoutRecovery(filePath: string): Promise<Run
 	if (!Array.isArray(parsed)) throw new Error("Task history root is not an array")
 	const items: RunHistoryItem[] = []
 	for (const [index, item] of parsed.entries()) {
+		if (hasTaskletHistoryId(item)) continue
 		if (isExplicitGoalRecord(item)) {
 			assertReadableGoalHistoryItem(item, index)
 			items.push(item)

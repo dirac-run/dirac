@@ -43,7 +43,9 @@ export function getTaskDirectoryPath(address: string | TaskStorageAddress): stri
 export async function listTaskDirectoryIds(): Promise<string[]> {
 	try {
 		const entries = await fs.readdir(getTasksDirectoryPath(), { withFileTypes: true })
-		return entries.filter((entry) => entry.isDirectory() && !entry.name.endsWith(".lock")).map((entry) => entry.name)
+		return entries
+			.filter((entry) => entry.isDirectory() && !entry.name.endsWith(".lock") && !entry.name.startsWith(TASKLET_ID_PREFIX))
+			.map((entry) => entry.name)
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
 		throw error

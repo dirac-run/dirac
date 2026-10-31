@@ -1,3 +1,4 @@
+import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
 import { Logger } from "@shared/services/Logger"
 import { arePathsEqual, isLocatedInPath } from "@utils/path"
 import fs from "fs/promises"
@@ -11,6 +12,7 @@ async function realpathOrSelf(p: string): Promise<string> {
 
 export interface TaskPromptArtifactsContext {
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	// Per-request sequence number (1-based). Included in the artifact filename so a
 	// multi-call turn (e.g. the noToolsUsed retry loop) leaves one file per API
 	// request instead of each write overwriting the previous one.
@@ -37,6 +39,8 @@ export async function writePromptMetadataArtifacts(
 	}
 
 	try {
+		const address = ctx.storageAddress
+		if (address) getTaskDirectoryPath(address)
 		// Env var is OS-level (user-controlled, safe to allow absolute); workspace setting is the exfiltration vector.
 		const envDir = promptArtifactsDir()
 		const settingDir = ctx.writePromptMetadataDirectory?.trim()
@@ -58,11 +62,16 @@ export async function writePromptMetadataArtifacts(
 			}
 		}
 		const configuredDir = envDir || settingDir
-		const artifactDir = configuredDir
+		const artifactBaseDir = configuredDir
 			? path.isAbsolute(configuredDir)
 				? path.resolve(configuredDir)
 				: path.resolve(ctx.cwd, configuredDir)
 			: path.resolve(ctx.cwd, ".dirac-prompt-artifacts")
+		// Debug output keeps its configured destination; only contained executions gain a root-qualified namespace.
+		const artifactDir =
+			address?.kind === "tasklet"
+				? path.join(artifactBaseDir, "tasks", address.rootTaskId, "tasklets", address.taskletId)
+				: artifactBaseDir
 
 		await fs.mkdir(artifactDir, { recursive: true })
 		// Defense-in-depth: re-check the boundary after mkdir resolves any symlinks in the path,
@@ -81,7 +90,8 @@ export async function writePromptMetadataArtifacts(
 		const gitignorePath = path.join(writeDir, ".gitignore")
 		await fs.writeFile(gitignorePath, "*\n!.gitignore\n", "utf8").catch(() => {})
 
-		const debugPath = path.join(writeDir, `task-${ctx.taskId}-debug-${String(ctx.requestSeq).padStart(3, "0")}.md`)
+		const executionId = address ? (address.kind === "tasklet" ? address.taskletId : address.taskId) : ctx.taskId
+		const debugPath = path.join(writeDir, `task-${executionId}-debug-${String(ctx.requestSeq).padStart(3, "0")}.md`)
 
 		let markdown = `## System Prompt\n\n${params.systemPrompt}\n\n`
 

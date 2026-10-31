@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import * as path from "path"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { UserToolLoader } from "../discovery/UserToolLoader"
@@ -45,9 +46,9 @@ export async function refreshToolRegistryForWorkspace<T>(
 }
 
 /** Scan task tools first, then register the complete result under global-registry exclusivity. */
-export async function refreshTaskTools(taskId: string): Promise<string[]> {
+export async function refreshTaskTools(taskId: string, storageAddress: string | TaskStorageAddress = taskId): Promise<string[]> {
 	const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
-	const taskDir = await ensureTaskDirectoryExists(taskId)
+	const taskDir = await ensureTaskDirectoryExists(storageAddress)
 	const toolsDir = path.join(taskDir, "tools")
 	const taskTools = (await ToolDiscoveryService.scanUserToolDirectory(toolsDir, "task")).map((tool) => ({
 		...tool,
