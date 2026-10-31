@@ -72,6 +72,23 @@ function createMocks() {
 }
 
 describe("LocalConversationCompaction", () => {
+	for (const contained of [false, true]) {
+		it(`forwards ${contained ? "contained" : "legacy"} storage to PreCompact while retaining payload identity`, async () => {
+			const { compaction, dependencies } = createMocks()
+			const address = contained ? { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" } : undefined
+			Object.assign(dependencies, { storageAddress: address })
+			const configuration = dependencies.getWorkingConfiguration()
+			configuration.settings.hooksEnabled = true
+			dependencies.getApi.returns({ getModel: () => ({ id: "model" }) })
+			sinon.stub(compaction as any, "generateSummary").resolves("summary")
+			const hook = sinon.stub(require("@core/hooks/precompact-executor"), "executePreCompactHookWithCleanup").resolves({})
+			await compaction.run({ source: "user" })
+			assert.equal(hook.callCount, 1)
+			assert.equal(hook.firstCall.args[0].taskId, dependencies.taskId)
+			assert.equal(hook.firstCall.args[0].storageAddress, address)
+		})
+	}
+
 	afterEach(() => sinon.restore())
 
 	it("preserves a follow-up hidden from effective API history when the Utility summary only mentions the initial task", async () => {

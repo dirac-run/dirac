@@ -382,6 +382,7 @@ describe("ApiConversationManager steering delivery", () => {
 		const dependencies: any = {
 			taskState,
 			api: { supportsNativeWebSearch: () => true },
+			getRequestRuntime: () => undefined,
 			contextManager: {
 				getTruncatedMessages: sinon.stub().callsFake((messages: any[]) => messages),
 			},
@@ -463,6 +464,11 @@ describe("ApiConversationManager steering delivery", () => {
 			const compactConversation = sinon.stub().resolves({ input: [{ type: "compaction", encrypted_content: "opaque" }] })
 			const dependencies: any = {
 				taskState,
+				getRequestRuntime: () => undefined,
+				getWorkingConfiguration: () => ({
+					settings: Object.fromEntries(["hooksEnabled", "useAutoCondense", "autoCondenseContextLimits"].map((key) => [key, dependencies.stateManager.getGlobalSettingsKey(key)])),
+					apiConfiguration: {},
+				}),
 				api: { compactConversation },
 				contextManager: {
 					getTruncatedMessages: sinon.stub().callsFake((messages: any[]) => messages),
@@ -484,6 +490,29 @@ describe("ApiConversationManager steering delivery", () => {
 				getCurrentProviderInfo: () => ({ providerId: "openai-codex" }),
 			}
 			return { dependencies, history, compactConversation, getProviderState: () => providerState }
+		}
+
+		for (const contained of [false, true]) {
+			it(`forwards ${contained ? "contained" : "legacy"} storage to emergency PreCompact without changing payload identity`, async () => {
+				const { dependencies } = createCompactionDependencies()
+				const address = contained ? { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" } : undefined
+				Object.assign(dependencies, {
+					taskId: "logical-task", storageAddress: address,
+					setActiveHookExecution: sinon.stub(), clearActiveHookExecution: sinon.stub(),
+					postStateToWebview: sinon.stub(), cancelTask: sinon.stub(),
+				})
+				dependencies.api.getModel = () => ({ id: "model" })
+				dependencies.stateManager.getGlobalSettingsKey.withArgs("hooksEnabled").returns(true)
+				const hook = sinon.stub(require("@core/hooks/precompact-executor"), "executePreCompactHookWithCleanup").resolves({})
+				try {
+					await new ApiConversationManager(dependencies).handleContextWindowExceededError()
+					assert.equal(hook.callCount, 1)
+					assert.equal(hook.firstCall.args[0].taskId, dependencies.taskId)
+					assert.equal(hook.firstCall.args[0].storageAddress, address)
+				} finally {
+					hook.restore()
+				}
+			})
 		}
 
 		it("enables native web search only for a capable provider with the skill active", async () => {

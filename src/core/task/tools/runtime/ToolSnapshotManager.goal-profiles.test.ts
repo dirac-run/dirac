@@ -15,6 +15,7 @@ import {
 import { ToolDiscoveryService } from "../discovery/ToolDiscoveryService"
 import { UserToolLoader } from "../discovery/UserToolLoader"
 import type { ToolExecutionEnvironment } from "../interfaces/ToolEnvironmentFactory"
+import { ReadFileTool } from "../modules/read_file/ReadFileTool"
 import { UseSubagentsTool } from "../modules/use_subagents/UseSubagentsTool"
 import { ToolRegistry } from "../registry/ToolRegistry"
 import { AgentConfigLoader, type AgentBaseConfig } from "../subagent/AgentConfigLoader"
@@ -24,7 +25,7 @@ import type { ToolSelectionPolicy } from "./ToolSelectionPolicy"
 import type { ToolRequestSnapshot } from "./ToolSnapshot"
 import { ToolSnapshotManager } from "./ToolSnapshotManager"
 
-const goalProfiles = ["goal_coordinator", "goal_followup", "goal_child"] as const
+const nonDelegatingProfiles = ["goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const
 const agentConfigs: AgentBaseConfig[] = ["reviewer", "implementer"].map((name) => ({
 	name,
 	description: `Fixture ${name}`,
@@ -75,13 +76,14 @@ async function createSnapshot(
 	profile: TaskExecutionProfile,
 	selectionPolicy?: ToolSelectionPolicy,
 	activeSkills: readonly SkillMetadata[] = [],
+	mode: TaskConfig["mode"] = "act",
 ) {
 	const config = {
 		taskId: `snapshot-${profile}`,
 		ulid: `snapshot-${profile}`,
 		cwd: "/goal-profile-fixture",
 		executionProfile: profile,
-		mode: "act",
+		mode,
 		subagentsEnabled: true,
 		hooksEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
@@ -119,7 +121,7 @@ async function createSnapshot(
 	return { snapshot, config, createEnvironment, environment }
 }
 
-describe("ToolSnapshotManager Goal profile integration", () => {
+describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 	let configuredAgents: AgentBaseConfig[]
 
 	beforeEach(() => {
@@ -148,7 +150,7 @@ describe("ToolSnapshotManager Goal profile integration", () => {
 		setHostCapabilities(undefined)
 	})
 
-	for (const profile of goalProfiles) {
+	for (const profile of nonDelegatingProfiles) {
 		for (const namedAgents of [false, true]) {
 			it(`${profile} excludes and rejects subagents with named configs ${namedAgents ? "present" : "absent"}`, async () => {
 				if (!namedAgents) configuredAgents = []
@@ -215,6 +217,30 @@ describe("ToolSnapshotManager Goal profile integration", () => {
 			await assert.rejects(createSnapshot(profile, undefined, [skill]), {
 				message: `Built-in skill '${skill.name}' declares non-skill-only dependency 'use_subagents'.`,
 			})
+		})
+	}
+
+	for (const mode of ["plan", "act"] as const) {
+		it(`tasklet retains ordinary work dispatch and rejects both delegation routes in ${mode} mode`, async () => {
+			const readCall = sinon.stub(ReadFileTool.prototype, "processCall").resolves("fixture read")
+			const delegateCall = sinon.stub(UseSubagentsTool.prototype, "processCall").resolves("unexpected dispatch")
+			const { snapshot, config, environment } = await createSnapshot("tasklet", undefined, [], mode)
+			assert.equal(config.mode, mode)
+			assertNoSubagents(snapshot)
+			for (const name of ["read_file", "edit_file", "execute_command", "write_to_file", "respond"]) {
+				assert.ok(snapshot.executableToolNames.has(name), name)
+			}
+			const params = { paths: ["fixture.txt"] }
+			assert.equal(await snapshot.coordinator.execute(config, {
+				type: "tool_use", name: "read_file", params, isComplete: true,
+			}), "fixture read")
+			sinon.assert.calledOnceWithExactly(readCall, params, environment)
+			for (const name of subagentToolNames) {
+				await assert.rejects(snapshot.coordinator.execute(config, {
+					type: "tool_use", name, params: {}, isComplete: true,
+				}), { message: `No modular tool registered for: ${name}` })
+			}
+			sinon.assert.notCalled(delegateCall)
 		})
 	}
 

@@ -61,6 +61,7 @@ export class ApiConversationManager {
 				// Execute hook - throws HookCancellationError if cancelled
 				await executePreCompactHookWithCleanup({
 					taskId: this.dependencies.taskId,
+					storageAddress: this.dependencies.storageAddress,
 					ulid: this.dependencies.ulid,
 					modelContext: getTaskHookModelContext(
 						this.getOperationalApi(),

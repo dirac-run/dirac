@@ -1,7 +1,7 @@
 import type { SkillMetadata } from "@shared/skills"
 import type { DiscoveredTool } from "./tools/discovery/DiscoveredTool"
 
-export type TaskExecutionProfile = "standalone" | "goal_coordinator" | "goal_followup" | "goal_child"
+export type TaskExecutionProfile = "standalone" | "goal_coordinator" | "goal_followup" | "goal_child" | "tasklet"
 
 export function isSkillAvailableToTaskProfile(
 	profile: TaskExecutionProfile,
@@ -40,6 +40,15 @@ export function isDiscoveredToolAvailableToTaskProfile(profile: TaskExecutionPro
 
 export function taskProfileSystemInstructions(profile: TaskExecutionProfile): string | undefined {
 	if (profile === "standalone") return undefined
+	if (profile === "tasklet") {
+		return `# CONTAINED TASKLET
+
+You are a private worker for a parent agent. Work strictly within the complete assignment supplied by the parent. Do not broaden scope without asking the parent. You do not communicate with the end user. Report questions, plans, progress, and completion through the respond tool; those responses are delivered privately to the parent.
+
+Keep the parent meaningfully informed during non-trivial work. Report substantive findings, milestones, blockers, and changes of approach, not routine tool narration. Keep progress updates compact.
+
+Follow the current Plan or Act mode and its normal tool restrictions. You cannot delegate to other agents; ask the parent when additional delegation is needed.`
+	}
 	if (profile === "goal_child") {
 		return `# CONTAINED GOAL TASK
 

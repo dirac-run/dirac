@@ -9,6 +9,19 @@ import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { buildOrchestrationTrait } from "../OrchestrationTraitBuilder"
 
+describe("OrchestrationTraitBuilder skill storage", () => {
+	afterEach(() => sinon.restore())
+	for (const contained of [false, true]) {
+		it(`forwards ${contained ? "contained" : "legacy"} skill storage`, async () => {
+			const { config } = createMockTaskConfig()
+			if (contained) config.storageAddress = { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }
+			const activate = sinon.stub(require("@core/task/activateTaskSkill"), "activateTaskSkill").resolves()
+			await buildOrchestrationTrait(config).activateSkill("skill")
+			sinon.assert.calledOnceWithExactly(activate, config.storageAddress ?? config.taskId, config.taskState, "skill")
+		})
+	}
+})
+
 describe("OrchestrationTraitBuilder Utility subagent routing", () => {
 	afterEach(() => sinon.restore())
 

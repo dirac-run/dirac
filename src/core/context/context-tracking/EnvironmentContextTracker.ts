@@ -1,10 +1,14 @@
 import { collectEnvironmentMetadata, updateTaskMetadata } from "@core/storage/disk"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import type { EnvironmentMetadataEntry } from "./ContextTrackerTypes"
 
 export class EnvironmentContextTracker {
 	readonly taskId: string
 
-	constructor(taskId: string) {
+	constructor(
+		taskId: string,
+		private readonly storageAddress?: TaskStorageAddress,
+	) {
 		this.taskId = taskId
 	}
 
@@ -15,7 +19,7 @@ export class EnvironmentContextTracker {
 			...currentEnv,
 		}
 
-		await updateTaskMetadata(this.taskId, (metadata) => {
+		await updateTaskMetadata(this.storageAddress ?? this.taskId, (metadata) => {
 			metadata.environment_history ??= []
 			const lastEntry = metadata.environment_history[metadata.environment_history.length - 1]
 			if (lastEntry && this.isSameEnvironment(lastEntry, currentEnvWithTs)) return

@@ -18,6 +18,8 @@ import { TaskMessenger } from "../TaskMessenger"
 import { TaskState } from "../TaskState"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
+
 export interface LifecycleManagerDependencies {
 	taskState: TaskState
 	messageStateHandler: MessageStateHandler
@@ -25,6 +27,7 @@ export interface LifecycleManagerDependencies {
 	getRequestRuntime: () => TaskRequestRuntime | undefined
 	api: ApiHandler
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	ulid: string
 	taskMessenger: TaskMessenger
 	postStateToWebview: () => Promise<void>

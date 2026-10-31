@@ -197,6 +197,21 @@ describe("LifecycleManager", () => {
 			})
 		}
 
+		for (const storageAddress of [undefined, { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }]) {
+			it(`forwards ${storageAddress ? "contained" : "legacy"} resume storage without changing registry ownership`, async () => {
+				setupDiskMocks()
+				deps.storageAddress = storageAddress
+				const registryModule = require("@core/task/tools/registry/refreshToolRegistry")
+				const refresh = sinon.stub(registryModule, "refreshTaskTools").resolves([])
+				await manager.resumeTaskFromHistory(undefined, { systemContext: "Resume" })
+				const disk = require("@core/storage/disk")
+				for (const name of ["getSavedPresentationHistory", "getSavedApiConversationState", "getSavedApiConversationProviderState", "ensureTaskDirectoryExists", "getTaskMetadata"]) {
+					sinon.assert.alwaysCalledWithExactly(disk[name], storageAddress ?? deps.taskId)
+				}
+				sinon.assert.calledOnceWithExactly(refresh, deps.taskId, storageAddress ?? deps.taskId)
+			})
+		}
+
 		it("loads saved messages and history", async () => {
 			setupDiskMocks([{ content: { type: "text", text: "hello" }, ts: Date.now() }])
 			unblockWaitFor()

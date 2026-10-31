@@ -3,6 +3,7 @@ import type { ContextManager } from "@core/context/context-management/ContextMan
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/hooks/precompact-executor"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { continuationPrompt } from "@core/prompts/contextManagement"
 import type { TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import { ConversationCondensationService } from "@core/text-condensation/ConversationCondensationService"
@@ -39,6 +40,7 @@ export type LocalConversationCompactionSource = "automatic" | "user"
 
 interface LocalConversationCompactionDependencies {
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	ulid: string
 	taskState: TaskState
 	messageStateHandler: MessageStateHandler
@@ -230,6 +232,7 @@ export class LocalConversationCompaction {
 
 		const result = await executePreCompactHookWithCleanup({
 			taskId: this.dependencies.taskId,
+			storageAddress: this.dependencies.storageAddress,
 			ulid: this.dependencies.ulid,
 			modelContext: getTaskHookModelContext(this.dependencies.getApi(), this.dependencies.getWorkingConfiguration()),
 			apiConversationHistory: this.dependencies.messageStateHandler.getApiConversationHistory(),

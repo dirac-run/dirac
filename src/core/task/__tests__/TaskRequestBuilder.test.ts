@@ -194,6 +194,15 @@ describe("TaskRequestBuilder", () => {
 		return subagents?.items?.properties ?? {}
 	}
 
+	for (const contained of [false, true]) {
+		it(`forwards ${contained ? "contained" : "legacy"} storage to context assembly`, async () => {
+			const { context, requestRuntime } = createContext(undefined)
+			if (contained) context.storageAddress = { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }
+			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+			sinon.assert.calledOnceWithExactly(disk.ensureTaskDirectoryExists as sinon.SinonStub, context.storageAddress ?? context.taskId)
+		})
+	}
+
 	it("exposes Utility routing in generic and dynamic subagent schemas for a valid selection", async () => {
 		const { context, requestRuntime, getCapturedPromptContext, writePromptMetadataArtifacts } = createContext({
 			provider: "anthropic",

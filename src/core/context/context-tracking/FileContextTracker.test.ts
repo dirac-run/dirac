@@ -182,7 +182,7 @@ describe("FileContextTracker", () => {
 		const trackFileContextSpy = sandbox.spy(tracker, "trackFileContext")
 
 		// Get the callback that was registered with chokidar "change" event
-		const callback = mockFileSystemWatcher.on.firstCall.args[1]
+		const callback = mockFileSystemWatcher.on.getCalls().find((call: sinon.SinonSpyCall) => call.args[0] === "change")!.args[1]
 
 		// Directly call the callback to simulate a file change event
 		callback(vscode.Uri.file(path.resolve("/mock/workspace", filePath)))
@@ -209,7 +209,7 @@ describe("FileContextTracker", () => {
 		const trackFileContextSpy = sandbox.spy(tracker, "trackFileContext")
 
 		// Get the callback that was registered with chokidar "change" event
-		const callback = mockFileSystemWatcher.on.firstCall.args[1]
+		const callback = mockFileSystemWatcher.on.getCalls().find((call: sinon.SinonSpyCall) => call.args[0] === "change")!.args[1]
 
 		// Directly call the callback to simulate a file change event
 		callback(vscode.Uri.file(path.resolve("/mock/workspace", filePath)))

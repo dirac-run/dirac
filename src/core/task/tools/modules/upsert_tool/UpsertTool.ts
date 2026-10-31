@@ -255,7 +255,7 @@ async function resolveToolDirectory(name: string, scope: ToolScope, env: IToolEn
 		if (!env.config.taskId) {
 			throw new Error("no taskId for task-scoped tool")
 		}
-		dir = await resolveTaskToolDir(name, env.config.taskId)
+		dir = await resolveTaskToolDir(name, env.config.storageAddress ?? env.config.taskId)
 	} else {
 		const home = diracHomeDir()
 		dir = scope === "global"

@@ -9,6 +9,7 @@ import { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 
 import { CommandPermissionController } from "@core/permissions"
 import type { SlashCommandDirectAction } from "@core/slash-commands"
+import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
 import { createDefaultTextCondensationTemplateRegistry } from "@core/text-condensation/templates"
 import { isUtilityTextCondensationAvailable } from "@core/text-condensation/UtilityTextCondensationAvailability"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
@@ -107,6 +108,14 @@ import { extractProviderDomainFromUrl } from "./utils"
 
 export type ToolResponse = DiracToolResponseContent
 
+/** Private owner bindings; a tasklet never falls back to foreground publication. */
+export interface TaskletExecutionBindings {
+	storageAddress: Extract<TaskStorageAddress, { kind: "tasklet" }>
+	postStateToOwner: () => Promise<void>
+	postPresentationToOwner?: () => Promise<void>
+	updateBackgroundCommandState: (running: boolean, taskId: string) => void
+}
+
 export type TaskParams = {
 	controller: ITaskHost
 	updateTaskHistory: (historyItem: HistoryItem) => Promise<HistoryItem[]>
@@ -133,6 +142,7 @@ export type TaskParams = {
 	pinnedContext?: string
 	getPinnedContext?: () => Promise<string | undefined>
 	executionProfile?: TaskExecutionProfile
+	tasklet?: TaskletExecutionBindings
 	toolEnvironmentFactory?: ToolEnvironmentFactory
 	toolSelectionPolicy?: import("./tools/runtime/ToolSelectionPolicy").ToolSelectionPolicy
 	onContextCompacted?: () => void
@@ -145,6 +155,7 @@ export type TaskParams = {
 export class Task {
 	// Core task variables
 	readonly taskId: string
+	readonly storageAddress: TaskStorageAddress
 	// Sequence number for prompt-metadata debug artifacts — see promptArtifactsContext.
 	// Each API request within a task gets its own file instead of overwriting the last.
 	private promptArtifactSeq = 0
@@ -194,6 +205,7 @@ export class Task {
 	private get promptArtifactsContext(): TaskPromptArtifactsContext {
 		return {
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			// Each call gets its own sequence number so a multi-call turn (e.g. the
 			// noToolsUsed retry loop) leaves one debug artifact per API request
 			// instead of the last request overwriting all earlier ones.
@@ -207,6 +219,7 @@ export class Task {
 	private requestBuilderContext(requestRuntime: TaskRequestRuntime): TaskRequestBuilderContext {
 		return {
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			cwd: this.cwd,
 			terminalExecutionMode: this.terminalExecutionMode,
 			stateManager: this.stateManager,
@@ -224,6 +237,7 @@ export class Task {
 				writePromptMetadataArtifacts(
 					{
 						taskId: this.taskId,
+						storageAddress: this.storageAddress,
 						requestSeq: ++this.promptArtifactSeq,
 						cwd: this.cwd,
 						writePromptMetadataEnabled: requestRuntime.workingConfiguration.settings.writePromptMetadataEnabled,
@@ -453,16 +467,31 @@ export class Task {
 		this.taskState.pinnedContext = params.pinnedContext
 		this.executionProfile = params.executionProfile ?? "standalone"
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
-		if (this.executionProfile !== "standalone" && workingConfiguration.settings.mode !== "act") {
+		if (this.executionProfile.startsWith("goal_") && workingConfiguration.settings.mode !== "act") {
 			throw new Error(`${this.executionProfile} Tasks require an Act-mode working configuration`)
 		}
 		this.contextCompactionObserver = params.onContextCompacted
 		this.host = controller
-		this.updateTaskHistory = updateTaskHistory
-		this.postStateToWebview = postStateToWebview
-		this.postPresentationToWebview = postPresentationToWebview ?? postStateToWebview
-		this.reinitExistingTaskFromId = reinitExistingTaskFromId
-		this.cancelTask = cancelTask
+		const contained = params.tasklet
+		if ((this.executionProfile === "tasklet") !== !!contained) {
+			throw new Error("Tasklet execution requires private owner bindings and the tasklet profile")
+		}
+		if (contained && (contained.storageAddress.taskletId !== taskId || releaseTaskLock)) {
+			throw new Error("Tasklet identity must match its storage address and cannot own a root Task lock")
+		}
+		this.storageAddress = Object.freeze(contained ? { ...contained.storageAddress } : { kind: "task", taskId })
+		getTaskDirectoryPath(this.storageAddress)
+		this.updateTaskHistory = contained ? async () => [] : updateTaskHistory
+		this.postStateToWebview = contained ? contained.postStateToOwner : postStateToWebview
+		this.postPresentationToWebview = contained
+			? contained.postPresentationToOwner ?? contained.postStateToOwner
+			: postPresentationToWebview ?? postStateToWebview
+		this.reinitExistingTaskFromId = contained
+			? async () => {
+				throw new Error("Tasklets are reconstructed only by their owner")
+			}
+			: reinitExistingTaskFromId
+		this.cancelTask = contained ? () => this.abortTask() : cancelTask
 		this.stateManager = stateManager
 		this.workingConfiguration = workingConfiguration
 		this.workspaceManager = workspaceManager
@@ -470,7 +499,12 @@ export class Task {
 		this.taskId = taskId
 		this.releaseTaskLock = releaseTaskLock
 		this.terminalExecutionMode = vscodeTerminalExecutionMode || "vscodeTerminal"
-		this.switchToActMode = params.switchToActMode ?? (() => this.host.toggleActModeForYoloMode())
+		this.switchToActMode = contained
+			? async () => {
+				await this.applyWorkingConfigurationUpdate({ settings: { mode: "act" } })
+				return true
+			}
+			: params.switchToActMode ?? (() => this.host.toggleActModeForYoloMode())
 		this.enqueuePreRequestSteeringMessages = params.enqueuePreRequestSteeringMessages ?? (async () => undefined)
 		this.conversationPersistenceHooks = params.conversationPersistenceHooks
 
@@ -492,6 +526,7 @@ export class Task {
 
 		this.messageStateHandler = new MessageStateHandler({
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			taskState: this.taskState,
 			taskIsFavorited: this.taskIsFavorited,
@@ -563,12 +598,12 @@ export class Task {
 
 		// Tool context owns restoration of conversation-scoped anchor state. Reconstructing
 		// a Task for the same ULID must not destroy anchors already emitted to the model.
-		this.diracContext = new DiracContext(this.taskId, this.stateManager, this.ulid)
+		this.diracContext = new DiracContext(this.storageAddress, this.stateManager, this.ulid)
 
 		// Initialize context trackers
-		this.fileContextTracker = new FileContextTracker(stateManager, this.taskId)
-		this.modelContextTracker = new ModelContextTracker(this.taskId)
-		this.environmentContextTracker = new EnvironmentContextTracker(this.taskId)
+		this.fileContextTracker = new FileContextTracker(stateManager, this.taskId, undefined, this.storageAddress)
+		this.modelContextTracker = new ModelContextTracker(this.taskId, this.storageAddress)
+		this.environmentContextTracker = new EnvironmentContextTracker(this.taskId, this.storageAddress)
 
 		// Check for multiroot workspace and warn about checkpoints
 		const isMultiRootWorkspace = this.workspaceManager && this.workspaceManager.getRoots().length > 1
@@ -683,7 +718,9 @@ export class Task {
 		const commandExecutorCallbacks: CommandExecutorCallbacks = {
 			taskMessenger: this.taskMessenger,
 			updateBackgroundCommandState: (isRunning: boolean) =>
-				(updateBackgroundCommandState ?? this.host.updateBackgroundCommandState.bind(this.host))(isRunning, this.taskId),
+				(contained
+					? contained.updateBackgroundCommandState
+					: updateBackgroundCommandState ?? this.host.updateBackgroundCommandState.bind(this.host))(isRunning, this.taskId),
 			updateDiracMessage: async (index: number, updates: Partial<import("@shared/ExtensionMessage").DiracMessage>) => {
 				await this.messageStateHandler.updateDiracMessage(index, updates)
 				await this.postStateToWebview()
@@ -745,6 +782,7 @@ export class Task {
 			this.executionProfile,
 			params.toolEnvironmentFactory ?? new SurfaceToolEnvironmentFactory(),
 			params.toolSelectionPolicy,
+			this.storageAddress,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -798,6 +836,7 @@ export class Task {
 			getRequestRuntime: () => this.activeRequestRuntime,
 			api: this.api,
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			taskMessenger: this.taskMessenger,
 			postStateToWebview: this.postStateToWebview,
@@ -822,6 +861,7 @@ export class Task {
 
 		this.localConversationCompaction = new LocalConversationCompaction({
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			taskState: this.taskState,
 			messageStateHandler: this.messageStateHandler,
@@ -844,6 +884,7 @@ export class Task {
 			getWorkingConfiguration: () => this.workingConfiguration,
 			getRequestRuntime: () => this.activeRequestRuntime,
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			cwd: this.cwd,
 			taskMessenger: this.taskMessenger,
@@ -853,7 +894,7 @@ export class Task {
 			streamHandler: this.streamHandler,
 			withStateLock: this.withStateLock.bind(this),
 			loadContext: this.loadContext.bind(this),
-			activateSkill: (skillId) => activateTaskSkill(this.taskId, this.taskState, skillId),
+			activateSkill: (skillId) => activateTaskSkill(this.storageAddress, this.taskState, skillId),
 			getCurrentProviderInfo: this.getCurrentProviderInfo.bind(this),
 			getEnvironmentDetails: this.getEnvironmentDetails.bind(this),
 			getPinnedContext: () => this.taskState.pinnedContext,
@@ -943,7 +984,9 @@ export class Task {
 				return { settings: { toolToggles } }
 			},
 			async (candidate) => {
-				this.stateManager.setGlobalState("toolToggles", structuredClone(candidate.settings.toolToggles))
+				if (this.executionProfile !== "tasklet") {
+					this.stateManager.setGlobalState("toolToggles", structuredClone(candidate.settings.toolToggles))
+				}
 				await finalize?.()
 			},
 		)

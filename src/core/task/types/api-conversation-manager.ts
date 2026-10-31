@@ -14,6 +14,8 @@ import { TaskState } from "../TaskState"
 import { ToolExecutor } from "../ToolExecutor"
 import { HookExecution } from "./HookExecution"
 
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
+
 export interface ApiConversationManagerDependencies {
 	taskState: TaskState
 	messageStateHandler: MessageStateHandler
@@ -22,6 +24,7 @@ export interface ApiConversationManagerDependencies {
 	getWorkingConfiguration: () => TaskWorkingConfiguration
 	getRequestRuntime: () => TaskRequestRuntime | undefined
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	ulid: string
 	cwd: string
 	taskMessenger: TaskMessenger

@@ -3,6 +3,7 @@ import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { describe, it } from "mocha"
 import {
 	isDiscoveredToolAvailableToTaskProfile,
+	isSkillAvailableToTaskProfile,
 	isToolAvailableToTaskProfile,
 	type TaskExecutionProfile,
 	taskProfileSystemInstructions,
@@ -32,7 +33,7 @@ describe("Task execution profiles", () => {
 	})
 
 	it("restricts the subagent dispatcher to standalone Tasks", () => {
-		for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child"] as const) {
+		for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
 			assert.equal(isToolAvailableToTaskProfile(profile, "use_subagents"), profile === "standalone")
 			assert.equal(isToolAvailableToTaskProfile(profile, "read_file"), true)
 		}
@@ -43,6 +44,29 @@ describe("Task execution profiles", () => {
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("standalone", tool), false)
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("goal_coordinator", tool), false)
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("goal_child", tool), true)
+	})
+
+	it("keeps tasklets private without imposing Goal or Act-only semantics", () => {
+		const instructions = taskProfileSystemInstructions("tasklet") ?? ""
+		assert.match(instructions, /private worker for a parent agent/)
+		assert.match(instructions, /delivered privately to the parent/)
+		assert.match(instructions, /current Plan or Act mode/)
+		assert.match(instructions, /cannot delegate/)
+		assert.doesNotMatch(instructions, /Goal|always work in Act|always uses Act/)
+		assert.equal(isToolAvailableToTaskProfile("tasklet", "start_task"), false)
+	})
+
+	it("keeps foreground-only skills root-owned while retaining ordinary worker skills", () => {
+		for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+			for (const isSubagentExecution of [false, true]) {
+				const skill = { name: "fixture", description: "Fixture", path: "/fixture/SKILL.md", source: "builtin" as const }
+				assert.equal(isSkillAvailableToTaskProfile(profile, skill, isSubagentExecution), true)
+				assert.equal(
+					isSkillAvailableToTaskProfile(profile, { ...skill, foregroundOnly: true }, isSubagentExecution),
+					!isSubagentExecution && profile !== "goal_child" && profile !== "tasklet",
+				)
+			}
+		}
 	})
 
 	it("asks contained Goal Tasks for concise private trajectory updates", () => {

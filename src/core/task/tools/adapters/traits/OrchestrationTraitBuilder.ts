@@ -101,7 +101,7 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 			config.taskState[key] = value
 		},
 		commitCompletionResponse: (response) => config.taskState.commitCompletionResponse(response),
-		activateSkill: (skillId) => activateTaskSkill(config.taskId, config.taskState, skillId),
+		activateSkill: (skillId) => activateTaskSkill(config.storageAddress ?? config.taskId, config.taskState, skillId),
 		doesLatestTaskCompletionHaveNewChanges: () => config.callbacks.doesLatestTaskCompletionHaveNewChanges(),
 		updateMessage: (index, updates) => config.callbacks.updateDiracMessage(index, updates as Partial<DiracMessage>),
 		resetTransientState: () => config.callbacks.resetTransientState(),

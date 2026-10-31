@@ -7,6 +7,8 @@ import sinon from "sinon"
 import { Logger } from "@/shared/services/Logger"
 import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { SurfaceAdapter } from "../SurfaceAdapter"
+import * as taskDirectory from "@core/storage/taskDirectory"
+import { ArchitectureStorage } from "@core/architecture/ArchitectureStorage"
 
 // Characterization tests for SurfaceAdapter — verifies that each trait method
 // correctly delegates to the underlying config service/callback.
@@ -44,6 +46,44 @@ describe("SurfaceAdapter", () => {
 		it("exposes diagnostics when the host advertises support", () => {
 			setHostCapabilities({ editorDiagnostics: true })
 			expect(new SurfaceAdapter(config).diagnostics).to.not.be.undefined
+		})
+
+		it("keeps architecture presentation root-owned without removing ordinary tasklet traits", () => {
+			setHostCapabilities({
+				architectureViewer: {
+					prepare: async () => { },
+					createPanel: async () => { throw new Error("not used") },
+				}
+			})
+			for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+				for (const isSubagentExecution of [false, true]) {
+					const worker = new SurfaceAdapter({ ...config, executionProfile, isSubagentExecution })
+					expect(worker.architecture !== undefined).to.equal(
+						!isSubagentExecution && executionProfile !== "goal_child" && executionProfile !== "tasklet",
+					)
+					for (const trait of ["system", "workspace", "editor", "browser", "sourceAst", "skills"] as const) {
+						expect(worker[trait], trait).not.to.equal(undefined)
+					}
+				}
+			}
+		})
+
+		it("resolves root architecture storage from the explicit address or legacy task identity", async () => {
+			setHostCapabilities({
+				architectureViewer: {
+					prepare: async () => { },
+					createPanel: async () => { throw new Error("not used") },
+				}
+			})
+			const resolveDirectory = sinon.stub(taskDirectory, "getTaskDirectoryPath").returns("/fixture/owner")
+			const listDiagrams = sinon.stub(ArchitectureStorage.prototype, "listDiagrams").resolves([])
+			for (const storageAddress of [undefined, { kind: "task" as const, taskId: "owner" }]) {
+				resolveDirectory.resetHistory()
+				const root = new SurfaceAdapter({ ...config, executionProfile: "standalone", storageAddress })
+				await root.architecture!.listDiagrams()
+				sinon.assert.calledOnceWithExactly(resolveDirectory, storageAddress ?? config.taskId)
+			}
+			sinon.assert.calledTwice(listDiagrams)
 		})
 
 		it("exposes all required traits", () => {

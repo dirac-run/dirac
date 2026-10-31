@@ -249,7 +249,7 @@ export class LifecycleManager {
 		}
 		if (this.dependencies.taskState.abort) return
 
-		const savedPresentation = await getSavedPresentationHistory(this.dependencies.taskId)
+		const savedPresentation = await getSavedPresentationHistory(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		const savedDiracMessages = savedPresentation.messages
 		this.dependencies.messageStateHandler.setDiracMessages(savedDiracMessages, savedPresentation.lastOffset)
 		if (this.dependencies.taskState.abort) return
@@ -275,11 +275,11 @@ export class LifecycleManager {
 
 		await this.dependencies.messageStateHandler.overwriteDiracMessages(savedDiracMessages)
 		if (this.dependencies.taskState.abort) return
-		const persistedPresentation = await getSavedPresentationHistory(this.dependencies.taskId)
+		const persistedPresentation = await getSavedPresentationHistory(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.messageStateHandler.setDiracMessages(persistedPresentation.messages, persistedPresentation.lastOffset)
 
-		const savedApiConversation = await getSavedApiConversationState(this.dependencies.taskId)
+		const savedApiConversation = await getSavedApiConversationState(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		const savedApiConversationHistory = savedApiConversation.messages.map(removeUserInputMarkersFromMessage)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.messageStateHandler.setApiConversationHistory(
@@ -287,19 +287,22 @@ export class LifecycleManager {
 			savedApiConversation.lastOffset,
 		)
 		this.dependencies.messageStateHandler.setApiConversationProviderState(
-			await getSavedApiConversationProviderState(this.dependencies.taskId),
+			await getSavedApiConversationProviderState(this.dependencies.storageAddress ?? this.dependencies.taskId),
 		)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.restoreQueuedSteeringFromTranscript()
 
-		await ensureTaskDirectoryExists(this.dependencies.taskId)
+		await ensureTaskDirectoryExists(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		if (this.dependencies.taskState.abort) return
 
 		// Restore task-scoped tools from the task directory
 		const { refreshTaskTools } = await import("@core/task/tools/registry/refreshToolRegistry")
-		this.dependencies.taskState.taskScopedToolIds = await refreshTaskTools(this.dependencies.taskId)
+		this.dependencies.taskState.taskScopedToolIds = await refreshTaskTools(
+			this.dependencies.taskId,
+			this.dependencies.storageAddress ?? this.dependencies.taskId,
+		)
 		if (this.dependencies.taskState.abort) return
-		const taskMetadata = await getTaskMetadata(this.dependencies.taskId)
+		const taskMetadata = await getTaskMetadata(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.taskState.activeSkillIds = taskMetadata.active_skill_ids ?? []
 

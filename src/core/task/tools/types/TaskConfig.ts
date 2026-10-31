@@ -16,6 +16,7 @@ import type { DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracContent, DiracStorageMessage } from "@shared/messages/content"
 import type { Mode } from "@shared/storage/types"
 import type { SubagentIdentity } from "@shared/subagents"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import type { DiracDefaultTool, DiracTool, DiracToolSpec } from "@shared/tools"
 import { WorkspaceRootManager } from "@/core/workspace"
 import type { ContextManager } from "../../../context/context-management/ContextManager"
@@ -38,6 +39,7 @@ export interface TaskConfig {
 	executionProfile: TaskExecutionProfile
 	// Core identifiers
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	ulid: string
 	cwd: string
 	mode: Mode

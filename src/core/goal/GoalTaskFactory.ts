@@ -26,7 +26,7 @@ interface GoalTaskBaseConstruction {
 }
 
 export type GoalTaskConstruction = GoalTaskBaseConstruction & {
-	executionProfile: Exclude<TaskExecutionProfile, "standalone">
+	executionProfile: Extract<TaskExecutionProfile, `goal_${string}`>
 }
 
 export interface GoalTaskFactoryDependencies {
@@ -40,7 +40,7 @@ export interface GoalTaskFactoryDependencies {
 
 /** Constructs Goal-owned Tasks without routing them through the top-level TaskController. */
 export class GoalTaskFactory {
-	constructor(private readonly dependencies: GoalTaskFactoryDependencies) {}
+	constructor(private readonly dependencies: GoalTaskFactoryDependencies) { }
 
 	async create(input: GoalTaskConstruction): Promise<Task> {
 		// GoalLoop owns the coordinator directory until all owned activity and persistence settle.

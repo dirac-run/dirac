@@ -13,6 +13,7 @@ import {
 } from "@core/context/instructions/user-instructions/external-rules"
 import { formatResponse } from "@core/formatResponse"
 import { ensureRulesDirectoryExists, ensureTaskDirectoryExists } from "@core/storage/disk"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
 import { HostProvider } from "@hosts/host-provider"
 import { featureFlagsService } from "@services/feature-flags"
@@ -42,6 +43,7 @@ import { isSkillAvailableToTaskProfile, taskProfileSystemInstructions } from "./
 
 export interface TaskRequestBuilderContext {
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	cwd: string
 	terminalExecutionMode: "vscodeTerminal" | "backgroundExec"
 	stateManager: StateManager
@@ -234,7 +236,7 @@ export async function buildApiRequestParams(
 		requestRuntime.api,
 		ctx.taskState.conversationHistoryDeletedRange,
 		params.previousApiReqIndex,
-		await ensureTaskDirectoryExists(ctx.taskId),
+		await ensureTaskDirectoryExists(ctx.storageAddress ?? ctx.taskId),
 		settings.useAutoCondense,
 	)
 

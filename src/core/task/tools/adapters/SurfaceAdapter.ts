@@ -86,9 +86,9 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.skills = buildSkillsTrait(config)
 		this.architecture = buildArchitectureTrait({
 			taskId: config.taskId,
-			foreground: !config.isSubagentExecution && config.executionProfile !== "goal_child",
+			foreground: !config.isSubagentExecution && config.executionProfile !== "goal_child" && config.executionProfile !== "tasklet",
 			canWaitForInput: !config.yoloModeToggled,
-			resolveTaskDirectory: () => getTaskDirectoryPath(config.taskId),
+			resolveTaskDirectory: () => getTaskDirectoryPath(config.storageAddress ?? config.taskId),
 		})
 		this.system = buildSystemTrait(config, this.executeCommand.bind(this))
 		this.telemetry = buildTelemetryTrait(this, config)

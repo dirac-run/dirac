@@ -1,14 +1,18 @@
 import { updateTaskMetadata } from "@core/storage/disk"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 
 export class ModelContextTracker {
 	readonly taskId: string
 
-	constructor(taskId: string) {
+	constructor(
+		taskId: string,
+		private readonly storageAddress?: TaskStorageAddress,
+	) {
 		this.taskId = taskId
 	}
 
 	async recordModelUsage(apiProviderId: string, modelId: string, mode: string) {
-		await updateTaskMetadata(this.taskId, (metadata) => {
+		await updateTaskMetadata(this.storageAddress ?? this.taskId, (metadata) => {
 			metadata.model_usage ??= []
 
 			const lastEntry = metadata.model_usage[metadata.model_usage.length - 1]

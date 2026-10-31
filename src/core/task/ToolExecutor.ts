@@ -22,6 +22,7 @@ import { DiracContent } from "@shared/messages/content"
 import { canonicalizeResponseToolCall, isCompletionResponseCall } from "@shared/responseTool"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
+import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { modelDoesntSupportWebp } from "@/utils/model-utils"
 import { ToolUse } from "../assistant-message"
 import { ContextManager } from "../context/context-management/ContextManager"
@@ -119,6 +120,7 @@ export class ToolExecutor {
 		private executionProfile: TaskExecutionProfile,
 		private environmentFactory: ToolEnvironmentFactory,
 		private toolSelectionPolicy: import("./tools/runtime/ToolSelectionPolicy").ToolSelectionPolicy | undefined,
+		private storageAddress?: TaskStorageAddress,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -295,6 +297,7 @@ export class ToolExecutor {
 		const config: TaskConfig = {
 			executionProfile: this.executionProfile,
 			taskId: this.taskId,
+			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			mode: settings.mode,
 			strictPlanModeEnabled: settings.strictPlanModeEnabled,

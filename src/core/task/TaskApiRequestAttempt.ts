@@ -101,7 +101,10 @@ export async function* attemptApiRequest(
 			yield chunk
 		}
 
-		recordSuccessfulModelProviderPreset(ctx.stateManager, providerId as ApiProvider, model.id, model.info, providerInfo.mode)
+		// Contained model selections must not recapture or mutate foreground provider defaults.
+		if (ctx.executionProfile !== "tasklet") {
+			recordSuccessfulModelProviderPreset(ctx.stateManager, providerId as ApiProvider, model.id, model.info, providerInfo.mode)
+		}
 		await finalizeApiReqMsg()
 	} catch (error) {
 		// Once output is exposed, replaying this request would append a second response
