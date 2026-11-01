@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@shared/taskletId"
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
 import CheckpointTracker from "@integrations/checkpoints/CheckpointTracker"
@@ -23,6 +24,7 @@ type UpdateTaskHistoryFunction = (historyItem: HistoryItem) => Promise<HistoryIt
 
 interface CheckpointManagerTask {
 	readonly taskId: string
+	readonly storageAddress?: TaskStorageAddress
 }
 interface CheckpointManagerConfig {
 	enableCheckpoints: boolean
@@ -98,7 +100,7 @@ export class TaskCheckpointManager implements ICheckpointManager {
 			this.storage.setCheckpointManagerErrorMessage(initialState.checkpointManagerErrorMessage)
 
 		this.restoreHandler = new CheckpointRestoreHandler(
-			{ taskId: task.taskId, enableCheckpoints: config.enableCheckpoints },
+			{ taskId: task.taskId, storageAddress: task.storageAddress, enableCheckpoints: config.enableCheckpoints },
 			{
 				messageStateHandler: services.messageStateHandler,
 				fileContextTracker: services.fileContextTracker,

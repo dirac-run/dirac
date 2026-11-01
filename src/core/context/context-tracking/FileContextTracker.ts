@@ -37,6 +37,7 @@ export class FileContextTracker {
 	// File tracking and watching
 	private fileWatchers = new Map<string, FSWatcher>()
 	private readonly watcherCloser = new ChokidarWatcherCloser()
+	private disposed = false
 	private recentlyModifiedFiles = new Set<string>()
 	private recentlyEditedByDirac = new Set<string>()
 
@@ -54,10 +55,12 @@ export class FileContextTracker {
 	 * File watchers are set up for each file that is tracked in the task metadata.
 	 */
 	async setupFileWatcher(filePath: string) {
+		if (this.disposed) return
 		await this.watcherCloser.closeAll()
-		if (this.fileWatchers.has(filePath)) return
+		if (this.disposed || this.fileWatchers.has(filePath)) return
 
 		const cwd = await getCwd()
+		if (this.disposed || this.fileWatchers.has(filePath)) return
 		if (!cwd) {
 			Logger.info("No workspace folder available - cannot determine current working directory")
 			return
@@ -106,8 +109,10 @@ export class FileContextTracker {
 	 * This is the main entry point for FileContextTracker and is called when a file is passed to Dirac via a tool, mention, or edit.
 	 */
 	async trackFileContext(filePath: string, operation: "read_tool" | "user_edited" | "dirac_edited" | "file_mentioned") {
+		if (this.disposed) return
 		try {
 			const cwd = await getCwd()
+			if (this.disposed) return
 			if (!cwd) {
 				Logger.info("No workspace folder available - cannot determine current working directory")
 				return
@@ -195,6 +200,7 @@ export class FileContextTracker {
 	 * Disposes all file watchers
 	 */
 	async dispose(): Promise<void> {
+		this.disposed = true
 		const watchers = Array.from(this.fileWatchers.values())
 		this.fileWatchers.clear()
 		await this.watcherCloser.closeAll(watchers)

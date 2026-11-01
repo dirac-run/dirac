@@ -223,7 +223,7 @@ export async function recursivelyMakeDiracRequests(
 			Session.get().finalizeRequest()
 
 			if (ctx.diffViewProvider.isEditing) {
-				await ctx.diffViewProvider.revertChanges()
+				await ctx.diffViewProvider.reset()
 			}
 
 			ctx.taskState.endApiRequest()

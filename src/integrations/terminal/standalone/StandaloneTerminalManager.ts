@@ -35,6 +35,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Set of terminal IDs managed by this instance */
 	private terminalIds: Set<number> = new Set()
+	private disposed = false
 
 	/** Timeout for shell integration (kept for interface compatibility, not used in standalone) */
 	private shellIntegrationTimeout = 4000
@@ -55,6 +56,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Run a command in the specified terminal. */
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+		if (this.disposed) throw new Error("Terminal manager is disposed")
 		return this.processManager.runCommand(terminalInfo, command)
 	}
 
@@ -62,6 +64,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Get or create a terminal for the specified working directory. */
 	async getOrCreateTerminal(cwd: string, env?: { [key: string]: string | undefined }): Promise<TerminalInfo> {
+		if (this.disposed) throw new Error("Terminal manager is disposed")
 		const terminals = this.registry.getAllTerminals()
 
 		// Find available terminal with matching CWD
@@ -82,6 +85,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 			const availableTerminal = terminals.find((t) => !t.busy)
 			if (availableTerminal) {
 				await this.runCommand(availableTerminal, `cd "${cwd}"`)
+				if (this.disposed) throw new Error("Terminal manager is disposed")
 				availableTerminal.terminal._cwd = cwd
 				availableTerminal.terminal._env = env
 				if (availableTerminal.terminal.shellIntegration?.cwd) {
@@ -145,6 +149,8 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Dispose of all terminals and clean up resources. */
 	disposeAll(): void {
+		if (this.disposed) return
+		this.disposed = true
 		// Dispose background commands first
 		this.processManager.disposeBackgroundCommands()
 

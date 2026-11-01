@@ -39,8 +39,69 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 	private hotTimer: NodeJS.Timeout | null = null
 	private exitCode: number | null | undefined = undefined
 	private signal: NodeJS.Signals | null = null
+	private readonly cancellation = new AbortController()
+	private terminal?: vscode.Terminal
+	private closeListener?: vscode.Disposable
+	private resolveCompletion!: () => void
+	readonly completion = new Promise<void>((resolve) => { this.resolveCompletion = resolve })
+	hasCompleted = false
+
+	constructor(private readonly retireTerminal: () => void = () => { }) {
+		super()
+	}
+
+	get abortSignal(): AbortSignal {
+		return this.cancellation.signal
+	}
+
+	bindTerminal(terminal: vscode.Terminal): void {
+		if (this.terminal) return
+		this.terminal = terminal
+		this.closeListener = vscode.window.onDidCloseTerminal((closed) => {
+			if (closed !== terminal) return
+			this.stop()
+		})
+	}
+
+	/** Stop local execution and callbacks; host closure remains best effort. */
+	stop(): void {
+		this.cancellation.abort()
+		this.finish()
+	}
+
+	async terminate(): Promise<void> {
+		if (this.hasCompleted) return
+		this.retireTerminal()
+		this.stop()
+		this.terminal?.dispose()
+	}
+
+	fail(error: Error): void {
+		if (this.hasCompleted) return
+		this.retireTerminal()
+		this.cancellation.abort()
+		this.finish(error)
+		this.terminal?.dispose()
+	}
+
+	private finish(error?: Error): void {
+		if (this.hasCompleted) return
+		this.hasCompleted = true
+		this.closeListener?.dispose()
+		if (this.hotTimer) clearTimeout(this.hotTimer)
+		this.isHot = false
+		this.resolveCompletion()
+		if (error) {
+			this.emit("error", error)
+		} else {
+			this.emit("completed", this.getCompletionDetails())
+			this.emit("continue")
+		}
+	}
 
 	async run(terminal: vscode.Terminal, command: string) {
+		if (this.abortSignal.aborted) return
+		this.bindTerminal(terminal)
 		this.exitCode = undefined
 		this.signal = null
 
@@ -48,13 +109,16 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 		const returnCurrentTerminalContents = async () => {
 			try {
 				const terminalSnapshot = await getLatestTerminalOutput()
+				if (this.abortSignal.aborted) return false
 				if (terminalSnapshot && terminalSnapshot.trim()) {
 					const fallbackMessage = `No output. Here's the current terminal's content to help you get the command's output:\n\n${terminalSnapshot}`
 					this.emit("line", fallbackMessage)
+					return true
 				}
 			} catch (error) {
 				Logger.error("Error capturing terminal output:", error)
 			}
+			return false
 		}
 
 		if (terminal.shellIntegration && terminal.shellIntegration.executeCommand) {
@@ -67,6 +131,7 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 			let didEmitEmptyLine = false
 
 			for await (let data of stream) {
+				if (this.abortSignal.aborted) return
 				// Parse shell integration completion markers when present.
 				// Sequence format: ]633;D;<exitCode>
 				const completionMatches = [...data.matchAll(/\]633;D(?:;(-?\d+))?/g)]
@@ -223,20 +288,16 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 				}
 			}
 
+			if (this.abortSignal.aborted) return
 			this.emitRemainingBufferIfListening()
 
 			// the command process is finished, let's check the output to see if we need to use the terminal capture fallback
 			if (!this.fullOutput.trim()) {
 				// No output captured via shell integration, trying fallback
 				telemetryService.captureTerminalOutputFailure(TerminalOutputFailureReason.TIMEOUT, "vscode")
-				await returnCurrentTerminalContents()
-				// Check if fallback worked
-				const terminalSnapshot = await getLatestTerminalOutput()
-				if (terminalSnapshot && terminalSnapshot.trim()) {
-					telemetryService.captureTerminalExecution(true, "vscode", "clipboard")
-				} else {
-					telemetryService.captureTerminalExecution(false, "vscode", "none")
-				}
+				const captured = await returnCurrentTerminalContents()
+				if (this.abortSignal.aborted) return
+				telemetryService.captureTerminalExecution(captured, "vscode", captured ? "clipboard" : "none")
 			} else {
 				// Shell integration worked
 				telemetryService.captureTerminalExecution(true, "vscode", "shell_integration")
@@ -249,8 +310,7 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 			}
 			this.isHot = false
 
-			this.emit("completed", this.getCompletionDetails())
-			this.emit("continue")
+			this.finish()
 		} else {
 			// no shell integration detected, we'll fallback to running the command and capturing the terminal's output after some time
 			telemetryService.captureTerminalOutputFailure(TerminalOutputFailureReason.NO_SHELL_INTEGRATION, "vscode")
@@ -258,25 +318,14 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 
 			// wait 3 seconds for the command to run
 			await new Promise((resolve) => setTimeout(resolve, 3000))
+			if (this.abortSignal.aborted) return
 
 			// For terminals without shell integration, also try to capture terminal content
-			await returnCurrentTerminalContents()
-			// Check if clipboard fallback worked
-			const terminalSnapshot = await getLatestTerminalOutput()
-			if (terminalSnapshot && terminalSnapshot.trim()) {
-				telemetryService.captureTerminalExecution(true, "vscode", "clipboard")
-			} else {
-				telemetryService.captureTerminalExecution(false, "vscode", "none")
-			}
-			// For terminals without shell integration, we can't know when the command completes
-			// So we'll just emit the continue event after a delay
-			this.emit("completed", this.getCompletionDetails())
-			this.emit("continue")
+			const captured = await returnCurrentTerminalContents()
+			if (this.abortSignal.aborted) return
+			telemetryService.captureTerminalExecution(captured, "vscode", captured ? "clipboard" : "none")
 			this.emit("no_shell_integration")
-			// setTimeout(() => {
-			// 	Logger.log(`Emitting continue after delay for terminal`)
-			// 	// can't emit completed since we don't if the command actually completed, it could still be running server
-			// }, 500) // Adjust this delay as needed
+			this.finish()
 		}
 	}
 
@@ -358,7 +407,7 @@ export type TerminalProcessResultPromise = VscodeTerminalProcess & Promise<void>
 
 // Similar to execa's ResultPromise, this lets us create a mixin of both a TerminalProcess and a Promise: https://github.com/sindresorhus/execa/blob/main/lib/methods/promise.js
 export function mergePromise(process: VscodeTerminalProcess, promise: Promise<void>): TerminalProcessResultPromise {
-	const nativePromisePrototype = (async () => {})().constructor.prototype
+	const nativePromisePrototype = (async () => { })().constructor.prototype
 	const descriptors = ["then", "catch", "finally"].map(
 		(property) => [property, Reflect.getOwnPropertyDescriptor(nativePromisePrototype, property)] as const,
 	)

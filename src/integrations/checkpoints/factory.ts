@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@shared/taskletId"
 import type { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import type { MessageStateHandler } from "@core/task/message-state"
 import type { TaskState } from "@core/task/TaskState"
@@ -25,6 +26,7 @@ export function shouldUseMultiRoot({
 type BuildArgs = {
 	// common
 	taskId: string
+	storageAddress?: TaskStorageAddress
 	messageStateHandler: MessageStateHandler
 	// single-root deps
 	fileContextTracker: FileContextTracker
@@ -56,6 +58,7 @@ type BuildArgs = {
 export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 	const {
 		taskId,
+		storageAddress,
 		messageStateHandler,
 		fileContextTracker,
 		diffViewProvider,
@@ -82,7 +85,7 @@ export function buildCheckpointManager(args: BuildArgs): ICheckpointManager {
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
 	const { createTaskCheckpointManager } = require("./index")
 	return createTaskCheckpointManager(
-		{ taskId },
+		{ taskId, storageAddress },
 		{ enableCheckpoints },
 		{
 			diffViewProvider,

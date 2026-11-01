@@ -42,12 +42,17 @@ export class BrowserConnectionManager {
 	private cachedWebSocketEndpoint?: string
 	private lastConnectionAttempt = 0
 	private isConnectedToRemote = false
+	private disposed = false
+
+	private assertActive(): void {
+		if (this.disposed) throw new Error("Browser session is disposed")
+	}
 
 	// Telemetry tracking — connection lifecycle emits start/end/error events
 	private sessionStartTime = 0
 	private browserActions: string[] = []
 	private ulid?: string
-	constructor(private readonly settingsSource: StateManager | BrowserSettings | (() => BrowserSettings)) {}
+	constructor(private readonly settingsSource: StateManager | BrowserSettings | (() => BrowserSettings)) { }
 
 	private get browserSettings(): BrowserSettings {
 		if (typeof this.settingsSource === "function") return this.settingsSource()
@@ -190,6 +195,7 @@ export class BrowserConnectionManager {
 	// --- launch / connect ---
 
 	async launchBrowser() {
+		this.assertActive()
 		if (this.browser) {
 			await this.closeBrowser() // re-launch after a previous session
 		}
@@ -211,6 +217,7 @@ export class BrowserConnectionManager {
 				}
 				return
 			} catch (error) {
+				this.assertActive()
 				Logger.error("Failed to launch remote browser, falling back to local mode:", error)
 				if (this.ulid) {
 					telemetryService.captureBrowserError(this.ulid, "remote_browser_launch_error", getErrorMessage(error), {
@@ -225,7 +232,12 @@ export class BrowserConnectionManager {
 			await this.launchLocalBrowser()
 		}
 
-		this.page = await this.browser?.newPage()
+		const page = await this.browser?.newPage()
+		if (this.disposed) {
+			await page?.close().catch(() => { })
+			this.assertActive()
+		}
+		this.page = page
 
 		if (this.ulid) {
 			telemetryService.captureBrowserToolStart(this.ulid, browserSettings)
@@ -233,10 +245,12 @@ export class BrowserConnectionManager {
 	}
 
 	async launchLocalBrowser() {
+		this.assertActive()
 		const browserSettings = this.browserSettings
 		const { path } = await this.getDetectedChromePath()
+		this.assertActive()
 		const userArgs = splitArgs(browserSettings.customArgs)
-		this.browser = await launch({
+		const browser = await launch({
 			args: [
 				"--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 				...userArgs,
@@ -245,10 +259,16 @@ export class BrowserConnectionManager {
 			defaultViewport: browserSettings.viewport,
 			headless: "shell", // Always headless for local connections
 		})
+		if (this.disposed) {
+			await browser.close().catch(() => { })
+			this.assertActive()
+		}
+		this.browser = browser
 		this.isConnectedToRemote = false
 	}
 
 	async launchRemoteBrowser() {
+		this.assertActive()
 		const browserSettings = this.browserSettings
 		let remoteBrowserHost = browserSettings.remoteBrowserHost
 		let browserWSEndpoint: string | undefined = this.cachedWebSocketEndpoint
@@ -270,6 +290,7 @@ export class BrowserConnectionManager {
 			}
 		}
 
+		this.assertActive()
 		// Try cached endpoint first if recent (< 1 hour)
 		if (browserWSEndpoint && Date.now() - this.lastConnectionAttempt < 3600000) {
 			try {
@@ -278,6 +299,10 @@ export class BrowserConnectionManager {
 					browserWSEndpoint,
 					defaultViewport: getViewport(),
 				})
+				if (this.disposed) {
+					await browser.disconnect().catch(() => { })
+					this.assertActive()
+				}
 				let page: Page
 				try {
 					page = await browser.newPage()
@@ -285,11 +310,17 @@ export class BrowserConnectionManager {
 					await browser.disconnect()
 					throw error
 				}
+				if (this.disposed) {
+					await page.close().catch(() => { })
+					await browser.disconnect().catch(() => { })
+					this.assertActive()
+				}
 				this.browser = browser
 				this.page = page
 				this.isConnectedToRemote = true
 				return
 			} catch (error) {
+				this.assertActive()
 				Logger.log(`Failed to connect using cached endpoint: ${error}`)
 				if (this.ulid) {
 					telemetryService.captureBrowserError(this.ulid, "cached_endpoint_connection_error", getErrorMessage(error), {
@@ -311,6 +342,7 @@ export class BrowserConnectionManager {
 				Logger.info(`Fetching WebSocket endpoint from ${versionUrl}`)
 
 				const response = await axios.get(versionUrl)
+				this.assertActive()
 				browserWSEndpoint = response.data.webSocketDebuggerUrl
 				if (!browserWSEndpoint) {
 					throw new Error("Could not find webSocketDebuggerUrl in the response")
@@ -324,6 +356,10 @@ export class BrowserConnectionManager {
 					browserWSEndpoint,
 					defaultViewport: getViewport(),
 				})
+				if (this.disposed) {
+					await browser.disconnect().catch(() => { })
+					this.assertActive()
+				}
 				let page: Page
 				try {
 					page = await browser.newPage()
@@ -331,11 +367,17 @@ export class BrowserConnectionManager {
 					await browser.disconnect()
 					throw error
 				}
+				if (this.disposed) {
+					await page.close().catch(() => { })
+					await browser.disconnect().catch(() => { })
+					this.assertActive()
+				}
 				this.browser = browser
 				this.page = page
 				this.isConnectedToRemote = true
 				return
 			} catch (error) {
+				this.assertActive()
 				Logger.log(`Failed to connect to remote browser: ${error}`)
 				if (this.ulid) {
 					telemetryService.captureBrowserError(this.ulid, "remote_host_connection_error", getErrorMessage(error), {
@@ -367,13 +409,13 @@ export class BrowserConnectionManager {
 
 			if (this.isConnectedToRemote && this.browser) {
 				if (this.page) {
-					await this.page.close().catch(() => {})
+					await this.page.close().catch(() => { })
 					Logger.info("closed remote browser tab...")
 				}
-				await this.browser.disconnect().catch(() => {})
+				await this.browser.disconnect().catch(() => { })
 				Logger.info("disconnected from remote browser...")
 			} else if (this.isConnectedToRemote === false) {
-				await this.browser?.close().catch(() => {})
+				await this.browser?.close().catch(() => { })
 				Logger.info("closed local browser...")
 			}
 
@@ -388,6 +430,7 @@ export class BrowserConnectionManager {
 	}
 
 	async dispose() {
+		this.disposed = true
 		await this.closeBrowser()
 	}
 }

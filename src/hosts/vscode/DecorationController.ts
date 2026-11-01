@@ -1,37 +1,33 @@
 import * as vscode from "vscode"
 
-const fadedOverlayDecorationType = vscode.window.createTextEditorDecorationType({
-	backgroundColor: "rgba(255, 255, 0, 0.1)",
-	opacity: "0.4",
-	isWholeLine: true,
-})
-
-const activeLineDecorationType = vscode.window.createTextEditorDecorationType({
-	backgroundColor: "rgba(255, 255, 0, 0.3)",
-	opacity: "1",
-	isWholeLine: true,
-	border: "1px solid rgba(255, 255, 0, 0.5)",
-})
-
 type DecorationType = "fadedOverlay" | "activeLine"
 
 export class DecorationController {
-	private decorationType: DecorationType
+	private decoration: vscode.TextEditorDecorationType
 	private editor: vscode.TextEditor
 	private ranges: vscode.Range[] = []
 
 	constructor(decorationType: DecorationType, editor: vscode.TextEditor) {
-		this.decorationType = decorationType
+		this.decoration = vscode.window.createTextEditorDecorationType(
+			decorationType === "fadedOverlay"
+				? { backgroundColor: "rgba(255, 255, 0, 0.1)", opacity: "0.4", isWholeLine: true }
+				: {
+						backgroundColor: "rgba(255, 255, 0, 0.3)",
+						opacity: "1",
+						isWholeLine: true,
+						border: "1px solid rgba(255, 255, 0, 0.5)",
+					},
+		)
 		this.editor = editor
 	}
 
 	getDecoration() {
-		switch (this.decorationType) {
-			case "fadedOverlay":
-				return fadedOverlayDecorationType
-			case "activeLine":
-				return activeLineDecorationType
-		}
+		return this.decoration
+	}
+
+	dispose(): void {
+		this.decoration.dispose()
+		this.ranges = []
 	}
 
 	addLines(startIndex: number, numLines: number) {

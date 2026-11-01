@@ -9,7 +9,7 @@ import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
 import { GitOperations } from "./CheckpointGitOperations"
 import { getDefaultExclusions, getLfsPatterns } from "./CheckpointExclusions"
-import { releaseCheckpointLock, tryAcquireCheckpointLockWithRetry } from "./CheckpointLockUtils"
+import { releaseCheckpointLock, tryAcquireCheckpointLockWithRetry, withCheckpointRepositoryLock } from "./CheckpointLockUtils"
 import { getShadowGitPath, hashWorkingDir, validateWorkspacePath } from "./CheckpointUtils"
 
 /**
@@ -177,7 +177,10 @@ class CheckpointTracker {
 			await newTracker.sendCheckpointSubscriptionEvent("CHECKPOINT_INIT", true)
 
 			const gitPath = await getShadowGitPath(newTracker.cwdHash)
-			await newTracker.gitOperations.initShadowGit(gitPath, workingDir, taskId, signal)
+			await withCheckpointRepositoryLock(gitPath, async () => {
+				signal.throwIfAborted()
+				await newTracker.gitOperations.initShadowGit(gitPath, workingDir, taskId, signal)
+			})
 			signal.throwIfAborted()
 			await newTracker.sendCheckpointSubscriptionEvent("CHECKPOINT_INIT", false)
 
@@ -191,96 +194,40 @@ class CheckpointTracker {
 		}
 	}
 
-	/**
-	 * Creates a new checkpoint commit in the shadow git repository.
-	 *
-	 * Key behaviors:
-	 * - Acquires folder lock before proceeding to prevent conflicts
-	 * - Creates commit with checkpoint files in shadow git repo
-	 * - Releases folder lock after completion
-	 * - Caches the created commit hash
-	 *
-	 * Commit structure:
-	 * - Commit message: "checkpoint-{cwdHash}-{taskId}"
-	 * - Always allows empty commits
-	 *
-	 * Dependencies:
-	 * - Requires initialized shadow git (getShadowGitPath)
-	 * - Uses addCheckpointFiles to stage changes using 'git add .'
-	 * - Relies on git's native exclusion handling via the exclude file
-	 *
-	 * @returns Promise<string | undefined> The created commit hash, or undefined if:
-	 * - Folder lock acquisition fails or times out
-	 * - Shadow git access fails
-	 * - Staging files fails
-	 * - Commit creation fails
-	 * @throws Error if unable to:
-	 * - Access shadow git path
-	 * - Initialize simple-git
-	 * - Stage or commit files
-	 */
+	/** Stage and commit as one shared-repository operation; publication is outside the lock. */
 	public async commit(): Promise<string | undefined> {
-		let lockAcquired = false
-
 		try {
 			await this.sendCheckpointSubscriptionEvent("CHECKPOINT_COMMIT", true)
-			Logger.info(`Creating new checkpoint commit for task ${this.taskId}`)
 			const startTime = performance.now()
-
-			const lockResult: FolderLockWithRetryResult = await tryAcquireCheckpointLockWithRetry(this.cwdHash, this.taskId)
-
-			// Locking failed due to conflicting lock
-			if (!lockResult.acquired && !lockResult.skipped) {
-				throw new Error(
-					"Failed to acquire checkpoint folder lock - another Dirac instance may be performing checkpoint operations",
-				)
-			}
-
-			// Locking skipped as we are in VS Code
-			if (!lockResult.acquired && lockResult.skipped) {
-				Logger.log("Skipping Checkpoints lock - VS Code")
-			}
-
-			if (lockResult.acquired) {
-				lockAcquired = true
-			}
-
 			const gitPath = await getShadowGitPath(this.cwdHash)
-			const git = simpleGit(path.dirname(gitPath))
-
-			Logger.info(`Using shadow git at: ${gitPath}`)
-
-			const addFilesResult = await this.gitOperations.addCheckpointFiles(git)
-			if (!addFilesResult.success) {
-				throw new Error("Failed to stage checkpoint files; refusing to create a partial checkpoint")
-			}
-
-			const commitMessage = "checkpoint-" + this.cwdHash + "-" + this.taskId
-
-			Logger.info(`Creating checkpoint commit with message: ${commitMessage}`)
-			const result = await git.commit(commitMessage, {
-				"--allow-empty": null,
-				"--no-verify": null,
+			const commitHash = await withCheckpointRepositoryLock(gitPath, async () => {
+				let lockAcquired = false
+				try {
+					const lockResult: FolderLockWithRetryResult = await tryAcquireCheckpointLockWithRetry(this.cwdHash, this.taskId)
+					if (!lockResult.acquired && !lockResult.skipped) {
+						throw new Error("Failed to acquire checkpoint folder lock - another Dirac instance may be performing checkpoint operations")
+					}
+					lockAcquired = lockResult.acquired
+					const git = simpleGit(path.dirname(gitPath))
+					const addFilesResult = await this.gitOperations.addCheckpointFiles(git)
+					if (!addFilesResult.success) {
+						throw new Error("Failed to stage checkpoint files; refusing to create a partial checkpoint")
+					}
+					const result = await git.commit("checkpoint-" + this.cwdHash + "-" + this.taskId, {
+						"--allow-empty": null,
+						"--no-verify": null,
+					})
+					return (result.commit || "").replace(/^HEAD\s+/, "")
+				} finally {
+					if (lockAcquired) await releaseCheckpointLock(this.cwdHash, this.taskId)
+				}
 			})
-			const commitHash = (result.commit || "").replace(/^HEAD\s+/, "")
-			Logger.warn(`Checkpoint commit created: `, commitHash)
-
-			const durationMs = Math.round(performance.now() - startTime)
 			await this.sendCheckpointSubscriptionEvent("CHECKPOINT_COMMIT", false, commitHash)
-			telemetryService.captureCheckpointUsage(this.taskId, "commit_created", durationMs)
-
+			telemetryService.captureCheckpointUsage(this.taskId, "commit_created", Math.round(performance.now() - startTime))
 			return commitHash
 		} catch (error) {
-			Logger.error("Failed to create checkpoint:", {
-				taskId: this.taskId,
-				error,
-			})
+			Logger.error("Failed to create checkpoint:", { taskId: this.taskId, error })
 			throw new Error(`Failed to create checkpoint: ${getErrorMessage(error)}`)
-		} finally {
-			if (lockAcquired) {
-				Logger.info("Releasing checkpoint folder lock")
-				await releaseCheckpointLock(this.cwdHash, this.taskId)
-			}
 		}
 	}
 
@@ -321,73 +268,31 @@ class CheckpointTracker {
 		}
 	}
 
-	/**
-	 * Resets the shadow git repository's HEAD to a specific checkpoint commit.
-	 * This will discard all changes after the target commit and restore the
-	 * working directory to that checkpoint's state.
-	 *
-	 * Key behaviors:
-	 * - Acquires folder lock before proceeding to prevent conflicts
-	 * - Performs hard reset to target commit
-	 * - Releases folder lock after completion
-	 *
-	 * Dependencies:
-	 * - Requires initialized shadow git (getShadowGitPath)
-	 * - Must be called with a valid commit hash from this task's history
-	 *
-	 * @param commitHash - The hash of the checkpoint commit to reset to
-	 * @returns Promise<void> Resolves when reset is complete
-	 * @throws Error if unable to:
-	 * - Acquire folder lock (timeout or conflict)
-	 * - Access shadow git path
-	 * - Initialize simple-git
-	 * - Reset to target commit
-	 */
+	/** Restore remains workspace-wide, but cannot interleave another checkpoint's Git transaction. */
 	public async resetHead(commitHash: string): Promise<void> {
-		let lockAcquired = false
-
 		try {
-			Logger.info(`Resetting to checkpoint: ${commitHash}`)
 			const startTime = performance.now()
 			await this.sendCheckpointSubscriptionEvent("CHECKPOINT_RESTORE", true, commitHash)
-			const lockResult: FolderLockWithRetryResult = await tryAcquireCheckpointLockWithRetry(this.cwdHash, this.taskId)
-
-			// Locking failed due to conflicting lock
-			if (!lockResult.acquired && !lockResult.skipped) {
-				throw new Error(
-					"Failed to acquire checkpoint folder lock - another Dirac instance may be performing checkpoint operations",
-				)
-			}
-
-			// Locking skipped as we are in VS Code
-			if (!lockResult.acquired && lockResult.skipped) {
-				Logger.log("Skipping Checkpoints lock - VS Code")
-			}
-
-			if (lockResult.acquired) {
-				lockAcquired = true
-			}
-
 			const gitPath = await getShadowGitPath(this.cwdHash)
-			const git = simpleGit(path.dirname(gitPath))
-			Logger.debug(`Using shadow git at: ${gitPath}`)
-			await git.reset(["--hard", this.cleanCommitHash(commitHash)]) // Hard reset to target commit
-			Logger.debug(`Successfully reset to checkpoint: ${commitHash}`)
-
-			const durationMs = Math.round(performance.now() - startTime)
-			await this.sendCheckpointSubscriptionEvent("CHECKPOINT_RESTORE", false, commitHash)
-			telemetryService.captureCheckpointUsage(this.taskId, "restored", durationMs)
-		} catch (error) {
-			Logger.error("Failed to reset to checkpoint:", {
-				taskId: this.taskId,
-				commitHash,
-				error,
+			await withCheckpointRepositoryLock(gitPath, async () => {
+				let lockAcquired = false
+				try {
+					const lockResult: FolderLockWithRetryResult = await tryAcquireCheckpointLockWithRetry(this.cwdHash, this.taskId)
+					if (!lockResult.acquired && !lockResult.skipped) {
+						throw new Error("Failed to acquire checkpoint folder lock - another Dirac instance may be performing checkpoint operations")
+					}
+					lockAcquired = lockResult.acquired
+					const git = simpleGit(path.dirname(gitPath))
+					await git.reset(["--hard", this.cleanCommitHash(commitHash)])
+				} finally {
+					if (lockAcquired) await releaseCheckpointLock(this.cwdHash, this.taskId)
+				}
 			})
+			await this.sendCheckpointSubscriptionEvent("CHECKPOINT_RESTORE", false, commitHash)
+			telemetryService.captureCheckpointUsage(this.taskId, "restored", Math.round(performance.now() - startTime))
+		} catch (error) {
+			Logger.error("Failed to reset to checkpoint:", { taskId: this.taskId, commitHash, error })
 			throw error
-		} finally {
-			if (lockAcquired) {
-				await releaseCheckpointLock(this.cwdHash, this.taskId)
-			}
 		}
 	}
 
@@ -405,97 +310,99 @@ class CheckpointTracker {
 		const startTime = performance.now()
 
 		const gitPath = await getShadowGitPath(this.cwdHash)
-		const git = simpleGit(path.dirname(gitPath))
+		const entries = await withCheckpointRepositoryLock(gitPath, async () => {
+			const git = simpleGit(path.dirname(gitPath))
 
-		Logger.info(`Getting diff between commits: ${lhsHash || "initial"} -> ${rhsHash || "working directory"}`)
+			Logger.info(`Getting diff between commits: ${lhsHash || "initial"} -> ${rhsHash || "working directory"}`)
 
-		// Stage all changes so that untracked files appear in diff summary
-		await this.gitOperations.addCheckpointFiles(git)
+			// Stage all changes so that untracked files appear in diff summary
+			await this.gitOperations.addCheckpointFiles(git)
 
-		const cleanRhs = rhsHash ? this.cleanCommitHash(rhsHash) : undefined
-		const diffRange = cleanRhs ? `${this.cleanCommitHash(lhsHash)}..${cleanRhs}` : this.cleanCommitHash(lhsHash)
-		Logger.info(`Diff range: ${diffRange}`)
-		const diffSummary = await git.diffSummary([diffRange])
+			const cleanRhs = rhsHash ? this.cleanCommitHash(rhsHash) : undefined
+			const diffRange = cleanRhs ? `${this.cleanCommitHash(lhsHash)}..${cleanRhs}` : this.cleanCommitHash(lhsHash)
+			Logger.info(`Diff range: ${diffRange}`)
+			const diffSummary = await git.diffSummary([diffRange])
 
-		const lfsPatterns = await getLfsPatterns(this.cwd)
-		const exclusions = getDefaultExclusions(lfsPatterns)
+			const lfsPatterns = await getLfsPatterns(this.cwd)
+			const exclusions = getDefaultExclusions(lfsPatterns)
 
-		const result = []
-		for (const file of diffSummary.files) {
-			const filePath = file.file
-			const absolutePath = path.join(this.cwd, filePath)
+			const result = []
+			for (const file of diffSummary.files) {
+				const filePath = file.file
+				const absolutePath = path.join(this.cwd, filePath)
 
-			// Optimization: Skip binary check if file is in exclusion list
-			const isExcluded = exclusions.some((pattern) => {
-				if (pattern.endsWith("/")) {
-					return filePath.startsWith(pattern)
-				}
-				if (pattern.startsWith("*.")) {
-					return filePath.endsWith(pattern.slice(1))
-				}
-				return filePath === pattern
-			})
-
-			if (isExcluded) {
-				continue
-			}
-
-			// For extensionless files or dotfiles: exclude from diff result if binary
-			const lastDotIndex = filePath.lastIndexOf(".")
-			const lastSlashIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"))
-			const ext = lastDotIndex > lastSlashIndex ? filePath.substring(lastDotIndex).toLowerCase() : ""
-			const isDotfile = lastDotIndex !== -1 && lastDotIndex === lastSlashIndex + 1
-
-			if (!ext || isDotfile) {
-				try {
-					const isBinary = await isBinaryFile(absolutePath).catch(() => false)
-					if (isBinary) {
-						continue
+				// Optimization: Skip binary check if file is in exclusion list
+				const isExcluded = exclusions.some((pattern) => {
+					if (pattern.endsWith("/")) {
+						return filePath.startsWith(pattern)
 					}
-				} catch {
+					if (pattern.startsWith("*.")) {
+						return filePath.endsWith(pattern.slice(1))
+					}
+					return filePath === pattern
+				})
+
+				if (isExcluded) {
 					continue
 				}
-			}
 
-			let beforeContent = ""
-			try {
-				beforeContent = await git.show([`${this.cleanCommitHash(lhsHash)}:${filePath}`])
-			} catch (_) {
-				// file didn't exist in older commit => remains empty
-			}
+				// For extensionless files or dotfiles: exclude from diff result if binary
+				const lastDotIndex = filePath.lastIndexOf(".")
+				const lastSlashIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"))
+				const ext = lastDotIndex > lastSlashIndex ? filePath.substring(lastDotIndex).toLowerCase() : ""
+				const isDotfile = lastDotIndex !== -1 && lastDotIndex === lastSlashIndex + 1
 
-			let afterContent = ""
-			if (rhsHash) {
-				try {
-					afterContent = await git.show([`${this.cleanCommitHash(rhsHash)}:${filePath}`])
-				} catch (_) {
-					// file didn't exist in newer commit => remains empty
+				if (!ext || isDotfile) {
+					try {
+						const isBinary = await isBinaryFile(absolutePath).catch(() => false)
+						if (isBinary) {
+							continue
+						}
+					} catch {
+						continue
+					}
 				}
-			} else {
+
+				let beforeContent = ""
 				try {
-					afterContent = await fs.readFile(absolutePath, "utf8")
+					beforeContent = await git.show([`${this.cleanCommitHash(lhsHash)}:${filePath}`])
 				} catch (_) {
-					// file might be deleted => remains empty
+					// file didn't exist in older commit => remains empty
 				}
+
+				let afterContent = ""
+				if (rhsHash) {
+					try {
+						afterContent = await git.show([`${this.cleanCommitHash(rhsHash)}:${filePath}`])
+					} catch (_) {
+						// file didn't exist in newer commit => remains empty
+					}
+				} else {
+					try {
+						afterContent = await fs.readFile(absolutePath, "utf8")
+					} catch (_) {
+						// file might be deleted => remains empty
+					}
+				}
+
+				// Skip files that differ only in whitespace (e.g. tabs becoming spaces)
+				if (normalizeWhitespace(beforeContent) === normalizeWhitespace(afterContent)) {
+					continue
+				}
+
+				result.push({
+					relativePath: filePath,
+					absolutePath,
+					before: beforeContent,
+					after: afterContent,
+				})
 			}
 
-			// Skip files that differ only in whitespace (e.g. tabs becoming spaces)
-			if (normalizeWhitespace(beforeContent) === normalizeWhitespace(afterContent)) {
-				continue
-			}
 
-			result.push({
-				relativePath: filePath,
-				absolutePath,
-				before: beforeContent,
-				after: afterContent,
-			})
-		}
-
-		const durationMs = Math.round(performance.now() - startTime)
-		telemetryService.captureCheckpointUsage(this.taskId, "diff_generated", durationMs)
-
-		return result
+			return result
+		})
+		telemetryService.captureCheckpointUsage(this.taskId, "diff_generated", Math.round(performance.now() - startTime))
+		return entries
 	}
 
 	/**
@@ -510,21 +417,23 @@ class CheckpointTracker {
 		const startTime = performance.now()
 
 		const gitPath = await getShadowGitPath(this.cwdHash)
-		const git = simpleGit(path.dirname(gitPath))
+		const count = await withCheckpointRepositoryLock(gitPath, async () => {
+			const git = simpleGit(path.dirname(gitPath))
 
-		Logger.info(`Getting diff count between commits: ${lhsHash || "initial"} -> ${rhsHash || "working directory"}`)
+			Logger.info(`Getting diff count between commits: ${lhsHash || "initial"} -> ${rhsHash || "working directory"}`)
 
-		// Stage all changes so that untracked files appear in diff summary
-		await this.gitOperations.addCheckpointFiles(git)
+			// Stage all changes so that untracked files appear in diff summary
+			await this.gitOperations.addCheckpointFiles(git)
 
-		const cleanRhs = rhsHash ? this.cleanCommitHash(rhsHash) : undefined
-		const diffRange = cleanRhs ? `${this.cleanCommitHash(lhsHash)}..${cleanRhs}` : this.cleanCommitHash(lhsHash)
-		const diffSummary = await git.diffSummary([diffRange])
+			const cleanRhs = rhsHash ? this.cleanCommitHash(rhsHash) : undefined
+			const diffRange = cleanRhs ? `${this.cleanCommitHash(lhsHash)}..${cleanRhs}` : this.cleanCommitHash(lhsHash)
+			const diffSummary = await git.diffSummary([diffRange])
 
-		const durationMs = Math.round(performance.now() - startTime)
-		telemetryService.captureCheckpointUsage(this.taskId, "diff_generated", durationMs)
 
-		return diffSummary.files.length
+			return diffSummary.files.length
+		})
+		telemetryService.captureCheckpointUsage(this.taskId, "diff_generated", Math.round(performance.now() - startTime))
+		return count
 	}
 }
 

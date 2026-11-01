@@ -145,6 +145,7 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 	private _unretrievedOutput = ""
 	private _continued = false
 	private _completed = false
+	private _terminated = false
 	private _hotTimeout: NodeJS.Timeout | null = null
 	private _exitWaitTimeout: NodeJS.Timeout | null = null
 	private readonly manager: AcpTerminalManager
@@ -155,6 +156,10 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 		super()
 		this.manager = manager
 		this.terminalId = terminalId
+	}
+
+	get hasCompleted(): boolean {
+		return this._completed
 	}
 
 	/** Update the terminal ID after recreating a terminal. */
@@ -175,8 +180,28 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 	}
 
 	async terminate(): Promise<void> {
+		if (this._terminated) return
+		this._terminated = true
+		this.complete()
+		this.emit("continue")
+		// Host requests are best effort; cancellation must not wait for a stalled client.
+		void this.manager.kill(this.terminalId).then((result) => {
+			if (!result.success) Logger.debug("[AcpTerminalProcess] Kill failed:", result.error)
+		})
+	}
+
+	private complete(): void {
+		if (this._completed) return
+		this._completed = true
 		this.cleanup()
-		await this.manager.kill(this.terminalId)
+		this.emit("completed")
+	}
+
+	fail(error: Error): void {
+		if (this._completed) return
+		this._completed = true
+		this.cleanup()
+		this.emit("error", error)
 	}
 
 	/**
@@ -184,6 +209,7 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 	 * Called on continue, terminate, or completion to prevent memory leaks.
 	 */
 	private cleanup(): void {
+		this.isHot = false
 		this.stopPolling()
 		if (this._hotTimeout) {
 			clearTimeout(this._hotTimeout)
@@ -207,20 +233,25 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 	 * This method sets up the polling loop that emits 'line' events.
 	 */
 	run(_command: string): void {
+		if (this._terminated) {
+			void this.manager.kill(this.terminalId)
+			void this.manager.release(this.terminalId)
+			return
+		}
 		let lastOutput = ""
 
 		// Start polling for output
 		this.pollInterval = setInterval(async () => {
-			if (this._continued || this._completed) {
+			if (this._continued || this._completed || this._terminated) {
 				this.stopPolling()
 				return
 			}
 
 			try {
 				const result = await this.manager.getOutput(this.terminalId)
+				if (this._continued || this._completed || this._terminated) return
 				if (!result.success) {
-					this.stopPolling()
-					this.emit("error", new Error(result.error || "Failed to get output"))
+					this.fail(new Error(result.error || "Failed to get output"))
 					return
 				}
 
@@ -244,26 +275,23 @@ class AcpTerminalProcess extends EventEmitter<TerminalProcessEvents> implements 
 
 				// Check if completed
 				if (result.exitStatus) {
-					this._completed = true
-					this.stopPolling()
-					this.emit("completed")
+					this.complete()
 				}
 			} catch (error) {
-				this.stopPolling()
-				this.emit("error", error instanceof Error ? error : new Error(String(error)))
+				if (!this._continued && !this._terminated) {
+					this.fail(error instanceof Error ? error : new Error(String(error)))
+				}
 			}
 		}, 100) // Poll every 100ms
 
 		// Also set up exit waiting in parallel
 		this.manager.waitForExit(this.terminalId).then((result) => {
-			if (result.success && !this._continued && !this._completed) {
+			if (result.success && !this._continued && !this._completed && !this._terminated) {
 				// The polling loop should handle this, but ensure we emit completed
 				// Track the timeout so it can be cleaned up if the process is terminated early
 				this._exitWaitTimeout = setTimeout(() => {
-					if (!this._continued && !this._completed) {
-						this._completed = true
-						this.cleanup()
-						this.emit("completed")
+					if (!this._continued && !this._completed && !this._terminated) {
+						this.complete()
 					}
 				}, 200)
 			}
@@ -348,7 +376,7 @@ class AcpTerminal implements ITerminal {
  * This allows the returned object to be both awaitable and have event methods.
  */
 function mergePromise(process: AcpTerminalProcess, promise: Promise<void>): TerminalProcessResultPromise {
-	const nativePromisePrototype = (async () => {})().constructor.prototype
+	const nativePromisePrototype = (async () => { })().constructor.prototype
 	const descriptors = ["then", "catch", "finally"].map((property) => [
 		property,
 		Reflect.getOwnPropertyDescriptor(nativePromisePrototype, property),
@@ -391,6 +419,7 @@ export class AcpTerminalManager implements ITerminalManager {
 	private readonly connection: acp.AgentSideConnection
 	private readonly clientCapabilities: acp.ClientCapabilities | undefined
 	private readonly sessionIdResolver: ActiveAcpSessionIdResolver
+	private disposed = false
 
 	/** Active terminals indexed by their string ID */
 	private readonly terminals: Map<string, ManagedTerminal> = new Map()
@@ -439,6 +468,7 @@ export class AcpTerminalManager implements ITerminalManager {
 	 * @returns A promise-like object that emits events and resolves on completion
 	 */
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+		if (this.disposed) throw new Error("ACP terminal manager is disposed")
 		const terminal = terminalInfo.terminal as AcpTerminal
 		const managedTerminal = terminal._managedTerminal
 
@@ -450,7 +480,7 @@ export class AcpTerminalManager implements ITerminalManager {
 		managedTerminal.lastCommand = command
 
 		// Create the process - will be updated with actual terminal ID after creation
-		const process = new AcpTerminalProcess(this, managedTerminal.id)
+		const process = new AcpTerminalProcess(this, "")
 		this.processes.set(managedTerminal.numericId, process)
 
 		// Set up completion handlers
@@ -473,7 +503,7 @@ export class AcpTerminalManager implements ITerminalManager {
 
 		// For ACP, we need to create a new terminal with the command
 		// since ACP terminals are command-based, not interactive
-		this.runCommandInternal(managedTerminal, command, process)
+		void this.runCommandInternal(managedTerminal, command, process)
 
 		return mergePromise(process, promise)
 	}
@@ -494,7 +524,18 @@ export class AcpTerminalManager implements ITerminalManager {
 				cwd: managedTerminal.cwd,
 			}
 
-			const handle = await this.connection.createTerminal(request)
+			const handle = await this.createTerminalHandle(request)
+			if (process.hasCompleted || this.processes.get(managedTerminal.numericId) !== process) {
+				this.disposeUninstalledHandle(handle)
+				return
+			}
+
+			// Release the previous command's host resources before forgetting its handle.
+			// release marks admission synchronously; a pending acknowledgement must not
+			// duplicate cleanup or prevent this new command from starting.
+			if (managedTerminal.handle && !managedTerminal.released) {
+				void this.release(managedTerminal.id)
+			}
 
 			// Remove old terminal entry if it exists
 			if (managedTerminal.id && this.terminals.has(managedTerminal.id)) {
@@ -504,6 +545,7 @@ export class AcpTerminalManager implements ITerminalManager {
 			// Update the managed terminal with the new handle
 			managedTerminal.handle = handle
 			managedTerminal.id = handle.id
+			managedTerminal.released = false
 
 			// Update the ID mappings
 			this.terminals.set(handle.id, managedTerminal)
@@ -515,7 +557,7 @@ export class AcpTerminalManager implements ITerminalManager {
 			// Start the process polling
 			process.run(command)
 		} catch (error) {
-			process.emit("error", error instanceof Error ? error : new Error(String(error)))
+			process.fail(error instanceof Error ? error : new Error(String(error)))
 		}
 	}
 
@@ -525,6 +567,7 @@ export class AcpTerminalManager implements ITerminalManager {
 	 * @returns The terminal info for an available terminal
 	 */
 	async getOrCreateTerminal(cwd: string): Promise<TerminalInfo> {
+		if (this.disposed) throw new Error("ACP terminal manager is disposed")
 		// Find an available terminal with matching CWD
 		for (const [_numericId, terminalInfo] of this.terminalInfos) {
 			if (!terminalInfo.busy) {
@@ -626,22 +669,16 @@ export class AcpTerminalManager implements ITerminalManager {
 		return process ? process.isHot : false
 	}
 
-	/**
-	 * Dispose of all terminals and clean up resources.
-	 */
+	/** Stop local callbacks and request host cleanup without joining host RPCs. */
 	disposeAll(): void {
-		// Release all terminals
-		this.releaseAll().catch((err) => {
-			Logger.debug("[AcpTerminalManager] Error releasing terminals:", err)
-		})
-
-		// Clear all tracking
+		if (this.disposed) return
+		this.disposed = true
+		for (const process of this.processes.values()) void process.terminate()
+		void this.releaseAll().catch((error) => Logger.debug("[AcpTerminalManager] Error releasing terminals:", error))
 		this.terminals.clear()
 		this.numericIdToStringId.clear()
 		this.processes.clear()
 		this.terminalInfos.clear()
-
-		Logger.debug("[AcpTerminalManager] disposeAll complete")
 	}
 
 	/**
@@ -736,7 +773,7 @@ export class AcpTerminalManager implements ITerminalManager {
 			request.outputByteLimit = Number(options.outputByteLimit)
 		}
 
-		const handle = await this.connection.createTerminal(request)
+		const handle = await this.createTerminalHandle(request)
 		const numericId = this.nextNumericId++
 		const managedTerminal: ManagedTerminal = {
 			id: handle.id,
@@ -945,15 +982,20 @@ export class AcpTerminalManager implements ITerminalManager {
 
 		Logger.debug("[AcpTerminalManager] release:", { terminalId })
 
+		// Mark the request before awaiting the host so replacement/releaseAll cannot
+		// issue duplicate releases. Only this handle may undo the flag on failure.
+		const handle = terminal.handle
+		terminal.released = true
 		try {
-			await terminal.handle.release()
-			terminal.released = true
+			// getOrCreateTerminal reserves a placeholder before a host request exists.
+			if (handle) await handle.release()
 
 			Logger.debug("[AcpTerminalManager] release success")
 
 			return { success: true }
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
+			if (terminal.handle === handle) terminal.released = false
 
 			Logger.debug("[AcpTerminalManager] release error:", errorMessage)
 
@@ -988,19 +1030,11 @@ export class AcpTerminalManager implements ITerminalManager {
 		return this.getActiveTerminals().length
 	}
 
-	/**
-	 * Release all active terminals.
-	 *
-	 * This is useful for cleanup when a session ends.
-	 */
+	/** Release all active terminals on a best-effort basis. */
 	async releaseAll(): Promise<void> {
 		const activeTerminals = this.getActiveTerminals()
-
 		Logger.debug("[AcpTerminalManager] releaseAll:", { count: activeTerminals.length })
-
-		const releasePromises = activeTerminals.map((terminal) => this.release(terminal.id))
-		await Promise.allSettled(releasePromises)
-
+		await Promise.allSettled(activeTerminals.map((terminal) => this.release(terminal.id)))
 		Logger.debug("[AcpTerminalManager] releaseAll complete")
 	}
 
@@ -1053,6 +1087,21 @@ export class AcpTerminalManager implements ITerminalManager {
 			// Always release the terminal
 			await this.release(terminal.id)
 		}
+	}
+
+	private disposeUninstalledHandle(handle: TerminalHandle): void {
+		void handle.kill().catch((error) => Logger.debug("[AcpTerminalManager] Late terminal kill failed:", error))
+		void handle.release().catch((error) => Logger.debug("[AcpTerminalManager] Late terminal release failed:", error))
+	}
+
+	private async createTerminalHandle(request: acp.CreateTerminalRequest): Promise<TerminalHandle> {
+		if (this.disposed) throw new Error("ACP terminal manager is disposed")
+		const handle = await this.connection.createTerminal(request)
+		if (this.disposed) {
+			this.disposeUninstalledHandle(handle)
+			throw new Error("ACP terminal manager is disposed")
+		}
+		return handle
 	}
 
 	/**

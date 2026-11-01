@@ -4,7 +4,10 @@ import { TerminalRegistry, type TerminalInfo as RegTerminalInfo } from "./Vscode
 export class TerminalProfileManager {
 	private defaultTerminalProfile = "default"
 
-	constructor() {}
+	constructor(
+		private readonly ownerId: string,
+		private readonly closeTerminal: (terminal: RegTerminalInfo) => void,
+	) {}
 
 	setDefaultTerminalProfile(profileId: string): {
 		closedCount: number
@@ -30,7 +33,7 @@ export class TerminalProfileManager {
 	}
 
 	filterTerminals(filterFn: (terminal: RegTerminalInfo) => boolean): RegTerminalInfo[] {
-		const terminals = TerminalRegistry.getAllTerminals()
+		const terminals = TerminalRegistry.getOwnedTerminals(this.ownerId)
 		return terminals.filter(filterFn)
 	}
 
@@ -43,8 +46,7 @@ export class TerminalProfileManager {
 				continue
 			}
 
-			terminal.terminal.dispose()
-			TerminalRegistry.removeTerminal(terminal.id)
+			this.closeTerminal(terminal)
 			closedCount++
 		}
 
@@ -56,7 +58,7 @@ export class TerminalProfileManager {
 	}
 
 	updateLastActiveForShell(shellPath: string | undefined): void {
-		const allTerminals = TerminalRegistry.getAllTerminals()
+		const allTerminals = TerminalRegistry.getOwnedTerminals(this.ownerId)
 		allTerminals.forEach((terminal) => {
 			if (terminal.shellPath !== shellPath) {
 				TerminalRegistry.updateTerminal(terminal.id, { lastActive: Date.now() })

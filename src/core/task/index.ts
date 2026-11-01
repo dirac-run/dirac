@@ -619,6 +619,7 @@ export class Task {
 			try {
 				this.checkpointManager = buildCheckpointManager({
 					taskId: this.taskId,
+					storageAddress: this.storageAddress,
 					messageStateHandler: this.messageStateHandler,
 					fileContextTracker: this.fileContextTracker,
 					diffViewProvider: this.diffViewProvider,
@@ -742,8 +743,8 @@ export class Task {
 			this.urlContentFetcher,
 			this.browserSession,
 			(browserSession) => {
-				this.browserSession = browserSession
 				this.lifecycleManager.setBrowserSession(browserSession)
+				this.browserSession = browserSession
 			},
 			this.diffViewProvider,
 			this.fileContextTracker,

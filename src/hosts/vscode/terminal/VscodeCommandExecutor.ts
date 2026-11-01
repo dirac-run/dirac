@@ -1,5 +1,5 @@
 import * as vscode from "vscode"
-import pWaitFor from "p-wait-for"
+import { setTimeout as delay } from "node:timers/promises"
 import { Logger } from "@/shared/services/Logger"
 import { mergePromise, VscodeTerminalProcess, type TerminalProcessResultPromise } from "./VscodeTerminalProcess"
 
@@ -8,66 +8,41 @@ export interface CommandExecutorOptions {
 }
 
 export class CommandExecutor {
-	constructor(private options: CommandExecutorOptions) {}
+	constructor(private options: CommandExecutorOptions) { }
 
-	async runCommand(
+	runCommand(
 		terminalId: number,
 		terminal: vscode.Terminal,
 		command: string,
+		process: VscodeTerminalProcess,
 		onCompleted?: () => void,
-		onNoShellIntegration?: () => void,
-	): Promise<TerminalProcessResultPromise> {
-		const process = new VscodeTerminalProcess()
-
-		process.once("completed", () => {
-			Logger.log(`[CommandExecutor] Terminal ${terminalId} completed`)
-			onCompleted?.()
-		})
-
-		process.once("no_shell_integration", () => {
-			Logger.log(`[CommandExecutor] no_shell_integration for terminal ${terminalId}`)
-			onNoShellIntegration?.()
-		})
-
+	): TerminalProcessResultPromise {
+		process.bindTerminal(terminal)
+		process.once("completed", () => onCompleted?.())
+		process.once("error", () => onCompleted?.())
 		const promise = new Promise<void>((resolve, reject) => {
-			process.once("continue", () => resolve())
-			process.once("error", (error) => {
-				Logger.error(`Error in terminal ${terminalId}:`, error)
-				reject(error)
-			})
+			process.once("continue", resolve)
+			process.once("error", reject)
 		})
-
-		if (terminal.shellIntegration) {
+		const result = mergePromise(process, promise)
+		// Defer execution, not the process object: callers can attach listeners synchronously.
+		void Promise.resolve().then(async () => {
+			if (!terminal.shellIntegration) await this.waitForShellIntegration(process, terminal)
+			if (process.abortSignal.aborted) return
 			process.waitForShellIntegration = false
-			process.run(terminal, command)
-		} else {
-			await this.waitForAndRunCommand(terminalId, terminal, process, command)
-		}
-
-		return mergePromise(process, promise)
+			await process.run(terminal, command)
+		}).catch((error) => {
+			if (process.abortSignal.aborted) return
+			Logger.error(`Error in terminal ${terminalId}:`, error)
+			process.fail(error instanceof Error ? error : new Error(String(error)))
+		})
+		return result
 	}
 
-	private async waitForAndRunCommand(
-		terminalId: number,
-		terminal: vscode.Terminal,
-		process: VscodeTerminalProcess,
-		command: string,
-	): Promise<void> {
-		Logger.log(
-			`[CommandExecutor] Waiting for shell integration for terminal ${terminalId} with timeout ${this.options.shellIntegrationTimeout}ms`,
-		)
-
-		try {
-			await pWaitFor(() => terminal.shellIntegration !== undefined, {
-				timeout: this.options.shellIntegrationTimeout,
-			})
-			Logger.log(`[CommandExecutor] Shell integration activated for terminal ${terminalId}`)
-		} catch (err) {
-			Logger.warn(`[CommandExecutor] Shell integration timed out or failed for terminal ${terminalId}: ${err.message}`)
-		} finally {
-			Logger.log(`[CommandExecutor] Proceeding with command execution for terminal ${terminalId}`)
-			process.waitForShellIntegration = false
-			process.run(terminal, command)
+	private async waitForShellIntegration(process: VscodeTerminalProcess, terminal: vscode.Terminal): Promise<void> {
+		const deadline = Date.now() + this.options.shellIntegrationTimeout
+		while (!terminal.shellIntegration && Date.now() < deadline) {
+			await delay(Math.min(100, deadline - Date.now()), undefined, { signal: process.abortSignal })
 		}
 	}
 

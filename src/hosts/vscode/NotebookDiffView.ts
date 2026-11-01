@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto"
 import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
@@ -13,6 +14,7 @@ import { Logger } from "@/shared/services/Logger"
 export class NotebookDiffView {
 	private tempModifiedUri?: vscode.Uri
 	private tempFileWatcher?: vscode.FileSystemWatcher
+	private stopping = false
 
 	/**
 	 * Opens a notebook diff view for the given file.
@@ -40,8 +42,7 @@ export class NotebookDiffView {
 
 	private async createDiffView(uri: vscode.Uri, fileName: string, editor: vscode.TextEditor): Promise<void> {
 		const tempDir = os.tmpdir()
-		const timestamp = Date.now()
-		const tempModifiedPath = path.join(tempDir, `dirac-modified-${timestamp}-${fileName}`)
+		const tempModifiedPath = path.join(tempDir, `dirac-modified-${randomUUID()}-${fileName}`)
 
 		const currentContent = editor.document.getText()
 
@@ -78,8 +79,9 @@ export class NotebookDiffView {
 		const tempFileName = path.basename(this.tempModifiedUri.fsPath)
 		this.tempFileWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(tempDir, tempFileName))
 
-		this.tempFileWatcher.onDidChange(async () => {
-			await this.syncToEditor(editor)
+		this.tempFileWatcher.onDidChange(() => {
+			if (this.stopping) return
+			void this.syncToEditor(editor)
 		})
 	}
 
@@ -90,6 +92,7 @@ export class NotebookDiffView {
 
 		try {
 			const tempContent = await vscode.workspace.fs.readFile(this.tempModifiedUri)
+			if (this.stopping) return
 			const tempContentString = new TextDecoder().decode(tempContent)
 
 			const edit = new vscode.WorkspaceEdit()
@@ -102,18 +105,43 @@ export class NotebookDiffView {
 	}
 
 	async cleanup(): Promise<void> {
+		this.stopping = true
 		if (this.tempFileWatcher) {
 			this.tempFileWatcher.dispose()
 			this.tempFileWatcher = undefined
 		}
 
 		if (this.tempModifiedUri) {
-			try {
-				await vscode.workspace.fs.delete(this.tempModifiedUri)
-			} catch (error) {
-				Logger.error(`Failed to cleanup temporary file: ${error}`)
-			}
+			const tempModifiedUri = this.tempModifiedUri
 			this.tempModifiedUri = undefined
+			const modifiedUri = tempModifiedUri.toString()
+			const tabs = vscode.window.tabGroups.all
+				.flatMap((group) => group.tabs)
+				.filter(
+					(tab) =>
+						(tab.input instanceof vscode.TabInputNotebookDiff || tab.input instanceof vscode.TabInputTextDiff) &&
+						tab.input.modified.toString() === modifiedUri,
+				)
+			// Release local state now; keep the backing file until the host confirms closure.
+			void (async () => {
+				try {
+					const closed = await Promise.all(tabs.map((tab) => tab.isDirty ? false : vscode.window.tabGroups.close(tab)))
+					if (!closed.every(Boolean)) return
+					// Ordinary tabs belong to the user. Keep their backing file, including
+					// views opened while a diff-close acknowledgement was pending.
+					const stillReferenced = vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => {
+						const input = tab.input
+						if (input instanceof vscode.TabInputText || input instanceof vscode.TabInputNotebook) {
+							return input.uri.toString() === modifiedUri
+						}
+						return (input instanceof vscode.TabInputTextDiff || input instanceof vscode.TabInputNotebookDiff) &&
+							(input.original.toString() === modifiedUri || input.modified.toString() === modifiedUri)
+					})
+					if (!stillReferenced) await vscode.workspace.fs.delete(tempModifiedUri)
+				} catch (error) {
+					Logger.error(`Failed to cleanup notebook diff: ${error}`)
+				}
+			})()
 		}
 	}
 }

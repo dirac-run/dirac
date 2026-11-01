@@ -429,13 +429,21 @@ export class ToolExecutor {
 	}
 
 	public async applyLatestBrowserSettings() {
-		await this.browserSession.dispose()
+		if (this.taskState.abort) throw new Error("Cannot replace browser session after task abort")
 		const runtime = this.requestRuntime()
+		await this.browserSession.dispose()
+		if (this.taskState.abort) throw new Error("Cannot replace browser session after task abort")
 		const useWebp = !modelDoesntSupportWebp(runtime.api.getModel())
-		this.browserSession = new BrowserSession(runtime.workingConfiguration.settings.browserSettings, useWebp)
-		this.browserSession.setUlid(this.ulid)
-		this.installBrowserSession(this.browserSession)
-		return this.browserSession
+		const replacement = new BrowserSession(runtime.workingConfiguration.settings.browserSettings, useWebp)
+		replacement.setUlid(this.ulid)
+		try {
+			this.installBrowserSession(replacement)
+		} catch (error) {
+			await replacement.dispose()
+			throw error
+		}
+		this.browserSession = replacement
+		return replacement
 	}
 
 	private isPlanModeToolRestricted(toolName: DiracDefaultTool): boolean {

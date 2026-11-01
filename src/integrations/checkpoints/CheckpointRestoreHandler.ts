@@ -1,3 +1,4 @@
+import type { TaskStorageAddress } from "@shared/taskletId"
 import { sendRelinquishControlEvent } from "@core/controller/ui/subscribeToRelinquishControl"
 import { getPresentationHistoryAtMessage } from "@core/storage/disk"
 import { findLastIndex } from "@shared/array"
@@ -19,6 +20,7 @@ import type CheckpointTracker from "./CheckpointTracker"
 interface CheckpointRestoreConfig {
 	enableCheckpoints: boolean
 	readonly taskId: string
+	readonly storageAddress?: TaskStorageAddress
 }
 
 /** Factory for creating a `CheckpointTracker` for a task/workspace. */
@@ -259,7 +261,10 @@ export class CheckpointRestoreHandler {
 					}
 				}
 
-				const newDiracMessages = await getPresentationHistoryAtMessage(this.config.taskId, message.id)
+				const newDiracMessages = await getPresentationHistoryAtMessage(
+					this.config.storageAddress ?? this.config.taskId,
+					message.id,
+				)
 				const restoredCheckpointMessage = newDiracMessages.at(-1)
 				if (restoredCheckpointMessage?.id === message.id) {
 					restoredCheckpointMessage.lastCheckpointHash = message.lastCheckpointHash

@@ -30,6 +30,7 @@ export class CommandPermissionController {
 	private workspaceRoot: string | null = null
 	private fileWatcher?: FSWatcher
 	private readonly watcherCloser = new ChokidarWatcherCloser()
+	private disposed = false
 	private config: CommandPermissionConfig | null = null
 	private readonly ruleEvaluator = new PermissionRuleEvaluator()
 	private readonly commandParser = new CommandParser()
@@ -41,6 +42,7 @@ export class CommandPermissionController {
 
 	/** Initialize the controller with a workspace root and load configuration from file. */
 	async initialize(workspaceRoot: string): Promise<void> {
+		if (this.disposed) return
 		this.workspaceRoot = workspaceRoot
 		await this.loadConfig()
 		await this.setupFileWatcher()
@@ -49,12 +51,13 @@ export class CommandPermissionController {
 	/** Set up a file watcher for .dirac/permissions.json */
 	private async setupFileWatcher(): Promise<void> {
 		await this.watcherCloser.closeAll()
+		if (this.disposed) return
 		if (this.fileWatcher) {
 			const previousWatcher = this.fileWatcher
 			this.fileWatcher = undefined
 			await this.watcherCloser.close(previousWatcher)
 		}
-		if (!this.workspaceRoot) return
+		if (this.disposed || !this.workspaceRoot || this.fileWatcher) return
 
 		const configPath = path.join(this.workspaceRoot, ".dirac", "permissions.json")
 		try {
@@ -312,6 +315,7 @@ export class CommandPermissionController {
 
 	/** Clean up resources when the controller is no longer needed. */
 	async dispose(): Promise<void> {
+		this.disposed = true
 		const watcher = this.fileWatcher
 		this.fileWatcher = undefined
 		await this.watcherCloser.closeAll(watcher ? [watcher] : [])

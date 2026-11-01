@@ -1,88 +1,70 @@
 import * as vscode from "vscode"
 import { arePathsEqual } from "@/utils/path"
 import { DIFF_VIEW_URI_SCHEME } from "./diff-view-constants"
+import { TabManager } from "./TabManager"
 
 export class ReviewContextManager {
-	private static reviewingFiles: Map<string, string> = new Map()
+	private reviewingFiles = new Map<string, string>()
+	private static reviews = new Set<ReviewContextManager>()
 	private static contextKeyDisposables: vscode.Disposable[] = []
-	private static isInitialized = false
 
-	static initialize(): void {
-		if (!ReviewContextManager.isInitialized) {
-			ReviewContextManager.contextKeyDisposables.push(
-				vscode.window.onDidChangeActiveTextEditor((editor) => ReviewContextManager.updateContextKeys(editor)),
-				vscode.workspace.onDidChangeTextDocument((event) => {
-					const activeEditor = vscode.window.activeTextEditor
-					if (activeEditor && event.document === activeEditor.document) {
-						ReviewContextManager.updateContextKeys(activeEditor)
-					}
-				}),
-			)
-			ReviewContextManager.isInitialized = true
-		}
-	}
+	constructor(private readonly tabs: TabManager) {}
 
-	static dispose(): void {
-		for (const disposable of ReviewContextManager.contextKeyDisposables) {
-			disposable.dispose()
-		}
-		ReviewContextManager.contextKeyDisposables = []
-		ReviewContextManager.isInitialized = false
+	private static initialize(): void {
+		if (this.contextKeyDisposables.length > 0) return
+		this.contextKeyDisposables.push(
+			vscode.window.onDidChangeActiveTextEditor((editor) => this.updateContextKeys(editor)),
+			vscode.workspace.onDidChangeTextDocument((event) => {
+				const activeEditor = vscode.window.activeTextEditor
+				if (activeEditor && event.document === activeEditor.document) this.updateContextKeys(activeEditor)
+			}),
+		)
 	}
 
 	private static updateContextKeys(editor: vscode.TextEditor | undefined): void {
-		if (!editor || editor.document.uri.scheme === DIFF_VIEW_URI_SCHEME) {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
-			return
-		}
-
-		const fsPath = editor.document.uri.fsPath
-		let proposedContent: string | undefined
-		for (const [filePath, content] of ReviewContextManager.reviewingFiles.entries()) {
-			if (arePathsEqual(filePath, fsPath)) {
-				proposedContent = content
-				break
-			}
-		}
-
-		if (proposedContent === undefined) {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", false)
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", false)
-		} else {
-			vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", true)
-			const isModified = editor.document.getText() !== proposedContent
-			vscode.commands.executeCommand("setContext", "dirac.isFileModified", isModified)
-		}
+		const proposedContents =
+			editor && editor.document.uri.scheme !== DIFF_VIEW_URI_SCHEME
+				? [...this.reviews].flatMap((review) =>
+						[...review.reviewingFiles]
+							.filter(([filePath]) => arePathsEqual(filePath, editor.document.uri.fsPath))
+							.map(([, content]) => content),
+					)
+				: []
+		vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", proposedContents.length > 0)
+		vscode.commands.executeCommand(
+			"setContext",
+			"dirac.isFileModified",
+			proposedContents.some((content) => content !== editor!.document.getText()),
+		)
 	}
 
-	static async showReview(
+	async showReview(
 		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
 	): Promise<void> {
-		ReviewContextManager.reviewingFiles = new Map(files.map((f) => [f.absolutePath, f.content]))
+		this.reviewingFiles = new Map(files.map((file) => [file.absolutePath, file.content]))
+		ReviewContextManager.reviews.add(this)
+		ReviewContextManager.initialize()
 		ReviewContextManager.updateContextKeys(vscode.window.activeTextEditor)
 
 		await vscode.commands.executeCommand(
 			"vscode.changes",
-			"Review Dirac Edits",
-			files.map((file) => {
-				const absolutePath = file.absolutePath.toPosix()
-				return [
-					vscode.Uri.file(file.absolutePath),
-					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
-						query: Buffer.from(file.originalContent ?? "").toString("base64"),
-					}),
-					vscode.Uri.parse(`${DIFF_VIEW_URI_SCHEME}:${absolutePath}`).with({
-						query: Buffer.from(file.content).toString("base64"),
-					}),
-				]
-			}),
+			this.tabs.reviewTitle,
+			files.map((file) => [
+				vscode.Uri.file(file.absolutePath),
+				this.tabs.originalUri(file.absolutePath, file.originalContent ?? ""),
+				this.tabs.originalUri(file.absolutePath, file.content),
+			]),
 		)
 		vscode.commands.executeCommand("workbench.action.closePanel")
 	}
 
-	static hideReview(): void {
-		ReviewContextManager.reviewingFiles.clear()
+	hideReview(): void {
+		this.reviewingFiles.clear()
+		ReviewContextManager.reviews.delete(this)
 		ReviewContextManager.updateContextKeys(vscode.window.activeTextEditor)
+		if (ReviewContextManager.reviews.size === 0) {
+			for (const disposable of ReviewContextManager.contextKeyDisposables) disposable.dispose()
+			ReviewContextManager.contextKeyDisposables = []
+		}
 	}
 }

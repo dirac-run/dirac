@@ -15,11 +15,9 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	private streamingUpdater?: StreamingTextUpdater
 	private notebookManager = new NotebookDiffManager()
 	private documentOpManager = new DocumentOperationManager()
-
-	constructor() {
-		super()
-		ReviewContextManager.initialize()
-	}
+	private readonly tabManager = new TabManager()
+	private readonly reviewManager = new ReviewContextManager(this.tabManager)
+	private diffEditor?: vscode.TextEditor
 
 	override async openDiffEditor(): Promise<void> {
 		if (!this.absolutePath) {
@@ -28,13 +26,15 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 
 		this.documentWasOpen = false
 
-		const { editor, documentWasOpen } = await TabManager.openDiffEditor(
+		const { editor, documentWasOpen } = await this.tabManager.openDiffEditor(
 			this.absolutePath,
 			this.editType,
 			this.originalContent,
 			{ preserveFocus: true },
 		)
+		if (!this.isEditing) return
 		this.documentWasOpen = documentWasOpen
+		this.diffEditor = editor
 
 		this.decorationManager = new DecorationControllerManager(editor)
 		this.decorationManager.initialize()
@@ -79,15 +79,11 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	}
 
 	protected override async getDocumentText(): Promise<string | undefined> {
-		const editor = vscode.window.activeTextEditor
-		if (!editor || editor.document.uri.scheme === DIFF_VIEW_URI_SCHEME) {
-			return undefined
-		}
-		return editor.document.getText()
+		return this.diffEditor?.document.getText()
 	}
 
 	protected override async saveDocument(): Promise<boolean> {
-		const editor = vscode.window.activeTextEditor
+		const editor = this.diffEditor
 		if (!editor) {
 			return false
 		}
@@ -95,20 +91,20 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	}
 
 	protected async closeAllDiffViews(): Promise<void> {
-		await TabManager.closeAllDiffViews(DIFF_VIEW_URI_SCHEME)
+		await this.tabManager.closeOwnedDiffViews()
 	}
 
 	protected override async resetDiffView(): Promise<void> {
-		if (this.notebookManager) {
-			await this.notebookManager.cleanup()
-		}
-
-		this.streamingUpdater = undefined
+		this.reviewManager.hideReview()
+		this.decorationManager?.reset()
 		this.decorationManager = undefined
+		this.streamingUpdater = undefined
+		this.diffEditor = undefined
+		await Promise.all([this.closeAllDiffViews(), this.notebookManager.cleanup()])
 	}
 
 	protected override async switchToSpecializedEditor(): Promise<void> {
-		const editor = vscode.window.activeTextEditor
+		const editor = this.diffEditor
 		if (!this.isNotebookFile() || !editor || !this.absolutePath) {
 			return
 		}
@@ -141,7 +137,7 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	override async showReview(
 		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
 	): Promise<void> {
-		await ReviewContextManager.showReview(files)
+		await this.reviewManager.showReview(files)
 	}
 
 	override async applyAndSaveBatchSilently(
@@ -157,8 +153,6 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	}
 
 	override async hideReview(): Promise<void> {
-		ReviewContextManager.hideReview()
-		await this.closeAllDiffViews()
 		await this.reset()
 	}
 }

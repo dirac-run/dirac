@@ -6,6 +6,28 @@ import type { FolderLockOptions, FolderLockWithRetryResult } from "@/core/locks/
  */
 const CHECKPOINTS_BASE_PATH = "~/.dirac/data/checkpoints"
 
+// Folder leases exclude other instances, not siblings within this process.
+const repositoryTails = new Map<string, Promise<void>>()
+
+/** Lock order: repository critical section, existing folder lease, nested-Git mutation lock.
+ * Call only at checkpoint operation boundaries, never recursively from Git helpers.
+ * This protects shared Git state; it does not drain tasks or serialize workspace edits.
+ */
+export async function withCheckpointRepositoryLock<T>(gitPath: string, operation: () => Promise<T>): Promise<T> {
+	const previous = repositoryTails.get(gitPath) ?? Promise.resolve()
+	let release!: () => void
+	const pending = new Promise<void>((resolve) => { release = resolve })
+	const tail = previous.then(() => pending)
+	repositoryTails.set(gitPath, tail)
+	await previous
+	try {
+		return await operation()
+	} finally {
+		release()
+		if (repositoryTails.get(gitPath) === tail) repositoryTails.delete(gitPath)
+	}
+}
+
 /**
  * Attempt to acquire checkpoint folder lock with retry logic.
  * This is a convenience wrapper around the generic folder lock utility

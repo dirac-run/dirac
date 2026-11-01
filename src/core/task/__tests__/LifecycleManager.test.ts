@@ -55,7 +55,7 @@ describe("LifecycleManager", () => {
 			// Stub ensureCheckpointInitialized via module proxy
 			const initModule = require("@integrations/checkpoints/initializer")
 			const origInit = initModule.ensureCheckpointInitialized
-			initModule.ensureCheckpointInitialized = async () => {}
+			initModule.ensureCheckpointInitialized = async () => { }
 			try {
 				await manager.initializeCheckpoints(true)
 				sinon.assert.calledOnce(deps.taskMessenger.createCheckpoint)
@@ -129,7 +129,7 @@ describe("LifecycleManager", () => {
 			const userContent = deps.initiateTaskLoop.firstCall.args[0]
 			userContent.some((c: any) => c.text === "file content here").should.equal(true)
 			const fileContent = userContent.find((c: any) => c.text === "file content here")
-			;(fileContent.isUserInput === undefined).should.equal(true)
+				; (fileContent.isUserInput === undefined).should.equal(true)
 		})
 
 		it("keeps hook-provided command examples unmarked", async () => {
@@ -144,7 +144,7 @@ describe("LifecycleManager", () => {
 				await manager.startTask("task")
 				const userContent = deps.initiateTaskLoop.firstCall.args[0]
 				const hookContent = userContent.find((c: any) => c.text?.includes("<hook_context"))
-				;(hookContent.isUserInput === undefined).should.equal(true)
+					; (hookContent.isUserInput === undefined).should.equal(true)
 			} finally {
 				hookModule.executeHook = originalExecuteHook
 			}
@@ -197,7 +197,10 @@ describe("LifecycleManager", () => {
 			})
 		}
 
-		for (const storageAddress of [undefined, { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }]) {
+		for (const storageAddress of [
+			undefined,
+			{ kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" },
+		]) {
 			it(`forwards ${storageAddress ? "contained" : "legacy"} resume storage without changing registry ownership`, async () => {
 				setupDiskMocks()
 				deps.storageAddress = storageAddress
@@ -205,7 +208,13 @@ describe("LifecycleManager", () => {
 				const refresh = sinon.stub(registryModule, "refreshTaskTools").resolves([])
 				await manager.resumeTaskFromHistory(undefined, { systemContext: "Resume" })
 				const disk = require("@core/storage/disk")
-				for (const name of ["getSavedPresentationHistory", "getSavedApiConversationState", "getSavedApiConversationProviderState", "ensureTaskDirectoryExists", "getTaskMetadata"]) {
+				for (const name of [
+					"getSavedPresentationHistory",
+					"getSavedApiConversationState",
+					"getSavedApiConversationProviderState",
+					"ensureTaskDirectoryExists",
+					"getTaskMetadata",
+				]) {
 					sinon.assert.alwaysCalledWithExactly(disk[name], storageAddress ?? deps.taskId)
 				}
 				sinon.assert.calledOnceWithExactly(refresh, deps.taskId, storageAddress ?? deps.taskId)
@@ -287,7 +296,7 @@ describe("LifecycleManager", () => {
 			const resumedContent = deps.initiateTaskLoop.firstCall.args[0]
 			const systemContext = resumedContent.find((block: any) => block.text?.includes("<system_context"))
 			String(systemContext.text).should.containEql("Resume the Goal from durable state.")
-			;(systemContext.isUserInput === undefined).should.equal(true)
+				; (systemContext.isUserInput === undefined).should.equal(true)
 		})
 
 		it("starts a resumed turn from explicit user input without waiting for an interaction callback", async () => {
@@ -353,10 +362,10 @@ describe("LifecycleManager", () => {
 
 			const restoredHistory = deps.messageStateHandler.setApiConversationHistory.firstCall.args[0]
 			const restoredBlock = restoredHistory[0].content[0]
-			;(restoredBlock.isUserInput === undefined).should.equal(true)
+				; (restoredBlock.isUserInput === undefined).should.equal(true)
 			const replayedContent = deps.initiateTaskLoop.firstCall.args[0]
 			const replayedBlock = replayedContent.find((block: any) => block.text === "<task>/reloadtools</task>")
-			;(replayedBlock.isUserInput === undefined).should.equal(true)
+				; (replayedBlock.isUserInput === undefined).should.equal(true)
 		})
 
 		it("restores provider-native conversation state", async () => {
@@ -507,7 +516,7 @@ describe("LifecycleManager", () => {
 			await manager.abortTask()
 
 			deps.taskState.isApiRequestActive.should.equal(false)
-			;(deps.taskState.activeVoiceStreamId === undefined).should.equal(true)
+				; (deps.taskState.activeVoiceStreamId === undefined).should.equal(true)
 			deps.taskState.isWaitingForFirstChunk.should.equal(false)
 			deps.taskState.didFinishAbortingStream.should.equal(true)
 			deps.taskState.status.should.equal(TaskStatus.CANCELLED)
@@ -520,19 +529,38 @@ describe("LifecycleManager", () => {
 			sinon.assert.calledOnce(deps.hookManager.clearActiveHookExecution)
 		})
 
-		it("cancels background command if active", async () => {
-			deps.commandExecutor.hasActiveBackgroundCommand = sinon.stub().returns(true)
+		it("stops the command executor even without an active background command", async () => {
 			await manager.abortTask()
-			sinon.assert.calledOnce(deps.commandExecutor.cancelBackgroundCommand)
+			sinon.assert.called(deps.commandExecutor.dispose)
+			sinon.assert.callOrder(deps.commandExecutor.dispose, deps.terminalManager.disposeAll)
+		})
+
+		it("rejects browser-session replacement once resource cleanup starts", async () => {
+			const previous = deps.browserSession
+			const cleanup = manager.finalizeTaskRun()
+			const replaceSession = () => manager.setBrowserSession({ dispose: sinon.stub().resolves() } as any)
+			replaceSession.should.throw(/stopped/)
+			deps.browserSession.should.equal(previous)
+			await cleanup
 		})
 
 		it("disposes task-scoped resources", async () => {
 			await manager.abortTask()
-			sinon.assert.calledOnce(deps.terminalManager.disposeAll)
+			sinon.assert.calledTwice(deps.terminalManager.disposeAll)
 			sinon.assert.calledOnce(deps.urlContentFetcher.closeBrowser)
 			sinon.assert.calledOnce(deps.commandPermissionController.dispose)
 			sinon.assert.calledOnce(deps.diracIgnoreController.dispose)
 			sinon.assert.calledOnce(deps.fileContextTracker.dispose)
+		})
+
+		it("stops the terminal owner before joining an executor waiting for terminal acquisition", async () => {
+			let terminalClosed!: () => void
+			const close = new Promise<void>((resolve) => { terminalClosed = resolve })
+			deps.commandExecutor.dispose.returns(close)
+			deps.terminalManager.disposeAll.callsFake(() => { terminalClosed(); return close })
+			await manager.abortTask()
+			sinon.assert.called(deps.terminalManager.disposeAll)
+			sinon.assert.called(deps.commandExecutor.dispose)
 		})
 
 		it("waits for asynchronous task-scoped resource disposal", async () => {
@@ -574,13 +602,14 @@ describe("LifecycleManager", () => {
 			sinon.assert.calledOnce(deps.commandPermissionController.dispose)
 			sinon.assert.calledOnce(deps.diracIgnoreController.dispose)
 			sinon.assert.calledOnce(deps.fileContextTracker.dispose)
-			sinon.assert.calledOnce(deps.diffViewProvider.revertChanges)
+			sinon.assert.calledOnce(deps.diffViewProvider.reset)
 			deps.taskState.status.should.equal(TaskStatus.CANCELLED)
 		})
 
-		it("reverts diff view changes", async () => {
+		it("releases diff views without reverting shared file contents", async () => {
 			await manager.abortTask()
-			sinon.assert.calledOnce(deps.diffViewProvider.revertChanges)
+			sinon.assert.calledOnce(deps.diffViewProvider.reset)
+			sinon.assert.notCalled(deps.diffViewProvider.revertChanges)
 		})
 
 		it("keeps persistence available after cancellation until the owner closes the task", async () => {
@@ -646,7 +675,7 @@ describe("LifecycleManager", () => {
 			await manager.abortTask()
 
 			sinon.assert.calledOnce(deps.hookManager.shouldRunTaskCancelHook)
-			sinon.assert.calledOnce(deps.terminalManager.disposeAll)
+			sinon.assert.calledTwice(deps.terminalManager.disposeAll)
 			sinon.assert.callCount(deps.messageStateHandler.flushPendingWrites, 2)
 		})
 	})
@@ -704,13 +733,14 @@ function createMockDeps(): any {
 		terminalManager: { disposeAll: sinon.stub() } as any,
 		urlContentFetcher: { closeBrowser: sinon.stub() } as any,
 		browserSession: { dispose: sinon.stub().resolves() } as any,
-		diffViewProvider: { revertChanges: sinon.stub().resolves() } as any,
+		diffViewProvider: { reset: sinon.stub().resolves(), revertChanges: sinon.stub().resolves() } as any,
 		fileContextTracker: {
 			dispose: sinon.stub(),
 			retrieveAndClearPendingFileContextWarning: sinon.stub().resolves(null),
 		} as any,
 		contextManager: {} as any,
 		commandExecutor: {
+			dispose: sinon.stub().resolves(),
 			hasActiveBackgroundCommand: sinon.stub().returns(false),
 			cancelBackgroundCommand: sinon.stub().resolves(),
 		} as any,

@@ -32,6 +32,8 @@ export class DecorationControllerManager {
 	}
 
 	reset(): void {
+		this.fadedOverlay?.dispose()
+		this.activeLine?.dispose()
 		this.fadedOverlay = undefined
 		this.activeLine = undefined
 	}

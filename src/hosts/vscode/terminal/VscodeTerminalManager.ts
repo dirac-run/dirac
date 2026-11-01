@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { getShellForProfile } from "@utils/shell"
 import {
 	TerminalInfo as ITerminalInfo,
@@ -5,66 +6,65 @@ import {
 	TerminalProcessResultPromise as ITerminalProcessResultPromise,
 	TerminalProfileChangeResult,
 } from "@/integrations/terminal/types"
-import { Logger } from "@/shared/services/Logger"
 import { CommandExecutor } from "./VscodeCommandExecutor"
-import { ShellIntegrationManager } from "./VscodeShellIntegrationManager"
 import { TerminalLifecycleManager } from "./VscodeTerminalLifecycleManager"
-import { VscodeTerminalProcess } from "./VscodeTerminalProcess"
+import { VscodeTerminalProcess, type TerminalProcessResultPromise } from "./VscodeTerminalProcess"
 import { TerminalProfileManager } from "./VscodeTerminalProfileManager"
 import { TerminalInfo, TerminalRegistry } from "./VscodeTerminalRegistry"
 
 export class VscodeTerminalManager implements ITerminalManager {
-	private terminalIds: Set<number> = new Set()
-	private processes: Map<number, VscodeTerminalProcess> = new Map()
+	private readonly ownerId = randomUUID()
+	private processes = new Map<number, VscodeTerminalProcess>()
 	private terminalOutputLineLimit = 500
-
-	private shellIntegrationManager = new ShellIntegrationManager()
+	private stopped = false
 	private lifecycleManager: TerminalLifecycleManager
-	private commandExecutor: CommandExecutor
-	private profileManager = new TerminalProfileManager()
+	private commandExecutor = new CommandExecutor({ shellIntegrationTimeout: 4000 })
+	private profileManager = new TerminalProfileManager(this.ownerId, (terminal) => this.closeTerminal(terminal))
 
 	constructor() {
-		this.lifecycleManager = new TerminalLifecycleManager({
-			terminalReuseEnabled: true,
-			defaultTerminalProfile: "default",
-		})
-		this.commandExecutor = new CommandExecutor({ shellIntegrationTimeout: 4000 })
-
-		this.shellIntegrationManager.setupListeners()
+		this.lifecycleManager = new TerminalLifecycleManager(
+			{ terminalReuseEnabled: true, defaultTerminalProfile: "default" },
+			this.ownerId,
+			(info, command) => this.startCommand(info, command, false),
+		)
 	}
 
 	runCommand(terminalInfo: ITerminalInfo, command: string): ITerminalProcessResultPromise {
-		const info = terminalInfo as unknown as TerminalInfo
-		info.lastCommand = command // record the actual command being run
-		Logger.log(`[TerminalManager] Running command on terminal ${info.id}: "${command}"`)
-		Logger.log(`[TerminalManager] Terminal ${info.id} busy state before: ${info.busy}`)
+		return this.startCommand(terminalInfo as unknown as TerminalInfo, command, true)
+	}
 
+	private startCommand(info: TerminalInfo, command: string, releaseReservation: boolean): TerminalProcessResultPromise {
+		if (this.stopped) throw new Error("Terminal manager is disposed")
+		if (info.ownerId !== this.ownerId || TerminalRegistry.getTerminal(info.id) !== info) {
+			throw new Error("Terminal is not owned by this manager")
+		}
+		const previous = this.processes.get(info.id)
+		if (previous && !previous.hasCompleted) throw new Error("Terminal already has a running command")
+		info.lastCommand = command
 		info.busy = true
-		const process = new VscodeTerminalProcess()
+		const process = new VscodeTerminalProcess(() => {
+			info.reuseDisabled = true
+			TerminalRegistry.removeTerminal(info.id)
+		})
 		this.processes.set(info.id, process)
-
-		const result = this.commandExecutor.runCommand(
-			info.id,
-			info.terminal,
-			command,
-			() => {
-				Logger.log(`[TerminalManager] Terminal ${info.id} completed, setting busy to false`)
-				info.busy = false
-			},
-			() => {
-				TerminalRegistry.removeTerminal(info.id)
-				this.terminalIds.delete(info.id)
-				this.processes.delete(info.id)
-			},
-		)
-
-		return result as unknown as ITerminalProcessResultPromise
+		process.once("no_shell_integration", () => { info.reuseDisabled = true })
+		return this.commandExecutor.runCommand(info.id, info.terminal, command, process, () => {
+			if (releaseReservation) info.busy = false
+		})
 	}
 
 	async getOrCreateTerminal(cwd: string, env?: { [key: string]: string | undefined }): Promise<ITerminalInfo> {
+		if (this.stopped) throw new Error("Terminal manager is disposed")
 		const terminal = await this.lifecycleManager.getOrCreateTerminal(cwd, env)
-		this.terminalIds.add(terminal.id)
+		if (this.stopped) throw new Error("Terminal manager is disposed")
 		return terminal as unknown as ITerminalInfo
+	}
+
+	releaseTerminalReservation(terminalInfo: ITerminalInfo): void {
+		const info = terminalInfo as TerminalInfo
+		if (info.ownerId !== this.ownerId) throw new Error("Terminal is not owned by this manager")
+		if (TerminalRegistry.getTerminal(info.id) !== info) return
+		info.busy = false
 	}
 
 	getTerminals(busy: boolean): { id: number; lastCommand: string }[] {
@@ -72,27 +72,29 @@ export class VscodeTerminalManager implements ITerminalManager {
 	}
 
 	getUnretrievedOutput(terminalId: number): string {
-		if (!this.terminalIds.has(terminalId)) {
-			return ""
-		}
-		const process = this.processes.get(terminalId)
-		return process ? process.getUnretrievedOutput() : ""
+		return this.processes.get(terminalId)?.getUnretrievedOutput() ?? ""
 	}
 
 	isProcessHot(terminalId: number): boolean {
-		const process = this.processes.get(terminalId)
-		return process ? process.isHot : false
+		return this.processes.get(terminalId)?.isHot ?? false
 	}
 
 	disposeAll(): void {
-		this.terminalIds.clear()
+		if (this.stopped) return
+		this.stopped = true
+		this.lifecycleManager.stop()
+		this.closeAllTerminals()
 		this.processes.clear()
-		this.shellIntegrationManager.dispose()
+	}
+
+	private closeTerminal(info: TerminalInfo): void {
+		this.processes.get(info.id)?.stop()
+		TerminalRegistry.closeTerminal(info, this.ownerId)
+		this.processes.delete(info.id)
 	}
 
 	setShellIntegrationTimeout(timeout: number): void {
 		this.commandExecutor.setShellIntegrationTimeout(timeout)
-		this.lifecycleManager.setShellIntegrationTimeout(timeout)
 	}
 
 	setTerminalReuseEnabled(enabled: boolean): void {
@@ -125,21 +127,11 @@ export class VscodeTerminalManager implements ITerminalManager {
 	}
 
 	closeTerminals(filterFn: (terminal: TerminalInfo) => boolean, force = false): number {
-		// Identify which terminals will be closed before delegating
-		const toClose = this.profileManager.filterTerminals(filterFn).filter((t) => force || !t.busy)
-		const closedIds = new Set(toClose.map((t) => t.id))
-		const count = this.profileManager.closeTerminals(filterFn, force)
-		// Only clear processes for terminals that were actually closed
-		for (const id of closedIds) {
-			this.terminalIds.delete(id)
-			this.processes.delete(id)
-		}
-		return count
+		return this.profileManager.closeTerminals(filterFn, force)
 	}
 
 	handleTerminalProfileChange(newShellPath: string | undefined): TerminalProfileChangeResult {
-		// Close non-busy terminals with different shell path
-		const closedCount = this.closeTerminals((t) => !t.busy && t.shellPath !== newShellPath, false)
+		const closedCount = this.closeTerminals((t) => !t.busy && t.shellPath !== newShellPath)
 		const busyTerminals = this.profileManager.filterTerminals((t) => t.busy && t.shellPath !== newShellPath)
 		return { closedCount, busyTerminals }
 	}

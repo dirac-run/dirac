@@ -180,6 +180,8 @@ export type TerminalProcessResultPromise = Promise<void> &
  * Defines the contract that both implementations must follow.
  */
 export interface ITerminalManager {
+	/** Release an unused acquisition if this manager reserves terminals before command startup. */
+	releaseTerminalReservation?(terminalInfo: TerminalInfo): void
 	/**
 	 * Run a command in the specified terminal.
 	 * @param terminalInfo The terminal to run the command in
@@ -219,7 +221,7 @@ export interface ITerminalManager {
 	/**
 	 * Dispose of all terminals and clean up resources.
 	 */
-	disposeAll(): void
+	disposeAll(): void | Promise<void>
 
 	/**
 	 * Set the timeout for waiting for shell integration.

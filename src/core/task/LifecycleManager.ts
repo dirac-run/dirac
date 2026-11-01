@@ -48,13 +48,14 @@ export class LifecycleManager {
 	private abortPromise?: Promise<void>
 	private ownedResourceCleanupPromise?: Promise<void>
 
-	constructor(private dependencies: LifecycleManagerDependencies) {}
+	constructor(private dependencies: LifecycleManagerDependencies) { }
 
 	setApi(api: LifecycleManagerDependencies["api"]): void {
 		this.dependencies.api = api
 	}
 
 	setBrowserSession(browserSession: BrowserSession): void {
+		if (this.ownedResourceCleanupPromise) throw new Error("Task resources have stopped")
 		this.dependencies.browserSession = browserSession
 	}
 
@@ -93,12 +94,7 @@ export class LifecycleManager {
 			const lastCheckpointMessageIndex = findLastIndex(messages, (m) => m.content.type === DiracMessageType.CHECKPOINT)
 			if (lastCheckpointMessageIndex !== -1) {
 				const commitPromise = this.dependencies.checkpointManager!.commit()
-				// Store the initial commit promise in Task for unsafe tools to wait on
-				// We'll need to expose this or handle it differently.
-				// In Task, it was: this.initialCheckpointCommitPromise = commitPromise
-				// I'll add a way to set it in Task or just keep it here if it's only used for tools.
-				// Wait, ToolExecutor needs it. I'll add it to TaskState or pass it back.
-				// Let's add it to TaskState for simplicity as it's a transient state.
+				// Unsafe tools wait for the initial checkpoint commit.
 				this.dependencies.taskState.initialCheckpointCommitPromise = commitPromise
 
 				commitPromise
@@ -582,12 +578,14 @@ export class LifecycleManager {
 				}
 			}
 
-			if (this.dependencies.commandExecutor.hasActiveBackgroundCommand()) {
-				try {
-					await this.dependencies.commandExecutor.cancelBackgroundCommand()
-				} catch (error) {
-					Logger.error("Failed to cancel background command during task abort", error)
-				}
+			// Terminal acquisition may itself be running a manager-owned CWD command.
+			// Stop both owners before joining either; executor-first draining can deadlock.
+			const terminalResults = await Promise.allSettled([
+				Promise.resolve().then(() => this.dependencies.commandExecutor.dispose()),
+				Promise.resolve().then(() => this.dependencies.terminalManager.disposeAll()),
+			])
+			for (const result of terminalResults) {
+				if (result.status === "rejected") abortFailures.push(result.reason)
 			}
 
 			const hooksEnabled = getHooksEnabledSafe(this.dependencies.getWorkingConfiguration().settings.hooksEnabled)
@@ -612,7 +610,7 @@ export class LifecycleManager {
 						model: getTaskHookModelContext(
 							this.getOperationalApi(),
 							this.dependencies.getRequestRuntime()?.workingConfiguration ??
-								this.dependencies.getWorkingConfiguration(),
+							this.dependencies.getWorkingConfiguration(),
 						),
 					})
 				} catch (error) {
@@ -708,13 +706,17 @@ export class LifecycleManager {
 			}
 		}
 
-		await attempt(() => this.dependencies.terminalManager.disposeAll())
+		await Promise.all([
+			attempt(() => this.dependencies.commandExecutor.dispose()),
+			attempt(() => this.dependencies.terminalManager.disposeAll()),
+		])
 		await attempt(() => this.dependencies.urlContentFetcher.closeBrowser())
 		await attempt(() => this.dependencies.browserSession.dispose())
 		await attempt(() => this.dependencies.commandPermissionController.dispose())
 		await attempt(() => this.dependencies.diracIgnoreController.dispose())
 		await attempt(() => this.dependencies.fileContextTracker.dispose())
-		await attempt(() => this.dependencies.diffViewProvider.revertChanges())
+		// Cancellation releases views, not shared workspace contents (including partial writes).
+		await attempt(() => this.dependencies.diffViewProvider.reset())
 		await attempt(() => AnchorStateManager.reset(this.dependencies.ulid))
 
 		return failures

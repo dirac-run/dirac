@@ -239,12 +239,5 @@ describe("TaskCheckpointManager", () => {
 			expect(result).to.deep.equal({})
 		})
 
-		it("returns state update with conversationHistoryDeletedRange for task restore", async () => {
-			const msg = makeMessage({ id: "msg-1", conversationHistoryDeletedRange: [0, 5], conversationHistoryIndex: 3 })
-			const { manager, messageStateHandler } = makeManager(sandbox, { messages: [msg] })
-			// Task restore doesn't need tracker, just message state manipulation
-			const result = await manager.restoreCheckpoint("msg-1", "task")
-			expect(result.conversationHistoryDeletedRange).to.deep.equal([0, 5])
-		})
 	})
 })

@@ -15,11 +15,12 @@ export class IgnoreFileWatcher {
 	constructor(
 		private readonly cwd: string,
 		private readonly watcherFactory: WatcherFactory,
-	) {}
+	) { }
 
 	async start(onReload: () => Promise<void> | void): Promise<void> {
-		await this.watcherCloser.closeAll()
 		if (this.disposed) return
+		await this.watcherCloser.closeAll()
+		if (this.disposed || this.watcher) return
 		const ignorePath = path.join(this.cwd, ".diracignore")
 		try {
 			const watcher = this.watcherFactory(ignorePath, {

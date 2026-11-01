@@ -2,10 +2,9 @@ import { invalidateArchitectureTask } from "@core/architecture/architectureLifet
 import fs from "fs/promises"
 import path from "path"
 import { HostProvider } from "@/hosts/host-provider"
-import { isTaskletId, TASKLET_ID_PREFIX } from "@/shared/taskletId"
+import { isTaskletId, TASKLET_ID_PREFIX, type TaskStorageAddress } from "@/shared/taskletId"
 
-/** Storage location only, not proof of ownership or permission to access an execution. */
-export type TaskStorageAddress = { kind: "task"; taskId: string } | { kind: "tasklet"; rootTaskId: string; taskletId: string }
+export type { TaskStorageAddress } from "@/shared/taskletId"
 
 function assertTaskDirectoryId(taskId: string): void {
 	if (
