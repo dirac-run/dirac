@@ -1,4 +1,5 @@
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
+import type { TaskRunOutcome } from "@core/task/TaskRunOutcome"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
@@ -9,6 +10,27 @@ import { atomicWriteFile } from "./atomicWrite"
 import { ensureTaskDirectoryExists } from "./directoryEnsurers"
 import { GlobalFileNames } from "./fileNames"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
+
+/** Durable child identity/assignment; an absent outcome means accepted, not completed. */
+export interface TaskletRecord {
+	id: string
+	rootTaskId: string
+	conversationUlid: string
+	title: string
+	prompt: string
+	createdAt: number
+	outcome?: TaskRunOutcome
+}
+
+/** TaskletHost is the sole writer; it serializes acceptance before outcome publication. */
+export async function saveTaskletRecord(record: TaskletRecord): Promise<void> {
+	const directory = await ensureTaskDirectoryExists({
+		kind: "tasklet",
+		rootTaskId: record.rootTaskId,
+		taskletId: record.id,
+	})
+	await atomicWriteFile(path.join(directory, GlobalFileNames.taskletRecord), JSON.stringify(record, null, 2))
+}
 
 // Process-local locks only; address resolution is not ownership authorization or filesystem isolation.
 const taskMetadataLocks = new Map<string, Mutex>()

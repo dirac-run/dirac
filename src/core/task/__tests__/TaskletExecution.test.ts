@@ -4,8 +4,10 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import * as apiModule from "@core/api"
 import type { ApiHandler } from "@core/api"
+import { TaskletHost, type TaskletTaskOptions } from "../TaskletHost"
 import type { ApiStream } from "@core/api/transform/stream"
 import { getSavedApiConversationState, getSavedApiConversationProviderState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
 import { GlobalFileNames } from "@core/storage/fileNames"
@@ -192,6 +194,130 @@ describe("Tasklet real Task execution", function () {
 			return { file, contents }
 		}))
 	}
+
+	async function waitForOutcome(host: TaskletHost, id: string) {
+		const deadline = Date.now() + 5_000
+		while (!host.inspect(id).outcomePersisted) {
+			assert.ok(Date.now() < deadline, "Tasklet did not settle")
+			if (host.inspect(id).settlementError) assert.fail(JSON.stringify(host.inspect(id)))
+			await new Promise((resolve) => setTimeout(resolve, 5))
+		}
+		return host.inspect(id)
+	}
+
+	function createHost() {
+		const params = parameters()
+		const options: TaskletTaskOptions = {
+			controller: params.controller, cwd, stateManager, workingConfiguration: params.workingConfiguration,
+			shellIntegrationTimeout: params.shellIntegrationTimeout, terminalReuseEnabled: params.terminalReuseEnabled,
+			terminalOutputLineLimit: params.terminalOutputLineLimit, defaultTerminalProfile: params.defaultTerminalProfile,
+			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode, toolSelectionPolicy: params.toolSelectionPolicy,
+			pinnedContext: params.pinnedContext,
+		}
+		return new TaskletHost({ taskId: "root", executionProfile: "standalone" }, options)
+	}
+
+	it("interrupts a real Task immediately after acceptance without starting a provider request", async () => {
+		const host = createHost()
+		const record = await host.start({ title: "early stop", prompt: "Do not start this work" })
+		const stopped = await host.interrupt(record.id, "stop during startup")
+		assert.equal(stopped.outcome?.kind, "interrupted", JSON.stringify(stopped))
+		assert.equal(stopped.outcomePersisted, true)
+		assert.equal(requests.length, 0)
+		assert.match(JSON.stringify(await host.readTranscript(record.id)), /Do not start this work/)
+	})
+
+	it("preserves the full failed transcript when final persistence fails after a completion response", async () => {
+		const host = createHost()
+		const originalRetire = Task.prototype.retirePersistence
+		let failedTask: Task | undefined
+		sandbox.stub(Task.prototype, "retirePersistence").callsFake(async function (this: Task) {
+			failedTask = this
+			// Inject an unflushed final history and a disk failure at the actual retirement boundary.
+			this.messageStateHandler.setApiConversationHistory([
+				...this.messageStateHandler.getApiConversationHistory(),
+				{ role: "assistant", content: [{ type: "text", text: "UNFLUSHED_FINAL_DETAIL" }] },
+			])
+			sandbox.stub(this.messageStateHandler, "flushPendingWrites").rejects(new Error("final transcript flush failed"))
+			return originalRetire.call(this)
+		})
+		const record = await host.start({ title: "failure", prompt: "Complete privately" })
+		try {
+			const result = await waitForOutcome(host, record.id)
+			assert.equal(result.outcome?.kind, "failed", JSON.stringify(result))
+			const transcript = await host.readTranscript(record.id)
+			assert.match(JSON.stringify(transcript.conversation), /Private assignment complete/)
+			assert.match(JSON.stringify(transcript.conversation), /UNFLUSHED_FINAL_DETAIL/)
+			const disk = await getSavedApiConversationState({ kind: "tasklet", rootTaskId: "root", taskletId: record.id })
+			assert.doesNotMatch(JSON.stringify(disk.messages), /UNFLUSHED_FINAL_DETAIL/)
+			transcript.conversation.length = 0
+			assert.match(JSON.stringify(await host.readTranscript(record.id)), /UNFLUSHED_FINAL_DETAIL/)
+		} finally {
+			await failedTask?.messageStateHandler.retirePersistence()
+			await host.interrupt(record.id)
+		}
+	})
+
+	it("hosts two real unfinished Tasks, steers privately, interrupts one and retains the other's full result", async () => {
+		// The controlled provider deliberately produces a late chunk after interruption.
+		expectLoggerErrors()
+		const host = createHost()
+		let releaseFirst!: () => void
+		let releaseSecond!: () => void
+		let enteredFirst!: () => void
+		let enteredSecond!: () => void
+		const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+		const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve })
+		const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve })
+		const secondEntered = new Promise<void>((resolve) => { enteredSecond = resolve })
+		let turn = 0
+		nextTurn = async () => {
+			turn++
+			if (turn === 1) { enteredFirst(); await firstGate; return "complete" }
+			if (turn === 2) { enteredSecond(); await secondGate; return "progress" }
+			return "complete"
+		}
+		try {
+			const first = await host.start({ title: "first", prompt: "FIRST_PRIVATE_ASSIGNMENT" })
+			assert.equal(first.outcome, undefined)
+			await firstEntered
+			const second = await host.start({ title: "second", prompt: "SECOND_PRIVATE_ASSIGNMENT" })
+			await secondEntered
+			assert.equal(host.list().filter((record) => !record.outcome).length, 2)
+			const steering = await host.steer(second.id, "SECOND_PRIVATE_GUIDANCE")
+			assert.equal(steering.accepted, true)
+			const liveTranscript = await host.readTranscript(second.id)
+			assert.match(JSON.stringify(liveTranscript.presentation), /SECOND_PRIVATE_GUIDANCE/)
+			assert.doesNotMatch(JSON.stringify(liveTranscript.conversation), /SECOND_PRIVATE_GUIDANCE/)
+			assert.doesNotMatch(JSON.stringify(await host.readTranscript(first.id)), /SECOND_PRIVATE_GUIDANCE/)
+			const interruption = host.interrupt(first.id, "first no longer needed")
+			releaseFirst()
+			const interrupted = await interruption
+			assert.equal(interrupted.outcome?.kind, "interrupted")
+			assert.equal(interrupted.id, first.id)
+			assert.equal(interrupted.outcomePersisted, true)
+			assert.equal(host.inspect(second.id).outcome, undefined)
+			releaseSecond()
+			// Observe independently committed completion, not a respond card or an implicit join on start.
+			await waitForOutcome(host, second.id)
+			const result = host.inspect(second.id)
+			assert.equal(result.outcome?.kind, "completed", JSON.stringify(result))
+			const transcript = await host.readTranscript(second.id)
+			assert.match(JSON.stringify(transcript.conversation), /SECOND_PRIVATE_GUIDANCE/)
+			assert.match(JSON.stringify(transcript.conversation), /Private assignment complete/)
+			assert.doesNotMatch(JSON.stringify(transcript), /FIRST_PRIVATE_ASSIGNMENT/)
+			assert.equal(requests.length, 3)
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: second.id }
+			const record = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"))
+			assert.deepEqual(record.outcome, result.outcome)
+			assert.equal(record.conversationUlid, second.conversationUlid)
+			assert.deepEqual(await fs.readdir(path.join(directory, "storage", "tasks")), ["root"])
+		} finally {
+			releaseFirst()
+			releaseSecond()
+			await Promise.all(host.list().map((record) => host.interrupt(record.id)))
+		}
+	})
 
 	it("runs a real Act assignment privately and persists only root-qualified tasklet artifacts", async () => {
 		const params = parameters()

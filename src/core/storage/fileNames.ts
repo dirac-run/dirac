@@ -30,5 +30,6 @@ export const GlobalFileNames = {
 	windsurfRules: ".windsurfrules",
 	agentsRulesFile: "AGENTS.md",
 	taskMetadata: "task_metadata.json",
+	taskletRecord: "tasklet.json",
 	remoteConfig: (orgId: string) => `remote_config_${orgId}.json`,
 } as const
