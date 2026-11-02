@@ -7,7 +7,6 @@ import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import * as apiModule from "@core/api"
 import type { ApiHandler } from "@core/api"
-import { TaskletHost, type TaskletTaskOptions } from "../TaskletHost"
 import type { ApiStream } from "@core/api/transform/stream"
 import { getSavedApiConversationState, getSavedApiConversationProviderState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
 import { GlobalFileNames } from "@core/storage/fileNames"
@@ -21,7 +20,7 @@ import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import type { Mode } from "@/shared/storage/types"
 import { createTaskletId } from "@/shared/taskletId"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
-import { Task, type TaskParams } from "../index"
+import { Task, TaskletHost, type TaskParams, type TaskletTaskOptions } from "../index"
 import * as taskLocks from "../TaskLockUtils"
 import { SqliteLockManager } from "@core/locks/SqliteLockManager"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
@@ -217,6 +216,127 @@ describe("Tasklet real Task execution", function () {
 		return new TaskletHost({ taskId: "root", executionProfile: "standalone" }, options)
 	}
 
+	it("cancels a running root and its running child without changing ordinary root lock lifetime", async () => {
+		expectLoggerErrors()
+		const params = parameters()
+		const release = sandbox.stub().resolves()
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			releaseTaskLock: release, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		let releaseProviders!: () => void
+		let enteredRoot!: () => void
+		let enteredChild!: () => void
+		const gate = new Promise<void>((resolve) => { releaseProviders = resolve })
+		const rootEntered = new Promise<void>((resolve) => { enteredRoot = resolve })
+		const childEntered = new Promise<void>((resolve) => { enteredChild = resolve })
+		let turns = 0
+		nextTurn = async () => {
+			if (++turns === 1) enteredRoot()
+			else enteredChild()
+			await gate
+			return "complete"
+		}
+		const run = root.startTask("Root assignment")
+		try {
+			await rootEntered
+			const child = await root.taskletHost!.start({ title: "child", prompt: "Child assignment" })
+			await childEntered
+			const abort = root.abortTask()
+			releaseProviders()
+			await abort
+			assert.equal((await run).kind, "cancelled")
+			assert.equal(root.taskletHost!.inspect(child.id).outcome?.kind, "interrupted")
+			assert.equal(root.taskletHost!.inspect(child.id).outcomePersisted, true)
+			sinon.assert.notCalled(release)
+			await root.retirePersistence()
+			sinon.assert.calledOnce(release)
+		} finally {
+			releaseProviders()
+			await root.abortTask()
+			await run
+			await root.retirePersistence()
+		}
+	})
+
+	it("owns real children through root abort, final record persistence, lock release and deletion", async () => {
+		expectLoggerErrors() // Controlled providers deliberately return late chunks after abort.
+		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub
+		acquire.restore()
+		const rootDirectory = getTaskDirectoryPath("root")
+		const releaseLock = await taskLocks.acquireTaskLock(rootDirectory)
+		const release = sandbox.spy(releaseLock)
+		const params = parameters()
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			releaseTaskLock: release, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		const host = root.taskletHost!
+		assert.ok(host)
+		let releaseProviders!: () => void
+		let enteredBoth!: () => void
+		const providers = new Promise<void>((resolve) => { releaseProviders = resolve })
+		const entered = new Promise<void>((resolve) => { enteredBoth = resolve })
+		let turns = 0
+		nextTurn = async () => {
+			if (++turns === 2) enteredBoth()
+			await providers
+			return "complete"
+		}
+		let releaseRecord!: () => void
+		let writingRecord!: () => void
+		const recordGate = new Promise<void>((resolve) => { releaseRecord = resolve })
+		const recordEntered = new Promise<void>((resolve) => { writingRecord = resolve })
+		const storage = await import("@core/storage/taskStorage")
+		const originalSave = storage.saveTaskletRecord
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (record.outcome) { writingRecord(); await recordGate }
+			await originalSave(record)
+		})
+		let abort: Promise<void> | undefined
+		let retirement: Promise<void> | undefined
+		try {
+			const first = await host.start({ title: "first", prompt: "first owned child" })
+			const second = await host.start({ title: "second", prompt: "second owned child" })
+			await entered
+			const completion = await (root as any).commitAttemptCompletion("too soon")
+			assert.equal(completion.committed, false)
+			assert.match(completion.error, new RegExp(first.id))
+			assert.match(completion.error, new RegExp(second.id))
+			assert.equal(host.listActive().length, 2)
+			abort = root.abortTask()
+			retirement = root.retirePersistence()
+			await assert.rejects(taskLocks.acquireTaskLock(rootDirectory), /another Dirac instance/)
+			releaseProviders()
+			await recordEntered
+			sinon.assert.notCalled(release)
+			assert.equal(host.list().filter((record) => record.outcomePersisted).length, 0)
+			releaseRecord()
+			await Promise.all([abort, retirement])
+			sinon.assert.calledOnce(release)
+			assert.ok(host.list().every((record) => record.outcomePersisted && record.outcome?.kind === "interrupted"))
+			await assert.rejects(host.start({ title: "late", prompt: "must not launch" }), /shutting down/)
+			const writesAtDeletion = save.callCount
+			const deletionLock = await taskLocks.acquireTaskLock(rootDirectory)
+			try {
+				const { deleteTaskDirectory } = await import("@core/storage/taskDirectory")
+				await deleteTaskDirectory("root")
+			} finally { await deletionLock() }
+			await new Promise((resolve) => setTimeout(resolve, 30))
+			assert.equal(save.callCount, writesAtDeletion)
+			await assert.rejects(fs.stat(rootDirectory), { code: "ENOENT" })
+		} finally {
+			releaseProviders()
+			releaseRecord()
+			await abort
+			await retirement
+			await root.abortTask()
+			await root.retirePersistence()
+		}
+	})
+
 	it("interrupts a real Task immediately after acceptance without starting a provider request", async () => {
 		const host = createHost()
 		const record = await host.start({ title: "early stop", prompt: "Do not start this work" })
@@ -227,18 +347,70 @@ describe("Tasklet real Task execution", function () {
 		assert.match(JSON.stringify(await host.readTranscript(record.id)), /Do not start this work/)
 	})
 
+	it("keeps root ownership on a child transcript-flush failure while retiring writers and settling siblings", async () => {
+		expectLoggerErrors()
+		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub
+		acquire.restore()
+		const rootDirectory = getTaskDirectoryPath("root")
+		const releaseLock = await taskLocks.acquireTaskLock(rootDirectory)
+		const release = sandbox.spy(releaseLock)
+		const params = parameters()
+		const root = new Task({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			releaseTaskLock: release, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		const host = root.taskletHost!
+		nextTurn = async () => "complete"
+		const originalRetire = Task.prototype.retirePersistence
+		let failedTask: Task | undefined
+		let writerRetirement: sinon.SinonSpy | undefined
+		sandbox.stub(Task.prototype, "retirePersistence").callsFake(async function (this: Task) {
+			if (this.executionProfile === "tasklet" && !failedTask) {
+				failedTask = this
+				writerRetirement = sandbox.spy(this.messageStateHandler, "retirePersistence")
+				sandbox.stub(this.messageStateHandler, "flushPendingWrites").rejects(new Error("child transcript disk failure"))
+			}
+			return originalRetire.call(this)
+		})
+		try {
+			const first = await host.start({ title: "failure", prompt: "Complete privately" })
+			await waitForOutcome(host, first.id)
+			const second = await host.start({ title: "sibling", prompt: "Sibling completes independently" })
+			await waitForOutcome(host, second.id)
+			assert.equal(host.inspect(first.id).outcome?.kind, "failed")
+			assert.match(host.inspect(first.id).settlementError!.message, /child transcript disk failure/)
+			assert.equal(host.inspect(second.id).outcome?.kind, "completed")
+			assert.equal(host.inspect(second.id).outcomePersisted, true)
+			await assert.rejects(root.abortTask(), /Tasklet shutdown failed/)
+			await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
+			sinon.assert.calledOnce(writerRetirement!)
+			sinon.assert.notCalled(release)
+			await assert.rejects(taskLocks.acquireTaskLock(rootDirectory), /another Dirac instance/)
+			await fs.access(rootDirectory)
+		} finally {
+			await assert.rejects(root.abortTask(), /Tasklet shutdown failed/)
+			await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
+			// Test-only owner release: production deliberately retains the failed ownership.
+			await releaseLock()
+		}
+	})
+
 	it("preserves the full failed transcript when final persistence fails after a completion response", async () => {
+		expectLoggerErrors()
 		const host = createHost()
 		const originalRetire = Task.prototype.retirePersistence
 		let failedTask: Task | undefined
 		sandbox.stub(Task.prototype, "retirePersistence").callsFake(async function (this: Task) {
-			failedTask = this
-			// Inject an unflushed final history and a disk failure at the actual retirement boundary.
-			this.messageStateHandler.setApiConversationHistory([
-				...this.messageStateHandler.getApiConversationHistory(),
-				{ role: "assistant", content: [{ type: "text", text: "UNFLUSHED_FINAL_DETAIL" }] },
-			])
-			sandbox.stub(this.messageStateHandler, "flushPendingWrites").rejects(new Error("final transcript flush failed"))
+			if (!failedTask) {
+				failedTask = this
+				// Inject unflushed history and a disk failure at the actual retirement boundary.
+				this.messageStateHandler.setApiConversationHistory([
+					...this.messageStateHandler.getApiConversationHistory(),
+					{ role: "assistant", content: [{ type: "text", text: "UNFLUSHED_FINAL_DETAIL" }] },
+				])
+				sandbox.stub(this.messageStateHandler, "flushPendingWrites").rejects(new Error("final transcript flush failed"))
+			}
 			return originalRetire.call(this)
 		})
 		const record = await host.start({ title: "failure", prompt: "Complete privately" })
@@ -253,8 +425,8 @@ describe("Tasklet real Task execution", function () {
 			transcript.conversation.length = 0
 			assert.match(JSON.stringify(await host.readTranscript(record.id)), /UNFLUSHED_FINAL_DETAIL/)
 		} finally {
-			await failedTask?.messageStateHandler.retirePersistence()
-			await host.interrupt(record.id)
+			await assert.rejects(host.interrupt(record.id), /interruption failed/)
+			await assert.rejects(host.shutdown(), /shutdown failed/)
 		}
 	})
 

@@ -60,7 +60,6 @@ export interface ITaskControllerDependencies {
 }
 
 const HISTORICAL_TASK_RESTORE_TIMEOUT_MS = 30_000
-const HISTORICAL_TASK_CLEANUP_TIMEOUT_MS = 5_000
 export class TaskController {
 	private _task?: Task
 	private _workspaceManager?: WorkspaceRootManager
@@ -196,18 +195,10 @@ export class TaskController {
 			}
 		} catch (error) {
 			if (this._task === task) {
-				const abort = task.abortTask()
-				void abort.catch((abortError) =>
-					Logger.error(`Failed to abort task ${task.taskId} after history restoration failed`, abortError),
-				)
 				try {
-					await pTimeout(this.clearTask(), {
-						milliseconds: HISTORICAL_TASK_CLEANUP_TIMEOUT_MS,
-						message: `Timed out while clearing task ${task.taskId} after history restoration failed`,
-					})
+					await this.clearTask()
 				} catch (cleanupError) {
-					Logger.error(`Failed to clear task ${task.taskId} after history restoration failed`, cleanupError)
-					if (this._task === task) this._task = undefined
+					throw new AggregateError([error, cleanupError], `Task ${task.taskId} history restoration and cleanup failed`)
 				}
 			}
 			throw error
@@ -433,20 +424,24 @@ export class TaskController {
 	async clearTask() {
 		const task = this._task
 		if (task) {
-			await this.deps.clearTaskSettings()
-			let abortFailure: unknown
+			const failures: unknown[] = []
+			try {
+				await this.deps.clearTaskSettings()
+			} catch (error) {
+				failures.push(error)
+			}
 			try {
 				await task.abortTask()
 			} catch (error) {
-				abortFailure = error
+				failures.push(error)
 			}
 			try {
 				await task.retirePersistence()
 			} catch (error) {
-				if (abortFailure) throw new AggregateError([abortFailure, error], "Task abort and persistence retirement failed")
-				throw error
+				failures.push(error)
 			}
-			if (abortFailure) throw abortFailure
+			if (failures.length === 1) throw failures[0]
+			if (failures.length > 1) throw new AggregateError(failures, "Task cleanup failed")
 		}
 		if (this._task === task) {
 			this._task = undefined

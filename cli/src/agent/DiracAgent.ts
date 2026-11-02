@@ -38,7 +38,8 @@ import { CommandPermissionController } from "@/core/permissions/CommandPermissio
 import type { ToolPermissionRule } from "@/core/permissions/types.js"
 import { getSavedDiracMessages, setRuntimeHooksDir } from "@/core/storage/disk"
 import { StateManager } from "@/core/storage/StateManager"
-import { deleteTaskDirectory } from "@/core/storage/taskDirectory"
+import { deleteTaskDirectory, getTaskDirectoryPath } from "@/core/storage/taskDirectory"
+import { acquireTaskLock } from "@/core/task/TaskLockUtils"
 import { withTaskHistoryInventoryLock } from "@/core/storage/taskHistory"
 import { AuthHandler } from "@/hosts/external/AuthHandler.js"
 import { ExternalCommentReviewController } from "@/hosts/external/ExternalCommentReviewController.js"
@@ -247,19 +248,25 @@ export class DiracAgent implements acp.Agent {
 			await this.releaseSessionResources(sessionId)
 
 			await withTaskHistoryInventoryLock(async () => {
-				await this.releaseOwnedSessionWorktree(sessionId)
-
 				const taskIds = getTaskIdsForSession(sessionId)
-				const stateManager = StateManager.get()
-				for (const taskId of taskIds) {
-					await deleteTaskDirectory(taskId)
+				const releases: Array<() => Promise<void>> = []
+				try {
+					// Acquire the complete set before removing storage or a shared worktree.
+					for (const taskId of taskIds) releases.push(await acquireTaskLock(getTaskDirectoryPath(taskId)))
+					await this.releaseOwnedSessionWorktree(sessionId)
+					const stateManager = StateManager.get()
+					for (const taskId of taskIds) {
+						await deleteTaskDirectory(taskId)
+					}
+					stateManager.removeTaskHistoryItems(taskIds)
+					await stateManager.flushPendingState()
+					deleteTasksForSession(sessionId)
+					deleteSessionUpdates(sessionId)
+					deletePinnedSessionMessages(sessionId)
+					deleteSessionRuntimeConfig(this.ctx.DATA_DIR, sessionId)
+				} finally {
+					await Promise.all(releases.map((release) => release()))
 				}
-				stateManager.removeTaskHistoryItems(taskIds)
-				await stateManager.flushPendingState()
-				deleteTasksForSession(sessionId)
-				deleteSessionUpdates(sessionId)
-				deletePinnedSessionMessages(sessionId)
-				deleteSessionRuntimeConfig(this.ctx.DATA_DIR, sessionId)
 			})
 		})
 	}

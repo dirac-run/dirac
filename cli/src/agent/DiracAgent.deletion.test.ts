@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ArchitectureStorage } from "@/core/architecture/ArchitectureStorage"
 import { serializeArchitectureWrite } from "@/core/architecture/architectureOperations"
 import * as atomicWrite from "@/core/storage/atomicWrite"
+import { acquireTaskLock } from "@/core/task/TaskLockUtils"
 import { HostProvider } from "@/hosts/host-provider"
 import { DiracAgent } from "./DiracAgent.js"
 
@@ -236,5 +237,51 @@ describe("DiracAgent session deletion", () => {
 		await expect(storage.upsertDiagram("cli", diagram)).resolves.toEqual({ name: "cli", version: 2 })
 		expect(mocks.removeTaskHistoryItems).not.toHaveBeenCalled()
 		expectSessionMetadataRetained()
+	})
+
+	it("acquires all task locks before deleting any session storage or releasing its worktree", async () => {
+		mocks.taskHistory.push({ id: "first", ulid: "session" }, { id: "locked", ulid: "session" })
+		await createStorage("first")
+		await createStorage("locked")
+		const nested = path.join(taskDirectory("locked"), "tasklets", "child")
+		await fs.mkdir(nested, { recursive: true })
+		await fs.writeFile(path.join(nested, "tasklet.json"), "owned")
+		const release = await acquireTaskLock(taskDirectory("locked"))
+		try {
+			await expect(agent.deleteSession({ sessionId: "session" })).rejects.toThrow("another Dirac instance")
+			expect(await fs.readdir(path.join(root, "tasks"))).toEqual(["first", "locked", "locked.lock"])
+			expect(await fs.readFile(path.join(nested, "tasklet.json"), "utf8")).toBe("owned")
+			expect(mocks.getSessionWorktree).not.toHaveBeenCalled()
+			expect(mocks.removeTaskHistoryItems).not.toHaveBeenCalled()
+			expectSessionMetadataRetained()
+			// Failure to acquire a later lock must release every earlier acquisition.
+			const releaseFirst = await acquireTaskLock(taskDirectory("first"))
+			await releaseFirst()
+		} finally {
+			await release()
+		}
+		await expect(agent.deleteSession({ sessionId: "session" })).resolves.toEqual({})
+		expect(await fs.readdir(path.join(root, "tasks"))).toEqual([])
+	})
+
+	it("waits for local session shutdown before deleting contained tasklet storage", async () => {
+		mocks.taskHistory.push({ id: "root", ulid: "session" })
+		const nested = path.join(taskDirectory("root"), "tasklets", "child")
+		await fs.mkdir(nested, { recursive: true })
+		const shutdown = deferred()
+		const started = deferred()
+		vi.spyOn(agent as any, "releaseSessionResources").mockImplementation(async () => {
+			started.resolve()
+			await shutdown.promise
+			await fs.writeFile(path.join(nested, "tasklet.json"), "settled")
+		})
+		const deleting = agent.deleteSession({ sessionId: "session" })
+		await started.promise
+		expect((await fs.stat(nested)).isDirectory()).toBe(true)
+		expect(mocks.removeTaskHistoryItems).not.toHaveBeenCalled()
+		shutdown.resolve()
+		await expect(deleting).resolves.toEqual({})
+		await expect(fs.stat(taskDirectory("root"))).rejects.toMatchObject({ code: "ENOENT" })
+		expectSessionMetadataDeleted("session")
 	})
 })

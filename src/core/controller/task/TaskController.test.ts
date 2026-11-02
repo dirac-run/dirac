@@ -178,6 +178,57 @@ describe("TaskController task lifecycle", () => {
 		finishRun()
 		await controller.taskRunPromise
 	})
+
+	it("retains a failed historical owner until shutdown settles beyond the former cleanup timeout", async () => {
+		const clock = sinon.useFakeTimers()
+		const failure = new Error("unreadable transcript")
+		sinon.stub(Logger, "error")
+		let finishAbort!: () => void
+		const abort = new Promise<void>((resolve) => {
+			finishAbort = resolve
+		})
+		const controller = new (TaskController as any)({ clearTaskSettings: sinon.stub().resolves() }) as TaskController
+		const task = {
+			taskId: "slow-cleanup",
+			resumeTaskFromHistory: sinon.stub().rejects(failure),
+			abortTask: sinon.stub().returns(abort),
+			retirePersistence: sinon.stub().resolves(),
+		} as any
+		controller.task = task
+		let settled = false
+		const start = (controller as any).startHistoricalTaskAndWaitForRestore(task).finally(() => {
+			settled = true
+		})
+		const rejected = assert.rejects(start, (error: unknown) => error === failure)
+		await clock.tickAsync(6_000)
+		assert.equal(settled, false)
+		assert.equal(controller.task, task)
+		sinon.assert.notCalled(task.retirePersistence)
+		finishAbort()
+		await rejected
+		sinon.assert.calledOnce(task.abortTask)
+		sinon.assert.calledOnce(task.retirePersistence)
+		assert.equal(controller.task, undefined)
+	})
+
+	it("retains the historical owner and reports both restoration and cleanup failures", async () => {
+		const failure = new Error("unreadable transcript")
+		const cleanupFailure = new Error("child persistence failed")
+		sinon.stub(Logger, "error")
+		const controller = new (TaskController as any)({ clearTaskSettings: sinon.stub().resolves() }) as TaskController
+		const task = {
+			taskId: "failed-cleanup",
+			resumeTaskFromHistory: sinon.stub().rejects(failure),
+			abortTask: sinon.stub().resolves(),
+			retirePersistence: sinon.stub().rejects(cleanupFailure),
+		} as any
+		controller.task = task
+		await assert.rejects((controller as any).startHistoricalTaskAndWaitForRestore(task), (error: AggregateError) => {
+			assert.deepEqual(error.errors, [failure, cleanupFailure])
+			return true
+		})
+		assert.equal(controller.task, task)
+	})
 })
 
 describe("TaskController task isolation", () => {
@@ -423,6 +474,38 @@ describe("TaskController task isolation", () => {
 		assert.equal(initTask.firstCall.args[3], historyItem)
 		assert.equal(initTask.firstCall.args[5], "conversation")
 		sinon.assert.calledOnce(postStateToWebview)
+	})
+
+	it("attempts abort and persistence retirement even when settings cleanup fails", async () => {
+		const failure = new Error("settings failed")
+		const task = { abortTask: sinon.stub().resolves(), retirePersistence: sinon.stub().resolves() } as any
+		const controller = new (TaskController as any)({
+			task,
+			clearTaskSettings: sinon.stub().rejects(failure),
+		}) as TaskController
+		await assert.rejects(controller.clearTask(), (error: unknown) => error === failure)
+		sinon.assert.callOrder(task.abortTask, task.retirePersistence)
+		sinon.assert.calledOnce(task.abortTask)
+		sinon.assert.calledOnce(task.retirePersistence)
+		assert.equal(controller.task, task)
+	})
+
+	it("reports every cleanup failure after attempting persistence retirement", async () => {
+		const failures = [new Error("settings failed"), new Error("abort failed"), new Error("persistence failed")]
+		const task = {
+			abortTask: sinon.stub().rejects(failures[1]),
+			retirePersistence: sinon.stub().rejects(failures[2]),
+		} as any
+		const controller = new (TaskController as any)({
+			task,
+			clearTaskSettings: sinon.stub().rejects(failures[0]),
+		}) as TaskController
+		await assert.rejects(controller.clearTask(), (error: AggregateError) => {
+			assert.deepEqual(error.errors, failures)
+			return true
+		})
+		sinon.assert.callOrder(task.abortTask, task.retirePersistence)
+		assert.equal(controller.task, task)
 	})
 })
 describe("TaskController follow-up readiness", () => {

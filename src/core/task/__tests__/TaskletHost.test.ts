@@ -12,7 +12,7 @@ import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import * as storage from "@core/storage/taskStorage"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import * as taskModule from "../index"
-import { TaskletHost, type TaskletTaskOptions } from "../TaskletHost"
+import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 
 function deferred<T>() {
@@ -62,7 +62,11 @@ describe("TaskletHost asynchronous ownership", () => {
 			children.push(child)
 			return child.task
 		}) as any)
-		host = new TaskletHost({ taskId: "root", executionProfile: "standalone" }, {} as TaskletTaskOptions)
+		host = new TaskletHost(
+			{ taskId: "root", executionProfile: "standalone" },
+			{} as TaskletTaskOptions,
+			constructed as unknown as typeof taskModule.Task,
+		)
 	})
 
 	afterEach(async () => {
@@ -229,6 +233,170 @@ describe("TaskletHost asynchronous ownership", () => {
 		children[0].outcome.resolve(completed)
 		await rejection
 		assert.deepEqual((await saved(record.id)).outcome, completed)
+	})
+
+	it("lists running, input-waiting and acceptance-pending children without joining or cancelling them", async () => {
+		const running = await host.start({ title: "running", prompt: "work" })
+		const waiting = await host.start({ title: "waiting", prompt: "ask" })
+		children[1].task.stateView.status = TaskStatus.AWAITING_USER_INPUT
+		const releaseAcceptance = deferred<void>()
+		const originalSave = storage.saveTaskletRecord
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (!record.outcome) await releaseAcceptance.promise
+			return originalSave(record)
+		})
+		const starting = host.start({ title: "starting", prompt: "later" })
+		try {
+			const active = host.listActive()
+			assert.equal(active.length, 3)
+			assert.ok(active.some(({ id, title }) => id === running.id && title === "running"))
+			assert.ok(active.some(({ id, title }) => id === waiting.id && title === "waiting"))
+			assert.ok(active.some(({ title }) => title === "starting"))
+			assert.equal(host.list().length, 2)
+			active[0].title = "changed snapshot"
+			assert.ok(host.listActive().some(({ title }) => title === "running"))
+			for (const child of children) sinon.assert.notCalled(child.task.abortTask)
+		} finally {
+			releaseAcceptance.resolve()
+			await starting
+		}
+		await host.interrupt(running.id)
+		assert.equal(host.listActive().some(({ id }) => id === running.id), false)
+		assert.equal(host.listActive().length, 2)
+	})
+
+	it("joins an in-flight acceptance write at shutdown without constructing late work", async () => {
+		const releaseAcceptance = deferred<void>()
+		const originalSave = storage.saveTaskletRecord
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (!record.outcome) await releaseAcceptance.promise
+			return originalSave(record)
+		})
+		const starting = host.start({ title: "starting", prompt: "work" })
+		let settled = false
+		const shutdown = host.shutdown().then(() => { settled = true })
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+			sinon.assert.notCalled(constructed)
+			await assert.rejects(host.start({ title: "too late", prompt: "work" }), /shutting down/)
+		} finally {
+			releaseAcceptance.resolve()
+		}
+		const record = await starting
+		await shutdown
+		sinon.assert.notCalled(constructed)
+		assert.equal(record.outcome?.kind, "interrupted")
+		assert.deepEqual(await saved(record.id), record)
+		assert.equal(host.inspect(record.id).outcomePersisted, true)
+		assert.deepEqual(host.listActive(), [])
+	})
+
+	it("does not settle shutdown before a completed child's final record write finishes", async () => {
+		const record = await host.start({ title: "finishing", prompt: "work" })
+		const writeEntered = deferred<void>()
+		const releaseWrite = deferred<void>()
+		const originalSave = storage.saveTaskletRecord
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (value) => {
+			writeEntered.resolve()
+			await releaseWrite.promise
+			return originalSave(value)
+		})
+		children[0].outcome.resolve(completed)
+		await writeEntered.promise
+		let settled = false
+		const shutdown = host.shutdown().then(() => { settled = true })
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+			assert.equal(host.inspect(record.id).outcomePersisted, false)
+			assert.equal((await saved(record.id)).outcome, undefined)
+			sinon.assert.notCalled(children[0].task.abortTask)
+		} finally {
+			releaseWrite.resolve()
+			await shutdown
+		}
+		assert.deepEqual((await saved(record.id)).outcome, completed)
+		assert.equal(host.inspect(record.id).outcomePersisted, true)
+	})
+
+	it("shares one shutdown promise, interrupts every live child once and permanently closes admission", async () => {
+		const first = await host.start({ title: "first", prompt: "work" })
+		const second = await host.start({ title: "second", prompt: "work" })
+		children[1].task.stateView.status = TaskStatus.AWAITING_USER_INPUT
+		const shutdown = host.shutdown()
+		assert.equal(host.shutdown(), shutdown)
+		await shutdown
+		assert.equal(host.shutdown(), shutdown)
+		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
+		sinon.assert.calledTwice(constructed)
+		for (const child of children) {
+			sinon.assert.calledOnceWithExactly(child.task.abortTask, { kind: "interrupted", reason: "Root Task closed" })
+		}
+		for (const record of [first, second]) {
+			assert.equal((await saved(record.id)).outcome?.kind, "interrupted")
+			assert.equal(host.inspect(record.id).outcomePersisted, true)
+		}
+		assert.deepEqual(host.listActive(), [])
+	})
+
+	it("reports cancellation failure only after the failed child's run and sibling cleanup settle", async () => {
+		const first = await host.start({ title: "first", prompt: "work" })
+		const second = await host.start({ title: "second", prompt: "work" })
+		children[0].task.abortTask.rejects(new Error("cancel failed"))
+		let settled = false
+		const shutdown = host.shutdown()
+		const rejection = assert.rejects(shutdown, /Tasklet shutdown failed/).then(() => { settled = true })
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+			sinon.assert.calledOnce(children[1].task.abortTask)
+		} finally {
+			children[0].outcome.resolve(completed)
+			await rejection
+		}
+		assert.equal(host.shutdown(), shutdown)
+		assert.deepEqual((await saved(first.id)).outcome, completed)
+		assert.equal((await saved(second.id)).outcome?.kind, "interrupted")
+		assert.equal(host.inspect(second.id).outcomePersisted, true)
+	})
+
+	it("surfaces outcome-write failure without skipping sibling shutdown and persistence", async () => {
+		expectLoggerErrors()
+		const first = await host.start({ title: "first", prompt: "work" })
+		const second = await host.start({ title: "second", prompt: "work" })
+		const originalSave = storage.saveTaskletRecord
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (record.id === first.id) throw new Error("final record unavailable")
+			return originalSave(record)
+		})
+		await assert.rejects(host.shutdown(), /Tasklet shutdown failed/)
+		for (const child of children) sinon.assert.calledOnce(child.task.abortTask)
+		assert.equal(host.inspect(first.id).outcomePersisted, false)
+		assert.match(host.inspect(first.id).settlementError!.message, /final record unavailable/)
+		assert.equal((await saved(second.id)).outcome?.kind, "interrupted")
+		assert.equal(host.inspect(second.id).outcomePersisted, true)
+	})
+
+	it("surfaces a pending initial-write failure through both start and shutdown", async () => {
+		const acceptance = deferred<void>()
+		sandbox.stub(storage, "saveTaskletRecord").returns(acceptance.promise)
+		const starting = host.start({ title: "starting", prompt: "work" })
+		const startRejected = assert.rejects(starting, /acceptance failed/)
+		const shutdown = host.shutdown()
+		const shutdownRejected = assert.rejects(shutdown, (error: unknown) => {
+			assert.ok(error instanceof AggregateError)
+			assert.match(error.message, /Tasklet shutdown failed/)
+			assert.match(error.errors[0].message, /acceptance failed/)
+			return true
+		})
+		acceptance.reject(new Error("acceptance failed"))
+		await Promise.all([startRejected, shutdownRejected])
+		sinon.assert.notCalled(constructed)
+		assert.deepEqual(host.list(), [])
+		assert.deepEqual(host.listActive(), [])
+		assert.equal(host.shutdown(), shutdown)
+		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
 	})
 
 	it("rejects recursive/Goal ownership, invalid roots and empty assignments", async () => {

@@ -1,3 +1,6 @@
+import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
+import { saveTaskletRecord, type TaskletRecord } from "@core/storage/taskStorage"
+import { createTaskletId } from "@shared/taskletId"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
@@ -32,7 +35,7 @@ import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import { telemetryService } from "@services/telemetry"
 import { type ApiConfiguration } from "@shared/api"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
-import { TaskStatus } from "@shared/ExtensionMessage"
+import { type DiracMessage, TaskStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import { DiracContent, DiracStorageMessage, DiracTextContentBlock, DiracToolResponseContent } from "@shared/messages/content"
 import { ShowMessageType } from "@shared/proto/index.host"
@@ -81,7 +84,7 @@ import { type TaskPromptArtifactsContext, writePromptMetadataArtifacts } from ".
 import { type TaskRequestBuilderContext } from "./TaskRequestBuilder"
 import { recursivelyMakeDiracRequests, type TaskRequestLoopContext } from "./TaskRequestLoop"
 import { handleApiRequestError, persistApiStopReason, type TaskRequestOutcomeContext } from "./TaskRequestOutcome"
-import { serializeTaskError, type TaskCancellationIntent, type TaskRunOutcome } from "./TaskRunOutcome"
+import { serializeTaskError, type SerializedTaskError, type TaskCancellationIntent, type TaskRunOutcome } from "./TaskRunOutcome"
 import { type ReadonlyTaskState, TaskState } from "./TaskState"
 import {
 	appendQueuedSteeringToNextApiRequest,
@@ -177,6 +180,7 @@ export class Task {
 	private readonly conversationPersistenceHooks?: TaskConversationPersistenceHooks
 	private readonly releaseTaskLock?: () => Promise<void>
 	private persistenceRetirementPromise?: Promise<void>
+	readonly taskletHost?: TaskletHost
 
 	// ONE mutex for ALL state modifications to prevent race conditions
 	private stateMutex = new Mutex()
@@ -199,6 +203,11 @@ export class Task {
 				this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup",
 			postStateToWebview: () => this.postStateToWebview(),
 			withStateLock: (fn) => this.withStateLock(fn),
+			getCompletionBlocker: () => {
+				const active = this.taskletHost?.listActive() ?? []
+				if (!active.length) return undefined
+				return `Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before completing.`
+			},
 		}
 	}
 
@@ -926,6 +935,29 @@ export class Task {
 			toolExecutor: this.toolExecutor,
 			assistantStreamManager: this.assistantStreamManager,
 		})
+
+		if (this.executionProfile === "standalone") {
+			const root = this
+			this.taskletHost = new TaskletHost(this, {
+				controller,
+				cwd,
+				stateManager,
+				workspaceManager,
+				shellIntegrationTimeout,
+				terminalReuseEnabled,
+				terminalOutputLineLimit,
+				defaultTerminalProfile,
+				vscodeTerminalExecutionMode,
+				get workingConfiguration() {
+					return root.getWorkingConfiguration()
+				},
+				get pinnedContext() {
+					return root.taskState.pinnedContext
+				},
+				toolSelectionPolicy: params.toolSelectionPolicy,
+				toolEnvironmentFactory: params.toolEnvironmentFactory,
+			})
+		}
 	}
 
 	/** Read-only task-owned configuration. The value is detached and deeply frozen. */
@@ -1248,8 +1280,16 @@ export class Task {
 
 	private async settleTaskRun(candidate: TaskRunOutcome): Promise<TaskRunOutcome> {
 		let outcome = candidate
-		if (this.executionProfile !== "standalone") {
-			const failures: unknown[] = []
+		const failures: unknown[] = []
+		if (this.executionProfile === "standalone") {
+			// Ordinary completion waits for follow-up inside the run. Reaching this boundary
+			// means the run actually closed, including provider/startup failures.
+			try {
+				await this.taskletHost?.shutdown()
+			} catch (error) {
+				failures.push(error)
+			}
+		} else {
 			try {
 				await this.lifecycleManager.finalizeTaskRun()
 			} catch (error) {
@@ -1260,15 +1300,15 @@ export class Task {
 			} catch (error) {
 				failures.push(error)
 			}
-			if (failures.length > 0) {
-				if (candidate.kind === "failed") {
-					failures.unshift(new Error(`${candidate.error.name}: ${candidate.error.message}`))
-				}
-				outcome = {
-					kind: "failed",
-					error: serializeTaskError(new AggregateError(failures, "Task termination failed")),
-					failedAt: Date.now(),
-				}
+		}
+		if (failures.length > 0) {
+			if (candidate.kind === "failed") {
+				failures.unshift(new Error(`${candidate.error.name}: ${candidate.error.message}`))
+			}
+			outcome = {
+				kind: "failed",
+				error: serializeTaskError(new AggregateError(failures, "Task termination failed")),
+				failedAt: Date.now(),
 			}
 		}
 
@@ -1289,7 +1329,11 @@ export class Task {
 			this.taskState.status = TaskStatus.CANCELLING
 		}
 
-		return this.lifecycleManager.abortTask()
+		// Stop both owners before joining either; a child failure cannot skip root cleanup.
+		const results = await Promise.allSettled([this.taskletHost?.shutdown(), this.lifecycleManager.abortTask()])
+		const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason)
+		if (failures.length === 1) throw failures[0]
+		if (failures.length) throw new AggregateError(failures, "Root and tasklet abort failed")
 	}
 
 	/** Retires this writer before releasing exclusive ownership, once per task instance. */
@@ -1299,8 +1343,26 @@ export class Task {
 	}
 
 	private async retirePersistenceAndReleaseLock(): Promise<void> {
-		await this.messageStateHandler.flushPendingWrites()
-		await this.messageStateHandler.retirePersistence()
+		const failures: unknown[] = []
+		try {
+			await this.taskletHost?.shutdown()
+		} catch (error) {
+			failures.push(error)
+		}
+		try {
+			await this.messageStateHandler.flushPendingWrites()
+		} catch (error) {
+			failures.push(error)
+		}
+		// Even a failed final flush must close writer admission; report the lost persistence.
+		try {
+			await this.messageStateHandler.retirePersistence()
+		} catch (error) {
+			failures.push(error)
+		}
+		// A failed shutdown/retirement is not permission to delete the owned tree.
+		if (failures.length === 1) throw failures[0]
+		if (failures.length) throw new AggregateError(failures, "Root and tasklet persistence retirement failed")
 		await this.releaseTaskLock?.()
 	}
 
@@ -1416,4 +1478,297 @@ export class Task {
 	private async determineContextCompaction(previousApiReqIndex: number): Promise<boolean> {
 		return this.apiConversationManager.determineContextCompaction(previousApiReqIndex)
 	}
+}
+
+/** Construction data only; foreground callbacks and root lock ownership cannot be inherited. */
+export type TaskletTaskOptions = Pick<
+	TaskParams,
+	| "controller"
+	| "cwd"
+	| "stateManager"
+	| "workingConfiguration"
+	| "workspaceManager"
+	| "shellIntegrationTimeout"
+	| "terminalReuseEnabled"
+	| "terminalOutputLineLimit"
+	| "defaultTerminalProfile"
+	| "vscodeTerminalExecutionMode"
+	| "pinnedContext"
+	| "toolSelectionPolicy"
+	| "toolEnvironmentFactory"
+>
+
+export interface TaskletInspection extends TaskletRecord {
+	/** Live engine status is informational, never evidence of a committed outcome. */
+	executionStatus?: TaskStatus
+	backgroundCommandRunning: boolean
+	outcomePersisted: boolean
+	settlementError?: SerializedTaskError
+}
+
+interface TaskletTranscript {
+	conversation: DiracStorageMessage[]
+	presentation: DiracMessage[]
+}
+
+interface OwnedTasklet {
+	record: TaskletRecord
+	task?: Task
+	failedTranscript?: TaskletTranscript
+	settlement?: Promise<void>
+	backgroundCommandRunning: boolean
+	outcomePersisted: boolean
+	settlementError?: SerializedTaskError
+}
+
+/**
+ * One ordinary root Task's in-memory child owner, retained through shutdown.
+ * Co-located with Task because roots construct hosts and hosts construct contained Tasks;
+ * separate classes retain separate ownership without a circular module dependency.
+ * No interaction decisions, parent-context delivery or reconstruction live here yet.
+ */
+export class TaskletHost {
+	private readonly children = new Map<string, OwnedTasklet>()
+	private readonly rootTaskId: string
+	private readonly starting = new Map<string, { record: TaskletRecord; acceptance: Promise<TaskletRecord> }>()
+	private closing = false
+	private shutdownPromise?: Promise<void>
+
+	constructor(
+		owner: Pick<Task, "taskId" | "executionProfile">,
+		private readonly options: TaskletTaskOptions,
+		// Constructor substitution is only a controlled-execution test seam, not a factory service.
+		private readonly TaskConstructor: typeof Task = Task,
+	) {
+		if (owner.executionProfile !== "standalone") throw new Error("Only ordinary root Tasks may own tasklets")
+		getTaskDirectoryPath(owner.taskId)
+		this.rootTaskId = owner.taskId
+	}
+
+	/** Persist acceptance and launch, without waiting for the assignment to finish. */
+	async start(input: { title: string; prompt: string }): Promise<TaskletRecord> {
+		if (this.closing) throw new Error("Tasklet host is shutting down")
+		const title = input.title.trim()
+		const prompt = input.prompt.trim()
+		if (!title || !prompt) throw new Error("Tasklet title and prompt must be non-empty")
+		const record: TaskletRecord = {
+			id: createTaskletId(),
+			rootTaskId: this.rootTaskId,
+			conversationUlid: ulid(),
+			title,
+			prompt,
+			createdAt: Date.now(),
+		}
+		const acceptance = this.acceptAndStart(record)
+		this.starting.set(record.id, { record, acceptance })
+		try {
+			return await acceptance
+		} finally {
+			this.starting.delete(record.id)
+		}
+	}
+
+	private async acceptAndStart(record: TaskletRecord): Promise<TaskletRecord> {
+		// No Task or live handle exists if this initial write fails.
+		await saveTaskletRecord(record)
+		const child: OwnedTasklet = { record, backgroundCommandRunning: false, outcomePersisted: false }
+		this.children.set(record.id, child)
+		// A start admitted before shutdown still owns its write, but must not launch late work.
+		if (this.closing) {
+			child.settlement = this.persistOutcome(child, {
+				kind: "interrupted", reason: "Root Task closed during tasklet startup", interruptedAt: Date.now(),
+			})
+			await child.settlement
+			return structuredClone(child.record)
+		}
+		try {
+			child.task = new this.TaskConstructor({
+				...this.options,
+				taskId: record.id,
+				conversationUlid: record.conversationUlid,
+				task: record.prompt,
+				executionProfile: "tasklet",
+				updateTaskHistory: async () => [],
+				postStateToWebview: unavailableForegroundCallback,
+				reinitExistingTaskFromId: unavailableForegroundCallback,
+				cancelTask: unavailableForegroundCallback,
+				tasklet: {
+					storageAddress: this.address(record.id),
+					// Activity remains in the child's transcript. Parent delivery is item 3.10.
+					postStateToOwner: async () => { },
+					postPresentationToOwner: async () => { },
+					updateBackgroundCommandState: (running) => {
+						child.backgroundCommandRunning = running
+					},
+				},
+			})
+		} catch (error) {
+			child.settlement = this.persistOutcome(child, {
+				kind: "failed",
+				error: serializeTaskError(error),
+				failedAt: Date.now(),
+			})
+			await child.settlement
+			return structuredClone(child.record)
+		}
+		child.settlement = this.observeRun(child, child.task)
+		// Retain the rejecting promise for controls; observe it now to avoid an unhandled rejection.
+		void child.settlement.catch((error) => Logger.error(`[Tasklet ${record.id}] Settlement failed:`, error))
+		return structuredClone(record)
+	}
+
+	/** Includes admitted starts and input waits, not just provider activity. */
+	listActive(): Array<Pick<TaskletRecord, "id" | "title">> {
+		const active = new Map<string, Pick<TaskletRecord, "id" | "title">>()
+		for (const { record } of this.starting.values()) active.set(record.id, { id: record.id, title: record.title })
+		for (const { record } of this.children.values()) {
+			if (!record.outcome) active.set(record.id, { id: record.id, title: record.title })
+		}
+		return [...active.values()]
+	}
+
+	/** Close admission synchronously, then join every admitted writer and execution. */
+	shutdown(): Promise<void> {
+		this.closing = true
+		this.shutdownPromise ??= this.stopOwnedTasklets()
+		return this.shutdownPromise
+	}
+
+	private async stopOwnedTasklets(): Promise<void> {
+		const results = await Promise.allSettled([
+			...[...this.starting.values()].map(({ acceptance }) => acceptance),
+			...[...this.children.keys()].map((id) => this.interrupt(id, "Root Task closed")),
+		])
+		const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason)
+		if (failures.length) throw new AggregateError(failures, "Tasklet shutdown failed")
+	}
+
+	list(): TaskletInspection[] {
+		return [...this.children.keys()].map((id) => this.inspect(id))
+	}
+
+	inspect(id: string): TaskletInspection {
+		const child = this.requireChild(id)
+		return structuredClone({
+			...child.record,
+			executionStatus: child.task?.stateView.status,
+			backgroundCommandRunning: child.backgroundCommandRunning,
+			outcomePersisted: child.outcomePersisted,
+			settlementError: child.settlementError,
+		})
+	}
+
+	async readTranscript(id: string) {
+		const child = this.requireChild(id)
+		if (child.failedTranscript) return structuredClone(child.failedTranscript)
+		if (child.task) {
+			return structuredClone({
+				conversation: child.task.messageStateHandler.getApiConversationHistory(),
+				presentation: child.task.messageStateHandler.getDiracMessages(),
+			})
+		}
+		const [conversation, presentation] = await Promise.all([
+			getSavedApiConversationState(this.address(id)),
+			getSavedPresentationHistory(this.address(id)),
+		])
+		return { conversation: conversation.messages, presentation: presentation.messages }
+	}
+
+	/** Uses the engine's admission check; startup/terminal states can reject steering. */
+	async steer(id: string, message: string): Promise<{ id: string; messageId: string; accepted: true }> {
+		const child = this.requireChild(id)
+		if (!child.task || child.record.outcome) throw new Error(`Tasklet ${id} is not running`)
+		const messageId = await child.task.enqueueSteeringMessage(message)
+		return { id, messageId, accepted: true }
+	}
+
+	/** Abort is not settlement: retain ownership through the run and outcome write. */
+	async interrupt(id: string, reason?: string): Promise<TaskletInspection> {
+		const child = this.requireChild(id)
+		const results = await Promise.allSettled([
+			child.task && !child.record.outcome ? child.task.abortTask({ kind: "interrupted", reason }) : undefined,
+			child.settlement,
+		])
+		const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason)
+		if (failures.length) throw new AggregateError(failures, `Tasklet ${id} interruption failed`)
+		return this.inspect(id)
+	}
+
+	private async observeRun(child: OwnedTasklet, task: Task): Promise<void> {
+		let outcome: TaskRunOutcome
+		try {
+			outcome = await task.startTask(child.record.prompt)
+		} catch (error) {
+			// Task normally returns a failed outcome, including finalization errors.
+			// A rejected start still requires cancellation before persistence retirement.
+			const failures: unknown[] = [error]
+			try {
+				await task.abortTask()
+			} catch (abortError) {
+				failures.push(abortError)
+			}
+			outcome = {
+				kind: "failed",
+				failedAt: Date.now(),
+				error: serializeTaskError(failures.length > 1 ? new AggregateError(failures, "Tasklet startup failed") : error),
+			}
+		}
+		const settlementFailures: unknown[] = []
+		// A failed run outcome can include a failed final flush. It is not proof that
+		// persistence retired successfully, so verify the engine's idempotent retirement.
+		try {
+			await task.retirePersistence()
+		} catch (error) {
+			settlementFailures.push(error)
+			if (outcome.kind !== "failed") {
+				outcome = { kind: "failed", failedAt: Date.now(), error: serializeTaskError(error) }
+			}
+		}
+		if (outcome.kind === "failed") {
+			child.failedTranscript = structuredClone({
+				conversation: task.messageStateHandler.getApiConversationHistory(),
+				presentation: task.messageStateHandler.getDiracMessages(),
+			})
+		}
+		try {
+			await this.persistOutcome(child, outcome)
+		} catch (error) {
+			settlementFailures.push(error)
+		}
+		if (settlementFailures.length) {
+			const error = settlementFailures.length === 1
+				? settlementFailures[0]
+				: new AggregateError(settlementFailures, "Tasklet persistence settlement failed")
+			child.settlementError = serializeTaskError(error)
+			throw error
+		}
+	}
+
+	private async persistOutcome(child: OwnedTasklet, outcome: TaskRunOutcome): Promise<void> {
+		child.record = { ...child.record, outcome }
+		try {
+			await saveTaskletRecord(child.record)
+			child.outcomePersisted = true
+		} catch (error) {
+			child.settlementError = serializeTaskError(error)
+			throw error
+		} finally {
+			child.task = undefined
+			child.backgroundCommandRunning = false
+		}
+	}
+
+	private requireChild(id: string): OwnedTasklet {
+		const child = this.children.get(id)
+		if (!child) throw new Error(`Tasklet ${id} does not belong to root ${this.rootTaskId}`)
+		return child
+	}
+
+	private address(id: string) {
+		return { kind: "tasklet" as const, rootTaskId: this.rootTaskId, taskletId: id }
+	}
+}
+
+async function unavailableForegroundCallback(): Promise<never> {
+	throw new Error("Tasklet cannot use a foreground lifecycle callback")
 }

@@ -20,6 +20,7 @@ export interface TaskSteeringContext {
 	messageStateHandler: MessageStateHandler
 	taskMessenger: TaskMessenger
 	allowWhileWaitingForInteraction?: boolean
+	getCompletionBlocker?: () => string | undefined
 	postStateToWebview: () => void | Promise<void>
 	withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>
 }
@@ -247,9 +248,12 @@ export async function commitAttemptCompletion(
 		const hasQueuedSteering = ctx.taskState.steeringMessages.some(
 			(message) => message.deliveryState === SteeringDeliveryState.QUEUED,
 		)
-		if (hasQueuedSteering) {
+		const blocker = hasQueuedSteering
+			? "Completion was superseded by queued user steering."
+			: ctx.getCompletionBlocker?.()
+		if (blocker) {
 			ctx.taskState.didAttemptCompletion = false
-			return { committed: false, error: "Completion was superseded by queued user steering." }
+			return { committed: false, error: blocker }
 		}
 		ctx.taskState.completionCommitted = true
 		ctx.taskState.didAttemptCompletion = true
