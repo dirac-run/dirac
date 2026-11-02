@@ -111,8 +111,12 @@ import { extractProviderDomainFromUrl } from "./utils"
 
 export type ToolResponse = DiracToolResponseContent
 
+import type { TaskCounterparty, TaskInteractionRequest } from "./types/task-messenger"
+import type { ResponseArguments } from "@shared/responseTool"
+
 /** Private owner bindings; a tasklet never falls back to foreground publication. */
 export interface TaskletExecutionBindings {
+	counterparty: TaskCounterparty
 	storageAddress: Extract<TaskStorageAddress, { kind: "tasklet" }>
 	postStateToOwner: () => Promise<void>
 	postPresentationToOwner?: () => Promise<void>
@@ -548,6 +552,7 @@ export class Task {
 			messageStateHandler: this.messageStateHandler,
 			postStateToWebview: this.postStateToWebview,
 			postPresentationToWebview: this.postPresentationToWebview,
+			counterparty: contained?.counterparty,
 			getWorkingConfiguration: () => this.activeRequestRuntime?.workingConfiguration ?? this.workingConfiguration,
 			getRequestRuntime: () => this.activeRequestRuntime,
 			taskId: this.taskId,
@@ -1498,7 +1503,16 @@ export type TaskletTaskOptions = Pick<
 	| "toolEnvironmentFactory"
 >
 
+export interface TaskletInteraction extends TaskInteractionRequest {
+	id: string
+	status: "pending" | "retired"
+	createdAt: number
+	retiredAt?: number
+}
+
 export interface TaskletInspection extends TaskletRecord {
+	responses: ResponseArguments[]
+	interactions: TaskletInteraction[]
 	/** Live engine status is informational, never evidence of a committed outcome. */
 	executionStatus?: TaskStatus
 	backgroundCommandRunning: boolean
@@ -1512,6 +1526,9 @@ interface TaskletTranscript {
 }
 
 interface OwnedTasklet {
+	responses: ResponseArguments[]
+	interactions: Map<string, { record: TaskletInteraction; retire: () => void }>
+	interactionsClosed: boolean
 	record: TaskletRecord
 	task?: Task
 	failedTranscript?: TaskletTranscript
@@ -1571,7 +1588,10 @@ export class TaskletHost {
 	private async acceptAndStart(record: TaskletRecord): Promise<TaskletRecord> {
 		// No Task or live handle exists if this initial write fails.
 		await saveTaskletRecord(record)
-		const child: OwnedTasklet = { record, backgroundCommandRunning: false, outcomePersisted: false }
+		const child: OwnedTasklet = {
+			record, backgroundCommandRunning: false, outcomePersisted: false,
+			responses: [], interactions: new Map(), interactionsClosed: false,
+		}
 		this.children.set(record.id, child)
 		// A start admitted before shutdown still owns its write, but must not launch late work.
 		if (this.closing) {
@@ -1593,6 +1613,13 @@ export class TaskletHost {
 				reinitExistingTaskFromId: unavailableForegroundCallback,
 				cancelTask: unavailableForegroundCallback,
 				tasklet: {
+					counterparty: {
+						recordResponse: async (response) => {
+							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
+							child.responses.push(structuredClone(response))
+						},
+						requestInteraction: (request, signal) => this.waitForInteraction(child, request, signal),
+					},
 					storageAddress: this.address(record.id),
 					// Activity remains in the child's transcript. Parent delivery is item 3.10.
 					postStateToOwner: async () => { },
@@ -1630,6 +1657,7 @@ export class TaskletHost {
 	/** Close admission synchronously, then join every admitted writer and execution. */
 	shutdown(): Promise<void> {
 		this.closing = true
+		for (const child of this.children.values()) this.retireInteractions(child)
 		this.shutdownPromise ??= this.stopOwnedTasklets()
 		return this.shutdownPromise
 	}
@@ -1651,6 +1679,8 @@ export class TaskletHost {
 		const child = this.requireChild(id)
 		return structuredClone({
 			...child.record,
+			responses: child.responses,
+			interactions: [...child.interactions.values()].map(({ record }) => record),
 			executionStatus: child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
 			outcomePersisted: child.outcomePersisted,
@@ -1685,6 +1715,7 @@ export class TaskletHost {
 	/** Abort is not settlement: retain ownership through the run and outcome write. */
 	async interrupt(id: string, reason?: string): Promise<TaskletInspection> {
 		const child = this.requireChild(id)
+		this.retireInteractions(child)
 		const results = await Promise.allSettled([
 			child.task && !child.record.outcome ? child.task.abortTask({ kind: "interrupted", reason }) : undefined,
 			child.settlement,
@@ -1745,6 +1776,7 @@ export class TaskletHost {
 	}
 
 	private async persistOutcome(child: OwnedTasklet, outcome: TaskRunOutcome): Promise<void> {
+		this.retireInteractions(child)
 		child.record = { ...child.record, outcome }
 		try {
 			await saveTaskletRecord(child.record)
@@ -1756,6 +1788,31 @@ export class TaskletHost {
 			child.task = undefined
 			child.backgroundCommandRunning = false
 		}
+	}
+
+	private waitForInteraction(child: OwnedTasklet, request: TaskInteractionRequest, signal: AbortSignal): Promise<never> {
+		signal.throwIfAborted()
+		if (this.closing || child.interactionsClosed || child.record.outcome) throw new Error("Tasklet counterparty is closed")
+		const id = request.card.id
+		if (child.interactions.has(id)) throw new Error(`Tasklet interaction ${id} already exists`)
+		const record: TaskletInteraction = { ...structuredClone(request), id, status: "pending", createdAt: Date.now() }
+		// Resolution and permission enforcement are item 3.9. No approval shortcut exists here.
+		return new Promise<never>((_resolve, reject) => {
+			const retire = () => {
+				if (record.status === "retired") return
+				record.status = "retired"
+				record.retiredAt = Date.now()
+				signal.removeEventListener("abort", retire)
+				reject(new Error(`Tasklet interaction ${id} retired`))
+			}
+			child.interactions.set(id, { record, retire })
+			signal.addEventListener("abort", retire, { once: true })
+		})
+	}
+
+	private retireInteractions(child: OwnedTasklet): void {
+		child.interactionsClosed = true
+		for (const interaction of child.interactions.values()) interaction.retire()
 	}
 
 	private requireChild(id: string): OwnedTasklet {

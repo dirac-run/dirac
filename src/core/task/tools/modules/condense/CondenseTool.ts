@@ -2,7 +2,6 @@ import { formatResponse } from "@core/formatResponse"
 import { continuationPrompt } from "@core/prompts/contextManagement"
 import { formatCurrentTurnUserRequests } from "@core/text-condensation/CurrentTurnUserRequests"
 import { CONVERSATION_CONTINUATION_TEMPLATE_ID } from "@core/text-condensation/templates"
-import { showSystemNotification } from "@integrations/notifications"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { telemetryService } from "@/services/telemetry"
@@ -167,7 +166,7 @@ export class CondenseTool implements IDiracTool {
 		}
 
 		if (env.config.autoApprovalSettings.enableNotifications) {
-			showSystemNotification({
+			env.system.showNotification({
 				subtitle: "Dirac wants to condense the conversation...",
 				message: "Review the generated conversation summary before condensing.",
 			})

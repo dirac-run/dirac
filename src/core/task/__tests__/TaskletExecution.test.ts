@@ -18,6 +18,9 @@ import { ErrorService } from "@/services/error/ErrorService"
 import { HostProvider } from "@/hosts/host-provider"
 import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import type { Mode } from "@/shared/storage/types"
+import { DiracAskResponse } from "@/shared/WebviewMessage"
+import * as notifications from "@integrations/notifications"
+import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
 import { createTaskletId } from "@/shared/taskletId"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { Task, TaskletHost, type TaskParams, type TaskletTaskOptions } from "../index"
@@ -42,7 +45,7 @@ describe("Tasklet real Task execution", function () {
 	let requests: Request[]
 	let forbidden: sinon.SinonStub[]
 	let stateManager: StateManager
-	let nextTurn: ((mode: Mode) => Promise<"progress" | "plan" | "complete" | "read_file">) | undefined
+	let nextTurn: ((mode: Mode) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense">) | undefined
 
 	function rejectCall(name: string) {
 		const spy = sandbox.stub().callsFake(() => { throw new Error(`Tasklet escaped to ${name}`) })
@@ -110,9 +113,11 @@ describe("Tasklet real Task execution", function () {
 					yield {
 						type: "tool_calls", tool_call: {
 							call_id: `call-${requests.length}`, function: {
-								name: operation === "read_file" ? "read_file" : "respond",
+								name: operation === "read_file" || operation === "execute_command" || operation === "condense" ? operation : "respond",
 								arguments: JSON.stringify(operation === "read_file" ? { paths: ["assignment.txt"] }
-									: { operation, text: operation === "complete" ? "Private assignment complete." : "Private Plan analysis." }),
+									: operation === "execute_command" ? { commands: ["touch permission-bypass-marker"] }
+										: operation === "condense" ? { context: "Private continuation summary" }
+											: { operation, text: operation === "complete" ? "Private assignment complete." : "Private Plan analysis." }),
 							}
 						}
 					}
@@ -169,6 +174,11 @@ describe("Tasklet real Task execution", function () {
 			taskId: address.taskletId, executionProfile: "tasklet", pinnedContext: "PINNED_PRIVATE_CONSTRAINT",
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file"] },
 			tasklet: {
+				// Controlled answers exercise legacy execution/resource cases, not production host authorization.
+				counterparty: {
+					recordResponse: sandbox.stub().resolves(),
+					requestInteraction: sandbox.stub().resolves({ response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE }),
+				},
 				storageAddress: address, postStateToOwner: sandbox.stub().resolves(),
 				postPresentationToOwner: sandbox.stub().resolves(), updateBackgroundCommandState: sandbox.stub()
 			},
@@ -204,8 +214,7 @@ describe("Tasklet real Task execution", function () {
 		return host.inspect(id)
 	}
 
-	function createHost() {
-		const params = parameters()
+	function createHost(params = parameters()) {
 		const options: TaskletTaskOptions = {
 			controller: params.controller, cwd, stateManager, workingConfiguration: params.workingConfiguration,
 			shellIntegrationTimeout: params.shellIntegrationTimeout, terminalReuseEnabled: params.terminalReuseEnabled,
@@ -215,6 +224,107 @@ describe("Tasklet real Task execution", function () {
 		}
 		return new TaskletHost({ taskId: "root", executionProfile: "standalone" }, options)
 	}
+
+	async function waitForInteraction(host: TaskletHost, id: string) {
+		const deadline = Date.now() + 5_000
+		while (!host.inspect(id).interactions.some((request) => request.status === "pending")) {
+			assert.ok(Date.now() < deadline, `No owner request: ${JSON.stringify(host.inspect(id))}`)
+			await new Promise((resolve) => setTimeout(resolve, 5))
+		}
+		return host.inspect(id).interactions.find((request) => request.status === "pending")!
+	}
+
+	it("retains directed progress and completion without emitting routine presentation as communication", async () => {
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "progress" : "complete"
+		const host = createHost()
+		try {
+			const child = await host.start({ title: "updates", prompt: "Report privately" })
+			const result = await waitForOutcome(host, child.id)
+			assert.equal(result.outcome?.kind, "completed")
+			assert.deepEqual(result.responses.map((response) => response.operation), ["progress", "complete"])
+			assert.deepEqual(result.interactions, [])
+			assert.ok((await host.readTranscript(child.id)).presentation.length > result.responses.length)
+			result.responses[0].text = "mutated snapshot"
+			assert.notEqual(host.inspect(child.id).responses[0].text, "mutated snapshot")
+		} finally { await host.shutdown() }
+	})
+
+	for (const operation of ["question", "execute_command", "condense"] as const) {
+		it(`routes real ${operation} to the owner despite YOLO, permits a sibling to finish, and retires on shutdown`, async () => {
+			expectLoggerErrors() // Aborting a real tool wait is an expected tool cancellation.
+			const notification = sandbox.stub(notifications, "showSystemNotification")
+			const params = parameters()
+			params.toolSelectionPolicy = { mode: "exact", toolIds: ["respond", "execute_command", "condense"] }
+			params.workingConfiguration = createTaskWorkingConfiguration({
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				workspaceConfiguration: {} as any,
+				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "vscodeTerminal", multiRootEnabled: false },
+				settings: {
+					...SETTINGS_DEFAULTS, mode: "act", hooksEnabled: false, yoloModeToggled: true,
+					toolToggles: { read_file: true, execute_command: true },
+					autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: true }
+				} as Settings,
+			})
+			let turn = 0
+			nextTurn = async () => ++turn === 1 ? operation : "complete"
+			const host = createHost(params)
+			try {
+				const child = await host.start({ title: "waiting", prompt: "Private request" })
+				const request = await waitForInteraction(host, child.id)
+				assert.equal(request.toolCall?.name, operation === "question" ? "respond" : operation)
+				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+				assert.equal(host.inspect(child.id).outcome, undefined)
+				assert.equal(host.inspect(child.id).responses.length, 0)
+				assert.doesNotMatch(JSON.stringify(await host.readTranscript(child.id)), /PRIVATE_FILE_CONTENT/)
+				assert.equal(requests.length, 1)
+				const sibling = await host.start({ title: "independent", prompt: "Complete independently" })
+				assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
+				assert.equal(host.inspect(child.id).interactions[0].status, "pending")
+				await host.shutdown()
+				assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+				assert.equal(host.inspect(child.id).interactions[0].status, "retired")
+				assert.ok(host.inspect(child.id).interactions[0].retiredAt)
+				sinon.assert.notCalled(notification)
+			} finally { await host.shutdown() }
+		})
+	}
+
+	it("routes real runtime authentication intervention to the owner and retires it on interruption", async () => {
+		expectLoggerErrors()
+		nextTurn = async () => { throw new Error("authentication failed: controlled provider") }
+		const host = createHost()
+		try {
+			const child = await host.start({ title: "runtime", prompt: "Runtime wait" })
+			const request = await waitForInteraction(host, child.id)
+			assert.equal(request.card.header, "API Request Failed")
+			assert.equal(request.toolCall, undefined)
+			assert.equal(requests.length, 1)
+			await host.interrupt(child.id)
+			assert.equal(host.inspect(child.id).interactions[0].status, "retired")
+			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+		} finally { await host.shutdown() }
+	})
+
+	it("keeps ordinary real Task transport retry automatic and out of pending interactions", async () => {
+		expectLoggerErrors()
+		sandbox.stub(retryPolicy, "getApiRequestRetryDelay").returns(1)
+		let turn = 0
+		nextTurn = async () => {
+			if (++turn === 1) throw new Error("temporary transport failure")
+			return "complete"
+		}
+		const host = createHost()
+		try {
+			const child = await host.start({ title: "retry", prompt: "Retry transport" })
+			const result = await waitForOutcome(host, child.id)
+			assert.equal(result.outcome?.kind, "completed")
+			assert.equal(requests.length, 2)
+			assert.deepEqual(result.interactions, [])
+			assert.deepEqual(result.responses.map((response) => response.operation), ["complete"])
+			assert.match(JSON.stringify(await host.readTranscript(child.id)), /API Error \(Retrying\)/)
+		} finally { await host.shutdown() }
+	})
 
 	it("cancels a running root and its running child without changing ordinary root lock lifetime", async () => {
 		expectLoggerErrors()
@@ -398,6 +508,7 @@ describe("Tasklet real Task execution", function () {
 
 	it("preserves the full failed transcript when final persistence fails after a completion response", async () => {
 		expectLoggerErrors()
+		nextTurn = async () => "complete"
 		const host = createHost()
 		const originalRetire = Task.prototype.retirePersistence
 		let failedTask: Task | undefined
@@ -564,9 +675,13 @@ describe("Tasklet real Task execution", function () {
 		assert.deepEqual(await fs.readdir(path.join(directory, "storage", "tasks")), ["root"])
 	})
 
-	it("routes automatic Plan-to-Act approval through the child's configuration, not the foreground host", async () => {
+	it("routes controlled Plan-to-Act input through the child's configuration, not the foreground host", async () => {
 		const params = parameters("plan")
 		const task = create(params)
+		params.tasklet!.counterparty.requestInteraction = async () => {
+			await task.applyWorkingConfigurationUpdate({ settings: { mode: "act" } })
+			return { response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE, text: "Proceed" }
+		}
 		await task.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		nextTurn = async (mode) => mode === "plan" ? "plan" : "complete"
 		const outcome = await task.startTask(params.task)

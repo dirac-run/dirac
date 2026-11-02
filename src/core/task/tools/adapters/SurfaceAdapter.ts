@@ -111,7 +111,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.editor = buildEditorTrait(config)
 		this.context = config.context
 		this.orchestration = buildOrchestrationTrait(config)
-		this.responseObserver = { recordResponse: async () => undefined }
+		this.responseObserver = { recordResponse: (response) => config.taskMessenger.recordResponse(response) }
 		this.conversationCondensation = config.isSubagentExecution
 			? undefined
 			: buildConversationCondensationTrait(config)

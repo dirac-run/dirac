@@ -53,6 +53,8 @@ export function buildSystemTrait(
 			}
 		},
 		openUrl: async (url) => await openUrlInBrowser(url),
-		showNotification: (options) => void showSystemNotification(options),
+		showNotification: (options) => {
+			if (config.executionProfile !== "tasklet") void showSystemNotification(options)
+		},
 	}
 }

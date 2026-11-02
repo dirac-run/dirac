@@ -20,6 +20,30 @@ function stubWorkspace(workspacePath = "/workspace"): void {
 	})
 }
 
+describe("AutoApprove counterparty interception", () => {
+	it("blocks every automatic approval path before settings, rules or workspace lookup", async () => {
+		const currentSettings = settings()
+		currentSettings.yoloModeToggled = true
+		currentSettings.autoApproveAllToggled = true
+		currentSettings.userApprovedCommands = [{ command: "npm test", match: "exact" }]
+		const permissions = commandPermissionController({ allowed: true, reason: "allowed", matchedPattern: "**" })
+		const settingsSource = sinon.stub().returns(currentSettings)
+		const autoApprove = new AutoApprove(permissions as any, settingsSource, false, true)
+
+		for (const tool of Object.values(DiracDefaultTool)) {
+			assert.equal(autoApprove.shouldAutoApproveTool(tool), false)
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/file.ts"), "manual_only")
+			assert.equal(autoApprove.shouldAutoApproveWithRules(tool, "/workspace/file.ts"), false)
+		}
+		assert.equal(autoApprove.isCommandAutoApproved("npm test"), false)
+		assert.equal(autoApprove.isCommandAutoApproved("ls"), false)
+		assert.equal(autoApprove.isUnrestrictedAutoApprove(), false)
+		sinon.assert.notCalled(settingsSource)
+		sinon.assert.notCalled(permissions.validateTool)
+	})
+})
+
 describe("AutoApprove.resolveToolPathPermission", () => {
 	afterEach(() => sinon.restore())
 

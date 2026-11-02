@@ -5,6 +5,7 @@ import { DiracDefaultTool } from "@shared/tools"
 import { ToolExecutor } from "../ToolExecutor"
 import { createTaskRequestRuntime } from "../runtime/TaskRequestRuntime"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
+import { TASK_CALLBACKS_KEYS } from "../tools/utils/ToolConstants"
 
 function configuration(mode: "plan" | "act", revision = 1, autoApproveAllToggled = false) {
 	return createTaskWorkingConfiguration({
@@ -153,6 +154,48 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), true)
 		current = configuration("act", 3, false)
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
+	})
+
+	it("keeps tasklet interception enabled across live permission changes", async () => {
+		let current = configuration("act", 1, false)
+		const harness = {
+			executionProfile: "tasklet",
+			getCurrentWorkingConfiguration: () => current,
+			commandPermissionController: { validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) },
+		}
+		const autoApprover = (ToolExecutor.prototype as any).requestAutoApprover.call(harness)
+		assert.equal(autoApprover.requiresCounterpartyApproval, true)
+		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
+		current = configuration("act", 2, true)
+		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
+		assert.equal(await autoApprover.resolveToolPathPermission(DiracDefaultTool.EDIT_FILE, "src/index.ts"), "manual_only")
+		sinon.assert.notCalled(harness.commandPermissionController.validateTool)
+	})
+
+	it("keeps tasklet question/plan flows interactive without legacy subagent or Utility shortcuts", () => {
+		const current = configuration("act", 2, true)
+		const workingConfiguration = { ...current, settings: { ...current.settings, yoloModeToggled: true } }
+		const runtime = createTaskRequestRuntime(workingConfiguration, { getModel: () => ({ id: "test", info: {} }) } as any, "request-1")
+		const executor = Object.assign(Object.create(ToolExecutor.prototype), {
+			executionProfile: "tasklet",
+			requestRuntime: () => runtime,
+			getCurrentWorkingConfiguration: () => workingConfiguration,
+			commandPermissionController: {},
+			createPermissionDecisionBinding: sinon.stub().returns({ service: {} }),
+		})
+		for (const key of TASK_CALLBACKS_KEYS) {
+			if (typeof executor[key] !== "function") executor[key] = sinon.stub()
+		}
+		const config = executor.asToolConfig()
+		assert.equal(config.yoloModeToggled, false)
+		assert.equal(config.isSubagentExecution, false)
+		assert.equal(config.permissionDecisionBinding, undefined)
+		sinon.assert.notCalled(executor.createPermissionDecisionBinding)
+		executor.executionProfile = "standalone"
+		const foreground = executor.asToolConfig()
+		assert.equal(foreground.yoloModeToggled, true)
+		assert.ok(foreground.permissionDecisionBinding)
+		sinon.assert.calledOnce(executor.createPermissionDecisionBinding)
 	})
 
 	it("builds permission handling from the supplied current configuration", () => {

@@ -157,6 +157,7 @@ export class ToolExecutor {
 			this.commandPermissionController,
 			() => this.getCurrentWorkingConfiguration().settings,
 			this.getCurrentWorkingConfiguration().executionOptions.multiRootEnabled,
+			this.executionProfile === "tasklet",
 		)
 	}
 
@@ -302,7 +303,7 @@ export class ToolExecutor {
 			mode: settings.mode,
 			strictPlanModeEnabled: settings.strictPlanModeEnabled,
 			get yoloModeToggled() {
-				return currentSettings().yoloModeToggled
+				return !autoApprover.requiresCounterpartyApproval && currentSettings().yoloModeToggled
 			},
 			lowVerbosityEnabled: settings.lowVerbosityEnabled,
 			vscodeTerminalExecutionMode: this.terminalExecutionMode,
@@ -335,7 +336,7 @@ export class ToolExecutor {
 			autoApprover,
 			browserSettings: settings.browserSettings,
 			get permissionDecisionBinding() {
-				return currentPermissionDecisionBinding()
+				return autoApprover.requiresCounterpartyApproval ? undefined : currentPermissionDecisionBinding()
 			},
 			services: {
 				browserSession: this.browserSession,

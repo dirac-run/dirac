@@ -25,6 +25,7 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 	}
 
 	const env = {
+		system: { showNotification: sinon.stub() },
 		ui: { createCard: sinon.stub().resolves(card) },
 		conversationCondensation,
 		logging: { warn: sinon.stub() },
@@ -69,6 +70,15 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 
 describe("CondenseTool", () => {
 	afterEach(() => sinon.restore())
+
+	it("requests condensation notifications through the environment when enabled", async () => {
+		const { env } = createMocks("user")
+		env.config.autoApprovalSettings.enableNotifications = true
+		await new CondenseTool().processCall({ context: "summary" }, env as any)
+		sinon.assert.calledOnceWithMatch(env.system.showNotification, {
+			subtitle: "Dirac wants to condense the conversation...",
+		})
+	})
 
 	it("preserves current intent independently of stale active-model summaries across repeated condensations", async () => {
 		const { env, state } = createMocks("automatic")

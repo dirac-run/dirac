@@ -146,6 +146,7 @@ export class ExecuteCommandTool implements IDiracTool {
 		commands: NormalizedCommand[],
 		utilityPermissionHandlingEnabled: boolean,
 	): CommandApprovalRequirement {
+		if (this.autoApprover.requiresCounterpartyApproval) return { required: true, utilityEligible: false }
 		if (!utilityPermissionHandlingEnabled && this.autoApprover.isUnrestrictedAutoApprove()) {
 			return { required: false, utilityEligible: false }
 		}

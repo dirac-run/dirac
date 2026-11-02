@@ -43,7 +43,7 @@ export async function handleMistakeLimitReached(
 	}
 
 	const autoApprovalSettings = ctx.settings.autoApprovalSettings
-	if (autoApprovalSettings.enableNotifications) {
+	if (autoApprovalSettings.enableNotifications && !ctx.taskMessenger.routesToOwner) {
 		showSystemNotification({
 			subtitle: "Error",
 			message: "Dirac is having trouble. Would you like to continue the task?",

@@ -10,7 +10,8 @@ import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { GlobalFileNames } from "@core/storage/fileNames"
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import * as storage from "@core/storage/taskStorage"
-import { TaskStatus } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, TaskStatus } from "@shared/ExtensionMessage"
+import type { TaskInteractionRequest } from "../types/task-messenger"
 import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
@@ -93,6 +94,62 @@ describe("TaskletHost asynchronous ownership", () => {
 			),
 		) as storage.TaskletRecord
 	}
+
+	function request(id: string): TaskInteractionRequest {
+		return {
+			card: {
+				id, kind: CardKind.GENERIC, header: "Permission", body: "Full operation", status: CardStatus.WAITING_FOR_INPUT,
+				renderType: "text", requireApproval: true
+			},
+			permissionRequestKind: "manual_tool",
+			toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
+		}
+	}
+
+	it("retains detached requests per child and rejects duplicate, retired and late registrations", async () => {
+		const first = await host.start({ title: "first", prompt: "first" })
+		const second = await host.start({ title: "second", prompt: "second" })
+		const firstOwner = (constructed.firstCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		const secondOwner = (constructed.secondCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		const input = request("same-card-id")
+		const firstRejected = assert.rejects(firstOwner.requestInteraction(input, new AbortController().signal), /retired/)
+		const secondRejected = assert.rejects(secondOwner.requestInteraction(request("same-card-id"), new AbortController().signal), /retired/)
+		input.toolCall!.arguments.commands = ["changed"]
+		const snapshot = host.inspect(first.id).interactions[0]
+		assert.deepEqual(snapshot.toolCall!.arguments.commands, ["echo private"])
+		Object.assign(snapshot.card, { body: "mutated snapshot" })
+		assert.equal(host.inspect(first.id).interactions[0].card.body, "Full operation")
+		assert.throws(() => firstOwner.requestInteraction(request("same-card-id"), new AbortController().signal), /already exists/)
+		await host.interrupt(first.id)
+		await firstRejected
+		assert.equal(host.inspect(first.id).interactions[0].status, "retired")
+		assert.equal(typeof host.inspect(first.id).interactions[0].retiredAt, "number")
+		assert.equal(host.inspect(second.id).interactions[0].status, "pending")
+		assert.throws(() => firstOwner.requestInteraction(request("late"), new AbortController().signal), /closed/)
+		await host.shutdown()
+		await secondRejected
+		assert.equal(host.inspect(second.id).interactions[0].status, "retired")
+		assert.throws(() => secondOwner.requestInteraction(request("late"), new AbortController().signal), /closed/)
+	})
+
+	it("retires signal-aborted requests without closing siblings and rejects pre-aborted registration", async () => {
+		const record = await host.start({ title: "work", prompt: "work" })
+		const owner = (constructed.firstCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		const aborted = new AbortController()
+		aborted.abort(new Error("already aborted"))
+		assert.throws(() => owner.requestInteraction(request("pre-aborted"), aborted.signal), /already aborted/)
+		assert.deepEqual(host.inspect(record.id).interactions, [])
+		const controller = new AbortController()
+		const rejected = assert.rejects(owner.requestInteraction(request("first"), controller.signal), /retired/)
+		controller.abort()
+		await rejected
+		assert.equal(host.inspect(record.id).interactions[0].status, "retired")
+		assert.throws(() => owner.requestInteraction(request("first"), new AbortController().signal), /already exists/)
+		const nextRejected = assert.rejects(owner.requestInteraction(request("next"), new AbortController().signal), /retired/)
+		assert.equal(host.inspect(record.id).interactions[1].status, "pending")
+		await host.interrupt(record.id)
+		await nextRejected
+	})
 
 	it("accepts two unfinished children durably, without joining, and scopes detached inspection snapshots", async () => {
 		const [first, second] = await Promise.all([

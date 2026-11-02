@@ -28,6 +28,41 @@ describe("SurfaceAdapter", () => {
 		setHostCapabilities(undefined)
 	})
 
+	describe("owner-routed permission cards", () => {
+		for (const permissionRequestKind of [undefined, "tool", "manual_tool"] as const) {
+			for (const manual of [false, true]) {
+				it(`bypasses every approval shortcut for ${permissionRequestKind ?? "unclassified"} (${manual ? "manual" : "ordinary"} card)`, async () => {
+					config.taskMessenger.routesToOwner = true
+					config.yoloModeToggled = true
+					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
+					config.permissionDecisionBinding = { configurationRevision: 1, service: { decide: sinon.stub().resolves({ decision: "approve" }) } }
+					config.toolUse = { name: "execute_command", params: { commands: ["echo retained"] } }
+					const liveApproval = sinon.stub().returns(true)
+					const protocol = {
+						getCard: () => ({ id: "owner-card", status: CardStatus.WAITING_FOR_INPUT, requireApproval: true }),
+						waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }),
+					}
+					config.taskMessenger.createCard.resolves(protocol)
+					const params = { header: "Owner decision", requireApproval: true, permissionRequestKind, isAutoApproved: liveApproval }
+					const card = manual ? await adapter.ui.createManualInteractionCard(params) : await adapter.ui.createCard(params)
+					const forwarded = config.taskMessenger.createCard.firstCall.args[0]
+					expect(forwarded.permissionRequestKind).to.equal(permissionRequestKind)
+					expect(forwarded.requireApproval).to.equal(true)
+					expect(forwarded.isAutoApproved).to.equal(undefined)
+					expect(forwarded.toolCall).to.deep.equal({ name: "execute_command", arguments: { commands: ["echo retained"] } })
+					config.toolUse.params.commands[0] = "changed"
+					expect(forwarded.toolCall.arguments.commands).to.deep.equal(["echo retained"])
+					expect(card.requiresUserInteraction).to.equal(true)
+					expect((await card.waitForInteraction()).response).to.equal(DiracAskResponse.REJECT)
+					sinon.assert.calledOnce(protocol.waitForInteraction)
+					sinon.assert.notCalled(liveApproval)
+					sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+					sinon.assert.notCalled(config.permissionDecisionBinding.service.decide)
+				})
+			}
+		}
+	})
+
 	describe("constructor", () => {
 		it("stores config and toolName", () => {
 			adapter.config.should.equal(config)

@@ -23,6 +23,19 @@ function createPermissionEnvironment() {
 }
 
 describe("BrowserActionTool", () => {
+	it("intercepts browser permissions before unrestricted and matching-rule approvals", () => {
+		const tool = new BrowserActionTool()
+		const { env, validateTool, isUnrestrictedAutoApprove, shouldAutoApproveTool } = createPermissionEnvironment()
+		;(env.config.autoApprover as any).requiresCounterpartyApproval = true
+		isUnrestrictedAutoApprove.returns(true)
+		validateTool.returns({ allowed: true, reason: "allowed", matchedPattern: "**" })
+
+		assert.equal((tool as any).resolveLaunchPermission(env, "https://example.com"), "manual_only")
+		sinon.assert.notCalled(validateTool)
+		sinon.assert.notCalled(isUnrestrictedAutoApprove)
+		sinon.assert.notCalled(shouldAutoApproveTool)
+	})
+
 	it("strips the data URL prefix and preserves the screenshot media type", async () => {
 		const tool = new BrowserActionTool()
 		const blocks = await (tool as any).formatBrowserActionResult(

@@ -8,8 +8,9 @@ import { TaskMessenger } from "../TaskMessenger"
 import { TaskState } from "../TaskState"
 import { submitCardResponse } from "../TaskUserInput"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
+import type { TaskCounterparty } from "../types/task-messenger"
 
-function createMessenger(postStateToWebview = sinon.stub().resolves()) {
+function createMessenger(postStateToWebview = sinon.stub().resolves(), counterparty?: TaskCounterparty) {
 	const messages: any[] = []
 	const messageStateHandler = {
 		addToDiracMessages: sinon.stub().callsFake(async (message) => {
@@ -69,6 +70,7 @@ function createMessenger(postStateToWebview = sinon.stub().resolves()) {
 		taskState,
 		messageStateHandler,
 		postStateToWebview,
+		counterparty,
 		getWorkingConfiguration: () => ({ settings: { hooksEnabled: false }, apiConfiguration: {} }) as any,
 		taskId: "task-1",
 		getCurrentProviderInfo: sinon.stub(),
@@ -97,6 +99,70 @@ const responseFields = [
 	"askResponseAction",
 	"askResponseValue",
 ] as const
+
+describe("TaskMessenger owner interactions", () => {
+	function owner() {
+		return {
+			recordResponse: sinon.stub().resolves(),
+			requestInteraction: sinon.stub().callsFake((_request, signal: AbortSignal) => new Promise<never>((_resolve, reject) => {
+				signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+			})),
+		}
+	}
+
+	it("flushes before owner registration and bypasses live approval, foreground FIFO and notifications", async () => {
+		const counterparty = owner()
+		const { messenger, taskState, messageStateHandler } = createMessenger(undefined, counterparty)
+		const notification = sinon.stub(messenger, "runNotificationHook").resolves()
+		const autoApprove = sinon.stub().returns(true)
+		let release!: () => void
+		messageStateHandler.flushPendingWrites.callsFake(() => new Promise<void>((resolve) => { release = resolve }))
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true, isAutoApproved: autoApprove })
+		const waiting = card.waitForInteraction()
+		const rejected = assert.rejects(waiting)
+		sinon.assert.notCalled(counterparty.requestInteraction)
+		assert.equal(taskState.status, TaskStatus.AWAITING_USER_INPUT)
+		release()
+		await pWaitFor(() => counterparty.requestInteraction.calledOnce, { interval: 1 })
+		assert.deepEqual(taskState.waitingCardIds, [])
+		sinon.assert.notCalled(autoApprove)
+		sinon.assert.notCalled(notification)
+		sinon.assert.notCalled(messageStateHandler.publishCardInteractionReady)
+		taskState.abort = true
+		await rejected
+	})
+
+	it("does not register a request aborted during its transcript flush", async () => {
+		const counterparty = owner()
+		const { messenger, taskState, messageStateHandler } = createMessenger(undefined, counterparty)
+		let release!: () => void
+		messageStateHandler.flushPendingWrites.callsFake(() => new Promise<void>((resolve) => { release = resolve }))
+		const card = await messenger.createCard({ header: "Question", requireFeedback: true })
+		const rejected = assert.rejects(card.waitForInteraction())
+		taskState.abort = true
+		release()
+		await rejected
+		sinon.assert.notCalled(counterparty.requestInteraction)
+	})
+
+	it("retires terminal-card waits independently and restores status only after the last owner wait", async () => {
+		const counterparty = owner()
+		const { messenger, taskState } = createMessenger(undefined, counterparty)
+		taskState.status = TaskStatus.WAITING_FOR_API
+		const first = await messenger.createCard({ header: "First", requireFeedback: true })
+		const second = await messenger.createCard({ header: "Second", requireFeedback: true })
+		const firstRejected = assert.rejects(first.waitForInteraction(), /became terminal/)
+		const secondRejected = assert.rejects(second.waitForInteraction(), /became terminal/)
+		await pWaitFor(() => counterparty.requestInteraction.calledTwice, { interval: 1 })
+		await first.finalize(CardStatus.CANCELLED)
+		await firstRejected
+		assert.equal(taskState.status, TaskStatus.AWAITING_USER_INPUT)
+		assert.equal(counterparty.requestInteraction.secondCall.args[1].aborted, false)
+		await second.finalize(CardStatus.CANCELLED)
+		await secondRejected
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+	})
+})
 
 describe("TaskMessenger text authorship", () => {
 	it("defaults non-user text to assistant", async () => {

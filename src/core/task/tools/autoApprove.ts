@@ -23,6 +23,7 @@ export class AutoApprove {
 		commandPermissionController: CommandPermissionController,
 		private readonly settingsSource: DeepReadonly<Settings> | (() => DeepReadonly<Settings>),
 		private readonly multiRootEnabled: boolean,
+		public readonly requiresCounterpartyApproval = false,
 	) {
 		this.commandPermissionController = commandPermissionController
 	}
@@ -56,6 +57,7 @@ export class AutoApprove {
 	// Check if the tool should be auto-approved based on the settings
 	// Returns bool for most tools, and tuple for tools with nested settings
 	shouldAutoApproveTool(toolName: DiracDefaultTool): boolean | [boolean, boolean] {
+		if (this.requiresCounterpartyApproval) return false
 		if (this.setting("yoloModeToggled")) {
 			switch (toolName) {
 				case DiracDefaultTool.FILE_READ:
@@ -127,6 +129,7 @@ export class AutoApprove {
 		blockname: DiracDefaultTool,
 		autoApproveActionpath: string | undefined,
 	): Promise<ToolPermissionDisposition> {
+		if (this.requiresCounterpartyApproval) return "manual_only"
 		let isLocal = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -165,6 +168,7 @@ export class AutoApprove {
 		blockname: DiracDefaultTool,
 		autoApproveActionpath: string | undefined,
 	): Promise<boolean> {
+		if (this.requiresCounterpartyApproval) return false
 		let isLocalRead = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -199,6 +203,7 @@ export class AutoApprove {
 	}
 
 	public isCommandAutoApproved(command: string): boolean {
+		if (this.requiresCounterpartyApproval) return false
 		const entries = this.setting("userApprovedCommands")
 		const autoApproveResult = this.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND)
 		const safeCommandAutoApprovalEnabled = Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult
@@ -216,6 +221,7 @@ export class AutoApprove {
 	 * The active permission flow determines whether this override precedes or follows other restrictions.
 	 */
 	public isUnrestrictedAutoApprove(): boolean {
+		if (this.requiresCounterpartyApproval) return false
 		return this.setting("yoloModeToggled") || this.setting("autoApproveAllToggled")
 	}
 
@@ -223,6 +229,7 @@ export class AutoApprove {
 	 * Check if the tool should be auto-approved based on the permission rules.
 	 */
 	public shouldAutoApproveWithRules(toolName: DiracDefaultTool, path?: string): boolean {
+		if (this.requiresCounterpartyApproval) return false
 		const result = this.commandPermissionController.validateTool(toolName, path)
 		return result.allowed && result.reason === "allowed"
 	}

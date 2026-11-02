@@ -82,6 +82,7 @@ export async function createCardFromMessenger(
 	params: CardParams,
 	tracker: CardHandle[],
 ): Promise<ICardHandle> {
+	if (config.taskMessenger.routesToOwner) return createOwnerCard(config, params, tracker)
 	const { permissionRequestKind, ...cardParams } = params
 	if (permissionRequestKind === undefined) {
 		return createDisplayedCardFromMessenger(config, cardParams, tracker)
@@ -171,8 +172,20 @@ export async function createManualInteractionCardFromMessenger(
 	params: CardParams,
 	tracker: CardHandle[],
 ): Promise<ICardHandle> {
+	if (config.taskMessenger.routesToOwner) return createOwnerCard(config, params, tracker)
 	const { permissionRequestKind: _permissionRequestKind, ...cardParams } = params
 	return createDisplayedCardFromMessenger(config, cardParams, tracker, false)
+}
+
+async function createOwnerCard(config: TaskConfig, params: CardParams, tracker: CardHandle[]): Promise<ICardHandle> {
+	const handle = await config.taskMessenger.createCard({
+		...params,
+		isAutoApproved: undefined,
+		toolCall: config.toolUse ? { name: config.toolUse.name, arguments: structuredClone(config.toolUse.params) } : undefined,
+	})
+	const adapterHandle = new CardHandle(handle)
+	tracker.push(adapterHandle)
+	return adapterHandle
 }
 
 // Creates a card via taskMessenger and wraps the protocol handle in a CardHandle.

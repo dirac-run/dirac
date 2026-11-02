@@ -21,6 +21,7 @@ import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import { createTaskletId } from "@/shared/taskletId"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { Task, type TaskParams } from "../index"
+import { DiracAskResponse } from "@/shared/WebviewMessage"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 
@@ -223,6 +224,11 @@ process.on("SIGTERM", () => {
 			...(rootTaskId ? {
 				executionProfile: "tasklet" as const,
 				tasklet: {
+					// Resource isolation is tested with a controlled owner granting the command.
+					counterparty: {
+						recordResponse: async () => { },
+						requestInteraction: async () => ({ response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE }),
+					},
 					storageAddress: { kind: "tasklet" as const, rootTaskId, taskletId: taskId },
 					postStateToOwner: sandbox.stub().resolves(), postPresentationToOwner: sandbox.stub().resolves(),
 					updateBackgroundCommandState: sandbox.stub(),

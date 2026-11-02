@@ -149,6 +149,7 @@ export class BrowserActionTool implements IDiracTool {
 	}
 
 	private resolveLaunchPermission(env: IToolEnvironment, url: string): ToolPermissionDisposition {
+		if (env.config.autoApprover.requiresCounterpartyApproval) return "manual_only"
 		const ruleResult = env.config.services.commandPermissionController.validateTool(DiracDefaultTool.BROWSER, url)
 		if (!ruleResult.allowed) return "manual_only"
 		if (env.config.autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"

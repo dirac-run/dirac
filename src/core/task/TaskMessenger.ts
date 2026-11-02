@@ -21,9 +21,12 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { clearAskResponse } from "./TaskUserInput"
-import { TaskMessengerDependencies } from "./types/task-messenger"
+import { TaskMessengerDependencies, type TaskInteractionRequest } from "./types/task-messenger"
+import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
 
 interface TaskCardParams extends CardParams {
+	permissionRequestKind?: TaskInteractionRequest["permissionRequestKind"]
+	toolCall?: TaskInteractionRequest["toolCall"]
 	isAutoApproved?: () => boolean
 }
 
@@ -34,8 +37,37 @@ export interface TaskCardHandle extends ICardHandle {
 export class TaskMessenger implements ITaskMessenger {
 	private activeVoiceStream?: ITextStreamHandle
 	private lastMessageId = 0
+	private ownerWaitCount = 0
+	private statusBeforeOwnerWait?: TaskStatus
 
 	constructor(private dependencies: TaskMessengerDependencies) { }
+
+	get routesToOwner(): boolean {
+		return this.dependencies.counterparty !== undefined
+	}
+
+	async recordResponse(response: ResponseArguments): Promise<void> {
+		// Questions and plans are retained once, with their actionable card, at the wait boundary.
+		if (response.operation === ResponseOperation.QUESTION || response.operation === ResponseOperation.PLAN) return
+		await this.dependencies.counterparty?.recordResponse(response)
+	}
+
+	private async waitForOwnerInteraction(request: TaskInteractionRequest, signal: AbortSignal) {
+		const state = this.dependencies.taskState
+		signal.throwIfAborted()
+		if (this.ownerWaitCount++ === 0) this.statusBeforeOwnerWait = state.status
+		state.status = TaskStatus.AWAITING_USER_INPUT
+		try {
+			await this.dependencies.messageStateHandler.flushPendingWrites()
+			signal.throwIfAborted()
+			return await this.dependencies.counterparty!.requestInteraction(request, signal)
+		} finally {
+			if (--this.ownerWaitCount === 0) {
+				if (!state.abort && this.statusBeforeOwnerWait !== undefined) state.status = this.statusBeforeOwnerWait
+				this.statusBeforeOwnerWait = undefined
+			}
+		}
+	}
 
 	private postPresentationToWebview(): Promise<void> {
 		return (this.dependencies.postPresentationToWebview ?? this.dependencies.postStateToWebview)()
@@ -191,6 +223,7 @@ export class TaskMessenger implements ITaskMessenger {
 				(cardId) => cardId !== id,
 			)
 		}
+		const ownerWaitCancellation = new AbortController()
 		const updateCard = async (patch: Partial<Card>, doNotAutoCollapse?: boolean): Promise<Readonly<Card>> => {
 			const current = getCard()
 			const requestedStatus = patch.status
@@ -205,7 +238,10 @@ export class TaskMessenger implements ITaskMessenger {
 			}
 			if (doNotAutoCollapse) recordedPatch.do_not_auto_collapse = true
 			const updated = await this.dependencies.messageStateHandler.patchCardById(id, recordedPatch)
-			if (isFinalStatus(updated.status)) removeWaitingCard()
+			if (isFinalStatus(updated.status)) {
+				removeWaitingCard()
+				ownerWaitCancellation.abort(new Error(`Card ${id} became terminal while waiting for interaction`))
+			}
 			this.scheduleStatePublication()
 			return updated
 		}
@@ -227,6 +263,17 @@ export class TaskMessenger implements ITaskMessenger {
 				await this.dependencies.messageStateHandler.flushPendingWrites()
 			},
 			waitForInteraction: async () => {
+				if (this.routesToOwner) {
+					const card = getCard()
+					if (!(card.requireApproval || card.requireFeedback) || isFinalStatus(card.status)) {
+						throw new Error(`Card ${id} is not in a state that requires interaction`)
+					}
+					return this.waitForOwnerInteraction({
+						card: structuredClone(card),
+						permissionRequestKind: params.permissionRequestKind,
+						toolCall: params.toolCall,
+					}, AbortSignal.any([this.dependencies.taskState.abortSignal, ownerWaitCancellation.signal]))
+				}
 				if (params.isAutoApproved?.() === true) return autoApprovedInteraction()
 				const card = getCard()
 				const isAsk = !!(card.requireApproval || card.requireFeedback)
