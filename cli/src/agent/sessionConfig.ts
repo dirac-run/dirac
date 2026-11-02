@@ -26,7 +26,7 @@ import {
     OPENAI_REASONING_EFFORT_LABELS,
     OPENAI_REASONING_EFFORT_OPTIONS,
 } from "@/shared/storage/types"
-import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
+import { filterOpenRouterModelIds, rankModelIdsForDisplay } from "@/shared/utils/model-filters"
 import { getDefaultModelId, getModelList, hasStaticModels } from "../utils/model-metadata.js"
 import { fetchOpenRouterModels, usesOpenRouterModels } from "../utils/openrouter-models"
 import { getProviderLabel, getValidCliProviders, isValidCliProvider } from "../utils/providers.js"
@@ -536,12 +536,15 @@ export class SessionConfigManager {
 			candidates = (async () => {
 				try {
 					if (usesOpenRouterModels(provider)) {
-						return refreshDynamicCatalog
-							? filterOpenRouterModelIds(
-									Object.keys(await fetchOpenRouterModels()).sort((a, b) => a.localeCompare(b)),
-									provider,
-								)
-							: []
+						if (!refreshDynamicCatalog) return []
+						const openRouterModels = await fetchOpenRouterModels()
+						return filterOpenRouterModelIds(
+							rankModelIdsForDisplay(
+								Object.keys(openRouterModels),
+								(modelId) => openRouterModels[modelId]?.canonicalSlug,
+							),
+							provider,
+						)
 					}
 					if (provider === "huggingface") {
 						return refreshDynamicCatalog
