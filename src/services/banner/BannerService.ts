@@ -1,10 +1,9 @@
 import type { Banner, BannerAction } from "@shared/DiracBanner"
 import { BannerActionType, type BannerCardData } from "@shared/dirac/banner"
-import { Controller } from "@/core/controller"
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { HostInfo, HostRegistryInfo } from "@/registry"
 import { Logger } from "@/shared/services/Logger"
-import { RemoteBannerService } from "./RemoteBannerService"
+import { RemoteBannerService, type WebviewStatePusher } from "./RemoteBannerService"
 import { WelcomeBannerService } from "./WelcomeBannerService"
 
 /**
@@ -18,9 +17,9 @@ export class BannerService {
 	readonly remote: RemoteBannerService
 	private readonly welcome: WelcomeBannerService
 
-	private constructor(controller: Controller, hostInfo: HostInfo) {
+	private constructor(statePusher: WebviewStatePusher, hostInfo: HostInfo) {
 		this.validActionTypes = new Set(Object.values(BannerActionType))
-		this.remote = new RemoteBannerService(controller, hostInfo)
+		this.remote = new RemoteBannerService(statePusher, hostInfo)
 		this.welcome = new WelcomeBannerService(
 			this.remote,
 			(bannerId) => this.isBannerDismissed(bannerId),
@@ -29,17 +28,17 @@ export class BannerService {
 		Logger.log("[BannerService] initialized")
 	}
 
-	public static initialize(controller: Controller): BannerService {
+	public static initialize(statePusher: WebviewStatePusher): BannerService {
 		if (BannerService.instance) return BannerService.instance
 		const hostInfo = HostRegistryInfo.get()
 		if (!hostInfo) throw new Error("[BannerService] Ensure HostRegistryInfo is initialized before BannerService.")
-		BannerService.instance = new BannerService(controller, hostInfo)
+		BannerService.instance = new BannerService(statePusher, hostInfo)
 		return BannerService.instance
 	}
 
 	public static get(): BannerService {
 		if (!BannerService.instance) {
-			throw new Error("BannerService not initialized. Call BannerService.initialize(controller) first.")
+			throw new Error("BannerService not initialized. Call BannerService.initialize(statePusher) first.")
 		}
 		return BannerService.instance
 	}
@@ -81,10 +80,10 @@ export class BannerService {
 
 	public async dismissBanner(bannerId: string): Promise<void> {
 		try {
-			const dismissed = StateManager.get().getGlobalStateKey("dismissedBanners") || []
+			const dismissed = requireStateAccess().getGlobalStateKey("dismissedBanners") || []
 			if (dismissed.some((b) => b.bannerId === bannerId)) return
 
-			StateManager.get().setGlobalState("dismissedBanners", [...dismissed, { bannerId, dismissedAt: Date.now() }])
+			requireStateAccess().setGlobalState("dismissedBanners", [...dismissed, { bannerId, dismissedAt: Date.now() }])
 
 			await this.remote.sendBannerEvent(bannerId, "dismiss")
 			this.clearCache()
@@ -99,7 +98,7 @@ export class BannerService {
 
 	public isBannerDismissed(bannerId: string): boolean {
 		try {
-			const dismissed = StateManager.get().getGlobalStateKey("dismissedBanners") || []
+			const dismissed = requireStateAccess().getGlobalStateKey("dismissedBanners") || []
 			return dismissed.some((b) => b.bannerId === bannerId)
 		} catch (error) {
 			Logger.error("[BannerService] Error checking dismissed banner", error)

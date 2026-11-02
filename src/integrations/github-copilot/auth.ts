@@ -1,4 +1,4 @@
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { fetch } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import { z } from "zod"
@@ -23,7 +23,7 @@ export class GithubCopilotAuthManager {
 
 	async loadCredentials(): Promise<GithubCopilotCredentials | null> {
 		try {
-			const stateManager = StateManager.get()
+			const stateManager = requireStateAccess()
 			const credentialsJson = stateManager.getSecretKey("github-copilot-oauth-credentials")
 			if (!credentialsJson) {
 				return null
@@ -38,14 +38,14 @@ export class GithubCopilotAuthManager {
 	}
 
 	async saveCredentials(credentials: GithubCopilotCredentials): Promise<void> {
-		const stateManager = StateManager.get()
+		const stateManager = requireStateAccess()
 		stateManager.setSecret("github-copilot-oauth-credentials", JSON.stringify(credentials))
 		await stateManager.flushPendingState()
 		this.credentials = credentials
 	}
 
 	async clearCredentials(): Promise<void> {
-		const stateManager = StateManager.get()
+		const stateManager = requireStateAccess()
 		stateManager.setSecret("github-copilot-oauth-credentials", undefined)
 		await stateManager.flushPendingState()
 		this.credentials = null

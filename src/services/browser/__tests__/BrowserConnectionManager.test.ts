@@ -21,7 +21,7 @@ describe("BrowserConnectionManager", () => {
 			getGlobalSettingsKey: () => ({ ...DEFAULT_BROWSER_SETTINGS, customArgs: "" }),
 		} as never)
 
-		await manager.relaunchChromeDebugMode({} as never).should.be.rejectedWith(/Failed to relaunch Chrome: spawn ENOENT/)
+		await manager.relaunchChromeDebugMode().should.be.rejectedWith(/Failed to relaunch Chrome: spawn ENOENT/)
 
 		sinon.assert.calledOnce(child.unref)
 	})

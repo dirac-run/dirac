@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import should from "should"
 import sinon from "sinon"
 import { DiracEnv } from "@/config"
-import { StateManager } from "@/core/storage/StateManager"
+import { initializeStateAccess, resetStateAccess } from "@/shared/storage/state-access-provider"
 import { HostRegistryInfo } from "@/registry"
 import * as net from "@/shared/net"
 import { FeatureFlag } from "@/shared/services/feature-flags/feature-flags"
@@ -42,7 +42,7 @@ describe("BannerService", () => {
 			getApiConfiguration: sandbox.stub().returns({}),
 			getGlobalSettingsKey: sandbox.stub().returns("act"),
 		}
-		sandbox.stub(StateManager, "get").returns(mockStateManager)
+		initializeStateAccess(() => mockStateManager)
 
 		// Build mock host info
 		mockHostInfo = {
@@ -87,6 +87,7 @@ describe("BannerService", () => {
 
 	afterEach(() => {
 		BannerService.reset()
+		resetStateAccess()
 		sandbox.restore()
 	})
 

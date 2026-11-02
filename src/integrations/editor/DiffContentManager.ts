@@ -1,4 +1,4 @@
-import { formatResponse } from "@core/formatResponse"
+import { createPrettyPatch } from "@shared/format-response"
 import { sanitizeNotebookForLLM } from "../misc/notebook-utils"
 
 // Use require to avoid ts-node transpileOnly eliding the import
@@ -123,7 +123,7 @@ export class DiffContentManager {
 		const normalizedPre = this.normalizeEol(preSaveContent)
 		const normalizedNew = this.normalizeEol(newContent)
 		if (normalizedPre !== normalizedNew) {
-			return formatResponse.createPrettyPatch((relPath || "file").toPosix(), normalizedNew, normalizedPre)
+			return createPrettyPatch((relPath || "file").toPosix(), normalizedNew, normalizedPre)
 		}
 		return undefined
 	}
@@ -132,7 +132,7 @@ export class DiffContentManager {
 		const normalizedPre = this.normalizeEol(preSaveContent)
 		const normalizedPost = this.normalizeEol(postSaveContent)
 		if (normalizedPre !== normalizedPost) {
-			return formatResponse.createPrettyPatch((relPath || "file").toPosix(), normalizedPre, normalizedPost)
+			return createPrettyPatch((relPath || "file").toPosix(), normalizedPre, normalizedPost)
 		}
 		return undefined
 	}

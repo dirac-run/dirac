@@ -5,7 +5,7 @@
  * This is Strategy 5: functional composition with direct params.
  */
 
-import { formatResponse } from "@core/formatResponse"
+import { toolResult } from "@shared/format-response"
 import type { OrchestrationResult } from "./types"
 
 export interface BuildResultInput {
@@ -25,7 +25,7 @@ export function buildResult(input: BuildResultInput): OrchestrationResult {
 	if (input.userRejected && input.userFeedbackText) {
 		return {
 			userRejected: true,
-			result: formatResponse.toolResult(
+			result: toolResult(
 				`Command is still running in the user's terminal.${
 					input.result.length > 0 ? `\nHere's the output so far:\n${input.result}` : ""
 				}\n\nThe user provided the following feedback:\n<feedback>\n${input.userFeedbackText}\n</feedback>`,
@@ -43,7 +43,7 @@ export function buildResult(input: BuildResultInput): OrchestrationResult {
 	if (input.userRejected) {
 		return {
 			userRejected: true,
-			result: formatResponse.toolResult(
+			result: toolResult(
 				`Command cancelled. ${input.result.length > 0 ? `\nOutput captured before cancellation:\n${input.result}` : ""}`,
 			),
 			completed: false,

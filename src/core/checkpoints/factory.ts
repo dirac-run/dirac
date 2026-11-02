@@ -3,7 +3,7 @@ import type { MessageStateHandler } from "@core/task/message-state"
 import type { TaskState } from "@core/task/TaskState"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
 // lazy import to break circular dependency: task/index → factory → checkpoints/index → task/message-state
-import { MultiRootCheckpointManager } from "@integrations/checkpoints/MultiRootCheckpointManager"
+import { MultiRootCheckpointManager } from "./MultiRootCheckpointManager"
 import type { ICheckpointManager } from "@integrations/checkpoints/types"
 import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 

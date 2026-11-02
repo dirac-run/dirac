@@ -1,4 +1,4 @@
-import { StateManager } from "@/core/storage/StateManager"
+import { getStateAccess } from "@/shared/storage/state-access-provider"
 import { HostProvider } from "@/hosts/host-provider"
 import { getErrorLevelFromString } from "@/services/error"
 import { getDistinctId } from "@/services/logging/distinctId"
@@ -190,10 +190,11 @@ export class DiracTelemetryProvider implements ITelemetryProvider {
 	}
 
 	public isEnabled(): boolean {
-		if (!StateManager.isInitialized()) {
+		const state = getStateAccess()
+		if (!state) {
 			return false
 		}
-		const isOptedIn = StateManager.get().getGlobalSettingsKey("telemetrySetting") !== "disabled"
+		const isOptedIn = state.getGlobalSettingsKey("telemetrySetting") !== "disabled"
 		this.optInCache = isOptedIn
 		return isOptedIn && this.telemetrySettings.hostEnabled
 	}

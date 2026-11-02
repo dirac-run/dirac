@@ -13,7 +13,7 @@ import { createDefaultTextCondensationTemplateRegistry } from "@core/text-conden
 import { isUtilityTextCondensationAvailable } from "@core/text-condensation/UtilityTextCondensationAvailability"
 import { WorkspaceRootManager } from "@core/workspace/WorkspaceRootManager"
 import { HostProvider } from "@hosts/host-provider"
-import { buildCheckpointManager, shouldUseMultiRoot } from "@integrations/checkpoints/factory"
+import { buildCheckpointManager, shouldUseMultiRoot } from "@core/checkpoints/factory"
 import { ICheckpointManager } from "@integrations/checkpoints/types"
 import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 import { FileEditProvider } from "@integrations/editor/FileEditProvider"

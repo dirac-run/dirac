@@ -30,7 +30,7 @@ import { getErrorMessage } from "@/shared/errors"
 import { ShowMessageType } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
 import CheckpointTracker from "./CheckpointTracker"
-import { ICheckpointManager } from "./types"
+import { ICheckpointManager } from "@integrations/checkpoints/types"
 
 /**
  * Manages checkpoints across multiple workspace roots.

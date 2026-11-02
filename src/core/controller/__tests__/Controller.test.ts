@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 import * as skillsModule from "@core/context/instructions/user-instructions/skills"
-import * as checkpointFactory from "@integrations/checkpoints/factory"
+import * as checkpointFactory from "@core/checkpoints/factory"
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"

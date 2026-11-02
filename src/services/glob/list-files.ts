@@ -1,5 +1,5 @@
 import { createReadStream, promises as fs } from "node:fs"
-import { workspaceResolver } from "@core/workspace"
+import { requireWorkspacePathResolver } from "@shared/workspace/workspace-path-resolver"
 import { arePathsEqual } from "@utils/path"
 import { runWorkspaceGit, walkWorkspace } from "@utils/workspaceTraversal"
 import { isBinaryFile } from "isbinaryfile"
@@ -62,7 +62,7 @@ async function describeFile(absolutePath: string, signal: AbortSignal, followSym
 }
 
 export async function listFiles(dirPath: string, recursive: boolean, limit: number): Promise<[FileInfo[], boolean]> {
-	const resolved = workspaceResolver.resolveWorkspacePath(dirPath, "", "Services.glob.listFiles")
+	const resolved = requireWorkspacePathResolver().resolveWorkspacePath(dirPath, "", "Services.glob.listFiles")
 	const absolutePath = typeof resolved === "string" ? resolved : resolved.absolutePath
 	if (isRestrictedPath(absolutePath)) return [[], false]
 	if (limit <= 0) return [[], true]

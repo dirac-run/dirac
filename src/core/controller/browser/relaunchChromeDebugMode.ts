@@ -14,7 +14,7 @@ export async function relaunchChromeDebugMode(controller: Controller, _: EmptyRe
 		const browserSession = new BrowserSession(controller.stateManager)
 
 		// Relaunch Chrome in debug mode
-		await browserSession.relaunchChromeDebugMode(controller)
+		await browserSession.relaunchChromeDebugMode()
 
 		// The actual result will be sent via the ProtoBus in the BrowserSession.relaunchChromeDebugMode method
 		// Here we just return a message as a placeholder

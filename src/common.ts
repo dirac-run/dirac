@@ -1,5 +1,5 @@
 import { DiracWebviewProvider } from "./core/webview"
-import "./utils/path" // necessary to have access to String.prototype.toPosix
+import "./utils/path"; // necessary to have access to String.prototype.toPosix
 
 import { createRotatingFileLogger, type RotatingFileLogger, resolveLogDirectory } from "@shared/services/file-logger"
 import { HostProvider } from "@/hosts/host-provider"
@@ -10,11 +10,11 @@ import { FileContextTracker } from "./core/context/context-tracking/FileContextT
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
 import { HookProcessRegistry } from "./core/hooks/HookProcessRegistry"
 import { StateManager } from "./core/storage/StateManager"
+import { initializeUnbiasedWelcomeOffer } from "./core/storage/unbiasedWelcomeOffer"
 import { AgentConfigLoader } from "./core/task/tools/subagent/AgentConfigLoader"
 import { ErrorService } from "./services/error"
 import { featureFlagsService } from "./services/feature-flags"
 import { getDistinctId } from "./services/logging/distinctId"
-import { initializeUnbiasedWelcomeOffer } from "./core/storage/unbiasedWelcomeOffer"
 import { recordVersionUpgrade } from "./services/release-notes/recordVersionUpgrade"
 import { SymbolIndexService } from "./services/symbol-index/SymbolIndexService"
 import { telemetryService } from "./services/telemetry"

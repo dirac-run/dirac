@@ -1,4 +1,4 @@
-import { StateManager } from "@/core/storage/StateManager"
+import { requireStateAccess } from "@/shared/storage/state-access-provider"
 import { HostProvider } from "@/hosts/host-provider"
 import { getDistinctId } from "@/services/logging/distinctId"
 import { fetch } from "@/shared/net"
@@ -151,7 +151,7 @@ export class DiracErrorProvider implements IErrorProvider {
 	}
 
 	public isEnabled(): boolean {
-		return StateManager.get().getGlobalSettingsKey("telemetrySetting") !== "disabled" && this.errorSettings.hostEnabled
+		return requireStateAccess().getGlobalSettingsKey("telemetrySetting") !== "disabled" && this.errorSettings.hostEnabled
 	}
 
 	public getSettings(): ErrorSettings {
