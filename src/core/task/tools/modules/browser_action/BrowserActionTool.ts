@@ -6,7 +6,7 @@ import { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
-import type { ToolPermissionDisposition } from "../../autoApprove"
+import { resolveBrowserLaunchPermission, type ToolPermissionDisposition } from "../../autoApprove"
 import { SurfaceType } from "../../interfaces/SurfaceType"
 
 export const browser_action_spec: DiracToolSpec = {
@@ -85,6 +85,7 @@ export class BrowserActionTool implements IDiracTool {
 							icon: DiracIcon.BROWSER,
 							status: CardStatus.WAITING_FOR_INPUT,
 							requireApproval: true,
+							permissionOperation: { kind: "browser", url },
 							permissionRequestKind:
 								utilityPermissionHandlingEnabled && permissionDisposition === "manual_only"
 									? "manual_tool"
@@ -149,13 +150,7 @@ export class BrowserActionTool implements IDiracTool {
 	}
 
 	private resolveLaunchPermission(env: IToolEnvironment, url: string): ToolPermissionDisposition {
-		if (env.config.autoApprover.requiresCounterpartyApproval) return "manual_only"
-		const ruleResult = env.config.services.commandPermissionController.validateTool(DiracDefaultTool.BROWSER, url)
-		if (!ruleResult.allowed) return "manual_only"
-		if (env.config.autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
-		if (ruleResult.reason === "allowed" && ruleResult.matchedPattern) return "auto_approve"
-		if (env.config.autoApprover.shouldAutoApproveTool(DiracDefaultTool.BROWSER) === true) return "auto_approve"
-		return "utility_eligible"
+		return resolveBrowserLaunchPermission(url, env.config.autoApprover, env.config.services.commandPermissionController)
 	}
 
 	private async reportMissingActionParameter(env: IToolEnvironment, example: string): Promise<string> {

@@ -78,7 +78,7 @@ import { type SteeringClaim } from "./steering"
 import { attemptApiRequest } from "./TaskApiRequestAttempt"
 import type { TaskConversationPersistenceHooks } from "./TaskConversationPersistence"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
-import { TaskMessenger } from "./TaskMessenger"
+import { TaskMessenger, TaskletEscalationCleanupError } from "./TaskMessenger"
 import { handleMistakeLimitReached } from "./TaskMistakeLimit"
 import { type TaskPromptArtifactsContext, writePromptMetadataArtifacts } from "./TaskPromptArtifacts"
 import { type TaskRequestBuilderContext } from "./TaskRequestBuilder"
@@ -943,7 +943,12 @@ export class Task {
 
 		if (this.executionProfile === "standalone") {
 			const root = this
-			this.taskletHost = new TaskletHost(this, {
+			this.taskletHost = new TaskletHost({
+				taskId: this.taskId, executionProfile: this.executionProfile,
+				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
+				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
+				escalateInteraction: (child, request, signal) => this.taskMessenger.escalateTaskletInteraction(child, request, signal),
+			}, {
 				controller,
 				cwd,
 				stateManager,
@@ -1505,9 +1510,11 @@ export type TaskletTaskOptions = Pick<
 
 export interface TaskletInteraction extends TaskInteractionRequest {
 	id: string
-	status: "pending" | "retired"
+	status: "pending" | "resolved" | "retired"
 	createdAt: number
 	retiredAt?: number
+	resolvedAt?: number
+	resolution?: TaskletInteractionResult
 }
 
 export interface TaskletInspection extends TaskletRecord {
@@ -1525,9 +1532,31 @@ interface TaskletTranscript {
 	presentation: DiracMessage[]
 }
 
+export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
+	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
+	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
+	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
+}
+
+type TaskletInteractionResult = Awaited<ReturnType<TaskCounterparty["requestInteraction"]>>
+
+export type TaskletInteractionDecision =
+	| { operation: "approve" | "reject" | "escalate" }
+	| { operation: "answer"; response: TaskletInteractionResult }
+
+type TaskletResolution = { status: "resolved" | "requires_user_approval" }
+
+interface PendingTaskletInteraction {
+	record: TaskletInteraction
+	cancellation: AbortController
+	resolving: boolean
+	resolve: (result: TaskletInteractionResult) => void
+	retire: () => void
+}
+
 interface OwnedTasklet {
 	responses: ResponseArguments[]
-	interactions: Map<string, { record: TaskletInteraction; retire: () => void }>
+	interactions: Map<string, PendingTaskletInteraction>
 	interactionsClosed: boolean
 	record: TaskletRecord
 	task?: Task
@@ -1542,7 +1571,7 @@ interface OwnedTasklet {
  * One ordinary root Task's in-memory child owner, retained through shutdown.
  * Co-located with Task because roots construct hosts and hosts construct contained Tasks;
  * separate classes retain separate ownership without a circular module dependency.
- * No interaction decisions, parent-context delivery or reconstruction live here yet.
+ * Explicit decisions are checked against the owner; parent-context delivery and reconstruction come later.
  */
 export class TaskletHost {
 	private readonly children = new Map<string, OwnedTasklet>()
@@ -1550,9 +1579,11 @@ export class TaskletHost {
 	private readonly starting = new Map<string, { record: TaskletRecord; acceptance: Promise<TaskletRecord> }>()
 	private closing = false
 	private shutdownPromise?: Promise<void>
+	private readonly resolutions = new Set<Promise<TaskletResolution>>()
+	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
 
 	constructor(
-		owner: Pick<Task, "taskId" | "executionProfile">,
+		private readonly owner: TaskletOwner,
 		private readonly options: TaskletTaskOptions,
 		// Constructor substitution is only a controlled-execution test seam, not a factory service.
 		private readonly TaskConstructor: typeof Task = Task,
@@ -1667,7 +1698,12 @@ export class TaskletHost {
 			...[...this.starting.values()].map(({ acceptance }) => acceptance),
 			...[...this.children.keys()].map((id) => this.interrupt(id, "Root Task closed")),
 		])
-		const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason)
+		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
+		await Promise.allSettled([...this.resolutions])
+		const failures = [
+			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
+			...this.interactionCleanupFailures,
+		]
 		if (failures.length) throw new AggregateError(failures, "Tasklet shutdown failed")
 	}
 
@@ -1710,6 +1746,75 @@ export class TaskletHost {
 		if (!child.task || child.record.outcome) throw new Error(`Tasklet ${id} is not running`)
 		const messageId = await child.task.enqueueSteeringMessage(message)
 		return { id, messageId, accepted: true }
+	}
+
+	/** Explicit parent decisions only. An approval outside current authority leaves the request pending. */
+	async resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision): Promise<TaskletResolution> {
+		const child = this.requireChild(id)
+		const interaction = child.interactions.get(requestId)
+		if (!interaction || interaction.record.status !== "pending" || this.closing || child.interactionsClosed) {
+			throw new Error(`Tasklet interaction ${requestId} is not pending for ${id}`)
+		}
+		if (interaction.resolving) throw new Error(`Tasklet interaction ${requestId} is already being resolved`)
+		interaction.resolving = true
+		const resolution = this.applyInteractionDecision(child, interaction, structuredClone(decision))
+		this.resolutions.add(resolution)
+		try {
+			return await resolution
+		} catch (error) {
+			if (error instanceof TaskletEscalationCleanupError) this.interactionCleanupFailures.push(error)
+			throw error
+		} finally {
+			interaction.resolving = false
+			this.resolutions.delete(resolution)
+		}
+	}
+
+	private async applyInteractionDecision(
+		child: OwnedTasklet,
+		interaction: PendingTaskletInteraction,
+		decision: TaskletInteractionDecision,
+	): Promise<TaskletResolution> {
+		const request = interaction.record
+		const signal = interaction.cancellation.signal
+		const permission = request.permissionOperation !== undefined || request.permissionRequestKind !== undefined
+		let result: TaskletInteractionResult
+		let assertAuthorityCurrent: (() => void) | undefined
+		switch (decision.operation) {
+			case "answer":
+				if (permission) throw new Error("Permission requests require approve, reject or escalate, not an answer")
+				result = decision.response
+				break
+			case "reject":
+				result = { action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }
+				break
+			case "approve": {
+				if (!permission) throw new Error("Use answer for questions and operational choices")
+				const authority = await this.owner.authorizePermission(structuredClone(request), signal)
+				signal.throwIfAborted()
+				authority.assertCurrent()
+				if (!authority.approved) return { status: "requires_user_approval" }
+				assertAuthorityCurrent = authority.assertCurrent
+				result = { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE }
+				break
+			}
+			case "escalate":
+				if (permission) this.owner.assertPermissionAllowed(request)
+				result = await this.owner.escalateInteraction(
+					{ id: child.record.id, title: child.record.title }, structuredClone(request), signal,
+				)
+				break
+			default:
+				throw new Error("Unknown tasklet interaction decision")
+		}
+		signal.throwIfAborted()
+		if (permission && result.userEdits !== undefined) throw new Error("Tasklet approval cannot change the requested operation")
+		if (permission && (result.action === DiracAskResponse.APPROVE || result.response === DiracAskResponse.APPROVE)) {
+			this.owner.assertPermissionAllowed(request)
+			assertAuthorityCurrent?.()
+		}
+		interaction.resolve(result)
+		return { status: "resolved" }
 	}
 
 	/** Abort is not settlement: retain ownership through the run and outcome write. */
@@ -1790,22 +1895,38 @@ export class TaskletHost {
 		}
 	}
 
-	private waitForInteraction(child: OwnedTasklet, request: TaskInteractionRequest, signal: AbortSignal): Promise<never> {
+	private waitForInteraction(child: OwnedTasklet, request: TaskInteractionRequest, signal: AbortSignal): Promise<TaskletInteractionResult> {
 		signal.throwIfAborted()
 		if (this.closing || child.interactionsClosed || child.record.outcome) throw new Error("Tasklet counterparty is closed")
-		const id = request.card.id
-		if (child.interactions.has(id)) throw new Error(`Tasklet interaction ${id} already exists`)
+		if ([...child.interactions.values()].some(({ record }) => record.card.id === request.card.id)) {
+			throw new Error(`Tasklet interaction for card ${request.card.id} already exists`)
+		}
+		// A host request identity cannot accidentally select the same card ID in another child.
+		const id = ulid()
 		const record: TaskletInteraction = { ...structuredClone(request), id, status: "pending", createdAt: Date.now() }
-		// Resolution and permission enforcement are item 3.9. No approval shortcut exists here.
-		return new Promise<never>((_resolve, reject) => {
+		const cancellation = new AbortController()
+		return new Promise<TaskletInteractionResult>((resolve, reject) => {
 			const retire = () => {
-				if (record.status === "retired") return
+				if (record.status !== "pending") return
 				record.status = "retired"
 				record.retiredAt = Date.now()
 				signal.removeEventListener("abort", retire)
-				reject(new Error(`Tasklet interaction ${id} retired`))
+				const error = new Error(`Tasklet interaction ${id} retired`)
+				cancellation.abort(error)
+				reject(error)
 			}
-			child.interactions.set(id, { record, retire })
+			child.interactions.set(id, {
+				record, cancellation, resolving: false, retire,
+				resolve: (result) => {
+					cancellation.signal.throwIfAborted()
+					if (record.status !== "pending") throw new Error(`Tasklet interaction ${id} is not pending`)
+					record.status = "resolved"
+					record.resolvedAt = Date.now()
+					record.resolution = structuredClone(result)
+					signal.removeEventListener("abort", retire)
+					resolve(structuredClone(result))
+				},
+			})
 			signal.addEventListener("abort", retire, { once: true })
 		})
 	}

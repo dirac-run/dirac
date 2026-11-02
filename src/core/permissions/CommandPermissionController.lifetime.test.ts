@@ -1,5 +1,8 @@
 import { strict as assert } from "node:assert"
 import { EventEmitter } from "node:events"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import type { FSWatcher } from "chokidar"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
@@ -25,6 +28,27 @@ describe("CommandPermissionController watcher ownership", () => {
 		const load = sinon.stub(controller as unknown as { loadConfig(): Promise<void> }, "loadConfig").resolves()
 		return { controller, watchers, factory, load }
 	}
+
+	it("revises authority after file reload and persisted rule changes", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permission-revision-"))
+		const watcher = Object.assign(new EventEmitter(), { close: sinon.stub().resolves() })
+		const controller = new CommandPermissionController(() => watcher as unknown as FSWatcher)
+		try {
+			assert.equal(controller.revision, 0)
+			await controller.initialize(directory)
+			const initialized = controller.revision
+			assert.ok(initialized > 0)
+			await controller.saveConfig({ rules: [{ tool: "execute_command", pattern: "echo hi", action: "deny" }] })
+			assert.ok(controller.revision > initialized)
+			assert.equal(controller.validateTool("execute_command", "echo hi").allowed, false)
+			const saved = controller.revision
+			await (controller as unknown as { loadConfig(): Promise<void> }).loadConfig()
+			assert.ok(controller.revision > saved)
+		} finally {
+			await controller.dispose()
+			await fs.rm(directory, { recursive: true, force: true })
+		}
+	})
 
 	it("does not join config loading or create a watcher after disposal", async () => {
 		const { controller, factory, load } = createController()

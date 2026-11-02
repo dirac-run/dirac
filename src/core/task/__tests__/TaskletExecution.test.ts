@@ -5,6 +5,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
+import { TaskletEscalationCleanupError } from "../TaskMessenger"
 import * as apiModule from "@core/api"
 import type { ApiHandler } from "@core/api"
 import type { ApiStream } from "@core/api/transform/stream"
@@ -19,6 +20,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import type { Mode } from "@/shared/storage/types"
 import { DiracAskResponse } from "@/shared/WebviewMessage"
+import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import * as notifications from "@integrations/notifications"
 import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
 import { createTaskletId } from "@/shared/taskletId"
@@ -222,7 +224,12 @@ describe("Tasklet real Task execution", function () {
 			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode, toolSelectionPolicy: params.toolSelectionPolicy,
 			pinnedContext: params.pinnedContext,
 		}
-		return new TaskletHost({ taskId: "root", executionProfile: "standalone" }, options)
+		return new TaskletHost({
+			taskId: "root", executionProfile: "standalone",
+			authorizePermission: rejectCall("unconfigured owner authorization"),
+			assertPermissionAllowed: rejectCall("unconfigured owner authority"),
+			escalateInteraction: rejectCall("unconfigured owner escalation"),
+		}, options)
 	}
 
 	async function waitForInteraction(host: TaskletHost, id: string) {
@@ -233,6 +240,158 @@ describe("Tasklet real Task execution", function () {
 		}
 		return host.inspect(id).interactions.find((request) => request.status === "pending")!
 	}
+
+	function createResolutionRoot() {
+		const params = parameters()
+		return create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
+			vscodeTerminalExecutionMode: "backgroundExec",
+			workingConfiguration: {
+				...params.workingConfiguration,
+				executionOptions: { ...params.workingConfiguration.executionOptions, vscodeTerminalExecutionMode: "backgroundExec" },
+			},
+			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+	}
+
+	async function waitForRootCard(root: Task) {
+		const deadline = Date.now() + 5_000
+		while (!root.stateView.lastWaitingCardId) {
+			assert.ok(Date.now() < deadline, "Root escalation did not become actionable")
+			await new Promise((resolve) => setTimeout(resolve, 5))
+		}
+		const id = root.stateView.lastWaitingCardId
+		const message = root.messageStateHandler.getDiracMessages().find((entry) => entry.id === id)
+		assert.equal(message?.content.type, DiracMessageType.CARD)
+		assert.ok(message?.content.type === DiracMessageType.CARD)
+		return message.content.card
+	}
+
+	it("answers a real child question through the root host while a sibling completes independently", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "question" : "complete"
+		const child = await host.start({ title: "question", prompt: "Ask privately" })
+		const request = await waitForInteraction(host, child.id)
+		assert.equal(request.permissionOperation, undefined)
+		const sibling = await host.start({ title: "sibling", prompt: "Finish independently" })
+		assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
+		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, {
+			operation: "answer", response: {
+				action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "PRIVATE_PARENT_ANSWER",
+			},
+		}), { status: "resolved" })
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		assert.match(JSON.stringify(requests[2].messages), /PRIVATE_PARENT_ANSWER/)
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
+		assert.equal(requests.length, 3)
+	})
+
+	it("rejects a real command without executing it and resumes the child conversation", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		const child = await host.start({ title: "command", prompt: "Ask command permission" })
+		const request = await waitForInteraction(host, child.id)
+		assert.deepEqual(request.permissionOperation, { kind: "commands", commands: ["touch permission-bypass-marker"] })
+		await host.resolveInteraction(child.id, request.id, { operation: "reject" })
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		assert.match(JSON.stringify(requests[1].messages), /denied/i)
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
+	})
+
+	it("uses the parent's current authority rather than the child's spawn settings for real command approval", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		const child = await host.start({ title: "command", prompt: "Ask command permission" })
+		const request = await waitForInteraction(host, child.id)
+		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), { status: "requires_user_approval" })
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
+		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), { status: "resolved" })
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		await fs.access(path.join(cwd, "permission-bypass-marker"))
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
+	})
+
+	it("escalates a real command through root input without granting approval to the next operation", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => ++turn <= 2 ? "execute_command" : "complete"
+		const child = await host.start({ title: "command", prompt: "Ask command permission twice" })
+		const request = await waitForInteraction(host, child.id)
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), { status: "requires_user_approval" })
+		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
+		const card = await waitForRootCard(root)
+		assert.notEqual(card.id, request.card.id)
+		assert.match(card.header, /command/)
+		assert.deepEqual(card.rawInput, request.card.rawInput)
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)
+		assert.deepEqual(await escalation, { status: "resolved" })
+		const next = await waitForInteraction(host, child.id)
+		assert.notEqual(next.id, request.id)
+		await fs.access(path.join(cwd, "permission-bypass-marker"))
+		await fs.unlink(path.join(cwd, "permission-bypass-marker"))
+		assert.deepEqual(await host.resolveInteraction(child.id, next.id, { operation: "approve" }), { status: "requires_user_approval" })
+		await host.resolveInteraction(child.id, next.id, { operation: "reject" })
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		const final = root.messageStateHandler.getDiracMessages().find((entry) => entry.id === card.id)!
+		assert.ok(final.content.type === DiracMessageType.CARD)
+		assert.equal(final.content.card.status, CardStatus.SUCCESS)
+	})
+
+	it("keeps explicit real-root escalation interactive even under current YOLO permission", async () => {
+		const root = createResolutionRoot()
+		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		const child = await host.start({ title: "command", prompt: "Explicitly escalate" })
+		const request = await waitForInteraction(host, child.id)
+		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
+		const card = await waitForRootCard(root)
+		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		await root.submitCardResponse(card.id, DiracAskResponse.REJECT)
+		await escalation
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+	})
+
+	it("answers real runtime retry intervention without treating the answer as a permission grant", async () => {
+		expectLoggerErrors() // The first controlled provider request deliberately fails authentication.
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => {
+			if (++turn === 1) throw new Error("authentication failed: controlled provider")
+			return "complete"
+		}
+		const child = await host.start({ title: "runtime", prompt: "Retry when instructed" })
+		const request = await waitForInteraction(host, child.id)
+		assert.equal(request.card.header, "API Request Failed")
+		assert.equal(request.permissionOperation, undefined)
+		await host.resolveInteraction(child.id, request.id, {
+			operation: "answer", response: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
+		})
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		assert.equal(requests.length, 2)
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
+	})
 
 	it("retains directed progress and completion without emitting routine presentation as communication", async () => {
 		let turn = 0
@@ -455,6 +614,76 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(stopped.outcomePersisted, true)
 		assert.equal(requests.length, 0)
 		assert.match(JSON.stringify(await host.readTranscript(record.id)), /Do not start this work/)
+	})
+
+	it("retains the real root lock when cancelled escalation cannot finalize its card", async () => {
+		expectLoggerErrors() // Cancelling the child's real command wait is expected.
+		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub
+		acquire.restore()
+		const rootDirectory = getTaskDirectoryPath("root")
+		const releaseLock = await taskLocks.acquireTaskLock(rootDirectory)
+		const release = sandbox.spy(releaseLock)
+		const params = parameters()
+		// This failed owner is deliberately not registered with ordinary successful afterEach shutdown.
+		const root = new Task({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
+			releaseTaskLock: release, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		let expectedShutdownFailure = false
+		try {
+			const child = await host.start({ title: "permission", prompt: "Wait for command approval" })
+			const request = await waitForInteraction(host, child.id)
+			const sibling = await host.start({ title: "sibling", prompt: "Complete independently" })
+			assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
+			const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
+			const failedEscalation = assert.rejects(escalation, (error) => {
+				assert.ok(error instanceof TaskletEscalationCleanupError)
+				assert.match(String(error.cause), /root escalation patch failure/)
+				return true
+			})
+			const card = await waitForRootCard(root)
+			const patch = root.messageStateHandler.patchCardById.bind(root.messageStateHandler)
+			sandbox.stub(root.messageStateHandler, "patchCardById").callsFake(async (id, update) => {
+				if (id === card.id && update.status === CardStatus.CANCELLED) {
+					throw new Error("root escalation patch failure")
+				}
+				return patch(id, update)
+			})
+			expectedShutdownFailure = true
+			await Promise.all([
+				assert.rejects(root.abortTask(), /Tasklet shutdown failed/),
+				failedEscalation,
+			])
+			await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
+			assert.deepEqual(root.stateView.waitingCardIds, [])
+			assert.equal(root.stateView.lastWaitingCardId, undefined)
+			assert.equal(root.stateView.askResponseCardId, undefined)
+			assert.equal(host.inspect(child.id).interactions[0].status, "retired")
+			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+			assert.equal(host.inspect(child.id).outcomePersisted, true)
+			assert.equal(host.inspect(sibling.id).outcome?.kind, "completed")
+			sinon.assert.notCalled(release)
+			await assert.rejects(taskLocks.acquireTaskLock(rootDirectory), /another Dirac instance/)
+			await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		} finally {
+			try {
+				if (expectedShutdownFailure) {
+					await assert.rejects(root.abortTask(), /Tasklet shutdown failed/)
+					await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
+				} else {
+					await root.abortTask()
+					await root.retirePersistence()
+				}
+			} finally {
+				// Test-only release; production correctly retains failed ownership.
+				await releaseLock()
+			}
+		}
 	})
 
 	it("keeps root ownership on a child transcript-flush failure while retiring writers and settling siblings", async () => {

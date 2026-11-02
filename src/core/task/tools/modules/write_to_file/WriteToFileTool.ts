@@ -180,6 +180,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					body: `Dirac wants to ${fileExists ? "edit" : "create"} ${displayPath}`,
 					status: CardStatus.WAITING_FOR_INPUT,
 					requireApproval: true,
+					permissionOperation: { kind: "paths", paths: [displayPath] },
 					permissionRequestKind:
 						utilityPermissionHandlingEnabled && permissionDisposition === "manual_only" ? "manual_tool" : "tool",
 					collapsed: false,

@@ -11,10 +11,12 @@ import { GlobalFileNames } from "@core/storage/fileNames"
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import * as storage from "@core/storage/taskStorage"
 import { CardKind, CardStatus, TaskStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { TaskInteractionRequest } from "../types/task-messenger"
 import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
+import { TaskletEscalationCleanupError } from "../TaskMessenger"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -33,6 +35,13 @@ describe("TaskletHost asynchronous ownership", () => {
 	let host: TaskletHost
 	let constructed: sinon.SinonStub
 	let children: ReturnType<typeof controlledTask>[]
+	let owner: taskModule.TaskletOwner & {
+		authorizePermission: sinon.SinonStub
+		assertPermissionAllowed: sinon.SinonStub
+		escalateInteraction: sinon.SinonStub
+	}
+	const approved = { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE }
+	const rejected = { action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }
 	const completed: TaskRunOutcome = { kind: "completed", response: "full result", completedAt: 123 }
 
 	function controlledTask() {
@@ -63,8 +72,14 @@ describe("TaskletHost asynchronous ownership", () => {
 			children.push(child)
 			return child.task
 		}) as any)
+		owner = {
+			taskId: "root", executionProfile: "standalone",
+			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
+			assertPermissionAllowed: sandbox.stub(),
+			escalateInteraction: sandbox.stub().resolves(rejected),
+		}
 		host = new TaskletHost(
-			{ taskId: "root", executionProfile: "standalone" },
+			owner,
 			{} as TaskletTaskOptions,
 			constructed as unknown as typeof taskModule.Task,
 		)
@@ -102,8 +117,238 @@ describe("TaskletHost asynchronous ownership", () => {
 				renderType: "text", requireApproval: true
 			},
 			permissionRequestKind: "manual_tool",
+			permissionOperation: { kind: "commands", commands: ["echo private"] },
 			toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
 		}
+	}
+
+	async function registerInteraction(input = request("card")) {
+		const child = await host.start({ title: "requesting child", prompt: "work" })
+		const counterparty = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		const cancellation = new AbortController()
+		const waiting = counterparty.requestInteraction(input, cancellation.signal)
+		// The original promise remains rejecting; individual assertions own cancellation failures.
+		void waiting.catch(() => { })
+		const interaction = host.inspect(child.id).interactions[0]
+		return { child, counterparty, cancellation, waiting, requestId: interaction.id }
+	}
+
+	it("resolves explicit authorized approval against detached operation data exactly once", async () => {
+		const input = request("permission-card")
+		const entry = await registerInteraction(input)
+		input.toolCall!.arguments.commands = ["changed by caller"]
+		input.permissionOperation = { kind: "commands", commands: ["changed descriptor"] }
+		const assertCurrent = sandbox.stub()
+		owner.authorizePermission.resolves({ approved: true, assertCurrent })
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), { status: "resolved" })
+		assert.deepEqual(await entry.waiting, approved)
+		sinon.assert.calledOnce(owner.authorizePermission)
+		const retained = owner.authorizePermission.firstCall.args[0] as TaskInteractionRequest
+		assert.deepEqual(retained.toolCall!.arguments, { commands: ["echo private"] })
+		assert.deepEqual(retained.permissionOperation, { kind: "commands", commands: ["echo private"] })
+		sinon.assert.called(assertCurrent)
+		sinon.assert.notCalled(owner.escalateInteraction)
+		const resolved = host.inspect(entry.child.id).interactions[0]
+		assert.equal(resolved.status, "resolved")
+		assert.equal(typeof resolved.resolvedAt, "number")
+		assert.deepEqual(resolved.resolution, approved)
+		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), /not pending/)
+		entry.cancellation.abort()
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "resolved")
+	})
+
+	it("leaves unauthorized approval pending and prevents answer-based permission bypass", async () => {
+		const entry = await registerInteraction()
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
+		sinon.assert.notCalled(owner.escalateInteraction)
+		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response: approved }), /Permission requests/)
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), { status: "resolved" })
+		assert.deepEqual(await entry.waiting, rejected)
+		sinon.assert.calledOnce(owner.authorizePermission)
+		sinon.assert.notCalled(owner.assertPermissionAllowed)
+	})
+
+	it("answers questions and runtime choices without security authorization or mode changes", async () => {
+		for (const requireApproval of [false, true]) {
+			const input: TaskInteractionRequest = { card: { ...request("choice").card, requireApproval, requireFeedback: !requireApproval } }
+			const entry = await registerInteraction(input)
+			await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), /Use answer/)
+			const response = { ...approved, value: "retry", text: "Continue the same operation" }
+			assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response }), { status: "resolved" })
+			assert.deepEqual(await entry.waiting, response)
+			response.text = "mutated"
+			assert.equal(host.inspect(entry.child.id).interactions[0].resolution?.text, "Continue the same operation")
+		}
+		sinon.assert.notCalled(owner.authorizePermission)
+		sinon.assert.notCalled(owner.assertPermissionAllowed)
+		sinon.assert.notCalled(owner.escalateInteraction)
+	})
+
+	it("rejects unknown, wrong-child and retired request identities even when children reuse card IDs", async () => {
+		const first = await registerInteraction(request("same-card"))
+		const second = await registerInteraction(request("same-card"))
+		assert.notEqual(first.requestId, second.requestId)
+		assert.equal(host.inspect(first.child.id).interactions[0].card.id, "same-card")
+		await assert.rejects(host.resolveInteraction(second.child.id, first.requestId, { operation: "reject" }), /not pending/)
+		await assert.rejects(host.resolveInteraction(first.child.id, "same-card", { operation: "reject" }), /not pending/)
+		await assert.rejects(host.resolveInteraction("unknown-child", first.requestId, { operation: "reject" }), /does not belong/)
+		first.cancellation.abort()
+		await assert.rejects(first.waiting, /retired/)
+		await assert.rejects(host.resolveInteraction(first.child.id, first.requestId, { operation: "reject" }), /not pending/)
+		assert.equal(host.inspect(second.child.id).interactions[0].status, "pending")
+		await host.resolveInteraction(second.child.id, second.requestId, { operation: "reject" })
+		assert.deepEqual(await second.waiting, rejected)
+	})
+
+	it("rejects simultaneous decisions and rechecks authority before applying an asynchronous approval", async () => {
+		const entry = await registerInteraction()
+		const check = deferred<{ approved: boolean; assertCurrent: () => void }>()
+		owner.authorizePermission.returns(check.promise)
+		const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" })
+		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), /already being resolved/)
+		check.resolve({ approved: true, assertCurrent: () => { throw new Error("Parent authority changed") } })
+		await assert.rejects(resolution, /Parent authority changed/)
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
+		await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
+		assert.deepEqual(await entry.waiting, rejected)
+	})
+
+	it("requires a fresh operation-specific user approval for every request", async () => {
+		const first = await registerInteraction(request("same-card"))
+		const second = await registerInteraction(request("same-card"))
+		owner.escalateInteraction.resolves(approved)
+		assert.deepEqual(await host.resolveInteraction(first.child.id, first.requestId, { operation: "escalate" }), { status: "resolved" })
+		assert.deepEqual(await first.waiting, approved)
+		sinon.assert.calledOnce(owner.escalateInteraction)
+		assert.deepEqual(owner.escalateInteraction.firstCall.args[0], { id: first.child.id, title: first.child.title })
+		assert.equal(owner.escalateInteraction.firstCall.args[1].id, first.requestId)
+		assert.equal(host.inspect(second.child.id).interactions[0].status, "pending")
+		assert.deepEqual(await host.resolveInteraction(second.child.id, second.requestId, { operation: "approve" }), { status: "requires_user_approval" })
+		sinon.assert.calledOnce(owner.escalateInteraction)
+		owner.escalateInteraction.resolves(rejected)
+		await host.resolveInteraction(second.child.id, second.requestId, { operation: "escalate" })
+		assert.deepEqual(await second.waiting, rejected)
+	})
+
+	it("rejects operation-changing escalation edits without consuming the pending request", async () => {
+		const entry = await registerInteraction()
+		owner.escalateInteraction.resolves({ ...approved, userEdits: { "outside.txt": "different operation" } })
+		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "escalate" }), /cannot change/)
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
+		await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
+		assert.deepEqual(await entry.waiting, rejected)
+	})
+
+	it("rechecks non-bypassable authority after user escalation and keeps a failed decision retryable", async () => {
+		const entry = await registerInteraction()
+		const decision = deferred<typeof approved>()
+		owner.escalateInteraction.returns(decision.promise)
+		const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "escalate" })
+		owner.assertPermissionAllowed.throws(new Error("Strict Plan mutation restriction"))
+		decision.resolve(approved)
+		await assert.rejects(resolution, /Strict Plan/)
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
+		await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
+		assert.deepEqual(await entry.waiting, rejected)
+	})
+
+	for (const operation of ["approve", "escalate"] as const) {
+		it(`rejects late ${operation} after interruption without affecting a sibling`, async () => {
+			const first = await registerInteraction()
+			const sibling = await registerInteraction()
+			const decision = deferred<any>()
+			const callback = operation === "approve" ? owner.authorizePermission : owner.escalateInteraction
+			callback.returns(decision.promise)
+			const resolution = host.resolveInteraction(first.child.id, first.requestId, { operation })
+			const resolutionRejected = assert.rejects(resolution, /retired/)
+			const signal = callback.firstCall.args[operation === "approve" ? 1 : 2] as AbortSignal
+			await host.interrupt(first.child.id)
+			assert.equal(signal.aborted, true)
+			await assert.rejects(first.waiting, /retired/)
+			decision.resolve(operation === "approve" ? { approved: true, assertCurrent: () => { } } : approved)
+			await resolutionRejected
+			assert.equal(host.inspect(first.child.id).interactions[0].status, "retired")
+			assert.equal(host.inspect(sibling.child.id).interactions[0].status, "pending")
+			sinon.assert.notCalled(children[1].task.abortTask)
+			await host.resolveInteraction(sibling.child.id, sibling.requestId, { operation: "reject" })
+			assert.deepEqual(await sibling.waiting, rejected)
+		})
+	}
+
+	it("joins escalation cancellation cleanup before root shutdown settles", async () => {
+		const entry = await registerInteraction()
+		const cleanup = deferred<void>()
+		const aborted = deferred<void>()
+		owner.escalateInteraction.callsFake(async (_child, _request, signal: AbortSignal) => {
+			await new Promise<void>((resolve) => signal.addEventListener("abort", () => { aborted.resolve(); resolve() }, { once: true }))
+			await cleanup.promise
+			signal.throwIfAborted()
+			return approved
+		})
+		const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "escalate" })
+		const resolutionRejected = assert.rejects(resolution, /retired/)
+		let shutdownFinished = false
+		const shutdown = host.shutdown().then(() => { shutdownFinished = true })
+		await aborted.promise
+		await assert.rejects(entry.waiting, /retired/)
+		await new Promise<void>((resolve) => setImmediate(resolve))
+		assert.equal(shutdownFinished, false)
+		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), /not pending/)
+		cleanup.resolve()
+		await Promise.all([resolutionRejected, shutdown])
+		assert.equal(shutdownFinished, true)
+		assert.equal(host.inspect(entry.child.id).interactions[0].status, "retired")
+	})
+
+	for (const timing of ["during shutdown", "before shutdown"] as const) {
+		it(`retains failed escalation cleanup ${timing} while settling siblings`, async () => {
+			const entry = await registerInteraction()
+			const sibling = await registerInteraction()
+			const failure = new TaskletEscalationCleanupError(new Error("root card cleanup failed"))
+			const cleanup = deferred<void>()
+			const aborted = deferred<void>()
+			owner.escalateInteraction.callsFake(async (_child, _request, signal: AbortSignal) => {
+				await new Promise<void>((resolve) => signal.addEventListener("abort", () => {
+					aborted.resolve()
+					resolve()
+				}, { once: true }))
+				await cleanup.promise
+				throw failure
+			})
+			const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "escalate" })
+			const resolutionRejected = assert.rejects(resolution, (error) => error === failure)
+			const assertShutdownFailure = (error: unknown) => {
+				assert.ok(error instanceof AggregateError)
+				assert.ok(error.errors.includes(failure))
+				return true
+			}
+			let shutdown: Promise<void>
+			if (timing === "before shutdown") {
+				entry.cancellation.abort()
+				await aborted.promise
+				cleanup.resolve()
+				await resolutionRejected
+				assert.equal(host.inspect(sibling.child.id).interactions[0].status, "pending")
+				shutdown = assert.rejects(host.shutdown(), assertShutdownFailure)
+			} else {
+				let settled = false
+				shutdown = assert.rejects(host.shutdown(), assertShutdownFailure).then(() => { settled = true })
+				await aborted.promise
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				assert.equal(settled, false, "Shutdown must join failed cleanup, not detach it")
+				cleanup.resolve()
+			}
+			await Promise.all([resolutionRejected, shutdown])
+			await assert.rejects(entry.waiting, /retired/)
+			await assert.rejects(sibling.waiting, /retired/)
+			for (const child of [entry.child, sibling.child]) {
+				assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+				assert.equal(host.inspect(child.id).outcomePersisted, true)
+				assert.equal(host.inspect(child.id).interactions[0].status, "retired")
+			}
+			await assert.rejects(host.shutdown(), assertShutdownFailure)
+		})
 	}
 
 	it("retains detached requests per child and rejects duplicate, retired and late registrations", async () => {
@@ -164,7 +409,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const snapshot = host.inspect(first.id)
 		snapshot.prompt = "cannot mutate owner"
 		assert.equal(host.inspect(first.id).prompt, "first assignment")
-		const other = new TaskletHost({ taskId: "other", executionProfile: "standalone" }, {} as TaskletTaskOptions)
+		const other = new TaskletHost({ ...owner, taskId: "other" }, {} as TaskletTaskOptions)
 		assert.throws(() => other.inspect(first.id), /does not belong/)
 		await assert.rejects(other.steer(first.id, "wrong root"), /does not belong/)
 		await assert.rejects(other.interrupt(first.id), /does not belong/)
@@ -458,10 +703,10 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("rejects recursive/Goal ownership, invalid roots and empty assignments", async () => {
 		for (const executionProfile of ["tasklet", "goal_child", "goal_coordinator", "goal_followup"] as const) {
-			assert.throws(() => new TaskletHost({ taskId: "root", executionProfile }, {} as TaskletTaskOptions), /ordinary root/)
+			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, {} as TaskletTaskOptions), /ordinary root/)
 		}
 		assert.throws(
-			() => new TaskletHost({ taskId: "../escape", executionProfile: "standalone" }, {} as TaskletTaskOptions),
+			() => new TaskletHost({ ...owner, taskId: "../escape" }, {} as TaskletTaskOptions),
 			/Invalid/,
 		)
 		await assert.rejects(host.start({ title: " ", prompt: "work" }), /non-empty/)

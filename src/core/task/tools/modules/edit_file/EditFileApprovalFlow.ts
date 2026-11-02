@@ -34,6 +34,7 @@ export class EditFileApprovalFlow {
 				icon: DiracIcon.FILE_EDIT,
 				status: CardStatus.WAITING_FOR_INPUT,
 				requireApproval: true,
+				permissionOperation: { kind: "paths", paths: preparedBatches.map((batch) => batch.displayPath) },
 				permissionRequestKind:
 					utilityPermissionHandlingEnabled && permissionDisposition === "manual_only" ? "manual_tool" : "tool",
 				collapsed: false,

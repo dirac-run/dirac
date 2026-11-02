@@ -12,6 +12,41 @@ const WRITE_TOOLS: DiracDefaultTool[] = [DiracDefaultTool.FILE_NEW, DiracDefault
 
 export type ToolPermissionDisposition = "auto_approve" | "utility_eligible" | "manual_only"
 
+/** Shared by command execution and parent authorization of the exact normalized commands. */
+export function resolveCommandApproval(
+	commands: readonly string[],
+	utilityEnabled: boolean,
+	autoApprover: AutoApprove,
+	permissions: Pick<CommandPermissionController, "validateTool">,
+): { required: boolean; utilityEligible: boolean } {
+	if (autoApprover.requiresCounterpartyApproval) return { required: true, utilityEligible: false }
+	if (!utilityEnabled && autoApprover.isUnrestrictedAutoApprove()) return { required: false, utilityEligible: false }
+	const results = commands.map((command) => {
+		const actualCommand = command.match(/^@(\w+):(.+)$/)?.[2].trim() ?? command
+		return { actualCommand, permission: permissions.validateTool("execute_command", actualCommand) }
+	})
+	if (results.some(({ permission }) => !permission.allowed)) return { required: true, utilityEligible: false }
+	if (autoApprover.isUnrestrictedAutoApprove()) return { required: false, utilityEligible: false }
+	const required = results.some(({ actualCommand, permission }) =>
+		!autoApprover.isCommandAutoApproved(actualCommand) && !permission.matchedPattern)
+	return { required, utilityEligible: required }
+}
+
+/** Utility browser path; the legacy browser path intentionally does not use these shortcuts. */
+export function resolveBrowserLaunchPermission(
+	url: string,
+	autoApprover: AutoApprove,
+	permissions: Pick<CommandPermissionController, "validateTool">,
+): ToolPermissionDisposition {
+	if (autoApprover.requiresCounterpartyApproval) return "manual_only"
+	const ruleResult = permissions.validateTool(DiracDefaultTool.BROWSER, url)
+	if (!ruleResult.allowed) return "manual_only"
+	if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
+	if (ruleResult.reason === "allowed" && ruleResult.matchedPattern) return "auto_approve"
+	if (autoApprover.shouldAutoApproveTool(DiracDefaultTool.BROWSER) === true) return "auto_approve"
+	return "utility_eligible"
+}
+
 export class AutoApprove {
 	private commandPermissionController: CommandPermissionController
 	// Cache for workspace paths - populated on first access and reused for the task lifetime

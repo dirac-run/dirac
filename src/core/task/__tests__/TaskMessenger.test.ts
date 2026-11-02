@@ -1,14 +1,15 @@
 import { strict as assert } from "node:assert"
-import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { describe, it } from "mocha"
 import pWaitFor from "p-wait-for"
 import sinon from "sinon"
-import { TaskMessenger } from "../TaskMessenger"
+import { TaskMessenger, TaskletEscalationCleanupError } from "../TaskMessenger"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../TaskState"
 import { submitCardResponse } from "../TaskUserInput"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
-import type { TaskCounterparty } from "../types/task-messenger"
+import type { TaskCounterparty, TaskInteractionRequest } from "../types/task-messenger"
 
 function createMessenger(postStateToWebview = sinon.stub().resolves(), counterparty?: TaskCounterparty) {
 	const messages: any[] = []
@@ -100,6 +101,194 @@ const responseFields = [
 	"askResponseValue",
 ] as const
 
+describe("TaskMessenger tasklet escalation", () => {
+	const child = { id: "tasklet-private", title: "Private worker" }
+	function request(): TaskInteractionRequest {
+		return {
+			card: {
+				id: "private-card", kind: CardKind.GENERIC, header: "Execute?", body: "Full operation",
+				status: CardStatus.WAITING_FOR_INPUT, renderType: "text", requireApproval: true,
+				startTime: 1, rawInput: { commands: ["echo example"] },
+				actions: [{ label: "Approve", value: DiracAskResponse.APPROVE, primary: true }],
+			},
+			permissionOperation: { kind: "commands", commands: ["echo example"] },
+		}
+	}
+
+	it("copies full operation details into a fresh card and accepts an immediate response", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		messageStateHandler.flushPendingWrites.callsFake(async () => {
+			const cardId = taskState.lastWaitingCardId
+			if (cardId) submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE })
+		})
+		const input = request()
+		const result = await messenger.escalateTaskletInteraction(child, input, new AbortController().signal)
+		const card = messages[0].content.card
+		assert.equal(result.action, DiracAskResponse.APPROVE)
+		assert.notEqual(card.id, input.card.id)
+		assert.notEqual(card.startTime, 1)
+		assert.match(card.header, /Private worker.*tasklet-private/)
+		assert.deepEqual(card.rawInput, input.card.rawInput)
+		assert.deepEqual(card.actions, input.card.actions)
+		assert.equal(card.status, CardStatus.SUCCESS)
+		assert.equal(input.card.status, CardStatus.WAITING_FOR_INPUT)
+		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+
+	it("does not create a card for pre-aborted or owner-routed escalation", async () => {
+		const { messenger, messages } = createMessenger()
+		const controller = new AbortController()
+		controller.abort(new Error("retired"))
+		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /retired/)
+		assert.deepEqual(messages, [])
+		const owner = createMessenger(undefined, { recordResponse: async () => { }, requestInteraction: sinon.stub() })
+		await assert.rejects(owner.messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), /root messenger/)
+		assert.deepEqual(owner.messages, [])
+	})
+
+	it("cancels a card created after its child retired", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		let release!: () => void
+		messageStateHandler.addToDiracMessages.callsFake(async (message) => {
+			messages.push(message)
+			await new Promise<void>((resolve) => { release = resolve })
+		})
+		const controller = new AbortController()
+		const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /retired/)
+		controller.abort(new Error("retired"))
+		release()
+		await rejected
+		assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
+		assert.deepEqual(taskState.waitingCardIds, [])
+		sinon.assert.notCalled(messageStateHandler.publishCardInteractionReady)
+	})
+
+	it("cancels queued escalation without consuming the active root response", async () => {
+		const { messenger, messages, taskState } = createMessenger()
+		const foreground = await messenger.createCard({ header: "Root question", requireFeedback: true })
+		const foregroundWait = foreground.waitForInteraction()
+		await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT, { interval: 1 })
+		const controller = new AbortController()
+		const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /abort/i)
+		await pWaitFor(() => taskState.waitingCardIds.length === 2, { interval: 1 })
+		submitCardResponse({ taskState }, { cardId: foreground.id, response: DiracAskResponse.REJECT })
+		controller.abort()
+		await rejected
+		assert.equal((await foregroundWait).action, DiracAskResponse.REJECT)
+		assert.equal(messages[1].content.card.status, CardStatus.CANCELLED)
+		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+
+	for (const queued of [false, true]) {
+		it(`settles ${queued ? "queued" : "active"} cancellation when terminal patch fails`, async () => {
+			const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+			const foreground = queued ? await messenger.createCard({ header: "Root question", requireFeedback: true }) : undefined
+			const foregroundWait = foreground?.waitForInteraction()
+			if (foreground) await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+			const controller = new AbortController()
+			const failure = new Error("terminal patch failed")
+			const waiting = messenger.escalateTaskletInteraction(child, request(), controller.signal)
+			const rejected = assert.rejects(withInteractionTimeout(taskState, waiting), (error: unknown) => {
+				assert.ok(error instanceof TaskletEscalationCleanupError)
+				assert.equal(error.cause, failure)
+				return true
+			})
+			await pWaitFor(() => queued ? taskState.waitingCardIds.length === 2 : messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+			messageStateHandler.patchCardById.rejects(failure)
+			controller.abort(new Error("child retired"))
+			await rejected
+			assert.equal(taskState.abort, false, "must settle without timeout/root abort")
+			assert.equal(messages.at(-1).content.card.status, CardStatus.WAITING_FOR_INPUT)
+			assert.deepEqual(taskState.waitingCardIds, foreground ? [foreground.id] : [])
+			for (const field of responseFields) assert.equal(taskState[field], undefined)
+			if (foreground) {
+				submitCardResponse({ taskState }, { cardId: foreground.id, response: DiracAskResponse.REJECT })
+				assert.equal((await foregroundWait)!.action, DiracAskResponse.REJECT)
+			}
+		})
+	}
+
+	it("reports failed publication after clearing the cancelled escalation FIFO", async () => {
+		expectLoggerErrors()
+		const { messenger, taskState, messageStateHandler, postStateToWebview } = createMessenger()
+		const controller = new AbortController()
+		const failure = new Error("publication failed")
+		const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), (error: unknown) => {
+			assert.ok(error instanceof TaskletEscalationCleanupError)
+			assert.equal(error.cause, failure)
+			return true
+		})
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+		postStateToWebview.rejects(failure)
+		controller.abort()
+		await rejected
+		assert.deepEqual(taskState.waitingCardIds, [])
+		for (const field of responseFields) assert.equal(taskState[field], undefined)
+	})
+
+	it("reports admission failure even when a card was retained before rejection", async () => {
+		const { messenger, messages, messageStateHandler } = createMessenger()
+		const failure = new Error("admission persistence failed")
+		messageStateHandler.addToDiracMessages.callsFake(async (message) => {
+			messages.push(message)
+			throw failure
+		})
+		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), (error: unknown) => {
+			assert.ok(error instanceof TaskletEscalationCleanupError)
+			assert.equal(error.cause, failure)
+			return true
+		})
+		assert.equal(messages.length, 1)
+	})
+
+	for (const source of ["child", "root"] as const) {
+		it(`cancels an active escalation on ${source} abort`, async () => {
+			const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+			const controller = new AbortController()
+			const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal))
+			await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+			if (source === "child") controller.abort()
+			else taskState.abort = true
+			await rejected
+			assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
+			assert.deepEqual(taskState.waitingCardIds, [])
+		})
+	}
+
+	it("preserves ordinary option values without treating them as permissions", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		const input = request()
+		delete input.permissionOperation
+		input.card = { ...input.card, requireApproval: false, requireFeedback: true }
+		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE, value: "Retry" })
+		})
+		const result = await messenger.escalateTaskletInteraction(child, input, new AbortController().signal)
+		assert.equal(result.value, "Retry")
+		assert.equal(messages[0].content.card.status, CardStatus.SUCCESS)
+	})
+
+	it("rejects operation-changing permission edits and closes the card", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE })
+			taskState.askResponseUserEdits = { "file.ts": "changed" }
+		})
+		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), /cannot change/)
+		assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
+	})
+
+	it("keeps normal chat interruption an exception, not an approval", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.MESSAGE, text: "Stop and reconsider" })
+		})
+		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), ToolSkippedByUserMessage)
+		assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
+		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+})
+
 describe("TaskMessenger owner interactions", () => {
 	function owner() {
 		return {
@@ -130,6 +319,15 @@ describe("TaskMessenger owner interactions", () => {
 		sinon.assert.notCalled(messageStateHandler.publishCardInteractionReady)
 		taskState.abort = true
 		await rejected
+	})
+
+	it("forwards the trusted operation descriptor to its owner", async () => {
+		const counterparty = { recordResponse: sinon.stub().resolves(), requestInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT }) }
+		const { messenger } = createMessenger(undefined, counterparty)
+		const operation = { kind: "commands" as const, commands: ["exact normalized command"] }
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true, permissionOperation: operation })
+		await card.waitForInteraction()
+		assert.deepEqual(counterparty.requestInteraction.firstCall.args[0].permissionOperation, operation)
 	})
 
 	it("does not register a request aborted during its transcript flush", async () => {

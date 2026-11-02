@@ -181,6 +181,11 @@ async function createOwnerCard(config: TaskConfig, params: CardParams, tracker: 
 	const handle = await config.taskMessenger.createCard({
 		...params,
 		isAutoApproved: undefined,
+		permissionOperation: params.permissionOperation ?? (
+			!params.operationalInput && (params.requireApproval || params.permissionRequestKind)
+				? { kind: "tool", manualOnly: params.permissionRequestKind === "manual_tool" }
+				: undefined
+		),
 		toolCall: config.toolUse ? { name: config.toolUse.name, arguments: structuredClone(config.toolUse.params) } : undefined,
 	})
 	const adapterHandle = new CardHandle(handle)

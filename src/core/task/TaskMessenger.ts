@@ -26,12 +26,22 @@ import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
 
 interface TaskCardParams extends CardParams {
 	permissionRequestKind?: TaskInteractionRequest["permissionRequestKind"]
+	permissionOperation?: TaskInteractionRequest["permissionOperation"]
 	toolCall?: TaskInteractionRequest["toolCall"]
 	isAutoApproved?: () => boolean
 }
 
 export interface TaskCardHandle extends ICardHandle {
 	getCard(): Readonly<Card>
+	waitForInteraction(signal?: AbortSignal): ReturnType<ICardHandle["waitForInteraction"]>
+}
+
+/** Cleanup/persistence failed: the owner must retain this failure through shutdown. */
+export class TaskletEscalationCleanupError extends Error {
+	constructor(cause: unknown) {
+		super("Tasklet escalation cleanup or persistence failed", { cause })
+		this.name = "TaskletEscalationCleanupError"
+	}
 }
 
 export class TaskMessenger implements ITaskMessenger {
@@ -50,6 +60,71 @@ export class TaskMessenger implements ITaskMessenger {
 		// Questions and plans are retained once, with their actionable card, at the wait boundary.
 		if (response.operation === ResponseOperation.QUESTION || response.operation === ResponseOperation.PLAN) return
 		await this.dependencies.counterparty?.recordResponse(response)
+	}
+
+	/** One user decision for one retained child request; never changes permission settings. */
+	async escalateTaskletInteraction(
+		child: { id: string; title: string },
+		request: TaskInteractionRequest,
+		signal: AbortSignal,
+	): ReturnType<ICardHandle["waitForInteraction"]> {
+		if (this.routesToOwner) throw new Error("Only a root messenger may escalate tasklet interactions")
+		const cancellation = AbortSignal.any([signal, this.dependencies.taskState.abortSignal])
+		cancellation.throwIfAborted()
+		let handle: TaskCardHandle | undefined
+		let finalization: Promise<void> | undefined
+		const finalize = (status: CardStatus) => {
+			if (handle) finalization ??= handle.finalize(status).catch((error) => {
+				throw new TaskletEscalationCleanupError(error)
+			})
+			return finalization
+		}
+		const cancel = () => {
+			// Observe immediately, then await the same cleanup before returning below.
+			void finalize(CardStatus.CANCELLED)?.catch(() => { })
+		}
+		cancellation.addEventListener("abort", cancel, { once: true })
+		try {
+			const card = structuredClone(request.card)
+			handle = await this.createCard({
+				kind: card.kind,
+				header: `Tasklet ${child.title} (${child.id}): ${card.header}`,
+				toolName: card.toolName,
+				icon: card.icon,
+				status: CardStatus.WAITING_FOR_INPUT,
+				renderType: card.renderType,
+				body: card.body,
+				rawInput: card.rawInput,
+				architectureReference: card.architectureReference,
+				diffs: card.diffs,
+				locations: card.locations,
+				requireApproval: card.requireApproval,
+				requireFeedback: card.requireFeedback,
+				feedbackPlaceholder: card.feedbackPlaceholder,
+				actions: card.actions,
+				autoScroll: card.autoScroll,
+				collapsed: false,
+				maxHeight: card.maxHeight,
+			}).catch((error) => {
+				// Admission may have persisted a card before failing; do not report this as ordinary cancellation.
+				throw new TaskletEscalationCleanupError(error)
+			})
+			cancellation.throwIfAborted()
+			const result = await handle.waitForInteraction(cancellation)
+			cancellation.throwIfAborted()
+			if ((request.permissionOperation || request.permissionRequestKind) && result.userEdits !== undefined) {
+				throw new Error("Tasklet permission approval cannot change the requested operation")
+			}
+			await finalize(result.action === DiracAskResponse.REJECT ? CardStatus.CANCELLED : CardStatus.SUCCESS)
+			cancellation.throwIfAborted()
+			return result
+		} catch (error) {
+			await finalize(CardStatus.CANCELLED)
+			throw error
+		} finally {
+			cancellation.removeEventListener("abort", cancel)
+			await finalization
+		}
 	}
 
 	private async waitForOwnerInteraction(request: TaskInteractionRequest, signal: AbortSignal) {
@@ -262,7 +337,8 @@ export class TaskMessenger implements ITaskMessenger {
 				await updateCard({ status }, doNotAutoCollapse)
 				await this.dependencies.messageStateHandler.flushPendingWrites()
 			},
-			waitForInteraction: async () => {
+			waitForInteraction: async (signal?: AbortSignal) => {
+				signal?.throwIfAborted()
 				if (this.routesToOwner) {
 					const card = getCard()
 					if (!(card.requireApproval || card.requireFeedback) || isFinalStatus(card.status)) {
@@ -271,8 +347,9 @@ export class TaskMessenger implements ITaskMessenger {
 					return this.waitForOwnerInteraction({
 						card: structuredClone(card),
 						permissionRequestKind: params.permissionRequestKind,
+						permissionOperation: params.permissionOperation,
 						toolCall: params.toolCall,
-					}, AbortSignal.any([this.dependencies.taskState.abortSignal, ownerWaitCancellation.signal]))
+					}, AbortSignal.any([this.dependencies.taskState.abortSignal, ownerWaitCancellation.signal, ...(signal ? [signal] : [])]))
 				}
 				if (params.isAutoApproved?.() === true) return autoApprovedInteraction()
 				const card = getCard()
@@ -286,16 +363,23 @@ export class TaskMessenger implements ITaskMessenger {
 						if (!this.dependencies.taskState.waitingCardIds.includes(id)) {
 							this.dependencies.taskState.waitingCardIds.push(id)
 						}
-						await this.dependencies.messageStateHandler.flushPendingWrites()
-						await this.postPresentationToWebview()
+						try {
+							await this.dependencies.messageStateHandler.flushPendingWrites()
+							await this.postPresentationToWebview()
+						} catch (error) {
+							if (signal) throw new TaskletEscalationCleanupError(error)
+							throw error
+						}
 						await pWaitFor(
 							() =>
 								this.dependencies.taskState.lastWaitingCardId === id ||
 								this.dependencies.taskState.abort ||
+								signal?.aborted ||
 								isFinalStatus(getCard().status) ||
 								params.isAutoApproved?.() === true,
 							{ interval: 100 },
 						)
+						signal?.throwIfAborted()
 						if (this.dependencies.taskState.abort) {
 							throw new Error("Task aborted while waiting for card interaction")
 						}
@@ -323,6 +407,7 @@ export class TaskMessenger implements ITaskMessenger {
 							waitingForUserInput: true,
 						})
 
+						signal?.throwIfAborted()
 						this.dependencies.taskState.status = TaskStatus.AWAITING_USER_INPUT
 						this.dependencies.messageStateHandler.publishCardInteractionReady(id)
 
@@ -333,6 +418,7 @@ export class TaskMessenger implements ITaskMessenger {
 									response !== undefined ||
 									this.dependencies.taskState.lastMessageTs !== messageTs ||
 									this.dependencies.taskState.abort ||
+									signal?.aborted ||
 									isFinalStatus(getCard().status) ||
 									params.isAutoApproved?.()
 								)
@@ -340,6 +426,7 @@ export class TaskMessenger implements ITaskMessenger {
 							{ interval: 100 },
 						)
 
+						signal?.throwIfAborted()
 						if (this.dependencies.taskState.abort) {
 							throw new Error("Task aborted while waiting for card interaction")
 						}
@@ -393,7 +480,10 @@ export class TaskMessenger implements ITaskMessenger {
 							this.dependencies.taskState.status = previousStatus
 						}
 						removeWaitingCard()
-						await this.postPresentationToWebview()
+						await this.postPresentationToWebview().catch((error) => {
+							if (signal) throw new TaskletEscalationCleanupError(error)
+							throw error
+						})
 					}
 				}
 

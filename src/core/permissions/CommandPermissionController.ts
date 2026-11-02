@@ -32,6 +32,10 @@ export class CommandPermissionController {
 	private readonly watcherCloser = new ChokidarWatcherCloser()
 	private disposed = false
 	private config: CommandPermissionConfig | null = null
+	private configRevision = 0
+
+	/** Changes independently of Task working configuration (including live file reloads). */
+	get revision(): number { return this.configRevision }
 	private readonly ruleEvaluator = new PermissionRuleEvaluator()
 	private readonly commandParser = new CommandParser()
 	private readonly dangerousCharDetector = new DangerousCharDetector()
@@ -93,6 +97,7 @@ export class CommandPermissionController {
 		const envConfig = this.parseConfigFromEnv()
 		const fileConfig = await this.loadConfigFromFile()
 
+		this.configRevision++
 		this.config = {
 			...envConfig,
 			...fileConfig,
@@ -166,6 +171,7 @@ export class CommandPermissionController {
 		// Update in-memory config. loadConfig() will be called by file watcher,
 		// but we update it here for immediate effect.
 		const envConfig = this.parseConfigFromEnv()
+		this.configRevision++
 		this.config = {
 			...envConfig,
 			...config,

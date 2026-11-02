@@ -61,12 +61,22 @@ export interface ICardHandle {
 	finalize(status: CardStatus, doNotAutoCollapse?: boolean): Promise<void>
 }
 
+/** Runtime-resolved operation, never supplied by a parent approval response. */
+export type PermissionOperation =
+	| { kind: "commands"; commands: string[] }
+	| { kind: "paths"; paths: string[] }
+	| { kind: "browser"; url: string }
+	| { kind: "tool"; manualOnly: boolean }
+
 export interface CardParams extends SharedCardParams {
 	/**
 	 * Classifies tool permissions for the shared approval pipeline.
 	 * Utility may approve `tool`; `manual_tool` requires the user unless an explicit unrestricted mode is active.
 	 */
 	permissionRequestKind?: "tool" | "manual_tool"
+	permissionOperation?: PermissionOperation
+	/** Operational choice (for example condensation), not a security grant. */
+	operationalInput?: boolean
 	/** Internal live predicate used to resolve a displayed tool permission after settings change. */
 	isAutoApproved?: () => boolean
 }

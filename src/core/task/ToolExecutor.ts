@@ -33,7 +33,7 @@ import { assertTaskMutationAuthorized, type TaskRequestRuntime } from "./runtime
 import { deepFreezeConfiguration, type TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import { TaskState } from "./TaskState"
 import { recordUtilityModelUsage } from "./recordUtilityModelUsage"
-import { AutoApprove, type ToolPermissionDisposition } from "./tools/autoApprove"
+import { AutoApprove, resolveCommandApproval, resolveBrowserLaunchPermission, type ToolPermissionDisposition } from "./tools/autoApprove"
 import { IDiracContext } from "./tools/interfaces/IDiracContext"
 import { ToolErrorHandler, ToolHookRunner } from "./tools/runtime/ToolHookRunner"
 import { ToolResultPusher } from "./tools/runtime/ToolResultPusher"
@@ -45,6 +45,7 @@ import { type SubagentRuntime, TaskConfig, validateTaskConfig } from "./tools/ty
 import { ToolDisplayUtils } from "./tools/utils/ToolDisplayUtils"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
 import { isDiscoveredToolAvailableToTaskProfile } from "./TaskExecutionProfile"
+import type { TaskInteractionRequest } from "./types/task-messenger"
 
 export { canonicalizeResponseToolCall }
 
@@ -159,6 +160,96 @@ export class ToolExecutor {
 			this.getCurrentWorkingConfiguration().executionOptions.multiRootEnabled,
 			this.executionProfile === "tasklet",
 		)
+	}
+
+	/** A user escalation cannot override the root's current strict-Plan mutation boundary. */
+	public assertTaskletPermissionAllowed(request: TaskInteractionRequest): void {
+		const tool = request.toolCall?.name as DiracDefaultTool | undefined
+		if (tool && ToolExecutor.PLAN_MODE_RESTRICTED_TOOLS.includes(tool)) {
+			const current = this.getCurrentWorkingConfiguration()
+			assertTaskMutationAuthorized(this.activeRequestRuntime?.workingConfiguration ?? current, current, tool)
+		}
+	}
+
+	/** Checks authority only after an explicit parent approval; never decides for the parent. */
+	public async authorizeTaskletPermission(
+		request: TaskInteractionRequest,
+		signal: AbortSignal,
+	): Promise<{ approved: boolean; assertCurrent: () => void }> {
+		const configuration = this.getCurrentWorkingConfiguration()
+		const permissionRevision = this.commandPermissionController.revision
+		const assertCurrent = () => {
+			signal.throwIfAborted()
+			this.assertTaskletPermissionAllowed(request)
+			if (this.getCurrentWorkingConfiguration().revision !== configuration.revision ||
+				this.commandPermissionController.revision !== permissionRevision) {
+				throw new Error("Parent authority changed while resolving tasklet permission")
+			}
+		}
+		assertCurrent()
+		const operation = request.permissionOperation
+		if (!operation || !request.toolCall) return { approved: false, assertCurrent }
+		const binding = this.createPermissionDecisionBinding(configuration)
+		const autoApprover = this.requestAutoApprover()
+		const disposition = await this.taskletPermissionDisposition(request, autoApprover, !!binding)
+		assertCurrent()
+		if (disposition === "auto_approve") return { approved: true, assertCurrent }
+		if (disposition !== "utility_eligible" || !binding) return { approved: false, assertCurrent }
+		const decision = await binding.service.decide({
+			toolCall: structuredClone(request.toolCall),
+			permission: {
+				header: request.card.header,
+				...(request.card.locations ? { locations: structuredClone(request.card.locations) } : {}),
+				...(request.card.diffs ? { diffs: structuredClone(request.card.diffs) } : {}),
+			},
+			runtime: { cwd: this.cwd, mode: configuration.settings.mode, isSubagent: false },
+		}, signal)
+		assertCurrent()
+		return { approved: decision.decision === "approve", assertCurrent }
+	}
+
+	private async taskletPermissionDisposition(
+		request: TaskInteractionRequest,
+		autoApprover: AutoApprove,
+		utilityEnabled: boolean,
+	): Promise<ToolPermissionDisposition> {
+		const operation = request.permissionOperation!
+		const tool = request.toolCall!.name as DiracDefaultTool
+		switch (operation.kind) {
+			case "commands": {
+				if (tool !== DiracDefaultTool.EXECUTE_COMMAND || !operation.commands.length) return "manual_only"
+				// Classified permission cards apply the shared unrestricted override even when
+				// the tool's initial disposition is manual-only (including Utility restrictions).
+				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
+				const approval = resolveCommandApproval(operation.commands, utilityEnabled, autoApprover, this.commandPermissionController)
+				return !approval.required ? "auto_approve" : approval.utilityEligible ? "utility_eligible" : "manual_only"
+			}
+			case "browser":
+				if (tool !== DiracDefaultTool.BROWSER) return "manual_only"
+				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
+				return utilityEnabled
+					? resolveBrowserLaunchPermission(operation.url, autoApprover, this.commandPermissionController)
+					: autoApprover.isUnrestrictedAutoApprove() ? "auto_approve" : "manual_only"
+			case "paths": {
+				if (!ToolExecutor.PLAN_MODE_RESTRICTED_TOOLS.includes(tool) || !operation.paths.length) return "manual_only"
+				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
+				let result: ToolPermissionDisposition = "auto_approve"
+				for (const path of operation.paths) {
+					const disposition = utilityEnabled
+						? await autoApprover.resolveToolPathPermission(tool, path)
+						: await autoApprover.shouldAutoApproveToolWithPath(tool, path) ? "auto_approve" : "manual_only"
+					if (disposition === "manual_only") return disposition
+					if (disposition === "utility_eligible") result = disposition
+				}
+				return result
+			}
+			case "tool":
+				// Built-ins with resolved scopes must not fall back to a generic grant if metadata is missing.
+				if (ToolExecutor.PLAN_MODE_RESTRICTED_TOOLS.includes(tool) ||
+					tool === DiracDefaultTool.EXECUTE_COMMAND || tool === DiracDefaultTool.BROWSER) return "manual_only"
+				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
+				return operation.manualOnly ? "manual_only" : "utility_eligible"
+		}
 	}
 
 	private shouldAutoApproveTool(toolName: DiracDefaultTool): boolean | [boolean, boolean] {

@@ -188,6 +188,7 @@ export class AstEditApproval {
 			icon: args.operation === "rename" ? DiracIcon.SYMBOL_RENAME : DiracIcon.SYMBOL_REPLACE,
 			status: CardStatus.WAITING_FOR_INPUT,
 			requireApproval: true,
+			permissionOperation: { kind: "paths", paths: plan.files.map((file) => file.displayPath) },
 			permissionRequestKind:
 				utilityPermissionHandlingEnabled && permissionDisposition === "manual_only" ? "manual_tool" : "tool",
 			collapsed: false,

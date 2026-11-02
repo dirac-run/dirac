@@ -176,6 +176,7 @@ export class CondenseTool implements IDiracTool {
 			header: "Condense Conversation",
 			icon: DiracIcon.CHAT,
 			requireApproval: true,
+			operationalInput: true,
 			collapsed: false,
 			actions: [
 				{ label: "Condense", value: DiracAskResponse.APPROVE, primary: true },

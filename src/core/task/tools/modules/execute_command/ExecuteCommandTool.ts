@@ -10,6 +10,7 @@ import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment
 import { SurfaceType } from "../../interfaces/SurfaceType"
 import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import { resolveCommandTimeoutSeconds } from "../../utils/CommandTimeoutUtils"
+import { resolveCommandApproval } from "../../autoApprove"
 
 import { shortenCommandForDisplay } from "./path-display"
 
@@ -146,30 +147,8 @@ export class ExecuteCommandTool implements IDiracTool {
 		commands: NormalizedCommand[],
 		utilityPermissionHandlingEnabled: boolean,
 	): CommandApprovalRequirement {
-		if (this.autoApprover.requiresCounterpartyApproval) return { required: true, utilityEligible: false }
-		if (!utilityPermissionHandlingEnabled && this.autoApprover.isUnrestrictedAutoApprove()) {
-			return { required: false, utilityEligible: false }
-		}
-
-		const permissionResults = commands.map((command) => {
-			const actualCommand = this.stripWorkspaceHint(command.command)
-			return {
-				actualCommand,
-				permission: this.commandPermissionController.validateTool("execute_command", actualCommand),
-			}
-		})
-		if (permissionResults.some(({ permission }) => !permission.allowed)) {
-			return { required: true, utilityEligible: false }
-		}
-		if (this.autoApprover.isUnrestrictedAutoApprove()) {
-			return { required: false, utilityEligible: false }
-		}
-
-		const requiresApproval = permissionResults.some(({ actualCommand, permission }) => {
-			if (this.autoApprover.isCommandAutoApproved(actualCommand)) return false
-			return !permission.matchedPattern
-		})
-		return { required: requiresApproval, utilityEligible: requiresApproval }
+		return resolveCommandApproval(commands.map(({ command }) => command), utilityPermissionHandlingEnabled,
+			this.autoApprover, this.commandPermissionController)
 	}
 
 	private async requestApproval(
@@ -184,6 +163,7 @@ export class ExecuteCommandTool implements IDiracTool {
 			status: CardStatus.WAITING_FOR_INPUT,
 			icon: DiracIcon.COMMAND,
 			requireApproval: true,
+			permissionOperation: { kind: "commands", commands: commands.map(({ command }) => command) },
 			permissionRequestKind:
 				utilityPermissionHandlingEnabled
 					? (!utilityEligible ? "manual_tool" : "tool")
@@ -383,9 +363,6 @@ export class ExecuteCommandTool implements IDiracTool {
 		return commands
 	}
 
-	private stripWorkspaceHint(cmd: string): string {
-		return parseWorkspaceHint(cmd)?.command ?? cmd
-	}
 
 	private wrapScript(script: string, language: string): string {
 		const delimiter = `EOF_DIRAC_SCRIPT_${Math.random().toString(36).substring(2, 10).toUpperCase()}`
