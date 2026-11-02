@@ -1,53 +1,47 @@
-import { describe, expect, it } from "vitest"
+import { strict as assert } from "node:assert"
+import { describe, it } from "mocha"
 import { filterOpenRouterModelIds, rankModelIdsForDisplay, releaseDateKey } from "../model-filters"
 
 describe("filterOpenRouterModelIds", () => {
 	it("hides internal provider entries", () => {
-		expect(filterOpenRouterModelIds(["dirac/internal", "z-ai/glm-4.7"], "openrouter")).toEqual(["z-ai/glm-4.7"])
+		assert.deepEqual(filterOpenRouterModelIds(["dirac/internal", "z-ai/glm-4.7"], "openrouter"), ["z-ai/glm-4.7"])
 	})
 })
 
 describe("releaseDateKey", () => {
 	it("parses the compact canonical stamp", () => {
-		expect(releaseDateKey("z-ai/glm-4.7-20251222")).toBe("20251222")
+		assert.equal(releaseDateKey("z-ai/glm-4.7-20251222"), "20251222")
 	})
 
 	it("parses dashed, month-year, and short stamp forms", () => {
-		expect(releaseDateKey("qwen/qwen3-coder-next-2025-02-03")).toBe("20250203")
-		expect(releaseDateKey("cohere/command-a-plus-05-2026")).toBe("20260501")
-		expect(releaseDateKey("mistralai/mistral-small-2603")).toBe("20260301")
+		assert.equal(releaseDateKey("qwen/qwen3-coder-next-2025-02-03"), "20250203")
+		assert.equal(releaseDateKey("cohere/command-a-plus-05-2026"), "20260501")
+		assert.equal(releaseDateKey("mistralai/mistral-small-2603"), "20260301")
 	})
 
 	it("returns undefined without a recognisable stamp", () => {
-		expect(releaseDateKey(undefined)).toBeUndefined()
-		expect(releaseDateKey("")).toBeUndefined()
-		expect(releaseDateKey("openai/gpt-audio")).toBeUndefined()
+		assert.equal(releaseDateKey(undefined), undefined)
+		assert.equal(releaseDateKey(""), undefined)
+		assert.equal(releaseDateKey("openai/gpt-audio"), undefined)
 	})
 })
 
 describe("rankModelIdsForDisplay", () => {
-	const canonical = (id: string): string | undefined =>
+	const canonicalSlugFor = (modelId: string): string | undefined =>
 		({
 			"~z-ai/glm-latest": "~z-ai/glm-latest",
 			"z-ai/glm-6": "z-ai/glm-6-20260601",
 			"z-ai/glm-4.7": "z-ai/glm-4.7-20251222",
 			"openai/gpt-5.5": "openai/gpt-5.5-20251101",
 			"openai/gpt-audio": "openai/gpt-audio",
-		})[id]
+		})[modelId]
 
 	it("orders aliases, then dated newest-first, then undated, then variants", () => {
 		const ranked = rankModelIdsForDisplay(
-			[
-				"z-ai/glm-5.3:batch",
-				"openai/gpt-audio",
-				"openai/gpt-5.5",
-				"z-ai/glm-4.7",
-				"~z-ai/glm-latest",
-				"z-ai/glm-6",
-			],
-			canonical,
+			["z-ai/glm-5.3:batch", "openai/gpt-audio", "openai/gpt-5.5", "z-ai/glm-4.7", "~z-ai/glm-latest", "z-ai/glm-6"],
+			canonicalSlugFor,
 		)
-		expect(ranked).toEqual([
+		assert.deepEqual(ranked, [
 			"~z-ai/glm-latest",
 			"z-ai/glm-6",
 			"z-ai/glm-4.7",
@@ -58,27 +52,27 @@ describe("rankModelIdsForDisplay", () => {
 	})
 
 	it("keeps a dated base model ahead of its suffixed variants", () => {
-		const ranked = rankModelIdsForDisplay(["z-ai/glm-4.7:batch", "z-ai/glm-4.7:free", "z-ai/glm-4.7"], canonical)
-		expect(ranked).toEqual(["z-ai/glm-4.7", "z-ai/glm-4.7:batch", "z-ai/glm-4.7:free"])
+		const ranked = rankModelIdsForDisplay(["z-ai/glm-4.7:batch", "z-ai/glm-4.7:free", "z-ai/glm-4.7"], canonicalSlugFor)
+		assert.deepEqual(ranked, ["z-ai/glm-4.7", "z-ai/glm-4.7:batch", "z-ai/glm-4.7:free"])
 	})
 
 	it("is stable for models sharing a release date", () => {
-		expect(rankModelIdsForDisplay(["vendor/b", "vendor/a"], () => "vendor/shared-20250101")).toEqual([
-			"vendor/a",
-			"vendor/b",
-		])
+		assert.deepEqual(
+			rankModelIdsForDisplay(["vendor/b", "vendor/a"], () => "vendor/shared-20250101"),
+			["vendor/a", "vendor/b"],
+		)
 	})
 
-	it("keeps every model when metadata is missing", () => {
+	it("never adds or drops models when metadata is missing", () => {
 		const input = ["vendor/unknown", "vendor/dated"]
 		const ranked = rankModelIdsForDisplay(input, () => undefined)
-		expect([...ranked].sort()).toEqual([...input].sort())
+		assert.deepEqual([...ranked].sort(), [...input].sort())
 	})
 
-	it("never adds or drops models", () => {
+	it("never adds or drops models across mixed tiers", () => {
 		const input = ["~b/latest", "a/dated", "a/x:batch", "c/undated"]
-		const ranked = rankModelIdsForDisplay(input, canonical)
-		expect(ranked).toHaveLength(input.length)
-		expect([...ranked].sort()).toEqual([...input].sort())
+		const ranked = rankModelIdsForDisplay(input, canonicalSlugFor)
+		assert.equal(ranked.length, input.length)
+		assert.deepEqual([...ranked].sort(), [...input].sort())
 	})
 })

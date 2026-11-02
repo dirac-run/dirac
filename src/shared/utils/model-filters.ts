@@ -68,10 +68,7 @@ export function releaseDateKey(canonicalSlug: string | undefined): string | unde
  * suffixed variants such as `:batch` and `:free`, which restate a base model
  * and should never push that base model out of view.
  */
-export function rankModelIdsForDisplay(
-	modelIds: string[],
-	canonicalSlugFor: (modelId: string) => string | undefined,
-): string[] {
+export function rankModelIdsForDisplay(modelIds: string[], canonicalSlugFor: (modelId: string) => string | undefined): string[] {
 	const aliases: string[] = []
 	const dated: Array<{ id: string; date: string }> = []
 	const undated: string[] = []
