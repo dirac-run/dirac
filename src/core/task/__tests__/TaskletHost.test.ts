@@ -12,6 +12,7 @@ import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import * as storage from "@core/storage/taskStorage"
 import { CardKind, CardStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { ResponseOperation } from "@shared/responseTool"
 import type { TaskInteractionRequest } from "../types/task-messenger"
 import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
@@ -27,6 +28,10 @@ function deferred<T>() {
 	})
 	return { promise, resolve, reject }
 }
+
+const deliverTaskletEvents = (taskModule.Task.prototype as unknown as {
+	deliverTaskletEvents(history: import("@shared/messages/content").DiracStorageMessage[]): Promise<void>
+}).deliverTaskletEvents
 
 /** Controlled executions, real addressed/atomic record storage. Real Task coverage is in TaskletExecution.test.ts. */
 describe("TaskletHost asynchronous ownership", () => {
@@ -699,6 +704,291 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.deepEqual(host.listActive(), [])
 		assert.equal(host.shutdown(), shutdown)
 		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
+	})
+
+	async function savedEvents(id: string): Promise<Array<{
+		id: string; deliveredAt?: number; communication: {
+			type: string; response?: { text: string }; request?: { id: string; status: string; resolution?: unknown }
+		}
+	}>> {
+		return JSON.parse(await fs.readFile(path.join(
+			getTaskDirectoryPath({ kind: "tasklet", rootTaskId: "root", taskletId: id }),
+			GlobalFileNames.taskletEvents,
+		), "utf8"))
+	}
+
+	async function respondingChild() {
+		const child = await host.start({ title: "communicating child", prompt: "work" })
+		const counterparty = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		return { child, counterparty }
+	}
+
+	function parentDeliveryFixture() {
+		const history: import("@shared/messages/content").DiracStorageMessage[] = [
+			{ role: "user", content: [{ type: "text", text: "Continue supervising" }] },
+		]
+		const flush = sandbox.stub().resolves()
+		const append = sandbox.stub().callsFake(async (block) => {
+			const message = history.at(-1)!
+			assert.ok(Array.isArray(message.content))
+			message.content.push(block)
+			return message
+		})
+		const root = {
+			taskletHost: host,
+			messageStateHandler: {
+				getApiConversationHistory: () => history,
+				getApiConversationProviderState: () => ({}),
+				appendToLastApiConversationUserMessage: append,
+				flushPendingWrites: flush,
+			},
+		}
+		return {
+			history, flush, append,
+			deliver: (outbound = history) => deliverTaskletEvents.call(root, outbound),
+		}
+	}
+
+	it("persists full response payloads independently of bounded parent previews and acknowledgement", async () => {
+		const { child, counterparty } = await respondingChild()
+		const text = "A".repeat(12_000) + "FULL_RESULT_TAIL"
+		await counterparty.recordResponse({ operation: ResponseOperation.COMPLETE, text })
+		const stored = await savedEvents(child.id)
+		assert.equal(stored.length, 1)
+		assert.equal(stored[0].communication.response?.text, text)
+		assert.equal(stored[0].deliveredAt, undefined)
+		const delivery = (await host.prepareEventDelivery())!
+		assert.equal(delivery.content.length, 1)
+		assert.match(delivery.content[0].text, /preview truncated/)
+		assert.ok(!delivery.content[0].text.includes("FULL_RESULT_TAIL"))
+		assert.equal(host.inspect(child.id).responses[0].text, text)
+		await delivery.acknowledge()
+		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal((await savedEvents(child.id))[0].communication.response?.text, text)
+		assert.equal(await host.prepareEventDelivery(), undefined)
+		assert.equal(host.inspect(child.id).responses[0].text, text)
+	})
+
+	it("limits each parent delivery and retains the remainder without treating activity as communication", async () => {
+		const { child, counterparty } = await respondingChild()
+		const bindings = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!
+		await bindings.postStateToOwner()
+		await bindings.postPresentationToOwner?.()
+		assert.equal(await host.prepareEventDelivery(), undefined)
+		sandbox.stub(Date, "now").returns(12345)
+		for (let index = 0; index < 18; index++) await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: `update ${index}` })
+		const first = (await host.prepareEventDelivery())!
+		assert.equal(first.content.length, 16)
+		assert.deepEqual(first.content.map((block) => JSON.parse(block.text.split("\n")[1]).response.text),
+			Array.from({ length: 16 }, (_, index) => `update ${index}`))
+		await first.acknowledge()
+		const rest = (await host.prepareEventDelivery())!
+		assert.equal(rest.content.length, 2)
+		const deliveredIds = new Set(first.content.flatMap((block) => block.taskletEventIds ?? []))
+		assert.ok(rest.content.every((block) => !deliveredIds.has(block.taskletEventIds![0])))
+		await rest.acknowledge()
+		assert.equal((await savedEvents(child.id)).length, 18)
+		assert.equal(await host.prepareEventDelivery(), undefined)
+	})
+
+	it("does not acknowledge communications arriving while the previous acknowledgement is writing", async () => {
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "first" })
+		const delivery = (await host.prepareEventDelivery())!
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		const originalSave = storage.saveTaskletEvents
+		let writes = 0
+		sandbox.stub(storage, "saveTaskletEvents").callsFake(async (address, events) => {
+			if (++writes === 1) { entered.resolve(); await release.promise }
+			await originalSave(address, events)
+		})
+		const acknowledgement = delivery.acknowledge()
+		await entered.promise
+		const arrival = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "second" })
+		release.resolve()
+		await Promise.all([acknowledgement, arrival])
+		const stored = await savedEvents(child.id)
+		assert.equal(typeof stored[0].deliveredAt, "number")
+		assert.equal(stored[1].deliveredAt, undefined)
+		const next = (await host.prepareEventDelivery())!
+		assert.equal(next.content.length, 1)
+		assert.match(next.content[0].text, /second/)
+	})
+
+	it("surfaces failed event writes while retaining full responses for a subsequent complete snapshot", async () => {
+		expectLoggerErrors()
+		const { child, counterparty } = await respondingChild()
+		const originalSave = storage.saveTaskletEvents
+		const write = sandbox.stub(storage, "saveTaskletEvents")
+		write.onFirstCall().rejects(new Error("event disk unavailable"))
+		write.callsFake(originalSave)
+		await assert.rejects(counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained despite disk failure" }), /event disk unavailable/)
+		assert.equal(host.inspect(child.id).responses[0].text, "retained despite disk failure")
+		assert.equal((await host.prepareEventDelivery())!.content.length, 1)
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "next update" })
+		assert.equal((await savedEvents(child.id)).length, 2)
+		assert.equal((await host.prepareEventDelivery())!.content.length, 2)
+	})
+
+	it("does not persist acknowledgement on failure and allows retrying that acknowledgement", async () => {
+		expectLoggerErrors()
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "pending acknowledgement" })
+		const delivery = (await host.prepareEventDelivery())!
+		const originalSave = storage.saveTaskletEvents
+		const write = sandbox.stub(storage, "saveTaskletEvents")
+		write.onFirstCall().rejects(new Error("ack disk unavailable"))
+		write.callsFake(originalSave)
+		await assert.rejects(delivery.acknowledge(), /ack disk unavailable/)
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		await delivery.acknowledge()
+		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal(await host.prepareEventDelivery(), undefined)
+	})
+
+	it("retries a failed acknowledgement through the next parent delivery without duplicating context", async () => {
+		expectLoggerErrors()
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "receipt retry" })
+		const parent = parentDeliveryFixture()
+		const originalSave = storage.saveTaskletEvents
+		const write = sandbox.stub(storage, "saveTaskletEvents").callsFake(originalSave)
+		// The first write prepares delivery; the second acknowledges the persisted parent context.
+		write.onSecondCall().rejects(new Error("receipt disk failure"))
+		await assert.rejects(parent.deliver(), /receipt disk failure/)
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		await parent.deliver()
+		sinon.assert.calledOnce(parent.append)
+		assert.equal((parent.history[0].content as unknown[]).length, 2)
+		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+	})
+
+	it("rejects late acknowledgements after shutdown without starting another storage write", async () => {
+		const { counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "pending" })
+		const delivery = (await host.prepareEventDelivery())!
+		await host.shutdown()
+		const write = sandbox.spy(storage, "saveTaskletEvents")
+		await assert.rejects(delivery.acknowledge(), /shutting down/)
+		sinon.assert.notCalled(write)
+	})
+
+	it("retains events when parent flush fails and retries without duplicating canonical or outbound content", async () => {
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "deliver exactly once to context" })
+		const parent = parentDeliveryFixture()
+		parent.flush.onFirstCall().rejects(new Error("parent disk unavailable"))
+		const outbound = structuredClone(parent.history)
+		await assert.rejects(parent.deliver(outbound), /parent disk unavailable/)
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await host.prepareEventDelivery())!.content.length, 1)
+		await parent.deliver(outbound)
+		sinon.assert.calledOnce(parent.append)
+		assert.equal((parent.history[0].content as unknown[]).length, 2)
+		assert.equal((outbound[0].content as unknown[]).length, 2)
+		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		await parent.deliver(outbound)
+		sinon.assert.calledOnce(parent.append)
+		sinon.assert.calledTwice(parent.flush)
+	})
+
+	it("retains pending delivery when parent append fails before flush or acknowledgement", async () => {
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "append retry" })
+		const parent = parentDeliveryFixture()
+		parent.append.onFirstCall().rejects(new Error("parent append failed"))
+		await assert.rejects(parent.deliver(), /parent append failed/)
+		sinon.assert.notCalled(parent.flush)
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((parent.history[0].content as unknown[]).length, 1)
+		await parent.deliver()
+		assert.equal((parent.history[0].content as unknown[]).length, 2)
+		assert.equal(await host.prepareEventDelivery(), undefined)
+	})
+
+	it("keeps arrivals during parent-context persistence pending for the next serial delivery", async () => {
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "before parent flush" })
+		const parent = parentDeliveryFixture()
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		parent.flush.onFirstCall().callsFake(async () => { entered.resolve(); await release.promise })
+		const delivery = parent.deliver()
+		await entered.promise
+		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "during parent flush" })
+		release.resolve()
+		await delivery
+		const stored = await savedEvents(child.id)
+		assert.equal(typeof stored[0].deliveredAt, "number")
+		assert.equal(stored[1].deliveredAt, undefined)
+		assert.equal((parent.history[0].content as unknown[]).length, 2)
+		await parent.deliver()
+		assert.equal((parent.history[0].content as unknown[]).length, 3)
+		assert.equal(await host.prepareEventDelivery(), undefined)
+	})
+
+	it("does not duplicate a delivery when persisted and outbound user messages share an object", async () => {
+		const { child, counterparty } = await respondingChild()
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "shared user message" })
+		const parent = parentDeliveryFixture()
+		await parent.deliver()
+		assert.equal((parent.history[0].content as unknown[]).length, 2)
+		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		sinon.assert.calledOnce(parent.append)
+	})
+
+	it("persists resolved and retired request states without reviving pending authority", async () => {
+		const resolved = await registerInteraction()
+		await host.resolveInteraction(resolved.child.id, resolved.requestId, { operation: "reject" })
+		await resolved.waiting
+		const response = (await savedEvents(resolved.child.id))[0].communication.request!
+		assert.equal(response.id, resolved.requestId)
+		assert.equal(response.status, "resolved")
+		assert.deepEqual(response.resolution, rejected)
+		const retired = await registerInteraction()
+		await host.interrupt(retired.child.id)
+		await assert.rejects(retired.waiting, /retired/)
+		assert.equal((await savedEvents(retired.child.id))[0].communication.request?.status, "retired")
+		await assert.rejects(host.resolveInteraction(retired.child.id, retired.requestId, { operation: "approve" }), /not pending/)
+	})
+
+	it("joins communication persistence before shutdown settles", async () => {
+		const { child, counterparty } = await respondingChild()
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		const originalSave = storage.saveTaskletEvents
+		sandbox.stub(storage, "saveTaskletEvents").callsFake(async (address, events) => {
+			entered.resolve()
+			await release.promise
+			await originalSave(address, events)
+		})
+		const response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "shutdown must await this" })
+		await entered.promise
+		let settled = false
+		const shutdown = host.shutdown().then(() => { settled = true })
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+		} finally {
+			release.resolve()
+			await Promise.all([response, shutdown])
+		}
+		assert.equal((await savedEvents(child.id))[0].communication.response?.text, "shutdown must await this")
+	})
+
+	it("surfaces failed communication persistence through shutdown without skipping sibling cleanup", async () => {
+		expectLoggerErrors()
+		const { child, counterparty } = await respondingChild()
+		const sibling = await host.start({ title: "sibling", prompt: "work" })
+		sandbox.stub(storage, "saveTaskletEvents").rejects(new Error("communication disk failure"))
+		await assert.rejects(counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained" }), /communication disk failure/)
+		await assert.rejects(host.shutdown(), /Tasklet shutdown failed/)
+		for (const execution of children) sinon.assert.calledOnce(execution.task.abortTask)
+		assert.equal(host.inspect(child.id).responses[0].text, "retained")
+		assert.equal(host.inspect(sibling.id).outcomePersisted, true)
 	})
 
 	it("rejects recursive/Goal ownership, invalid roots and empty assignments", async () => {

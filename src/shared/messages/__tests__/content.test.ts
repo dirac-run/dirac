@@ -3,6 +3,16 @@ import { describe, it } from "mocha"
 import { convertDiracStorageToAnthropicMessage } from "../content"
 
 describe("message content provenance cleanup", () => {
+	for (const provider of ["anthropic", "openrouter"]) {
+		it(`removes tasklet receipts without mutating persisted content for ${provider}`, () => {
+			const message = { role: "user" as const, content: [{ type: "text" as const, text: "child update", taskletEventIds: ["event-1"] }] }
+			const result = convertDiracStorageToAnthropicMessage(message, provider)
+			assert.equal(JSON.stringify(result).includes("taskletEventIds"), false)
+			assert.match(JSON.stringify(result), /child update/)
+			assert.deepEqual(message.content[0].taskletEventIds, ["event-1"])
+		})
+	}
+
 	it("removes transient user-input provenance for ordinary providers", () => {
 		const result = convertDiracStorageToAnthropicMessage({
 			role: "user",
@@ -54,6 +64,7 @@ describe("message content provenance cleanup", () => {
 								text: "machine text",
 								isUserInput: true,
 								steeringMessageIds: ["steer-1"],
+								taskletEventIds: ["event-1"],
 							},
 						],
 					},
@@ -65,6 +76,7 @@ describe("message content provenance cleanup", () => {
 
 		assert.equal("isUserInput" in nestedBlock, false)
 		assert.equal("steeringMessageIds" in nestedBlock, false)
+		assert.equal("taskletEventIds" in nestedBlock, false)
 	})
 
 	it("removes provider-boundary metadata recursively from document content", () => {
@@ -82,6 +94,7 @@ describe("message content provenance cleanup", () => {
 									text: "document text",
 									isUserInput: true,
 									steeringMessageIds: ["steer-1"],
+									taskletEventIds: ["event-1"],
 								},
 							],
 						},
@@ -94,6 +107,7 @@ describe("message content provenance cleanup", () => {
 
 		assert.equal("isUserInput" in nestedBlock, false)
 		assert.equal("steeringMessageIds" in nestedBlock, false)
+		assert.equal("taskletEventIds" in nestedBlock, false)
 		assert.equal(nestedBlock.text, "document text")
 	})
 })

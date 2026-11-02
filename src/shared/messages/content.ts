@@ -31,6 +31,8 @@ export interface DiracTextContentBlock extends Anthropic.TextBlockParam, DiracSh
 	isUserInput?: boolean
 	// Internal delivery receipt for queued steering. Removed before provider dispatch.
 	steeringMessageIds?: string[]
+	// Durable tasklet communication receipt. Removed before provider dispatch.
+	taskletEventIds?: string[]
 	// reasoning_details only exists for providers listed in REASONING_DETAILS_PROVIDERS
 	reasoning_details?: DiracReasoningDetailParam[]
 	// Thought Signature associates with Gemini
@@ -165,9 +167,10 @@ export function convertDiracStorageToAnthropicMessage(
 }
 
 function removeProviderBoundaryMetadata(block: DiracContent): DiracContent {
-	const { isUserInput, steeringMessageIds, ...contentBlock } = block as DiracContent & {
+	const { isUserInput, steeringMessageIds, taskletEventIds, ...contentBlock } = block as DiracContent & {
 		isUserInput?: boolean
 		steeringMessageIds?: string[]
+		taskletEventIds?: string[]
 	}
 	if (block.type === "tool_result" && Array.isArray(block.content)) {
 		return {
@@ -188,7 +191,7 @@ function removeProviderBoundaryMetadata(block: DiracContent): DiracContent {
 }
 
 export function cleanContentBlock(block: DiracContent): Anthropic.ContentBlock {
-	const { reasoning_details, call_id, summary, isComplete, isNativeToolCall, isUserInput, steeringMessageIds, ...rest } =
+	const { reasoning_details, call_id, summary, isComplete, isNativeToolCall, isUserInput, steeringMessageIds, taskletEventIds, ...rest } =
 		block as any
 
 	if (block.type === "tool_result" && Array.isArray(block.content)) {

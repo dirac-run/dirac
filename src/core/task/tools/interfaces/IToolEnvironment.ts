@@ -1,3 +1,5 @@
+import type { TaskletRecord } from "@core/storage/taskStorage"
+import type { TaskInteractionRequest } from "../../types/task-messenger"
 import type { CardParams, ICardHandle } from "./ICardHandle"
 import type { IArchitectureTrait } from "./IArchitectureTrait"
 import type { TextCondensationTemplateId } from "@core/text-condensation/TextCondenser"
@@ -243,7 +245,55 @@ export interface ISourceAstTrait {
 	getAnchorFingerprint(path: string): string | null
 }
 
+export type TaskletInteractionResult = Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
+
+export interface TaskletInteraction extends TaskInteractionRequest {
+	id: string
+	status: "pending" | "resolved" | "retired"
+	createdAt: number
+	retiredAt?: number
+	resolvedAt?: number
+	resolution?: TaskletInteractionResult
+}
+
+export interface TaskletInspection extends TaskletRecord {
+	responses: ResponseArguments[]
+	interactions: TaskletInteraction[]
+	/** Live engine status is informational, never evidence of a committed outcome. */
+	executionStatus?: import("@shared/ExtensionMessage").TaskStatus
+	backgroundCommandRunning: boolean
+	outcomePersisted: boolean
+	settlementError?: import("../../TaskRunOutcome").SerializedTaskError
+}
+
+export interface TaskletTranscript {
+	conversation: import("@shared/messages/content").DiracStorageMessage[]
+	presentation: DiracMessage[]
+}
+
+export type TaskletInteractionDecision =
+	| { operation: "approve" | "reject" | "escalate" }
+	| { operation: "answer"; response: TaskletInteractionResult }
+
+export type TaskletResolution = { status: "resolved" | "requires_user_approval" }
+
+/** Parent-only controls. Implementations expose data and operations, never the live Task/host. */
+export interface TaskletControls {
+	/** Acceptance only: does not wait for or assert successful completion of the assignment. */
+	start(input: { title: string; prompt: string }): Promise<TaskletRecord>
+	list(): TaskletInspection[]
+	inspect(id: string): TaskletInspection
+	readTranscript(id: string): Promise<TaskletTranscript>
+	/** Queued guidance is not an answer to a pending interaction or proof of consumption. */
+	steer(id: string, message: string): Promise<{ id: string; messageId: string; accepted: true }>
+	interrupt(id: string, reason?: string): Promise<TaskletInspection>
+	resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision): Promise<TaskletResolution>
+}
+
 export interface IOrchestrationTrait {
+	/** Available only to an owning ordinary root; never exposes a live Task or host. */
+	readonly tasklets?: TaskletControls
+
 	runSubagent(
 		prompt: string,
 		options?: {

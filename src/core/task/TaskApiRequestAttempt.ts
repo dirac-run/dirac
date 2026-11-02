@@ -44,6 +44,7 @@ export async function* attemptApiRequest(
 	}
 
 	await appendQueuedSteeringToNextApiRequest(ctx.steeringContext, contextManagementMetadata.truncatedConversationHistory)
+	await ctx.deliverTaskletEvents?.(contextManagementMetadata.truncatedConversationHistory)
 
 	const providerDispatch = await ctx.apiConversationManager.prepareProviderConversationDispatch({
 		systemPrompt,

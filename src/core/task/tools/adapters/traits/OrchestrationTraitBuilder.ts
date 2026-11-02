@@ -12,6 +12,9 @@ import { SubagentUsagePublisher } from "./SubagentUsagePublisher"
 // Builds the orchestration trait — subagent execution, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
+		tasklets: config.executionProfile === "standalone" && !config.isSubagentExecution
+			? config.callbacks.tasklets
+			: undefined,
 		runSubagent: async (prompt, options) => {
 			const agentIdentity = options?.agentIdentity ?? { id: 1, name: options?.subagentName ?? "subagent" }
 			const utilityModelSelection = options?.useUtilityModel

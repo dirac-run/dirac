@@ -269,6 +269,147 @@ describe("Tasklet real Task execution", function () {
 		return message.content.card
 	}
 
+	it("delivers questions and bounded results to an executing parent through environment controls while a sibling runs", async () => {
+		const { SurfaceToolEnvironmentFactory } = await import("../tools/adapters/SurfaceAdapter")
+		const surface = new SurfaceToolEnvironmentFactory()
+		const modelPresets = await import("@core/models/modelProviderPresets")
+		sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+		const fullResult = `CHILD_RESULT_START ${"detail ".repeat(1000)} CHILD_RESULT_END`
+		let childId = ""
+		let siblingId = ""
+		let questionId = ""
+		let rootTurn = 0
+		let activeParentRequests = 0
+		let maxParentRequests = 0
+		let releaseSibling!: () => void
+		let siblingEntered!: () => void
+		const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve })
+		const siblingStarted = new Promise<void>((resolve) => { siblingEntered = resolve })
+		const parentMessages: string[] = []
+		const siblingMessages: string[] = []
+		let handlerNumber = 0
+		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
+		buildApi.callsFake(() => {
+			const role = handlerNumber++
+			let turn = 0
+			return {
+				getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
+					const currentTurn = ++turn
+					const serialized = JSON.stringify(messages)
+					if (role === 0) {
+						activeParentRequests++
+						maxParentRequests = Math.max(maxParentRequests, activeParentRequests)
+						parentMessages.push(serialized)
+						rootTurn = currentTurn
+						assert.ok(currentTurn <= 4, "Unexpected parent request")
+						assert.doesNotMatch(serialized, /PRIVATE_FILE_CONTENT|CHILD_RESULT_END/)
+						assert.doesNotMatch(serialized, /taskletEventIds/)
+						if (currentTurn === 2) {
+							assert.match(serialized, /CHILD_QUESTION/)
+							assert.ok(serialized.includes(questionId))
+							assert.ok(serialized.includes(childId))
+						}
+						if (currentTurn === 3) {
+							assert.match(serialized, /CHILD_RESULT_START/)
+							assert.match(serialized, /preview truncated/)
+						}
+					} else if (role === 2) {
+						siblingMessages.push(serialized)
+						if (currentTurn === 1) {
+							siblingEntered()
+							await siblingGate
+						}
+					}
+					try {
+						const read = role === 1 && currentTurn === 1
+						const operation = role === 0 ? (currentTurn < 4 ? "progress" : "complete")
+							: role === 1 ? (currentTurn === 2 ? "question" : "complete")
+								: currentTurn === 1 ? "progress" : "complete"
+						const text = role === 1 ? (currentTurn === 2 ? "CHILD_QUESTION" : fullResult) : `role ${role} turn ${currentTurn}`
+						yield {
+							type: "tool_calls", tool_call: {
+								call_id: `call-${role}-${currentTurn}`, function: {
+									name: read ? "read_file" : "respond", arguments: JSON.stringify(read ? { paths: ["assignment.txt"] } : { operation, text }),
+								}
+							}
+						}
+						yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+					} finally {
+						if (role === 0) activeParentRequests--
+					}
+				},
+			} satisfies ApiHandler
+		})
+		const params = parameters()
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			toolEnvironmentFactory: {
+				create(config, toolName) {
+					const env = surface.create(config, toolName)
+					if (config.executionProfile !== "standalone") {
+						assert.equal(env.orchestration.tasklets, undefined)
+						return env
+					}
+					const controls = env.orchestration.tasklets!
+					assert.ok(controls, "Root tool environment must expose contained controls")
+					const recordResponse = env.responseObserver.recordResponse
+					env.responseObserver.recordResponse = async (response) => {
+						await recordResponse(response)
+						if (response.operation !== "progress") return
+						if (rootTurn === 1) {
+							childId = (await controls.start({ title: "question worker", prompt: "Read privately then ask CHILD_QUESTION" })).id
+							questionId = (await waitForInteraction(root.taskletHost!, childId)).id
+							siblingId = (await controls.start({ title: "running sibling", prompt: "Work independently" })).id
+							await siblingStarted
+							assert.equal(parentMessages.length, 1, "Child events must not start another parent loop")
+							return
+						}
+						if (rootTurn === 2) {
+							assert.equal(controls.list().length, 2)
+							assert.equal(controls.inspect(siblingId).outcome, undefined)
+							assert.match(JSON.stringify(await controls.readTranscript(childId)), /PRIVATE_FILE_CONTENT/)
+							assert.equal((await controls.steer(siblingId, "SIBLING_STEERING")).accepted, true)
+							assert.deepEqual(await controls.resolveInteraction(childId, questionId, {
+								operation: "answer", response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "PARENT_ANSWER" },
+							}), { status: "resolved" })
+							await waitForOutcome(root.taskletHost!, childId)
+							assert.equal(controls.inspect(siblingId).outcome, undefined)
+							return
+						}
+						assert.equal(rootTurn, 3)
+						assert.equal(controls.inspect(siblingId).outcome, undefined)
+						assert.equal(controls.inspect(childId).responses.at(-1)?.text, fullResult)
+						const transcript = JSON.stringify(await controls.readTranscript(childId))
+						assert.match(transcript, /CHILD_RESULT_END/)
+						assert.match(transcript, /PARENT_ANSWER/)
+						releaseSibling()
+						await waitForOutcome(root.taskletHost!, siblingId)
+					}
+					return env
+				},
+			},
+		})
+		// Terminate the normal root follow-up wait after completion; model/tool execution remains real.
+		sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+		try {
+			const outcome = await root.startTask("Supervise the contained workers")
+			assert.equal(outcome.kind, "completed", JSON.stringify(outcome))
+			assert.equal(parentMessages.length, 4)
+			assert.equal(maxParentRequests, 1)
+			assert.equal(siblingMessages.length, 2)
+			assert.match(siblingMessages[1], /SIBLING_STEERING/)
+			const persisted = await getSavedApiConversationState(root.taskId)
+			assert.match(JSON.stringify(persisted.messages), /CHILD_QUESTION|CHILD_RESULT_START/)
+			assert.doesNotMatch(JSON.stringify(persisted.messages), /PRIVATE_FILE_CONTENT|CHILD_RESULT_END/)
+		} finally {
+			releaseSibling()
+			await root.abortTask()
+		}
+	})
+
 	it("answers a real child question through the root host while a sibling completes independently", async () => {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!

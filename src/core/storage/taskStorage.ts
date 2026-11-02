@@ -32,6 +32,15 @@ export async function saveTaskletRecord(record: TaskletRecord): Promise<void> {
 	await atomicWriteFile(path.join(directory, GlobalFileNames.taskletRecord), JSON.stringify(record, null, 2))
 }
 
+/** The owning host serializes full communication snapshots and delivery acknowledgements. */
+export async function saveTaskletEvents(
+	address: Extract<TaskStorageAddress, { kind: "tasklet" }>,
+	events: readonly unknown[],
+): Promise<void> {
+	const directory = await ensureTaskDirectoryExists(address)
+	await atomicWriteFile(path.join(directory, GlobalFileNames.taskletEvents), JSON.stringify(events, null, 2))
+}
+
 // Process-local locks only; address resolution is not ownership authorization or filesystem isolation.
 const taskMetadataLocks = new Map<string, Mutex>()
 const taskSettingsLocks = new Map<string, Mutex>()

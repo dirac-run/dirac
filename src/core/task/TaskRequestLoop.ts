@@ -42,6 +42,7 @@ export interface TaskRequestLoopContext extends TaskRequestBuilderContext, TaskR
 	diffViewProvider: DiffViewProvider
 	ulid: string
 	conversationPersistenceHooks?: TaskConversationPersistenceHooks
+	deliverTaskletEvents?: (outboundHistory: import("@shared/messages/content").DiracStorageMessage[]) => Promise<void>
 }
 
 export async function recursivelyMakeDiracRequests(

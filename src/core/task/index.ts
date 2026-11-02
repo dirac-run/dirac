@@ -1,5 +1,5 @@
 import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
-import { saveTaskletRecord, type TaskletRecord } from "@core/storage/taskStorage"
+import { saveTaskletEvents, saveTaskletRecord, type TaskletRecord } from "@core/storage/taskStorage"
 import { createTaskletId } from "@shared/taskletId"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
@@ -35,7 +35,7 @@ import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import { telemetryService } from "@services/telemetry"
 import { type ApiConfiguration } from "@shared/api"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
-import { type DiracMessage, TaskStatus } from "@shared/ExtensionMessage"
+import { TaskStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import { DiracContent, DiracStorageMessage, DiracTextContentBlock, DiracToolResponseContent } from "@shared/messages/content"
 import { ShowMessageType } from "@shared/proto/index.host"
@@ -106,8 +106,16 @@ import { ToolExecutor } from "./ToolExecutor"
 import { SurfaceToolEnvironmentFactory } from "./tools/adapters/SurfaceAdapter"
 import { DiracContext } from "./tools/context/DiracContext"
 import type { ToolEnvironmentFactory } from "./tools/interfaces/ToolEnvironmentFactory"
+import type {
+	TaskletInteraction, TaskletInspection, TaskletTranscript, TaskletInteractionResult,
+	TaskletInteractionDecision, TaskletResolution,
+} from "./tools/interfaces/IToolEnvironment"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
+export type {
+	TaskletInteraction, TaskletInspection, TaskletTranscript, TaskletInteractionResult,
+	TaskletInteractionDecision, TaskletResolution,
+} from "./tools/interfaces/IToolEnvironment"
 
 export type ToolResponse = DiracToolResponseContent
 
@@ -301,6 +309,7 @@ export class Task {
 			diffViewProvider: this.diffViewProvider,
 			ulid: this.ulid,
 			conversationPersistenceHooks: this.conversationPersistenceHooks,
+			deliverTaskletEvents: (history) => this.deliverTaskletEvents(history),
 		}
 	}
 
@@ -324,6 +333,48 @@ export class Task {
 
 	public async enqueueSteeringMessage(text: string): Promise<string> {
 		return enqueueSteeringMessage(this.steeringContext, text)
+	}
+
+	/** Called only at the existing serial provider-dispatch boundary, never by event arrival. */
+	private async deliverTaskletEvents(outboundHistory: DiracStorageMessage[]): Promise<void> {
+		const delivery = await this.taskletHost?.prepareEventDelivery()
+		if (!delivery) return
+		let outboundUserMessage = outboundHistory.at(-1)
+		if (!outboundUserMessage || outboundUserMessage.role !== "user") {
+			throw new Error("Cannot deliver tasklet events without a final user message")
+		}
+		const history = this.messageStateHandler.getApiConversationHistory()
+		const checkpoint = this.messageStateHandler.getApiConversationProviderState().checkpoint
+		const eventIds = (message: DiracStorageMessage): string[] => Array.isArray(message.content)
+			? message.content.flatMap((block) => block.type === "text" ? (block as DiracTextContentBlock).taskletEventIds ?? [] : [])
+			: []
+		const recordedIds = new Set(history.flatMap(eventIds))
+		const newContent = delivery.content.filter((block) => !recordedIds.has(block.taskletEventIds![0]))
+		// A checkpoint is an opaque snapshot: mutating its final user message cannot
+		// update that snapshot. Preserve it and append new communications after its boundary.
+		if (newContent.length && checkpoint && checkpoint.compactedThroughHistoryIndex >= history.length - 1) {
+			await this.messageStateHandler.addToApiConversationHistory({ role: "user", content: newContent })
+			outboundUserMessage = history.at(-1)!
+			if (outboundHistory !== history) outboundHistory.push(outboundUserMessage)
+		} else {
+			for (const block of newContent) await this.messageStateHandler.appendToLastApiConversationUserMessage(block)
+		}
+		for (const block of delivery.content) {
+			const id = block.taskletEventIds![0]
+			if (outboundHistory.some((message) => eventIds(message).includes(id))) continue
+			const recordedIndex = history.findIndex((message) => eventIds(message).includes(id))
+			// Receipt-only retries must not put checkpointed input into the suffix again.
+			if (checkpoint && recordedIndex <= checkpoint.compactedThroughHistoryIndex) continue
+			if (typeof outboundUserMessage.content === "string") {
+				outboundUserMessage.content = [{ type: "text", text: outboundUserMessage.content }, block]
+			} else {
+				outboundUserMessage.content.push(block)
+			}
+		}
+		// A failed flush leaves the receipt in the write buffer, but the host event stays pending.
+		// Retrying flush/ack must not append another copy to the parent's persisted conversation.
+		await this.messageStateHandler.flushPendingWrites()
+		await delivery.acknowledge()
 	}
 
 	private async claimSteeringMessages(): Promise<SteeringClaim | undefined> {
@@ -798,6 +849,19 @@ export class Task {
 			params.toolEnvironmentFactory ?? new SurfaceToolEnvironmentFactory(),
 			params.toolSelectionPolicy,
 			this.storageAddress,
+			() => {
+				const host = this.taskletHost
+				if (!host) return undefined
+				return {
+					start: (input) => host.start(input),
+					list: () => host.list(),
+					inspect: (id) => host.inspect(id),
+					readTranscript: (id) => host.readTranscript(id),
+					steer: (id, message) => host.steer(id, message),
+					interrupt: (id, reason) => host.interrupt(id, reason),
+					resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
+				}
+			},
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1508,29 +1572,6 @@ export type TaskletTaskOptions = Pick<
 	| "toolEnvironmentFactory"
 >
 
-export interface TaskletInteraction extends TaskInteractionRequest {
-	id: string
-	status: "pending" | "resolved" | "retired"
-	createdAt: number
-	retiredAt?: number
-	resolvedAt?: number
-	resolution?: TaskletInteractionResult
-}
-
-export interface TaskletInspection extends TaskletRecord {
-	responses: ResponseArguments[]
-	interactions: TaskletInteraction[]
-	/** Live engine status is informational, never evidence of a committed outcome. */
-	executionStatus?: TaskStatus
-	backgroundCommandRunning: boolean
-	outcomePersisted: boolean
-	settlementError?: SerializedTaskError
-}
-
-interface TaskletTranscript {
-	conversation: DiracStorageMessage[]
-	presentation: DiracMessage[]
-}
 
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
@@ -1538,13 +1579,6 @@ export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> 
 	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
 }
 
-type TaskletInteractionResult = Awaited<ReturnType<TaskCounterparty["requestInteraction"]>>
-
-export type TaskletInteractionDecision =
-	| { operation: "approve" | "reject" | "escalate" }
-	| { operation: "answer"; response: TaskletInteractionResult }
-
-type TaskletResolution = { status: "resolved" | "requires_user_approval" }
 
 interface PendingTaskletInteraction {
 	record: TaskletInteraction
@@ -1554,8 +1588,17 @@ interface PendingTaskletInteraction {
 	retire: () => void
 }
 
+interface TaskletEvent {
+	id: string
+	taskletId: string
+	createdAt: number
+	deliveredAt?: number
+	communication: { type: "response"; response: ResponseArguments } | { type: "interaction"; request: TaskletInteraction }
+}
+
 interface OwnedTasklet {
-	responses: ResponseArguments[]
+	events: TaskletEvent[]
+	eventWrites: Promise<void>
 	interactions: Map<string, PendingTaskletInteraction>
 	interactionsClosed: boolean
 	record: TaskletRecord
@@ -1571,7 +1614,7 @@ interface OwnedTasklet {
  * One ordinary root Task's in-memory child owner, retained through shutdown.
  * Co-located with Task because roots construct hosts and hosts construct contained Tasks;
  * separate classes retain separate ownership without a circular module dependency.
- * Explicit decisions are checked against the owner; parent-context delivery and reconstruction come later.
+ * Explicit decisions are checked against the owner; communications persist until parent delivery.
  */
 export class TaskletHost {
 	private readonly children = new Map<string, OwnedTasklet>()
@@ -1621,7 +1664,7 @@ export class TaskletHost {
 		await saveTaskletRecord(record)
 		const child: OwnedTasklet = {
 			record, backgroundCommandRunning: false, outcomePersisted: false,
-			responses: [], interactions: new Map(), interactionsClosed: false,
+			events: [], eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: false,
 		}
 		this.children.set(record.id, child)
 		// A start admitted before shutdown still owns its write, but must not launch late work.
@@ -1647,12 +1690,16 @@ export class TaskletHost {
 					counterparty: {
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
-							child.responses.push(structuredClone(response))
+							child.events.push({
+								id: ulid(), taskletId: record.id, createdAt: Date.now(),
+								communication: { type: "response", response: structuredClone(response) },
+							})
+							await this.persistEvents(child)
 						},
 						requestInteraction: (request, signal) => this.waitForInteraction(child, request, signal),
 					},
 					storageAddress: this.address(record.id),
-					// Activity remains in the child's transcript. Parent delivery is item 3.10.
+					// Routine activity remains in the child's transcript, not the communication queue.
 					postStateToOwner: async () => { },
 					postPresentationToOwner: async () => { },
 					updateBackgroundCommandState: (running) => {
@@ -1673,6 +1720,55 @@ export class TaskletHost {
 		// Retain the rejecting promise for controls; observe it now to avoid an unhandled rejection.
 		void child.settlement.catch((error) => Logger.error(`[Tasklet ${record.id}] Settlement failed:`, error))
 		return structuredClone(record)
+	}
+
+	/** Serialize complete snapshots; later writes include every retained communication. */
+	private persistEvents(child: OwnedTasklet, deliveredIds: ReadonlySet<string> = new Set()): Promise<void> {
+		const write = async () => {
+			const deliveredAt = Date.now()
+			const snapshot = child.events.map((event) => ({
+				...event,
+				deliveredAt: deliveredIds.has(event.id) ? event.deliveredAt ?? deliveredAt : event.deliveredAt,
+			}))
+			await saveTaskletEvents(this.address(child.record.id), structuredClone(snapshot))
+			for (const event of child.events) {
+				if (deliveredIds.has(event.id)) event.deliveredAt ??= deliveredAt
+			}
+		}
+		// A subsequent full snapshot may retry a failed write; the original caller still sees its failure.
+		child.eventWrites = child.eventWrites.then(write, write)
+		void child.eventWrites.catch((error) => Logger.error(`[Tasklet ${child.record.id}] Communication persistence failed:`, error))
+		return child.eventWrites
+	}
+
+	/** No claims or model execution: the root consumes this bounded snapshot in its serial request flow. */
+	async prepareEventDelivery(): Promise<{ content: DiracTextContentBlock[]; acknowledge: () => Promise<void> } | undefined> {
+		if (this.closing) return undefined
+		const pending = [...this.children.values()].flatMap((child) =>
+			child.events.filter((event) => event.deliveredAt === undefined).map((event) => ({ child, event })),
+		).sort((a, b) => a.event.createdAt - b.event.createdAt).slice(0, 16)
+		if (!pending.length) return undefined
+		const children = [...new Set(pending.map(({ child }) => child))]
+		// A new delivery attempt also retries a previously failed full snapshot/receipt write.
+		await Promise.all(children.map((child) => this.persistEvents(child)))
+		if (this.closing) return undefined
+		const content: DiracTextContentBlock[] = pending.map(({ child, event }) => {
+			const full = JSON.stringify(event.communication)
+			const preview = full.length > 4000 ? `${full.slice(0, 4000)}… [preview truncated; inspect tasklet for full contents]` : full
+			return {
+				type: "text", taskletEventIds: [event.id],
+				text: `[Tasklet communication: ${event.taskletId}; event ${event.id}; title ${JSON.stringify(child.record.title)}]\n${preview}`,
+			}
+		})
+		return {
+			content,
+			acknowledge: async () => {
+				if (this.closing) throw new Error("Tasklet host is shutting down")
+				await Promise.all(children.map((child) => this.persistEvents(child,
+					new Set(pending.filter((entry) => entry.child === child).map(({ event }) => event.id)),
+				)))
+			},
+		}
 	}
 
 	/** Includes admitted starts and input waits, not just provider activity. */
@@ -1700,9 +1796,11 @@ export class TaskletHost {
 		])
 		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
 		await Promise.allSettled([...this.resolutions])
+		const eventResults = await Promise.allSettled([...this.children.values()].map((child) => child.eventWrites))
 		const failures = [
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
 			...this.interactionCleanupFailures,
+			...eventResults.filter((result) => result.status === "rejected").map((result) => result.reason),
 		]
 		if (failures.length) throw new AggregateError(failures, "Tasklet shutdown failed")
 	}
@@ -1715,7 +1813,7 @@ export class TaskletHost {
 		const child = this.requireChild(id)
 		return structuredClone({
 			...child.record,
-			responses: child.responses,
+			responses: child.events.flatMap((event) => event.communication.type === "response" ? [event.communication.response] : []),
 			interactions: [...child.interactions.values()].map(({ record }) => record),
 			executionStatus: child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
@@ -1814,6 +1912,7 @@ export class TaskletHost {
 			assertAuthorityCurrent?.()
 		}
 		interaction.resolve(result)
+		await this.persistEvents(child)
 		return { status: "resolved" }
 	}
 
@@ -1885,6 +1984,7 @@ export class TaskletHost {
 		child.record = { ...child.record, outcome }
 		try {
 			await saveTaskletRecord(child.record)
+			await child.eventWrites
 			child.outcomePersisted = true
 		} catch (error) {
 			child.settlementError = serializeTaskError(error)
@@ -1901,11 +2001,11 @@ export class TaskletHost {
 		if ([...child.interactions.values()].some(({ record }) => record.card.id === request.card.id)) {
 			throw new Error(`Tasklet interaction for card ${request.card.id} already exists`)
 		}
-		// A host request identity cannot accidentally select the same card ID in another child.
 		const id = ulid()
 		const record: TaskletInteraction = { ...structuredClone(request), id, status: "pending", createdAt: Date.now() }
 		const cancellation = new AbortController()
-		return new Promise<TaskletInteractionResult>((resolve, reject) => {
+		child.events.push({ id, taskletId: child.record.id, createdAt: record.createdAt, communication: { type: "interaction", request: record } })
+		const waiting = new Promise<TaskletInteractionResult>((resolve, reject) => {
 			const retire = () => {
 				if (record.status !== "pending") return
 				record.status = "retired"
@@ -1914,6 +2014,7 @@ export class TaskletHost {
 				const error = new Error(`Tasklet interaction ${id} retired`)
 				cancellation.abort(error)
 				reject(error)
+				void this.persistEvents(child)
 			}
 			child.interactions.set(id, {
 				record, cancellation, resolving: false, retire,
@@ -1929,6 +2030,8 @@ export class TaskletHost {
 			})
 			signal.addEventListener("abort", retire, { once: true })
 		})
+		// Observe both immediately: cancellation can precede the first disk write.
+		return Promise.all([waiting, this.persistEvents(child)]).then(([result]) => result)
 	}
 
 	private retireInteractions(child: OwnedTasklet): void {

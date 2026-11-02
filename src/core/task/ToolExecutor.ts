@@ -122,6 +122,7 @@ export class ToolExecutor {
 		private environmentFactory: ToolEnvironmentFactory,
 		private toolSelectionPolicy: import("./tools/runtime/ToolSelectionPolicy").ToolSelectionPolicy | undefined,
 		private storageAddress?: TaskStorageAddress,
+		private getTaskletControls?: () => import("./tools/interfaces/IToolEnvironment").TaskletControls | undefined,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -439,6 +440,7 @@ export class ToolExecutor {
 				contextManager: this.contextManager,
 			},
 			callbacks: {
+				tasklets: this.executionProfile === "standalone" ? this.getTaskletControls?.() : undefined,
 				assertMutationAuthorized: (toolName) => this.assertMutationAuthorized(toolName),
 				withMutationAuthorization: (toolName, mutation) => this.withMutationAuthorization(toolName, mutation),
 				transitionFromMutation: (transition) => this.transitionFromMutation(transition),

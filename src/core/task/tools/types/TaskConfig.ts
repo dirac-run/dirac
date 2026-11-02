@@ -129,6 +129,8 @@ export interface SubagentRuntime {
  * All callback functions available to tool handlers
  */
 export interface TaskCallbacks {
+	/** Optional root-owned capability; absent for contained and Goal executions. */
+	tasklets?: import("../interfaces/IToolEnvironment").TaskletControls
 	/** Revalidates request-bound mutation consent against the Task's current mode. */
 	assertMutationAuthorized: (toolName?: DiracToolSpec["id"]) => void
 	/** Holds task mutation consent through the complete asynchronous write boundary. */

@@ -31,5 +31,6 @@ export const GlobalFileNames = {
 	agentsRulesFile: "AGENTS.md",
 	taskMetadata: "task_metadata.json",
 	taskletRecord: "tasklet.json",
+	taskletEvents: "tasklet_events.json",
 	remoteConfig: (orgId: string) => `remote_config_${orgId}.json`,
 } as const
