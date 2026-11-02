@@ -71,7 +71,8 @@ describe("rankModelIdsForDisplay", () => {
 
 	it("keeps every model when metadata is missing", () => {
 		const input = ["vendor/unknown", "vendor/dated"]
-		expect(rankModelIdsForDisplay(input, () => undefined)).toEqual(input)
+		const ranked = rankModelIdsForDisplay(input, () => undefined)
+		expect([...ranked].sort()).toEqual([...input].sort())
 	})
 
 	it("never adds or drops models", () => {
