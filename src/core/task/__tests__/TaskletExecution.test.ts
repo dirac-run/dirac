@@ -273,6 +273,219 @@ describe("Tasklet real Task execution", function () {
 		return message.content.card
 	}
 
+	for (const interrupt of [false, true]) {
+		it(`composes supervision, sleep, ownership and accounting through an executing root reopening its ${interrupt ? "interrupted" : "completed"} child`, async () => {
+			if (interrupt) expectLoggerErrors() // Cancellation of the real command permission wait.
+			const { SurfaceToolEnvironmentFactory } = await import("../tools/adapters/SurfaceAdapter")
+			const surface = new SurfaceToolEnvironmentFactory()
+			const modelPresets = await import("@core/models/modelProviderPresets")
+			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+			const fullResult = `FOUNDATION_RESULT_START ${"private detail ".repeat(1000)} FOUNDATION_RESULT_END`
+			const parentInputs: string[] = []
+			const turns = [0, 0, 0, 0, 0]
+			let handlerNumber = 0
+			let childId = ""
+			let siblingId = ""
+			let requestId = ""
+			let userWoke = false
+			let releaseSibling!: () => void
+			const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve })
+			let siblingReadFile!: () => void
+			const siblingRead = new Promise<void>((resolve) => { siblingReadFile = resolve })
+			const lockReleases: string[] = []
+			let parentRequests = 0
+			let maxParentRequests = 0
+			const buildApi = apiModule.buildApiHandler as sinon.SinonStub
+			buildApi.callsFake(() => {
+				const role = handlerNumber++ // Original root, permission child, sibling, reopened root, resumed child.
+				assert.ok(role < turns.length, "Reconstruction must not construct historical children")
+				return {
+					getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+					async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
+						const turn = ++turns[role]
+						const serialized = JSON.stringify(messages)
+						const parent = role === 0 || role === 3
+						if (parent) {
+							parentRequests++
+							maxParentRequests = Math.max(maxParentRequests, parentRequests)
+							parentInputs.push(serialized)
+							assert.doesNotMatch(serialized, /PRIVATE_FILE_CONTENT|FOUNDATION_RESULT_END/)
+						}
+						try {
+							assert.ok(turn <= (role === 0 ? 4 : 2), "Unexpected request after controlled completion")
+							if (role === 0 && turn === 2) assert.ok(serialized.includes(requestId), "Parent model receives the permission request")
+							if (role === 0 && turn === 3) {
+								assert.match(serialized, /Active tasklets:/)
+								assert.ok(serialized.includes(childId) && serialized.includes(siblingId))
+							}
+							if (role === 0 && turn === 4) {
+								assert.equal(userWoke, true)
+								assert.match(serialized, /FOUNDATION_USER_GUIDANCE/)
+								assert.match(serialized, /FOUNDATION_RESULT_START/)
+							}
+							if (role === 2 && turn === 2) {
+								assert.match(serialized, /PRIVATE_FILE_CONTENT/)
+								siblingReadFile()
+								await siblingGate
+							}
+							if (role === 4) {
+								assert.match(serialized, /FOUNDATION_PERMISSION_ASSIGNMENT/)
+								assert.match(serialized, /FOUNDATION_EXPLICIT_FOLLOWUP/)
+								assert.equal(serialized.split("Tasklet resumed.").length - 1, 1)
+							}
+							const name = role === 1 && turn === 1 ? "execute_command" : role === 2 && turn === 1 ? "read_file" : "respond"
+							const operation = role === 0 ? (turn === 1 || turn === 3 ? "progress" : "complete")
+								: role === 3 && turn === 1 ? "progress" : "complete"
+							yield {
+								type: "tool_calls", tool_call: {
+									call_id: `foundation-${role}-${turn}`, function: {
+										name, arguments: JSON.stringify(name === "execute_command" ? { commands: ["touch foundation-permission-marker"] }
+											: name === "read_file" ? { paths: ["assignment.txt"] }
+												: { operation, text: role === 2 ? fullResult : `Foundation role ${role} turn ${turn}` }),
+									},
+								},
+							}
+							yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+						} finally {
+							if (parent) parentRequests--
+						}
+					},
+				} satisfies ApiHandler
+			})
+
+			function foundationRoot(reopening: boolean) {
+				const params = parameters()
+				const root = create({
+					...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+					toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "execute_command"] },
+					vscodeTerminalExecutionMode: "backgroundExec",
+					workingConfiguration: {
+						...params.workingConfiguration,
+						executionOptions: { ...params.workingConfiguration.executionOptions, vscodeTerminalExecutionMode: "backgroundExec" },
+					},
+					releaseTaskLock: async () => {
+						assert.deepEqual(root.taskletHost!.listActive(), [])
+						for (const record of root.taskletHost!.list()) assert.equal(record.outcomePersisted, true)
+						lockReleases.push(reopening ? "reopened" : "original")
+					},
+					updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+					toolEnvironmentFactory: {
+						create(config, toolName) {
+							const env = surface.create(config, toolName)
+							if (config.executionProfile !== "standalone") {
+								assert.equal(env.orchestration.tasklets, undefined)
+								return env
+							}
+							const controls = env.orchestration.tasklets!
+							const recordResponse = env.responseObserver.recordResponse
+							env.responseObserver.recordResponse = async (response) => {
+								await recordResponse(response)
+								if (response.operation !== "progress") return
+								if (reopening) {
+									assert.deepEqual(root.taskletHost!.listActive(), [])
+									assert.equal(controls.inspect(childId).interactions[0].status, interrupt ? "retired" : "resolved")
+									await assert.rejects(controls.resolveInteraction(childId, requestId, { operation: "approve" }), /not pending/)
+									assert.equal(controls.inspect(siblingId).responses.at(-1)?.text, fullResult)
+									const before = controls.inspect(childId)
+									const resumed = await controls.resume(childId, "FOUNDATION_EXPLICIT_FOLLOWUP")
+									assert.equal(resumed.id, childId)
+									assert.equal(resumed.conversationUlid, before.conversationUlid)
+									assert.equal((await waitForOutcome(root.taskletHost!, childId)).outcome?.kind, "completed")
+									return
+								}
+								if (turns[0] === 1) {
+									childId = (await controls.start({ title: "permission child", prompt: "FOUNDATION_PERMISSION_ASSIGNMENT" })).id
+									siblingId = (await controls.start({ title: "private reader", prompt: "Read the private file, then report fully" })).id
+									const wake = await controls.sleep({ taskletIds: [childId], timeoutMs: 5_000 })
+									assert.equal(wake.reason, "event")
+									requestId = (await waitForInteraction(root.taskletHost!, childId)).id
+									await siblingRead
+									assert.equal(controls.inspect(childId).interactions[0].status, "pending", "Sibling reads while the permission child is waiting")
+									assert.equal(controls.inspect(siblingId).outcome, undefined)
+									return
+								}
+								assert.equal(turns[0], 3, "Rejected completion continues the same serial parent loop")
+								assert.deepEqual(lockReleases, [])
+								assert.equal(controls.inspect(childId).outcome, undefined, "Completion must not interrupt children")
+								assert.deepEqual(await controls.resolveInteraction(childId, requestId, { operation: "approve" }), { status: "requires_user_approval" })
+								await assert.rejects(fs.stat(path.join(cwd, "foundation-permission-marker")), { code: "ENOENT" })
+								if (interrupt) {
+									assert.equal((await controls.interrupt(childId, "Parent explicitly stops the pending permission")).outcome?.kind, "interrupted")
+								} else {
+									const escalation = controls.resolveInteraction(childId, requestId, { operation: "escalate" })
+									const card = await waitForRootCard(root)
+									await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)
+									assert.deepEqual(await escalation, { status: "resolved" })
+									assert.equal((await waitForOutcome(root.taskletHost!, childId)).outcome?.kind, "completed")
+									await fs.unlink(path.join(cwd, "foundation-permission-marker"))
+								}
+								assert.equal(controls.inspect(siblingId).outcome, undefined, "Sibling survives permission resolution/interruption")
+								assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), { reason: "user_message" })
+								userWoke = true
+								releaseSibling()
+								assert.equal((await waitForOutcome(root.taskletHost!, siblingId)).outcome?.kind, "completed")
+							}
+							return env
+						},
+					},
+				})
+				sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+				return root
+			}
+
+			const root = foundationRoot(false)
+			const run = root.startTask("Supervise private children, then close and reopen their conversations")
+			try {
+				const deadline = Date.now() + 10_000
+				while (!(turns[0] === 3 && root.taskletHost!.isSleeping)) {
+					assert.ok(Date.now() < deadline, `Parent did not reach the user-wake sleep; turns: ${turns}`)
+					await Promise.race([new Promise((resolve) => setTimeout(resolve, 5)), run.then((outcome) => assert.fail(JSON.stringify(outcome)))])
+				}
+				assert.equal(turns[0], 3, "Sleeping parent makes no idle model requests")
+				await root.enqueueSteeringMessage("FOUNDATION_USER_GUIDANCE")
+				assert.equal((await run).kind, "completed")
+				const initialTokens = (interrupt ? 7 : 8) * 100 // Four parent turns, two reader turns, one/two permission-child turns.
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, initialTokens)
+				await root.abortTask()
+				await root.retirePersistence()
+				assert.deepEqual(lockReleases, ["original"])
+				const reopened = foundationRoot(true)
+				assert.equal((await reopened.resumeTaskFromHistory(() => {
+					assert.deepEqual(turns, [4, interrupt ? 1 : 2, 2, 0, 0])
+					assert.equal(handlerNumber, 4, "Root restoration constructs no child engines")
+					assert.deepEqual(reopened.taskletHost!.listActive(), [])
+					assert.equal(reopened.taskletHost!.inspect(childId).outcome?.kind, interrupt ? "interrupted" : "completed")
+					assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, initialTokens)
+				}, { initialUserInput: { text: "Resume the selected child explicitly" } })).kind, "completed")
+				await reopened.abortTask()
+				await reopened.retirePersistence()
+				assert.deepEqual(lockReleases, ["original", "reopened"])
+				assert.equal(maxParentRequests, 1)
+				assert.equal(parentInputs.length, 6)
+				assert.deepEqual(turns, [4, interrupt ? 1 : 2, 2, 2, 1])
+				const persistedRoot = (await getSavedPresentationHistory("root")).messages
+				assert.equal(getApiMetrics(persistedRoot).totalTokensIn, initialTokens + 300)
+				assert.equal(getApiMetrics(persistedRoot).totalTokensOut, (initialTokens + 300) / 5)
+				const contributions = persistedRoot.flatMap((message) => message.content.type === DiracMessageType.CARD
+					? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined) : [])
+				assert.deepEqual(contributions.map((usage) => usage.taskletId).sort(), [childId, siblingId].sort())
+				const childTranscript = JSON.stringify(await reopened.taskletHost!.readTranscript(childId))
+				assert.match(childTranscript, /FOUNDATION_EXPLICIT_FOLLOWUP/)
+				assert.doesNotMatch(childTranscript, /PRIVATE_FILE_CONTENT|FOUNDATION_RESULT_END/)
+				assert.match(JSON.stringify(await reopened.taskletHost!.readTranscript(siblingId)), /PRIVATE_FILE_CONTENT/)
+				assert.equal(reopened.taskletHost!.inspect(siblingId).responses.at(-1)?.text, fullResult)
+				await assert.rejects(fs.stat(path.join(cwd, "foundation-permission-marker")), { code: "ENOENT" })
+				const rootPath = getTaskDirectoryPath("root")
+				assert.deepEqual((await fs.readdir(path.join(rootPath, "tasklets"))).sort(), [childId, siblingId].sort())
+				assert.deepEqual(await fs.readdir(path.dirname(rootPath)), ["root"], "No independent top-level tasklet directories")
+			} finally {
+				releaseSibling()
+				await root.abortTask()
+				await run
+			}
+		})
+	}
+
 	it("delivers questions and bounded results to an executing parent through environment controls while a sibling runs", async () => {
 		const { SurfaceToolEnvironmentFactory } = await import("../tools/adapters/SurfaceAdapter")
 		const surface = new SurfaceToolEnvironmentFactory()
