@@ -17,6 +17,8 @@ export async function* attemptApiRequest(
 	previousApiReqIndex: number,
 	lastApiReqIndex: number,
 	shouldCompact?: boolean,
+	metricsManager = new StreamingMetricsManager(ctx.messageStateHandler, lastApiReqIndex, ctx.requestRuntime.api),
+	settleUsageSideEffects?: () => Promise<void>,
 ): ApiStream {
 	const requestPreparationStartedAt = performance.now()
 	const { systemPrompt, toolSnapshot, contextManagementMetadata, providerInfo } = await buildApiRequestParams(
@@ -29,7 +31,6 @@ export async function* attemptApiRequest(
 	)
 	const { model, providerId } = providerInfo
 
-	const metricsManager = new StreamingMetricsManager(ctx.messageStateHandler, lastApiReqIndex, ctx.requestRuntime.api)
 
 	const finalizeApiReqMsg = async (cancelReason?: DiracApiReqCancelReason, streamingFailedMessage?: string) => {
 		await metricsManager.updateApiReqMsgFromMetrics(cancelReason, streamingFailedMessage)
@@ -84,6 +85,7 @@ export async function* attemptApiRequest(
 		}
 
 		emittedOutput = firstChunk.value.type !== "usage"
+		if (firstChunk.value.type === "usage") metricsManager.updateFromChunk(firstChunk.value)
 		yield firstChunk.value
 
 		for await (const chunk of iterator) {
@@ -111,6 +113,7 @@ export async function* attemptApiRequest(
 		// Once output is exposed, replaying this request would append a second response
 		// to the same stream. Let the outer loop persist the interrupted turn instead.
 		if (emittedOutput) throw error
+		await settleUsageSideEffects?.()
 		const shouldRetry = await handleApiRequestError(ctx, {
 			error,
 			previousApiReqIndex,
@@ -121,7 +124,7 @@ export async function* attemptApiRequest(
 			metricsManager,
 		})
 		if (shouldRetry) {
-			yield* attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact)
+			yield* attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact, metricsManager, settleUsageSideEffects)
 		}
 		return
 	}

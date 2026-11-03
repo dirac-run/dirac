@@ -22,7 +22,7 @@ import { getModelInfoForInferenceSpeed } from "@/utils/cost"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 
 export const ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01"
 
@@ -165,24 +165,26 @@ export class AnthropicHandler implements ApiHandler {
 		}
 
 		const lastStartedToolCall = { id: "", name: "", arguments: "" }
+		const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
 		for await (const chunk of stream) {
-			yield* this.parseAnthropicChunk(chunk, lastStartedToolCall)
+			yield* this.parseAnthropicChunk(chunk, lastStartedToolCall, usage)
 		}
 	}
 
 	private *parseAnthropicChunk(
 		chunk: any,
 		lastStartedToolCall: { id: string; name: string; arguments: string },
+		usage: ApiStreamUsageChunk,
 	): Generator<any> {
 		switch (chunk?.type) {
 			case "message_start":
-				yield this.parseAnthropicMessageStart(chunk)
+				Object.assign(usage, this.parseAnthropicMessageStart(chunk))
+				yield { ...usage }
 				break
 			case "message_delta":
+				usage.outputTokens = chunk.usage.output_tokens ?? usage.outputTokens
 				yield {
-					type: "usage",
-					inputTokens: 0,
-					outputTokens: chunk.usage.output_tokens || 0,
+					...usage,
 					stopReason: chunk.delta.stop_reason || undefined,
 				}
 				break

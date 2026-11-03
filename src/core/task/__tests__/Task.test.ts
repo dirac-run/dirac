@@ -653,7 +653,7 @@ describe("Task (original)", () => {
 			error: new Error("connection failed"),
 			model: { id: "test-model", info: {} },
 			providerId: "test-provider",
-			metricsManager: {},
+			metricsManager: { updateApiReqMsgFromMetrics: async () => { } },
 		})
 
 		shouldRetry.should.equal(false)

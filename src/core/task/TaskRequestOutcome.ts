@@ -19,7 +19,6 @@ import type { TaskMessenger } from "./TaskMessenger"
 import type { TaskState } from "./TaskState"
 import { clearAskResponse } from "./TaskUserInput"
 import { ToolSkippedByUserMessage } from "./tools/types/ToolSkippedByUserMessage"
-import { updateApiReqMsg } from "./utils"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
 
 export interface TaskRequestOutcomeContext {
@@ -76,10 +75,10 @@ export async function handleApiRequestError(
 
 	const streamingFailedMessage = diracError.serialize()
 
+	// Preserve observed usage while waiting for an intervention or a retry decision.
+	await params.metricsManager.updateApiReqMsgFromMetrics("streaming_failed", streamingFailedMessage)
+
 	const lastApiStatus = ctx.messageStateHandler.getLatestApiStatusMessage()
-	const lastApiReqStartedIndex = lastApiStatus
-		? ctx.messageStateHandler.findMessageIndexById(lastApiStatus.id)
-		: -1
 	if (lastApiStatus?.content.type === DiracMessageType.API_STATUS) {
 		await ctx.messageStateHandler.patchApiStatusById(
 			lastApiStatus.id,
@@ -96,19 +95,6 @@ export async function handleApiRequestError(
 		ctx.taskState.apiErrorRetryAttempts++
 		const delay = getApiRequestRetryDelay(ctx.taskState.apiErrorRetryAttempts)
 
-		await updateApiReqMsg({
-			messageStateHandler: ctx.messageStateHandler,
-			lastApiReqIndex: lastApiReqStartedIndex,
-			inputTokens: 0,
-			reasoningTokens: 0,
-			outputTokens: 0,
-			cacheWriteTokens: 0,
-			cacheReadTokens: 0,
-			totalCost: undefined,
-			api: ctx.api,
-			cancelReason: "streaming_failed",
-			streamingFailedMessage,
-		})
 		await ctx.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 		await ctx.postStateToWebview()
 
@@ -204,6 +190,8 @@ export async function handleApiRequestError(
 	if (manualRetryApiStatus?.content.type === DiracMessageType.API_STATUS) {
 		await ctx.messageStateHandler.patchApiStatusById(manualRetryApiStatus.id, {}, ["streamingFailedMessage"])
 	}
+
+	await params.metricsManager.archiveForRetry()
 
 	await ctx.taskMessenger.upsertText("Retrying API request...")
 

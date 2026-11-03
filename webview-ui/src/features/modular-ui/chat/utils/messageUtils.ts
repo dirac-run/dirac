@@ -4,6 +4,7 @@
 
 import { DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
 import { getSubagentUsage } from "@shared/subagentUsage"
+import { getTaskletUsage } from "@shared/taskletUsage"
 
 /**
  * Filter messages that should be visible in the chat.
@@ -26,7 +27,7 @@ export function filterVisibleMessages(messages: DiracMessage[]): DiracMessage[] 
 
 	return messages.filter((message, index) => {
 		const content = message.content
-		if (content.type === DiracMessageType.CARD && getSubagentUsage(content.card)) return false
+		if (content.type === DiracMessageType.CARD && (getSubagentUsage(content.card) || getTaskletUsage(content.card))) return false
 		if (content.type === DiracMessageType.CHECKPOINT) {
 			return true
 		}

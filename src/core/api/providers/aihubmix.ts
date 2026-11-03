@@ -10,7 +10,7 @@ import { DiracStorageMessage } from "@/shared/messages/content"
 import { convertAnthropicMessagesToGemini } from "../transform/gemini-format"
 import { resolveGeminiImageSources } from "./gemini-image-resolver"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 
 interface AIhubmixHandlerOptions extends CommonApiHandlerOptions {
 	apiKey?: string
@@ -163,24 +163,21 @@ export class AIhubmixHandler implements ApiHandler {
 			stream: true,
 		})
 
+		const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
 		for await (const chunk of stream) {
 			switch (chunk?.type) {
 				case "message_start":
-					const usage = chunk.message.usage
-					yield {
-						type: "usage",
-						inputTokens: usage.input_tokens || 0,
-						outputTokens: usage.output_tokens || 0,
-						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-						cacheReadTokens: usage.cache_read_input_tokens || undefined,
-					}
+					Object.assign(usage, {
+						inputTokens: chunk.message.usage.input_tokens ?? 0,
+						outputTokens: chunk.message.usage.output_tokens ?? 0,
+						cacheWriteTokens: chunk.message.usage.cache_creation_input_tokens || undefined,
+						cacheReadTokens: chunk.message.usage.cache_read_input_tokens || undefined,
+					})
+					yield { ...usage }
 					break
 				case "message_delta":
-					yield {
-						type: "usage",
-						inputTokens: 0,
-						outputTokens: chunk.usage.output_tokens || 0,
-					}
+					usage.outputTokens = chunk.usage.output_tokens ?? usage.outputTokens
+					yield { ...usage }
 					break
 				case "content_block_start":
 					if (chunk.content_block.type === "text") {

@@ -123,6 +123,7 @@ export class ToolExecutor {
 		private toolSelectionPolicy: import("./tools/runtime/ToolSelectionPolicy").ToolSelectionPolicy | undefined,
 		private storageAddress?: TaskStorageAddress,
 		private getTaskletControls?: () => import("./tools/interfaces/IToolEnvironment").TaskletControls | undefined,
+		private onUtilityUsageRecorded?: () => void,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -319,6 +320,7 @@ export class ToolExecutor {
 			ulid: this.ulid,
 			onUsage: (event) => {
 				recordUtilityModelUsage(this.taskState, this.ulid, event)
+				this.onUtilityUsageRecorded?.()
 				observer?.(event)
 			},
 		})

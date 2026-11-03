@@ -374,12 +374,14 @@ export interface DiracApiReqInfo {
 	}
 	contextWindow?: number
 	contextUsagePercentage?: number
-	/** Aggregate metrics from messages deleted during checkpoint restore. Used for accurate total tracking without inflating per-request counts. */
+	/** Prior checkpoint/deleted or failed-attempt usage, excluded from current context-window counts. */
 	deletedMetrics?: {
 		tokensIn?: number
 		tokensOut?: number
 		cacheWrites?: number
 		cacheReads?: number
+		cost?: number
+		reasoningTokens?: number
 	}
 
 	cancelReason?: DiracApiReqCancelReason

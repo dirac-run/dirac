@@ -1,5 +1,6 @@
 import { DiracApiReqInfo, DiracMessage } from "./ExtensionMessage"
 import { getSubagentUsage } from "./subagentUsage"
+import { getTaskletUsage } from "./taskletUsage"
 
 export interface ApiMetrics {
 	totalTokensIn: number
@@ -20,6 +21,7 @@ export interface ApiMetrics {
  * - 'api_req_started' messages that have been combined with their corresponding 'api_req_finished' messages
  * - 'deleted_api_reqs' messages, which are aggregated from deleted messages
  * - 'subagent_usage' messages, which are aggregated usage snapshots emitted by subagent batches
+ * - structured tasklet accounting cards, one replaceable cumulative contribution per child
  * It extracts and sums up the tokensIn, tokensOut, cacheWrites, cacheReads, and cost from these messages.
  *
  * @param messages - An array of DiracMessage objects to process.
@@ -74,15 +76,19 @@ export function getApiMetrics(messages: DiracMessage[]): ApiMetrics {
 					result.totalCacheWrites = (result.totalCacheWrites ?? 0) + deletedMetrics.cacheWrites
 				if (typeof deletedMetrics.cacheReads === "number")
 					result.totalCacheReads = (result.totalCacheReads ?? 0) + deletedMetrics.cacheReads
+				if (typeof deletedMetrics.cost === "number") result.totalCost += deletedMetrics.cost
+				if (typeof deletedMetrics.reasoningTokens === "number") result.totalReasoningTokens += deletedMetrics.reasoningTokens
 			}
 		} else if (message.content.type === "card") {
-			const usage = getSubagentUsage(message.content.card)
+			const taskletUsage = getTaskletUsage(message.content.card)
+			const usage = taskletUsage ?? getSubagentUsage(message.content.card)
 			if (!usage) return
 			result.totalTokensIn += usage.tokensIn
 			result.totalTokensOut += usage.tokensOut
-			result.totalCacheWrites = (result.totalCacheWrites ?? 0) + usage.cacheWrites
-			result.totalCacheReads = (result.totalCacheReads ?? 0) + usage.cacheReads
+			if (usage.cacheWrites !== undefined) result.totalCacheWrites = (result.totalCacheWrites ?? 0) + usage.cacheWrites
+			if (usage.cacheReads !== undefined) result.totalCacheReads = (result.totalCacheReads ?? 0) + usage.cacheReads
 			result.totalCost += usage.cost
+			result.totalReasoningTokens += taskletUsage?.reasoningTokens ?? 0
 		}
 	})
 

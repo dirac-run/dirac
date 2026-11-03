@@ -314,11 +314,11 @@ export class AwsBedrockHandler implements ApiHandler {
 									}
 
 									if (accumulatedTokens >= TOKEN_REPORT_THRESHOLD) {
-										const totalCost = calculateApiCostOpenAI(model.info, 0, accumulatedTokens, 0, 0)
+										const totalCost = calculateApiCostOpenAI(model.info, inputTokenEstimate, outputTokens, 0, 0)
 										yield {
 											type: "usage",
-											inputTokens: 0,
-											outputTokens: accumulatedTokens,
+											inputTokens: inputTokenEstimate,
+											outputTokens,
 											totalCost: totalCost,
 										}
 										accumulatedTokens = 0
@@ -337,11 +337,11 @@ export class AwsBedrockHandler implements ApiHandler {
 								}
 								// Report aggregated token usage only when threshold is reached
 								if (accumulatedTokens >= TOKEN_REPORT_THRESHOLD) {
-									const totalCost = calculateApiCostOpenAI(model.info, 0, accumulatedTokens, 0, 0)
+									const totalCost = calculateApiCostOpenAI(model.info, inputTokenEstimate, outputTokens, 0, 0)
 									yield {
 										type: "usage",
-										inputTokens: 0,
-										outputTokens: accumulatedTokens,
+										inputTokens: inputTokenEstimate,
+										outputTokens,
 										totalCost: totalCost,
 									}
 									accumulatedTokens = 0
@@ -360,11 +360,11 @@ export class AwsBedrockHandler implements ApiHandler {
 
 				// Report any remaining accumulated tokens at the end of the stream
 				if (accumulatedTokens > 0) {
-					const totalCost = calculateApiCostOpenAI(model.info, 0, accumulatedTokens, 0, 0)
+					const totalCost = calculateApiCostOpenAI(model.info, inputTokenEstimate, outputTokens, 0, 0)
 					yield {
 						type: "usage",
-						inputTokens: 0,
-						outputTokens: accumulatedTokens,
+						inputTokens: inputTokenEstimate,
+						outputTokens,
 						totalCost: totalCost,
 					}
 				}
@@ -484,9 +484,9 @@ export class AwsBedrockHandler implements ApiHandler {
 		})
 		const messagesWithCache = applyCache
 			? applyCacheControlToMessages(formattedMessages, {
-					lastUserIndex: userMsgIndices.at(-1) ?? -1,
-					secondLastUserIndex: userMsgIndices.at(-2) ?? -1,
-				})
+				lastUserIndex: userMsgIndices.at(-1) ?? -1,
+				secondLastUserIndex: userMsgIndices.at(-2) ?? -1,
+			})
 			: formattedMessages
 		const systemMessages = prepareSystemMessages(systemPrompt, applyCache)
 		const toolConfig = mapDiracToolsToBedrockToolConfig(tools)
@@ -525,8 +525,8 @@ export class AwsBedrockHandler implements ApiHandler {
 				}),
 				...(reasoningOn &&
 					useAdaptive && {
-						output_config: { effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) },
-					}),
+					output_config: { effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) },
+				}),
 			},
 		})
 

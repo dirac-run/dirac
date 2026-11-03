@@ -262,6 +262,64 @@ describe("LifecycleManager", () => {
 			deps.taskState.status.should.equal(TaskStatus.COMPLETED)
 		})
 
+		it("restores COMPLETED status when a structured tasklet accounting card trails completion", async () => {
+			setupDiskMocks([
+				{
+					id: "completion", ts: 1,
+					content: { type: DiracMessageType.CARD, card: { kind: "task_completion", status: CardStatus.SUCCESS } },
+				},
+				{
+					id: "tasklet-usage:child", ts: 2,
+					content: {
+						type: DiracMessageType.CARD,
+						card: {
+							id: "tasklet-usage:child", header: "Tasklet usage", status: CardStatus.SUCCESS, renderType: "text",
+							rawOutput: { source: "tasklet", taskletId: "child", tokensIn: 200, tokensOut: 40, cost: 1.25, reasoningTokens: 10 },
+						},
+					},
+				},
+			])
+			unblockWaitFor()
+			await manager.resumeTaskFromHistory()
+			deps.taskState.status.should.equal(TaskStatus.COMPLETED)
+			deps.messageStateHandler.getDiracMessages().map((message: any) => message.id).should.eql([
+				"completion", "tasklet-usage:child",
+			])
+		})
+
+		it("preserves reported tokens from an unknown-priced request during restoration", async () => {
+			setupDiskMocks([
+				{
+					id: "unknown-priced-request", ts: 1,
+					content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 100, tokensOut: 20 } },
+				},
+			])
+			unblockWaitFor()
+			await manager.resumeTaskFromHistory()
+			const messages = deps.messageStateHandler.getDiracMessages()
+			messages.length.should.equal(1)
+			messages[0].id.should.equal("unknown-priced-request")
+			messages[0].content.status.should.eql({ tokensIn: 100, tokensOut: 20 })
+		})
+
+		it("preserves archived retry spend when the following unknown-priced attempt reports no usage", async () => {
+			const deletedMetrics = { tokensIn: 100, tokensOut: 20, cost: 0.5, reasoningTokens: 3 }
+			setupDiskMocks([{
+				id: "retried-request", ts: 1,
+				content: {
+					type: DiracMessageType.API_STATUS, status: {
+						tokensIn: 0, tokensOut: 0, deletedMetrics,
+						usageAvailability: { inputTokens: false, outputTokens: false, cacheWrites: false, cacheReads: false, reasoningTokens: false, cost: false },
+					}
+				},
+			}])
+			unblockWaitFor()
+			await manager.resumeTaskFromHistory()
+			const messages = deps.messageStateHandler.getDiracMessages()
+			messages.length.should.equal(1)
+			messages[0].content.status.deletedMetrics.should.eql(deletedMetrics)
+		})
+
 		it("restores CANCELLED status when the last run-produced entry is not a completion card", async () => {
 			setupDiskMocks([
 				{

@@ -14,6 +14,7 @@ import { processFilesIntoText } from "@integrations/misc/extract-text"
 import type { BrowserSession } from "@services/browser/BrowserSession"
 import { findLastIndex } from "@shared/array"
 import { isResumePromptCard, isSuccessfulTaskCompletionCard } from "@shared/cardIdentity"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import {
 	DiracContent,
 	DiracImageContentBlock,
@@ -236,7 +237,7 @@ export class LifecycleManager {
 	}
 
 	public async resumeTaskFromHistory(
-		onRestored?: () => void,
+		onRestored?: () => void | Promise<void>,
 		options: ResumeTaskOptions = {},
 	): Promise<TaskRunOutcome | undefined> {
 		if (options.taskletResumeMessage !== undefined && this.dependencies.storageAddress?.kind !== "tasklet") {
@@ -272,8 +273,12 @@ export class LifecycleManager {
 		if (lastApiReqStartedIndex !== -1) {
 			const lastApiReqStarted = savedDiracMessages[lastApiReqStartedIndex]
 			if (lastApiReqStarted.content.type === "api_status") {
-				const { cost, cancelReason } = lastApiReqStarted.content.status
-				if (cost === undefined && cancelReason === undefined) {
+				const { cost, cancelReason, tokensIn, tokensOut, cacheWrites, cacheReads, reasoningTokens, usageAvailability, deletedMetrics } = lastApiReqStarted.content.status
+				// Unknown pricing does not make reported or archived usage an unstarted request.
+				const hasUsage = [tokensIn, tokensOut, cacheWrites, cacheReads, reasoningTokens].some((value) => (value ?? 0) > 0)
+					|| Object.values(usageAvailability ?? {}).some(Boolean)
+					|| Object.values(deletedMetrics ?? {}).some((value) => value > 0)
+				if (cost === undefined && cancelReason === undefined && !hasUsage) {
 					savedDiracMessages.splice(lastApiReqStartedIndex, 1)
 				}
 			}
@@ -338,7 +343,7 @@ export class LifecycleManager {
 			.reverse()
 			.find(
 				(m) =>
-					!(m.content.type === DiracMessageType.CARD && isResumePromptCard(m.content.card)) &&
+					!(m.content.type === DiracMessageType.CARD && (isResumePromptCard(m.content.card) || getTaskletUsage(m.content.card))) &&
 					!(m.content.type === DiracMessageType.MARKDOWN && m.content.role === "user"),
 			)
 
@@ -354,7 +359,7 @@ export class LifecycleManager {
 
 		this.dependencies.taskState.status = completedTask ? TaskStatus.COMPLETED : TaskStatus.CANCELLED
 		await this.dependencies.postStateToWebview()
-		onRestored?.()
+		await onRestored?.()
 
 		if (
 			options.systemContext === undefined &&

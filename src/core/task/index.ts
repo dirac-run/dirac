@@ -1,6 +1,7 @@
 import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
 import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRecord, type TaskletRecord, type TaskletEvent } from "@core/storage/taskStorage"
 import { createTaskletId } from "@shared/taskletId"
+import { taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
@@ -128,6 +129,9 @@ export interface TaskletExecutionBindings {
 	postStateToOwner: () => Promise<void>
 	postPresentationToOwner?: () => Promise<void>
 	updateBackgroundCommandState: (running: boolean, taskId: string) => void
+	usage?: TaskletUsageSnapshot
+	/** The host owns and joins asynchronous writes; this notification never starts a model loop. */
+	recordUsage?: (usage: TaskletUsageSnapshot) => void
 }
 
 export type TaskParams = {
@@ -603,6 +607,38 @@ export class Task {
 			workspaceRootPath: this.workspaceManager?.getPrimaryRoot()?.path,
 		})
 
+		if (contained?.usage) {
+			const { utility } = contained.usage
+			this.taskState.utilityPermissionInputTokens = utility.tokensIn
+			this.taskState.utilityPermissionOutputTokens = utility.tokensOut
+			this.taskState.utilityPermissionCacheWriteTokens = utility.cacheWrites ?? 0
+			this.taskState.utilityPermissionCacheReadTokens = utility.cacheReads ?? 0
+			this.taskState.utilityPermissionCost = utility.cost
+			this.taskState.utilityModelReasoningTokens = utility.reasoningTokens
+		}
+		const recordOwnerUsage = contained?.recordUsage
+		let restoredPrimary = contained?.usage?.primary
+		let primaryShortfall: TaskletUsageSnapshot["primary"] | undefined
+		const recordUsage = recordOwnerUsage ? () => {
+			const snapshot = this.getUsageSnapshot()
+			if (restoredPrimary) {
+				// A durable usage write can precede the transcript flush at a crash.
+				// Preserve that shortfall once, then add only new transcript usage.
+				primaryShortfall = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0 }
+				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
+					if (restoredPrimary[key] !== undefined) primaryShortfall[key] = Math.max(0, restoredPrimary[key]! - (snapshot.primary[key] ?? 0))
+				}
+				restoredPrimary = undefined
+			}
+			if (primaryShortfall) {
+				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
+					if (primaryShortfall[key] !== undefined) snapshot.primary[key] = (snapshot.primary[key] ?? 0) + primaryShortfall[key]!
+				}
+			}
+			recordOwnerUsage(snapshot)
+		} : undefined
+		if (recordUsage) this.messageStateHandler.on("diracMessagesChanged", recordUsage)
+
 		this.taskMessenger = new TaskMessenger({
 			taskState: this.taskState,
 			messageStateHandler: this.messageStateHandler,
@@ -869,6 +905,7 @@ export class Task {
 					sleep: (options) => host.sleep(options, this.taskState.abortSignal),
 				}
 			},
+			recordUsage,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -960,6 +997,7 @@ export class Task {
 			setActiveHookExecution: this.hookManager.setActiveHookExecution.bind(this.hookManager),
 			clearActiveHookExecution: this.hookManager.clearActiveHookExecution.bind(this.hookManager),
 			onContextCompacted: this.notifyContextCompacted.bind(this),
+			onUtilityUsageRecorded: recordUsage,
 		})
 
 		this.apiConversationManager = new ApiConversationManager({
@@ -1016,6 +1054,7 @@ export class Task {
 			const root = this
 			this.taskletHost = new TaskletHost({
 				taskId: this.taskId, executionProfile: this.executionProfile,
+				recordTaskletUsage: (id, usage) => this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage)),
 				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
 				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
 				escalateInteraction: (child, request, signal) => this.taskMessenger.escalateTaskletInteraction(child, request, signal),
@@ -1281,8 +1320,30 @@ export class Task {
 		return this.runTaskLifecycle(async () => {
 			await this.taskletHost?.reconstruct()
 			await this.toolExecutor.refreshToolsForTask()
-			return this.lifecycleManager.resumeTaskFromHistory(onRestored, options)
+			return this.lifecycleManager.resumeTaskFromHistory(async () => {
+				await this.taskletHost?.reconcileUsage()
+				onRestored?.()
+			}, options)
 		})
+	}
+
+	/** Conversation-lifetime primary usage plus contained Utility counters restored on resumption. */
+	private getUsageSnapshot(): TaskletUsageSnapshot {
+		const metrics = this.messageStateHandler.getApiUsage()
+		return {
+			primary: {
+				tokensIn: metrics.totalTokensIn, tokensOut: metrics.totalTokensOut,
+				cacheWrites: metrics.totalCacheWrites, cacheReads: metrics.totalCacheReads,
+				cost: metrics.totalCost, reasoningTokens: metrics.totalReasoningTokens,
+			},
+			utility: {
+				tokensIn: this.taskState.utilityPermissionInputTokens,
+				tokensOut: this.taskState.utilityPermissionOutputTokens,
+				cacheWrites: this.taskState.utilityPermissionCacheWriteTokens,
+				cacheReads: this.taskState.utilityPermissionCacheReadTokens,
+				cost: this.taskState.utilityPermissionCost, reasoningTokens: this.taskState.utilityModelReasoningTokens,
+			},
+		}
 	}
 
 	public markToolsDirty(reason: ToolSnapshotDirtyReason): void {
@@ -1601,6 +1662,7 @@ export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> 
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
 	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
 	hasPendingUserInput: () => boolean
+	recordTaskletUsage?: (id: string, usage: TaskletUsageSnapshot) => Promise<void>
 }
 
 
@@ -1616,6 +1678,8 @@ interface PendingTaskletInteraction {
 interface OwnedTasklet {
 	events: TaskletEvent[]
 	eventWrites: Promise<void>
+	recordWrites: Promise<void>
+	usageProjectionError?: Error
 	interactions: Map<string, PendingTaskletInteraction>
 	interactionsClosed: boolean
 	record: TaskletRecord
@@ -1640,6 +1704,7 @@ export class TaskletHost {
 	private closing = false
 	private shutdownPromise?: Promise<void>
 	private reconstruction?: Promise<void>
+	private usageProjectionReady = true
 	private readonly resolutions = new Set<Promise<TaskletResolution>>()
 	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
 	private sleepWaiter?: { check: () => void; finish: (result: TaskletWakeResult) => void }
@@ -1717,11 +1782,13 @@ export class TaskletHost {
 	}
 
 	private async restoreRecords(): Promise<void> {
+		this.usageProjectionReady = false
 		const records = await loadTaskletRecords(this.rootTaskId)
 		for (const record of records) {
 			const events = await loadTaskletEvents(this.address(record.id))
 			const child: OwnedTasklet = {
 				record, events, eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: true,
+				recordWrites: Promise.resolve(),
 				backgroundCommandRunning: false, outcomePersisted: false,
 			}
 			this.children.set(record.id, child)
@@ -1741,6 +1808,39 @@ export class TaskletHost {
 				child.outcomePersisted = true
 			}
 		}
+	}
+
+	/** Reproject only after the root's presentation is restored; no child is started. */
+	async reconcileUsage(): Promise<void> {
+		if (this.closing) throw new Error("Tasklet host is shutting down")
+		this.usageProjectionReady = true
+		for (const child of this.children.values()) {
+			if (child.record.usage) await this.persistRecord(child)
+			if (child.usageProjectionError) throw child.usageProjectionError
+		}
+	}
+
+	private persistRecord(child: OwnedTasklet): Promise<void> {
+		const record = structuredClone(child.record)
+		child.recordWrites = child.recordWrites.then(async () => {
+			await saveTaskletRecord(record)
+			if (!this.usageProjectionReady || !record.usage || child.usageProjectionError) return
+			try {
+				await this.owner.recordTaskletUsage?.(record.id, record.usage)
+			} catch (error) {
+				// Keep persisting incurred child spend; surface projection failure at settlement.
+				child.usageProjectionError = new Error(getErrorMessage(error), { cause: error })
+			}
+		})
+		return child.recordWrites
+	}
+
+	private recordUsage(child: OwnedTasklet, usage: TaskletUsageSnapshot): void {
+		if (child.record.outcome) throw new Error("Cannot record usage after tasklet settlement")
+		if (JSON.stringify(child.record.usage) === JSON.stringify(usage)) return
+		child.record = { ...child.record, usage: structuredClone(usage) }
+		// Observe rejection now, but retain the rejecting write for settlement and shutdown.
+		void this.persistRecord(child).catch((error) => Logger.error(`[Tasklet ${child.record.id}] Usage persistence failed:`, error))
 	}
 
 	/** Resume the existing conversation; acceptance never joins the new assignment. */
@@ -1802,6 +1902,7 @@ export class TaskletHost {
 		const child: OwnedTasklet = {
 			record, backgroundCommandRunning: false, outcomePersisted: false,
 			events: [], eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: false,
+			recordWrites: Promise.resolve(),
 		}
 		this.children.set(record.id, child)
 		return this.launch(child)
@@ -1842,6 +1943,8 @@ export class TaskletHost {
 						requestInteraction: (request, signal) => this.waitForInteraction(child, request, signal),
 					},
 					storageAddress: this.address(record.id),
+					usage: record.usage,
+					recordUsage: (usage) => this.recordUsage(child, usage),
 					// Routine activity remains in the child's transcript, not the communication queue.
 					postStateToOwner: async () => { },
 					postPresentationToOwner: async () => { },
@@ -1941,12 +2044,13 @@ export class TaskletHost {
 		])
 		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
 		await Promise.allSettled([...this.resolutions])
-		const eventResults = await Promise.allSettled([...this.children.values()].map((child) => child.eventWrites))
+		const eventResults = await Promise.allSettled([...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites]))
 		const failures = [
 			...reconstruction.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
 			...this.interactionCleanupFailures,
 			...eventResults.filter((result) => result.status === "rejected").map((result) => result.reason),
+			...[...this.children.values()].flatMap((child) => child.usageProjectionError ? [child.usageProjectionError] : []),
 		]
 		if (failures.length) throw new AggregateError(failures, "Tasklet shutdown failed")
 	}
@@ -2133,7 +2237,8 @@ export class TaskletHost {
 		this.retireInteractions(child)
 		child.record = { ...child.record, outcome }
 		try {
-			await saveTaskletRecord(child.record)
+			await this.persistRecord(child)
+			if (child.usageProjectionError) throw child.usageProjectionError
 			await child.eventWrites
 			child.outcomePersisted = true
 		} catch (error) {

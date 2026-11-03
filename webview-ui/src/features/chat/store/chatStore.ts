@@ -10,6 +10,7 @@ import {
 import { type ApiMetrics, getApiMetrics, getLastApiReqInfo } from "@shared/getApiMetrics"
 import type { PresentationBatch, PresentationOperation } from "@shared/PresentationOperation"
 import { getSubagentUsage } from "@shared/subagentUsage"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import { create } from "zustand"
 
 export type PresentationApplyResult = "applied" | "gap" | "wrong_surface"
@@ -45,7 +46,7 @@ interface ChatState {
 }
 
 function isVisibleMessage(message: DiracMessage, latestRequestStatusId?: string): boolean {
-	if (message.content.type === DiracMessageType.CARD && getSubagentUsage(message.content.card)) return false
+	if (message.content.type === DiracMessageType.CARD && (getSubagentUsage(message.content.card) || getTaskletUsage(message.content.card))) return false
 	if (message.content.type === DiracMessageType.MARKDOWN) {
 		return message.content.content !== "" || (message.content.images?.length ?? 0) > 0
 	}

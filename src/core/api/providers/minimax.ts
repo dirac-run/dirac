@@ -9,7 +9,7 @@ import { DiracTool } from "@/shared/tools"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 
 interface MinimaxHandlerOptions extends CommonApiHandlerOptions {
 	minimaxApiKey?: string
@@ -96,9 +96,10 @@ export class MinimaxHandler implements ApiHandler {
 		)
 
 		const lastStartedToolCall = { id: "", name: "", arguments: "" }
+		const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
 
 		for await (const chunk of stream) {
-			yield* handleStreamChunk(chunk, lastStartedToolCall)
+			yield* handleStreamChunk(chunk, lastStartedToolCall, usage)
 		}
 	}
 
@@ -119,12 +120,12 @@ export class MinimaxHandler implements ApiHandler {
 type ToolCallState = { id: string; name: string; arguments: string }
 
 /** Dispatches a single Anthropic stream chunk to the appropriate handler. */
-async function* handleStreamChunk(chunk: Anthropic.RawMessageStreamEvent, state: ToolCallState): ApiStream {
+async function* handleStreamChunk(chunk: Anthropic.RawMessageStreamEvent, state: ToolCallState, usage: ApiStreamUsageChunk): ApiStream {
 	switch (chunk.type) {
 		case "message_start":
-			return yield* handleMessageStart(chunk)
+			return yield* handleMessageStart(chunk, usage)
 		case "message_delta":
-			return yield* handleMessageDelta(chunk)
+			return yield* handleMessageDelta(chunk, usage)
 		case "message_stop":
 			return
 		case "content_block_start":
@@ -136,19 +137,24 @@ async function* handleStreamChunk(chunk: Anthropic.RawMessageStreamEvent, state:
 	}
 }
 
-async function* handleMessageStart(chunk: Anthropic.RawMessageStartEvent): ApiStream {
+async function* handleMessageStart(chunk: Anthropic.RawMessageStartEvent, snapshot: ApiStreamUsageChunk): ApiStream {
 	const usage = chunk.message.usage
-	yield {
-		type: "usage",
-		inputTokens: usage.input_tokens || 0,
-		outputTokens: usage.output_tokens || 0,
-		cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-		cacheReadTokens: usage.cache_read_input_tokens || undefined,
-	}
+	Object.assign(snapshot, {
+		inputTokens: usage.input_tokens ?? 0,
+		outputTokens: usage.output_tokens ?? 0,
+		cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
+		cacheReadTokens: usage.cache_read_input_tokens ?? undefined,
+	})
+	yield { ...snapshot }
 }
 
-async function* handleMessageDelta(chunk: Anthropic.RawMessageDeltaEvent): ApiStream {
-	yield { type: "usage", inputTokens: chunk.usage.input_tokens || 0, outputTokens: chunk.usage.output_tokens || 0 }
+async function* handleMessageDelta(chunk: Anthropic.RawMessageDeltaEvent, snapshot: ApiStreamUsageChunk): ApiStream {
+	const usage = chunk.usage
+	snapshot.inputTokens = usage.input_tokens ?? snapshot.inputTokens
+	snapshot.outputTokens = usage.output_tokens ?? snapshot.outputTokens
+	if (usage.cache_creation_input_tokens != null) snapshot.cacheWriteTokens = usage.cache_creation_input_tokens
+	if (usage.cache_read_input_tokens != null) snapshot.cacheReadTokens = usage.cache_read_input_tokens
+	yield { ...snapshot }
 }
 
 async function* handleContentBlockStart(chunk: Anthropic.RawContentBlockStartEvent, state: ToolCallState): ApiStream {

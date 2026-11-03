@@ -288,7 +288,7 @@ export async function recursivelyMakeDiracRequests(
 		await ctx.resetStreamingState()
 
 		const { toolUseHandler, reasonsHandler } = ctx.streamHandler.getHandlers()
-		const stream = attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact)
+		const stream = attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact, metricsManager, () => usageChunkSideEffectsQueue)
 
 		let assistantMessageId = ""
 		let assistantMessage = ""

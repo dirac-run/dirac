@@ -1,4 +1,4 @@
-import type { MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/beta/messages/messages"
+import type { MessageCreateParamsStreaming as BetaMessageCreateParamsStreaming, BetaRawMessageStreamEvent } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
 import { FunctionDeclaration as GoogleTool } from "@google/genai"
@@ -16,7 +16,7 @@ import { DiracTool } from "@/shared/tools"
 import { ApiHandler, CommonApiHandlerOptions } from "../"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
-import { ApiStream } from "../transform/stream"
+import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 import { GeminiHandler } from "./gemini"
 
 // The installed SDK types do not yet include xhigh, which the API accepts for Opus 5.5.
@@ -160,9 +160,10 @@ export class VertexHandler implements ApiHandler {
 		const stream = await clientAnthropic.beta.messages.create(request, { signal })
 
 		const lastStartedToolCall = { id: "", name: "", arguments: "" }
+		const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
 
 		for await (const chunk of stream) {
-			yield* this.parseVertexChunk(chunk, lastStartedToolCall)
+			yield* this.parseVertexChunk(chunk, lastStartedToolCall, usage)
 		}
 	}
 
@@ -172,13 +173,19 @@ export class VertexHandler implements ApiHandler {
 	}
 
 	// Parses a single Anthropic stream chunk into Dirac ApiStreamChunk(s).
-	private *parseVertexChunk(chunk: any, lastStartedToolCall: { id: string; name: string; arguments: string }): Generator<any> {
+	private *parseVertexChunk(
+		chunk: BetaRawMessageStreamEvent,
+		lastStartedToolCall: { id: string; name: string; arguments: string },
+		usage: ApiStreamUsageChunk,
+	): Generator<any> {
 		switch (chunk?.type) {
 			case "message_start":
-				yield this.parseVertexMessageStart(chunk)
+				Object.assign(usage, this.parseVertexMessageStart(chunk))
+				yield { ...usage }
 				break
 			case "message_delta":
-				yield { type: "usage", inputTokens: 0, outputTokens: chunk.usage?.output_tokens || 0 }
+				usage.outputTokens = chunk.usage?.output_tokens ?? usage.outputTokens
+				yield { ...usage }
 				break
 			case "content_block_start":
 				yield* this.parseVertexContentBlockStart(chunk, lastStartedToolCall)

@@ -2,6 +2,8 @@ import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes
 import type { TaskRunOutcome } from "@core/task/TaskRunOutcome"
 import type { TaskletInteraction } from "@core/task/tools/interfaces/IToolEnvironment"
 import type { ResponseArguments } from "@shared/responseTool"
+import type { TaskletUsageSnapshot } from "@shared/taskletUsage"
+import { isTaskletUsageSnapshot } from "@shared/taskletUsage"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
@@ -22,6 +24,8 @@ export interface TaskletRecord {
 	prompt: string
 	createdAt: number
 	outcome?: TaskRunOutcome
+	/** Lifetime snapshots, replaced rather than added on explicit resumption. */
+	usage?: TaskletUsageSnapshot
 }
 
 export interface TaskletEvent {
@@ -58,7 +62,8 @@ export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRec
 					!record.conversationUlid ||
 					typeof record.title !== "string" ||
 					typeof record.prompt !== "string" ||
-					!Number.isFinite(record.createdAt)
+					!Number.isFinite(record.createdAt) ||
+					(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
 				)
 					throw new Error(`Invalid tasklet record for ${entry.name} under root ${rootTaskId}`)
 				return record
@@ -91,9 +96,9 @@ export async function loadTaskletEvents(address: Extract<TaskStorageAddress, { k
 				(event.communication.type === "response"
 					? !event.communication.response || typeof event.communication.response !== "object"
 					: event.communication.type !== "interaction" ||
-						!event.communication.request ||
-						typeof event.communication.request.id !== "string" ||
-						!["pending", "resolved", "retired"].includes(event.communication.request.status)),
+					!event.communication.request ||
+					typeof event.communication.request.id !== "string" ||
+					!["pending", "resolved", "retired"].includes(event.communication.request.status)),
 		)
 	)
 		throw new Error(`Invalid tasklet events for ${address.taskletId} under root ${address.rootTaskId}`)

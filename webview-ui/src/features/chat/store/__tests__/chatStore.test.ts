@@ -199,6 +199,46 @@ describe("useChatStore", () => {
 		expect(useChatStore.getState().diracMessages).toHaveLength(4)
 	})
 
+	it("hydrates and replaces hidden tasklet usage snapshots without changing root context metrics", () => {
+		const task: DiracMessage = { id: "task", ts: 0, content: { type: DiracMessageType.MARKDOWN, content: "task" } }
+		const main: DiracMessage = {
+			id: "main", ts: 1,
+			content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 10, tokensOut: 5, cost: 0.25, reasoningTokens: 1 } },
+		}
+		const usage = { source: "tasklet", taskletId: "tasklet-1", tokensIn: 100, tokensOut: 20, cacheWrites: 4, cacheReads: 8, cost: 0.5, reasoningTokens: 3 }
+		const child: DiracMessage = {
+			id: "child-accounting", ts: 2,
+			content: {
+				type: DiracMessageType.CARD, card: {
+					id: "child-accounting", header: "Localized label", body: "Not JSON", renderType: "text", status: CardStatus.SUCCESS, rawOutput: usage,
+				}
+			},
+		}
+		const execution = permissionCardMessage(CardStatus.SUCCESS, true)
+		useChatStore.getState().applyExtensionState({
+			diracMessages: [task, main, execution, child], presentationSurfaceId: "task-1", presentationOffset: -1,
+		})
+		expect(useChatStore.getState().apiMetrics).toMatchObject({ totalCost: 0.75, totalTokensIn: 110, totalReasoningTokens: 4 })
+		expect(useChatStore.getState().visibleMessageIds).toEqual([main.id, execution.id])
+		expect(filterVisibleMessages([execution, child])).toEqual([execution])
+		const patch = { ...usage, tokensIn: 150, cost: 1, reasoningTokens: 5 }
+		useChatStore.getState().applyPresentationBatch({
+			surfaceId: "task-1", operations: [{ offset: 0, type: "patch_card", id: child.id, patch: { rawOutput: patch } }],
+		})
+		expect(useChatStore.getState().apiMetrics).toMatchObject({ totalCost: 1.25, totalTokensIn: 160, totalReasoningTokens: 6 })
+		expect(useChatStore.getState().lastApiReqInfo?.tokensIn).toBe(10)
+		expect(useChatStore.getState().visibleMessageIds).toEqual([main.id, execution.id])
+		// Repeated lifetime snapshots and hydration replace, rather than re-add, incurred usage.
+		useChatStore.getState().applyPresentationBatch({
+			surfaceId: "task-1", operations: [{ offset: 1, type: "patch_card", id: child.id, patch: { rawOutput: patch } }],
+		})
+		const restored = structuredClone(useChatStore.getState().diracMessages)
+		useChatStore.getState().setDiracMessages(restored)
+		expect(useChatStore.getState().apiMetrics.totalCost).toBe(1.25)
+		expect(useChatStore.getState().apiMetrics.totalReasoningTokens).toBe(6)
+		expect(useChatStore.getState().visibleMessageIds).toEqual([main.id, execution.id])
+	})
+
 
 	it("applies contiguous patches by ID without replacing an unchanged large body", () => {
 		const task: DiracMessage = {

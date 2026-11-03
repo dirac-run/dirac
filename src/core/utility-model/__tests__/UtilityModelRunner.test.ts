@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert"
 import type { ApiHandler } from "@core/api"
-import type { ApiStream, ApiStreamChunk } from "@core/api/transform/stream"
+import type { ApiStream, ApiStreamChunk, ApiStreamUsageChunk } from "@core/api/transform/stream"
 import type { ModelProviderSelection } from "@shared/api"
 import type { DiracStorageMessage } from "@shared/messages/content"
 import type { DiracTool } from "@shared/tools"
@@ -81,6 +81,84 @@ describe("UtilityModelRunner", () => {
 
 		assert.deepEqual(usages, [18])
 		assert.equal(chunks[0].type, "usage")
+	})
+
+	it("accounts cumulative usage snapshots once while yielding the original chunks unchanged", async () => {
+		const snapshots: ApiStreamUsageChunk[] = [
+			{ type: "usage", inputTokens: 10, outputTokens: 2, reasoningTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 15, outputTokens: 5, reasoningTokens: 3, cacheWriteTokens: 5, cacheReadTokens: 7, totalCost: 0.5 },
+			{ type: "usage", inputTokens: 15, outputTokens: 5, reasoningTokens: 3, cacheWriteTokens: 5, cacheReadTokens: 7, totalCost: 0.5 },
+		]
+		const original = structuredClone(snapshots)
+		const usages: ApiStreamUsageChunk[] = []
+		const runner = new UtilityModelRunner(selection, () => fakeHandler(() => streamChunks(snapshots)), {
+			onUsage: ({ usage }) => usages.push(usage),
+		})
+		const yielded: ApiStreamChunk[] = []
+		for await (const chunk of runner.run({ systemPrompt: "prompt", messages: [] })) yielded.push(chunk)
+
+		assert.deepEqual(usages, [
+			original[0],
+			{ type: "usage", inputTokens: 5, outputTokens: 3, reasoningTokens: 2, cacheWriteTokens: 2, cacheReadTokens: 3, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, totalCost: 0 },
+		])
+		assert.deepEqual(yielded, original)
+		assert.deepEqual(snapshots, original)
+		assert.equal(yielded[0], snapshots[0])
+	})
+
+	it("retains omitted optional baselines and shares one reasoning baseline between aliases", async () => {
+		const usages: ApiStreamUsageChunk[] = []
+		const snapshots: ApiStreamUsageChunk[] = [
+			{ type: "usage", inputTokens: 10, outputTokens: 2, thoughtsTokenCount: 3, cacheWriteTokens: 4, cacheReadTokens: 5, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 12, outputTokens: 3 },
+			{ type: "usage", inputTokens: 15, outputTokens: 5, reasoningTokens: 6, cacheWriteTokens: 7, cacheReadTokens: 9, totalCost: 0.5 },
+			{ type: "usage", inputTokens: 16, outputTokens: 6, thoughtsTokenCount: 8 },
+			{ type: "usage", inputTokens: 17, outputTokens: 7, reasoningTokens: 10, thoughtsTokenCount: 99 },
+		]
+		const runner = new UtilityModelRunner(selection, () => fakeHandler(() => streamChunks(snapshots)), {
+			onUsage: ({ usage }) => usages.push(usage),
+		})
+		for await (const _chunk of runner.run({ systemPrompt: "prompt", messages: [] })) { /* Consume. */ }
+
+		assert.deepEqual(usages, [
+			snapshots[0],
+			{ type: "usage", inputTokens: 2, outputTokens: 1 },
+			{ type: "usage", inputTokens: 3, outputTokens: 2, reasoningTokens: 3, cacheWriteTokens: 3, cacheReadTokens: 4, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 1, outputTokens: 1, thoughtsTokenCount: 2 },
+			{ type: "usage", inputTokens: 1, outputTokens: 1, reasoningTokens: 2, thoughtsTokenCount: 2 },
+		])
+	})
+
+	it("resets cumulative accounting for each retry and retains observed usage when the retry is cancelled", async () => {
+		const controller = new AbortController()
+		const usages: ApiStreamUsageChunk[] = []
+		let attempts = 0
+		let aborts = 0
+		const runner = new UtilityModelRunner(selection, () => {
+			const attempt = ++attempts
+			return fakeHandler(async function* () {
+				yield { type: "usage", inputTokens: 10, outputTokens: 2, totalCost: 0.25 }
+				yield { type: "usage", inputTokens: 15, outputTokens: 5, totalCost: 0.5 }
+				if (attempt === 1) throw new Error("provider failed after usage")
+				controller.abort()
+				yield { type: "usage", inputTokens: 99, outputTokens: 99, totalCost: 99 }
+			}, () => { aborts++ })
+		}, { onUsage: ({ usage }) => usages.push(usage) })
+		sinon.stub(runner as any, "waitForRetry").resolves()
+
+		await assert.rejects(
+			() => runner.run({ systemPrompt: "prompt", messages: [], signal: controller.signal }).next(),
+			UtilityModelCancelledError,
+		)
+		assert.deepEqual(usages, [
+			{ type: "usage", inputTokens: 10, outputTokens: 2, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 5, outputTokens: 3, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 10, outputTokens: 2, totalCost: 0.25 },
+			{ type: "usage", inputTokens: 5, outputTokens: 3, totalCost: 0.25 },
+		])
+		assert.equal(attempts, 2)
+		assert.equal(aborts, 2)
 	})
 
 	it("publishes the model resolved by the handler after a successful request", async () => {

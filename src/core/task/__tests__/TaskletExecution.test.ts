@@ -29,6 +29,9 @@ import { Task, TaskletHost, type TaskParams, type TaskletTaskOptions } from "../
 import * as taskLocks from "../TaskLockUtils"
 import { SqliteLockManager } from "@core/locks/SqliteLockManager"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
+import { getApiMetrics } from "@shared/getApiMetrics"
+import { getTaskletUsage } from "@shared/taskletUsage"
+import { createDefaultTextCondensationTemplateRegistry } from "@core/text-condensation/templates"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
 
@@ -1181,6 +1184,8 @@ describe("Tasklet real Task execution", function () {
 		try {
 			const result = await waitForOutcome(host, record.id)
 			assert.equal(result.outcome?.kind, "failed", JSON.stringify(result))
+			assert.equal(result.usage?.primary.tokensIn, 100, "Failed final persistence retains already observed primary spend")
+			assert.equal(result.usage?.primary.tokensOut, 20)
 			const transcript = await host.readTranscript(record.id)
 			assert.match(JSON.stringify(transcript.conversation), /Private assignment complete/)
 			assert.match(JSON.stringify(transcript.conversation), /UNFLUSHED_FINAL_DETAIL/)
@@ -1469,6 +1474,193 @@ describe("Tasklet real Task execution", function () {
 			await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
 		} finally {
 			await host.shutdown()
+		}
+	})
+
+	describe("durable tasklet usage attribution", () => {
+		it("counts two real children and the executing root once each in persisted root accounting", async () => {
+			const root = createResolutionRoot()
+			sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+			const modelPresets = await import("@core/models/modelProviderPresets")
+			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+			let rootTurn = true
+			const ids: string[] = []
+			nextTurn = async () => {
+				if (rootTurn) {
+					rootTurn = false
+					const children = await Promise.all([
+						root.taskletHost!.start({ title: "first usage", prompt: "FIRST_USAGE" }),
+						root.taskletHost!.start({ title: "second usage", prompt: "SECOND_USAGE" }),
+					])
+					ids.push(...children.map((child) => child.id))
+					await Promise.all(ids.map((id) => waitForOutcome(root.taskletHost!, id)))
+				}
+				return "complete"
+			}
+			assert.equal((await root.startTask("ROOT_USAGE")).kind, "completed")
+			const messages = root.messageStateHandler.getDiracMessages()
+			const metrics = getApiMetrics(messages)
+			assert.equal(metrics.totalTokensIn, 300)
+			assert.equal(metrics.totalTokensOut, 60)
+			const contributions = messages.flatMap((message) => message.content.type === DiracMessageType.CARD
+				? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined) : [])
+			assert.deepEqual(contributions.map((usage) => usage.taskletId).sort(), ids.sort())
+			for (const id of ids) {
+				assert.equal(root.taskletHost!.inspect(id).usage?.primary.tokensIn, 100)
+				assert.equal(root.taskletHost!.inspect(id).usage?.primary.tokensOut, 20)
+			}
+			const persisted = (await getSavedPresentationHistory("root")).messages
+			assert.equal(getApiMetrics(persisted).totalTokensIn, 300)
+			assert.equal(requests.length, 3)
+		})
+
+		it("adds only new primary spend when a completed real tasklet resumes under its stable handle", async () => {
+			const root = createResolutionRoot()
+			const host = root.taskletHost!
+			nextTurn = async () => "complete"
+			const child = await host.start({ title: "usage follow-up", prompt: "FIRST_USAGE_TURN" })
+			assert.equal((await waitForOutcome(host, child.id)).usage?.primary.tokensIn, 100)
+			await host.resume(child.id, "SECOND_USAGE_TURN")
+			const resumed = await waitForOutcome(host, child.id)
+			assert.equal(resumed.outcome?.kind, "completed")
+			assert.equal(resumed.conversationUlid, child.conversationUlid)
+			assert.equal(resumed.usage?.primary.tokensIn, 200)
+			assert.equal(resumed.usage?.primary.tokensOut, 40)
+			assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
+			const cards = root.messageStateHandler.getDiracMessages().filter((message) =>
+				message.content.type === DiracMessageType.CARD && getTaskletUsage(message.content.card))
+			assert.equal(cards.length, 1, "Follow-up replaces the stable accounting projection")
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
+			const record = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"))
+			assert.deepEqual(record.usage, resumed.usage)
+		})
+
+		it("preserves durable primary spend ahead of its transcript through reconstruction and explicit resumption", async () => {
+			const root = createResolutionRoot()
+			nextTurn = async () => "complete"
+			const child = await root.taskletHost!.start({ title: "ahead of transcript", prompt: "PERSIST_TRANSCRIPT_USAGE" })
+			await waitForOutcome(root.taskletHost!, child.id)
+			await root.abortTask()
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
+			assert.equal(getApiMetrics((await getSavedPresentationHistory(address)).messages).totalTokensIn, 100)
+			const recordPath = path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord)
+			const record = JSON.parse(await fs.readFile(recordPath, "utf8"))
+			record.usage.primary = {
+				tokensIn: 200, tokensOut: 40, cacheWrites: 6, cacheReads: 8, cost: 1.25, reasoningTokens: 10,
+			}
+			await fs.writeFile(recordPath, JSON.stringify(record))
+
+			const reopened = createResolutionRoot()
+			const host = reopened.taskletHost!
+			await host.reconstruct()
+			await host.reconcileUsage()
+			assert.equal(requests.length, 1, "Reconstruction does not run a provider")
+			assert.equal(host.inspect(child.id).usage?.primary.tokensIn, 200)
+			assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
+			await host.resume(child.id, "INCUR_ONLY_ONE_NEW_REQUEST")
+			const resumed = await waitForOutcome(host, child.id)
+			assert.equal(resumed.outcome?.kind, "completed")
+			assert.equal(resumed.conversationUlid, child.conversationUlid)
+			assert.deepEqual(resumed.usage?.primary, {
+				tokensIn: 300, tokensOut: 60, cacheWrites: 6, cacheReads: 8, cost: 1.25, reasoningTokens: 10,
+			})
+			const metrics = getApiMetrics(reopened.messageStateHandler.getDiracMessages())
+			assert.equal(metrics.totalTokensIn, 300)
+			assert.equal(metrics.totalTokensOut, 60)
+			assert.equal(metrics.totalCacheWrites, 6)
+			assert.equal(metrics.totalCacheReads, 8)
+			assert.equal(metrics.totalCost, 1.25)
+			assert.equal(metrics.totalReasoningTokens, 10)
+			assert.deepEqual(JSON.parse(await fs.readFile(recordPath, "utf8")).usage, resumed.usage)
+			assert.equal(requests.length, 2, "Only explicit resumption incurs another provider request")
+		})
+
+		it("retains incurred primary usage across interruption and counts only the resumed request anew", async () => {
+			expectLoggerErrors() // Interrupting the real permission wait is expected tool cancellation.
+			const root = createResolutionRoot()
+			const host = root.taskletHost!
+			nextTurn = async () => requests.length === 1 ? "execute_command" : "complete"
+			const child = await host.start({ title: "interrupted usage", prompt: "REQUEST_USAGE_THEN_PERMISSION" })
+			await waitForInteraction(host, child.id)
+			const stopped = await host.interrupt(child.id, "Retain incurred spend")
+			assert.equal(stopped.outcome?.kind, "interrupted")
+			assert.equal(stopped.usage?.primary.tokensIn, 100)
+			assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 100)
+			await host.resume(child.id, "Continue without the retired command")
+			const resumed = await waitForOutcome(host, child.id)
+			assert.equal(resumed.outcome?.kind, "completed")
+			assert.equal(resumed.usage?.primary.tokensIn, 200)
+			assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
+			assert.equal(requests.length, 2)
+		})
+
+		it("restores root accounting after presentation loading without constructing or charging historical child runs again", async () => {
+			const root = createResolutionRoot()
+			nextTurn = async () => "complete"
+			const child = await root.taskletHost!.start({ title: "durable usage", prompt: "PERSIST_USAGE" })
+			await waitForOutcome(root.taskletHost!, child.id)
+			await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_USAGE" }] }])
+			await root.abortTask()
+			const reopened = createResolutionRoot()
+			sandbox.stub(reopened as any, "waitForFollowUp").resolves(undefined)
+			const modelPresets = await import("@core/models/modelProviderPresets")
+			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+			let restored = false
+			assert.equal((await reopened.resumeTaskFromHistory(() => {
+				restored = true
+				assert.equal(requests.length, 1, "Reconstruction does not run child providers")
+				assert.deepEqual(reopened.taskletHost!.listActive(), [])
+				assert.equal(reopened.taskletHost!.inspect(child.id).usage?.primary.tokensIn, 100)
+				assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 100)
+			}, { initialUserInput: { text: "ROOT_ONLY_NEW_USAGE" } })).kind, "completed")
+			assert.equal(restored, true)
+			assert.equal(requests.length, 2)
+			assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
+			assert.equal(getApiMetrics((await getSavedPresentationHistory("root")).messages).totalTokensIn, 200)
+		})
+
+		for (const invalidSummary of [false, true]) {
+			it(`retains actual Utility compaction ${invalidSummary ? "failed-summary" : "successful-summary"} spend through real tasklet resumption`, async () => {
+				const root = createResolutionRoot()
+				const host = root.taskletHost!
+				const started = sandbox.spy(Task.prototype, "startTask")
+				const utilityHandler = {
+					getModel: () => ({ id: "controlled-utility", info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false } }),
+					async *createMessage(): ApiStream {
+						yield { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalCost: 0.5 }
+						yield { type: "text", text: invalidSummary ? "" : "Continue the private assignment under the parent's constraints." }
+					},
+				} as ApiHandler
+				let generated = false
+				nextTurn = async () => {
+					if (!generated) {
+						generated = true
+						const task = started.firstCall.thisValue as Task
+						const summary = (task as any).localConversationCompaction.generateSummary(
+							{ provider: "anthropic", modelId: "controlled-utility" }, () => utilityHandler,
+							createDefaultTextCondensationTemplateRegistry(), undefined, [],
+						)
+						if (invalidSummary) await assert.rejects(summary, /empty|output/i)
+						else assert.match(await summary, /private assignment/)
+					}
+					return "complete"
+				}
+				const child = await host.start({ title: "Utility usage", prompt: "INCUR_UTILITY_USAGE" })
+				const first = await waitForOutcome(host, child.id)
+				assert.equal(first.outcome?.kind, "completed")
+				assert.equal(first.usage?.primary.tokensIn, 100)
+				assert.deepEqual(first.usage?.utility, {
+					tokensIn: 11, tokensOut: 7, cacheWrites: 1, cacheReads: 2, cost: 0.5, reasoningTokens: 3,
+				})
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 111)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
+				await host.resume(child.id, "FOLLOWUP_WITHOUT_NEW_UTILITY_USAGE")
+				const second = await waitForOutcome(host, child.id)
+				assert.deepEqual(second.usage?.utility, first.usage?.utility)
+				assert.equal(second.usage?.primary.tokensIn, 200)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 211)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
+			})
 		}
 	})
 

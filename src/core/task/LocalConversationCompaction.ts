@@ -53,6 +53,7 @@ interface LocalConversationCompactionDependencies {
 	setActiveHookExecution: (hookExecution: HookExecution | undefined) => Promise<void>
 	clearActiveHookExecution: () => Promise<void>
 	onContextCompacted?: () => void
+	onUtilityUsageRecorded?: () => void
 }
 
 interface LocalConversationCompactionOptions {
@@ -207,7 +208,10 @@ export class LocalConversationCompaction {
 	): Promise<string> {
 		const runner = new UtilityModelRunner(selection, createHandler, {
 			onRetry,
-			onUsage: (event) => recordUtilityModelUsage(this.dependencies.taskState, this.dependencies.ulid, event),
+			onUsage: (event) => {
+				recordUtilityModelUsage(this.dependencies.taskState, this.dependencies.ulid, event)
+				this.dependencies.onUtilityUsageRecorded?.()
+			},
 		})
 		const textCondenser = new UtilityModelTextCondenser(runner, templates)
 		const service = new ConversationCondensationService({

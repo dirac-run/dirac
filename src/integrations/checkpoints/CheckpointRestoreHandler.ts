@@ -5,6 +5,7 @@ import { findLastIndex } from "@shared/array"
 import { combineCardSequences } from "@shared/combineCardSequences"
 import { DiracMessage } from "@shared/ExtensionMessage"
 import { getApiMetrics } from "@shared/getApiMetrics"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import { DiracCheckpointRestore } from "@shared/WebviewMessage"
 import { HostProvider } from "@/hosts/host-provider"
 import { getErrorMessage } from "@/shared/errors"
@@ -248,7 +249,14 @@ export class CheckpointRestoreHandler {
 				// aggregate deleted api reqs info so we don't lose costs/tokens
 				const diracMessages = this.services.messageStateHandler.getDiracMessages()
 				const deletedMessages = diracMessages.slice(messageIndex + 1)
-				const deletedApiReqsMetrics = getApiMetrics(combineCardSequences(deletedMessages))
+				// Tasklet snapshots remain separately attributed; never fold them into deleted root API usage.
+				const deletedApiReqsMetrics = getApiMetrics(
+					combineCardSequences(
+						deletedMessages.filter(
+							(message) => message.content.type !== "card" || !getTaskletUsage(message.content.card),
+						),
+					),
+				)
 
 				// Detect files edited after this message timestamp for file context warning
 				if (restoreType === "task") {
@@ -270,7 +278,20 @@ export class CheckpointRestoreHandler {
 					restoredCheckpointMessage.lastCheckpointHash = message.lastCheckpointHash
 					restoredCheckpointMessage.isCheckpointCheckedOut = message.isCheckpointCheckedOut
 				}
-				await this.services.messageStateHandler.overwriteDiracMessages(newDiracMessages)
+				// Checkpoint history can contain older snapshots of these same stable children.
+				const currentTaskletUsage = new Map<string, DiracMessage>()
+				for (const currentMessage of diracMessages) {
+					if (currentMessage.content.type !== "card") continue
+					const usage = getTaskletUsage(currentMessage.content.card)
+					if (usage) currentTaskletUsage.set(usage.taskletId, currentMessage)
+				}
+				const restoredMessages = newDiracMessages.filter((restoredMessage) => {
+					if (restoredMessage.content.type !== "card") return true
+					const usage = getTaskletUsage(restoredMessage.content.card)
+					return !usage || !currentTaskletUsage.has(usage.taskletId)
+				})
+				restoredMessages.push(...currentTaskletUsage.values())
+				await this.services.messageStateHandler.overwriteDiracMessages(restoredMessages)
 
 				await this.callbacks.taskMessenger.upsertApiStatus({
 					tokensIn: 0,
@@ -283,6 +304,7 @@ export class CheckpointRestoreHandler {
 						tokensOut: deletedApiReqsMetrics.totalTokensOut,
 						cacheWrites: deletedApiReqsMetrics.totalCacheWrites,
 						cacheReads: deletedApiReqsMetrics.totalCacheReads,
+						reasoningTokens: deletedApiReqsMetrics.totalReasoningTokens,
 					},
 				})
 				break

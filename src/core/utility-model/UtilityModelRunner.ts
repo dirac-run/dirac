@@ -33,6 +33,7 @@ export interface UtilityModelRetryEvent {
 }
 
 export interface UtilityModelRunnerOptions {
+	/** Per-attempt usage deltas for accounting; the yielded stream retains provider snapshots. */
 	onUsage?: (event: UtilityModelUsageEvent) => void
 	onModelResolved?: (event: UtilityModelResolvedEvent) => void
 	onRetry?: (event: UtilityModelRetryEvent) => void | Promise<void>
@@ -117,9 +118,29 @@ export class UtilityModelRunner {
 		try {
 			this.throwIfCancelled(request.signal)
 			const chunks: ApiStreamChunk[] = []
+			const accountedUsage = {
+				inputTokens: 0, outputTokens: 0, reasoningTokens: 0,
+				cacheWriteTokens: 0, cacheReadTokens: 0, totalCost: 0,
+			}
 			for await (const chunk of handler.createMessage(request.systemPrompt, request.messages, request.tools)) {
 				this.throwIfCancelled(request.signal)
-				if (chunk.type === "usage") this.options.onUsage?.({ selection: this.selection, usage: chunk })
+				if (chunk.type === "usage") {
+					const usage = { ...chunk }
+					for (const field of ["inputTokens", "outputTokens", "cacheWriteTokens", "cacheReadTokens", "totalCost"] as const) {
+						const value = chunk[field]
+						if (value === undefined) continue
+						usage[field] = value - accountedUsage[field]
+						accountedUsage[field] = value
+					}
+					const reasoningTokens = chunk.reasoningTokens ?? chunk.thoughtsTokenCount
+					if (reasoningTokens !== undefined) {
+						const delta = reasoningTokens - accountedUsage.reasoningTokens
+						if (chunk.reasoningTokens !== undefined) usage.reasoningTokens = delta
+						if (chunk.thoughtsTokenCount !== undefined) usage.thoughtsTokenCount = delta
+						accountedUsage.reasoningTokens = reasoningTokens
+					}
+					this.options.onUsage?.({ selection: this.selection, usage })
+				}
 				chunks.push(chunk)
 			}
 			this.throwIfCancelled(request.signal)

@@ -3,7 +3,7 @@ import CheckpointTracker from "@integrations/checkpoints/CheckpointTracker"
 import { EventEmitter } from "events"
 import getFolderSize from "get-folder-size"
 import Mutex from "p-mutex"
-import { Card, DiracApiReqInfo, DiracMessage, DiracMessageType } from "@/shared/ExtensionMessage"
+import { Card, CardStatus, DiracApiReqInfo, DiracMessage, DiracMessageType } from "@/shared/ExtensionMessage"
 import { getApiMetrics } from "@/shared/getApiMetrics"
 import { HistoryItem } from "@/shared/HistoryItem"
 import {
@@ -549,6 +549,27 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 			this.lastRelevantMessageId = this.diracMessages[index].id
 			return
 		}
+	}
+
+	/** Execution-local accounting; does not include session-only Utility counters. */
+	getApiUsage(): ReturnType<typeof getApiMetrics> {
+		return { ...this.apiMetrics }
+	}
+
+	/** One replaceable root projection per stable child; never an API/context-window record. */
+	async upsertTaskletUsage(taskletId: string, usage: import("@shared/taskletUsage").TaskletUsage): Promise<void> {
+		if (this.persistenceRetired) throw new Error("Cannot record tasklet usage after root persistence retirement")
+		const id = `tasklet-usage:${taskletId}`
+		const card: Card = {
+			id, header: "Tasklet usage", status: CardStatus.SUCCESS, renderType: "text",
+			rawOutput: { source: "tasklet", taskletId, ...usage },
+		}
+		if (this.findMessageIndexById(id) === -1) {
+			await this.addToDiracMessages({ id, ts: Date.now(), content: { type: DiracMessageType.CARD, card } })
+		} else {
+			await this.patchCardById(id, card)
+		}
+		await this.saveDiracMessagesAndUpdateHistory()
 	}
 
 	/**

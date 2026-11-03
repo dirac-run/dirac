@@ -62,7 +62,7 @@ export class StreamingMetricsManager {
 		private messageStateHandler: MessageStateHandler,
 		private lastApiReqIndex: number,
 		private api: ApiHandler,
-	) {}
+	) { }
 
 	/** Merge a usage chunk into the running totals. */
 	updateFromChunk(chunk: UsageChunk): void {
@@ -81,7 +81,7 @@ export class StreamingMetricsManager {
 	}
 
 	/** Persist current metrics to the api_status dirac message. */
-	async updateApiReqMsgFromMetrics(cancelReason?: DiracApiReqCancelReason, streamingFailedMessage?: string): Promise<void> {
+	async updateApiReqMsgFromMetrics(cancelReason?: DiracApiReqCancelReason, streamingFailedMessage?: string, archiveForRetry = false): Promise<void> {
 		const modelInfo = this.api.getModel().info
 		const contextWindow = modelInfo.contextWindow
 		const totalTokens =
@@ -106,7 +106,17 @@ export class StreamingMetricsManager {
 			streamingFailedMessage,
 			contextWindow,
 			contextUsagePercentage,
+			archiveForRetry,
 		})
+	}
+
+	/** Retire one failed attempt before the same API-status record is reused for its retry. */
+	async archiveForRetry(): Promise<void> {
+		await this.updateApiReqMsgFromMetrics("streaming_failed", undefined, true)
+		this.metrics = {
+			inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, totalCost: undefined,
+			availability: { inputTokens: false, outputTokens: false, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false },
+		}
 	}
 
 	/** Compute the cost, using the provider-calculated value when available. Returns undefined when pricing is unknown. */
