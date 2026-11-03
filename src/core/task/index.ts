@@ -74,7 +74,7 @@ import {
 } from "./runtime/TaskWorkingConfiguration"
 import { StreamingMetricsManager } from "./StreamingMetricsManager"
 import { StreamResponseHandler } from "./StreamResponseHandler"
-import { type SteeringClaim } from "./steering"
+import { SteeringDeliveryState, type SteeringClaim } from "./steering"
 import { attemptApiRequest } from "./TaskApiRequestAttempt"
 import type { TaskConversationPersistenceHooks } from "./TaskConversationPersistence"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
@@ -108,7 +108,7 @@ import { DiracContext } from "./tools/context/DiracContext"
 import type { ToolEnvironmentFactory } from "./tools/interfaces/ToolEnvironmentFactory"
 import type {
 	TaskletInteraction, TaskletInspection, TaskletTranscript, TaskletInteractionResult,
-	TaskletInteractionDecision, TaskletResolution,
+	TaskletInteractionDecision, TaskletResolution, TaskletSleepOptions, TaskletWakeResult,
 } from "./tools/interfaces/IToolEnvironment"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
@@ -214,7 +214,9 @@ export class Task {
 				this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup",
 			postStateToWebview: () => this.postStateToWebview(),
 			withStateLock: (fn) => this.withStateLock(fn),
+			onUserInputAccepted: () => this.taskletHost?.notifyUserMessage(),
 			getCompletionBlocker: () => {
+				if (this.hasPendingChatInput()) return "Completion was superseded by pending user input."
 				const active = this.taskletHost?.listActive() ?? []
 				if (!active.length) return undefined
 				return `Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before completing.`
@@ -310,6 +312,10 @@ export class Task {
 			conversationPersistenceHooks: this.conversationPersistenceHooks,
 			deliverTaskletEvents: (history) => this.deliverTaskletEvents(history),
 		}
+	}
+
+	private hasPendingChatInput(): boolean {
+		return this.taskState.pendingUserMessage !== undefined || !!this.taskState.pendingUserImages?.length || !!this.taskState.pendingUserFiles?.length
 	}
 
 	public canAcceptSteeringMessage(): boolean {
@@ -860,6 +866,7 @@ export class Task {
 					steer: (id, message) => host.steer(id, message),
 					interrupt: (id, reason) => host.interrupt(id, reason),
 					resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
+					sleep: (options) => host.sleep(options, this.taskState.abortSignal),
 				}
 			},
 		)
@@ -1012,6 +1019,8 @@ export class Task {
 				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
 				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
 				escalateInteraction: (child, request, signal) => this.taskMessenger.escalateTaskletInteraction(child, request, signal),
+				hasPendingUserInput: () => this.taskState.steeringMessages.some((message) => message.deliveryState === SteeringDeliveryState.QUEUED)
+					|| this.hasPendingChatInput(),
 			}, {
 				controller,
 				cwd,
@@ -1222,7 +1231,20 @@ export class Task {
 		value?: string,
 	) {
 		await this.withStateLock(async () => {
-			return submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value })
+			if (!cardId && response === DiracAskResponse.MESSAGE && this.taskletHost && this.canAcceptSteeringMessage()) {
+				// Active roots have no chat interaction card, including just before sleep
+				// registration. Preserve input in the existing next-turn slot, not ask state.
+				if (text !== undefined) this.taskState.pendingUserMessage = [this.taskState.pendingUserMessage, text].filter((part) => part !== undefined).join("\n")
+				if (images?.length) this.taskState.pendingUserImages = [...this.taskState.pendingUserImages ?? [], ...images]
+				if (files?.length) this.taskState.pendingUserFiles = [...this.taskState.pendingUserFiles ?? [], ...files]
+				this.taskletHost.notifyUserMessage()
+				return
+			}
+			if (cardId && cardId !== this.taskState.lastWaitingCardId) {
+				return submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value })
+			}
+			await submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value })
+			this.taskletHost?.notifyUserMessage()
 		})
 	}
 
@@ -1578,6 +1600,7 @@ export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> 
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
 	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
+	hasPendingUserInput: () => boolean
 }
 
 
@@ -1619,6 +1642,7 @@ export class TaskletHost {
 	private reconstruction?: Promise<void>
 	private readonly resolutions = new Set<Promise<TaskletResolution>>()
 	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
+	private sleepWaiter?: { check: () => void; finish: (result: TaskletWakeResult) => void }
 
 	constructor(
 		private readonly owner: TaskletOwner,
@@ -1629,6 +1653,57 @@ export class TaskletHost {
 		if (owner.executionProfile !== "standalone") throw new Error("Only ordinary root Tasks may own tasklets")
 		getTaskDirectoryPath(owner.taskId)
 		this.rootTaskId = owner.taskId
+	}
+
+	get isSleeping(): boolean {
+		return this.sleepWaiter !== undefined
+	}
+
+	/** User input overrides every event/time condition; input itself stays with Task. */
+	notifyUserMessage(): void {
+		this.sleepWaiter?.finish({ reason: "user_message" })
+	}
+
+	/** Register before checking state; no polling, acknowledgement or model execution. */
+	async sleep(options: TaskletSleepOptions = {}, signal?: AbortSignal): Promise<TaskletWakeResult> {
+		if (this.reconstruction) await this.reconstruction
+		const { timeoutMs } = options
+		if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)) {
+			throw new Error("Sleep timeoutMs must be an integer between 0 and 2147483647")
+		}
+		const ids = options.taskletIds === undefined ? undefined : new Set(options.taskletIds)
+		if (ids?.size === 0 && timeoutMs === undefined) throw new Error("Time-only sleep requires timeoutMs")
+		for (const id of ids ?? []) this.requireChild(id)
+		if (this.sleepWaiter) throw new Error("Parent is already sleeping")
+		if (this.closing || signal?.aborted) return { reason: "cancelled" }
+		return new Promise<TaskletWakeResult>((resolve) => {
+			let settled = false
+			let timer: ReturnType<typeof setTimeout> | undefined
+			const finish = (result: TaskletWakeResult) => {
+				if (settled) return
+				settled = true
+				if (timer !== undefined) clearTimeout(timer)
+				signal?.removeEventListener("abort", cancel)
+				this.sleepWaiter = undefined
+				resolve(result)
+			}
+			const cancel = () => finish({ reason: "cancelled" })
+			const check = () => {
+				if (settled) return
+				if (this.closing || signal?.aborted) return cancel()
+				if (this.owner.hasPendingUserInput()) return finish({ reason: "user_message" })
+				const event = [...this.children.values()]
+					.filter((child) => !ids || ids.has(child.record.id))
+					.flatMap((child) => child.events)
+					.filter((event) => event.deliveredAt === undefined)
+					.sort((a, b) => a.createdAt - b.createdAt)[0]
+				if (event) finish({ reason: "event", taskletId: event.taskletId, eventId: event.id })
+			}
+			this.sleepWaiter = { check, finish }
+			signal?.addEventListener("abort", cancel, { once: true })
+			if (timeoutMs !== undefined) timer = setTimeout(() => finish({ reason: "timeout" }), timeoutMs)
+			check()
+		})
 	}
 
 	/** Load stopped handles only. No Task, provider request or recorded tool execution is started. */
@@ -1761,6 +1836,7 @@ export class TaskletHost {
 								id: ulid(), taskletId: record.id, createdAt: Date.now(),
 								communication: { type: "response", response: structuredClone(response) },
 							})
+							this.sleepWaiter?.check()
 							await this.persistEvents(child)
 						},
 						requestInteraction: (request, signal) => this.waitForInteraction(child, request, signal),
@@ -1851,6 +1927,7 @@ export class TaskletHost {
 	/** Close admission synchronously, then join every admitted writer and execution. */
 	shutdown(): Promise<void> {
 		this.closing = true
+		this.sleepWaiter?.finish({ reason: "cancelled" })
 		for (const child of this.children.values()) this.retireInteractions(child)
 		this.shutdownPromise ??= this.stopOwnedTasklets()
 		return this.shutdownPromise
@@ -2078,6 +2155,7 @@ export class TaskletHost {
 		const record: TaskletInteraction = { ...structuredClone(request), id, status: "pending", createdAt: Date.now() }
 		const cancellation = new AbortController()
 		child.events.push({ id, taskletId: child.record.id, createdAt: record.createdAt, communication: { type: "interaction", request: record } })
+		this.sleepWaiter?.check()
 		const waiting = new Promise<TaskletInteractionResult>((resolve, reject) => {
 			const retire = () => {
 				if (record.status !== "pending") return

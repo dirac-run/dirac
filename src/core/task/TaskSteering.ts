@@ -23,6 +23,7 @@ export interface TaskSteeringContext {
 	getCompletionBlocker?: () => string | undefined
 	postStateToWebview: () => void | Promise<void>
 	withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>
+	onUserInputAccepted?: () => void
 }
 
 export function canAcceptSteeringMessage(ctx: TaskSteeringContext): boolean {
@@ -62,6 +63,7 @@ export async function enqueueSteeringMessage(ctx: TaskSteeringContext, text: str
 		}
 		await ctx.messageStateHandler.addToDiracMessages(transcriptMessage)
 		ctx.taskState.steeringMessages.push(message)
+		ctx.onUserInputAccepted?.()
 		return message
 	})
 

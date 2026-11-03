@@ -21,6 +21,7 @@ export interface TaskContextualInputContext {
 	postStateToWebview(): void | Promise<void>
 	canAcceptSteering(): boolean
 	submitResponse(cardId: string, value: string): Promise<void>
+	onUserInputAccepted?: () => void
 }
 
 export function assertContextualInputRoute(ctx: TaskContextualInputContext, route: ContextualInputRoute): void {
@@ -108,6 +109,7 @@ export async function submitContextualInput(
 					"Contextual feedback submitted with this response.",
 				)
 			}
+			ctx.onUserInputAccepted?.()
 		})
 		await ctx.postStateToWebview()
 		return { persisted: true }

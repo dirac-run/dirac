@@ -129,6 +129,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			authorizePermission: sandbox.stub(),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub(),
+			hasPendingUserInput: () => false,
 		}
 	})
 

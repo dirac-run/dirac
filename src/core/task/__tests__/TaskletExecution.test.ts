@@ -229,6 +229,7 @@ describe("Tasklet real Task execution", function () {
 			authorizePermission: rejectCall("unconfigured owner authorization"),
 			assertPermissionAllowed: rejectCall("unconfigured owner authority"),
 			escalateInteraction: rejectCall("unconfigured owner escalation"),
+			hasPendingUserInput: () => false,
 		}, options)
 	}
 
@@ -408,6 +409,288 @@ describe("Tasklet real Task execution", function () {
 			releaseSibling()
 			await root.abortTask()
 		}
+	})
+
+	describe("voluntary parent sleep", () => {
+		type Controls = NonNullable<import("../tools/interfaces/IToolEnvironment").IOrchestrationTrait["tasklets"]>
+
+		async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
+			let timer!: ReturnType<typeof setTimeout>
+			try {
+				return await Promise.race([
+					promise,
+					new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(label)), 5_000) }),
+				])
+			} finally {
+				clearTimeout(timer)
+			}
+		}
+
+		async function waitForSleep(root: Task) {
+			const deadline = Date.now() + 5_000
+			while (!root.taskletHost!.isSleeping) {
+				assert.ok(Date.now() < deadline, "Executing parent did not enter sleep")
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+		}
+
+		async function createSleepingRoot(onProgress: (controls: Controls, root: Task) => Promise<void>) {
+			const { SurfaceToolEnvironmentFactory } = await import("../tools/adapters/SurfaceAdapter")
+			const surface = new SurfaceToolEnvironmentFactory()
+			const modelPresets = await import("@core/models/modelProviderPresets")
+			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+			const params = parameters()
+			const root = create({
+				...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+				releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
+				postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+				toolEnvironmentFactory: {
+					create(config, toolName) {
+						const env = surface.create(config, toolName)
+						if (config.executionProfile !== "standalone") {
+							assert.equal(env.orchestration.tasklets, undefined, "Children cannot sleep the parent")
+							return env
+						}
+						const controls = env.orchestration.tasklets!
+						assert.ok(controls)
+						const recordResponse = env.responseObserver.recordResponse
+						env.responseObserver.recordResponse = async (response) => {
+							await recordResponse(response)
+							if (response.operation === "progress") await onProgress(controls, root)
+						}
+						return env
+					},
+				},
+			})
+			sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+			return root
+		}
+
+		it("keeps the executing parent paused until a real child's communication arrives, then delivers it on the serial next request", async () => {
+			let releaseChild!: () => void
+			let childEntered!: () => void
+			const childGate = new Promise<void>((resolve) => { releaseChild = resolve })
+			const childStarted = new Promise<void>((resolve) => { childEntered = resolve })
+			let childId = ""
+			let woke = false
+			nextTurn = async () => {
+				if (requests.length === 1) return "progress"
+				if (requests.length === 2) {
+					childEntered()
+					await childGate
+				} else {
+					assert.equal(woke, true, "No new parent request before sleep returns")
+					assert.match(JSON.stringify(requests[2].messages), /Private assignment complete\./)
+					assert.doesNotMatch(JSON.stringify(requests[2].messages), /taskletEventIds/)
+				}
+				return "complete"
+			}
+			const root = await createSleepingRoot(async (controls, parent) => {
+				childId = (await controls.start({ title: "sleep worker", prompt: "Complete while the parent sleeps" })).id
+				await bounded(childStarted, "Child provider did not start")
+				assert.equal(requests.length, 2)
+				const result = await controls.sleep({ taskletIds: [childId], timeoutMs: 5_000 })
+				assert.equal(result.reason, "event")
+				assert.ok(result.reason === "event")
+				assert.equal(result.taskletId, childId)
+				assert.equal(parent.taskletHost!.isSleeping, false)
+				assert.equal(requests.length, 2, "Waking must not dispatch a concurrent parent request")
+				await waitForOutcome(parent.taskletHost!, childId)
+				const { loadTaskletEvents } = await import("@core/storage/taskStorage")
+				const events = await loadTaskletEvents({ kind: "tasklet", rootTaskId: parent.taskId, taskletId: childId })
+				assert.equal(events.find((event) => event.id === result.eventId)?.deliveredAt, undefined)
+				assert.ok(events.some((event) => event.id === result.eventId), "Wake identifies persisted child communication")
+				assert.deepEqual(await controls.sleep({ taskletIds: [childId], timeoutMs: 0 }), result,
+					"Sleep does not consume or acknowledge communication")
+				woke = true
+			})
+			const run = root.startTask("Wait voluntarily for the contained worker")
+			try {
+				await waitForSleep(root)
+				assert.equal(requests.length, 2, "Parent has no second request while sleeping")
+				assert.equal(root.taskletHost!.inspect(childId).outcome, undefined)
+				// A deterministic microtask checkpoint, not a timing-based assertion.
+				await Promise.resolve()
+				assert.equal(root.taskletHost!.isSleeping, true)
+				assert.equal(requests.length, 2)
+				releaseChild()
+				assert.equal((await bounded(run, "Parent did not finish after child wake")).kind, "completed")
+				assert.equal(woke, true)
+				assert.equal(requests.length, 3, "Exactly one serial parent continuation")
+				assert.equal(root.taskletHost!.inspect(childId).outcome?.kind, "completed")
+			} finally {
+				releaseChild()
+				await root.abortTask()
+				await bounded(run, "Parent did not settle during cleanup")
+			}
+		})
+
+		for (const input of ["chat with attachments", "already queued chat with attachments", "steering", "already queued steering", "contextual feedback"] as const) {
+			it(`wakes the executing parent for ${input} despite an empty child filter and retains input for the next provider request`, async () => {
+				const text = `SLEEP_USER_INPUT_${input.replaceAll(" ", "_")}`
+				const image = "data:image/png;base64,iVBORw0KGgo="
+				const attachment = path.join(cwd, "sleep-feedback.txt")
+				await fs.writeFile(attachment, "SLEEP_ATTACHMENT_CONTENT\n")
+				let woke = false
+				nextTurn = async () => {
+					if (requests.length === 1) return "progress"
+					assert.equal(woke, true)
+					const messages = JSON.stringify(requests[1].messages)
+					assert.ok(messages.includes(text), "Accepted user input survives tool finalization")
+					assert.doesNotMatch(messages, /OPAQUE_FEEDBACK_SOURCE/)
+					if (input.includes("chat with attachments")) {
+						assert.match(messages, /iVBORw0KGgo=/)
+						assert.match(messages, /SLEEP_ATTACHMENT_CONTENT/)
+					}
+					return "complete"
+				}
+				const root = await createSleepingRoot(async (controls, parent) => {
+					if (input === "already queued steering") await parent.enqueueSteeringMessage(text)
+					if (input === "already queued chat with attachments") await parent.submitCardResponse("", DiracAskResponse.MESSAGE, text, [image], [attachment])
+					assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), { reason: "user_message" })
+					assert.equal(parent.taskletHost!.isSleeping, false)
+					assert.equal(requests.length, 1, "User wake must not start a second provider loop")
+					assert.equal(parent.stateView.askResponse, undefined, "Sleep input is not an interaction response")
+					assert.equal(parent.stateView.didRejectTool, false)
+					if (input.includes("chat with attachments")) {
+						assert.equal(parent.stateView.pendingUserMessage, text)
+						assert.deepEqual(parent.stateView.pendingUserImages, [image])
+						assert.deepEqual(parent.stateView.pendingUserFiles, [attachment])
+					}
+					// A later completion tool in this same assistant turn must not bypass
+					// input that woke the wait (or arrived just before registration).
+					const completion = await (parent as unknown as { commitAttemptCompletion(text: string): Promise<{ committed: boolean }> }).commitAttemptCompletion("Premature completion")
+					assert.equal(completion.committed, false)
+					woke = true
+				})
+				const run = root.startTask("Pause voluntarily for user guidance")
+				try {
+					if (!input.startsWith("already queued")) {
+						await waitForSleep(root)
+						assert.equal(requests.length, 1)
+						assert.equal(root.stateView.lastWaitingCardId, undefined, "Voluntary sleep creates no approval card")
+						if (input === "chat with attachments") {
+							await root.submitCardResponse("", DiracAskResponse.MESSAGE, text, [image], [attachment])
+						} else if (input === "steering") {
+							await root.enqueueSteeringMessage(text)
+						} else {
+							assert.deepEqual(await root.submitContextualInput(
+								{ text, references: ["OPAQUE_FEEDBACK_SOURCE"] }, { kind: "steering" }, () => { },
+							), { persisted: true })
+						}
+					}
+					assert.equal((await bounded(run, "User input did not resume parent")).kind, "completed")
+					assert.equal(woke, true)
+					assert.equal(requests.length, 2)
+					assert.equal(root.stateView.pendingUserMessage, undefined)
+					assert.equal(root.stateView.pendingUserImages, undefined)
+					assert.equal(root.stateView.pendingUserFiles, undefined)
+				} finally {
+					await root.abortTask()
+					await bounded(run, "Parent did not settle during input cleanup")
+				}
+			})
+		}
+
+		it("retains a second chat arriving during attachment extraction and rejects completion until it reaches the model", async () => {
+			const extract = await import("@integrations/misc/extract-text")
+			const processFiles = extract.processFilesIntoText
+			let releaseRead!: () => void
+			let enteredRead!: () => void
+			const readGate = new Promise<void>((resolve) => { releaseRead = resolve })
+			const readEntered = new Promise<void>((resolve) => { enteredRead = resolve })
+			const firstFile = path.join(cwd, "first-sleep-input.txt")
+			const secondFile = path.join(cwd, "second-sleep-input.txt")
+			await fs.writeFile(firstFile, "FIRST_ATTACHMENT_CONTENT")
+			await fs.writeFile(secondFile, "SECOND_ATTACHMENT_CONTENT")
+			sandbox.stub(extract, "processFilesIntoText").callsFake(async (files) => {
+				if (files.includes(firstFile)) {
+					enteredRead()
+					await readGate
+				}
+				return processFiles(files)
+			})
+			nextTurn = async () => {
+				if (requests.length === 1) return "progress"
+				const messages = JSON.stringify(requests.at(-1)!.messages)
+				assert.match(messages, /FIRST_CHAT|FIRST_ATTACHMENT_CONTENT/)
+				if (requests.length === 2) {
+					assert.doesNotMatch(messages, /SECOND_CHAT|SECOND_ATTACHMENT_CONTENT/)
+				} else {
+					assert.match(messages, /SECOND_CHAT/)
+					assert.match(messages, /SECOND_ATTACHMENT_CONTENT/)
+					assert.match(messages, /iVBORw0KGgo=/)
+				}
+				return "complete"
+			}
+			const root = await createSleepingRoot(async (controls) => {
+				assert.deepEqual(await controls.sleep(), { reason: "user_message" })
+			})
+			const run = root.startTask("Sleep until user guidance")
+			try {
+				await waitForSleep(root)
+				await root.submitCardResponse("", DiracAskResponse.MESSAGE, "FIRST_CHAT", undefined, [firstFile])
+				await bounded(readEntered, "First attachment extraction did not start")
+				await root.submitCardResponse("", DiracAskResponse.MESSAGE, "SECOND_CHAT", ["data:image/png;base64,iVBORw0KGgo="], [secondFile])
+				releaseRead()
+				assert.equal((await bounded(run, "Second input did not reach the parent")).kind, "completed")
+				assert.equal(requests.length, 3, "Completion must reject until the second accepted batch reaches the model")
+				assert.equal(root.stateView.pendingUserMessage, undefined)
+			} finally {
+				releaseRead()
+				await root.abortTask()
+				await bounded(run, "Parent did not settle after attachment input")
+			}
+		})
+
+		it("continues the real serial request loop after a time-only sleep expires", async () => {
+			let woke = false
+			nextTurn = async () => requests.length === 1 ? "progress" : "complete"
+			const root = await createSleepingRoot(async (controls, parent) => {
+				assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 0 }), { reason: "timeout" })
+				assert.equal(parent.taskletHost!.isSleeping, false)
+				assert.equal(requests.length, 1)
+				woke = true
+			})
+			const run = root.startTask("Wait only for the supplied timeout")
+			try {
+				assert.equal((await bounded(run, "Timeout did not resume parent")).kind, "completed")
+				assert.equal(woke, true)
+				assert.equal(requests.length, 2)
+			} finally {
+				await root.abortTask()
+				await bounded(run, "Parent did not settle after timeout")
+			}
+		})
+
+		it("cancels environment sleep through root abort and removes the waiter without another provider request", async () => {
+			expectLoggerErrors() // Cancelling the real executing tool is expected cancellation.
+			let woke = false
+			nextTurn = async () => "progress"
+			const root = await createSleepingRoot(async (controls, parent) => {
+				assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), { reason: "cancelled" })
+				assert.equal(parent.taskletHost!.isSleeping, false)
+				assert.equal(parent.taskState.abortSignal.aborted, true)
+				woke = true
+			})
+			const removeListener = sandbox.spy(root.taskState.abortSignal, "removeEventListener")
+			const run = root.startTask("Abort while voluntarily sleeping")
+			try {
+				await waitForSleep(root)
+				assert.equal(requests.length, 1)
+				await bounded(root.abortTask(), "Root abort did not release environment sleep")
+				assert.equal((await bounded(run, "Sleeping root did not cancel")).kind, "cancelled")
+				assert.equal(woke, true)
+				assert.equal(root.taskletHost!.isSleeping, false)
+				sinon.assert.calledWith(removeListener, "abort", sinon.match.func)
+				assert.deepEqual(await root.taskletHost!.sleep({ taskletIds: [], timeoutMs: 0 }), { reason: "cancelled" })
+				root.taskletHost!.notifyUserMessage()
+				assert.equal(requests.length, 1, "No late timeout/user wake may restart the aborted parent")
+			} finally {
+				await root.abortTask()
+				await bounded(run, "Parent did not settle after abort")
+			}
+		})
 	})
 
 	it("answers a real child question through the root host while a sibling completes independently", async () => {

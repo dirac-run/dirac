@@ -277,6 +277,17 @@ export type TaskletInteractionDecision =
 
 export type TaskletResolution = { status: "resolved" | "requires_user_approval" }
 
+export interface TaskletSleepOptions {
+	/** Omit to wake for any child communication; [] selects time/user-input only. */
+	taskletIds?: string[]
+	/** Optional relative deadline in milliseconds (integer, 0..2147483647). */
+	timeoutMs?: number
+}
+
+export type TaskletWakeResult =
+	| { reason: "event"; taskletId: string; eventId: string }
+	| { reason: "timeout" | "user_message" | "cancelled" }
+
 /** Parent-only controls. Implementations expose data and operations, never the live Task/host. */
 export interface TaskletControls {
 	/** Acceptance only: does not wait for or assert successful completion of the assignment. */
@@ -290,6 +301,8 @@ export interface TaskletControls {
 	steer(id: string, message: string): Promise<{ id: string; messageId: string; accepted: true }>
 	interrupt(id: string, reason?: string): Promise<TaskletInspection>
 	resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision): Promise<TaskletResolution>
+	/** Voluntary wait only; does not consume events/input, join children or start another model loop. */
+	sleep(options?: TaskletSleepOptions): Promise<TaskletWakeResult>
 }
 
 export interface IOrchestrationTrait {

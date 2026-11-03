@@ -15,6 +15,7 @@ function controls() {
 		steer: sinon.stub().resolves({ id: "child", messageId: "guidance", accepted: true }),
 		interrupt: sinon.stub().resolves({ id: "child" }),
 		resolveInteraction: sinon.stub().resolves({ status: "resolved" }),
+		sleep: sinon.stub().resolves({ reason: "timeout" }),
 	}
 }
 
@@ -41,6 +42,8 @@ describe("Tasklet environment control bindings", () => {
 		await tasklets.interrupt("child", "stop")
 		const decision = { operation: "reject" as const }
 		assert.deepEqual(await tasklets.resolveInteraction("child", "request", decision), { status: "resolved" })
+		const sleep = { taskletIds: ["child"], timeoutMs: 10 }
+		assert.deepEqual(await tasklets.sleep(sleep), { reason: "timeout" })
 		sinon.assert.calledOnceWithExactly(callbacks.start, input)
 		sinon.assert.calledOnceWithExactly(callbacks.resume, "child", "follow up")
 		sinon.assert.calledOnceWithExactly(callbacks.list)
@@ -49,6 +52,7 @@ describe("Tasklet environment control bindings", () => {
 		sinon.assert.calledOnceWithExactly(callbacks.steer, "child", "focus")
 		sinon.assert.calledOnceWithExactly(callbacks.interrupt, "child", "stop")
 		sinon.assert.calledOnceWithExactly(callbacks.resolveInteraction, "child", "request", decision)
+		sinon.assert.calledOnceWithExactly(callbacks.sleep, sleep)
 	})
 
 	for (const executionProfile of ["tasklet", "goal_coordinator", "goal_followup", "goal_child"] as const) {

@@ -44,6 +44,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		authorizePermission: sinon.SinonStub
 		assertPermissionAllowed: sinon.SinonStub
 		escalateInteraction: sinon.SinonStub
+		hasPendingUserInput: sinon.SinonStub
 	}
 	const approved = { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE }
 	const rejected = { action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }
@@ -82,6 +83,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub().resolves(rejected),
+			hasPendingUserInput: sandbox.stub().returns(false),
 		}
 		host = new TaskletHost(
 			owner,
@@ -722,6 +724,342 @@ describe("TaskletHost asynchronous ownership", () => {
 		const counterparty = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		return { child, counterparty }
 	}
+
+	describe("sleep", () => {
+		afterEach(() => host.notifyUserMessage())
+
+		it("wakes for pending responses without acknowledging or removing them", async () => {
+			const { child, counterparty } = await respondingChild()
+			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "still pending" })
+			const event = (await savedEvents(child.id))[0]
+			assert.equal(host.isSleeping, false)
+			for (let attempt = 0; attempt < 2; attempt++) {
+				assert.deepEqual(await host.sleep(), { reason: "event", taskletId: child.id, eventId: event.id })
+				assert.equal(host.isSleeping, false)
+				assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+			}
+			const delivery = (await host.prepareEventDelivery())!
+			assert.deepEqual(delivery.content[0].taskletEventIds, [event.id])
+			await delivery.acknowledge()
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const sleeping = host.sleep({ timeoutMs: 0 })
+			await clock.tickAsync(0)
+			assert.deepEqual(await sleeping, { reason: "timeout" })
+			assert.equal(host.inspect(child.id).responses[0].text, "still pending")
+		})
+
+		it("wakes for pending interaction requests without resolving them", async () => {
+			const entry = await registerInteraction()
+			assert.deepEqual(await host.sleep(), { reason: "event", taskletId: entry.child.id, eventId: entry.requestId })
+			assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
+			const delivery = (await host.prepareEventDelivery())!
+			assert.deepEqual(delivery.content[0].taskletEventIds, [entry.requestId])
+			assert.equal((await savedEvents(entry.child.id))[0].deliveredAt, undefined)
+			await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
+			await entry.waiting
+		})
+
+		it("wakes synchronously on response append while delivery still waits for persistence", async () => {
+			const { child, counterparty } = await respondingChild()
+			const entered = deferred<void>()
+			const release = deferred<void>()
+			const originalSave = storage.saveTaskletEvents
+			const write = sandbox.stub(storage, "saveTaskletEvents").callsFake(async (address, events) => {
+				entered.resolve()
+				await release.promise
+				await originalSave(address, events)
+			})
+			const sleeping = host.sleep()
+			assert.equal(host.isSleeping, true)
+			const response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "wake before disk" })
+			let delivery: ReturnType<TaskletHost["prepareEventDelivery"]> | undefined
+			try {
+				assert.equal(host.isSleeping, false)
+				await entered.promise
+				const wake = await sleeping
+				assert.equal(wake.reason, "event")
+				if (wake.reason !== "event") assert.fail("Expected a communication wake")
+				assert.equal(wake.taskletId, child.id)
+				let delivered = false
+				delivery = host.prepareEventDelivery().then((value) => { delivered = true; return value })
+				await Promise.resolve()
+				assert.equal(delivered, false)
+				sinon.assert.calledOnce(write)
+			} finally {
+				release.resolve()
+				await response
+			}
+			const prepared = (await delivery)!
+			const stored = (await savedEvents(child.id))[0]
+			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: stored.id })
+			assert.deepEqual(prepared.content[0].taskletEventIds, [stored.id])
+			assert.equal(stored.deliveredAt, undefined)
+		})
+
+		it("wakes synchronously for a newly registered interaction request", async () => {
+			const { child, counterparty } = await respondingChild()
+			const cancellation = new AbortController()
+			const sleeping = host.sleep()
+			const waiting = counterparty.requestInteraction(request("sleep-request"), cancellation.signal)
+			void waiting.catch(() => { })
+			assert.equal(host.isSleeping, false)
+			const interaction = host.inspect(child.id).interactions[0]
+			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: interaction.id })
+			assert.equal(interaction.status, "pending")
+			await host.resolveInteraction(child.id, interaction.id, { operation: "reject" })
+			await waiting
+		})
+
+		it("filters both pending and arriving communications by tasklet ID", async () => {
+			const first = await respondingChild()
+			const second = await respondingChild()
+			await first.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "excluded pending" })
+			const sleeping = host.sleep({ taskletIds: [second.child.id] })
+			assert.equal(host.isSleeping, true)
+			await first.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "excluded arrival" })
+			assert.equal(host.isSleeping, true)
+			await second.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "included" })
+			assert.deepEqual(await sleeping, {
+				reason: "event", taskletId: second.child.id, eventId: (await savedEvents(second.child.id))[0].id,
+			})
+			assert.equal((await savedEvents(first.child.id)).every((event) => event.deliveredAt === undefined), true)
+		})
+
+		it("does not treat routine child activity or settlement as communication", async () => {
+			const { child } = await respondingChild()
+			const bindings = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!
+			const sleeping = host.sleep()
+			await bindings.postStateToOwner()
+			await bindings.postPresentationToOwner?.()
+			bindings.updateBackgroundCommandState(true, child.id)
+			await host.steer(child.id, "continue")
+			await host.interrupt(child.id)
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+		})
+
+		it("selects an already-pending communication from the requested tasklet", async () => {
+			const first = await respondingChild()
+			const second = await respondingChild()
+			for (const entry of [first, second]) {
+				await entry.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: entry.child.id })
+			}
+			assert.deepEqual(await host.sleep({ taskletIds: [second.child.id] }), {
+				reason: "event", taskletId: second.child.id, eventId: (await savedEvents(second.child.id))[0].id,
+			})
+		})
+
+		it("treats an empty filter as time/user-only even with pending and new events", async () => {
+			const { counterparty } = await respondingChild()
+			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "pending" })
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const sleeping = host.sleep({ taskletIds: [], timeoutMs: 10 })
+			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "new" })
+			assert.equal(host.isSleeping, true)
+			await clock.tickAsync(9)
+			assert.equal(host.isSleeping, true)
+			await clock.tickAsync(1)
+			assert.deepEqual(await sleeping, { reason: "timeout" })
+			assert.equal(host.isSleeping, false)
+			assert.equal(clock.countTimers(), 0)
+		})
+
+		it("lets user messages override every event filter and cancels the timer", async () => {
+			const { child } = await respondingChild()
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			for (const taskletIds of [undefined, [], [child.id]]) {
+				const sleeping = host.sleep({ taskletIds, timeoutMs: 100 })
+				assert.equal(host.isSleeping, true)
+				host.notifyUserMessage()
+				assert.equal(host.isSleeping, false)
+				assert.deepEqual(await sleeping, { reason: "user_message" })
+				assert.equal(clock.countTimers(), 0)
+			}
+		})
+
+		it("returns immediately for already-queued user input, including alongside a pending event", async () => {
+			const { child, counterparty } = await respondingChild()
+			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "lower priority" })
+			owner.hasPendingUserInput.returns(true)
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			assert.deepEqual(await host.sleep({ taskletIds: [child.id], timeoutMs: 100 }), { reason: "user_message" })
+			assert.deepEqual(await host.sleep({ taskletIds: [], timeoutMs: 100 }), { reason: "user_message" })
+			assert.equal(host.isSleeping, false)
+			assert.equal(clock.countTimers(), 0)
+			assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		})
+
+		it("does not retain a user notification when there is no pending sleep", async () => {
+			host.notifyUserMessage()
+			const sleeping = host.sleep()
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+		})
+
+		it("does not lose a communication appended reentrantly while checking queued user input", async () => {
+			const { child, counterparty } = await respondingChild()
+			let response: Promise<void> | undefined
+			let appended = false
+			owner.hasPendingUserInput.callsFake(() => {
+				if (!appended) {
+					appended = true
+					response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "during registration" })
+				}
+				return false
+			})
+			const sleeping = host.sleep()
+			assert.equal(host.isSleeping, false)
+			await response
+			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: (await savedEvents(child.id))[0].id })
+		})
+
+		it("does not lose a user notification sent reentrantly while registering sleep", async () => {
+			owner.hasPendingUserInput.callsFake(() => {
+				host.notifyUserMessage()
+				return false
+			})
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const sleeping = host.sleep({ timeoutMs: 100 })
+			assert.equal(host.isSleeping, false)
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+			assert.equal(clock.countTimers(), 0)
+		})
+
+		it("allows only one pending sleep and permits another after wake", async () => {
+			const sleeping = host.sleep()
+			await assert.rejects(host.sleep())
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+			const next = host.sleep()
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await next, { reason: "user_message" })
+		})
+
+		for (const eventFirst of [true, false]) {
+			it(`settles the timer/event race once when ${eventFirst ? "the event" : "the timer"} wins`, async () => {
+				const { child, counterparty } = await respondingChild()
+				const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+				const cancellation = new AbortController()
+				const add = sandbox.spy(cancellation.signal, "addEventListener")
+				const remove = sandbox.spy(cancellation.signal, "removeEventListener")
+				const sleeping = host.sleep({ timeoutMs: 10 }, cancellation.signal)
+				const settled = sandbox.spy()
+				void sleeping.then(settled)
+				await clock.tickAsync(eventFirst ? 9 : 10)
+				const response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "racing event" })
+				if (eventFirst) assert.equal(host.isSleeping, false)
+				await response
+				const event = (await savedEvents(child.id))[0]
+				assert.deepEqual(await sleeping, eventFirst
+					? { reason: "event", taskletId: child.id, eventId: event.id }
+					: { reason: "timeout" })
+				await clock.tickAsync(100)
+				cancellation.abort()
+				host.notifyUserMessage()
+				sinon.assert.calledOnce(settled)
+				assert.equal(clock.countTimers(), 0)
+				sinon.assert.calledOnce(add)
+				sinon.assert.calledWith(remove, "abort", add.firstCall.args[1])
+				assert.equal(event.deliveredAt, undefined)
+				assert.deepEqual(await host.sleep(), { reason: "event", taskletId: child.id, eventId: event.id })
+			})
+		}
+
+		it("accepts zero and maximum bounded integer timeouts", async () => {
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			for (const timeoutMs of [0, 2_147_483_647]) {
+				const sleeping = host.sleep({ taskletIds: [], timeoutMs })
+				assert.equal(host.isSleeping, true)
+				await clock.tickAsync(timeoutMs)
+				assert.deepEqual(await sleeping, { reason: "timeout" })
+				assert.equal(host.isSleeping, false)
+				assert.equal(clock.countTimers(), 0)
+			}
+		})
+
+		it("cancels on signal abort and removes its listener and timer before accepting another sleep", async () => {
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const cancellation = new AbortController()
+			const add = sandbox.spy(cancellation.signal, "addEventListener")
+			const remove = sandbox.spy(cancellation.signal, "removeEventListener")
+			const sleeping = host.sleep({ timeoutMs: 100 }, cancellation.signal)
+			cancellation.abort(new Error("cancel sleep"))
+			assert.equal(host.isSleeping, false)
+			assert.deepEqual(await sleeping, { reason: "cancelled" })
+			sinon.assert.calledOnce(add)
+			sinon.assert.calledWith(remove, "abort", add.firstCall.args[1])
+			assert.equal(clock.countTimers(), 0)
+			const next = host.sleep()
+			assert.equal(host.isSleeping, true)
+			await clock.tickAsync(100)
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await next, { reason: "user_message" })
+		})
+
+		it("returns cancelled for an already-aborted signal without registering a listener or timer", async () => {
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const cancellation = new AbortController()
+			cancellation.abort()
+			const add = sandbox.spy(cancellation.signal, "addEventListener")
+			assert.deepEqual(await host.sleep({ timeoutMs: 100 }, cancellation.signal), { reason: "cancelled" })
+			assert.equal(host.isSleeping, false)
+			sinon.assert.notCalled(add)
+			assert.equal(clock.countTimers(), 0)
+		})
+
+		it("removes the abort listener when a user message wins", async () => {
+			const cancellation = new AbortController()
+			const add = sandbox.spy(cancellation.signal, "addEventListener")
+			const remove = sandbox.spy(cancellation.signal, "removeEventListener")
+			const sleeping = host.sleep(undefined, cancellation.signal)
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+			sinon.assert.calledOnce(add)
+			sinon.assert.calledWith(remove, "abort", add.firstCall.args[1])
+			const next = host.sleep()
+			cancellation.abort()
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await next, { reason: "user_message" })
+		})
+
+		it("cancels pending sleep at shutdown and cannot sleep after shutdown", async () => {
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			const cancellation = new AbortController()
+			const add = sandbox.spy(cancellation.signal, "addEventListener")
+			const remove = sandbox.spy(cancellation.signal, "removeEventListener")
+			const sleeping = host.sleep({ timeoutMs: 100 }, cancellation.signal)
+			const shutdown = host.shutdown()
+			assert.equal(host.isSleeping, false)
+			assert.deepEqual(await sleeping, { reason: "cancelled" })
+			assert.equal(clock.countTimers(), 0)
+			sinon.assert.calledOnce(add)
+			sinon.assert.calledWith(remove, "abort", add.firstCall.args[1])
+			await shutdown
+			assert.deepEqual(await host.sleep(), { reason: "cancelled" })
+			assert.equal(host.isSleeping, false)
+		})
+
+		it("rejects invalid timeouts and unbounded empty filters without leaving a pending sleep", async () => {
+			const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			for (const timeoutMs of [-1, 0.5, NaN, Infinity, -Infinity, 2_147_483_648, "10" as unknown as number]) {
+				await assert.rejects(host.sleep({ timeoutMs }))
+				assert.equal(host.isSleeping, false)
+				assert.equal(clock.countTimers(), 0)
+			}
+			await assert.rejects(host.sleep({ taskletIds: [] }))
+			assert.equal(host.isSleeping, false)
+			const sleeping = host.sleep()
+			assert.equal(host.isSleeping, true)
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+		})
+	})
 
 	function parentDeliveryFixture() {
 		const history: import("@shared/messages/content").DiracStorageMessage[] = [

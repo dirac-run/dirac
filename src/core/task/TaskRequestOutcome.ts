@@ -262,25 +262,29 @@ export async function processStreamResult(
 			(ctx.taskState.pendingUserImages?.length ?? 0) > 0 ||
 			(ctx.taskState.pendingUserFiles?.length ?? 0) > 0
 		) {
-			if (ctx.taskState.pendingUserMessage) {
+			// Detach this batch before attachment I/O; later chat belongs to the next turn.
+			const text = ctx.taskState.pendingUserMessage
+			const images = ctx.taskState.pendingUserImages
+			const files = ctx.taskState.pendingUserFiles
+			ctx.taskState.pendingUserMessage = undefined
+			ctx.taskState.pendingUserImages = undefined
+			ctx.taskState.pendingUserFiles = undefined
+			if (text) {
 				ctx.taskState.userMessageContent.push({
 					type: "text",
-					text: `<feedback>\n${ctx.taskState.pendingUserMessage}\n</feedback>`,
+					text: `<feedback>\n${text}\n</feedback>`,
 					isUserInput: true,
 				} as DiracTextContentBlock)
 			}
-			if (ctx.taskState.pendingUserImages?.length) {
-				ctx.taskState.userMessageContent.push(...formatResponse.imageBlocks(ctx.taskState.pendingUserImages))
+			if (images?.length) {
+				ctx.taskState.userMessageContent.push(...formatResponse.imageBlocks(images))
 			}
-			if (ctx.taskState.pendingUserFiles?.length) {
-				const fileContent = await processFilesIntoText(ctx.taskState.pendingUserFiles)
+			if (files?.length) {
+				const fileContent = await processFilesIntoText(files)
 				if (fileContent) {
 					ctx.taskState.userMessageContent.push({ type: "text", text: fileContent } as DiracTextContentBlock)
 				}
 			}
-			ctx.taskState.pendingUserMessage = undefined
-			ctx.taskState.pendingUserImages = undefined
-			ctx.taskState.pendingUserFiles = undefined
 		}
 
 		return await ctx.recursivelyMakeDiracRequests(ctx.taskState.userMessageContent)
