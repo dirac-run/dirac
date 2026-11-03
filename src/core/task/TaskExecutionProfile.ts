@@ -28,7 +28,7 @@ export const GOAL_TOOL_NAMES = [
 const goalToolNames = new Set<string>(GOAL_TOOL_NAMES)
 
 export function isToolAvailableToTaskProfile(profile: TaskExecutionProfile, toolName: string): boolean {
-	if (toolName === "use_subagents" && profile !== "standalone") return false
+	if ((toolName === "use_subagents" || toolName === "tasklets") && profile !== "standalone") return false
 	if (profile === "goal_coordinator" || profile === "goal_followup") return true
 	return !goalToolNames.has(toolName)
 }

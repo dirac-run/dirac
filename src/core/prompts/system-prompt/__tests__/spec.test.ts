@@ -12,6 +12,7 @@ import {
 import type { SystemPromptContext } from "../types"
 import { respondSpec } from "@core/task/tools/modules/respond/RespondTool"
 import { RESPONSE_OPERATIONS } from "@shared/responseTool"
+import { tasklets_spec } from "@core/task/tools/modules/use_subagents/UseSubagentsTool"
 const mockContext: SystemPromptContext = {
 	cwd: "/test/project",
 	ide: "TestIde",
@@ -129,6 +130,58 @@ describe("respond provider schemas", () => {
 		expect(enabledAnthropicBytes).to.be.at.most(2100)
 		expect(enabledOpenAIBytes).to.be.at.most(2200)
 	})
+})
+
+describe("tasklets provider schemas", () => {
+	const names = ["operation", "tasklet_id", "message", "request_id", "resolution", "answer", "action", "tasklet_ids", "timeout_ms"]
+	const operations = ["list", "inspect", "transcript", "steer", "interrupt", "resume", "resolve", "sleep"]
+	const resolutions = ["answer", "approve", "reject", "escalate"]
+
+	for (const provider of ["Anthropic", "Gemini", "OpenAI non-strict", "OpenAI strict"] as const) {
+		it(`${provider}: preserves control fields, constraints and answer/action semantics`, () => {
+			const strict = provider === "OpenAI strict"
+			const gemini = provider === "Gemini"
+			const anthropic = toolSpecInputSchema(tasklets_spec, mockContext)
+			const google = toolSpecFunctionDeclarations(tasklets_spec, mockContext)
+			const openAI = toolSpecFunctionDefinition(tasklets_spec, mockContext, strict) as any
+			const schema = (provider === "Anthropic" ? anthropic.input_schema : gemini ? google.parameters : openAI.function.parameters) as any
+			const properties = schema.properties
+			const type = (value: string, optional = false) => {
+				if (gemini) return value === "integer" ? "NUMBER" : value.toUpperCase()
+				return strict && optional ? [value, "null"] : value
+			}
+
+			expect(Object.keys(properties)).to.deep.equal(names)
+			expect(schema.required).to.deep.equal(strict ? names : ["operation"])
+			expect(schema.type).to.equal(type("object"))
+			expect(properties.operation.type).to.equal(type("string"))
+			expect(properties.operation.enum).to.deep.equal(operations)
+			expect(properties.resolution.enum).to.deep.equal(strict ? [...resolutions, null] : resolutions)
+			expect(properties.resolution.type).to.deep.equal(type("string", true))
+			for (const name of ["tasklet_id", "message", "request_id", "answer", "action"]) {
+				expect(properties[name].type).to.deep.equal(type("string", true))
+				expect(properties[name].minLength).to.equal(1)
+			}
+			expect(properties.tasklet_ids.type).to.deep.equal(type("array", true))
+			expect(properties.tasklet_ids.items).to.deep.equal({ type: type("string"), minLength: 1 })
+			expect(properties.tasklet_ids).not.to.have.property("minItems")
+			expect(properties.timeout_ms.type).to.deep.equal(type("integer", true))
+			expect(properties.timeout_ms.minimum).to.equal(0)
+			expect(properties.timeout_ms.maximum).to.equal(2147483647)
+			expect(properties.answer.description).to.include("Supply answer, action or both")
+			expect(properties.action.description).to.include("Displayed choice value")
+			expect(properties.action.description).to.include("approve for operational Retry; not a permission grant")
+			expect(properties.action).not.to.have.property("enum")
+			if (provider.startsWith("OpenAI")) {
+				expect(openAI.function.strict).to.equal(strict)
+				expect(schema.additionalProperties).to.equal(false)
+				expect((toOpenAIResponsesAPITool(openAI) as any).parameters).to.deep.include({
+					properties: schema.properties,
+					required: schema.required,
+				})
+			}
+		})
+	}
 })
 
 describe("toolSpecFunctionDeclarations (Gemini)", () => {

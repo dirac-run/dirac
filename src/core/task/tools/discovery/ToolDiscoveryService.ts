@@ -15,6 +15,7 @@ interface ToolManifest {
 
 interface DualToolManifest extends ToolManifest {
 	secondarySpec?: DiracToolSpec
+	secondaryExposure?: ToolExposure
 	createSecondary?: (config?: any) => IDiracTool
 }
 
@@ -51,7 +52,7 @@ export class ToolDiscoveryService {
 					id: manifest.secondarySpec.id,
 					name: manifest.secondarySpec.name,
 					source: "builtin",
-					exposure: manifest.exposure ?? CONFIGURABLE_TOOL_EXPOSURE,
+					exposure: manifest.secondaryExposure ?? manifest.exposure ?? CONFIGURABLE_TOOL_EXPOSURE,
 					spec: manifest.secondarySpec,
 					factory: manifest.createSecondary,
 					modulePath: `modules/${moduleName}/tool.ts`,

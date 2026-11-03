@@ -35,6 +35,8 @@ import { createDefaultTextCondensationTemplateRegistry } from "@core/text-conden
 import { AgentConfigLoader, type AgentBaseConfig } from "../tools/subagent/AgentConfigLoader"
 import * as skillsModule from "@core/context/instructions/user-instructions/skills"
 import type { DiracStorageMessage } from "@shared/messages/content"
+import { TaskletsTool } from "../tools/modules/use_subagents/UseSubagentsTool"
+import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
 
@@ -1113,9 +1115,16 @@ describe("Tasklet real Task execution", function () {
 		const request = await waitForInteraction(host, child.id)
 		assert.equal(request.card.header, "API Request Failed")
 		assert.equal(request.permissionOperation, undefined)
-		await host.resolveInteraction(child.id, request.id, {
-			operation: "answer", response: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
+		// The public mapping must preserve Retry's response classification, not only its action.
+		const executor = (root as any).toolExecutor
+		const coordinator = new ToolExecutorCoordinator()
+		coordinator.registerModularTool(new TaskletsTool())
+		executor.activeRequestRuntime = { requestId: "public-resolution", workingConfiguration: root.getWorkingConfiguration(), api: root.api }
+		const result = await coordinator.execute(executor.asToolConfig(coordinator), {
+			type: "tool_use", name: "tasklets", isComplete: true,
+			params: { operation: "resolve", tasklet_id: child.id, request_id: request.id, resolution: "answer", action: "approve" },
 		})
+		assert.deepEqual(JSON.parse(result as string), { status: "resolved" })
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 		assert.equal(requests.length, 2)
 		assert.equal(root.stateView.lastWaitingCardId, undefined)

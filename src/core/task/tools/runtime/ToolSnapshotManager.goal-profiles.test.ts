@@ -220,6 +220,29 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 		})
 	}
 
+	it("keeps parent controls out of legacy worker allowlists", async () => {
+		const tool = ToolDiscoveryService.scanBuiltinTools().find((candidate) => candidate.name === "tasklets")!
+		assert.deepEqual(tool.exposure, { kind: "profile_only", profiles: ["standalone"] })
+		assert.equal(ToolRegistry.getInstance().scopeToolForSubagent(tool, ["tasklets"]), undefined)
+	})
+
+	for (const profile of ["standalone", ...nonDelegatingProfiles] as const) {
+		it(`${profile} exposes tasklet controls only to the owning ordinary-root profile`, async () => {
+			const { snapshot, config } = await createSnapshot(profile)
+			const expected = profile === "standalone"
+			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.spec.name === "tasklets"), expected)
+			assert.equal(snapshot.promptVisibleSpecs.some((spec) => spec.name === "tasklets"), expected)
+			assert.equal(nativeNames(snapshot).includes("tasklets"), expected)
+			assert.equal(snapshot.executableToolNames.has("tasklets"), expected)
+			assert.equal(snapshot.coordinator.has("tasklets"), expected)
+			if (!expected) {
+				await assert.rejects(snapshot.coordinator.execute(config, {
+					type: "tool_use", name: "tasklets", params: { operation: "list" }, isComplete: true,
+				}), { message: "No modular tool registered for: tasklets" })
+			}
+		})
+	}
+
 	for (const mode of ["plan", "act"] as const) {
 		it(`tasklet retains ordinary work dispatch and rejects both delegation routes in ${mode} mode`, async () => {
 			const readCall = sinon.stub(ReadFileTool.prototype, "processCall").resolves("fixture read")
@@ -227,6 +250,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 			const { snapshot, config, environment } = await createSnapshot("tasklet", undefined, [], mode)
 			assert.equal(config.mode, mode)
 			assertNoSubagents(snapshot)
+			assert.equal(snapshot.coordinator.has("tasklets"), false)
 			for (const name of ["read_file", "edit_file", "execute_command", "write_to_file", "respond"]) {
 				assert.ok(snapshot.executableToolNames.has(name), name)
 			}
