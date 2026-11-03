@@ -19,6 +19,17 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 
 	const currentCwd = cwd || process.cwd()
 
+	const taskletParentGuidance =
+		context.executionProfile === "standalone" && context.subagentsEnabled === true
+			? `\nTASKLET DELEGATION
+
+- Generic and configured named-agent spawn tools start tasklets asynchronously. A returned stable tasklet ID confirms startup acceptance, not assignment success or completion; startup failures are reported separately.
+- Continue useful work after spawning. Later results, progress, and requests arrive through parent communication; use \`tasklets\` with \`inspect\` and the stable ID for retained status, results, and pending requests. Answer or resolve requests within your current authority; escalate to the user when needed.
+- When no useful work remains while tasklets are active, use \`tasklets\` with \`sleep\` to wait for events rather than repeatedly polling. Before completing the root task, let active tasklets finish or explicitly interrupt them.
+- The configured timeout applies to each execution, including explicit resumption. A deadline interrupts the tasklet while preserving its ID and conversation; continue only with explicit \`tasklets\` \`resume\`. There is no 90-second wrap-up grace, automatic continuation, or timeout-as-success.
+`
+			: ""
+
 	return `You are Dirac, an AI agent for software-engineering tasks.
 
 OPERATING PRINCIPLES
@@ -33,6 +44,7 @@ TOOL USE
 - Minimize round trips by grouping independent operations into one tool call whenever it accepts array inputs, such as multiple files, commands, edits, or targets, or by calling multiple independent tools in the same response.
 - Use \`respond\` for user-facing communication: \`progress\` for meaningful updates during longer work, \`question\` when you need information from the user, \`plan\` for Plan-mode answers or proposals, and \`complete\` for final Act-mode results. Do not send plain assistant text; every response must include a tool call.
 
+${taskletParentGuidance}
 MODES
 
 Tasks have two modes: PLAN MODE is for read-only research and proposals, while ACT MODE is for executing the task. The initial mode is provided at task start, and you will be notified every time the mode switches.
@@ -40,30 +52,37 @@ Tasks have two modes: PLAN MODE is for read-only research and proposals, while A
 
 SYSTEM INFO
 
-- OS: {{OS}}; shell: {{SHELL}}; cwd: \`${currentCwd}\`; parallel work: max {{AVAILABLE_CORES}} CPU cores.${process.platform === "win32" && !context.activeShellIsPosix
+- OS: {{OS}}; shell: {{SHELL}}; cwd: \`${currentCwd}\`; parallel work: max {{AVAILABLE_CORES}} CPU cores.${
+		process.platform === "win32" && !context.activeShellIsPosix
 			? "\n- Non-POSIX Windows shell: use PowerShell or cmd; Unix tools are unavailable."
 			: ""
-		}${context.activeShellType === "git-bash" ? "\n- Git Bash: use `/c/...` paths and expect CRLF." : ""}${context.activeShellType === "wsl" ? "\n- WSL: Windows drives are mounted under `/mnt/`." : ""}
+	}${context.activeShellType === "git-bash" ? "\n- Git Bash: use `/c/...` paths and expect CRLF." : ""}${context.activeShellType === "wsl" ? "\n- WSL: Windows drives are mounted under `/mnt/`." : ""}
 ${yoloModeToggled ? "- Autonomous mode: keep resource use reasonable.\n" : ""}
 
 {{SKILLS_SECTION}}
-${userInstructions ||
-			diracRules ||
-			preferredLanguageInstructions ||
-			globalDiracRulesFileInstructions ||
-			localDiracRulesFileInstructions ||
-			localCursorRulesFileInstructions ||
-			localCursorRulesDirInstructions ||
-			localWindsurfRulesFileInstructions ||
-			localAgentsRulesFileInstructions
-			? `\n\n# USER'S CUSTOM INSTRUCTIONS\n\nThe following additional instructions are provided by the user.\n${userInstructions ? `\n${userInstructions}` : ""
-			}${diracRules ? `\n${diracRules}` : ""}${preferredLanguageInstructions ? `\n${preferredLanguageInstructions}` : ""}${diracIgnoreInstructions ? `\n${diracIgnoreInstructions}` : ""
-			}${globalDiracRulesFileInstructions ? `\n${globalDiracRulesFileInstructions}` : ""}${localDiracRulesFileInstructions ? `\n${localDiracRulesFileInstructions}` : ""
-			}${localCursorRulesFileInstructions ? `\n${localCursorRulesFileInstructions}` : ""}${localCursorRulesDirInstructions ? `\n${localCursorRulesDirInstructions}` : ""
-			}${localWindsurfRulesFileInstructions ? `\n${localWindsurfRulesFileInstructions}` : ""}${localAgentsRulesFileInstructions ? `\n${localAgentsRulesFileInstructions}` : ""
+${
+	userInstructions ||
+	diracRules ||
+	preferredLanguageInstructions ||
+	globalDiracRulesFileInstructions ||
+	localDiracRulesFileInstructions ||
+	localCursorRulesFileInstructions ||
+	localCursorRulesDirInstructions ||
+	localWindsurfRulesFileInstructions ||
+	localAgentsRulesFileInstructions
+		? `\n\n# USER'S CUSTOM INSTRUCTIONS\n\nThe following additional instructions are provided by the user.\n${
+				userInstructions ? `\n${userInstructions}` : ""
+			}${diracRules ? `\n${diracRules}` : ""}${preferredLanguageInstructions ? `\n${preferredLanguageInstructions}` : ""}${
+				diracIgnoreInstructions ? `\n${diracIgnoreInstructions}` : ""
+			}${globalDiracRulesFileInstructions ? `\n${globalDiracRulesFileInstructions}` : ""}${
+				localDiracRulesFileInstructions ? `\n${localDiracRulesFileInstructions}` : ""
+			}${localCursorRulesFileInstructions ? `\n${localCursorRulesFileInstructions}` : ""}${
+				localCursorRulesDirInstructions ? `\n${localCursorRulesDirInstructions}` : ""
+			}${localWindsurfRulesFileInstructions ? `\n${localWindsurfRulesFileInstructions}` : ""}${
+				localAgentsRulesFileInstructions ? `\n${localAgentsRulesFileInstructions}` : ""
 			}`
-			: ""
-		}
+		: ""
+}
 ${profileInstructions ? `\n\n${profileInstructions}` : ""}
 `
 }

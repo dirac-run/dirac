@@ -264,6 +264,8 @@ export interface TaskletInspection extends TaskletRecord {
 	backgroundCommandRunning: boolean
 	outcomePersisted: boolean
 	settlementError?: import("../../TaskRunOutcome").SerializedTaskError
+	/** Informational projection failure; does not change child outcome or resumption authority. */
+	presentationError?: import("../../TaskRunOutcome").SerializedTaskError
 }
 
 export interface TaskletTranscript {

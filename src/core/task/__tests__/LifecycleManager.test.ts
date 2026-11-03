@@ -287,6 +287,26 @@ describe("LifecycleManager", () => {
 			])
 		})
 
+		for (const status of ["running", "waiting", "completed", "failed", "interrupted"]) {
+			it(`ignores trailing ${status} tasklet presentation when restoring root completion`, async () => {
+				setupDiskMocks([
+					{ id: "completion", ts: 1, content: { type: DiracMessageType.CARD, card: { kind: "task_completion", status: CardStatus.SUCCESS } } },
+					{
+						id: "tasklet:child", ts: 2, content: {
+							type: DiracMessageType.CARD, card: {
+								id: "tasklet:child", header: "Child", status: CardStatus.RUNNING, renderType: "text",
+								rawInput: { isTasklet: true, taskletId: "child" }, rawOutput: { tasklet: { taskletId: "child", status } },
+							}
+						}
+					},
+				])
+				unblockWaitFor()
+				await manager.resumeTaskFromHistory()
+				deps.taskState.status.should.equal(TaskStatus.COMPLETED)
+				deps.messageStateHandler.getDiracMessages().length.should.equal(2)
+			})
+		}
+
 		it("preserves reported tokens from an unknown-priced request during restoration", async () => {
 			setupDiskMocks([
 				{

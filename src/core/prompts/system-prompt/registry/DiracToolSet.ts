@@ -15,7 +15,8 @@ const UTILITY_MODEL_PARAMETER = {
 	name: "use_utility_model",
 	required: false,
 	type: "boolean" as const,
-	instruction: "Run this subagent using the configured Utility model. 'Utility model' is a pre-configured model that is cost effective and fast, but unsuitable for complex tasks. Default: false.",
+	instruction:
+		"Run this subagent using the configured Utility model. 'Utility model' is a pre-configured model that is cost effective and fast, but unsuitable for complex tasks. Default: false.",
 }
 
 export class DiracToolSet {
@@ -30,23 +31,32 @@ export class DiracToolSet {
 		return agentConfigs.map(({ toolName, config }) => ({
 			id: DiracDefaultTool.USE_SUBAGENTS,
 			name: toolName,
-			description: `Use the "${config.name}" subagent: ${config.description}`,
+			description: `Start a tasklet asynchronously using the "${config.name}" subagent: ${config.description}. Returns a stable tasklet ID on startup acceptance or a startup failure, not the assignment's final result. Startup acceptance is not assignment success. Later results and requests arrive through parent communication and tasklets inspect. Continue useful work or use tasklets sleep to wait; do not rely on polling alone.`,
 			contextRequirements: (ctx) => ctx.subagentsEnabled === true,
 			parameters: [
 				{
 					name: "task_title",
+					type: "string",
 					required: true,
 					instruction: `Task header for user observability. No more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words or ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters.`,
 				},
 				{
 					name: "prompt",
+					type: "string",
 					required: true,
 					instruction: "Helpful instruction for the task that the subagent will perform.",
 				},
 				{
 					name: "timeout",
+					type: "integer",
 					required: false,
-					instruction: `Optional timeout in seconds for the subagent. Default: ${DEFAULT_SUBAGENT_TIMEOUT_SECONDS}.`,
+					instruction: `Per-execution timeout in seconds, applied on start and each explicit resumption. Default: ${DEFAULT_SUBAGENT_TIMEOUT_SECONDS}. The deadline interrupts execution and retains the conversation and tasklet ID; continuing requires explicit tasklets resume. No 90-second wrap-up grace or automatic success.`,
+				},
+				{
+					name: "include_history",
+					type: "boolean",
+					required: false,
+					instruction: "Include the main task conversation history.",
 				},
 				...(context.utilityModelConfigured ? [UTILITY_MODEL_PARAMETER] : []),
 			],

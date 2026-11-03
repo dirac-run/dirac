@@ -8,6 +8,7 @@ import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRe
 import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
 import { createTaskletId } from "@shared/taskletId"
 import { taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
+import { taskletActivityPreview, type TaskletPresentationData } from "@shared/taskletPresentation"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
@@ -1071,6 +1072,10 @@ export class Task {
 			this.taskletHost = new TaskletHost({
 				taskId: this.taskId, executionProfile: this.executionProfile,
 				recordTaskletUsage: (id, usage) => this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage)),
+				projectTasklet: async (data) => {
+					await this.messageStateHandler.upsertTaskletPresentation(data)
+					void this.postPresentationToWebview().catch((error) => Logger.error("Tasklet presentation publication failed:", error))
+				},
 				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
 				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
 				escalateInteraction: (child, request, signal) => this.taskMessenger.escalateTaskletInteraction(child, request, signal),
@@ -1341,7 +1346,7 @@ export class Task {
 			await this.taskletHost?.reconstruct()
 			await this.toolExecutor.refreshToolsForTask()
 			return this.lifecycleManager.resumeTaskFromHistory(async () => {
-				await this.taskletHost?.reconcileUsage()
+				await this.taskletHost?.reconcileRootProjection()
 				onRestored?.()
 			}, options)
 		})
@@ -1683,6 +1688,7 @@ export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> 
 	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
 	hasPendingUserInput: () => boolean
 	recordTaskletUsage?: (id: string, usage: TaskletUsageSnapshot) => Promise<void>
+	projectTasklet?: (data: TaskletPresentationData) => Promise<void>
 }
 
 
@@ -1699,7 +1705,9 @@ interface OwnedTasklet {
 	events: TaskletEvent[]
 	eventWrites: Promise<void>
 	recordWrites: Promise<void>
+	presentationWrites?: Promise<void>
 	usageProjectionError?: Error
+	presentationError?: SerializedTaskError
 	interactions: Map<string, PendingTaskletInteraction>
 	interactionsClosed: boolean
 	record: TaskletRecord
@@ -1831,13 +1839,47 @@ export class TaskletHost {
 	}
 
 	/** Reproject only after the root's presentation is restored; no child is started. */
-	async reconcileUsage(): Promise<void> {
+	async reconcileRootProjection(): Promise<void> {
 		if (this.closing) throw new Error("Tasklet host is shutting down")
 		this.usageProjectionReady = true
 		for (const child of this.children.values()) {
 			if (child.record.usage) await this.persistRecord(child)
 			if (child.usageProjectionError) throw child.usageProjectionError
+			await this.projectChild(child)
 		}
+	}
+
+	/** Serialize display updates without creating communications or changing lifecycle ownership. */
+	private projectChild(child: OwnedTasklet): Promise<void> {
+		if (!this.owner.projectTasklet || !this.usageProjectionReady) return Promise.resolve()
+		const project = async () => {
+			const { record } = child
+			const outcome = record.outcome
+			const presentation = child.task?.messageStateHandler.getDiracMessages()
+				?? child.failedTranscript?.presentation
+				?? (await getSavedPresentationHistory(this.address(record.id))).messages
+			await this.owner.projectTasklet!({
+				taskletId: record.id, title: record.title, prompt: record.prompt, createdAt: record.createdAt,
+				status: outcome
+					? outcome.kind === "cancelled" ? "interrupted" : outcome.kind
+					: child.events.some((event) => event.communication.type === "interaction" && event.communication.request.status === "pending")
+						? "waiting" : "running",
+				result: outcome?.kind === "completed" ? outcome.response
+					: outcome?.kind === "failed" ? outcome.error.message : outcome?.reason,
+				communications: child.events.slice(-40).map((event) => JSON.stringify(event.communication)),
+				activity: taskletActivityPreview(presentation),
+				usage: record.usage ? taskletUsageTotal(record.usage) : undefined,
+			})
+		}
+		child.presentationWrites = (child.presentationWrites ?? Promise.resolve()).then(project).then(
+			() => { child.presentationError = undefined },
+			(error) => {
+				// Display failure is visible to supervision, not a failed child outcome or lost acceptance.
+				child.presentationError = serializeTaskError(error)
+				Logger.error(`[Tasklet ${child.record.id}] Presentation failed:`, error)
+			},
+		)
+		return child.presentationWrites
 	}
 
 	private persistRecord(child: OwnedTasklet): Promise<void> {
@@ -1973,8 +2015,8 @@ export class TaskletHost {
 					usage: record.usage,
 					recordUsage: (usage) => this.recordUsage(child, usage),
 					// Routine activity remains in the child's transcript, not the communication queue.
-					postStateToOwner: async () => { },
-					postPresentationToOwner: async () => { },
+					postStateToOwner: () => this.projectChild(child),
+					postPresentationToOwner: () => this.projectChild(child),
 					updateBackgroundCommandState: (running) => {
 						child.backgroundCommandRunning = running
 					},
@@ -1992,6 +2034,7 @@ export class TaskletHost {
 		child.settlement = this.observeRun(child, child.task, resumeMessage)
 		// Retain the rejecting promise for controls; observe it now to avoid an unhandled rejection.
 		void child.settlement.catch((error) => Logger.error(`[Tasklet ${record.id}] Settlement failed:`, error))
+		void this.projectChild(child)
 		return structuredClone(record)
 	}
 
@@ -2011,6 +2054,7 @@ export class TaskletHost {
 		// A subsequent full snapshot may retry a failed write; the original caller still sees its failure.
 		child.eventWrites = child.eventWrites.then(write, write)
 		void child.eventWrites.catch((error) => Logger.error(`[Tasklet ${child.record.id}] Communication persistence failed:`, error))
+		void child.eventWrites.then(() => this.projectChild(child), () => { })
 		return child.eventWrites
 	}
 
@@ -2071,7 +2115,7 @@ export class TaskletHost {
 		])
 		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
 		await Promise.allSettled([...this.resolutions])
-		const eventResults = await Promise.allSettled([...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites]))
+		const eventResults = await Promise.allSettled([...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites, child.presentationWrites]))
 		const failures = [
 			...reconstruction.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
@@ -2096,6 +2140,7 @@ export class TaskletHost {
 			backgroundCommandRunning: child.backgroundCommandRunning,
 			outcomePersisted: child.outcomePersisted,
 			settlementError: child.settlementError,
+			presentationError: child.presentationError,
 		})
 	}
 
@@ -2277,6 +2322,7 @@ export class TaskletHost {
 			if (child.usageProjectionError) throw child.usageProjectionError
 			await child.eventWrites
 			child.outcomePersisted = true
+			await this.projectChild(child)
 		} catch (error) {
 			child.settlementError = serializeTaskError(error)
 			throw error

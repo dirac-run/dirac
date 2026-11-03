@@ -42,6 +42,8 @@ export class PromptRegistry {
 			toolSnapshot.nativeTools.length,
 			// Template text fields (template.ts)
 			context.cwd,
+			context.executionProfile,
+			context.subagentsEnabled ? 1 : 0,
 			context.yoloModeToggled ? 1 : 0,
 			context.utilityModelConfigured ? 1 : 0,
 			context.activeShellIsPosix ? 1 : 0,

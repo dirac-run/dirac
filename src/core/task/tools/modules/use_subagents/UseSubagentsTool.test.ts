@@ -1,569 +1,303 @@
 import { strict as assert } from "node:assert"
-import { CardStatus, SubagentExecutionStatus } from "@shared/ExtensionMessage"
-import { SubagentTrajectoryEventType } from "@shared/subagents"
-import { describe, it } from "mocha"
+import type { TaskletRecord } from "@core/storage/taskStorage"
+import { CardStatus } from "@shared/ExtensionMessage"
+import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
-import { expectLoggerErrors } from "@/test/loggerGuard"
-import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
+import { AgentConfigLoader } from "../../subagent/AgentConfigLoader"
+import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
 import { UseSubagentsTool, use_subagents_spec } from "./UseSubagentsTool"
 
-const EMPTY_STATS = {
-	toolCalls: 0,
-	inputTokens: 0,
-	outputTokens: 0,
-	cacheWriteTokens: 0,
-	cacheReadTokens: 0,
-	totalCost: 0,
-	contextTokens: 0,
-	contextWindow: 0,
-	contextUsagePercentage: 0,
+function record(id: string, title = "Inspect code", outcome?: TaskletRecord["outcome"]): TaskletRecord {
+	return {
+		id,
+		title,
+		prompt: "Inspect",
+		rootTaskId: "root",
+		conversationUlid: "conversation",
+		createdAt: 1,
+		...(outcome ? { outcome } : {}),
+	}
 }
 
-interface RecordedCard {
-	id: string
-	params: any
-	updates: any[]
-	finalStatuses: unknown[]
+function deferred<T>() {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>((done) => {
+		resolve = done
+	})
+	return { promise, resolve }
 }
 
-function createRecordedCardEnvironment(
-	runSubagent: (_prompt: string, options: any) => Promise<any>,
-	shouldFailUpdate: (params: any) => boolean = () => false,
-	beforeCardUpdate: (params: any, patch: any) => Promise<void> = async () => { },
-	beforeCreateCard: (params: any) => Promise<void> = async () => { },
-): {
-	env: IToolEnvironment
-	cards: RecordedCard[]
-	warnings: unknown[][]
-	telemetryMetadata: Record<string, unknown>
-} {
-	const cards: RecordedCard[] = []
+function fixture(start: TaskletControls["start"] = async (input) => record("tasklet:accepted", input.title)) {
+	const updates: any[] = []
+	const finalized: CardStatus[] = []
 	const warnings: unknown[][] = []
-	const telemetryMetadata: Record<string, unknown> = {}
+	const card = {
+		id: "spawn-card",
+		update: async (patch: any) => {
+			updates.push(patch)
+		},
+		finalize: async (status: CardStatus) => {
+			finalized.push(status)
+		},
+	}
+	const createCard = sinon.stub().resolves(card)
+	const legacyCall = () => {
+		throw new Error("Legacy batch execution/accounting must not be used")
+	}
+	let mistakes = 0
 	const env = {
 		toolName: "use_subagents",
-		config: {
-			isSubagentExecution: false,
-			ulid: "parent-task",
-			taskState: { abortSignal: new AbortController().signal },
-		},
 		orchestration: {
-			getHistory: () => [],
-			getTaskState: () => 0,
-			setTaskState: () => { },
-			runSubagent,
-		},
-		ui: {
-			createCard: async (params: any) => {
-				await beforeCreateCard(params)
-				const card = {
-					id: `card-${cards.length + 1}`,
-					params,
-					updates: [] as any[],
-					finalStatuses: [] as unknown[],
-				}
-				cards.push(card)
-				return {
-					id: card.id,
-					update: async (patch: any) => {
-						if (shouldFailUpdate(params)) throw new Error("presentation failed")
-						await beforeCardUpdate(params, patch)
-						card.updates.push(patch)
-					},
-					finalize: async (status: unknown) => {
-						card.finalStatuses.push(status)
-					},
-				}
+			tasklets: { start },
+			runSubagent: legacyCall,
+			getHistory: legacyCall,
+			getTaskState: () => mistakes,
+			setTaskState: (_key: string, value: number) => {
+				mistakes = value
 			},
 		},
-		telemetry: {
-			captureCustomMetadata: (metadata: Record<string, unknown>) => Object.assign(telemetryMetadata, metadata),
-		},
-		logging: {
-			warn: (...args: unknown[]) => warnings.push(args),
-			debug: () => { },
-		},
+		ui: { createCard },
+		telemetry: { captureCustomMetadata: legacyCall },
+		logging: { warn: (...args: unknown[]) => warnings.push(args) },
 	} as unknown as IToolEnvironment
-	return { env, cards, warnings, telemetryMetadata }
+	return { env, card, createCard, updates, finalized, warnings, mistakes: () => mistakes }
 }
 
-describe("UseSubagentsTool", () => {
-	for (const status of [SubagentExecutionStatus.COMPLETED, SubagentExecutionStatus.FAILED, SubagentExecutionStatus.CANCELLED]) {
-		it(`returns full ${status} details for every agent without truncating at 1,200 characters`, async () => {
-			const reports = [1199, 1200, 1201, 12000].map((length) => {
-				const tail = `\nEND-${length}`
-				return "x".repeat(length - tail.length) + tail
-			})
-			const { env } = createRecordedCardEnvironment(async (prompt) => ({
-				status,
-				...(status === SubagentExecutionStatus.COMPLETED
-					? { result: reports[Number(prompt)] }
-					: { error: reports[Number(prompt)] }),
-				stats: EMPTY_STATS,
-			}))
+async function spawn(env: IToolEnvironment, subagents: unknown[]) {
+	return JSON.parse(await new UseSubagentsTool().processCall({ subagents }, env)).subagents
+}
 
-			const result = await new UseSubagentsTool().processCall(
-				{ subagents: reports.map((_, index) => ({ task_title: `Report ${index}`, prompt: String(index) })) },
+const assignment = { task_title: "Inspect code", prompt: "Inspect" }
+
+describe("UseSubagentsTool asynchronous tasklet startup", () => {
+	let resolveName: sinon.SinonStub
+	beforeEach(() => {
+		resolveName = sinon.stub().returns(undefined)
+		sinon
+			.stub(AgentConfigLoader, "getInstance")
+			.returns({ resolveSubagentNameForTool: resolveName } as unknown as AgentConfigLoader)
+	})
+	afterEach(() => sinon.restore())
+
+	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {
+		assert.match(use_subagents_spec.description, /asynchronously/)
+		assert.match(use_subagents_spec.description, /not completed results/)
+		assert.match(use_subagents_spec.description, /later results and requests/)
+		assert.match(use_subagents_spec.description, /tasklets to inspect/)
+		assert.match(use_subagents_spec.description, /sleep/)
+		assert.match(String(use_subagents_spec.parameters![0].instruction), /acceptance does not mean assignment completion/)
+	})
+
+	it("uses the environment capability guard even with no legacy config", async () => {
+		const { env, createCard } = fixture()
+		delete (env.orchestration as { tasklets?: TaskletControls }).tasklets
+		await assert.rejects(new UseSubagentsTool().processCall({ subagents: [assignment] }, env), /owning ordinary root/)
+		assert.equal(createCard.callCount, 0)
+		assert.equal(resolveName.callCount, 0)
+	})
+
+	it("returns stable acceptance and finishes only its own card while child execution remains pending", async () => {
+		const execution = deferred<void>()
+		let childCompleted = false
+		void execution.promise.then(() => {
+			childCompleted = true
+		})
+		const start = sinon.stub().resolves(record("tasklet:live"))
+		const { env, createCard, finalized, updates } = fixture(start)
+		assert.deepEqual(await spawn(env, [assignment]), [
+			{ index: 0, id: "tasklet:live", title: "Inspect code", accepted: true },
+		])
+		assert.equal(childCompleted, false)
+		assert.equal(createCard.callCount, 1, "The spawn tool must not create child cards")
+		assert.equal(createCard.firstCall.args[0].collapsed, true)
+		assert.deepEqual(finalized, [CardStatus.SUCCESS])
+		assert.match(updates[0].body, /Acceptance is not assignment completion/)
+		assert.deepEqual(start.firstCall.args[0], {
+			title: "Inspect code",
+			prompt: "Inspect",
+			agentName: undefined,
+			timeoutSeconds: 600,
+			includeHistory: false,
+			useUtilityModel: false,
+		})
+		assert.equal(resolveName.firstCall.args[0], "use_subagents")
+		execution.resolve()
+	})
+
+	it("starts assignments concurrently and keeps request order despite reversed acceptance", async () => {
+		const first = deferred<TaskletRecord>()
+		const secondStarted = deferred<void>()
+		const start = sinon.stub()
+		start.onFirstCall().returns(first.promise)
+		start.onSecondCall().callsFake(async () => {
+			secondStarted.resolve()
+			return record("tasklet:second", "Second")
+		})
+		const { env } = fixture(start)
+		const pending = spawn(env, [assignment, { task_title: "Second", prompt: "Second prompt" }])
+		await secondStarted.promise
+		assert.equal(start.callCount, 2)
+		first.resolve(record("tasklet:first"))
+		assert.deepEqual(
+			(await pending).map((result: any) => [result.index, result.id]),
+			[
+				[0, "tasklet:first"],
+				[1, "tasklet:second"],
+			],
+		)
+	})
+
+	it("resolves a named route and forwards profile, Utility, history and timeout choices", async () => {
+		resolveName.returns("Code reviewer")
+		const start = sinon.stub().resolves(record("tasklet:named", "Review code"))
+		const { env } = fixture(start)
+		Object.defineProperty(env, "toolName", { value: "code_reviewer" })
+		const results = JSON.parse(
+			await new UseSubagentsTool().processCall(
+				{
+					task_title: "  Review   code ",
+					prompt: " Review this diff ",
+					timeout: "42",
+					include_history: "true",
+					use_utility_model: true,
+				},
 				env,
-			)
+			),
+		).subagents
+		assert.equal(resolveName.firstCall.args[0], "code_reviewer")
+		assert.deepEqual(start.firstCall.args[0], {
+			title: "Review code",
+			prompt: "Review this diff",
+			agentName: "Code reviewer",
+			timeoutSeconds: 42,
+			includeHistory: true,
+			useUtilityModel: true,
+		})
+		assert.deepEqual(results, [{ index: 0, id: "tasklet:named", title: "Review code", accepted: true }])
+	})
 
-			assert.equal(typeof result, "string")
-			for (const report of reports) {
-				assert.ok(result.includes(report), `Missing full ${report.length}-character ${status} detail`)
-			}
-			assert.ok(!result.includes("..."), "Tool result must not replace report content with an ellipsis")
+	it("maps explicit generic options and derives a bounded title when omitted", async () => {
+		const start = sinon.stub().callsFake(async (input) => record("tasklet:generic", input.title))
+		const { env } = fixture(start)
+		const results = await spawn(env, [
+			{ prompt: "x".repeat(100), timeout: 12, include_history: true, use_utility_model: "true" },
+		])
+		assert.equal(results[0].title.length, 80)
+		assert.ok(results[0].title.endsWith("…"))
+		assert.deepEqual(start.firstCall.args[0], {
+			title: results[0].title,
+			prompt: "x".repeat(100),
+			agentName: undefined,
+			timeoutSeconds: 12,
+			includeHistory: true,
+			useUtilityModel: true,
+		})
+	})
+
+	for (const input of [undefined, {}, { subagents: [] }, { subagents: "invalid" }]) {
+		it(`reports a missing batch without creating a card: ${JSON.stringify(input)}`, async () => {
+			const { env, createCard, mistakes } = fixture()
+			assert.match(await new UseSubagentsTool().processCall(input, env), /Missing required parameter: subagents/)
+			assert.equal(mistakes(), 1)
+			assert.equal(createCard.callCount, 0)
 		})
 	}
 
-	for (const status of [SubagentExecutionStatus.COMPLETED, SubagentExecutionStatus.FAILED, SubagentExecutionStatus.CANCELLED]) {
-		it(`persists final usage inside the ${status} execution card`, async () => {
-			const usage = { inputTokens: 1234, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 25, totalCost: 0.125 }
-			const { env, cards } = createRecordedCardEnvironment(async () => ({
-				status, result: "done", stats: { ...EMPTY_STATS, ...usage },
-			}))
-			await new UseSubagentsTool().processCall({ subagents: [{ task_title: "Inspect usage", prompt: "Inspect" }] }, env)
-			const agentCard = cards.find((card) => card.params.rawInput?.isSubagent)
-			assert.ok(agentCard)
-			assert.deepEqual(agentCard.updates.at(-1).rawOutput.usage, usage)
-			assert.ok(agentCard.updates.at(-1).body.endsWith(
-				"Input: 1,234 · Output: 50 · Cache read: 1,000 · Cache write: 25 · Cost: $0.1250",
-			))
+	it("preserves successful handles across malformed assignments, validation errors and host startup rejection", async () => {
+		const start = sinon.stub().callsFake(async (input) => {
+			if (input.prompt === "Bad model") throw new Error("Utility model is unavailable")
+			return record(`tasklet:${input.prompt}`, input.title)
+		})
+		const { env, finalized, updates } = fixture(start)
+		const results = await spawn(env, [
+			null,
+			assignment,
+			{ prompt: "Bad model" },
+			[],
+			{ prompt: " " },
+			{ prompt: "Bad title", task_title: "one two three four five six" },
+			{ prompt: "Bad timeout", timeout: 0 },
+			{ task_title: "Second", prompt: "Second" },
+		])
+		assert.equal(results.length, 8)
+		assert.deepEqual(
+			results.filter((result: any) => result.accepted).map((result: any) => result.id),
+			["tasklet:Inspect", "tasklet:Second"],
+		)
+		assert.match(results[0].error, /assignment must be an object/)
+		assert.match(results[2].error, /Utility model is unavailable/)
+		assert.equal(results[2].title, "Bad model")
+		assert.match(results[3].error, /assignment must be an object/)
+		assert.match(results[4].error, /missing required parameter: prompt/)
+		assert.match(results[5].error, /task_title/)
+		assert.match(results[6].error, /timeout/)
+		assert.equal(start.callCount, 3)
+		assert.deepEqual(finalized, [CardStatus.ERROR])
+		assert.match(updates[0].body, /2 accepted; 6 startup errors/)
+	})
+
+	for (const outcome of [
+		{ kind: "failed", error: { name: "Error", message: "Construction failed" }, failedAt: 2 },
+		{ kind: "interrupted", reason: "Root stopped", interruptedAt: 2 },
+		{ kind: "cancelled", cancelledAt: 2 },
+		{ kind: "completed", response: "Finished very quickly", completedAt: 2 },
+	] as TaskletRecord["outcome"][]) {
+		it(`preserves a known ID and ${outcome!.kind} outcome returned during startup`, async () => {
+			const { env } = fixture(async () => record("tasklet:known", "Host title", outcome))
+			const [result] = await spawn(env, [assignment])
+			assert.equal(result.id, "tasklet:known")
+			assert.equal(result.title, "Host title")
+			assert.deepEqual(result.outcome, outcome)
+			assert.equal(result.accepted, outcome!.kind === "completed")
+			if (outcome!.kind !== "completed") assert.equal(typeof result.error, "string")
 		})
 	}
 
-	it("reports cancellations separately and keeps named trajectory cards collapsed", async () => {
-		const { env, cards } = createRecordedCardEnvironment(async (_prompt, options) => {
-			await options.onUpdate({ status: SubagentExecutionStatus.RUNNING, stats: EMPTY_STATS })
-			await options.onUpdate({ textChunk: "first chunk" })
-			await options.onUpdate({ textChunk: "second chunk" })
-			await options.onUpdate({
-				status: SubagentExecutionStatus.CANCELLED,
-				error: "cancelled by user",
-				stats: EMPTY_STATS,
-			})
-			return { status: SubagentExecutionStatus.CANCELLED, error: "cancelled by user", stats: EMPTY_STATS }
+	it("returns named malformed input as a startup failure rather than crashing the batch path", async () => {
+		resolveName.returns("Reviewer")
+		const start = sinon.stub()
+		const { env, finalized } = fixture(start)
+		const result = JSON.parse(await new UseSubagentsTool().processCall(null, env)).subagents[0]
+		assert.equal(result.accepted, false)
+		assert.match(result.error, /assignment must be an object/)
+		assert.equal(start.callCount, 0)
+		assert.deepEqual(finalized, [CardStatus.ERROR])
+	})
+
+	for (const phase of ["create", "update", "finalize"] as const) {
+		it(`does not hide acceptance when card ${phase} rejects`, async () => {
+			const { env, card, createCard, finalized, warnings } = fixture()
+			if (phase === "create") createCard.rejects(new Error("Card failed"))
+			else sinon.stub(card, phase).rejects(new Error("Card failed"))
+			const [result] = await spawn(env, [assignment])
+			assert.equal(result.accepted, true)
+			assert.equal(warnings.length, 1)
+			if (phase === "update") assert.deepEqual(finalized, [CardStatus.SUCCESS])
 		})
+	}
 
-		const result = await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Investigating subagent behavior", prompt: "Investigate" }] },
-			env,
-		)
-		const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-
-		assert.match(result as string, /Succeeded: 0/)
-		assert.match(result as string, /Failed: 0/)
-		assert.match(result as string, /Cancelled: 1/)
-		assert.ok(agentCard)
-		assert.equal(agentCard.params.collapsed, true)
-		assert.equal(agentCard.params.header, `${agentCard.params.rawInput.agentName}: Investigating subagent behavior`)
-		assert.equal(agentCard.params.rawInput.taskTitle, "Investigating subagent behavior")
-		assert.equal(agentCard.updates.length, 2)
-		assert.deepEqual(agentCard.finalStatuses, [CardStatus.CANCELLED])
-	})
-
-	it("finalizes from the returned result when no terminal progress update is emitted", async () => {
-		expectLoggerErrors()
-		const { env, cards } = createRecordedCardEnvironment(async () => ({
-			status: SubagentExecutionStatus.COMPLETED,
-			result: "done",
-			stats: EMPTY_STATS,
-		}))
-
-		await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Investigating subagent behavior", prompt: "Investigate" }] },
-			env,
-		)
-		const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-		const finalUpdate = agentCard?.updates.at(-1)
-
-		assert.ok(agentCard)
-		assert.equal(finalUpdate.rawOutput.status, SubagentExecutionStatus.COMPLETED)
-		assert.match(finalUpdate.body, /done/)
-		assert.deepEqual(agentCard.finalStatuses, [CardStatus.SUCCESS])
-	})
-
-	it("keeps the final card update after delayed trajectory updates", async () => {
-		const { env, cards } = createRecordedCardEnvironment(
-			async (_prompt, options) => {
-				options.onUpdate({
-					trajectoryEvent: { type: SubagentTrajectoryEventType.TOOL, text: "first_tool" },
-				})
-				options.onUpdate({
-					trajectoryEvent: { type: SubagentTrajectoryEventType.TOOL, text: "second_tool" },
-				})
-				return { status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }
-			},
-			() => false,
-			async (_params, patch) => {
-				if (patch.rawOutput?.status === SubagentExecutionStatus.COMPLETED) return
-				if (patch.body?.includes("second_tool")) {
-					await new Promise((resolve) => setTimeout(resolve, 10))
-					return
-				}
-				if (patch.body?.includes("first_tool")) await new Promise((resolve) => setTimeout(resolve, 20))
-			},
-		)
-
-		await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Tracking tool progress", prompt: "Investigate" }] },
-			env,
-		)
-		const agentCard = cards.find((card) => card.params.rawInput?.taskTitle === "Tracking tool progress")
-		const finalUpdate = agentCard?.updates.at(-1)
-
-		assert.ok(agentCard)
-		assert.equal(agentCard.params.header, `${agentCard.params.rawInput.agentName}: Tracking tool progress`)
-		assert.equal(agentCard.updates.length, 2)
-		assert.equal(finalUpdate.status, CardStatus.SUCCESS)
-		assert.equal(finalUpdate.rawOutput.status, SubagentExecutionStatus.COMPLETED)
-		assert.match(finalUpdate.body, /second_tool/)
-		assert.match(finalUpdate.body, /done/)
-	})
-
-	it("marks active subagent cards as wrapping up before their final result", async () => {
-		const { env, cards } = createRecordedCardEnvironment(async (_prompt, options) => {
-			await options.onUpdate({ status: SubagentExecutionStatus.RUNNING, stats: EMPTY_STATS })
-			await options.onUpdate({
-				isWrappingUp: true,
-				trajectoryEvent: { type: SubagentTrajectoryEventType.MESSAGE, text: "Time limit reached. Wrapping up task results." },
-				stats: EMPTY_STATS,
-			})
-			return { status: SubagentExecutionStatus.COMPLETED, result: "partial report", stats: EMPTY_STATS }
-		})
-
-		await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Investigating subagent behavior", prompt: "Investigate" }] },
-			env,
-		)
-
-		const aggregateCard = cards.find((card) => card.params.header === "Run Subagents")
-		const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-		assert.ok(aggregateCard)
-		assert.ok(agentCard)
-		assert.ok(aggregateCard.updates.some((update) => update.header === "Wrapping up 1 subagent"))
-		assert.ok(agentCard.updates.some((update) => update.header === `${agentCard.params.rawInput.agentName}: wrapping up`))
-		assert.equal(agentCard.updates.at(-1)?.header, `${agentCard.params.rawInput.agentName}: Investigating subagent behavior`)
-	})
-
-	it("returns when a presentation update never settles", async () => {
-		const clock = sinon.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-		try {
-			const { env, cards, warnings } = createRecordedCardEnvironment(
-				async (_prompt, options) => {
-					options.onUpdate({
-						trajectoryEvent: { type: SubagentTrajectoryEventType.TOOL, text: "blocked_tool" },
-					})
-					return { status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }
-				},
-				() => false,
-				async (params, patch) => {
-					if (params.header === "Run Subagents") return
-					if (patch.rawOutput?.status === SubagentExecutionStatus.RUNNING) {
-						await new Promise<void>(() => { })
-					}
-				},
-			)
-
-			const resultPromise = new UseSubagentsTool().processCall(
-				{ subagents: [{ task_title: "Tracking blocked presentation", prompt: "Investigate" }] },
-				env,
-			)
-			await clock.tickAsync(0)
-			await clock.tickAsync(1_000)
-			const result = await resultPromise
-
-			assert.match(result as string, /Succeeded: 1/)
+	for (const phase of ["create", "update", "finalize"] as const) {
+		it(`bounds stalled card ${phase} independently of child execution`, async () => {
+			const clock = sinon.useFakeTimers()
+			const { env, card, createCard, finalized, warnings } = fixture()
+			const stalled = deferred<any>()
+			if (phase === "create") createCard.returns(stalled.promise)
+			else sinon.stub(card, phase).returns(stalled.promise)
+			const pending = spawn(env, [assignment])
+			await clock.tickAsync(PRESENTATION_OPERATION_TIMEOUT_MS + 1)
+			const [result] = await pending
+			assert.equal(result.id, "tasklet:accepted")
+			assert.equal(result.accepted, true)
 			assert.equal(warnings.length, 1)
-			assert.match(String(warnings[0][1]), /did not drain before the timeout/)
-			const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-			assert.ok(agentCard)
-			assert.deepEqual(agentCard.finalStatuses, [CardStatus.SUCCESS])
-		} finally {
-			clock.restore()
-		}
-	})
-	it("does not replay aggregate terminal state after a timed-out update settles late", async () => {
-		const clock = sinon.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-		try {
-			const { env, cards } = createRecordedCardEnvironment(
-				async () => ({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }),
-				() => false,
-				async (params, patch) => {
-					if (params.header === "Run Subagents" && patch.status === CardStatus.RUNNING) {
-						await new Promise((resolve) => setTimeout(resolve, 1_500))
-					}
-				},
-			)
-
-			const resultPromise = new UseSubagentsTool().processCall(
-				{ subagents: [{ task_title: "Tracking delayed aggregate", prompt: "Investigate" }] },
-				env,
-			)
-			await clock.tickAsync(1_000)
-			const result = await resultPromise
-			const aggregateCard = cards.find((card) => card.params.header === "Run Subagents")
-
-			assert.match(result as string, /Succeeded: 1/)
-			assert.ok(aggregateCard)
-			assert.deepEqual(aggregateCard.finalStatuses, [CardStatus.SUCCESS])
-
-			await clock.tickAsync(500)
-			await Promise.resolve()
-			assert.deepEqual(aggregateCard.finalStatuses, [CardStatus.SUCCESS])
-			assert.equal(
-				aggregateCard.updates.filter(
-					(update) => update.header === "Ran 1 subagents" && update.status === CardStatus.SUCCESS,
-				).length,
-				1,
-			)
-		} finally {
-			clock.restore()
-		}
-	})
-	it("returns when aggregate card creation never settles", async () => {
-		const clock = sinon.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-		try {
-			const { env, warnings } = createRecordedCardEnvironment(
-				async () => ({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }),
-				() => false,
-				async () => { },
-				async (params) => {
-					if (params.header === "Run Subagents") await new Promise<void>(() => { })
-				},
-			)
-
-			const resultPromise = new UseSubagentsTool().processCall(
-				{ subagents: [{ task_title: "Testing card timeout", prompt: "Investigate" }] },
-				env,
-			)
-			await clock.tickAsync(1_000)
-			const result = await resultPromise
-
-			assert.match(result as string, /Succeeded: 1/)
-			assert.equal(warnings.length, 1)
-			assert.match(String(warnings[0][1]), /card creation timed out/)
-		} finally {
-			clock.restore()
-		}
-	})
-
-	it("returns when a subagent card creation never settles", async () => {
-		const clock = sinon.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-		try {
-			const { env, warnings } = createRecordedCardEnvironment(
-				async () => ({ status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }),
-				() => false,
-				async () => { },
-				async (params) => {
-					if (params.header !== "Run Subagents") await new Promise<void>(() => { })
-				},
-			)
-
-			const resultPromise = new UseSubagentsTool().processCall(
-				{ subagents: [{ task_title: "Testing card timeout", prompt: "Investigate" }] },
-				env,
-			)
-			await clock.tickAsync(0)
-			await clock.tickAsync(1_000)
-			const result = await resultPromise
-
-			assert.match(result as string, /Succeeded: 1/)
-			assert.equal(warnings.length, 1)
-			assert.match(String(warnings[0][1]), /card creation timed out/)
-		} finally {
-			clock.restore()
-		}
-	})
-
-	it("derives a task title for legacy calls that omit it", async () => {
-		const { env, cards } = createRecordedCardEnvironment(async () => ({
-			status: SubagentExecutionStatus.COMPLETED,
-			result: "done",
-			stats: EMPTY_STATS,
-		}))
-
-		const result = await new UseSubagentsTool().processCall(
-			{ subagents: [{ prompt: "Investigate the current subagent behavior carefully" }] },
-			env,
-		)
-		const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-
-		assert.match(result as string, /Succeeded: 1/)
-		assert.equal(
-			agentCard?.params.header,
-			`${agentCard?.params.rawInput.agentName}: Investigate the current subagent behavior`,
-		)
-		assert.equal(agentCard?.params.rawInput.taskTitle, "Investigate the current subagent behavior")
-	})
-
-	it("returns completed execution results when an agent card update fails", async () => {
-		const { env, warnings, telemetryMetadata } = createRecordedCardEnvironment(
-			async () => ({
-				status: SubagentExecutionStatus.COMPLETED,
-				result: "done",
-				stats: EMPTY_STATS,
-			}),
-			(params) => params.header !== "Run Subagents",
-		)
-
-		const result = await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Investigating subagent behavior", prompt: "Investigate" }] },
-			env,
-		)
-
-		assert.match(result as string, /Succeeded: 1/)
-		assert.equal(warnings.length, 1)
-		assert.match(String(warnings[0][0]), /scope=agent/)
-		assert.match(String(warnings[0][0]), /phase=terminal_update/)
-		assert.match(String(warnings[0][0]), /agentId=/)
-		assert.match(String(warnings[0][0]), /cardId=/)
-		assert.equal(telemetryMetadata.subagentPresentationIssueCount, 1)
-		assert.equal(telemetryMetadata.subagentPresentationTimeoutCount, 0)
-	})
-
-	it("keeps identities associated when card creation and completion orders are reversed", async () => {
-		const { env, cards } = createRecordedCardEnvironment(
-			async (prompt) => {
-				await new Promise((resolve) => setTimeout(resolve, prompt === "first prompt" ? 20 : 5))
-				return { status: SubagentExecutionStatus.COMPLETED, result: `${prompt} result`, stats: EMPTY_STATS }
-			},
-			() => false,
-			async () => { },
-			async (params) => {
-				if (params.rawInput?.prompt === "first prompt") await new Promise((resolve) => setTimeout(resolve, 15))
-			},
-		)
-
-		const result = await new UseSubagentsTool().processCall(
-			{
-				subagents: [
-					{ task_title: "Review first provider", prompt: "first prompt" },
-					{ task_title: "Review second provider", prompt: "second prompt" },
-				],
-			},
-			env,
-		)
-		const agentCards = cards.filter((card) => card.params.rawInput?.isSubagent)
-		const firstCard = agentCards.find((card) => card.params.rawInput.prompt === "first prompt")
-		const secondCard = agentCards.find((card) => card.params.rawInput.prompt === "second prompt")
-
-		assert.equal(agentCards.length, 2)
-		assert.ok(firstCard)
-		assert.ok(secondCard)
-		assert.notEqual(firstCard.params.rawInput.agentId, secondCard.params.rawInput.agentId)
-		assert.notEqual(firstCard.params.rawInput.agentName, secondCard.params.rawInput.agentName)
-		assert.match(firstCard.updates.at(-1).body, /first prompt result/)
-		assert.match(secondCard.updates.at(-1).body, /second prompt result/)
-		assert.match(result as string, new RegExp(`${firstCard.params.rawInput.agentName}: Review first provider · COMPLETED`))
-		assert.match(result as string, new RegExp(`${secondCard.params.rawInput.agentName}: Review second provider · COMPLETED`))
-	})
-
-	it("routes each subagent through the requested model independently", async () => {
-		const routes: boolean[] = []
-		const { env } = createRecordedCardEnvironment(async (_prompt, options) => {
-			routes.push(options.useUtilityModel)
-			return {
-				status: SubagentExecutionStatus.COMPLETED,
-				result: "done",
-				stats: EMPTY_STATS,
+			if (phase === "create") {
+				stalled.resolve(card)
+				await clock.tickAsync(0)
+				assert.deepEqual(finalized, [CardStatus.ABANDONED])
+			} else {
+				stalled.resolve(undefined)
+				await clock.tickAsync(0)
 			}
 		})
-
-		await new UseSubagentsTool().processCall(
-			{
-				subagents: [
-					{ task_title: "Use utility route", prompt: "first", use_utility_model: true },
-					{ task_title: "Use primary route", prompt: "second" },
-				],
-			},
-			env,
-		)
-
-		assert.deepEqual(routes.sort(), [false, true])
-	})
-
-	it("uses a 600-second default timeout without a turn-limit option", async () => {
-		let receivedOptions: any
-		const { env } = createRecordedCardEnvironment(async (_prompt, options) => {
-			receivedOptions = options
-			return {
-				status: SubagentExecutionStatus.COMPLETED,
-				result: "done",
-				stats: EMPTY_STATS,
-			}
-		})
-
-		await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Investigating subagent behavior", prompt: "Investigate" }] },
-			env,
-		)
-
-		assert.equal(receivedOptions.timeout, 600)
-		assert.equal("maxTurns" in receivedOptions, false)
-		const subagentsParameter = use_subagents_spec.parameters?.find((parameter) => parameter.name === "subagents")
-		assert.ok(subagentsParameter?.items)
-		assert.deepEqual(subagentsParameter.items.required, ["task_title", "prompt"])
-		assert.equal(
-			subagentsParameter.items.properties.task_title.description,
-			"Task header for user observability. No more than 5 words or 80 characters.",
-		)
-		assert.equal("max_turns" in subagentsParameter.items.properties, false)
-		assert.equal("use_utility_model" in subagentsParameter.items.properties, false)
-		assert.equal(receivedOptions.useUtilityModel, false)
-	})
-
-	it("rejects task titles longer than five words", async () => {
-		const { env } = createRecordedCardEnvironment(async () => {
-			throw new Error("Subagent should not run")
-		})
-
-		await assert.rejects(
-			() =>
-				new UseSubagentsTool().processCall(
-					{ subagents: [{ task_title: "This title contains more than five words", prompt: "Investigate" }] },
-					env,
-				),
-			/task_title must contain no more than 5 words/,
-		)
-	})
-
-	it("rejects task titles longer than eighty characters", async () => {
-		const { env } = createRecordedCardEnvironment(async () => {
-			throw new Error("Subagent should not run")
-		})
-
-		await assert.rejects(
-			() => new UseSubagentsTool().processCall({ subagents: [{ task_title: "x".repeat(81), prompt: "Investigate" }] }, env),
-			/task_title must contain no more than 80 characters/,
-		)
-	})
-
-	it("forwards task titles and projects liveness artifacts into bounded cards", async () => {
-		let receivedOptions: any
-		const { env, cards } = createRecordedCardEnvironment(async (_prompt, options) => {
-			receivedOptions = options
-			await options.onUpdate({ status: SubagentExecutionStatus.RUNNING, stats: EMPTY_STATS })
-			await options.onUpdate({
-				phase: "awaiting_first_provider_chunk",
-				phaseStartedAt: 1_000,
-				lastActivityAt: 2_000,
-				isStalled: true,
-				transcriptPath: "/tmp/task/subagents/run/transcript.md",
-				diagnosticsPath: "/tmp/task/subagents/run/diagnostics.md",
-			})
-			return { status: SubagentExecutionStatus.COMPLETED, result: "done", stats: EMPTY_STATS }
-		})
-
-		await new UseSubagentsTool().processCall(
-			{ subagents: [{ task_title: "Observe provider liveness", prompt: "Wait for provider output" }] },
-			env,
-		)
-
-		const aggregateCard = cards.find((card) => card.params.header === "Run Subagents")
-		const agentCard = cards.find((card) => card.params.header !== "Run Subagents")
-		assert.equal(receivedOptions.taskTitle, "Observe provider liveness")
-		assert.ok(aggregateCard?.updates.some((update) => /⚠ stalled: awaiting_first_provider_chunk/.test(update.body)))
-		assert.ok(aggregateCard?.updates.some((update) => /transcript\.md/.test(update.body)))
-		assert.ok(agentCard?.updates.some((update) => /\*\*Runtime:\*\* ⚠ stalled/.test(update.body)))
-	})
+	}
 })

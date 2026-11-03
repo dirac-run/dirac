@@ -6,21 +6,30 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
-import { saveApiConversationHistory, saveDiracMessages } from "@core/storage/conversationHistory"
+import { expectLoggerErrors } from "@/test/loggerGuard"
+import { getSavedPresentationHistory, saveApiConversationHistory, saveDiracMessages } from "@core/storage/conversationHistory"
 import { loadTaskletEvents, loadTaskletRecords } from "@core/storage/taskStorage"
+import { getApiMetrics } from "@shared/getApiMetrics"
+import { isTaskletId } from "@shared/taskletId"
+import { Logger } from "@shared/services/Logger"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
+import { getTaskletUsage, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { CardKind, CardStatus, DiracMessageType, TaskStatus, type DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
 import { ResponseOperation } from "@shared/responseTool"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { TaskletHost, type Task, type TaskletOwner, type TaskletTaskOptions, type TaskParams } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
+import { MessageStateHandler } from "../message-state"
+import { TaskState } from "../TaskState"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 import type { TaskInteractionRequest } from "../types/task-messenger"
 import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
 import { createMockTaskConfig } from "../tools/__tests__/helpers/mockTaskConfig"
 import type { ICardHandle, TaskletControls, TaskletInspection, TaskletTranscript, TaskletWakeResult } from "../tools/interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment } from "../tools/interfaces/ToolEnvironmentFactory"
-import { createSecondary as create } from "../tools/modules/use_subagents/tool"
+import { create, createSecondary } from "../tools/modules/use_subagents/tool"
+import { AgentConfigLoader } from "../tools/subagent/AgentConfigLoader"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -37,6 +46,9 @@ describe("TaskletsTool public controls", () => {
 	let config: ReturnType<typeof createMockTaskConfig>["config"]
 	let children: ReturnType<typeof controlledTask>[]
 	let constructed: sinon.SinonStub
+	let legacyRun: sinon.SinonStub
+	let rootMessages: MessageStateHandler | undefined
+	let options: TaskletTaskOptions
 	let cards: Array<ICardHandle & { update: sinon.SinonStub; finalize: sinon.SinonStub }>
 	let owner: TaskletOwner & {
 		authorizePermission: sinon.SinonStub
@@ -84,6 +96,16 @@ describe("TaskletsTool public controls", () => {
 		setVscodeHostProviderMock({ globalStorageFsPath: directory })
 		children = []
 		cards = []
+		rootMessages = undefined
+		legacyRun = sandbox.stub().throws(new Error("Legacy runner must not execute"))
+		sandbox.stub(AgentConfigLoader, "getInstance").returns({
+			ready: async () => { },
+			getCachedConfig: (name: string) => name === "Research" ? {
+				name: "Research", description: "Research assignment", systemPrompt: "Investigate independently", tools: ["read_file"],
+			} : undefined,
+			resolveSubagentNameForTool: (name: string) => name === "subagent_research" ? "Research" : undefined,
+			isDynamicSubagentTool: (name: string) => name === "subagent_research",
+		} as unknown as AgentConfigLoader)
 		constructed = sandbox.stub().callsFake((params: TaskParams) => {
 			const child = controlledTask(params)
 			children.push(child)
@@ -96,7 +118,7 @@ describe("TaskletsTool public controls", () => {
 			escalateInteraction: sandbox.stub().resolves(rejected),
 			hasPendingUserInput: sandbox.stub().returns(false),
 		}
-		const options = {
+		options = {
 			workingConfiguration: createTaskWorkingConfiguration({
 				settings: { mode: "act" } as any,
 				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
@@ -116,12 +138,21 @@ describe("TaskletsTool public controls", () => {
 			resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
 			sleep: (options) => host.sleep(options),
 		}
-		config = createMockTaskConfig({ overrides: { hooksEnabled: false } }).config
+		config = createMockTaskConfig({ overrides: { hooksEnabled: false, subagentsEnabled: true, isSubagentExecution: false } }).config
 		coordinator = new ToolExecutorCoordinator({
-			create: () => {
+			create: (toolConfig, toolName) => {
 				const callCards: ICardHandle[] = []
 				return {
-					orchestration: { tasklets: controls },
+					config: toolConfig,
+					toolName,
+					logging: { warn: sandbox.stub(), debug: sandbox.stub() },
+					orchestration: {
+						tasklets: controls,
+						runSubagent: legacyRun,
+						getHistory: () => rootMessages?.getDiracMessages() ?? [],
+						getTaskState: (key: keyof TaskState) => toolConfig.taskState[key],
+						setTaskState: (key: string, value: unknown) => { Object.assign(toolConfig.taskState, { [key]: value }) },
+					},
 					ui: {
 						createCard: async (params: Record<string, unknown>) => {
 							const card = {
@@ -142,11 +173,13 @@ describe("TaskletsTool public controls", () => {
 			},
 		})
 		coordinator.registerModularTool(create())
+		coordinator.registerModularTool(createSecondary())
 	})
 
 	afterEach(async () => {
 		try {
 			await host.shutdown()
+			await rootMessages?.retirePersistence()
 		} finally {
 			sandbox.restore()
 			HostProvider.reset()
@@ -196,6 +229,336 @@ describe("TaskletsTool public controls", () => {
 	function resolve(id: string, requestId: string, resolution: string, extra: Record<string, unknown> = {}) {
 		return call({ operation: "resolve", tasklet_id: id, request_id: requestId, resolution, ...extra })
 	}
+
+	interface SpawnResult {
+		subagents: Array<{ index: number; id?: string; title?: string; accepted: boolean; error?: string; outcome?: TaskRunOutcome }>
+	}
+
+	async function spawn(assignments: unknown[], toolName = "use_subagents"): Promise<SpawnResult> {
+		const params = toolName === "use_subagents" ? { subagents: assignments } : assignments[0] as Record<string, unknown>
+		const result = await coordinator.execute(config, { type: "tool_use", name: toolName, params })
+		assert.equal(typeof result, "string")
+		return JSON.parse(result as string) as SpawnResult
+	}
+
+	function acceptedId(result: SpawnResult, index = 0): string {
+		const entry = result.subagents[index]
+		assert.equal(entry.accepted, true, entry.error)
+		assert.equal(typeof entry.id, "string")
+		assert.ok(isTaskletId(entry.id!))
+		return entry.id!
+	}
+
+	async function projectRoot() {
+		rootMessages = new MessageStateHandler({
+			taskId: "root", ulid: "root-conversation", taskState: new TaskState(), updateTaskHistory: async () => [],
+		})
+		await rootMessages.addToDiracMessages({
+			id: "root-user", ts: 1, content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Parent assignment" },
+		})
+		owner.projectTasklet = (data) => rootMessages!.upsertTaskletPresentation(data)
+		owner.recordTaskletUsage = (id, usage) => rootMessages!.upsertTaskletUsage(id, taskletUsageTotal(usage))
+	}
+
+	function presentation(id: string) {
+		const message = rootMessages!.getDiracMessages().find((message) => message.id === `tasklet:${id}`)
+		assert.ok(message)
+		assert.equal(message.content.type, DiracMessageType.CARD)
+		if (message.content.type !== DiracMessageType.CARD) assert.fail("Expected tasklet card")
+		assert.equal(message.content.card.id, message.id)
+		const data = readTaskletPresentation(message.content.card)
+		assert.ok(data)
+		return { card: message.content.card, data }
+	}
+
+	it("returns a generic startup handle while the assignment remains active and its invocation card is final", async () => {
+		const result = await spawn([{ task_title: "Trace startup", prompt: "Investigate the startup path" }])
+		const id = acceptedId(result)
+		assert.equal(result.subagents[0].outcome, undefined)
+		assert.equal((await inspect(id)).outcome, undefined)
+		assert.deepEqual(host.listActive(), [{ id, title: "Trace startup" }])
+		sinon.assert.calledOnceWithExactly(children[0].task.startTask, "Investigate the startup path")
+		sinon.assert.notCalled(children[0].task.retirePersistence)
+		assert.equal(cards[0].status, CardStatus.SUCCESS)
+		sinon.assert.calledOnceWithExactly(cards[0].finalize, CardStatus.SUCCESS)
+		sinon.assert.notCalled(legacyRun)
+	})
+
+	it("dispatches a configured named agent through the same asynchronous host and public controls", async () => {
+		assert.equal(coordinator.has("subagent_research"), true)
+		const id = acceptedId(await spawn([{ task_title: "Named research", prompt: "Investigate configured tools" }], "subagent_research"))
+		const snapshot = await inspect(id)
+		assert.equal(snapshot.outcome, undefined)
+		assert.equal(snapshot.configuration?.name, "Research")
+		assert.equal(snapshot.configuration?.systemPrompt, "Investigate independently")
+		assert.deepEqual(snapshot.configuration?.allowedTools, ["read_file", "respond"])
+		assert.equal(children[0].params.executionProfile, "tasklet")
+		assert.equal(children[0].params.taskId, id)
+		assert.equal(cards[0].status, CardStatus.SUCCESS)
+		sinon.assert.notCalled(children[0].task.retirePersistence)
+		sinon.assert.notCalled(legacyRun)
+	})
+
+	it("accepts multiple assignments without joining them and publicly supervises only the selected child", async () => {
+		const result = await spawn([
+			{ task_title: "First child", prompt: "Investigate first" },
+			{ task_title: "Second child", prompt: "Investigate second" },
+		])
+		const first = acceptedId(result)
+		const sibling = acceptedId(result, 1)
+		const selectedChild = children.find((child) => child.params.taskId === first)!
+		const siblingChild = children.find((child) => child.params.taskId === sibling)!
+		assert.notEqual(first, sibling)
+		assert.equal((await call<TaskletInspection[]>({ operation: "list" })).length, 2)
+		assert.equal((await inspect(first)).outcome, undefined)
+		assert.equal((await inspect(sibling)).outcome, undefined)
+		await call({ operation: "steer", tasklet_id: first, message: "Narrow the investigation" })
+		sinon.assert.calledOnceWithExactly(selectedChild.task.enqueueSteeringMessage, "Narrow the investigation")
+		sinon.assert.notCalled(siblingChild.task.enqueueSteeringMessage)
+		const pending = registerInteraction(selectedChild, "spawned-question")
+		await resolve(first, pending.requestId, "answer", { answer: "Use the current implementation" })
+		assert.equal((await pending.waiting).text, "Use the current implementation")
+		await call({ operation: "interrupt", tasklet_id: first, message: "Pause first only" })
+		assert.equal((await inspect(first)).outcome?.kind, "interrupted")
+		assert.equal((await inspect(sibling)).outcome, undefined)
+		sinon.assert.notCalled(siblingChild.task.abortTask)
+		assert.equal(cards.every((card) => card.status === CardStatus.SUCCESS), true)
+		sinon.assert.notCalled(legacyRun)
+	})
+
+	it("retains accepted IDs across malformed assignments, option failures and a constructor startup failure", async () => {
+		constructed.callsFake((params: TaskParams) => {
+			if (params.task === "Constructor fails") throw new Error("Controlled startup failure")
+			const child = controlledTask(params)
+			children.push(child)
+			return child.task
+		})
+		const result = await spawn([
+			{ task_title: "Accepted child", prompt: "Keep investigating" },
+			null,
+			{ task_title: "Missing prompt" },
+			{ task_title: "Bad timeout", prompt: "Do not start", timeout: 0 },
+			{ task_title: "Failed startup", prompt: "Constructor fails" },
+			{ task_title: "Accepted sibling", prompt: "Continue independently" },
+		])
+		assert.deepEqual(result.subagents.map(({ index }) => index), [0, 1, 2, 3, 4, 5])
+		assert.deepEqual(result.subagents.map(({ accepted }) => accepted), [true, false, false, false, false, true])
+		const first = acceptedId(result)
+		const sibling = acceptedId(result, 5)
+		assert.match(result.subagents[1].error!, /must be an object/)
+		assert.match(result.subagents[2].error!, /prompt/)
+		assert.match(result.subagents[3].error!, /[Tt]imeout/)
+		assert.equal(result.subagents[1].id, undefined)
+		assert.equal(result.subagents[4].error, "Controlled startup failure")
+		const failed = result.subagents[4].id!
+		assert.ok(isTaskletId(failed))
+		assert.equal((await inspect(failed)).outcome?.kind, "failed")
+		assert.equal((await inspect(failed)).outcomePersisted, true)
+		assert.deepEqual(new Set(host.listActive().map(({ id }) => id)), new Set([first, sibling]))
+		assert.equal((await loadTaskletRecords("root")).length, 3)
+		assert.equal(cards[0].status, CardStatus.ERROR)
+		sinon.assert.calledOnceWithExactly(cards[0].finalize, CardStatus.ERROR)
+		sinon.assert.notCalled(legacyRun)
+	})
+
+	it("keeps spawned communication and full committed results addressable under the accepted ID", async () => {
+		const id = acceptedId(await spawn([{ task_title: "Full result", prompt: "Return private detail" }]))
+		const response = { operation: ResponseOperation.COMPLETE, text: fullText }
+		await children[0].params.tasklet!.counterparty.recordResponse(response)
+		assert.equal((await inspect(id)).outcome, undefined, "Completion communication is not a committed outcome")
+		const delivery = await host.prepareEventDelivery()
+		assert.ok(delivery)
+		assert.match(delivery.content[0].text, new RegExp(id))
+		assert.match(delivery.content[0].text, /preview truncated/)
+		assert.equal(delivery.content[0].text.includes("END-OF-FULL-CONTENT"), false)
+		await delivery.acknowledge()
+		const events = await loadTaskletEvents(address(id))
+		assert.equal(events[0].taskletId, id)
+		assert.deepEqual(events[0].communication, { type: "response", response })
+		children[0].outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })
+		await call({ operation: "interrupt", tasklet_id: id })
+		const stopped = await inspect(id)
+		assert.equal(stopped.outcome?.kind, "completed")
+		if (stopped.outcome?.kind !== "completed") assert.fail("Expected committed completion")
+		assert.equal(stopped.outcome.response, fullText)
+		assert.deepEqual(stopped.responses, [response])
+		assert.equal((await loadTaskletRecords("root"))[0].id, id)
+		assert.deepEqual(await call({ operation: "transcript", tasklet_id: id }), {
+			conversation: children[0].conversation, presentation: children[0].presentation,
+		})
+	})
+
+	it("projects running, waiting and terminal cards independently of spawn and reconciles restored same-ID state", async () => {
+		await projectRoot()
+		const result = await spawn([
+			{ task_title: "Projected child", prompt: "Inspect projection" },
+			{ task_title: "Projected sibling", prompt: "Continue independently" },
+		])
+		const id = acceptedId(result)
+		const sibling = acceptedId(result, 1)
+		const selectedChild = children.find((child) => child.params.taskId === id)!
+		const siblingChild = children.find((child) => child.params.taskId === sibling)!
+		await selectedChild.params.tasklet!.postStateToOwner()
+		await siblingChild.params.tasklet!.postPresentationToOwner!()
+		assert.equal(presentation(id).data.status, "running")
+		assert.equal(presentation(sibling).data.status, "running")
+		assert.equal(cards[0].status, CardStatus.SUCCESS)
+		assert.deepEqual(await loadTaskletEvents(address(id)), [])
+		const pending = registerInteraction(selectedChild, "projected-question")
+		await host.prepareEventDelivery()
+		const waiting = presentation(id)
+		assert.equal(waiting.data.status, "waiting")
+		assert.equal(waiting.card.status, CardStatus.WAITING_FOR_INPUT)
+		assert.equal(waiting.card.requireApproval, undefined)
+		assert.equal(waiting.card.requireFeedback, undefined)
+		assert.equal(waiting.card.actions, undefined)
+		assert.equal(presentation(sibling).data.status, "running")
+		await resolve(id, pending.requestId, "answer", { answer: "Continue" })
+		await pending.waiting
+		assert.equal(presentation(id).data.status, "running")
+		await selectedChild.params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: fullText })
+		selectedChild.outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })
+		await call({ operation: "interrupt", tasklet_id: id })
+		assert.equal(presentation(id).data.status, "completed")
+		assert.equal(presentation(id).card.status, CardStatus.SUCCESS)
+		assert.ok(presentation(id).data.result!.length < fullText.length)
+		assert.equal(presentation(id).data.result!.includes("END-OF-FULL-CONTENT"), false)
+		assert.ok(presentation(id).data.activity.every((text) => text.length < fullText.length))
+		await host.shutdown()
+		await rootMessages!.saveDiracMessagesAndUpdateHistory()
+		const saved = await getSavedPresentationHistory("root")
+		assert.ok(saved.messages.some((message) => message.id === `tasklet:${id}`))
+		rootMessages!.setDiracMessages(saved.messages, saved.lastOffset)
+		host = new TaskletHost(owner, options, constructed as unknown as typeof Task)
+		await host.reconstruct()
+		await host.reconcileRootProjection()
+		sinon.assert.calledTwice(constructed)
+		assert.equal(presentation(id).data.status, "completed")
+		assert.equal(presentation(sibling).data.status, "interrupted")
+		assert.equal(rootMessages!.getDiracMessages().filter((message) => message.id === `tasklet:${id}`).length, 1)
+		const resumed = await call<{ id: string }>({ operation: "resume", tasklet_id: id, message: "Continue the same conversation" })
+		assert.equal(resumed.id, id)
+		await children[2].params.tasklet!.postStateToOwner()
+		assert.equal(presentation(id).data.status, "running")
+		assert.equal(presentation(id).data.result, undefined)
+		assert.equal(rootMessages!.getDiracMessages().filter((message) => message.id === `tasklet:${id}`).length, 1)
+	})
+
+	it("reports projection failure without changing a completed durable outcome or blocking same-ID resume", async () => {
+		expectLoggerErrors()
+		await projectRoot()
+		const id = acceptedId(await spawn([{ task_title: "Display failure", prompt: "Finish independently of display" }]))
+		await children[0].params.tasklet!.postStateToOwner()
+		const project = owner.projectTasklet!
+		const failure = new Error("Controlled tasklet display failure")
+		const logged = sandbox.spy(Logger, "error")
+		owner.projectTasklet = sandbox.stub().rejects(failure)
+		const outcome: TaskRunOutcome = { kind: "completed", response: fullText, completedAt: 123 }
+		children[0].outcome.resolve(outcome)
+		const stopped = await call<TaskletInspection>({ operation: "interrupt", tasklet_id: id })
+		assert.deepEqual(stopped.outcome, outcome)
+		assert.equal(stopped.outcomePersisted, true)
+		assert.equal(stopped.settlementError, undefined)
+		assert.equal(stopped.presentationError?.message, failure.message)
+		assert.deepEqual((await loadTaskletRecords("root"))[0].outcome, outcome)
+		sinon.assert.calledWithExactly(logged, `[Tasklet ${id}] Presentation failed:`, failure)
+
+		const resumed = await call<{ id: string }>({ operation: "resume", tasklet_id: id, message: "Continue after display failure" })
+		assert.equal(resumed.id, id)
+		sinon.assert.calledOnceWithExactly(children[1].task.resumeTaskFromHistory, undefined, { taskletResumeMessage: "Continue after display failure" })
+		await children[1].params.tasklet!.postStateToOwner()
+		const running = await inspect(id)
+		assert.equal(running.outcome, undefined)
+		assert.equal(running.outcomePersisted, false)
+		assert.equal(running.settlementError, undefined)
+		assert.equal(running.presentationError?.message, failure.message)
+		owner.projectTasklet = project
+		await children[1].params.tasklet!.postStateToOwner()
+		assert.equal((await inspect(id)).presentationError, undefined)
+		assert.equal(presentation(id).data.status, "running")
+	})
+
+	it("retains the public spawn ID and constructor failure when terminal projection also fails", async () => {
+		expectLoggerErrors()
+		await projectRoot()
+		owner.projectTasklet = sandbox.stub().rejects(new Error("Controlled startup display failure"))
+		constructed.throws(new Error("Controlled constructor failure"))
+		const result = await spawn([{ task_title: "Failed construction", prompt: "Cannot construct" }])
+		const entry = result.subagents[0]
+		assert.equal(entry.accepted, false)
+		assert.ok(isTaskletId(entry.id!))
+		assert.equal(entry.error, "Controlled constructor failure")
+		const snapshot = await inspect(entry.id!)
+		assert.equal(snapshot.outcome?.kind, "failed")
+		if (snapshot.outcome?.kind !== "failed") assert.fail("Expected constructor failure")
+		assert.equal(snapshot.outcome.error.message, entry.error)
+		assert.equal(snapshot.outcomePersisted, true)
+		assert.equal(snapshot.settlementError, undefined)
+		assert.equal(snapshot.presentationError?.message, "Controlled startup display failure")
+		assert.deepEqual((await loadTaskletRecords("root"))[0].outcome, snapshot.outcome)
+		assert.deepEqual(host.listActive(), [])
+		assert.equal(cards[0].status, CardStatus.ERROR)
+	})
+
+	it("persists event resolution and retirement despite projection failures without unhandled rejections", async () => {
+		expectLoggerErrors()
+		await projectRoot()
+		const id = acceptedId(await spawn([{ task_title: "Communication display failure", prompt: "Ask twice" }]))
+		await children[0].params.tasklet!.postStateToOwner()
+		owner.projectTasklet = sandbox.stub().rejects(new Error("Controlled event display failure"))
+		const unhandled: unknown[] = []
+		const collectUnhandled = (error: unknown) => { unhandled.push(error) }
+		process.on("unhandledRejection", collectUnhandled)
+		try {
+			await children[0].params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "Durable progress" })
+			const answered = registerInteraction(children[0], "answered-despite-display")
+			assert.deepEqual(await resolve(id, answered.requestId, "answer", { answer: "Continue" }), { status: "resolved" })
+			assert.equal((await answered.waiting).text, "Continue")
+			const retired = registerInteraction(children[0], "retired-despite-display")
+			const stopped = await call<TaskletInspection>({ operation: "interrupt", tasklet_id: id })
+			await assert.rejects(retired.waiting, /retired/)
+			assert.equal(stopped.outcome?.kind, "interrupted")
+			assert.equal(stopped.outcomePersisted, true)
+			assert.equal(stopped.settlementError, undefined)
+			assert.equal(stopped.presentationError?.message, "Controlled event display failure")
+			const events = await loadTaskletEvents(address(id))
+			assert.equal(events.length, 3)
+			assert.deepEqual(events[0].communication, { type: "response", response: { operation: ResponseOperation.PROGRESS, text: "Durable progress" } })
+			const interactions = events.flatMap((event) => event.communication.type === "interaction" ? [event.communication.request] : [])
+			assert.deepEqual(interactions.map(({ id, status }) => ({ id, status })), [
+				{ id: answered.requestId, status: "resolved" }, { id: retired.requestId, status: "retired" },
+			])
+			await host.shutdown()
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.deepEqual(unhandled, [])
+		} finally {
+			process.off("unhandledRejection", collectUnhandled)
+		}
+	})
+
+	it("accounts public spawn usage only through replaceable host snapshots, not the former batch result path", async () => {
+		await projectRoot()
+		const id = acceptedId(await spawn([{ task_title: "Account once", prompt: "Use primary and Utility" }]))
+		const usage: TaskletUsageSnapshot = {
+			primary: { tokensIn: 100, tokensOut: 20, cost: 1, reasoningTokens: 3 },
+			utility: { tokensIn: 10, tokensOut: 2, cost: 0.25, reasoningTokens: 1 },
+		}
+		children[0].params.tasklet!.recordUsage!(usage)
+		children[0].params.tasklet!.recordUsage!(usage)
+		children[0].outcome.resolve({ kind: "completed", response: "Done", completedAt: 123 })
+		await call({ operation: "interrupt", tasklet_id: id })
+		const messages = rootMessages!.getDiracMessages()
+		const accounting = messages.flatMap((message) => message.content.type === DiracMessageType.CARD && getTaskletUsage(message.content.card) ? [message] : [])
+		assert.deepEqual(accounting.map(({ id }) => id), [`tasklet-usage:${id}`])
+		assert.equal(getApiMetrics(messages).totalCost, 1.25)
+		assert.equal(getApiMetrics(messages).totalTokensIn, 110)
+		assert.equal(getApiMetrics(messages).totalReasoningTokens, 4)
+		assert.deepEqual(presentation(id).data.usage, taskletUsageTotal(usage))
+		assert.equal(presentation(id).card.rawOutput?.source, undefined)
+		assert.equal(cards.some((card) => card.rawOutput?.source === "subagents" || card.rawOutput?.source === "tasklet"), false)
+		assert.deepEqual((await loadTaskletRecords("root"))[0].usage, usage)
+		sinon.assert.notCalled(legacyRun)
+	})
 
 	it("returns full retained results, responses and interactions, and live/persisted transcripts rather than previews", async () => {
 		const record = await host.start({ title: "Full detail", prompt: "Work" })

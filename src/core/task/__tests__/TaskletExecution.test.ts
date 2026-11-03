@@ -1863,7 +1863,7 @@ describe("Tasklet real Task execution", function () {
 			const reopened = createResolutionRoot()
 			const host = reopened.taskletHost!
 			await host.reconstruct()
-			await host.reconcileUsage()
+			await host.reconcileRootProjection()
 			assert.equal(requests.length, 1, "Reconstruction does not run a provider")
 			assert.equal(host.inspect(child.id).usage?.primary.tokensIn, 200)
 			assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 200)

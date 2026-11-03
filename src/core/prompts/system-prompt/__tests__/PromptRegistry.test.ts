@@ -59,6 +59,14 @@ describe("PromptRegistry", () => {
 		})
 	})
 
+	it("invalidates cached parent guidance when profile or delegation capability changes with identical inventories", async () => {
+		const parent = { ...mockContext, executionProfile: "standalone" as const, subagentsEnabled: true }
+		expect(await registry.get(parent, emptyToolSnapshot())).to.include("TASKLET DELEGATION")
+		expect(await registry.get({ ...parent, executionProfile: "tasklet" }, emptyToolSnapshot())).not.to.include("TASKLET DELEGATION")
+		expect(await registry.get({ ...parent, subagentsEnabled: false }, emptyToolSnapshot())).not.to.include("TASKLET DELEGATION")
+		expect(await registry.get(parent, emptyToolSnapshot())).to.include("TASKLET DELEGATION")
+	})
+
 	describe("basic functionality", () => {
 		it("should be able to create registry instance", () => {
 			expect(registry).to.be.instanceOf(PromptRegistry)

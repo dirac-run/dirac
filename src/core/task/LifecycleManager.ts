@@ -15,6 +15,7 @@ import type { BrowserSession } from "@services/browser/BrowserSession"
 import { findLastIndex } from "@shared/array"
 import { isResumePromptCard, isSuccessfulTaskCompletionCard } from "@shared/cardIdentity"
 import { getTaskletUsage } from "@shared/taskletUsage"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
 import {
 	DiracContent,
 	DiracImageContentBlock,
@@ -350,7 +351,7 @@ export class LifecycleManager {
 			.reverse()
 			.find(
 				(m) =>
-					!(m.content.type === DiracMessageType.CARD && (isResumePromptCard(m.content.card) || getTaskletUsage(m.content.card))) &&
+					!(m.content.type === DiracMessageType.CARD && (isResumePromptCard(m.content.card) || getTaskletUsage(m.content.card) || readTaskletPresentation(m.content.card))) &&
 					!(m.content.type === DiracMessageType.MARKDOWN && m.content.role === "user"),
 			)
 

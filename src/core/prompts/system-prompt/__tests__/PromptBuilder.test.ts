@@ -19,6 +19,56 @@ describe("PromptBuilder", () => {
 		yoloModeToggled: false,
 	}
 
+	describe("tasklet parent guidance", () => {
+		it("describes asynchronous delegation, inspection, voluntary sleep and explicit timeout resumption for ordinary parents", async () => {
+			const prompt = await new PromptBuilder({
+				...mockContext,
+				executionProfile: "standalone",
+				subagentsEnabled: true,
+			}).build()
+			expect(prompt).to.include("TASKLET DELEGATION")
+			expect(prompt).to.include("Generic and configured named-agent spawn tools start tasklets asynchronously")
+			expect(prompt).to.include("startup acceptance, not assignment success or completion")
+			expect(prompt).to.include("startup failures are reported separately")
+			expect(prompt).to.include("Later results, progress, and requests arrive through parent communication")
+			expect(prompt).to.include("`tasklets` with `inspect` and the stable ID")
+			expect(prompt).to.include("`tasklets` with `sleep` to wait for events rather than repeatedly polling")
+			expect(prompt).to.include("let active tasklets finish or explicitly interrupt them")
+			expect(prompt).to.include("timeout applies to each execution, including explicit resumption")
+			expect(prompt).to.include("A deadline interrupts the tasklet while preserving its ID and conversation")
+			expect(prompt).to.include("explicit `tasklets` `resume`")
+			expect(prompt).to.include("no 90-second wrap-up grace, automatic continuation, or timeout-as-success")
+		})
+
+		for (const executionProfile of ["goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+			it(`does not inject ordinary-parent guidance into ${executionProfile} prompts`, async () => {
+				const prompt = await new PromptBuilder({
+					...mockContext,
+					executionProfile,
+					subagentsEnabled: true,
+				}).build()
+				expect(prompt).to.not.include("TASKLET DELEGATION")
+				expect(prompt).to.not.include("`tasklets`")
+			})
+		}
+
+		it("does not advertise tasklet controls when ordinary delegation is disabled or unspecified", async () => {
+			for (const subagentsEnabled of [false, undefined]) {
+				const prompt = await new PromptBuilder({
+					...mockContext,
+					executionProfile: "standalone",
+					subagentsEnabled,
+				}).build()
+				expect(prompt).to.not.include("TASKLET DELEGATION")
+			}
+		})
+
+		it("does not infer parent capability from the delegation setting without a profile", async () => {
+			const prompt = await new PromptBuilder({ ...mockContext, subagentsEnabled: true }).build()
+			expect(prompt).to.not.include("TASKLET DELEGATION")
+		})
+	})
+
 	describe("postProcess", () => {
 		it("should clean up multiple empty lines", async () => {
 			const builder = new PromptBuilder(mockContext)
