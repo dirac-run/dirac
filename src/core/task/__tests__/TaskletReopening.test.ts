@@ -14,6 +14,7 @@ import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { type Task, TaskletHost, type TaskletOwner, type TaskletTaskOptions, type TaskParams } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
+import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -51,8 +52,16 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		}
 	}
 
-	function newHost() {
-		const host = new TaskletHost(owner, {} as TaskletTaskOptions, constructed as unknown as typeof Task)
+	function newHost(overrides: Partial<TaskletTaskOptions> = {}) {
+		const options = {
+			workingConfiguration: createTaskWorkingConfiguration({
+				settings: { mode: "act" } as any,
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				workspaceConfiguration: {} as any,
+				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+			}),
+		} as TaskletTaskOptions
+		const host = new TaskletHost(owner, { ...options, ...overrides }, constructed as unknown as typeof Task)
 		hosts.push(host)
 		return host
 	}
@@ -101,9 +110,9 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 					toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
 					...(status === "resolved"
 						? {
-								resolvedAt: 105,
-								resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
-							}
+							resolvedAt: 105,
+							resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
+						}
 						: status === "retired"
 							? { retiredAt: 106 }
 							: {}),
@@ -144,6 +153,26 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sandbox.restore()
 		HostProvider.reset()
 		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("preserves durable configuration across reopening without reinjecting parent history on resume", async () => {
+		const getParentHistory = sandbox.stub().returns({ messages: [{ role: "user", content: "Original root context" }] })
+		const original = newHost({ getParentHistory })
+		const record = await original.start({ title: "Retained configuration", prompt: "Work", includeHistory: true, timeoutSeconds: 45 })
+		const params = constructed.firstCall.args[0] as TaskParams
+		assert.deepEqual(params.tasklet!.initialHistory, getParentHistory.firstCall.returnValue)
+		children[0].outcome.resolve(completed)
+		await original.interrupt(record.id)
+		await original.shutdown()
+		const reopened = newHost({ getParentHistory })
+		await reopened.reconstruct()
+		assert.deepEqual(reopened.inspect(record.id).configuration, record.configuration)
+		await reopened.resume(record.id, "Follow up")
+		const resumedParams = constructed.secondCall.args[0] as TaskParams
+		assert.deepEqual(resumedParams.tasklet!.configuration, record.configuration)
+		assert.equal(resumedParams.tasklet!.initialHistory, undefined)
+		sinon.assert.calledOnce(getParentHistory)
+		assert.deepEqual((await storage.loadTaskletRecords("root"))[0].configuration, record.configuration)
 	})
 
 	it("reconstructs cleanly closed completed handles without constructing or restarting engines", async () => {

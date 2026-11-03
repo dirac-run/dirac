@@ -57,6 +57,7 @@ export interface TaskRequestBuilderContext {
 	taskState: TaskState
 	executionProfile: TaskExecutionProfile
 	getPinnedContext: () => Promise<string | undefined>
+	taskletConfiguration?: import("./TaskletConfiguration").TaskletConfiguration
 	writePromptMetadataArtifacts: (params: {
 		systemPrompt: string
 		providerInfo: ApiProviderInfo
@@ -158,6 +159,7 @@ export async function buildApiRequestParams(
 	const globalSkillsToggles = settings.globalSkillsToggles ?? {}
 	const localSkillsToggles = workspaceConfiguration.localSkillsToggles ?? {}
 	const availableSkills = providerSkills.filter(meetsHostCapabilityRequirement).filter((skill) => {
+		if (ctx.taskletConfiguration?.skills && !ctx.taskletConfiguration.skills.includes(skill.name)) return false
 		if (!isSkillAvailableToTaskProfile(ctx.executionProfile, skill)) return false
 		if (settings.yoloModeToggled && skill.interactiveOnly) return false
 		if (skill.source === "builtin") return true
@@ -223,10 +225,16 @@ export async function buildApiRequestParams(
 	const toolSnapshot = await ctx.toolExecutor.getSnapshotForRequest(promptContext, requestRuntime)
 	const { systemPrompt: baseSystemPrompt } = await getSystemPrompt(promptContext, toolSnapshot)
 	const pinnedContext = await ctx.getPinnedContext()
-	const systemPrompt =
-		ctx.executionProfile === "standalone" || !pinnedContext
-			? baseSystemPrompt
-			: `${baseSystemPrompt}\n\n${pinnedContext}`
+	const configuration = ctx.taskletConfiguration
+	const configuredPrompt = configuration?.systemPrompt
+		? `${configuration.systemPrompt}\n\n${taskProfileSystemInstructions(ctx.executionProfile) ?? ""}`
+		: baseSystemPrompt
+	const systemPrompt = [
+		configuredPrompt,
+		configuration?.name ? `# Agent Profile\nName: ${configuration.name}\n${configuration.description ?? ""}` : undefined,
+		configuration ? `# Execution Deadline\nComplete the assignment within ${configuration.timeoutSeconds} seconds.` : undefined,
+		ctx.executionProfile !== "standalone" ? pinnedContext : undefined,
+	].filter(Boolean).join("\n\n")
 	const boundRequestRuntime = bindToolSnapshotToRequestRuntime(requestRuntime, toolSnapshot)
 	ctx.toolExecutor.activateSnapshot(toolSnapshot, boundRequestRuntime)
 	ctx.taskState.useNativeToolCalls = toolSnapshot.nativeTools.length > 0

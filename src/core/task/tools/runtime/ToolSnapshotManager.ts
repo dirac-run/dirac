@@ -22,6 +22,7 @@ interface ToolSnapshotManagerOptions {
 	getSelectionPolicy: () => ToolSelectionPolicy | undefined
 	getActiveSkills: () => readonly SkillMetadata[]
 	isToolAvailable?: (tool: DiscoveredTool) => boolean
+	allowedTools?: readonly string[]
 	environmentFactory?: import("../interfaces/ToolEnvironmentFactory").ToolEnvironmentFactory
 }
 
@@ -76,6 +77,8 @@ export class ToolSnapshotManager {
 			const effectiveTools = this.mergeTools(selectedConfiguredTools, skillTools).filter(
 				(tool) => meetsHostCapabilityRequirement(tool.spec) && (this.options.isToolAvailable?.(tool) ?? true),
 			)
+				.map((tool) => this.options.allowedTools ? registry.scopeToolForSubagent(tool, this.options.allowedTools) : tool)
+				.filter((tool): tool is DiscoveredTool => tool !== undefined)
 			const promptVisibleSpecs = this.buildPromptVisibleSpecs(effectiveTools, context)
 			const nativeTools = DiracToolSet.convertSpecsToNativeTools(promptVisibleSpecs, context)
 			const dynamicSubagentToolNames = new Set(

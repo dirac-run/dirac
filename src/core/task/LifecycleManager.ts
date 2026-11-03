@@ -118,7 +118,10 @@ export class LifecycleManager {
 		}
 	}
 
-	public async startTask(task?: string, images?: string[], files?: string[]): Promise<TaskRunOutcome | undefined> {
+	public async startTask(
+		task?: string, images?: string[], files?: string[],
+		initialHistory?: { messages: import("@shared/messages/content").DiracStorageMessage[]; deletedRange?: [number, number] },
+	): Promise<TaskRunOutcome | undefined> {
 		try {
 			await this.dependencies.diracIgnoreController.initialize()
 			await this.dependencies.commandPermissionController.initialize(this.dependencies.cwd)
@@ -127,7 +130,11 @@ export class LifecycleManager {
 		}
 		this.dependencies.messageStateHandler.setDiracMessages([])
 		this.dependencies.messageStateHandler.setApiConversationHistory([])
+		this.dependencies.taskState.conversationHistoryDeletedRange = initialHistory?.deletedRange
 		this.dependencies.messageStateHandler.setApiConversationProviderState({})
+		if (initialHistory) {
+			await this.dependencies.messageStateHandler.overwriteApiConversationHistory(structuredClone(initialHistory.messages))
+		}
 
 		await this.dependencies.postStateToWebview()
 

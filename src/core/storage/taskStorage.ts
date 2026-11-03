@@ -17,6 +17,7 @@ import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
 
 /** Durable child identity/assignment; an absent outcome means accepted, not completed. */
 export interface TaskletRecord {
+	configuration?: import("@core/task/TaskletConfiguration").TaskletConfiguration
 	id: string
 	rootTaskId: string
 	conversationUlid: string

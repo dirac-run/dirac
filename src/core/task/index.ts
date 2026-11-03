@@ -1,8 +1,14 @@
+import { modelProviderSelectionUpdates } from "@core/api/modelProviderSelection"
+import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
+import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME } from "@shared/responseTool"
+import { AgentConfigLoader } from "./tools/subagent/AgentConfigLoader"
+import { DEFAULT_SUBAGENT_TIMEOUT_SECONDS } from "./tools/subagent/SubagentExecutionPolicy"
 import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
 import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRecord, type TaskletRecord, type TaskletEvent } from "@core/storage/taskStorage"
+import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
 import { createTaskletId } from "@shared/taskletId"
 import { taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
-import { ApiHandler, ApiProviderInfo, buildApiHandler, validateApiConfiguration } from "@core/api"
+import { ApiHandler, ApiProviderInfo, buildApiHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
 import { EnvironmentContextTracker } from "@core/context/context-tracking/EnvironmentContextTracker"
@@ -34,7 +40,7 @@ import { ITerminalManager } from "@integrations/terminal/types"
 import { BrowserSession } from "@services/browser/BrowserSession"
 import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import { telemetryService } from "@services/telemetry"
-import { type ApiConfiguration } from "@shared/api"
+import { type ApiConfiguration, type ModelProviderSelection } from "@shared/api"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
@@ -70,6 +76,7 @@ import {
 } from "./runtime/TaskRequestRuntime"
 import {
 	buildTaskWorkingConfigurationUpdate,
+	cloneConfigurationValue,
 	type TaskWorkingConfiguration,
 	type TaskWorkingConfigurationPatch,
 } from "./runtime/TaskWorkingConfiguration"
@@ -124,6 +131,8 @@ import type { TaskCounterparty, TaskInteractionRequest } from "./types/task-mess
 
 /** Private owner bindings; a tasklet never falls back to foreground publication. */
 export interface TaskletExecutionBindings {
+	configuration?: TaskletConfiguration
+	initialHistory?: { messages: DiracStorageMessage[]; deletedRange?: [number, number] }
 	counterparty: TaskCounterparty
 	storageAddress: Extract<TaskStorageAddress, { kind: "tasklet" }>
 	postStateToOwner: () => Promise<void>
@@ -259,6 +268,7 @@ export class Task {
 			taskState: this.taskState,
 			executionProfile: this.executionProfile,
 			getPinnedContext: this.getPinnedContext,
+			taskletConfiguration: this.taskletConfiguration,
 			writePromptMetadataArtifacts: (params) =>
 				writePromptMetadataArtifacts(
 					{
@@ -504,6 +514,8 @@ export class Task {
 	// Task Locking (Sqlite)
 	readonly executionProfile: TaskExecutionProfile
 	private readonly getPinnedContext: () => Promise<string | undefined>
+	private readonly taskletConfiguration?: TaskletConfiguration
+	private readonly initialTaskletHistory?: TaskletExecutionBindings["initialHistory"]
 
 	// Command executor for running shell commands (extracted from executeCommandTool)
 	private commandExecutor!: CommandExecutor
@@ -540,6 +552,8 @@ export class Task {
 		this.taskState.pinnedContext = params.pinnedContext
 		this.executionProfile = params.executionProfile ?? "standalone"
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
+		this.taskletConfiguration = params.tasklet?.configuration
+		this.initialTaskletHistory = params.tasklet?.initialHistory
 		if (this.executionProfile.startsWith("goal_") && workingConfiguration.settings.mode !== "act") {
 			throw new Error(`${this.executionProfile} Tasks require an Act-mode working configuration`)
 		}
@@ -906,6 +920,8 @@ export class Task {
 				}
 			},
 			recordUsage,
+			params.tasklet?.configuration?.allowedTools,
+			params.tasklet?.configuration?.skills,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1073,6 +1089,10 @@ export class Task {
 				get workingConfiguration() {
 					return root.getWorkingConfiguration()
 				},
+				getParentHistory: () => ({
+					messages: this.messageStateHandler.getApiConversationHistory(),
+					deletedRange: this.taskState.conversationHistoryDeletedRange,
+				}),
 				get pinnedContext() {
 					return root.taskState.pinnedContext
 				},
@@ -1308,7 +1328,7 @@ export class Task {
 	public async startTask(task?: string, images?: string[], files?: string[]): Promise<TaskRunOutcome> {
 		return this.runTaskLifecycle(async () => {
 			await this.toolExecutor.refreshToolsForTask()
-			return this.lifecycleManager.startTask(task, images, files)
+			return this.lifecycleManager.startTask(task, images, files, this.initialTaskletHistory)
 		})
 	}
 
@@ -1654,7 +1674,7 @@ export type TaskletTaskOptions = Pick<
 	| "pinnedContext"
 	| "toolSelectionPolicy"
 	| "toolEnvironmentFactory"
->
+> & { getParentHistory?: () => NonNullable<TaskletExecutionBindings["initialHistory"]> }
 
 
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
@@ -1873,7 +1893,7 @@ export class TaskletHost {
 	}
 
 	/** Persist acceptance and launch, without waiting for the assignment to finish. */
-	async start(input: { title: string; prompt: string }): Promise<TaskletRecord> {
+	async start(input: { title: string; prompt: string } & TaskletStartOptions): Promise<TaskletRecord> {
 		if (this.reconstruction) await this.reconstruction
 		if (this.closing) throw new Error("Tasklet host is shutting down")
 		const title = input.title.trim()
@@ -1887,7 +1907,7 @@ export class TaskletHost {
 			prompt,
 			createdAt: Date.now(),
 		}
-		const acceptance = this.acceptAndStart(record)
+		const acceptance = this.acceptAndStart(record, input)
 		this.starting.set(record.id, { record, acceptance })
 		try {
 			return await acceptance
@@ -1896,7 +1916,8 @@ export class TaskletHost {
 		}
 	}
 
-	private async acceptAndStart(record: TaskletRecord): Promise<TaskletRecord> {
+	private async acceptAndStart(record: TaskletRecord, input: TaskletStartOptions): Promise<TaskletRecord> {
+		record.configuration = await resolveTaskletConfiguration(input, this.options.workingConfiguration)
 		// No Task or live handle exists if this initial write fails.
 		await saveTaskletRecord(record)
 		const child: OwnedTasklet = {
@@ -1921,6 +1942,9 @@ export class TaskletHost {
 		try {
 			child.task = new this.TaskConstructor({
 				...this.options,
+				workingConfiguration: record.configuration
+					? taskletWorkingConfiguration(this.options.workingConfiguration, record.configuration)
+					: this.options.workingConfiguration,
 				taskId: record.id,
 				conversationUlid: record.conversationUlid,
 				task: record.prompt,
@@ -1930,6 +1954,9 @@ export class TaskletHost {
 				reinitExistingTaskFromId: unavailableForegroundCallback,
 				cancelTask: unavailableForegroundCallback,
 				tasklet: {
+					configuration: record.configuration,
+					initialHistory: resumeMessage === undefined && record.configuration?.includeHistory
+						? structuredClone(this.options.getParentHistory?.()) : undefined,
 					counterparty: {
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
@@ -2183,10 +2210,17 @@ export class TaskletHost {
 
 	private async observeRun(child: OwnedTasklet, task: Task, resumeMessage?: string): Promise<void> {
 		let outcome: TaskRunOutcome
+		let timeoutAbort: Promise<void> | undefined
+		const timeoutSeconds = child.record.configuration?.timeoutSeconds
+		const timer = timeoutSeconds === undefined ? undefined : setTimeout(() => {
+			timeoutAbort = task.abortTask({ kind: "interrupted", reason: `Tasklet execution timed out after ${timeoutSeconds} seconds` })
+			void timeoutAbort.catch((error) => Logger.error(`[Tasklet ${child.record.id}] Timeout cancellation failed:`, error))
+		}, timeoutSeconds * 1000)
 		try {
 			outcome = resumeMessage === undefined
 				? await task.startTask(child.record.prompt)
 				: await task.resumeTaskFromHistory(undefined, { taskletResumeMessage: resumeMessage })
+			await timeoutAbort
 		} catch (error) {
 			// Task normally returns a failed outcome, including finalization errors.
 			// A rejected start still requires cancellation before persistence retirement.
@@ -2201,6 +2235,8 @@ export class TaskletHost {
 				failedAt: Date.now(),
 				error: serializeTaskError(failures.length > 1 ? new AggregateError(failures, "Tasklet startup failed") : error),
 			}
+		} finally {
+			if (timer !== undefined) clearTimeout(timer)
 		}
 		const settlementFailures: unknown[] = []
 		// A failed run outcome can include a failed final flush. It is not proof that
@@ -2308,4 +2344,109 @@ export class TaskletHost {
 
 async function unavailableForegroundCallback(): Promise<never> {
 	throw new Error("Tasklet cannot use a foreground lifecycle callback")
+}
+
+function taskletTimeoutSeconds(timeoutSeconds = DEFAULT_SUBAGENT_TIMEOUT_SECONDS): number {
+	if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds * 1000 > 2 ** 31 - 1) {
+		throw new Error("Tasklet timeout must be a positive number of seconds within the JavaScript timer range.")
+	}
+	return timeoutSeconds
+}
+
+/** Pick only selection fields, never arbitrary persisted settings or credentials. */
+function copyModelSelection(selection: ModelProviderSelection): ModelProviderSelection {
+	return cloneConfigurationValue({
+		provider: selection.provider,
+		modelId: selection.modelId,
+		modelInfo: selection.modelInfo,
+		openAiProfileName: selection.openAiProfileName,
+		vsCodeLmModelSelector: selection.vsCodeLmModelSelector,
+		awsBedrockCustomSelected: selection.awsBedrockCustomSelected,
+		awsBedrockCustomModelBaseId: selection.awsBedrockCustomModelBaseId,
+	})
+}
+
+function taskletAllowedTools(tools: string[]): string[] | undefined {
+	if (tools.length === 0) return undefined
+	const migrated = tools.map((tool) => {
+		const name = tool.trim()
+		if (Object.hasOwn(LEGACY_RESPONSE_TOOLS, name) || name.startsWith(`${RESPOND_TOOL_NAME}:`)) {
+			return RESPOND_TOOL_NAME
+		}
+		return name
+	})
+	return [...new Set([...migrated, RESPOND_TOOL_NAME])]
+}
+
+/** Resolve a named profile and explicit model choice before accepting a start. */
+export async function resolveTaskletConfiguration(
+	options: TaskletStartOptions,
+	workingConfiguration: TaskWorkingConfiguration,
+): Promise<TaskletConfiguration> {
+	const resolved: TaskletConfiguration = {
+		includeHistory: options.includeHistory === true,
+		timeoutSeconds: taskletTimeoutSeconds(options.timeoutSeconds),
+	}
+	if (options.agentName !== undefined) {
+		const loader = AgentConfigLoader.getInstance()
+		await loader.ready()
+		const profile = loader.getCachedConfig(options.agentName)
+		if (!profile) throw new Error(`Unknown tasklet agent profile: ${options.agentName}`)
+		resolved.name = profile.name
+		resolved.description = profile.description
+		resolved.systemPrompt = profile.systemPrompt
+		resolved.skills = profile.skills ? [...profile.skills] : undefined
+		resolved.allowedTools = taskletAllowedTools(profile.tools)
+		if (profile.modelId && !options.useUtilityModel) {
+			const configuration = workingConfiguration.apiConfiguration
+			const mode = workingConfiguration.settings.mode
+			const provider =
+				(mode === "plan" ? configuration.planModeApiProvider : configuration.actModeApiProvider) ??
+				configuration.apiProvider
+			if (!provider) throw new Error("Tasklet agent model requires a configured parent API provider.")
+			const current = resolveModeConfig(configuration as ApiConfiguration, mode)
+			resolved.modelSelection = copyModelSelection({
+				provider,
+				modelId: profile.modelId,
+				openAiProfileName: current.openAiProfileName,
+				vsCodeLmModelSelector: current.vsCodeLmModelSelector,
+				awsBedrockCustomSelected: current.awsBedrockCustomSelected,
+				awsBedrockCustomModelBaseId: current.awsBedrockCustomModelBaseId,
+			})
+		}
+	}
+	if (options.useUtilityModel) {
+		const selection = getConfiguredUtilityModelSelection(workingConfiguration.settings.utilityModelSelection)
+		if (!selection) throw new Error("Utility model is not configured.")
+		resolved.modelSelection = copyModelSelection(selection)
+	}
+
+	if (resolved.modelSelection) taskletWorkingConfiguration(workingConfiguration, resolved)
+	return resolved
+}
+
+/** Reapply durable choices with current parent credentials, permissions and mode. */
+export function taskletWorkingConfiguration(
+	current: TaskWorkingConfiguration,
+	resolved: TaskletConfiguration,
+): TaskWorkingConfiguration {
+	taskletTimeoutSeconds(resolved.timeoutSeconds)
+	const selection = resolved.modelSelection
+	if (!selection) return current
+	const candidate = buildTaskWorkingConfigurationUpdate(current, {
+		apiConfiguration: {
+			...modelProviderSelectionUpdates("plan", selection, current.apiConfiguration.planModeInferenceSpeed),
+			...modelProviderSelectionUpdates("act", selection, current.apiConfiguration.actModeInferenceSpeed),
+		},
+	})
+	const mode = candidate.settings.mode
+	const configuration = candidate.apiConfiguration as ApiConfiguration
+	validateApiConfiguration(configuration, mode)
+	const modelId = buildApiHandler(configuration, mode).getModel().id
+	if (modelId !== selection.modelId) {
+		throw new Error(
+			`Tasklet model ${selection.modelId} is unavailable for provider ${selection.provider} (resolved ${modelId}).`,
+		)
+	}
+	return candidate
 }

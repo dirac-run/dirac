@@ -64,6 +64,7 @@ export interface TaskConfig {
 	utilityModelUseCondense: boolean
 	utilityModelSelection?: ModelProviderSelection
 	globalSkillsToggles: Readonly<Record<string, boolean>>
+	allowedSkillNames?: readonly string[]
 	localSkillsToggles: Readonly<Record<string, boolean>>
 
 	// Multi-workspace support

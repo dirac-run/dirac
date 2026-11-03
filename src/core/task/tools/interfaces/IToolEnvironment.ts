@@ -291,7 +291,7 @@ export type TaskletWakeResult =
 /** Parent-only controls. Implementations expose data and operations, never the live Task/host. */
 export interface TaskletControls {
 	/** Acceptance only: does not wait for or assert successful completion of the assignment. */
-	start(input: { title: string; prompt: string }): Promise<TaskletRecord>
+	start(input: { title: string; prompt: string } & import("../../TaskletConfiguration").TaskletStartOptions): Promise<TaskletRecord>
 	/** Explicit follow-up under the same handle/conversation; returns acceptance, not a result. */
 	resume(id: string, message?: string): Promise<TaskletRecord>
 	list(): TaskletInspection[]

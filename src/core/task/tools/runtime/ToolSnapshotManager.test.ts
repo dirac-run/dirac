@@ -11,6 +11,10 @@ import { ToolRegistry } from "../registry/ToolRegistry"
 import { refreshTaskTools } from "../registry/refreshToolRegistry"
 import { ToolSnapshotManager } from "./ToolSnapshotManager"
 import type { ToolSelectionPolicy } from "./ToolSelectionPolicy"
+import type { TaskConfig } from "../types/TaskConfig"
+import type { ToolExecutionEnvironment } from "../interfaces/ToolEnvironmentFactory"
+import type { ToolRequestSnapshot } from "./ToolSnapshot"
+import * as telemetry from "@/services/telemetry"
 
 function makeTool(id: string): DiscoveredTool {
 	return {
@@ -33,6 +37,7 @@ function createManager(
 	taskId = "task-id",
 	workspaceRoot = "/test-workspace",
 	selectionPolicy?: ToolSelectionPolicy,
+	options: Partial<ConstructorParameters<typeof ToolSnapshotManager>[0]> = {},
 ) {
 	return new ToolSnapshotManager({
 		createTaskConfig: () => ({}) as never,
@@ -41,6 +46,7 @@ function createManager(
 		getToggles: () => toggles,
 		getSelectionPolicy: () => selectionPolicy,
 		getActiveSkills: () => [],
+		...options,
 	})
 }
 
@@ -104,6 +110,116 @@ describe("ToolSnapshotManager task isolation", () => {
 		const deltaSnapshot = await delta.getSnapshotForRequest(context, { requestId: "delta", configurationRevision: 1 })
 		assert.deepEqual(exactSnapshot.inventoryEnabledTools.map((tool) => tool.id), ["beta"])
 		assert.deepEqual(deltaSnapshot.inventoryEnabledTools.map((tool) => tool.id), ["alpha"])
+	})
+
+	function assertToolNames(snapshot: ToolRequestSnapshot, expected: string[]) {
+		assert.deepEqual(snapshot.inventoryEnabledTools.map((tool) => tool.spec.name).sort(), expected)
+		assert.deepEqual(snapshot.promptVisibleSpecs.map((spec) => spec.name).sort(), expected)
+		assert.deepEqual(snapshot.nativeTools.map((tool) => {
+			assert.ok("name" in tool, "the fixture uses Anthropic native tools")
+			return tool.name
+		}).sort(), expected)
+		assert.deepEqual([...snapshot.executableToolNames].sort(), expected)
+		for (const name of ["alpha", "beta", "inspect_ast", "skill_tool"]) {
+			assert.equal(snapshot.coordinator.has(name), expected.includes(name), name)
+		}
+	}
+
+	it("leaves configured membership unchanged when allowedTools is omitted", async () => {
+		const snapshot = await createManager({ alpha: true, beta: true }).getSnapshotForRequest(context, {
+			requestId: "unrestricted", configurationRevision: 1,
+		})
+		assertToolNames(snapshot, ["alpha", "beta"])
+	})
+
+	it("restricts every request surface without enabling an allowed but disabled tool", async () => {
+		const snapshot = await createManager({ alpha: true, beta: false }, "task-id", "/test-workspace", undefined, {
+			allowedTools: ["beta"],
+		}).getSnapshotForRequest(context, { requestId: "disabled", configurationRevision: 1 })
+		assertToolNames(snapshot, [])
+		await assert.rejects(snapshot.coordinator.execute({} as TaskConfig, {
+			type: "tool_use", id: "disabled-beta", name: "beta", params: {}, isNativeToolCall: true,
+		}), /No modular tool registered for: beta/)
+	})
+
+	it("treats an explicit empty allowedTools list as no authorized tools", async () => {
+		const snapshot = await createManager({ alpha: true, beta: true }, "task-id", "/test-workspace", undefined, {
+			allowedTools: [],
+		}).getSnapshotForRequest(context, { requestId: "empty-scope", configurationRevision: 1 })
+		assertToolNames(snapshot, [])
+	})
+
+	it("applies allowedTools after invocation selection and does not mutate unrestricted snapshots", async () => {
+		const policy: ToolSelectionPolicy = { mode: "exact", toolIds: ["alpha", "beta"] }
+		const restricted = await createManager({ alpha: false, beta: true }, "task-id", "/test-workspace", policy, {
+			allowedTools: ["alpha"],
+		}).getSnapshotForRequest(context, { requestId: "restricted", configurationRevision: 1 })
+		const unrestricted = await createManager({ alpha: false, beta: true }, "task-id", "/test-workspace", policy)
+			.getSnapshotForRequest(context, { requestId: "unrestricted", configurationRevision: 1 })
+		assertToolNames(restricted, ["alpha"])
+		assertToolNames(unrestricted, ["alpha", "beta"])
+		assertToolNames(restricted, ["alpha"])
+	})
+
+	it("restricts skill-injected dependencies after activation as well as configured tools", async () => {
+		ToolRegistry.getInstance().registerBuiltin({
+			...makeTool("skill_tool"), exposure: { kind: "skill_only", authorizedSkillIds: ["fixture-skill"] },
+		})
+		for (const allowedTools of [["alpha"], ["alpha", "skill_tool"]]) {
+			const snapshot = await createManager({ alpha: true, beta: true }, "task-id", "/test-workspace", undefined, {
+				allowedTools,
+				getActiveSkills: () => [{
+					name: "fixture-skill", description: "Fixture", path: "/skills/fixture/SKILL.md", source: "builtin",
+					toolDependencies: ["skill_tool"],
+				}],
+			}).getSnapshotForRequest(context, { requestId: allowedTools.join(","), configurationRevision: 1 })
+			assert.deepEqual(snapshot.activeSkillIds, ["fixture-skill"])
+			assertToolNames(snapshot, allowedTools)
+		}
+	})
+
+	it("scopes operation schemas and rejects unauthorized operations through the request coordinator", async () => {
+		const processCall = sinon.stub().resolves("operation executed")
+		const spec = {
+			...makeTool("inspect_ast").spec,
+			parameters: [{ name: "operation", required: true, instruction: "AST inspection operation", enum: ["outline", "implementation"] }],
+		} as DiracToolSpec
+		ToolRegistry.getInstance().registerBuiltin({
+			...makeTool("inspect_ast"), spec,
+			factory: () => ({ spec: () => spec, supportedSurfaces: () => ["all"], processCall }),
+		})
+		const config = {
+			taskId: "task-id", ulid: "task-id", mode: "act", hooksEnabled: false,
+			vscodeTerminalExecutionMode: "backgroundExec", providerId: "anthropic",
+			model: { id: "test-model", info: {} }, taskState: { consecutiveMistakeCount: 0 },
+		} as TaskConfig
+		const environment = {
+			context: { save: sinon.stub().resolves() }, getCustomMetadata: () => ({}), getCreatedCards: () => [],
+		} as unknown as ToolExecutionEnvironment
+		sinon.stub(telemetry, "telemetryService").value({ captureToolUsage: sinon.stub() })
+		const snapshot = await createManager({ inspect_ast: true }, "task-id", "/test-workspace", undefined, {
+			allowedTools: ["inspect_ast:outline"], createTaskConfig: () => config,
+			environmentFactory: { create: () => environment },
+		}).getSnapshotForRequest(context, { requestId: "operations", configurationRevision: 1 })
+		assertToolNames(snapshot, ["inspect_ast"])
+		const scopedSpec = snapshot.promptVisibleSpecs[0]
+		assert.deepEqual(scopedSpec.parameters?.find((parameter) => parameter.name === "operation")?.enum, ["outline"])
+		assert.match(scopedSpec.description, /authorized only for operation: outline/)
+		const native = snapshot.nativeTools[0]
+		assert.ok("input_schema" in native)
+		const schema = native.input_schema as { properties: Record<string, { enum: string[] }> }
+		assert.deepEqual(schema.properties.operation.enum, ["outline"])
+		config.activeToolSnapshot = snapshot
+		for (const operation of ["outline", "implementation", undefined]) {
+			const result = await snapshot.coordinator.execute(config, {
+				type: "tool_use", id: `call-${operation}`, name: "inspect_ast", params: { operation }, isNativeToolCall: true,
+			})
+			if (operation === "outline") assert.equal(result, "operation executed")
+			else assert.match(String(result), /not authorized.*Allowed operations: outline/)
+		}
+		sinon.assert.calledOnce(processCall)
+		assert.deepEqual(processCall.firstCall.args[0], { operation: "outline" })
+		assert.deepEqual(spec.parameters?.[0].enum, ["outline", "implementation"], "registry specs remain unrestricted")
 	})
 
 	it("serializes process-global registry mutation into detached per-Task snapshots", async () => {

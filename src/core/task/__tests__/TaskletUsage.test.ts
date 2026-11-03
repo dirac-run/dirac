@@ -18,6 +18,7 @@ import { type Task, TaskletHost, type TaskletOwner, type TaskletTaskOptions, typ
 import { MessageStateHandler } from "../message-state"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import { TaskState } from "../TaskState"
+import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -63,7 +64,15 @@ describe("TaskletHost durable usage attribution", () => {
 	}
 
 	function newHost() {
-		const host = new TaskletHost(owner, {} as TaskletTaskOptions, constructed as unknown as typeof Task)
+		const options = {
+			workingConfiguration: createTaskWorkingConfiguration({
+				settings: { mode: "act" } as any,
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				workspaceConfiguration: {} as any,
+				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+			}),
+		} as TaskletTaskOptions
+		const host = new TaskletHost(owner, options, constructed as unknown as typeof Task)
 		hosts.push(host)
 		return host
 	}

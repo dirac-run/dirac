@@ -124,6 +124,8 @@ export class ToolExecutor {
 		private storageAddress?: TaskStorageAddress,
 		private getTaskletControls?: () => import("./tools/interfaces/IToolEnvironment").TaskletControls | undefined,
 		private onUtilityUsageRecorded?: () => void,
+		private readonly taskletAllowedTools?: readonly string[],
+		private readonly taskletAllowedSkillNames?: readonly string[],
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -132,6 +134,7 @@ export class ToolExecutor {
 			getWorkspaceRoot: () => this.workspaceManager?.getPrimaryRoot()?.path,
 			getToggles: () => this.requestRuntime().workingConfiguration.settings.toolToggles || {},
 			getSelectionPolicy: () => this.toolSelectionPolicy,
+			allowedTools: this.taskletAllowedTools,
 			getActiveSkills: () => {
 				const activeIds = new Set(this.taskState.activeSkillIds)
 				return this.taskState.availableSkills.filter((skill) => activeIds.has(skill.name))
@@ -415,6 +418,7 @@ export class ToolExecutor {
 				? (structuredClone(settings.utilityModelSelection) as ModelProviderSelection)
 				: undefined,
 			globalSkillsToggles: settings.globalSkillsToggles,
+			allowedSkillNames: this.taskletAllowedSkillNames,
 			localSkillsToggles: runtime.workingConfiguration.workspaceConfiguration.localSkillsToggles,
 			context: this.diracContext,
 			cwd: this.cwd,

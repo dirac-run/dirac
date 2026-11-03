@@ -16,6 +16,7 @@ export function buildSkillsTrait(config: TaskConfig): ISkillsTrait {
 			const globalToggles = config.globalSkillsToggles
 			const localToggles = config.localSkillsToggles
 			return providerSkills.filter(meetsHostCapabilityRequirement).filter((skill) => {
+				if (config.allowedSkillNames && !config.allowedSkillNames.includes(skill.name)) return false
 				if (!isSkillAvailableToTaskProfile(config.executionProfile, skill, config.isSubagentExecution)) return false
 				if (config.yoloModeToggled && skill.interactiveOnly) return false
 				if (skill.source === "builtin") return true

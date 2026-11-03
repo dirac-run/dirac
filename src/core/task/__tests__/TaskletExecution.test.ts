@@ -32,6 +32,9 @@ import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurat
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { createDefaultTextCondensationTemplateRegistry } from "@core/text-condensation/templates"
+import { AgentConfigLoader, type AgentBaseConfig } from "../tools/subagent/AgentConfigLoader"
+import * as skillsModule from "@core/context/instructions/user-instructions/skills"
+import type { DiracStorageMessage } from "@shared/messages/content"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
 
@@ -50,7 +53,7 @@ describe("Tasklet real Task execution", function () {
 	let requests: Request[]
 	let forbidden: sinon.SinonStub[]
 	let stateManager: StateManager
-	let nextTurn: ((mode: Mode) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense">) | undefined
+	let nextTurn: ((mode: Mode) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense" | "allowed_skill" | "excluded_skill">) | undefined
 
 	function rejectCall(name: string) {
 		const spy = sandbox.stub().callsFake(() => { throw new Error(`Tasklet escaped to ${name}`) })
@@ -118,11 +121,13 @@ describe("Tasklet real Task execution", function () {
 					yield {
 						type: "tool_calls", tool_call: {
 							call_id: `call-${requests.length}`, function: {
-								name: operation === "read_file" || operation === "execute_command" || operation === "condense" ? operation : "respond",
-								arguments: JSON.stringify(operation === "read_file" ? { paths: ["assignment.txt"] }
-									: operation === "execute_command" ? { commands: ["touch permission-bypass-marker"] }
-										: operation === "condense" ? { context: "Private continuation summary" }
-											: { operation, text: operation === "complete" ? "Private assignment complete." : "Private Plan analysis." }),
+								name: operation === "allowed_skill" || operation === "excluded_skill" ? "use_skill"
+									: operation === "read_file" || operation === "execute_command" || operation === "condense" ? operation : "respond",
+								arguments: JSON.stringify(operation === "allowed_skill" || operation === "excluded_skill" ? { skill_name: operation }
+									: operation === "read_file" ? { paths: ["assignment.txt"] }
+										: operation === "execute_command" ? { commands: ["touch permission-bypass-marker"] }
+											: operation === "condense" ? { context: "Private continuation summary" }
+												: { operation, text: operation === "complete" ? "Private assignment complete." : "Private Plan analysis." }),
 							}
 						}
 					}
@@ -219,13 +224,14 @@ describe("Tasklet real Task execution", function () {
 		return host.inspect(id)
 	}
 
-	function createHost(params = parameters()) {
+	function createHost(params = parameters(), getParentHistory?: TaskletTaskOptions["getParentHistory"]) {
 		const options: TaskletTaskOptions = {
 			controller: params.controller, cwd, stateManager, workingConfiguration: params.workingConfiguration,
 			shellIntegrationTimeout: params.shellIntegrationTimeout, terminalReuseEnabled: params.terminalReuseEnabled,
 			terminalOutputLineLimit: params.terminalOutputLineLimit, defaultTerminalProfile: params.defaultTerminalProfile,
 			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode, toolSelectionPolicy: params.toolSelectionPolicy,
 			pinnedContext: params.pinnedContext,
+			getParentHistory,
 		}
 		return new TaskletHost({
 			taskId: "root", executionProfile: "standalone",
@@ -235,6 +241,88 @@ describe("Tasklet real Task execution", function () {
 			hasPendingUserInput: () => false,
 		}, options)
 	}
+
+	for (const includeHistory of [undefined, false, true]) {
+		it(`starts a real Task with ${includeHistory === true ? "an independent parent history snapshot" : `no inherited history (${includeHistory})`}`, async () => {
+			const parentHistory: { messages: DiracStorageMessage[]; deletedRange?: [number, number] } = {
+				messages: [
+					{ role: "user", content: [{ type: "text", text: "PARENT_HISTORY_PRIVATE_CONTEXT" }] },
+					{ role: "assistant", content: [{ type: "text", text: "PARENT_HISTORY_PRIOR_ANSWER" }] },
+				],
+			}
+			const originalHistory = structuredClone(parentHistory)
+			const getParentHistory = sandbox.stub().returns(parentHistory)
+			const host = createHost(parameters(), getParentHistory)
+			try {
+				const child = await host.start({ title: "history", prompt: "CHILD_HISTORY_ASSIGNMENT", includeHistory })
+				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+				assert.deepEqual(parentHistory, originalHistory, "child tool results and completion must not mutate the parent")
+				assert.equal(getParentHistory.callCount, includeHistory === true ? 1 : 0)
+				assert.equal(child.configuration?.timeoutSeconds, 600)
+				for (const request of requests) {
+					const serialized = JSON.stringify(request.messages)
+					assert.equal(serialized.includes("PARENT_HISTORY_PRIVATE_CONTEXT"), includeHistory === true)
+					assert.equal(serialized.includes("PARENT_HISTORY_PRIOR_ANSWER"), includeHistory === true)
+					assert.match(serialized, /CHILD_HISTORY_ASSIGNMENT/)
+				}
+				assert.match(JSON.stringify(requests[1].messages), /PRIVATE_FILE_CONTENT/)
+				const transcript = await host.readTranscript(child.id)
+				assert.equal(JSON.stringify(transcript.conversation).includes("PARENT_HISTORY_PRIVATE_CONTEXT"), includeHistory === true)
+				assert.doesNotMatch(JSON.stringify(transcript.presentation), /PARENT_HISTORY_PRIVATE_CONTEXT/)
+				if (includeHistory === true) {
+					parentHistory.messages[0].content = "PARENT_HISTORY_REPLACED_AFTER_START"
+					await host.resume(child.id, "CHILD_HISTORY_FOLLOWUP")
+					assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+					assert.equal(getParentHistory.callCount, 1, "resume restores the child transcript, never recaptures parent history")
+					assert.match(JSON.stringify(requests[2].messages), /PARENT_HISTORY_PRIVATE_CONTEXT/)
+					assert.match(JSON.stringify(requests[2].messages), /PRIVATE_FILE_CONTENT/)
+					assert.match(JSON.stringify(requests[2].messages), /CHILD_HISTORY_FOLLOWUP/)
+					assert.doesNotMatch(JSON.stringify(requests[2].messages), /PARENT_HISTORY_REPLACED_AFTER_START/)
+				}
+			} finally {
+				await host.shutdown()
+			}
+		})
+	}
+
+	it("applies a named profile prompt, skills, model and tool scope to real provider requests", async () => {
+		const profile: AgentBaseConfig = {
+			name: "controlled-reviewer", description: "Controlled profile",
+			systemPrompt: "NAMED_PROFILE_PRIVATE_INSTRUCTIONS", skills: ["allowed_skill"],
+			tools: ["use_skill", "read_file"], modelId: "claude-sonnet-4-20250514",
+		}
+		const loader = AgentConfigLoader.getInstance()
+		sandbox.stub(loader, "ready").resolves()
+		sandbox.stub(loader, "getCachedConfig").withArgs(profile.name).returns(profile)
+		const skills = await Promise.all(["allowed_skill", "excluded_skill"].map(async (name) => {
+			const skillPath = path.join(directory, name, "SKILL.md")
+			await fs.mkdir(path.dirname(skillPath), { recursive: true })
+			await fs.writeFile(skillPath, `---\nname: ${name}\ndescription: Fixture skill\n---\n${name.toUpperCase()}_PRIVATE_INSTRUCTIONS\n`)
+			return { name, description: "Fixture skill", path: skillPath, source: "global" as const }
+		}))
+		sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves(skills)
+		const params = parameters()
+		params.toolSelectionPolicy = { mode: "exact", toolIds: ["respond", "use_skill", "read_file", "execute_command"] }
+		nextTurn = async () => requests.length === 1 ? "allowed_skill" : requests.length === 2 ? "excluded_skill" : "complete"
+		const host = createHost(params)
+		try {
+			const child = await host.start({ title: "profile", prompt: "PROFILE_ASSIGNMENT", agentName: profile.name, timeoutSeconds: 120 })
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.equal(requests.length, 3)
+			for (const request of requests) {
+				assert.equal(request.model, profile.modelId)
+				assert.match(request.systemPrompt, /NAMED_PROFILE_PRIVATE_INSTRUCTIONS/)
+				assert.match(request.systemPrompt, /PINNED_PRIVATE_CONSTRAINT/)
+				assert.match(request.systemPrompt, /120 seconds/)
+				assert.deepEqual(request.tools.sort(), ["read_file", "respond", "use_skill"])
+			}
+			assert.match(JSON.stringify(requests[1].messages), /ALLOWED_SKILL_PRIVATE_INSTRUCTIONS/)
+			assert.match(JSON.stringify(requests[2].messages), /Skill \\"excluded_skill\\" not found/)
+			assert.doesNotMatch(JSON.stringify(requests[2].messages), /EXCLUDED_SKILL_PRIVATE_INSTRUCTIONS/)
+		} finally {
+			await host.shutdown()
+		}
+	})
 
 	async function waitForInteraction(host: TaskletHost, id: string) {
 		const deadline = Date.now() + 5_000

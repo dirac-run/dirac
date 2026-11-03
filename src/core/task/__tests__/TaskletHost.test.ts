@@ -18,6 +18,8 @@ import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import { TaskletEscalationCleanupError } from "../TaskMessenger"
+import { AgentConfigLoader } from "../tools/subagent/AgentConfigLoader"
+import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -49,6 +51,17 @@ describe("TaskletHost asynchronous ownership", () => {
 	const approved = { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE }
 	const rejected = { action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }
 	const completed: TaskRunOutcome = { kind: "completed", response: "full result", completedAt: 123 }
+
+	function taskOptions(): TaskletTaskOptions {
+		return {
+			workingConfiguration: createTaskWorkingConfiguration({
+				settings: { mode: "act" } as any,
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				workspaceConfiguration: {} as any,
+				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+			}),
+		} as TaskletTaskOptions
+	}
 
 	function controlledTask() {
 		const outcome = deferred<TaskRunOutcome>()
@@ -87,7 +100,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		}
 		host = new TaskletHost(
 			owner,
-			{} as TaskletTaskOptions,
+			taskOptions(),
 			constructed as unknown as typeof taskModule.Task,
 		)
 	})
@@ -139,6 +152,74 @@ describe("TaskletHost asynchronous ownership", () => {
 		const interaction = host.inspect(child.id).interactions[0]
 		return { child, counterparty, cancellation, waiting, requestId: interaction.id }
 	}
+
+	it("persists generic configuration with the default timeout and forwards it to the Task", async () => {
+		const record = await host.start({ title: "Generic child", prompt: "Work" })
+		assert.deepEqual(record.configuration, { includeHistory: false, timeoutSeconds: 600 })
+		assert.deepEqual((await saved(record.id)).configuration, record.configuration)
+		const params = constructed.firstCall.args[0] as taskModule.TaskParams
+		assert.deepEqual(params.tasklet!.configuration, record.configuration)
+		assert.equal(params.workingConfiguration.settings.mode, "act")
+		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, "claude-opus-4-20250514")
+	})
+
+	it("forwards named profile configuration and its model selection to the Task", async () => {
+		const profile = {
+			name: "reviewer", description: "Review an assignment", systemPrompt: "Review carefully.",
+			skills: ["review"], tools: ["read_file", "respond"], modelId: "claude-sonnet-5",
+		}
+		const getCachedConfig = sandbox.stub().withArgs("reviewer").returns(profile)
+		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => { }, getCachedConfig } as any)
+		const record = await host.start({ title: "Review", prompt: "Review this change", agentName: "reviewer", timeoutSeconds: 45 })
+		const params = constructed.firstCall.args[0] as taskModule.TaskParams
+		assert.deepEqual(params.tasklet!.configuration, record.configuration)
+		const { modelSelection, ...configuration } = record.configuration!
+		assert.deepEqual((await saved(record.id)).configuration, { ...configuration, modelSelection: { provider: "anthropic", modelId: profile.modelId } })
+		assert.deepEqual(configuration, {
+			name: profile.name, description: profile.description, systemPrompt: profile.systemPrompt,
+			skills: profile.skills, allowedTools: ["read_file", "respond"], includeHistory: false, timeoutSeconds: 45,
+		})
+		assert.equal(modelSelection?.provider, "anthropic")
+		assert.equal(modelSelection?.modelId, profile.modelId)
+		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, profile.modelId)
+	})
+
+	for (const includeHistory of [false, true]) {
+		it(`${includeHistory ? "snapshots" : "omits"} root history on start when includeHistory is ${includeHistory}`, async () => {
+			const history = { messages: [{ role: "user" as const, content: "Root context" }], deletedRange: [1, 2] as [number, number] }
+			const getParentHistory = sandbox.stub().returns(history)
+			host = new TaskletHost(owner, { ...taskOptions(), getParentHistory }, constructed as unknown as typeof taskModule.Task)
+			await host.start({ title: "History child", prompt: "Work", includeHistory, timeoutSeconds: 30 })
+			const params = constructed.firstCall.args[0] as taskModule.TaskParams
+			if (!includeHistory) {
+				sinon.assert.notCalled(getParentHistory)
+				assert.equal(params.tasklet!.initialHistory, undefined)
+				return
+			}
+			sinon.assert.calledOnce(getParentHistory)
+			assert.deepEqual(params.tasklet!.initialHistory, history)
+			history.messages[0].content = "Changed after delegation"
+			history.deletedRange[0] = 9
+			assert.deepEqual(params.tasklet!.initialHistory, {
+				messages: [{ role: "user", content: "Root context" }], deletedRange: [1, 2],
+			})
+		})
+	}
+
+	it("cancels an unfinished Task at its configured positive timeout", async () => {
+		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		const record = await host.start({ title: "Timed child", prompt: "Work", timeoutSeconds: 2 })
+		await clock.tickAsync(1999)
+		sinon.assert.notCalled(children[0].task.abortTask)
+		await clock.tickAsync(1)
+		sinon.assert.calledOnceWithExactly(children[0].task.abortTask, {
+			kind: "interrupted", reason: "Tasklet execution timed out after 2 seconds",
+		})
+		const stopped = await host.interrupt(record.id)
+		assert.equal(stopped.outcome?.kind, "interrupted")
+		assert.equal(stopped.outcomePersisted, true)
+		assert.equal(clock.countTimers(), 0)
+	})
 
 	it("resolves explicit authorized approval against detached operation data exactly once", async () => {
 		const input = request("permission-card")
@@ -416,7 +497,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const snapshot = host.inspect(first.id)
 		snapshot.prompt = "cannot mutate owner"
 		assert.equal(host.inspect(first.id).prompt, "first assignment")
-		const other = new TaskletHost({ ...owner, taskId: "other" }, {} as TaskletTaskOptions)
+		const other = new TaskletHost({ ...owner, taskId: "other" }, taskOptions())
 		assert.throws(() => other.inspect(first.id), /does not belong/)
 		await assert.rejects(other.steer(first.id, "wrong root"), /does not belong/)
 		await assert.rejects(other.interrupt(first.id), /does not belong/)
@@ -1331,10 +1412,10 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("rejects recursive/Goal ownership, invalid roots and empty assignments", async () => {
 		for (const executionProfile of ["tasklet", "goal_child", "goal_coordinator", "goal_followup"] as const) {
-			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, {} as TaskletTaskOptions), /ordinary root/)
+			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /ordinary root/)
 		}
 		assert.throws(
-			() => new TaskletHost({ ...owner, taskId: "../escape" }, {} as TaskletTaskOptions),
+			() => new TaskletHost({ ...owner, taskId: "../escape" }, taskOptions()),
 			/Invalid/,
 		)
 		await assert.rejects(host.start({ title: " ", prompt: "work" }), /non-empty/)
