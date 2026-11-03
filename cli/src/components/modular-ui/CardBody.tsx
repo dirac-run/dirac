@@ -1,12 +1,12 @@
-import { styles } from "../../constants/theme"
 import { RenderType } from "@shared/ExtensionMessage"
-import { cardBodyForDisplay } from "../../utils/card-body"
+import { Box, Text } from "ink"
 import React, { useMemo } from "react"
-import { Text, Box } from "ink"
-import { Diff } from "./Diff"
+import { styles } from "../../constants/theme"
+import { cardBodyForDisplay } from "../../utils/card-body"
+import { clipMarkdownLines, renderMarkdownLines } from "../../utils/markdown"
 import { linkifyPaths } from "../../utils/terminal-link"
 import { clipTextToWindow } from "../../utils/text-clipping"
-import { clipMarkdownLines, renderMarkdownLines } from "../../utils/markdown"
+import { Diff } from "./Diff"
 import { Markdown } from "./Markdown"
 
 interface CardBodyProps {
@@ -15,13 +15,22 @@ interface CardBodyProps {
 	renderType: RenderType
 	scrollOffset?: number
 	renderWidth?: number
+	stripLineAnchors?: boolean
 }
 
-export const CardBody: React.FC<CardBodyProps> = ({ body, maxLines, renderType, scrollOffset, renderWidth }) => {
-	const displayBody = cardBodyForDisplay(body, renderType)
+export const CardBody: React.FC<CardBodyProps> = ({
+	body,
+	maxLines,
+	renderType,
+	scrollOffset,
+	renderWidth,
+	stripLineAnchors = true,
+}) => {
+	const displayBody = stripLineAnchors ? cardBodyForDisplay(body, renderType) : (body ?? "")
 	const columns = Math.max(1, renderWidth ?? (process.stdout.columns || 80) - 6)
 	const markdownLines = useMemo(
-		() => renderType === "markdown" && maxLines ? renderMarkdownLines(displayBody, columns, styles.tool.body.color) : undefined,
+		() =>
+			renderType === "markdown" && maxLines ? renderMarkdownLines(displayBody, columns, styles.tool.body.color) : undefined,
 		[displayBody, columns, renderType, maxLines],
 	)
 	const { visibleText, hasMoreAbove, hasMoreBelow } = maxLines
@@ -47,7 +56,11 @@ export const CardBody: React.FC<CardBodyProps> = ({ body, maxLines, renderType, 
 function renderContent(body: string, renderType: RenderType, width: number): React.ReactNode {
 	switch (renderType) {
 		case "markdown":
-			return <Markdown color={styles.tool.body.color} width={width}>{body}</Markdown>
+			return (
+				<Markdown color={styles.tool.body.color} width={width}>
+					{body}
+				</Markdown>
+			)
 		case "diff":
 			return <Diff content={body} width={width} />
 		case "text":

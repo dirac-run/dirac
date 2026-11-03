@@ -203,7 +203,7 @@ Operations: `screen`, `write`, `paste`, `key`, `resize`, `wait`, `stop`. Their
 properties mirror the CLI flags; deadlines use `timeoutMs`, dimensions use `cols`
 and `rows`, and repeated keypresses use `count`. `startSession` also accepts
 `command`, `args`, `cwd`, `live`, `idleMs`, and `fixture` (`long-response` by default
-or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-file`).
+or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-file` / `tasklets`).
 
 ## Vim prompt editing regressions (#92)
 
@@ -212,6 +212,32 @@ or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-f
 ## Prompt recall regressions (#269)
 
 `node --test tests/e2e/cli/prompt-history.test.mjs` checks Ctrl+Up/Down recall against the built CLI, including initial and follow-up prompts, draft/cursor restoration, collapsed pastes, editing and explicit resubmission, completion-menu priority, Vim NORMAL, resizing, narrow layouts, and unchanged response scrolling. It also checks recall after `/clear` and a new CLI launch with the same isolated configuration, plus workspace isolation. The shortcut hint uses the existing muted footer row without adding terminal rows. The harness sends xterm modified arrows (`ESC [ 1 ; 5 A/B`); OS-level shortcuts must be configured to pass these bytes to the terminal. No live credentials are used.
+
+## Tasklet lifecycle and Agents panel
+
+After a fresh `npm run cli:build`, run the focused scenario with:
+
+```bash
+node --test tests/e2e/cli/tasklets.test.mjs
+```
+
+The opt-in `tasklets` fixture enables subagents only in its private configuration.
+It uses public native `use_subagents`, `tasklets`, and child `respond` calls through
+the real built CLI. Root/child requests are distinguished by tool availability and
+assignment markers, not global request ordering. Two siblings report progress and
+ask private parent-directed questions; the parent inspects them and voluntarily
+sleeps. The test opens `/agent` (singular), inspects/reopens previews without
+answering the questions, then submits user messages to wake the parent. It checks
+one completed sibling while the other remains waiting, parent answer delivery,
+retained results/transcripts, same-ID resume, and completed previews after reopening
+the persisted root in a new CLI process with the provider stopped.
+
+No live credentials, command execution, or workspace edits are requested by the
+model. The provider writes only a diagnostic `tasklet-fixture.jsonl` in the temporary
+workspace. Inspection waits are event-driven and bounded; root and child request
+budgets and the test deadline fail rather than run indefinitely. This scenario
+covers question resolution, not tool-permission escalation, child interruption,
+or restoring a still-running child. Keep the default isolated workspace.
 
 ## Lifecycle and artifacts
 

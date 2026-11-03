@@ -126,6 +126,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	const { isActive: isSpinnerActive, startTime: spinnerStartTime } = useIsSpinnerActive()
 	const ctrl = useMemo(() => controller || taskController, [controller, taskController])
 
+	const steeringSubmissionRef = useRef(false)
 	const resetComposerInputRef = useRef<() => void>(() => {})
 	const composerActionsRef = useRef<ComposerActions>({
 		handleAskShortcuts: () => false,
@@ -730,7 +731,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
 	const handleSubmit = useCallback(
 		async (text: string, images: string[]) => {
-			if (!ctrl || (!text.trim() && images.length === 0) || isProcessing) return
+			if (!ctrl || (!text.trim() && images.length === 0) || steeringSubmissionRef.current) return
+			const activeTask = ctrl.task
+			if (!taskState.goal && !pendingAsk && activeTask?.canAcceptSteeringMessage()) {
+				steeringSubmissionRef.current = true
+				setLastError(null)
+				try {
+					const expandedText = expandPastedTexts(text, pastedTexts).trim()
+					const validImages = await processImagePaths(images, footerStatus.workspacePath)
+					await activeTask.submitCardResponse(
+						"",
+						DiracAskResponse.MESSAGE,
+						expandedText,
+						validImages.length > 0 ? validImages : undefined,
+					)
+					resetInput()
+				} catch (error) {
+					reportInteractionError("Failed to send message", error)
+				} finally {
+					steeringSubmissionRef.current = false
+				}
+				return
+			}
+			if (isProcessing || (isSpinnerActive && !taskState.goal)) return
 			setLastError(null)
 			const goal = taskState.goal
 			const isGoalPassthrough =
@@ -816,6 +839,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			ctrl,
 			pastedTexts,
 			isProcessing,
+			isSpinnerActive,
 			setIsProcessing,
 			pendingAsk,
 			handleExit,

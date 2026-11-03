@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import type { Dispatch, SetStateAction } from "react"
 import { combineCardSequences } from "@shared/combineCardSequences"
-import { DiracMessageType, isFinalStatus, type TaskStatus } from "@shared/ExtensionMessage"
 import type { DiracMessage } from "@shared/ExtensionMessage"
-import { useTranscriptPartition } from "./useTranscriptPartition"
+import { DiracMessageType, isFinalStatus, type TaskStatus } from "@shared/ExtensionMessage"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
+import type { Dispatch, SetStateAction } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChatLayoutRows } from "../utils/chat-layout"
 import type { CardBodySuppressionPolicy } from "../utils/quiet-mode"
 import {
@@ -11,6 +11,7 @@ import {
 	estimateTimelineMessageBodyRows,
 	estimateTimelineMessageRows,
 } from "../utils/timeline-rows"
+import { useTranscriptPartition } from "./useTranscriptPartition"
 
 export type TimelineMessageKind = "card" | "markdown" | "reasoning" | "checkpoint"
 
@@ -105,12 +106,16 @@ export function useChatTimeline({
 			rowBudget: layoutRows.activeContentRows,
 			estimateRows,
 		},
+		{
+			key: (message) => (message.content.type === DiracMessageType.CARD ? message.content.card.id : message.id),
+			revision: (message) =>
+				message.content.type === DiracMessageType.CARD && readTaskletPresentation(message.content.card)
+					? JSON.stringify(message.content.card)
+					: undefined,
+		},
 	)
 
-	const staticItems = useMemo(
-		() => createStaticTimelineItems(staticPrefix, showHeader),
-		[staticPrefix, showHeader],
-	)
+	const staticItems = useMemo(() => createStaticTimelineItems(staticPrefix, showHeader), [staticPrefix, showHeader])
 
 	const dynamicPlan = useMemo(
 		() =>
@@ -141,10 +146,7 @@ export function prepareTranscriptMessages(messages: DiracMessage[]): DiracMessag
 	return combineCardSequences(transcriptMessages)
 }
 
-function createStaticTimelineItems(
-	staticMessages: DiracMessage[],
-	showHeader: boolean,
-): TimelineStaticItem[] {
+function createStaticTimelineItems(staticMessages: DiracMessage[], showHeader: boolean): TimelineStaticItem[] {
 	const items: TimelineStaticItem[] = []
 
 	if (showHeader) {
@@ -266,12 +268,12 @@ function createTurnSeparatedMessageItems(
 	const items: Array<TimelineMessageItem | TimelineBoundaryItem> = []
 	let hasRenderedMessage = false
 
-	for (const message of messages) {
+	for (const [index, message] of messages.entries()) {
 		if (hasRenderedMessage && startsNewChatTurn(message)) {
-			items.push({ key: `${keyPrefix}-turn-boundary-${message.id}`, type: "boundary" })
+			items.push({ key: `${keyPrefix}-turn-boundary-${index}-${message.id}`, type: "boundary" })
 		}
 
-		items.push(createMessageItem(message))
+		items.push({ ...createMessageItem(message), key: `${keyPrefix}-${index}-${message.id}` })
 		hasRenderedMessage = true
 	}
 

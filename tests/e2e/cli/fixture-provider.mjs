@@ -2,6 +2,7 @@ import { once } from "node:events"
 import { mkdir, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import path from "node:path"
+import { createTaskletFixture } from "./tasklet-fixture.mjs"
 
 export const LONG_RESPONSE = Array.from(
 	{ length: 80 },
@@ -39,7 +40,7 @@ export const MARKDOWN_RESPONSE = [
 	"[Approval documentation][approvals]",
 	"",
 	"```sh",
-	...Array.from({ length: 24 }, (_, line) => `echo \"Code ${String(line + 1).padStart(2, "0")}: **literal**\"`),
+	...Array.from({ length: 24 }, (_, line) => `echo "Code ${String(line + 1).padStart(2, "0")}: **literal**"`),
 	"```",
 	"",
 	"**Approval summary:** changes still need permission.",
@@ -83,10 +84,15 @@ function editFileArguments(completion) {
 
 /** Deterministic tool calls; all UI, provider parsing, task execution and storage remain real. */
 export async function startFixtureProvider(home, scenario = "long-response", workspace, vimMode = false) {
-	if (!["long-response", "long-plan", "markdown-plan", "markdown-response", "create-file", "edit-file"].includes(scenario)) {
+	if (
+		!["long-response", "long-plan", "markdown-plan", "markdown-response", "create-file", "edit-file", "tasklets"].includes(
+			scenario,
+		)
+	) {
 		throw new Error(`Unknown fixture: ${scenario}`)
 	}
 	if (scenario === "edit-file") await writeFile(path.join(workspace, EDIT_FILE_PATH), EDIT_FILE_CONTENT)
+	const taskletFixture = scenario === "tasklets" ? createTaskletFixture(workspace) : undefined
 	let requests = 0
 	const server = createServer(async (request, response) => {
 		try {
@@ -102,33 +108,37 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 			let body = ""
 			for await (const chunk of request) body += chunk
 			const completion = JSON.parse(body)
+			const taskletCall = await taskletFixture?.(completion)
 			const createFile = scenario === "create-file" && requests === 0
 			const readFile = scenario === "edit-file" && requests === 0
 			const editFile = scenario === "edit-file" && requests === 1
-			const toolName = createFile ? "write_to_file" : readFile ? "read_file" : editFile ? "edit_file" : "respond"
+			const toolName =
+				taskletCall?.name ?? (createFile ? "write_to_file" : readFile ? "read_file" : editFile ? "edit_file" : "respond")
 			const tool = completion.tools?.find((candidate) => candidate.function?.name === toolName)
 			if (!tool) throw new Error(`Fixture requires the native ${toolName} tool`)
-			const args = createFile
-				? { path: CREATE_FILE_PATH, content: CREATE_FILE_CONTENT }
-				: readFile
-					? { paths: [EDIT_FILE_PATH], include_anchors: true }
-					: editFile
-						? editFileArguments(completion)
-						: {
-								operation: scenario === "long-plan" || scenario === "markdown-plan" ? "plan" : "complete",
-								text:
-									scenario === "markdown-response"
-										? MARKDOWN_RESPONSE
-										: scenario === "markdown-plan"
-											? MARKDOWN_PLAN
-											: scenario === "long-plan"
-												? LONG_PLAN
-												: scenario === "edit-file"
-													? "File edit fixture completed."
-													: scenario === "create-file"
-														? "File creation fixture completed."
-														: LONG_RESPONSE,
-							}
+			const args = taskletCall
+				? taskletCall.args
+				: createFile
+					? { path: CREATE_FILE_PATH, content: CREATE_FILE_CONTENT }
+					: readFile
+						? { paths: [EDIT_FILE_PATH], include_anchors: true }
+						: editFile
+							? editFileArguments(completion)
+							: {
+									operation: scenario === "long-plan" || scenario === "markdown-plan" ? "plan" : "complete",
+									text:
+										scenario === "markdown-response"
+											? MARKDOWN_RESPONSE
+											: scenario === "markdown-plan"
+												? MARKDOWN_PLAN
+												: scenario === "long-plan"
+													? LONG_PLAN
+													: scenario === "edit-file"
+														? "File edit fixture completed."
+														: scenario === "create-file"
+															? "File creation fixture completed."
+															: LONG_RESPONSE,
+								}
 			requests++
 			const chunk = (delta, finishReason = null) => ({
 				id: `tui-completion-${requests}`,
@@ -188,6 +198,7 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 			utilityModelUseCases: { condense: false, approval: false, earlyExit: false },
 			cliTerminalColorMode: "dark",
 			cliVimMode: vimMode,
+			...(scenario === "tasklets" ? { subagentsEnabled: true, enableCheckpointsSetting: false } : {}),
 		}),
 	)
 	await writeFile(path.join(dataDir, "secrets.json"), JSON.stringify({ openAiApiKey: "local-tui-fixture" }), { mode: 0o600 })

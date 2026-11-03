@@ -1,18 +1,13 @@
 /**
- * Maintains an append-only split between terminal scrollback and the live UI.
- *
- * Finalized messages remain in the live suffix while they still contribute rows
- * to the rolling viewport. Once capacity pressure pushes a complete finalized
- * message above the viewport, the watermark advances and Ink prints that message
- * exactly once through <Static>.
+ * Prints finalized, displaced snapshots exactly once through Ink's <Static>.
+ * Revisable items can return to the live tail without rewriting terminal history.
  */
-
 import { useRef } from "react"
 
 export interface TranscriptPartition<T> {
-	/** Immutable transcript prefix, printed exactly once by Ink's <Static>. */
+	/** Immutable snapshots, appended only after leaving the live viewport. */
 	staticPrefix: T[]
-	/** Uncommitted suffix from which the bounded live viewport is projected. */
+	/** Uncommitted items from which the bounded live viewport is projected. */
 	dynamicTail: T[]
 }
 
@@ -21,39 +16,52 @@ interface TranscriptRetention<T> {
 	estimateRows: (message: T) => number
 }
 
+export interface TranscriptRevisions<T> {
+	key: (message: T) => string
+	/** Only changed revisions of committed items re-enter the live tail. */
+	revision: (message: T) => unknown
+}
+
 export function useTranscriptPartition<T>(
 	messages: T[],
 	isMutable: (message: T) => boolean,
 	conversationKey?: string,
 	retention?: TranscriptRetention<T>,
+	revisions?: TranscriptRevisions<T>,
 ): TranscriptPartition<T> {
-	const conversationKeyRef = useRef(conversationKey)
-	const staticWatermarkRef = useRef(0)
-	const staticPrefixRef = useRef<T[]>([])
-	const dynamicTailRef = useRef<T[]>([])
-
-	const targetWatermark = calculateTargetWatermark(messages, isMutable, retention)
-	if (conversationKeyRef.current !== conversationKey) {
-		conversationKeyRef.current = conversationKey
-		staticWatermarkRef.current = targetWatermark
-	} else {
-		staticWatermarkRef.current = Math.max(staticWatermarkRef.current, targetWatermark)
+	const stateRef = useRef({
+		conversationKey,
+		staticPrefix: [] as T[],
+		committed: new Map<string | number, unknown>(),
+		tailKeys: [] as Array<string | number>,
+		dynamicTail: [] as T[],
+	})
+	if (stateRef.current.conversationKey !== conversationKey) {
+		stateRef.current = { conversationKey, staticPrefix: [], committed: new Map(), tailKeys: [], dynamicTail: [] }
 	}
-
-	const staticPrefix = messages.slice(0, staticWatermarkRef.current)
-	const dynamicTail = messages.slice(staticWatermarkRef.current)
-
-	if (!sameItems(staticPrefix, staticPrefixRef.current)) {
-		staticPrefixRef.current = staticPrefix
+	const state = stateRef.current
+	const current = new Map(messages.map((message, index) => [revisions?.key(message) ?? index, message]))
+	const pendingKeys = new Set(state.tailKeys)
+	for (const [key, message] of current) {
+		if (pendingKeys.has(key)) continue
+		if (state.committed.has(key) && Object.is(state.committed.get(key), revisions?.revision(message))) continue
+		state.tailKeys.push(key)
+		pendingKeys.add(key)
 	}
-	if (!sameItems(dynamicTail, dynamicTailRef.current)) {
-		dynamicTailRef.current = dynamicTail
+	state.tailKeys = state.tailKeys.filter((key) => current.has(key))
+	const tail = state.tailKeys.map((key) => current.get(key)!)
+	const target = calculateTargetWatermark(tail, isMutable, retention)
+	if (target > 0) {
+		const snapshots = tail.slice(0, target)
+		for (let index = 0; index < target; index++) {
+			state.committed.set(state.tailKeys[index], revisions?.revision(snapshots[index]))
+		}
+		state.staticPrefix = [...state.staticPrefix, ...snapshots]
+		state.tailKeys = state.tailKeys.slice(target)
 	}
-
-	return {
-		staticPrefix: staticPrefixRef.current,
-		dynamicTail: dynamicTailRef.current,
-	}
+	const dynamicTail = tail.slice(target)
+	if (!sameItems(dynamicTail, state.dynamicTail)) state.dynamicTail = dynamicTail
+	return { staticPrefix: state.staticPrefix, dynamicTail: state.dynamicTail }
 }
 
 function calculateTargetWatermark<T>(
@@ -69,11 +77,7 @@ function calculateTargetWatermark<T>(
 	return Math.min(mutableBoundary, visibleBoundary)
 }
 
-export function calculateVisibleBoundary<T>(
-	messages: T[],
-	rowBudget: number,
-	estimateRows: (message: T) => number,
-): number {
+export function calculateVisibleBoundary<T>(messages: T[], rowBudget: number, estimateRows: (message: T) => number): number {
 	if (messages.length === 0) return 0
 
 	let remainingRows = Math.max(1, rowBudget)

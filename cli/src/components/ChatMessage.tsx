@@ -6,22 +6,20 @@
  * - ⎿ for tool results (indented)
  */
 
-import { DiracMessage, DiracMessageType, SteeringTranscriptStatus } from "@shared/ExtensionMessage"
 import { isTaskCompletionCard } from "@shared/cardIdentity"
+import { DiracMessage, DiracMessageType, SteeringTranscriptStatus } from "@shared/ExtensionMessage"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import React from "react"
-import { Markdown } from "./modular-ui/Markdown"
-import { styles, theme } from "../constants/theme"
 import { getModeColor } from "../constants/colors"
+import { styles, theme } from "../constants/theme"
 import { useTerminalSize } from "../hooks/useTerminalSize"
+import { cardDisplayBody } from "../utils/card-body"
+import { clipTextToLastVisualLines, summarizeFirstLine } from "../utils/text-clipping"
+import { Markdown } from "./modular-ui/Markdown"
 import { ModularCard } from "./modular-ui/ModularCard"
 import { TaskCompletionCard } from "./modular-ui/TaskCompletionCard"
-import {
-	clipTextToLastVisualLines,
-	summarizeFirstLine,
-} from "../utils/text-clipping"
-import { cardBodyForDisplay } from "../utils/card-body"
 
 /**
  * Add "(Tab)" hint after "Act mode" mentions in plain text.
@@ -72,7 +70,6 @@ const DotRow: React.FC<{ children: React.ReactNode; color?: string; flashing?: b
 
 const REASONING_VISIBLE_LINES = 3
 
-
 const ReasoningMessage: React.FC<{
 	content: string
 	isStreaming: boolean
@@ -97,9 +94,7 @@ const ReasoningMessage: React.FC<{
 			<Text>
 				<Text color={theme.muted}>⎿ </Text>
 				<Text color={reasoningAccent}>Thinking</Text>
-				<Text color={theme.muted}>
-					{summarizeFirstLine(content) ? ` · ${summarizeFirstLine(content)}` : ""}
-				</Text>
+				<Text color={theme.muted}>{summarizeFirstLine(content) ? ` · ${summarizeFirstLine(content)}` : ""}</Text>
 			</Text>
 		)
 	}
@@ -108,10 +103,12 @@ const ReasoningMessage: React.FC<{
 		<React.Fragment>
 			<DotRow color={reasoningAccent} prefix="◇">
 				<Box flexDirection="column">
-					<Text color={reasoningAccent}>
-						Thinking
-					</Text>
-					<Markdown color={reasoningColor} width={Math.max(1, columns - 4)} maxLines={display === "tail" ? REASONING_VISIBLE_LINES : undefined} padLines>
+					<Text color={reasoningAccent}>Thinking</Text>
+					<Markdown
+						color={reasoningColor}
+						maxLines={display === "tail" ? REASONING_VISIBLE_LINES : undefined}
+						padLines
+						width={Math.max(1, columns - 4)}>
 						{content}
 					</Markdown>
 				</Box>
@@ -120,8 +117,6 @@ const ReasoningMessage: React.FC<{
 		</React.Fragment>
 	)
 }
-
-
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
 	message,
@@ -154,9 +149,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 							columns={columns}
 							compact={compact}
 							content={message.content.content}
-							mode={mode}
-							isStreaming={isStreaming}
 							display={reasoningDisplay}
+							isStreaming={isStreaming}
+							mode={mode}
 							showReasoning={showReasoning}
 						/>
 					)
@@ -181,7 +176,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 				return (
 					<React.Fragment>
 						<DotRow color={roleColor} prefix={markdownRole === "user" ? "❯" : undefined}>
-							<Markdown color={contentColor} width={Math.max(1, columns - 4)}>{message.content.content}</Markdown>
+							<Markdown color={contentColor} width={Math.max(1, columns - 4)}>
+								{message.content.content}
+							</Markdown>
 						</DotRow>
 						{message.content.steering && (
 							<DotRow color={theme.muted} prefix=" ">
@@ -196,7 +193,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 					</React.Fragment>
 				)
 			case DiracMessageType.CARD:
-				if (isTaskCompletionCard(message.content.card)) {
+				if (!readTaskletPresentation(message.content.card) && isTaskCompletionCard(message.content.card)) {
 					return (
 						<TaskCompletionCard
 							card={message.content.card}
@@ -219,7 +216,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 				return null
 			default:
 				return (
-					<Box borderStyle="single" borderColor={theme.error} paddingX={1}>
+					<Box borderColor={theme.error} borderStyle="single" paddingX={1}>
 						<Text color={theme.error}>Protocol Error: Unknown primitive type "{(message.content as any).type}"</Text>
 					</Box>
 				)
@@ -229,7 +226,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 	// If we reach here, it means the message doesn't have the 'content' field,
 	// which should be impossible according to the new DiracMessage type.
 	return (
-		<Box borderStyle="single" borderColor={theme.error} paddingX={1}>
+		<Box borderColor={theme.error} borderStyle="single" paddingX={1}>
 			<Text color={theme.error}>Protocol Error: Message is missing "content" field.</Text>
 		</Box>
 	)
@@ -244,20 +241,14 @@ function renderBoundedMarkdownMessage(
 	const color = role === "user" ? styles.conversation.user.color : styles.conversation.assistant.color
 	return (
 		<DotRow color={color} prefix={role === "user" ? "❯" : undefined}>
-			<Markdown color={color} width={Math.max(1, columns - 4)} maxLines={maxLines} scrollOffset={scrollOffset}>
+			<Markdown color={color} maxLines={maxLines} scrollOffset={scrollOffset} width={Math.max(1, columns - 4)}>
 				{content.content}
 			</Markdown>
 		</DotRow>
 	)
 }
 
-
-function renderTimelineTail(
-	message: DiracMessage,
-	maxLines: number,
-	columns: number,
-	suppressCardBody = false,
-): React.ReactNode {
+function renderTimelineTail(message: DiracMessage, maxLines: number, columns: number, suppressCardBody = false): React.ReactNode {
 	const width = Math.max(1, columns - 4)
 	if (message.content.type === DiracMessageType.MARKDOWN) {
 		const color = message.content.isReasoning
@@ -265,15 +256,32 @@ function renderTimelineTail(
 			: message.content.role === "user"
 				? styles.conversation.user.color
 				: styles.conversation.assistant.color
-		return <Markdown color={color} width={width} maxLines={maxLines}>{message.content.content}</Markdown>
+		return (
+			<Markdown color={color} maxLines={maxLines} width={width}>
+				{message.content.content}
+			</Markdown>
+		)
 	}
 
 	if (message.content.type === DiracMessageType.CARD) {
+		if (readTaskletPresentation(message.content.card)) {
+			return (
+				<ModularCard
+					card={message.content.card}
+					maxBodyLines={Math.max(1, maxLines - 2)}
+					suppressBody={suppressCardBody || maxLines <= 2}
+				/>
+			)
+		}
 		if (suppressCardBody) return <ModularCard card={message.content.card} suppressBody />
-		const body = cardBodyForDisplay(message.content.card.body, message.content.card.renderType)
+		const body = cardDisplayBody(message.content.card)
 		if (body) {
 			if (message.content.card.renderType === "markdown") {
-				return <Markdown color={styles.tool.body.color} width={Math.max(1, columns - 6)} maxLines={maxLines}>{body}</Markdown>
+				return (
+					<Markdown color={styles.tool.body.color} maxLines={maxLines} width={Math.max(1, columns - 6)}>
+						{body}
+					</Markdown>
+				)
 			}
 			return <Text {...styles.tool.body}>{clipTextToLastVisualLines(body, maxLines, width, "")}</Text>
 		}
@@ -282,8 +290,6 @@ function renderTimelineTail(
 
 	return null
 }
-
-
 
 /**
  * Information
@@ -340,8 +346,8 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
 							</Box>
 						)}
 					<ChatMessage
-						isStreaming={idx === messagesToShow.length - 1 && isLastStreaming}
 						activeVoiceStreamId={activeVoiceStreamId}
+						isStreaming={idx === messagesToShow.length - 1 && isLastStreaming}
 						message={msg}
 						mode={mode}
 						showReasoning={showReasoning}

@@ -1,5 +1,10 @@
 import { DiracMessage, DiracMessageType, SubagentExecutionStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { formatSubagentTrajectory, readSubagentCardData, type SubagentCardData } from "@shared/subagents"
+import {
+	readTaskletPresentation,
+	type TaskletPresentationData,
+	type TaskletPresentationStatus,
+} from "@shared/taskletPresentation"
 import { Box, Text, useInput } from "ink"
 import React, { useEffect, useMemo, useState } from "react"
 import { theme } from "../constants/theme"
@@ -18,10 +23,10 @@ interface AgentPanelContentProps {
 }
 
 interface AgentListItem {
-	id: number
+	id: number | string
 	name: string
 	taskTitle?: string
-	status: SubagentExecutionStatus | TaskStatus.IDLE
+	status: SubagentExecutionStatus | TaskStatus.IDLE | TaskletPresentationStatus
 	prompt: string
 	transcript: string
 }
@@ -31,7 +36,7 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ messages, 
 	const { columns, rows } = useTerminalSize()
 	const panelRows = availableRows ?? rows
 	const [selectedIndex, setSelectedIndex] = useState(0)
-	const [openAgentId, setOpenAgentId] = useState<number>()
+	const [openAgentId, setOpenAgentId] = useState<number | string>()
 	const [scrollOffset, setScrollOffset] = useState(0)
 	const agents = useMemo(() => buildAgentList(messages, taskStatus), [messages, taskStatus])
 	const openAgent = agents.find((agent) => agent.id === openAgentId)
@@ -126,6 +131,13 @@ export function buildAgentList(messages: DiracMessage[], taskStatus?: TaskStatus
 		.map((message) => readSubagentCardData(message.content.type === DiracMessageType.CARD ? message.content.card : undefined))
 		.filter((agent): agent is SubagentCardData => agent !== undefined)
 		.sort((left, right) => left.id - right.id)
+	const tasklets = messages
+		.flatMap((message) => {
+			if (message.content.type !== DiracMessageType.CARD) return []
+			const tasklet = readTaskletPresentation(message.content.card)
+			return tasklet ? [tasklet] : []
+		})
+		.sort((left, right) => left.createdAt - right.createdAt)
 
 	return [
 		{
@@ -143,13 +155,18 @@ export function buildAgentList(messages: DiracMessage[], taskStatus?: TaskStatus
 			prompt: agent.prompt,
 			transcript: formatSubagentTrajectory(agent),
 		})),
+		...tasklets.map((tasklet) => ({
+			id: tasklet.taskletId,
+			name: `Tasklet ${tasklet.taskletId}`,
+			taskTitle: tasklet.title,
+			status: tasklet.status,
+			prompt: tasklet.prompt,
+			transcript: formatTaskletPreview(tasklet),
+		})),
 	]
 }
 
-export function formatAgentLabel(
-	agent: Pick<AgentListItem, "name" | "taskTitle">,
-	maxLength?: number,
-): string {
+export function formatAgentLabel(agent: Pick<AgentListItem, "name" | "taskTitle">, maxLength?: number): string {
 	const label = agent.taskTitle ? `${agent.name}: ${agent.taskTitle}` : agent.name
 	if (maxLength === undefined || label.length <= maxLength) return label
 	if (maxLength === 1) return "…"
@@ -170,7 +187,11 @@ function formatMainTranscript(messages: DiracMessage[]): string {
 					const speaker = message.content.role === userRole ? "User" : "Dirac"
 					return [`${speaker}: ${message.content.content}`]
 				}
-				if (message.content.type === DiracMessageType.CARD && !readSubagentCardData(message.content.card)) {
+				if (
+					message.content.type === DiracMessageType.CARD &&
+					!readSubagentCardData(message.content.card) &&
+					!readTaskletPresentation(message.content.card)
+				) {
 					return [
 						`Tool: ${message.content.card.header}${message.content.card.body ? `\n${message.content.card.body}` : ""}`,
 					]
@@ -179,6 +200,20 @@ function formatMainTranscript(messages: DiracMessage[]): string {
 			})
 			.join("\n\n") || "No activity yet."
 	)
+}
+
+function formatTaskletPreview(tasklet: TaskletPresentationData): string {
+	return [
+		`Tasklet ${tasklet.taskletId} · ${tasklet.status}`,
+		`Assignment\n${tasklet.prompt}`,
+		tasklet.result === undefined ? undefined : `Result preview\n${tasklet.result}`,
+		tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
+		tasklet.communications.length ? `Parent-directed communication\n${tasklet.communications.join("\n\n")}` : undefined,
+		tasklet.activity.length ? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}` : undefined,
+		"Display preview only; the parent can inspect full results and transcript with tasklets.",
+	]
+		.filter(Boolean)
+		.join("\n\n")
 }
 
 function mainAgentStatus(status?: TaskStatus): SubagentExecutionStatus | TaskStatus.IDLE {

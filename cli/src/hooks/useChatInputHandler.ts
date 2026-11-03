@@ -458,16 +458,13 @@ export function useChatInputHandler({
 			toggleMode()
 			return
 		}
-		if (
-			key.return &&
-			!key.shift &&
-			!key.meta &&
-			input !== "\n" &&
-			!inMentionMode &&
-			(!isSpinnerActive || goalStatus !== undefined) &&
-			!isProcessing
-		) {
-			if (executeStandaloneLocalSlashCommand(currentTextInput, localSlashCommandContext)) {
+		if (key.return && !key.shift && !key.meta && input !== "\n" && !inMentionMode) {
+			// Runtime eligibility belongs to handleSubmit, which can accept input while a root sleeps.
+			if (
+				(!isSpinnerActive || goalStatus !== undefined) &&
+				!isProcessing &&
+				executeStandaloneLocalSlashCommand(currentTextInput, localSlashCommandContext)
+			) {
 				setSelectedSlashIndex(0)
 				setSlashMenuDismissed(true)
 				return
