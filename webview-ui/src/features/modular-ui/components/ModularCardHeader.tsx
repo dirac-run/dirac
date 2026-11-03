@@ -1,18 +1,19 @@
 import { Card, CardStatus, isFinalStatus } from "@shared/ExtensionMessage"
-import { readSubagentCardData } from "@shared/subagents"
 import { StringRequest } from "@shared/proto/dirac/common"
 import { extractFirstPath } from "@shared/string"
-import { cn } from "@/lib/utils"
-import { Badge } from "@/shared/ui/badge"
-import { FileServiceClient } from "@/shared/api/grpc-client"
+import { readSubagentCardData } from "@shared/subagents"
+import { readTaskletPresentation, type TaskletPresentationStatus } from "@shared/taskletPresentation"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { DynamicIcon } from "lucide-react/dynamic"
+import React, { useEffect, useMemo, useState } from "react"
+import { cn } from "@/lib/utils"
+import { FileServiceClient } from "@/shared/api/grpc-client"
+import { Badge } from "@/shared/ui/badge"
 import { CARD_DECORATORS } from "../decorators"
+import { getStatusTextColorClass } from "../utils/cardUtils"
+import { ArchitectureNavigation } from "./ArchitectureNavigation"
 import { CardStatusIcon } from "./CardStatusIcon"
 import { SubagentAvatar } from "./SubagentAvatar"
-import { ArchitectureNavigation } from "./ArchitectureNavigation"
-import { getStatusTextColorClass } from "../utils/cardUtils"
-import React, { useEffect, useMemo, useState } from "react"
 
 interface ModularCardHeaderProps {
 	card: Card
@@ -22,6 +23,14 @@ interface ModularCardHeaderProps {
 	onAction?: (value: string) => void
 }
 
+const TASKLET_STATUS_PRESENTATION: Record<TaskletPresentationStatus, { label: string; status: CardStatus }> = {
+	running: { label: "Running", status: CardStatus.RUNNING },
+	waiting: { label: "Waiting for parent", status: CardStatus.WAITING_FOR_INPUT },
+	completed: { label: "Completed", status: CardStatus.SUCCESS },
+	failed: { label: "Failed", status: CardStatus.ERROR },
+	interrupted: { label: "Interrupted", status: CardStatus.CANCELLED },
+}
+
 export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	card,
 	contentId,
@@ -29,32 +38,40 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	onToggleCollapse,
 	onAction,
 }) => {
-	const { header, icon, status } = card
+	const tasklet = readTaskletPresentation(card)
+	const isTaskletCard = card.rawInput?.isTasklet === true
+	const taskletStatus = tasklet ? TASKLET_STATUS_PRESENTATION[tasklet.status] : undefined
+	const header = tasklet ? `${tasklet.taskletId} · ${tasklet.title}` : card.header
+	const status = taskletStatus?.status ?? (isTaskletCard ? CardStatus.PENDING : card.status)
 	const isTerminal = isFinalStatus(status)
-	const subagentData = readSubagentCardData(card)
-	const isSubagentCard = subagentData !== undefined
+	const subagentData = isTaskletCard ? undefined : readSubagentCardData(card)
+	const isAgentCard = tasklet !== undefined || subagentData !== undefined
+	const startTime = tasklet?.createdAt ?? card.startTime
 	const [currentTime, setCurrentTime] = useState(() => Date.now())
 	const filePath = getCardFilePath(card)
-	const decorators = useMemo(() => CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card)), [card])
+	const decorators = useMemo(
+		() => (isTaskletCard ? [] : CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card))),
+		[card, isTaskletCard],
+	)
 	const iconSizeClass = "size-3.5"
 	const elapsedTime = getSubagentCardElapsedTime(card, currentTime)
 
 	useEffect(() => {
-		if (!isSubagentCard || isTerminal || card.startTime === undefined) return
+		if (!isAgentCard || isTerminal || startTime === undefined) return
 
 		setCurrentTime(Date.now())
 		const timer = setInterval(() => setCurrentTime(Date.now()), 1_000)
 		return () => clearInterval(timer)
-	}, [card.startTime, isSubagentCard, isTerminal])
+	}, [startTime, isAgentCard, isTerminal])
 
 	return (
 		<div
-			data-terminal={isTerminal}
 			className={cn(
 				"modular-card-header flex min-w-0 items-center gap-1.5 text-base leading-5",
 				isCollapsed ? "px-1.5 py-1" : "px-2.5 py-1.5",
 				isTerminal && "opacity-70",
-			)}>
+			)}
+			data-terminal={isTerminal}>
 			<button
 				aria-controls={contentId}
 				aria-expanded={!isCollapsed}
@@ -62,13 +79,17 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				onClick={onToggleCollapse}
 				title={isCollapsed ? `Expand ${header}` : `Collapse ${header}`}
 				type="button">
+				{tasklet && <SubagentAvatar agentId={tasklet.taskletId} agentName={tasklet.title} />}
 				{subagentData && <SubagentAvatar agentId={subagentData.id} agentName={subagentData.name} />}
 
-				<span className="shrink-0 leading-none" aria-hidden="true">
-					{icon ? (
-						<DynamicIcon name={icon as any} className={cn(iconSizeClass, getStatusTextColorClass(status))} />
+				<span aria-hidden="true" className="shrink-0 leading-none">
+					{!isTaskletCard && card.icon ? (
+						<DynamicIcon
+							className={cn(iconSizeClass, getStatusTextColorClass(status))}
+							name={card.icon as React.ComponentProps<typeof DynamicIcon>["name"]}
+						/>
 					) : (
-						<CardStatusIcon status={status} className={iconSizeClass} />
+						<CardStatusIcon className={iconSizeClass} status={status} />
 					)}
 				</span>
 
@@ -77,23 +98,32 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				</span>
 
 				{elapsedTime && (
-					<span aria-label={`Subagent runtime ${elapsedTime}`} className="shrink-0 font-mono text-xs font-normal text-muted-foreground">
+					<span
+						aria-label={`${isTaskletCard ? "Tasklet" : "Subagent"} runtime ${elapsedTime}`}
+						className="shrink-0 font-mono text-xs font-normal text-muted-foreground"
+						role="timer">
 						{elapsedTime}
 					</span>
 				)}
 
-				{status === CardStatus.WAITING_FOR_INPUT && (
-					<Badge variant="warning" className="shrink-0 px-1.5 py-0 text-xs leading-4">
+				{taskletStatus ? (
+					<Badge
+						className="shrink-0 px-1.5 py-0 text-xs leading-4"
+						variant={tasklet?.status === "waiting" ? "warning" : "outline"}>
+						{taskletStatus.label}
+					</Badge>
+				) : !isTaskletCard && status === CardStatus.WAITING_FOR_INPUT ? (
+					<Badge className="shrink-0 px-1.5 py-0 text-xs leading-4" variant="warning">
 						Awaiting Input
 					</Badge>
-				)}
+				) : null}
 
-				<span className="shrink-0 opacity-60 leading-none" aria-hidden="true">
+				<span aria-hidden="true" className="shrink-0 opacity-60 leading-none">
 					{isCollapsed ? <ChevronRightIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
 				</span>
 			</button>
 
-			{card.architectureReference && <ArchitectureNavigation selection={card.architectureReference} />}
+			{!isTaskletCard && card.architectureReference && <ArchitectureNavigation selection={card.architectureReference} />}
 			{filePath && !decorators.some((decorator) => decorator.renderHeaderActions) && (
 				<button
 					aria-label={`Open ${filePath}`}
@@ -112,15 +142,20 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	)
 }
 export function getCardFilePath(card: Card): string | undefined {
+	if (card.rawInput?.isTasklet === true) return undefined
 	return card.locations?.[0]?.path ?? extractFirstPath(card.header) ?? undefined
 }
 
-
 export function getSubagentCardElapsedTime(card: Card, now = Date.now()): string | undefined {
-	if (!readSubagentCardData(card) || card.startTime === undefined) return undefined
+	const tasklet = readTaskletPresentation(card)
+	if (card.rawInput?.isTasklet === true && !tasklet) return undefined
+	const startTime = tasklet?.createdAt ?? card.startTime
+	if ((!tasklet && !readSubagentCardData(card)) || startTime === undefined) return undefined
 
-	const stopTime = isFinalStatus(card.status) ? (card.endTime ?? now) : now
-	const elapsedSeconds = Math.max(0, Math.floor((stopTime - card.startTime) / 1_000))
+	const isTerminal = tasklet ? tasklet.status !== "running" && tasklet.status !== "waiting" : isFinalStatus(card.status)
+	const stopTime = isTerminal ? card.endTime : now
+	if (stopTime === undefined) return undefined
+	const elapsedSeconds = Math.max(0, Math.floor((stopTime - startTime) / 1_000))
 	const minutes = Math.floor(elapsedSeconds / 60)
 	const seconds = elapsedSeconds % 60
 	return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`

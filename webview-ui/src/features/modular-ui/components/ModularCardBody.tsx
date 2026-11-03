@@ -1,9 +1,10 @@
 import { Card } from "@shared/ExtensionMessage"
 import { formatSubagentTrajectory, readSubagentCardData } from "@shared/subagents"
-import { CARD_DECORATORS } from "../decorators"
-import { CardContent } from "./CardContent"
-import { CardActions } from "./CardActions"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
 import React, { useMemo } from "react"
+import { CARD_DECORATORS } from "../decorators"
+import { CardActions } from "./CardActions"
+import { CardContent } from "./CardContent"
 
 interface ModularCardBodyProps {
 	card: Card
@@ -15,6 +16,28 @@ interface ModularCardBodyProps {
 export const SUBAGENT_CARD_MAX_HEIGHT_PX = 320
 
 export function resolveCardBodyPresentation(card: Card): { body?: string; maxHeight?: number } {
+	const tasklet = readTaskletPresentation(card)
+	if (card.rawInput?.isTasklet === true) {
+		return {
+			body: tasklet
+				? [
+						`Assignment\n${tasklet.prompt}`,
+						tasklet.result === undefined ? undefined : `Result preview\n${tasklet.result}`,
+						tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
+						tasklet.communications.length
+							? `Parent-directed communication\n${tasklet.communications.join("\n\n")}`
+							: undefined,
+						tasklet.activity.length
+							? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}`
+							: undefined,
+						"Display preview only; the parent can inspect full results and transcript with tasklets.",
+					]
+						.filter(Boolean)
+						.join("\n\n")
+				: card.body,
+			maxHeight: SUBAGENT_CARD_MAX_HEIGHT_PX,
+		}
+	}
 	const subagentData = readSubagentCardData(card)
 	if (!subagentData) return { body: card.body, maxHeight: card.maxHeight }
 	return {
@@ -25,7 +48,11 @@ export function resolveCardBodyPresentation(card: Card): { body?: string; maxHei
 
 export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive, onAction, scrollRef }) => {
 	const { renderType } = card
-	const decorators = useMemo(() => CARD_DECORATORS.filter((d) => d.shouldApply(card)), [card])
+	const isTaskletCard = card.rawInput?.isTasklet === true
+	const decorators = useMemo(
+		() => (isTaskletCard ? [] : CARD_DECORATORS.filter((d) => d.shouldApply(card))),
+		[card, isTaskletCard],
+	)
 	const presentation = useMemo(() => resolveCardBodyPresentation(card), [card])
 
 	// Find the first decorator that provides a body wrapper
@@ -39,8 +66,8 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 			<CardContent
 				body={presentation.body}
 				messageId={card.id}
-				renderType={renderType}
-				streaming={card.status === "running" && presentation.body === card.body}
+				renderType={isTaskletCard ? "text" : renderType}
+				streaming={!isTaskletCard && card.status === "running" && presentation.body === card.body}
 			/>
 		</div>
 	)
@@ -53,7 +80,7 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 				<React.Fragment key={d.id}>{d.renderFooterExtra?.(card, onAction, isActive)}</React.Fragment>
 			))}
 
-			{!suppressDefaultActions && <CardActions card={card} isActive={isActive} onAction={onAction} />}
+			{!isTaskletCard && !suppressDefaultActions && <CardActions card={card} isActive={isActive} onAction={onAction} />}
 		</div>
 	)
 }
