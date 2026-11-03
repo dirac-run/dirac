@@ -536,6 +536,171 @@ describe("TaskletsTool public controls", () => {
 		}
 	})
 
+	/** Integrated cutover acceptance: real dispatch/host/storage, controlled child engines and usage snapshots; no live provider or UI. */
+	it("composes generic/named startup, parent supervision and durable same-ID reopening without truncating results or double accounting", async () => {
+		await projectRoot()
+		constructed.callsFake((params: TaskParams) => {
+			if (params.task === "Constructor fails") throw new Error("Controlled startup failure")
+			const child = controlledTask(params)
+			children.push(child)
+			return child.task
+		})
+		const batch = await spawn([
+			{ task_title: "Question child", prompt: "Ask before proceeding" },
+			null,
+			{ task_title: "Failed startup", prompt: "Constructor fails" },
+			{ task_title: "Independent sibling", prompt: "Keep making progress" },
+		])
+		assert.deepEqual(batch.subagents.map(({ accepted }) => accepted), [true, false, false, true])
+		assert.match(batch.subagents[1].error!, /must be an object/)
+		const failedId = batch.subagents[2].id!
+		assert.ok(isTaskletId(failedId))
+		assert.equal(batch.subagents[2].error, "Controlled startup failure")
+		assert.equal((await inspect(failedId)).outcome?.kind, "failed")
+		const questionId = acceptedId(batch)
+		const siblingId = acceptedId(batch, 3)
+		const namedId = acceptedId(await spawn([{ task_title: "Named permission", prompt: "Request parent permission" }], "subagent_research"))
+		const child = (id: string) => [...children].reverse().find((entry) => entry.params.taskId === id)!
+		assert.equal(cards[0].status, CardStatus.ERROR)
+		assert.equal(cards[1].status, CardStatus.SUCCESS)
+		assert.equal(children.length, 3)
+		for (const id of [questionId, siblingId, namedId]) {
+			assert.equal((await inspect(id)).outcome, undefined, "Both spawn interfaces return before controlled execution finishes")
+			sinon.assert.notCalled(child(id).task.retirePersistence)
+		}
+		assert.equal((await inspect(namedId)).configuration?.name, "Research")
+
+		const question = registerInteraction(child(questionId), "composed-question")
+		const permission = registerInteraction(child(namedId), "composed-permission", true)
+		await resolve(questionId, question.requestId, "answer", { answer: "Use the current implementation" })
+		assert.equal((await question.waiting).text, "Use the current implementation")
+		sinon.assert.notCalled(owner.authorizePermission)
+		assert.deepEqual(await resolve(namedId, permission.requestId, "approve"), { status: "requires_user_approval" })
+		const entered = deferred<void>()
+		const user = deferred<typeof approved>()
+		owner.escalateInteraction.callsFake(() => { entered.resolve(); return user.promise })
+		const escalating = resolve(namedId, permission.requestId, "escalate")
+		await entered.promise
+		assert.equal((await inspect(namedId)).interactions[0].status, "pending")
+		assert.deepEqual(owner.escalateInteraction.firstCall.args[0], { id: namedId, title: "Named permission" })
+		const sleeping = call<TaskletWakeResult>({ operation: "sleep", tasklet_ids: [siblingId] })
+		await inspect(siblingId) // Ensure the public sleep dispatch has registered its waiter.
+		assert.equal(host.isSleeping, true)
+		await child(siblingId).params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "Sibling progresses during escalation" })
+		const wake = await sleeping
+		assert.equal(wake.reason, "event")
+		if (wake.reason !== "event") assert.fail("Expected sibling communication")
+		assert.equal(wake.taskletId, siblingId)
+		assert.equal((await inspect(namedId)).interactions[0].status, "pending")
+		assert.equal((await inspect(siblingId)).outcome, undefined)
+		user.resolve(approved)
+		assert.deepEqual(await escalating, { status: "resolved" })
+		assert.deepEqual(await permission.waiting, approved)
+		sinon.assert.calledTwice(owner.assertPermissionAllowed)
+
+		const usage: TaskletUsageSnapshot = {
+			primary: { tokensIn: 100, tokensOut: 20, cost: 1, reasoningTokens: 3 },
+			utility: { tokensIn: 10, tokensOut: 2, cost: 0.25, reasoningTokens: 1 },
+		}
+		const expectedUsage = new Map([[questionId, usage], [namedId, usage]])
+		function recordUsage(id: string, snapshot: TaskletUsageSnapshot) {
+			child(id).params.tasklet!.recordUsage!(snapshot)
+			child(id).params.tasklet!.recordUsage!(snapshot)
+		}
+		async function assertAccounting() {
+			const messages = rootMessages!.getDiracMessages()
+			const contributions = messages.flatMap((message) => message.content.type === DiracMessageType.CARD
+				? [getTaskletUsage(message.content.card)].filter((entry) => entry !== undefined) : [])
+			assert.deepEqual(contributions.map(({ taskletId }) => taskletId).sort(), [...expectedUsage.keys()].sort())
+			const totals = [...expectedUsage.values()].map(taskletUsageTotal)
+			const metrics = getApiMetrics(messages)
+			assert.equal(metrics.totalTokensIn, totals.reduce((sum, value) => sum + value.tokensIn, 0))
+			assert.equal(metrics.totalTokensOut, totals.reduce((sum, value) => sum + value.tokensOut, 0))
+			assert.equal(metrics.totalCost, totals.reduce((sum, value) => sum + value.cost, 0))
+			assert.equal(metrics.totalReasoningTokens, totals.reduce((sum, value) => sum + value.reasoningTokens, 0))
+			const records = await loadTaskletRecords("root")
+			for (const [id, snapshot] of expectedUsage) {
+				assert.deepEqual(records.find((record) => record.id === id)!.usage, snapshot, "Durable primary/Utility split is retained")
+				assert.deepEqual(contributions.find((entry) => entry.taskletId === id), { source: "tasklet", taskletId: id, ...taskletUsageTotal(snapshot) })
+			}
+		}
+		for (const id of expectedUsage.keys()) recordUsage(id, usage)
+		await child(namedId).params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.COMPLETE, text: fullText })
+		child(namedId).outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })
+		// Join controlled settlement through a public control; spawn itself never joins.
+		assert.equal((await call<TaskletInspection>({ operation: "interrupt", tasklet_id: namedId })).outcome?.kind, "completed")
+		const delivery = await host.prepareEventDelivery()
+		assert.ok(delivery)
+		const preview = delivery.content.map(({ text }) => text).join("\n")
+		assert.match(preview, /preview truncated/)
+		assert.equal(preview.includes("END-OF-FULL-CONTENT"), false)
+		assert.equal(presentation(namedId).data.result!.includes("END-OF-FULL-CONTENT"), false)
+		await delivery.acknowledge()
+		const interrupted = await call<TaskletInspection>({ operation: "interrupt", tasklet_id: questionId, message: "Pause only this child" })
+		assert.equal(interrupted.outcome?.kind, "interrupted")
+		sinon.assert.notCalled(child(siblingId).task.abortTask)
+		assert.equal((await inspect(siblingId)).outcome, undefined)
+		await assertAccounting()
+		const identities = new Map((await call<TaskletInspection[]>({ operation: "list" })).map((record) => [record.id, record.conversationUlid]))
+
+		async function reconstructRoot() {
+			await host.shutdown()
+			await rootMessages!.saveDiracMessagesAndUpdateHistory()
+			await rootMessages!.retirePersistence()
+			const saved = await getSavedPresentationHistory("root")
+			rootMessages = new MessageStateHandler({
+				taskId: "root", ulid: "root-conversation", taskState: new TaskState(), updateTaskHistory: async () => [],
+			})
+			rootMessages.setDiracMessages(saved.messages, saved.lastOffset)
+			host = new TaskletHost(owner, options, constructed as unknown as typeof Task)
+			await host.reconstruct()
+			await host.reconcileRootProjection()
+			await host.reconcileRootProjection() // Reconciliation replaces contributions, never adds another charge.
+			await assertAccounting()
+		}
+		await reconstructRoot()
+		assert.equal(children.length, 3, "History restoration starts no child engines")
+		assert.equal((await inspect(siblingId)).outcome?.kind, "interrupted", "Root shutdown settles the still-active sibling")
+		assert.equal((await inspect(questionId)).outcome?.kind, "interrupted")
+		const completed = await inspect(namedId)
+		assert.deepEqual(completed.outcome, { kind: "completed", response: fullText, completedAt: 123 })
+		assert.equal(completed.responses.at(-1)!.text, fullText)
+		const transcript = await call<TaskletTranscript>({ operation: "transcript", tasklet_id: namedId })
+		assert.deepEqual(transcript, { conversation: child(namedId).conversation, presentation: child(namedId).presentation })
+
+		const increased: TaskletUsageSnapshot = {
+			primary: { tokensIn: 150, tokensOut: 30, cost: 1.5, reasoningTokens: 5 },
+			utility: { tokensIn: 30, tokensOut: 6, cost: 0.75, reasoningTokens: 2 },
+		}
+		for (const id of [questionId, namedId]) {
+			const resumed = await call<TaskletInspection>({ operation: "resume", tasklet_id: id, message: "Explicit follow-up" })
+			assert.equal(resumed.id, id)
+			assert.equal(resumed.conversationUlid, identities.get(id))
+			assert.equal(resumed.outcome, undefined)
+			assert.deepEqual(child(id).params.tasklet!.usage, usage, "Reopened engine receives lifetime primary/Utility baseline")
+			sinon.assert.notCalled(child(id).task.startTask)
+			sinon.assert.calledOnceWithExactly(child(id).task.resumeTaskFromHistory, undefined, { taskletResumeMessage: "Explicit follow-up" })
+			if (id === namedId) assert.equal((await inspect(id)).configuration?.name, "Research")
+			recordUsage(id, usage) // Re-reporting restored lifetime usage is not new spend.
+			await assertAccounting()
+			recordUsage(id, increased) // Controlled engine reports cumulative lifetime usage, not a per-run delta.
+			expectedUsage.set(id, increased)
+			child(id).outcome.resolve({ kind: "completed", response: fullText, completedAt: 125 })
+			assert.equal((await call<TaskletInspection>({ operation: "interrupt", tasklet_id: id })).outcome?.kind, "completed")
+			await assertAccounting()
+		}
+		await reconstructRoot()
+		assert.equal(children.length, 5, "A second restoration does not replay explicitly reopened runs")
+		const retained = await call<TaskletInspection[]>({ operation: "list" })
+		assert.deepEqual(new Map(retained.map((record) => [record.id, record.conversationUlid])), identities)
+		for (const record of retained) {
+			assert.equal(record.conversationUlid, identities.get(record.id))
+			assert.equal(record.outcomePersisted, true)
+		}
+		assert.deepEqual(await call({ operation: "transcript", tasklet_id: namedId }), transcript)
+		sinon.assert.notCalled(legacyRun)
+	})
+
 	it("accounts public spawn usage only through replaceable host snapshots, not the former batch result path", async () => {
 		await projectRoot()
 		const id = acceptedId(await spawn([{ task_title: "Account once", prompt: "Use primary and Utility" }]))

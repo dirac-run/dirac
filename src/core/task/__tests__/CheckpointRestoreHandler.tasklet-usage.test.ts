@@ -10,6 +10,7 @@ import { TaskState } from "@core/task/TaskState"
 import { CardStatus, DiracMessageType, type DiracApiReqInfo, type DiracMessage } from "@shared/ExtensionMessage"
 import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
+import { createTaskletPresentationCard, readTaskletPresentation, type TaskletPresentationData } from "@shared/taskletPresentation"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
@@ -40,6 +41,14 @@ function usageMessage(taskletId: string, cost: number): DiracMessage {
 				},
 			},
 		},
+	}
+}
+
+function presentationData(taskletId: string, status: TaskletPresentationData["status"]): TaskletPresentationData {
+	return {
+		taskletId, title: "Shared display title", prompt: `Assignment for ${taskletId}`, createdAt: 1, status,
+		result: `${taskletId}: ${status}`, communications: [`Parent update: ${status}`], activity: [`Activity: ${status}`],
+		usage: { cost: 99, tokensIn: 990, tokensOut: 99, reasoningTokens: 99 },
 	}
 }
 
@@ -112,6 +121,7 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 		})
 		await messages.addToDiracMessages(apiMessage("before", 2))
 		await messages.addToDiracMessages(usageMessage("first", 1))
+		await messages.upsertTaskletPresentation(presentationData("first", "running"))
 		await messages.addToDiracMessages({
 			id: "checkpoint",
 			ts: 1,
@@ -124,6 +134,8 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 		if (latest.content.type === "card") await messages.patchCardById("usage-first", latest.content.card)
 		await messages.addToDiracMessages(usageMessage("second", 11))
 		await messages.addToDiracMessages(apiMessage("after", 3))
+		await messages.upsertTaskletPresentation(presentationData("first", "completed"))
+		await messages.upsertTaskletPresentation(presentationData("second", "waiting"))
 		await messages.flushPendingWrites()
 	}
 
@@ -175,6 +187,33 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 	})
 
 	for (const restoreType of ["task", "taskAndWorkspace"] as const) {
+		it(`${restoreType}: preserves latest presentation per stable child through truncation and repeated restore`, async () => {
+			await seedCheckpoint()
+			const latest = { ...presentationData("first", "failed"), result: "Latest result under a different card ID" }
+			const card = { ...createTaskletPresentationCard(latest), id: "alternate-presentation-first" }
+			await messages.addToDiracMessages({ id: card.id, ts: 2, content: { type: DiracMessageType.CARD, card } })
+			await messages.flushPendingWrites()
+			const before = getApiMetrics(messages.getDiracMessages())
+			assert.equal(before.totalCost, 23)
+
+			for (let attempt = 0; attempt < 2; attempt++) {
+				// After cutover, a fresh projection must replace the retained alternate identity too.
+				const expectedFirst = attempt === 0 ? latest : presentationData("first", "interrupted")
+				if (attempt === 1) await messages.upsertTaskletPresentation(expectedFirst)
+				assert.deepEqual(await restore.restoreCheckpoint("checkpoint", restoreType), {})
+				const saved = (await getSavedPresentationHistory("root")).messages
+				const presentations = saved.flatMap((message) => {
+					if (message.content.type !== "card") return []
+					const data = readTaskletPresentation(message.content.card)
+					return data ? [data] : []
+				})
+				assert.deepEqual(presentations, [expectedFirst, presentationData("second", "waiting")])
+				assert.deepEqual(getApiMetrics(saved), before)
+				assert.equal(saved.filter((message) => message.content.type === "card" && getTaskletUsage(message.content.card)).length, 2)
+				assert.equal(upsertApiStatus.getCall(attempt).args[0].cost, 3)
+			}
+		})
+
 		it(`${restoreType}: retains live and archived retry cost/reasoning through repeated restoration`, async () => {
 			await messages.addToDiracMessages({
 				id: "checkpoint", ts: 1, lastCheckpointHash: "checkpoint-hash",

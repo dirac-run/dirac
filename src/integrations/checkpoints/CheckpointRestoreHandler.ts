@@ -6,6 +6,7 @@ import { combineCardSequences } from "@shared/combineCardSequences"
 import { DiracMessage } from "@shared/ExtensionMessage"
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
+import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { DiracCheckpointRestore } from "@shared/WebviewMessage"
 import { HostProvider } from "@/hosts/host-provider"
 import { getErrorMessage } from "@/shared/errors"
@@ -280,17 +281,22 @@ export class CheckpointRestoreHandler {
 				}
 				// Checkpoint history can contain older snapshots of these same stable children.
 				const currentTaskletUsage = new Map<string, DiracMessage>()
+				const currentTaskletPresentation = new Map<string, DiracMessage>()
 				for (const currentMessage of diracMessages) {
 					if (currentMessage.content.type !== "card") continue
 					const usage = getTaskletUsage(currentMessage.content.card)
 					if (usage) currentTaskletUsage.set(usage.taskletId, currentMessage)
+					const presentation = readTaskletPresentation(currentMessage.content.card)
+					if (presentation) currentTaskletPresentation.set(presentation.taskletId, currentMessage)
 				}
 				const restoredMessages = newDiracMessages.filter((restoredMessage) => {
 					if (restoredMessage.content.type !== "card") return true
 					const usage = getTaskletUsage(restoredMessage.content.card)
-					return !usage || !currentTaskletUsage.has(usage.taskletId)
+					if (usage && currentTaskletUsage.has(usage.taskletId)) return false
+					const presentation = readTaskletPresentation(restoredMessage.content.card)
+					return !presentation || !currentTaskletPresentation.has(presentation.taskletId)
 				})
-				restoredMessages.push(...currentTaskletUsage.values())
+				restoredMessages.push(...currentTaskletUsage.values(), ...currentTaskletPresentation.values())
 				await this.services.messageStateHandler.overwriteDiracMessages(restoredMessages)
 
 				await this.callbacks.taskMessenger.upsertApiStatus({

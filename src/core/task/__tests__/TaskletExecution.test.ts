@@ -576,6 +576,153 @@ describe("Tasklet real Task execution", function () {
 		})
 	}
 
+	it("dispatches public provider tasklet calls through real parent and child Tasks", async () => {
+		const modelPresets = await import("@core/models/modelProviderPresets")
+		sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+		const fullResult = `PUBLIC_RESULT_START ${"private detail ".repeat(1000)} PUBLIC_RESULT_END`
+		let releaseChild!: () => void
+		const childGate = new Promise<void>((resolve) => { releaseChild = resolve })
+		let releaseCompletion!: () => void
+		const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve })
+		let childAnswered!: () => void
+		const answerReceived = new Promise<void>((resolve) => { childAnswered = resolve })
+		let childId = ""
+		let questionId = ""
+		let handlerNumber = 0
+		const turns = [0, 0]
+		const parentInputs: string[] = []
+
+		async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
+			let timer!: ReturnType<typeof setTimeout>
+			try {
+				return await Promise.race([
+					promise,
+					new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}; turns: ${turns}`)), 5_000) }),
+				])
+			} finally {
+				clearTimeout(timer)
+			}
+		}
+
+		function toolOutput(messages: DiracStorageMessage[], callId: string): string {
+			const result = messages.flatMap((message) => typeof message.content === "string" ? [] : message.content)
+				.find((block) => block.type === "tool_result" && block.tool_use_id === callId)
+			assert.ok(result?.type === "tool_result", `Missing public tool result ${callId}`)
+			return typeof result.content === "string" ? result.content
+				: (result.content ?? []).map((block) => block.type === "text" ? block.text : "").join("\n")
+		}
+
+		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
+		buildApi.callsFake(() => {
+			const role = handlerNumber++
+			assert.ok(role < 2, "Both engines must be real Tasks, with no replacement child")
+			return {
+				getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				async *createMessage(_systemPrompt, messages, tools): ApiStream {
+					const turn = ++turns[role]
+					const history = messages as DiracStorageMessage[]
+					const serialized = JSON.stringify(history)
+					const advertised = (tools ?? []).map((tool) => (tool as { name: string }).name)
+					let name = "respond"
+					let args: Record<string, unknown> = { operation: "complete", text: fullResult }
+					if (role === 0) {
+						assert.ok(turn <= 6, "Unexpected parent retry or request after completion")
+						parentInputs.push(serialized)
+						assert.ok(advertised.includes("use_subagents") && advertised.includes("tasklets"))
+						assert.doesNotMatch(serialized, /PRIVATE_FILE_CONTENT|taskletEventIds/)
+						if (turn < 6) assert.doesNotMatch(serialized, /PUBLIC_RESULT_END/)
+						if (turn === 1) {
+							name = "use_subagents"
+							args = { subagents: [{ task_title: "Public question worker", prompt: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully" }] }
+						} else if (turn === 2) {
+							const accepted = JSON.parse(toolOutput(history, "public-0-1")).subagents
+							assert.equal(accepted.length, 1)
+							assert.equal(accepted[0].accepted, true)
+							assert.equal(accepted[0].outcome, undefined, "Acceptance precedes assignment completion")
+							childId = accepted[0].id
+							assert.match(childId, /^tasklet_[0-9a-f-]{36}$/)
+							assert.deepEqual(root.taskletHost!.listActive(), [{ id: childId, title: "Public question worker" }])
+							releaseChild()
+							await waitForInteraction(root.taskletHost!, childId)
+							args = { operation: "complete", text: "Premature public completion" }
+						} else if (turn === 3) {
+							assert.match(toolOutput(history, "public-0-2"), /Active tasklets:/)
+							assert.ok(toolOutput(history, "public-0-2").includes(childId))
+							const communication = history.flatMap((message) => typeof message.content === "string" ? [] : message.content)
+								.find((block) => block.type === "text" && block.text.includes('[Tasklet communication:') && block.text.includes('"type":"interaction"'))
+							assert.ok(communication?.type === "text", "Question must reach the parent provider, not an internal control callback")
+							assert.match(communication.text, /PUBLIC_CHILD_QUESTION/)
+							assert.ok(communication.text.includes(childId))
+							questionId = JSON.parse(communication.text.slice(communication.text.indexOf("\n") + 1)).request.id
+							assert.ok(questionId)
+							name = "tasklets"
+							args = { operation: "resolve", tasklet_id: childId, request_id: questionId, resolution: "answer", answer: "PUBLIC_PARENT_ANSWER" }
+						} else if (turn === 4) {
+							assert.deepEqual(JSON.parse(toolOutput(history, "public-0-3")), { status: "resolved" })
+							await bounded(answerReceived, "Child did not receive the public answer")
+							releaseCompletion()
+							assert.equal((await waitForOutcome(root.taskletHost!, childId)).outcome?.kind, "completed")
+							args = { operation: "progress", text: "Inspect the retained result next" }
+						} else if (turn === 5) {
+							assert.match(serialized, /PUBLIC_RESULT_START/)
+							assert.match(serialized, /preview truncated/)
+							name = "tasklets"
+							args = { operation: "inspect", tasklet_id: childId }
+						} else {
+							const inspection = JSON.parse(toolOutput(history, "public-0-5"))
+							assert.equal(inspection.id, childId, "Public inspection retains the accepted stable ID")
+							assert.equal(inspection.outcome.kind, "completed")
+							assert.equal(inspection.responses.at(-1).text, fullResult, "Explicit inspect returns the unabridged result")
+							assert.equal(inspection.interactions[0].id, questionId)
+							assert.equal(inspection.interactions[0].status, "resolved")
+							args = { operation: "complete", text: "Public supervision complete" }
+						}
+					} else {
+						assert.ok(turn <= 3, "Unexpected child request")
+						assert.ok(!advertised.includes("use_subagents") && !advertised.includes("tasklets"))
+						if (turn === 1) {
+							await childGate
+							name = "read_file"
+							args = { paths: ["assignment.txt"] }
+						} else if (turn === 2) {
+							assert.match(serialized, /PRIVATE_FILE_CONTENT/)
+							args = { operation: "question", text: "PUBLIC_CHILD_QUESTION" }
+						} else {
+							assert.match(serialized, /PUBLIC_PARENT_ANSWER/)
+							childAnswered()
+							await completionGate
+						}
+					}
+					assert.ok(advertised.includes(name), `Provider call ${name} must be advertised`)
+					yield { type: "tool_calls", tool_call: { call_id: `public-${role}-${turn}`, function: { id: `public-${role}-${turn}`, name, arguments: JSON.stringify(args) } } }
+					yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+				},
+			} satisfies ApiHandler
+		})
+		const params = parameters()
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "use_subagents", "tasklets"] },
+			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
+			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		// Only skip the user follow-up wait; tool discovery, dispatch and both engines are real.
+		sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+		const run = root.startTask("Supervise a worker through public tools")
+		try {
+			assert.equal((await bounded(run, "Public provider supervision did not complete")).kind, "completed")
+			assert.deepEqual(turns, [6, 3])
+			assert.equal(handlerNumber, 2)
+			assert.deepEqual(root.taskletHost!.listActive(), [])
+			assert.equal(parentInputs.length, 6)
+		} finally {
+			releaseChild()
+			releaseCompletion()
+			await root.abortTask()
+			await run
+		}
+	})
+
 	it("delivers questions and bounded results to an executing parent through environment controls while a sibling runs", async () => {
 		const { SurfaceToolEnvironmentFactory } = await import("../tools/adapters/SurfaceAdapter")
 		const surface = new SurfaceToolEnvironmentFactory()
