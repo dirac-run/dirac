@@ -1,5 +1,5 @@
 import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
-import { saveTaskletEvents, saveTaskletRecord, type TaskletRecord } from "@core/storage/taskStorage"
+import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRecord, type TaskletRecord, type TaskletEvent } from "@core/storage/taskStorage"
 import { createTaskletId } from "@shared/taskletId"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
@@ -120,7 +120,6 @@ export type {
 export type ToolResponse = DiracToolResponseContent
 
 import type { TaskCounterparty, TaskInteractionRequest } from "./types/task-messenger"
-import type { ResponseArguments } from "@shared/responseTool"
 
 /** Private owner bindings; a tasklet never falls back to foreground publication. */
 export interface TaskletExecutionBindings {
@@ -854,6 +853,7 @@ export class Task {
 				if (!host) return undefined
 				return {
 					start: (input) => host.start(input),
+					resume: (id, message) => host.resume(id, message),
 					list: () => host.list(),
 					inspect: (id) => host.inspect(id),
 					readTranscript: (id) => host.readTranscript(id),
@@ -1257,6 +1257,7 @@ export class Task {
 
 	public async resumeTaskFromHistory(onRestored?: () => void, options: ResumeTaskOptions = {}): Promise<TaskRunOutcome> {
 		return this.runTaskLifecycle(async () => {
+			await this.taskletHost?.reconstruct()
 			await this.toolExecutor.refreshToolsForTask()
 			return this.lifecycleManager.resumeTaskFromHistory(onRestored, options)
 		})
@@ -1588,13 +1589,6 @@ interface PendingTaskletInteraction {
 	retire: () => void
 }
 
-interface TaskletEvent {
-	id: string
-	taskletId: string
-	createdAt: number
-	deliveredAt?: number
-	communication: { type: "response"; response: ResponseArguments } | { type: "interaction"; request: TaskletInteraction }
-}
 
 interface OwnedTasklet {
 	events: TaskletEvent[]
@@ -1622,6 +1616,7 @@ export class TaskletHost {
 	private readonly starting = new Map<string, { record: TaskletRecord; acceptance: Promise<TaskletRecord> }>()
 	private closing = false
 	private shutdownPromise?: Promise<void>
+	private reconstruction?: Promise<void>
 	private readonly resolutions = new Set<Promise<TaskletResolution>>()
 	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
 
@@ -1636,8 +1631,75 @@ export class TaskletHost {
 		this.rootTaskId = owner.taskId
 	}
 
+	/** Load stopped handles only. No Task, provider request or recorded tool execution is started. */
+	reconstruct(): Promise<void> {
+		if (this.closing) return Promise.reject(new Error("Tasklet host is shutting down"))
+		if (!this.reconstruction) {
+			if (this.children.size || this.starting.size) return Promise.reject(new Error("Tasklet host already owns executions"))
+			this.reconstruction = this.restoreRecords()
+		}
+		return this.reconstruction
+	}
+
+	private async restoreRecords(): Promise<void> {
+		const records = await loadTaskletRecords(this.rootTaskId)
+		for (const record of records) {
+			const events = await loadTaskletEvents(this.address(record.id))
+			const child: OwnedTasklet = {
+				record, events, eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: true,
+				backgroundCommandRunning: false, outcomePersisted: false,
+			}
+			this.children.set(record.id, child)
+			let retired = false
+			for (const event of events) {
+				if (event.communication.type !== "interaction" || event.communication.request.status !== "pending") continue
+				event.communication.request.status = "retired"
+				event.communication.request.retiredAt = Date.now()
+				retired = true
+			}
+			if (retired) await this.persistEvents(child)
+			if (!record.outcome) {
+				await this.persistOutcome(child, {
+					kind: "interrupted", reason: "Root reopened; explicit tasklet resumption required", interruptedAt: Date.now(),
+				})
+			} else {
+				child.outcomePersisted = true
+			}
+		}
+	}
+
+	/** Resume the existing conversation; acceptance never joins the new assignment. */
+	async resume(id: string, message = ""): Promise<TaskletRecord> {
+		if (this.reconstruction) await this.reconstruction
+		if (this.closing) throw new Error("Tasklet host is shutting down")
+		const child = this.requireChild(id)
+		if (this.starting.has(id) || child.task || !child.record.outcome || !child.outcomePersisted || child.settlementError) {
+			throw new Error(`Tasklet ${id} has not settled successfully for resumption`)
+		}
+		const record = { ...child.record, outcome: undefined }
+		const acceptance = this.acceptResume(child, record, message)
+		this.starting.set(id, { record, acceptance })
+		try {
+			return await acceptance
+		} finally {
+			this.starting.delete(id)
+		}
+	}
+
+	private async acceptResume(child: OwnedTasklet, record: TaskletRecord, message: string): Promise<TaskletRecord> {
+		await saveTaskletRecord(record)
+		child.record = record
+		child.outcomePersisted = false
+		child.failedTranscript = undefined
+		child.settlement = undefined
+		child.interactions.clear()
+		child.interactionsClosed = false
+		return this.launch(child, message)
+	}
+
 	/** Persist acceptance and launch, without waiting for the assignment to finish. */
 	async start(input: { title: string; prompt: string }): Promise<TaskletRecord> {
+		if (this.reconstruction) await this.reconstruction
 		if (this.closing) throw new Error("Tasklet host is shutting down")
 		const title = input.title.trim()
 		const prompt = input.prompt.trim()
@@ -1667,6 +1729,11 @@ export class TaskletHost {
 			events: [], eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: false,
 		}
 		this.children.set(record.id, child)
+		return this.launch(child)
+	}
+
+	private async launch(child: OwnedTasklet, resumeMessage?: string): Promise<TaskletRecord> {
+		const record = child.record
 		// A start admitted before shutdown still owns its write, but must not launch late work.
 		if (this.closing) {
 			child.settlement = this.persistOutcome(child, {
@@ -1716,7 +1783,7 @@ export class TaskletHost {
 			await child.settlement
 			return structuredClone(child.record)
 		}
-		child.settlement = this.observeRun(child, child.task)
+		child.settlement = this.observeRun(child, child.task, resumeMessage)
 		// Retain the rejecting promise for controls; observe it now to avoid an unhandled rejection.
 		void child.settlement.catch((error) => Logger.error(`[Tasklet ${record.id}] Settlement failed:`, error))
 		return structuredClone(record)
@@ -1790,6 +1857,7 @@ export class TaskletHost {
 	}
 
 	private async stopOwnedTasklets(): Promise<void> {
+		const reconstruction = await Promise.allSettled(this.reconstruction ? [this.reconstruction] : [])
 		const results = await Promise.allSettled([
 			...[...this.starting.values()].map(({ acceptance }) => acceptance),
 			...[...this.children.keys()].map((id) => this.interrupt(id, "Root Task closed")),
@@ -1798,6 +1866,7 @@ export class TaskletHost {
 		await Promise.allSettled([...this.resolutions])
 		const eventResults = await Promise.allSettled([...this.children.values()].map((child) => child.eventWrites))
 		const failures = [
+			...reconstruction.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
 			...this.interactionCleanupFailures,
 			...eventResults.filter((result) => result.status === "rejected").map((result) => result.reason),
@@ -1814,7 +1883,7 @@ export class TaskletHost {
 		return structuredClone({
 			...child.record,
 			responses: child.events.flatMap((event) => event.communication.type === "response" ? [event.communication.response] : []),
-			interactions: [...child.interactions.values()].map(({ record }) => record),
+			interactions: child.events.flatMap((event) => event.communication.type === "interaction" ? [event.communication.request] : []),
 			executionStatus: child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
 			outcomePersisted: child.outcomePersisted,
@@ -1918,6 +1987,8 @@ export class TaskletHost {
 
 	/** Abort is not settlement: retain ownership through the run and outcome write. */
 	async interrupt(id: string, reason?: string): Promise<TaskletInspection> {
+		const acceptance = this.starting.get(id)?.acceptance
+		if (acceptance) await acceptance
 		const child = this.requireChild(id)
 		this.retireInteractions(child)
 		const results = await Promise.allSettled([
@@ -1929,10 +2000,12 @@ export class TaskletHost {
 		return this.inspect(id)
 	}
 
-	private async observeRun(child: OwnedTasklet, task: Task): Promise<void> {
+	private async observeRun(child: OwnedTasklet, task: Task, resumeMessage?: string): Promise<void> {
 		let outcome: TaskRunOutcome
 		try {
-			outcome = await task.startTask(child.record.prompt)
+			outcome = resumeMessage === undefined
+				? await task.startTask(child.record.prompt)
+				: await task.resumeTaskFromHistory(undefined, { taskletResumeMessage: resumeMessage })
 		} catch (error) {
 			// Task normally returns a failed outcome, including finalization errors.
 			// A rejected start still requires cancellation before persistence retirement.

@@ -9,11 +9,11 @@ import { TaskletEscalationCleanupError } from "../TaskMessenger"
 import * as apiModule from "@core/api"
 import type { ApiHandler } from "@core/api"
 import type { ApiStream } from "@core/api/transform/stream"
-import { getSavedApiConversationState, getSavedApiConversationProviderState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
+import { getSavedApiConversationState, getSavedApiConversationProviderState, getSavedPresentationHistory, saveApiConversationProviderState, saveApiConversationHistory, saveDiracMessages } from "@core/storage/conversationHistory"
 import { GlobalFileNames } from "@core/storage/fileNames"
 import { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
-import { writeTaskSettingsToStorage } from "@core/storage/taskStorage"
+import { writeTaskSettingsToStorage, updateTaskMetadata } from "@core/storage/taskStorage"
 import * as checkpointFactory from "@integrations/checkpoints/factory"
 import { ErrorService } from "@/services/error/ErrorService"
 import { HostProvider } from "@/hosts/host-provider"
@@ -969,6 +969,223 @@ describe("Tasklet real Task execution", function () {
 			releaseFirst()
 			releaseSecond()
 			await Promise.all(host.list().map((record) => host.interrupt(record.id)))
+		}
+	})
+
+	it("explicitly follows up a completed real tasklet under the same handle and restores task-local context", async () => {
+		const host = createHost()
+		const resumed = sandbox.spy(Task.prototype, "resumeTaskFromHistory")
+		const child = await host.start({ title: "follow-up", prompt: "READ_BEFORE_FOLLOWUP" })
+		try {
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
+			await updateTaskMetadata(address, (metadata) => { metadata.active_skill_ids = ["retained-tasklet-skill"] })
+			const toolDirectory = path.join(getTaskDirectoryPath(address), "tools", "retained_tasklet_tool")
+			await fs.mkdir(toolDirectory, { recursive: true })
+			await fs.writeFile(path.join(toolDirectory, "dirac-tool.json"), JSON.stringify({
+				schemaVersion: 1, id: "retained_tasklet_tool", name: "retained_tasklet_tool", scope: "task", entry: "tool.ts",
+				createdBy: "dirac", createdAt: "2026-05-29T00:00:00.000Z",
+			}))
+			await fs.writeFile(path.join(toolDirectory, "tool.ts"), `export const spec = { id: "retained_tasklet_tool", name: "retained_tasklet_tool", description: "Retained context" }; export function create() { return { spec() { return spec }, supportedSurfaces() { return ["all"] }, async processCall() { return "retained" } } }`)
+			const { UserToolLoader } = await import("../tools/discovery/UserToolLoader")
+			const loaded = await UserToolLoader.loadWithDiagnostics(toolDirectory, "task")
+			assert.ok(loaded.tool, loaded.error)
+			let contextRestored = false
+			nextTurn = async () => {
+				const task = resumed.firstCall.thisValue as Task
+				assert.deepEqual(task.stateView.activeSkillIds, ["retained-tasklet-skill"])
+				assert.deepEqual(task.stateView.taskScopedToolIds, ["retained_tasklet_tool"])
+				contextRestored = true
+				return "complete"
+			}
+			const accepted = await host.resume(child.id, "PARENT_FOLLOWUP_ONLY")
+			assert.equal(accepted.id, child.id)
+			assert.equal(accepted.conversationUlid, child.conversationUlid)
+			assert.equal(accepted.outcome, undefined)
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.equal(requests.length, 3)
+			assert.match(JSON.stringify(requests[2].messages), /READ_BEFORE_FOLLOWUP/)
+			assert.match(JSON.stringify(requests[2].messages), /PRIVATE_FILE_CONTENT/)
+			assert.match(JSON.stringify(requests[2]), /PINNED_PRIVATE_CONSTRAINT/)
+			const latestInput = (requests[2].messages as any[]).at(-1).content
+			assert.equal(JSON.stringify(latestInput).split("Tasklet resumed.").length - 1, 1)
+			assert.match(JSON.stringify(latestInput), /PARENT_FOLLOWUP_ONLY/)
+			assert.doesNotMatch(JSON.stringify(latestInput), /TASK RESUMPTION|isUserInput/)
+			sinon.assert.calledOnce(resumed)
+			const task = resumed.firstCall.thisValue as Task
+			assert.equal(task.ulid, child.conversationUlid)
+			assert.deepEqual(task.stateView.activeSkillIds, ["retained-tasklet-skill"])
+			assert.equal(contextRestored, true)
+			const transcript = JSON.stringify(await host.readTranscript(child.id))
+			assert.match(transcript, /PRIVATE_FILE_CONTENT/)
+			assert.match(transcript, /PARENT_FOLLOWUP_ONLY/)
+			assert.equal(host.list().length, 1)
+		} finally {
+			await host.shutdown()
+		}
+	})
+
+	for (const reopenRoot of [false, true]) {
+		it(`keeps completed plaintext compaction effective during real tasklet follow-up ${reopenRoot ? "after root reconstruction" : "under the same host"}`, async () => {
+			const root = createResolutionRoot()
+			let host = root.taskletHost!
+			nextTurn = async () => "complete"
+			const child = await host.start({ title: "compacted child", prompt: "INITIAL_TASKLET_CONTEXT" })
+			await waitForOutcome(host, child.id)
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
+			// Seed the persisted outcome of completed plaintext compaction, not the
+			// Utility summarizer itself: retain the first pair and summary after [2, 3].
+			await saveApiConversationHistory(address, [
+				{ role: "user", content: "INITIAL_TASKLET_CONTEXT" },
+				{ role: "assistant", content: "INITIAL_REPLY" },
+				{ role: "user", content: "COMPACTED_AWAY_USER_CONTEXT" },
+				{ role: "assistant", content: "COMPACTED_AWAY_ASSISTANT_CONTEXT" },
+				{ role: "user", content: "RETAINED_PLAINTEXT_SUMMARY" },
+				{ role: "assistant", content: "RETAINED_SUMMARY_ACKNOWLEDGEMENT" },
+			])
+			const presentation = await getSavedPresentationHistory(address)
+			presentation.messages.at(-1)!.conversationHistoryDeletedRange = [2, 3]
+			await saveDiracMessages(address, presentation.messages)
+			assert.deepEqual((await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange, [2, 3])
+			assert.deepEqual(await getSavedApiConversationProviderState(address), {})
+			let finishRoot: (() => void) | undefined
+			let rootRun: Promise<unknown> | undefined
+			try {
+				if (reopenRoot) {
+					await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_CONTEXT" }] }])
+					await root.abortTask()
+					const reopenedRoot = createResolutionRoot()
+					sandbox.stub(reopenedRoot as any, "waitForFollowUp").resolves(undefined)
+					const modelPresets = await import("@core/models/modelProviderPresets")
+					sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+					let rootEntered!: () => void
+					const rootStarted = new Promise<void>((resolve) => { rootEntered = resolve })
+					const rootGate = new Promise<void>((resolve) => { finishRoot = resolve })
+					let rootRequest = true
+					nextTurn = async () => {
+						if (rootRequest) {
+							rootRequest = false
+							rootEntered()
+							await rootGate
+						}
+						return "complete"
+					}
+					rootRun = reopenedRoot.resumeTaskFromHistory(undefined, { initialUserInput: { text: "ROOT_FOLLOWUP" } })
+					await rootStarted
+					host = reopenedRoot.taskletHost!
+					assert.equal(host.inspect(child.id).outcome?.kind, "completed")
+				}
+				await host.resume(child.id, "PARENT_COMPACTED_FOLLOWUP")
+				const result = await waitForOutcome(host, child.id)
+				assert.equal(result.outcome?.kind, "completed", JSON.stringify(result))
+				const dispatched = JSON.stringify(requests.at(-1)!.messages)
+				assert.match(dispatched, /INITIAL_TASKLET_CONTEXT/)
+				assert.match(dispatched, /RETAINED_PLAINTEXT_SUMMARY/)
+				assert.match(dispatched, /PARENT_COMPACTED_FOLLOWUP/)
+				assert.doesNotMatch(dispatched, /COMPACTED_AWAY_USER_CONTEXT|COMPACTED_AWAY_ASSISTANT_CONTEXT/)
+				assert.deepEqual((await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange, [2, 3])
+				assert.match(JSON.stringify(await host.readTranscript(child.id)), /COMPACTED_AWAY_USER_CONTEXT/)
+			} finally {
+				await host.shutdown()
+				finishRoot?.()
+				await rootRun
+			}
+		})
+	}
+
+	it("reconstructs a real root without starting its completed children and explicitly restores an opaque child checkpoint", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		nextTurn = async () => "complete"
+		const child = await host.start({ title: "persisted child", prompt: "COMPLETED_BEFORE_ROOT_CLOSE" })
+		await waitForOutcome(host, child.id)
+		await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_CONTEXT" }] }])
+		await root.messageStateHandler.flushPendingWrites()
+		await root.abortTask()
+		const reopenedRoot = createResolutionRoot()
+		sandbox.stub(reopenedRoot as any, "waitForFollowUp").resolves(undefined)
+		const modelPresets = await import("@core/models/modelProviderPresets")
+		sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
+		const requestsBeforeRootResume = requests.length
+		let rootRestored = false
+		const outcome = await reopenedRoot.resumeTaskFromHistory(() => {
+			rootRestored = true
+			assert.equal(requests.length, requestsBeforeRootResume, "Reconstruction must not start a child provider request")
+			assert.deepEqual(reopenedRoot.taskletHost!.listActive(), [])
+			assert.equal(reopenedRoot.taskletHost!.inspect(child.id).outcome?.kind, "completed")
+		}, { initialUserInput: { text: "ROOT_FOLLOWUP" } })
+		assert.equal(outcome.kind, "completed", JSON.stringify(outcome))
+		assert.equal(rootRestored, true)
+		assert.equal(requests.length, requestsBeforeRootResume + 1, "Only the root model ran")
+		await reopenedRoot.abortTask()
+
+		const reconstructed = createHost()
+		try {
+			await reconstructed.reconstruct()
+			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
+			const saved = await getSavedApiConversationState(address)
+			const checkpoint = {
+				providerId: "anthropic", modelId: "claude-opus-4-20250514", compactedThroughHistoryIndex: saved.messages.length - 1,
+				input: [{ type: "compaction", encrypted_content: "PRIVATE_OPAQUE_CHILD_CHECKPOINT" }],
+			}
+			await saveApiConversationProviderState(address, { checkpoint })
+			const buildApi = apiModule.buildApiHandler as sinon.SinonStub
+			const handler = buildApi(parameters().workingConfiguration.apiConfiguration, "act") as ApiHandler
+			const createMessage = handler.createMessage.bind(handler)
+			// Capture the real request-loop dispatch options at the controlled provider boundary.
+			let dispatchedOptions: unknown
+			handler.createMessage = function (systemPrompt, messages, tools, options) {
+				dispatchedOptions = structuredClone(options)
+				return createMessage(systemPrompt, messages, tools, options)
+			}
+			buildApi.callsFake(() => handler)
+			await reconstructed.resume(child.id, "FOLLOWUP_AFTER_RECONSTRUCTION")
+			const result = await waitForOutcome(reconstructed, child.id)
+			assert.equal(result.outcome?.kind, "completed", JSON.stringify(result))
+			assert.equal(result.conversationUlid, child.conversationUlid)
+			assert.deepEqual((dispatchedOptions as any).checkpoint, checkpoint)
+			assert.deepEqual((await getSavedApiConversationProviderState(address)).checkpoint, checkpoint)
+			const input = JSON.stringify(requests.at(-1)!.messages)
+			assert.equal(input.split("Tasklet resumed.").length - 1, 1)
+			assert.match(input, /FOLLOWUP_AFTER_RECONSTRUCTION/)
+			assert.doesNotMatch(input, /COMPLETED_BEFORE_ROOT_CLOSE/)
+			assert.match(JSON.stringify(await reconstructed.readTranscript(child.id)), /COMPLETED_BEFORE_ROOT_CLOSE/)
+		} finally {
+			await reconstructed.shutdown()
+		}
+	})
+
+	it("reopens an interrupted real permission conversation without reactivating or replaying its command while a sibling completes", async () => {
+		expectLoggerErrors() // Interrupting the actual command approval wait is expected cancellation.
+		const root = createResolutionRoot()
+		let turn = 0
+		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		const child = await root.taskletHost!.start({ title: "permission wait", prompt: "REQUEST_COMMAND_ONCE" })
+		const oldRequest = await waitForInteraction(root.taskletHost!, child.id)
+		await root.abortTask()
+		assert.equal(root.taskletHost!.inspect(child.id).interactions[0].status, "retired")
+		const host = createHost()
+		try {
+			const beforeReconstruct = requests.length
+			await host.reconstruct()
+			assert.equal(requests.length, beforeReconstruct)
+			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+			assert.equal(host.inspect(child.id).interactions[0].status, "retired")
+			await assert.rejects(host.resolveInteraction(child.id, oldRequest.id, { operation: "approve" }), /not pending/)
+			const sibling = await host.start({ title: "independent", prompt: "SIBLING_AFTER_REOPEN" })
+			assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
+			await host.resume(child.id, "DO_NOT_EXECUTE_PREVIOUS_COMMAND")
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.equal(requests.length, 3, "Reopening adds only the sibling turn and explicit resumed turn")
+			const resumedInput = JSON.stringify(requests[2].messages)
+			assert.match(resumedInput, /REQUEST_COMMAND_ONCE/)
+			assert.match(resumedInput, /DO_NOT_EXECUTE_PREVIOUS_COMMAND/)
+			assert.equal(resumedInput.split("Tasklet resumed.").length - 1, 1)
+			assert.equal(host.inspect(child.id).interactions.filter((request) => request.status === "pending").length, 0)
+			assert.equal(host.inspect(sibling.id).outcome?.kind, "completed")
+			await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		} finally {
+			await host.shutdown()
 		}
 	})
 

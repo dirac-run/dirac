@@ -8,6 +8,7 @@ import { buildOrchestrationTrait } from "../OrchestrationTraitBuilder"
 function controls() {
 	return {
 		start: sinon.stub().resolves({ id: "child" }),
+		resume: sinon.stub().resolves({ id: "child" }),
 		list: sinon.stub().returns([]),
 		inspect: sinon.stub().returns({ id: "child" }),
 		readTranscript: sinon.stub().resolves({ conversation: [], presentation: [] }),
@@ -32,6 +33,7 @@ describe("Tasklet environment control bindings", () => {
 		const tasklets = buildOrchestrationTrait(config).tasklets!
 		const input = { title: "investigate", prompt: "Find the cause" }
 		assert.deepEqual(await tasklets.start(input), { id: "child" })
+		assert.deepEqual(await tasklets.resume("child", "follow up"), { id: "child" })
 		assert.deepEqual(tasklets.list(), [])
 		assert.deepEqual(tasklets.inspect("child"), { id: "child" })
 		assert.deepEqual(await tasklets.readTranscript("child"), { conversation: [], presentation: [] })
@@ -40,6 +42,7 @@ describe("Tasklet environment control bindings", () => {
 		const decision = { operation: "reject" as const }
 		assert.deepEqual(await tasklets.resolveInteraction("child", "request", decision), { status: "resolved" })
 		sinon.assert.calledOnceWithExactly(callbacks.start, input)
+		sinon.assert.calledOnceWithExactly(callbacks.resume, "child", "follow up")
 		sinon.assert.calledOnceWithExactly(callbacks.list)
 		sinon.assert.calledOnceWithExactly(callbacks.inspect, "child")
 		sinon.assert.calledOnceWithExactly(callbacks.readTranscript, "child")

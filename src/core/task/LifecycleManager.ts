@@ -34,6 +34,8 @@ import { LifecycleManagerDependencies } from "./types/lifecycle-manager"
 import { buildUserFeedbackContent } from "./utils/buildUserFeedbackContent"
 
 export interface ResumeTaskOptions {
+	/** Parent guidance for a contained conversation; never user input or a recovery prompt. */
+	taskletResumeMessage?: string
 	/** Synthetic context for the first resumed model turn; never rendered or marked as user input. */
 	systemContext?: string
 	/** User-authored content that starts the resumed turn without waiting for an interaction callback. */
@@ -237,6 +239,9 @@ export class LifecycleManager {
 		onRestored?: () => void,
 		options: ResumeTaskOptions = {},
 	): Promise<TaskRunOutcome | undefined> {
+		if (options.taskletResumeMessage !== undefined && this.dependencies.storageAddress?.kind !== "tasklet") {
+			throw new Error("Tasklet resumption requires a contained tasklet address")
+		}
 		try {
 			await this.dependencies.diracIgnoreController.initialize()
 			await this.dependencies.commandPermissionController.initialize(this.dependencies.cwd)
@@ -247,6 +252,11 @@ export class LifecycleManager {
 
 		const savedPresentation = await getSavedPresentationHistory(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		const savedDiracMessages = savedPresentation.messages
+		if (options.taskletResumeMessage !== undefined) {
+			// Each appended presentation message snapshots the effective range. The
+			// latest snapshot is authoritative even when undefined (no truncation).
+			this.dependencies.taskState.conversationHistoryDeletedRange = savedDiracMessages.at(-1)?.conversationHistoryDeletedRange
+		}
 		this.dependencies.messageStateHandler.setDiracMessages(savedDiracMessages, savedPresentation.lastOffset)
 		if (this.dependencies.taskState.abort) return
 
@@ -269,13 +279,29 @@ export class LifecycleManager {
 			}
 		}
 
+		if (options.taskletResumeMessage !== undefined) {
+			// Old cards are history, never live counterpart requests after reopening.
+			for (const message of savedDiracMessages) {
+				if (
+					message.content.type === DiracMessageType.CARD &&
+					message.content.card.status === CardStatus.WAITING_FOR_INPUT
+				) {
+					message.content.card.status = CardStatus.CANCELLED
+				}
+			}
+		}
+
 		await this.dependencies.messageStateHandler.overwriteDiracMessages(savedDiracMessages)
 		if (this.dependencies.taskState.abort) return
-		const persistedPresentation = await getSavedPresentationHistory(this.dependencies.storageAddress ?? this.dependencies.taskId)
+		const persistedPresentation = await getSavedPresentationHistory(
+			this.dependencies.storageAddress ?? this.dependencies.taskId,
+		)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.messageStateHandler.setDiracMessages(persistedPresentation.messages, persistedPresentation.lastOffset)
 
-		const savedApiConversation = await getSavedApiConversationState(this.dependencies.storageAddress ?? this.dependencies.taskId)
+		const savedApiConversation = await getSavedApiConversationState(
+			this.dependencies.storageAddress ?? this.dependencies.taskId,
+		)
 		const savedApiConversationHistory = savedApiConversation.messages.map(removeUserInputMarkersFromMessage)
 		if (this.dependencies.taskState.abort) return
 		this.dependencies.messageStateHandler.setApiConversationHistory(
@@ -286,7 +312,9 @@ export class LifecycleManager {
 			await getSavedApiConversationProviderState(this.dependencies.storageAddress ?? this.dependencies.taskId),
 		)
 		if (this.dependencies.taskState.abort) return
-		this.dependencies.restoreQueuedSteeringFromTranscript()
+		// Only the explicit parent resume message starts contained work. Historical
+		// queued guidance remains inspectable, but is not reissued as user input.
+		if (options.taskletResumeMessage === undefined) this.dependencies.restoreQueuedSteeringFromTranscript()
 
 		await ensureTaskDirectoryExists(this.dependencies.storageAddress ?? this.dependencies.taskId)
 		if (this.dependencies.taskState.abort) return
@@ -328,7 +356,11 @@ export class LifecycleManager {
 		await this.dependencies.postStateToWebview()
 		onRestored?.()
 
-		if (options.systemContext === undefined && options.initialUserInput === undefined) {
+		if (
+			options.systemContext === undefined &&
+			options.initialUserInput === undefined &&
+			options.taskletResumeMessage === undefined
+		) {
 			await pWaitFor(() => this.dependencies.taskState.askResponse !== undefined || this.dependencies.taskState.abort, {
 				interval: 100,
 			})
@@ -342,6 +374,11 @@ export class LifecycleManager {
 		const files = options.initialUserInput?.files ?? this.dependencies.taskState.askResponseFiles
 
 		const newUserContent: DiracContent[] = []
+
+		if (options.taskletResumeMessage !== undefined) {
+			newUserContent.push({ type: "text", text: "Tasklet resumed." })
+			if (options.taskletResumeMessage) newUserContent.push({ type: "text", text: options.taskletResumeMessage })
+		}
 
 		if (options.systemContext !== undefined) {
 			newUserContent.push({
@@ -400,6 +437,18 @@ export class LifecycleManager {
 
 		if (this.dependencies.taskState.abort) {
 			return
+		}
+
+		if (options.taskletResumeMessage !== undefined) {
+			// Append a fresh turn without moving saved content across a native
+			// checkpoint boundary or reissuing an interrupted tool call.
+			try {
+				await this.dependencies.recordEnvironment()
+			} catch (error) {
+				Logger.error("Failed to record environment metadata on resume:", error)
+			}
+			if (this.dependencies.taskState.abort) return
+			return await this.dependencies.initiateTaskLoop(newUserContent)
 		}
 
 		let responseText: string | undefined

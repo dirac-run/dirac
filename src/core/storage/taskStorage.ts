@@ -1,5 +1,7 @@
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import type { TaskRunOutcome } from "@core/task/TaskRunOutcome"
+import type { TaskletInteraction } from "@core/task/tools/interfaces/IToolEnvironment"
+import type { ResponseArguments } from "@shared/responseTool"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
@@ -22,6 +24,82 @@ export interface TaskletRecord {
 	outcome?: TaskRunOutcome
 }
 
+export interface TaskletEvent {
+	id: string
+	taskletId: string
+	createdAt: number
+	deliveredAt?: number
+	communication: { type: "response"; response: ResponseArguments } | { type: "interaction"; request: TaskletInteraction }
+}
+
+/** Read only the owning root's contained records; reconstruction never starts executions. */
+export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRecord[]> {
+	const collectionDirectory = path.join(getTaskDirectoryPath(rootTaskId), "tasklets")
+	let entries: import("fs").Dirent[]
+	try {
+		entries = await fs.readdir(collectionDirectory, { withFileTypes: true })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+		throw error
+	}
+	return Promise.all(
+		entries
+			.filter((entry) => entry.isDirectory())
+			.map(async (entry) => {
+				const address = { kind: "tasklet" as const, rootTaskId, taskletId: entry.name }
+				const record: TaskletRecord = JSON.parse(
+					await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"),
+				)
+				if (
+					!record ||
+					record.id !== entry.name ||
+					record.rootTaskId !== rootTaskId ||
+					typeof record.conversationUlid !== "string" ||
+					!record.conversationUlid ||
+					typeof record.title !== "string" ||
+					typeof record.prompt !== "string" ||
+					!Number.isFinite(record.createdAt)
+				)
+					throw new Error(`Invalid tasklet record for ${entry.name} under root ${rootTaskId}`)
+				return record
+			}),
+	)
+}
+
+/** Retain full communication and delivery state; missing pre-communication snapshots are empty. */
+export async function loadTaskletEvents(address: Extract<TaskStorageAddress, { kind: "tasklet" }>): Promise<TaskletEvent[]> {
+	const filePath = path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletEvents)
+	let contents: string
+	try {
+		contents = await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+		throw error
+	}
+	const events: TaskletEvent[] = JSON.parse(contents)
+	if (
+		!Array.isArray(events) ||
+		events.some(
+			(event) =>
+				!event ||
+				typeof event.id !== "string" ||
+				!event.id ||
+				event.taskletId !== address.taskletId ||
+				!Number.isFinite(event.createdAt) ||
+				(event.deliveredAt !== undefined && !Number.isFinite(event.deliveredAt)) ||
+				!event.communication ||
+				(event.communication.type === "response"
+					? !event.communication.response || typeof event.communication.response !== "object"
+					: event.communication.type !== "interaction" ||
+						!event.communication.request ||
+						typeof event.communication.request.id !== "string" ||
+						!["pending", "resolved", "retired"].includes(event.communication.request.status)),
+		)
+	)
+		throw new Error(`Invalid tasklet events for ${address.taskletId} under root ${address.rootTaskId}`)
+	return events
+}
+
 /** TaskletHost is the sole writer; it serializes acceptance before outcome publication. */
 export async function saveTaskletRecord(record: TaskletRecord): Promise<void> {
 	const directory = await ensureTaskDirectoryExists({
@@ -35,7 +113,7 @@ export async function saveTaskletRecord(record: TaskletRecord): Promise<void> {
 /** The owning host serializes full communication snapshots and delivery acknowledgements. */
 export async function saveTaskletEvents(
 	address: Extract<TaskStorageAddress, { kind: "tasklet" }>,
-	events: readonly unknown[],
+	events: readonly TaskletEvent[],
 ): Promise<void> {
 	const directory = await ensureTaskDirectoryExists(address)
 	await atomicWriteFile(path.join(directory, GlobalFileNames.taskletEvents), JSON.stringify(events, null, 2))

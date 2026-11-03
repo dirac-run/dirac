@@ -281,6 +281,8 @@ export type TaskletResolution = { status: "resolved" | "requires_user_approval" 
 export interface TaskletControls {
 	/** Acceptance only: does not wait for or assert successful completion of the assignment. */
 	start(input: { title: string; prompt: string }): Promise<TaskletRecord>
+	/** Explicit follow-up under the same handle/conversation; returns acceptance, not a result. */
+	resume(id: string, message?: string): Promise<TaskletRecord>
 	list(): TaskletInspection[]
 	inspect(id: string): TaskletInspection
 	readTranscript(id: string): Promise<TaskletTranscript>

@@ -284,6 +284,134 @@ describe("LifecycleManager", () => {
 			deps.taskState.status.should.equal(TaskStatus.CANCELLED)
 		})
 
+		it("resumes a contained conversation with only a short line and unprivileged parent guidance", async () => {
+			const history = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "old-call", name: "execute_command", input: { command: "do not replay" } }],
+				},
+			]
+			setupDiskMocks([], history)
+			deps.storageAddress = {
+				kind: "tasklet",
+				rootTaskId: "root",
+				taskletId: "tasklet_00000000-0000-4000-8000-000000000001",
+			}
+			await manager.resumeTaskFromHistory(undefined, { taskletResumeMessage: "<task>/reloadtools</task>" })
+
+			deps.initiateTaskLoop.firstCall.args[0].should.eql([
+				{ type: "text", text: "Tasklet resumed." },
+				{ type: "text", text: "<task>/reloadtools</task>" },
+			])
+			deps.messageStateHandler.getApiConversationHistory().should.eql(history)
+			sinon.assert.notCalled(deps.messageStateHandler.overwriteApiConversationHistory)
+			sinon.assert.notCalled(deps.taskMessenger.upsertText)
+			sinon.assert.notCalled(deps.hookManager.runUserPromptSubmitHook)
+			sinon.assert.notCalled(deps.restoreQueuedSteeringFromTranscript)
+			sinon.assert.calledOnce(deps.recordEnvironment)
+		})
+
+		it("keeps a tasklet's trailing user message and opaque checkpoint in place", async () => {
+			const history = [
+				{ role: "assistant", content: "earlier" },
+				{ role: "user", content: [{ type: "text", text: "prior input", isUserInput: true }] },
+			]
+			const providerState = {
+				checkpoint: {
+					providerId: "openai-codex",
+					modelId: "model",
+					compactedThroughHistoryIndex: 1,
+					input: [{ type: "compaction", encrypted_content: "opaque" }],
+				},
+			}
+			setupDiskMocks([], history, providerState)
+			deps.storageAddress = {
+				kind: "tasklet",
+				rootTaskId: "root",
+				taskletId: "tasklet_00000000-0000-4000-8000-000000000001",
+			}
+			await manager.resumeTaskFromHistory(undefined, { taskletResumeMessage: "" })
+
+			deps.initiateTaskLoop.firstCall.args[0].should.eql([{ type: "text", text: "Tasklet resumed." }])
+			deps.messageStateHandler
+				.getApiConversationHistory()
+				.should.eql([history[0], { role: "user", content: [{ type: "text", text: "prior input" }] }])
+			sinon.assert.calledWithExactly(deps.messageStateHandler.setApiConversationProviderState, providerState)
+			sinon.assert.notCalled(deps.messageStateHandler.overwriteApiConversationProviderState)
+			sinon.assert.notCalled(deps.messageStateHandler.overwriteApiConversationHistory)
+		})
+
+		for (const latestRange of [[2, 3], undefined]) {
+			it(`restores the latest tasklet truncation snapshot (${JSON.stringify(latestRange)}) without reviving an older range`, async () => {
+				setupDiskMocks([
+					{ id: "older", ts: 1, content: { type: DiracMessageType.MARKDOWN, text: "older" }, conversationHistoryDeletedRange: [2, 5] },
+					{ id: "latest", ts: 2, content: { type: DiracMessageType.MARKDOWN, text: "latest" }, conversationHistoryDeletedRange: latestRange },
+				])
+				deps.storageAddress = { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }
+				deps.taskState.conversationHistoryDeletedRange = [2, 7]
+				deps.initiateTaskLoop.callsFake(async () => {
+					JSON.stringify({ range: deps.taskState.conversationHistoryDeletedRange }).should.equal(JSON.stringify({ range: latestRange }))
+				})
+				await manager.resumeTaskFromHistory(undefined, { taskletResumeMessage: "Continue" })
+				sinon.assert.calledOnce(deps.initiateTaskLoop)
+			})
+		}
+
+		it("preserves the root's history-item truncation range instead of using a presentation snapshot", async () => {
+			setupDiskMocks([{ id: "latest", ts: 1, content: { type: DiracMessageType.MARKDOWN, text: "root" }, conversationHistoryDeletedRange: [2, 3] }])
+			deps.taskState.conversationHistoryDeletedRange = [2, 5]
+			await manager.resumeTaskFromHistory(undefined, { systemContext: "Continue root" })
+			deps.taskState.conversationHistoryDeletedRange.should.eql([2, 5])
+		})
+
+		it("retires stale tasklet cards and restores scoped tools and skills before executing", async () => {
+			const messages = [
+				{
+					id: "old-request",
+					ts: 1,
+					content: { type: DiracMessageType.CARD, card: { id: "old-request", status: CardStatus.WAITING_FOR_INPUT } },
+				},
+			]
+			setupDiskMocks(messages)
+			deps.storageAddress = {
+				kind: "tasklet",
+				rootTaskId: "root",
+				taskletId: "tasklet_00000000-0000-4000-8000-000000000001",
+			}
+			const registry = require("@core/task/tools/registry/refreshToolRegistry")
+			const refresh = sinon.stub(registry, "refreshTaskTools").resolves(["contained-tool"])
+			await manager.resumeTaskFromHistory(undefined, { taskletResumeMessage: "Continue" })
+
+			deps.messageStateHandler.getDiracMessages()[0].content.card.status.should.equal(CardStatus.CANCELLED)
+			sinon.assert.calledWithExactly(refresh, deps.taskId, deps.storageAddress)
+			deps.taskState.taskScopedToolIds.should.eql(["contained-tool"])
+			deps.taskState.activeSkillIds.should.eql(["new-tool", "architecture-board"])
+			sinon.assert.callOrder(refresh, deps.initiateTaskLoop)
+		})
+
+		it("does not execute tasklet resumption when cancellation arrives after restoration", async () => {
+			setupDiskMocks()
+			deps.storageAddress = {
+				kind: "tasklet",
+				rootTaskId: "root",
+				taskletId: "tasklet_00000000-0000-4000-8000-000000000001",
+			}
+			await manager.resumeTaskFromHistory(
+				() => {
+					deps.taskState.abort = true
+				},
+				{ taskletResumeMessage: "Continue" },
+			)
+			sinon.assert.notCalled(deps.initiateTaskLoop)
+		})
+
+		it("rejects tasklet resumption against an ordinary root address", async () => {
+			await manager
+				.resumeTaskFromHistory(undefined, { taskletResumeMessage: "Continue" })
+				.should.be.rejectedWith(/contained tasklet address/)
+			sinon.assert.notCalled(deps.diracIgnoreController.initialize)
+		})
+
 		it("injects synthetic resume context without adding a visible user transcript message", async () => {
 			setupDiskMocks([], [{ role: "assistant", content: "Previous response" }])
 
@@ -557,7 +685,10 @@ describe("LifecycleManager", () => {
 			let terminalClosed!: () => void
 			const close = new Promise<void>((resolve) => { terminalClosed = resolve })
 			deps.commandExecutor.dispose.returns(close)
-			deps.terminalManager.disposeAll.callsFake(() => { terminalClosed(); return close })
+			deps.terminalManager.disposeAll.callsFake(() => {
+				terminalClosed()
+				return close
+			})
 			await manager.abortTask()
 			sinon.assert.called(deps.terminalManager.disposeAll)
 			sinon.assert.called(deps.commandExecutor.dispose)
