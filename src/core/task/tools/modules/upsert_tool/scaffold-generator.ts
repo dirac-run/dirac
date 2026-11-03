@@ -1,36 +1,18 @@
+import type { DiracToolSpec } from "@/shared/tools"
 import * as fs from "fs/promises"
 import * as path from "path"
-import { TOOL_IMPLEMENTATION_SENTINEL } from "./constants"
+import { SMOKE_COMPLETION_MARKER } from "./constants"
 
-export function buildScaffoldedToolSource(name: string, description: string, parameters: any[]): string {
-	const paramsArray = Array.isArray(parameters)
-		? parameters
-				.map((p: any) => {
-					const pName = p.name || "param"
-					const pType = p.type || "string"
-					const pRequired = p.required !== false
-					const pInstruction = p.instruction || ""
-					return `        { name: ${JSON.stringify(pName)}, type: ${JSON.stringify(pType)}, required: ${pRequired}, instruction: ${JSON.stringify(pInstruction)} },`
-				})
-				.join("\n")
-		: ""
-
+export function buildToolSource(name: string, description: string, parameters: NonNullable<DiracToolSpec["parameters"]>, implementation: string): string {
 	return [
-		`export const spec = {`,
-		`    id: ${JSON.stringify(name)},`,
-		`    name: ${JSON.stringify(name)},`,
-		`    description: ${JSON.stringify(description)},`,
-		`    parameters: [`,
-		paramsArray,
-		`    ],`,
-		`}`,
+		`export const spec = ${JSON.stringify({ id: name, name, description, parameters }, null, 4)}`,
 		``,
 		`export function create() {`,
 		`    return {`,
 		`        spec() { return spec },`,
 		`        supportedSurfaces() { return ["all"] },`,
 		`        async processCall(args: any, env: any): Promise<string> {`,
-		`            throw new Error(${JSON.stringify(TOOL_IMPLEMENTATION_SENTINEL)})`,
+		implementation,
 		`        },`,
 		`    }`,
 		`}`,
@@ -94,7 +76,6 @@ const env = {
   config: { cwd: process.cwd(), isSubagentExecution: true },
   interaction: { askPermission: async () => ({ approved: true, action: "approve" }) },
   orchestration: {
-    runSubagent: async () => ({ status: "completed", result: "", stats: {} }),
     runHook: async () => ({}), switchToActMode: async () => true,
     saveCheckpoint: noOp, getHistory: () => [], setTruncationRange: () => {},
     getNextTruncationRange: () => [0, 0] as [number, number],
@@ -134,11 +115,14 @@ async function main() {
 
   console.log("=== Test 1: Running with provided args")
   const r1 = await tool.processCall(args, env)
+  if (typeof r1 !== "string") throw new Error("processCall must return a string for smoke_args")
   console.log("=== PASS:", typeof r1 === "string" ? r1 : JSON.stringify(r1))
 
   console.log("\\n=== Test 2: Running with empty args (edge case)")
   const r2 = await tool.processCall({}, env)
+  if (typeof r2 !== "string") throw new Error("processCall must return a string for empty args")
   console.log("=== PASS (edge case):", typeof r2 === "string" ? r2 : JSON.stringify(r2))
+  console.log(${JSON.stringify(SMOKE_COMPLETION_MARKER)})
 }
 
 main().catch(e => { console.error("=== FAIL:", e.message); process.exit(1) })

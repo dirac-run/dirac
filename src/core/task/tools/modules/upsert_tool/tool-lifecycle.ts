@@ -18,6 +18,7 @@ export async function discardStagedTool(stagingDir: string): Promise<void> {
 }
 
 export async function promoteStagedTool(stagingDir: string, finalDir: string): Promise<ToolPromotion> {
+	await fs.mkdir(path.dirname(finalDir), { recursive: true })
 	const buildsDir = path.join(path.dirname(path.dirname(finalDir)), "tool-builds")
 	await fs.mkdir(buildsDir, { recursive: true })
 	const backupDir = await pathExists(finalDir)

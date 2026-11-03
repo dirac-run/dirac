@@ -27,8 +27,16 @@ describe("new-tool skill template", () => {
 			assert.match(instructions, /global/i)
 			assert.match(instructions, /workspace/i)
 			assert.match(instructions, /task/i)
-			// Mentions the requirements parameter (subagent-based generation)
-			assert.match(instructions, /requirements/)
+			assert.match(instructions, /implementation/)
+			assert.match(instructions, /smoke_args/)
+			assert.match(instructions, /complete TypeScript \*\*body\*\*/)
+			assert.match(instructions, /does not generate code or launch hidden workers/)
+			assert.match(instructions, /there is no automatic retry or repair/)
+			assert.match(instructions, /command-permission path/)
+			assert.match(instructions, /Newly installed tools are registered and enabled/)
+			assert.match(instructions, /updating an existing disabled tool preserves its disabled state/)
+			assert.match(instructions, /explicitly disabled result requires enabling/)
+			assert.doesNotMatch(instructions, /default to disabled|adjust the requirements/)
 			// Supports both user-guided and autonomous creation when requirements are clear
 			assert.match(instructions, /request may come directly from the user/)
 			assert.match(instructions, /requirements are clear, proceed without an interview/)
@@ -41,9 +49,15 @@ describe("new-tool skill template", () => {
 			assert.doesNotMatch(instructions, /schemaVersion === 1/)
 			assert.doesNotMatch(instructions, /entry === "tool\.ts"/)
 			assert.doesNotMatch(instructions, /createdBy === "dirac"/)
-			// No TypeScript source generation in skill — upsert_tool generates code internally
-			assert.doesNotMatch(instructions, /export const spec/)
-			assert.doesNotMatch(instructions, /export function create/)
+			// Supply only a processCall body; the installer owns the module wrapper.
+			assert.match(instructions, /return String\(args.text\).toUpperCase\(\)/)
+			assert.doesNotMatch(instructions, /export const spec|export function create/)
 		})
 	}
+
+	it("keeps canonical and embedded instructions identical", async () => {
+		const canonical = await getCanonicalInstructions()
+		const instructions = canonical.slice(canonical.indexOf("# Creating a New Custom Tool"))
+		assert.equal((await getEmbeddedInstructions()).trim(), instructions.trim())
+	})
 })

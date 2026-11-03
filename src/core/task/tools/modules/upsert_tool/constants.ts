@@ -2,99 +2,16 @@ import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import * as path from "path"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 
-export const SUBAGENT_TIMEOUT_SECONDS = 240
-export const BUILDER_MAX_ATTEMPTS = 3
-export const TOOL_IMPLEMENTATION_SENTINEL = "__DIRAC_TOOL_IMPLEMENTATION_REQUIRED__"
 export const SMOKE_ARGS_FILE = "smoke-args.json"
+export const SMOKE_COMPLETION_MARKER = "DIRAC_UPSERT_SMOKE_COMPLETED"
 
 export type ToolScope = "global" | "workspace" | "task"
-
-export const TOOL_BUILDER_SYSTEM_SUFFIX = `
-# Tool Builder Subagent Mode
-You implement processCall in an existing user-tool scaffold, provide realistic smoke-test arguments, test the implementation, and submit.
-
-## Strict boundaries
-- Read the existing tool.ts before editing it.
-- Edit only the processCall implementation. Do not rewrite the spec or create function.
-- The only auxiliary file you may create or update is smoke-args.json in the staging directory.
-- Do not modify files outside the staging directory.
-- Do not install packages or call upsert_tool/use_subagents.
-- Use read_file, edit_file, write_to_file, execute_command, and respond only.
-- Finish with respond operation "complete" and do not paste source code; it is already on disk.
-`
-
-/**
- * Contract sent to the subagent. Describes exactly how to write a valid Dirac tool module.
- * Lives here — never injected into the main agent's context.
- */
-export const TOOL_AUTHORING_CONTRACT = `
-## Tool Module Contract
-
-The module MUST export exactly two things:
-
-### 1. \`spec\` — a DiracToolSpec object
-
-\`\`\`typescript
-export const spec = {
-    id: string,        // snake_case, must match the tool name
-    name: string,      // same as id
-    description: string, // what the tool does, shown to the LLM
-    parameters: [
-        { name: string, type: string, required: boolean, instruction: string },
-    ],
-}
-\`\`\`
-
-### 2. \`create\` — a factory function
-
-\`\`\`typescript
-export function create() {
-    return {
-        spec() { return spec },
-        supportedSurfaces() { return ["all"] },
-        async processCall(args: any, env: any): Promise<string> {
-            // Your implementation here
-        },
-    }
-}
-\`\`\`
-
-## Environment Traits (\`env\`)
-
-**ALL methods are async and must be awaited.**
-
-- **env.workspace** — File operations
-  - \`await readFile(path): string\` — Read a file as UTF-8 string
-  - \`await writeFile(path, content): void\` — Write a file
-  - \`await listFiles(path, recursive, limit): [FileInfo[], boolean]\` — List files
-  - \`await resolvePath(path): { absolutePath, displayPath }\` — Resolve a path
-
-- **env.system** — System operations
-  - \`await executeCommand(cmd, opts?): { userRejected: boolean, output: unknown, completed?: boolean, exitCode?: number | null, signal?: NodeJS.Signals | null, logFilePath?: string }\` — Run a shell command
-  - \`await searchFiles(dir, regex, opts?): string\` — Search files with regex
-
-- **env.ui** — UI
-  - \`await createCard({ header, icon, collapsed, body?, status? }): Card\` — Create a UI card
-  - Card methods: \`await card.update({ status, body, ... })\`, \`await card.finalize(status)\`
-
-- **env.config** — Configuration (synchronous)
-  - \`{ cwd: string, taskId?: string, isSubagentExecution: boolean }\`
-
-## Rules
-
-1. Do NOT import from Dirac internals. No \`@/\`, \`@core/\`, \`@shared/\` path aliases.
-2. Use structural typing — do not import types, rely on the shapes described above.
-3. \`processCall\` must handle empty or missing args gracefully — return a usage string, don't throw.
-4. Return a string from \`processCall\` on success. Throw an Error on failure.
-5. ALWAYS \`await\` every \`env\` method call. They all return Promises.
-6. Use cards (\`env.ui.createCard\`) for meaningful user-visible progress.
-`.trim()
 
 export const upsert_tool_spec: DiracToolSpec = {
 	id: DiracDefaultTool.UPSERT_TOOL,
 	name: "upsert_tool",
 	description:
-		"Create or update one or more user-defined tools. Handles code generation, compilation, validation, smoke testing, and registration. Returns structured pass/fail for each tool. Supports global, workspace, and task scopes.",
+		"Validate and install parent-supplied user tools in global, workspace, or task scope. Wraps each implementation body with the supplied metadata, smoke-tests it once, then registers it. Returns pass/fail per tool; repair failures yourself and call again. Does not generate code or delegate work.",
 	parameters: [
 		{
 			name: "tools",
@@ -147,13 +64,18 @@ export const upsert_tool_spec: DiracToolSpec = {
 							additionalProperties: false,
 						},
 					},
-					requirements: {
+					implementation: {
 						type: "string",
 						description:
-							"Natural language description of what the tool should do — its behavior, logic, and edge cases.",
+							"Complete body of async processCall(args, env), not a module or function declaration. May reference args and env; no imports/exports or spec/create definitions. Return a string on success and throw on failure; handle empty args gracefully. Await asynchronous env methods.",
+					},
+					smoke_args: {
+						type: "string",
+						description:
+							"JSON-encoded object containing realistic arguments for a successful smoke test, e.g. '{\"path\":\"src\"}'. Encoded as a string to support strict provider schemas. The implementation is also invoked with empty args. Smoke testing executes your code and may have side effects.",
 					},
 				},
-				required: ["name", "scope", "description", "parameters", "requirements"],
+				required: ["name", "scope", "description", "parameters", "implementation", "smoke_args"],
 				additionalProperties: false,
 			},
 		},
