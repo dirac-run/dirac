@@ -3,10 +3,10 @@ import { describe, it } from "mocha"
 import { LegacyResponseParameter, ResponseOperation } from "@shared/responseTool"
 import { validateResponseArguments } from "../ResponseArgumentsValidator"
 
-function environment(mode: "plan" | "act" = "act", isSubagentExecution = false) {
+function environment(mode: "plan" | "act" = "act") {
 	let consecutiveMistakeCount = 0
 	return {
-		config: { mode, isSubagentExecution },
+		config: { mode },
 		orchestration: {
 			getTaskState: () => consecutiveMistakeCount,
 			setTaskState: (_key: string, value: number) => {
@@ -69,13 +69,10 @@ describe("response arguments validator", () => {
 		for (const args of invalid) assert.throws(() => validateResponseArguments(args, environment()))
 	})
 
-	it("enforces main-agent modes but leaves subagent scope policy to the registry", () => {
+	it("enforces Plan and Act response modes", () => {
 		assert.throws(() => validateResponseArguments({ operation: ResponseOperation.PLAN, text: "Plan" }, environment("act")))
 		assert.throws(() =>
 			validateResponseArguments({ operation: ResponseOperation.COMPLETE, text: "Done" }, environment("plan")),
-		)
-		assert.doesNotThrow(() =>
-			validateResponseArguments({ operation: ResponseOperation.COMPLETE, text: "Done" }, environment("plan", true)),
 		)
 	})
 })

@@ -15,7 +15,6 @@ describe("WriteToFileTool: text typed on the waiting card", () => {
 		const hideReview = sinon.stub().resolves()
 		const env = {
 			config: {
-				isSubagentExecution: false,
 				permissionDecisionBinding: undefined,
 				taskState: { consecutiveMistakeCount: 0 },
 				callbacks: { shouldAutoApproveToolWithPath: sinon.stub().resolves(false) },

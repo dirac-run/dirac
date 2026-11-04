@@ -100,7 +100,6 @@ function createConfig() {
 		yoloModeToggled: true,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: true,
-		isSubagentExecution: true, // skip UI calls and approval flow
 		taskState,
 		messageState: {
 			getApiConversationHistory: sinon.stub().returns([]),

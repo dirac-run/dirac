@@ -14,7 +14,6 @@ import type { BrowserSettings } from "@shared/BrowserSettings"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracContent } from "@shared/messages/content"
 import type { Mode } from "@shared/storage/types"
-import type { SubagentIdentity } from "@shared/subagents"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { WorkspaceRootManager } from "@/core/workspace"
@@ -47,9 +46,6 @@ export interface TaskConfig {
 	lowVerbosityEnabled: boolean
 	vscodeTerminalExecutionMode: "vscodeTerminal" | "backgroundExec"
 	enableParallelToolCalling: boolean
-	isSubagentExecution: boolean
-	/** Display identity for an observable subagent execution. */
-	agentIdentity?: SubagentIdentity
 	backgroundEditEnabled: boolean
 	/** Request-bound provider identity and secret-free operational settings. */
 	providerId: string

@@ -36,6 +36,7 @@ describe("upsert_tool support", () => {
 		assert.match(harness, /completed: true/)
 		assert.match(harness, /exitCode:/)
 		assert.doesNotMatch(harness, /return \[false,/)
+		assert.doesNotMatch(harness, /isSubagentExecution/)
 	})
 
 	it("restores the previous live directory when promotion is rolled back", async () => {

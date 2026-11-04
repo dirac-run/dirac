@@ -138,7 +138,7 @@ describe("TaskletsTool public controls", () => {
 			resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
 			sleep: (options) => host.sleep(options),
 		}
-		config = createMockTaskConfig({ overrides: { hooksEnabled: false, subagentsEnabled: true, isSubagentExecution: false } }).config
+		config = createMockTaskConfig({ overrides: { hooksEnabled: false, subagentsEnabled: true } }).config
 		coordinator = new ToolExecutorCoordinator({
 			create: (toolConfig, toolName) => {
 				const callCards: ICardHandle[] = []

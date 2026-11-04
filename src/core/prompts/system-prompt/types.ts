@@ -47,7 +47,6 @@ export interface SystemPromptContext {
 	readonly workspaceRoots?: Array<{ path: string; name: string; vcs?: string }>
 	readonly isSubagentsEnabledAndCliInstalled?: boolean
 	readonly isCliSubagent?: boolean
-	readonly isSubagentRun?: boolean
 	readonly isCliEnvironment?: boolean
 	readonly terminalExecutionMode?: "vscodeTerminal" | "backgroundExec"
 	readonly activeShellType?: ShellType

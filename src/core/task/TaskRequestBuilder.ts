@@ -202,7 +202,6 @@ export async function buildApiRequestParams(
 		diracWebToolsEnabled: settings.diracWebToolsEnabled && featureFlagsService.getWebtoolsEnabled(),
 		isMultiRootEnabled: multiRootEnabled,
 		workspaceRoots,
-		isSubagentRun: false,
 		isCliEnvironment,
 		terminalExecutionMode: ctx.terminalExecutionMode,
 		activeShellType: shellInfo.type,

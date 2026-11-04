@@ -121,9 +121,7 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 		const validation = InspectAstValidator.normalize(rawArgs)
 		if (!validation.valid) {
 			this.incrementMistakeCount(env)
-			if (!env.config.isSubagentExecution) {
-				await env.ui.upsertText(`Dirac tried to use inspect_ast with invalid arguments. ${validation.message}`).catch(() => undefined)
-			}
+			await env.ui.upsertText(`Dirac tried to use inspect_ast with invalid arguments. ${validation.message}`).catch(() => undefined)
 			const example = TOOL_EXAMPLES[DiracDefaultTool.INSPECT_AST]
 			return formatResponse.toolError(`${validation.message}${example ? `\n\nExample: ${example}` : ""}`)
 		}
@@ -139,9 +137,7 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 		}
 		const cards: InspectCardRecord[] = []
 		const observabilityFailures: string[] = [...(execution.warnings ?? [])]
-		if (!env.config.isSubagentExecution) {
-			observabilityFailures.push(...await this.createCards(args, execution.groups, env, cards))
-		}
+		observabilityFailures.push(...await this.createCards(args, execution.groups, env, cards))
 		observabilityFailures.push(...await this.finalizeCards(cards))
 		try {
 			this.captureTelemetry(args, execution, env)

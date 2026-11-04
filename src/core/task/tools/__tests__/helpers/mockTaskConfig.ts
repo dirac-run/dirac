@@ -198,7 +198,6 @@ export function createMockTaskConfig(options: MockTaskConfigOptions = {}) {
 		lowVerbosityEnabled: true,
 		vscodeTerminalExecutionMode: "backgroundExec" as const,
 		enableParallelToolCalling: true,
-		isSubagentExecution: true,
 		backgroundEditEnabled: false,
 		providerId: "test-provider",
 		customPrompt: undefined,

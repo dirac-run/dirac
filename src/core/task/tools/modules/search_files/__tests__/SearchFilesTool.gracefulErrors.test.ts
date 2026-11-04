@@ -42,7 +42,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 	afterEach(async () => {
 		sandbox.restore()
 		HostProvider.reset()
-		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { })
 	})
 
 	function makeBlock(relPaths?: string | string[], regex?: string, filePattern?: string) {
@@ -239,10 +239,9 @@ describe("SearchFilesTool.execute – error recovery", () => {
 		const clock = sinon.useFakeTimers()
 		try {
 			const { config, taskMessenger } = createMockTaskConfig({
-				overrides: { isSubagentExecution: false },
 			})
 			await fs.mkdir(path.join(tmpDir, "search-root"))
-			searchStub.callsFake(async () => await new Promise<string>(() => {}))
+			searchStub.callsFake(async () => await new Promise<string>(() => { }))
 			const coordinator = new ToolExecutorCoordinator()
 			coordinator.registerModularTool(new SearchFilesTool())
 
@@ -263,7 +262,6 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 	it("cancels the active search card when the task is stopped", async () => {
 		const { config, taskState, taskMessenger } = createMockTaskConfig({
-			overrides: { isSubagentExecution: false },
 		})
 		await fs.mkdir(path.join(tmpDir, "search-root"))
 		let markSearchStarted: (() => void) | undefined

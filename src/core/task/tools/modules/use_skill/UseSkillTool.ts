@@ -38,13 +38,11 @@ export class UseSkillTool implements IDiracTool {
 		}
 		const deadline = new ToolExecutionDeadline(this.spec().name)
 
-		const card = !env.config.isSubagentExecution
-			? await env.ui.createCard({
-				icon: DiracIcon.SKILL,
-				header: `Activate skill: ${skill_name}`,
-				collapsed: true,
-			})
-			: undefined
+		const card = await env.ui.createCard({
+			icon: DiracIcon.SKILL,
+			header: `Activate skill: ${skill_name}`,
+			collapsed: true,
+		})
 
 		try {
 			const availableSkills = await deadline.run("discovering available skills", async () =>
@@ -55,10 +53,8 @@ export class UseSkillTool implements IDiracTool {
 			if (!skillContent) {
 				const availableNames = availableSkills.map((s) => s.name).join(", ")
 				const errorMsg = `Error: Skill "${skill_name}" not found. Available skills: ${availableNames || "none"}`
-				if (card) {
-					await card.update({ status: CardStatus.ERROR, body: errorMsg })
-					await card.finalize(CardStatus.ERROR)
-				}
+				await card.update({ status: CardStatus.ERROR, body: errorMsg })
+				await card.finalize(CardStatus.ERROR)
 				return errorMsg
 			}
 			const { docs, scripts } = await deadline.run(`listing support files for ${skill_name}`, async () =>
@@ -97,23 +93,19 @@ export class UseSkillTool implements IDiracTool {
 				activationMessage += `\nYou may access other files in the skill directory at: ${skillDir}`
 			}
 
-			if (card) {
-				await card.update({
-					header: alreadyActive ? `Reloaded active skill: ${skill_name}` : `Activated skill: ${skill_name}`,
-					status: CardStatus.SUCCESS,
-					body: `✓ Skill source: ${skillContent.source}\nDirectory: ${skillDir}`,
-				})
-				await card.finalize(CardStatus.SUCCESS)
-			}
+			await card.update({
+				header: alreadyActive ? `Reloaded active skill: ${skill_name}` : `Activated skill: ${skill_name}`,
+				status: CardStatus.SUCCESS,
+				body: `✓ Skill source: ${skillContent.source}\nDirectory: ${skillDir}`,
+			})
+			await card.finalize(CardStatus.SUCCESS)
 			return activationMessage
 		} catch (error: any) {
 			if (error instanceof ToolTimeoutError) {
-				return await presentToolTimeout(env, error, card ? [card] : [])
+				return await presentToolTimeout(env, error, [card])
 			}
-			if (card) {
-				await card.update({ status: CardStatus.ERROR, body: `✕ ${error.message}` })
-				await card.finalize(CardStatus.ERROR)
-			}
+			await card.update({ status: CardStatus.ERROR, body: `✕ ${error.message}` })
+			await card.finalize(CardStatus.ERROR)
 			throw error
 		}
 	}

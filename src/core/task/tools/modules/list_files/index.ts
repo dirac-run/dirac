@@ -4,7 +4,7 @@ import { DiracIcon } from "@/shared/icons"
 import { CardStatus } from "../../../../../shared/ExtensionMessage"
 import { DiracDefaultTool, DiracToolSpec } from "../../../../../shared/tools"
 import { IDiracTool } from "../../interfaces/IDiracTool"
-import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import type { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { SurfaceType } from "../../interfaces/SurfaceType"
 import { ToolExecutionDeadline, ToolTimeoutError } from "../../runtime/ToolExecutionDeadline"
 import { presentToolTimeout } from "../../runtime/ToolTimeoutPresentation"
@@ -79,7 +79,7 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 			resolvedPaths.push({ relPath, absolutePath, displayPath })
 		}
 
-		const card = !env.config.isSubagentExecution ? new Map<string, { card: any; displayPath: string }>() : undefined
+		const card = new Map<string, { card: ICardHandle; displayPath: string }>()
 		const results: string[] = []
 		const displayPaths: string[] = []
 		let hasError = false

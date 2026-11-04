@@ -91,14 +91,12 @@ describe("SurfaceAdapter", () => {
 				}
 			})
 			for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
-				for (const isSubagentExecution of [false, true]) {
-					const worker = new SurfaceAdapter({ ...config, executionProfile, isSubagentExecution })
-					expect(worker.architecture !== undefined).to.equal(
-						!isSubagentExecution && executionProfile !== "goal_child" && executionProfile !== "tasklet",
-					)
-					for (const trait of ["system", "workspace", "editor", "browser", "sourceAst", "skills"] as const) {
-						expect(worker[trait], trait).not.to.equal(undefined)
-					}
+				const worker = new SurfaceAdapter({ ...config, executionProfile })
+				expect(worker.architecture !== undefined).to.equal(
+					executionProfile !== "goal_child" && executionProfile !== "tasklet",
+				)
+				for (const trait of ["system", "workspace", "editor", "browser", "sourceAst", "skills"] as const) {
+					expect(worker[trait], trait).not.to.equal(undefined)
 				}
 			}
 		})
@@ -327,8 +325,40 @@ describe("SurfaceAdapter", () => {
 			result.action.should.equal(DiracAskResponse.APPROVE)
 		})
 
-		for (const isSubagentExecution of [false, true]) {
-			it(`displays Utility escalations for user approval (subagent: ${isSubagentExecution})`, async () => {
+		it("displays Utility escalations for user approval", async () => {
+			const fakeHandle = {
+				id: "card-1",
+				update: sinon.stub().resolves(),
+				appendBody: sinon.stub().resolves(),
+				finalize: sinon.stub().resolves(),
+				waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
+			}
+			const decide = sinon.stub().resolves({ decision: "escalate", reason: "User choice." })
+			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
+
+			const handle = await adapter.ui.createCard({
+				header: "Permission",
+				status: CardStatus.WAITING_FOR_INPUT,
+				requireApproval: true,
+				permissionRequestKind: "tool",
+			})
+			await handle.waitForInteraction()
+
+			sinon.assert.calledOnce(decide)
+			sinon.assert.calledWithExactly(config.taskMessenger.createCard, {
+				header: "Permission",
+				toolName: "test-tool",
+				locations: undefined,
+				status: CardStatus.WAITING_FOR_INPUT,
+				requireApproval: true,
+				isAutoApproved: sinon.match.func,
+			})
+			sinon.assert.calledOnce(fakeHandle.waitForInteraction)
+		})
+
+		for (const permissionRequestKind of [undefined, "tool"] as const) {
+			it(`displays permissions without Utility (kind: ${permissionRequestKind})`, async () => {
 				const fakeHandle = {
 					id: "card-1",
 					update: sinon.stub().resolves(),
@@ -336,62 +366,24 @@ describe("SurfaceAdapter", () => {
 					finalize: sinon.stub().resolves(),
 					waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
 				}
-				const decide = sinon.stub().resolves({ decision: "escalate", reason: "User choice." })
-				config.isSubagentExecution = isSubagentExecution
-				config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
 				config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
 
 				const handle = await adapter.ui.createCard({
 					header: "Permission",
 					status: CardStatus.WAITING_FOR_INPUT,
 					requireApproval: true,
-					permissionRequestKind: "tool",
+					permissionRequestKind,
 				})
-				await handle.waitForInteraction()
+				const result = await handle.waitForInteraction()
 
-				sinon.assert.calledOnce(decide)
-				sinon.assert.calledWithExactly(config.taskMessenger.createCard, {
-					header: "Permission",
-					toolName: "test-tool",
-					locations: undefined,
+				sinon.assert.calledOnce(config.taskMessenger.createCard)
+				sinon.assert.calledWithMatch(config.taskMessenger.createCard, {
 					status: CardStatus.WAITING_FOR_INPUT,
 					requireApproval: true,
-					isAutoApproved: sinon.match.func,
 				})
 				sinon.assert.calledOnce(fakeHandle.waitForInteraction)
+				result.action.should.equal(DiracAskResponse.APPROVE)
 			})
-		}
-
-		for (const isSubagentExecution of [false, true]) {
-			for (const permissionRequestKind of [undefined, "tool"] as const) {
-				it(`displays permissions without Utility (subagent: ${isSubagentExecution}, kind: ${permissionRequestKind})`, async () => {
-					const fakeHandle = {
-						id: "card-1",
-						update: sinon.stub().resolves(),
-						appendBody: sinon.stub().resolves(),
-						finalize: sinon.stub().resolves(),
-						waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
-					}
-					config.isSubagentExecution = isSubagentExecution
-					config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
-
-					const handle = await adapter.ui.createCard({
-						header: "Permission",
-						status: CardStatus.WAITING_FOR_INPUT,
-						requireApproval: true,
-						permissionRequestKind,
-					})
-					const result = await handle.waitForInteraction()
-
-					sinon.assert.calledOnce(config.taskMessenger.createCard)
-					sinon.assert.calledWithMatch(config.taskMessenger.createCard, {
-						status: CardStatus.WAITING_FOR_INPUT,
-						requireApproval: true,
-					})
-					sinon.assert.calledOnce(fakeHandle.waitForInteraction)
-					result.action.should.equal(DiracAskResponse.APPROVE)
-				})
-			}
 		}
 
 		it("preserves legacy YOLO approval when Utility permission handling is disabled", async () => {
@@ -457,35 +449,6 @@ describe("SurfaceAdapter", () => {
 			result.action.should.equal(DiracAskResponse.APPROVE)
 		})
 
-		it("routes subagent permissions through the permission agent and publishes their approval", async () => {
-			const auditCardHandle = {
-				id: "approval-card-1",
-				update: sinon.stub().resolves(),
-				appendBody: sinon.stub().resolves(),
-				finalize: sinon.stub().resolves(),
-				waitForInteraction: sinon.stub(),
-			}
-			const decide = sinon.stub().resolves({ decision: "approve", reason: "Allowed." })
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
-			config.isSubagentExecution = true
-			config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(auditCardHandle))
-
-			const result = await (
-				await adapter.ui.createCard({
-					header: "Permission",
-					requireApproval: true,
-					permissionRequestKind: "tool",
-				})
-			).waitForInteraction()
-
-			sinon.assert.calledWithMatch(decide, { runtime: { cwd: "/test", mode: "act", isSubagent: true } })
-			sinon.assert.calledWithMatch(config.taskMessenger.createCard, {
-				header: "Auto Approved · Permission",
-				toolName: "permission_approval",
-				status: CardStatus.SUCCESS,
-			})
-			result.action.should.equal(DiracAskResponse.APPROVE)
-		})
 
 		it("discards an in-flight Utility approval after its configuration changes", async () => {
 			let resolveDecision!: (decision: { decision: "approve"; reason: string }) => void
@@ -571,26 +534,9 @@ describe("SurfaceAdapter", () => {
 		it("upsertText delegates to taskMessenger.upsertText", async () => {
 			config.taskMessenger.upsertText = sinon.stub().resolves()
 			await adapter.ui.upsertText("hello", true, "assistant")
-			sinon.assert.calledWith(config.taskMessenger.upsertText, "hello", true, undefined, undefined, "assistant", undefined)
+			sinon.assert.calledWithExactly(config.taskMessenger.upsertText, "hello", true, undefined, undefined, "assistant")
 		})
 
-		it("prefixes subagent text with its display name", async () => {
-			config.agentIdentity = { id: 2, name: "Feynman" }
-			config.taskMessenger.upsertText = sinon.stub().resolves()
-			adapter = new SurfaceAdapter(config, "test_tool")
-
-			await adapter.ui.upsertText("Working on it.", false, "assistant")
-
-			sinon.assert.calledWith(
-				config.taskMessenger.upsertText,
-				"**Feynman:** Working on it.",
-				false,
-				undefined,
-				undefined,
-				"assistant",
-				{ id: 2, name: "Feynman" },
-			)
-		})
 
 		it("streamText delegates to taskMessenger.streamText", async () => {
 			config.taskMessenger.streamText = sinon.stub().resolves({ write: sinon.stub(), close: sinon.stub() })
@@ -955,7 +901,6 @@ function createMockConfig(): any {
 		yoloModeToggled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: false,
-		isSubagentExecution: false,
 		backgroundEditEnabled: false,
 		taskState: { conversationHistoryDeletedRange: undefined },
 		messageState: { getDiracMessages: () => [], getApiConversationHistory: () => [] },

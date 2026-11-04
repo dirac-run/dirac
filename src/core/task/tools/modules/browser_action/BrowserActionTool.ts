@@ -55,7 +55,6 @@ export class BrowserActionTool implements IDiracTool {
 
 	async processCall(args: any, env: IToolEnvironment): Promise<string | Array<DiracTextContentBlock | DiracImageContentBlock>> {
 		const { action, url, coordinate, text } = args
-		const isSubagent = env.config.isSubagentExecution
 		const example = '{"action": "launch", "url": "https://google.com"}'
 		const utilityPermissionHandlingEnabled = env.config.permissionDecisionBinding !== undefined
 
@@ -63,13 +62,11 @@ export class BrowserActionTool implements IDiracTool {
 			return this.reportMissingActionParameter(env, example)
 		}
 
-		const card = !isSubagent
-			? await env.ui.createCard({
-				icon: DiracIcon.BROWSER,
-				header: `Browser: ${action}${action === "launch" && url ? ` ${url}` : action === "click" && coordinate ? ` at ${coordinate}` : action === "type" && text ? ` "${text.substring(0, 30)}"` : ""}`,
-				collapsed: true,
-			})
-			: undefined
+		const card = await env.ui.createCard({
+			icon: DiracIcon.BROWSER,
+			header: `Browser: ${action}${action === "launch" && url ? ` ${url}` : action === "click" && coordinate ? ` at ${coordinate}` : action === "type" && text ? ` "${text.substring(0, 30)}"` : ""}`,
+			collapsed: true,
+		})
 		try {
 			let result: BrowserActionResult
 

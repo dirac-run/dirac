@@ -36,18 +36,16 @@ export class ListSkillsTool implements IDiracTool {
 			available.some((candidate) => candidate.name === skill.name && candidate.path === skill.path))
 
 		if (skills.length === 0) {
-			if (!env.config.isSubagentExecution) {
-				const card = await env.ui.createCard({
-					icon: DiracIcon.SKILL,
-					header: "List available skills",
-					collapsed: true,
-				})
-				await card.update({
-					status: CardStatus.SUCCESS,
-					body: "No skills are currently available.",
-				})
-				await card.finalize(CardStatus.SUCCESS)
-			}
+			const card = await env.ui.createCard({
+				icon: DiracIcon.SKILL,
+				header: "List available skills",
+				collapsed: true,
+			})
+			await card.update({
+				status: CardStatus.SUCCESS,
+				body: "No skills are currently available.",
+			})
+			await card.finalize(CardStatus.SUCCESS)
 			return "No skills are currently available."
 		}
 
@@ -62,22 +60,20 @@ export class ListSkillsTool implements IDiracTool {
 		})
 		response += "\nUse the 'use_skill' tool to activate a skill."
 
-		if (!env.config.isSubagentExecution) {
-			const card = await env.ui.createCard({
-				icon: DiracIcon.SKILL,
-				header: "List available skills",
-				collapsed: true,
-			})
-			await card.appendBody(
-				`Found ${skills.length} skills (${projectSkills.length} project, ${builtinSkills.length} built-in, ${globalSkills.length} global).\n`,
-			)
-			await card.update({
-				header: "Listed available skills",
-				status: CardStatus.SUCCESS,
-				body: response,
-			})
-			await card.finalize(CardStatus.SUCCESS)
-		}
+		const card = await env.ui.createCard({
+			icon: DiracIcon.SKILL,
+			header: "List available skills",
+			collapsed: true,
+		})
+		await card.appendBody(
+			`Found ${skills.length} skills (${projectSkills.length} project, ${builtinSkills.length} built-in, ${globalSkills.length} global).\n`,
+		)
+		await card.update({
+			header: "Listed available skills",
+			status: CardStatus.SUCCESS,
+			body: response,
+		})
+		await card.finalize(CardStatus.SUCCESS)
 
 		return response
 	}

@@ -91,7 +91,6 @@ export class EditFileApprovalFlow {
 		batches: PreparedFileBatch[],
 	): Promise<ToolPermissionDisposition> {
 		if (env.config.permissionDecisionBinding === undefined) {
-			if (env.config.isSubagentExecution) return "auto_approve"
 			if (env.config.autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
 			for (const batch of batches) {
 				const autoApproved = await env.config.callbacks.shouldAutoApproveToolWithPath(

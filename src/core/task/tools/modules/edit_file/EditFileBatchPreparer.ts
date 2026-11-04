@@ -54,16 +54,14 @@ export class EditFileBatchPreparer {
 			if (prepared.resolvedEdits.length === 0) {
 				const failureMessage = failureMessages.join("\n\n")
 				results.push(failureMessage)
-				if (!env.config.isSubagentExecution) {
-					const card = await env.ui.createCard({
-						header: `Could not edit ${displayPath} — ${prepared.failedEdits.length} edit(s) failed`,
-						icon: DiracIcon.FILE_EDIT,
-						status: CardStatus.ERROR,
-						body: failureMessage,
-						collapsed: true,
-					})
-					await card.finalize(CardStatus.ERROR)
-				}
+				const card = await env.ui.createCard({
+					header: `Could not edit ${displayPath} — ${prepared.failedEdits.length} edit(s) failed`,
+					icon: DiracIcon.FILE_EDIT,
+					status: CardStatus.ERROR,
+					body: failureMessage,
+					collapsed: true,
+				})
+				await card.finalize(CardStatus.ERROR)
 				continue
 			}
 
@@ -73,19 +71,17 @@ export class EditFileBatchPreparer {
 			prepared.appliedEdits = appliedEdits
 			prepared.diff = this.fileFormatter.generateDiff(displayPath, prepared.lines, finalLines)
 
-			if (!env.config.isSubagentExecution) {
-				const partialSuffix =
-					prepared.failedEdits.length > 0
-						? ` — ${prepared.resolvedEdits.length} ready, ${prepared.failedEdits.length} failed`
-						: ""
-				cards[absolutePath] = await env.ui.createCard({
-					header: `Editing ${displayPath}${partialSuffix}`,
-					icon: DiracIcon.FILE_EDIT,
-					collapsed: true,
-				})
-				const cardBody = [stripHashesFromDiff(prepared.diff), ...failureMessages].filter(Boolean).join("\n\n")
-				await cards[absolutePath].update({ body: cardBody })
-			}
+			const partialSuffix =
+				prepared.failedEdits.length > 0
+					? ` — ${prepared.resolvedEdits.length} ready, ${prepared.failedEdits.length} failed`
+					: ""
+			cards[absolutePath] = await env.ui.createCard({
+				header: `Editing ${displayPath}${partialSuffix}`,
+				icon: DiracIcon.FILE_EDIT,
+				collapsed: true,
+			})
+			const cardBody = [stripHashesFromDiff(prepared.diff), ...failureMessages].filter(Boolean).join("\n\n")
+			await cards[absolutePath].update({ body: cardBody })
 
 			preparedBatches.push({ absolutePath, displayPath, blocks: [], prepared })
 		}

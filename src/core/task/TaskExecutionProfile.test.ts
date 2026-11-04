@@ -58,14 +58,12 @@ describe("Task execution profiles", () => {
 
 	it("keeps foreground-only skills root-owned while retaining ordinary worker skills", () => {
 		for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
-			for (const isSubagentExecution of [false, true]) {
-				const skill = { name: "fixture", description: "Fixture", path: "/fixture/SKILL.md", source: "builtin" as const }
-				assert.equal(isSkillAvailableToTaskProfile(profile, skill, isSubagentExecution), true)
-				assert.equal(
-					isSkillAvailableToTaskProfile(profile, { ...skill, foregroundOnly: true }, isSubagentExecution),
-					!isSubagentExecution && profile !== "goal_child" && profile !== "tasklet",
-				)
-			}
+			const skill = { name: "fixture", description: "Fixture", path: "/fixture/SKILL.md", source: "builtin" as const }
+			assert.equal(isSkillAvailableToTaskProfile(profile, skill), true)
+			assert.equal(
+				isSkillAvailableToTaskProfile(profile, { ...skill, foregroundOnly: true }),
+				profile !== "goal_child" && profile !== "tasklet",
+			)
 		}
 	})
 

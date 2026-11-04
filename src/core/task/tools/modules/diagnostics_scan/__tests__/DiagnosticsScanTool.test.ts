@@ -48,9 +48,6 @@ describe("DiagnosticsScanTool", () => {
 	function createConfig(abortSignal?: AbortSignal) {
 		const { config, taskState } = createMockTaskConfig({
 			cwd: tmpDir,
-			overrides: {
-				isSubagentExecution: false,
-			},
 		})
 		if (abortSignal) {
 			Object.defineProperty(taskState, "abortSignal", {
@@ -320,28 +317,6 @@ describe("DiagnosticsScanTool", () => {
 		assert.equal(card.getCard().status, CardStatus.SUCCESS)
 	})
 
-	it("handles execution in subagent mode without card", async () => {
-		const { config } = createMockTaskConfig({
-			cwd: tmpDir,
-			overrides: { isSubagentExecution: true },
-		})
-		const handler = new DiagnosticsScanTool()
-			; (handler as any).baseDiagnosticsTimeoutMs = 30
-			; (handler as any).diagnosticsDelayMs = 10
-		const coordinator = new ToolExecutorCoordinator()
-		coordinator.registerModularTool(handler)
-
-		const testFile = path.join(tmpDir, "test.ts")
-		await fs.writeFile(testFile, "const a = 1;")
-
-		getDiagnosticsStub.resolves({ fileDiagnostics: [] })
-
-		const result = await coordinator.execute(config, makeBlock(["test.ts"]))
-		assert.equal(typeof result, "string")
-
-		const createdCards = config.taskMessenger.createCard.returnValues
-		assert.equal(createdCards.length, 0)
-	})
 
 	it("handles ToolTimeoutError via presentToolTimeout", async () => {
 		const { config } = createConfig()
@@ -380,25 +355,6 @@ describe("DiagnosticsScanTool", () => {
 		assert.equal(card.getCard().status, CardStatus.ERROR)
 	})
 
-	it("handles ToolTimeoutError in subagent mode without card", async () => {
-		const { config } = createMockTaskConfig({
-			cwd: tmpDir,
-			overrides: { isSubagentExecution: true },
-		})
-		const handler = new DiagnosticsScanTool()
-		const coordinator = new ToolExecutorCoordinator()
-		coordinator.registerModularTool(handler)
-
-		const testFile = path.join(tmpDir, "test.ts")
-		await fs.writeFile(testFile, "const a = 1;")
-
-		const { ToolTimeoutError } = await import("../../../runtime/ToolExecutionDeadline")
-		prepareDiagnosticsStub.rejects(new ToolTimeoutError("diagnostics_scan", "preparing diagnostics", 2000))
-
-		const result = await coordinator.execute(config, makeBlock(["test.ts"]))
-		assert.equal(typeof result, "string")
-		assert.ok((result as string).includes("timed out"))
-	})
 
 	it("handles abort with default undefined reason", async () => {
 		const abortController = new AbortController()

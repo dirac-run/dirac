@@ -7,9 +7,7 @@ import type { TaskConfig } from "../../types/TaskConfig"
 // Builds the orchestration trait — tasklet supervision, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
-		tasklets: config.executionProfile === "standalone" && !config.isSubagentExecution
-			? config.callbacks.tasklets
-			: undefined,
+		tasklets: config.executionProfile === "standalone" ? config.callbacks.tasklets : undefined,
 		runHook: async (name, input, options) => {
 			const { executeHook } = await import("@core/hooks/hook-executor")
 			return await executeHook({

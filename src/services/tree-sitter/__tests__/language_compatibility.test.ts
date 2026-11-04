@@ -359,7 +359,6 @@ function createMockConfig(cwd: string) {
 		cwd,
 		taskState,
 		callbacks,
-		isSubagentExecution: false,
 		autoApprover: { isUnrestrictedAutoApprove: () => true },
 		messageState: { getApiConversationHistory: sinon.stub().returns([]) },
 		api: { getModel: () => ({ id: "test-model", info: { supportsImages: false } }) },

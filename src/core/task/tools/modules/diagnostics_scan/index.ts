@@ -58,14 +58,11 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 		const cancellationSignal = env.orchestration.getTaskState("abortSignal")
 		const deadline = new ToolExecutionDeadline(this.spec().name, { cancellationSignal })
 
-		const isSubagent = env.config.isSubagentExecution
-		const card = !isSubagent
-			? await env.ui.createCard({
-					header: `Scanning ${relPaths.length} file(s) for diagnostics`,
-					icon: DiracIcon.DIAGNOSTICS,
-					collapsed: true,
-				})
-			: undefined
+		const card = await env.ui.createCard({
+			header: `Scanning ${relPaths.length} file(s) for diagnostics`,
+			icon: DiracIcon.DIAGNOSTICS,
+			collapsed: true,
+		})
 
 		try {
 			this.throwIfAborted(cancellationSignal)

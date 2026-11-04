@@ -21,7 +21,7 @@ describe("upsert_tool public coordinator acceptance (controlled smoke-command re
 	it("returns a failed update to the parent, keeps the old tool callable, and installs only an explicit parent repair", async () => {
 		const { config, context } = createMockTaskConfig({
 			cwd: fixture.root,
-			overrides: { taskId: "test-owner", isSubagentExecution: false },
+			overrides: { taskId: "test-owner" },
 			callbackOverrides: fixture.env.config.callbacks,
 		})
 		const save = fixture.sandbox.spy(context, "save")

@@ -16,7 +16,6 @@ function makeEnvironment(legacySettings: Record<string, unknown>, subagentsEnabl
 			...legacySettings,
 			subagentsEnabled,
 			executionProfile: "standalone",
-			isSubagentExecution: false,
 			autoApprovalSettings: { enableNotifications: false },
 			mode: "act",
 		},

@@ -8,7 +8,7 @@ import { formatResponse } from "@core/formatResponse"
 
 export async function requestQuestionResponse(question: string, options: string[], env: IToolEnvironment): Promise<any> {
 	// Show notification if enabled
-	if (!env.config.isSubagentExecution && env.config.autoApprovalSettings.enableNotifications) {
+	if (env.config.autoApprovalSettings.enableNotifications) {
 		env.system.showNotification({
 			subtitle: "Dirac has a question...",
 			message: question.replace(/\n/g, " "),

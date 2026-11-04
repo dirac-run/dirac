@@ -6,10 +6,9 @@ export type TaskExecutionProfile = "standalone" | "goal_coordinator" | "goal_fol
 export function isSkillAvailableToTaskProfile(
 	profile: TaskExecutionProfile,
 	skill: SkillMetadata,
-	isSubagentExecution = false,
 ): boolean {
 	if (!skill.foregroundOnly) return true
-	return !isSubagentExecution && (profile === "standalone" || profile === "goal_coordinator" || profile === "goal_followup")
+	return profile === "standalone" || profile === "goal_coordinator" || profile === "goal_followup"
 }
 
 export const GOAL_TOOL_NAMES = [

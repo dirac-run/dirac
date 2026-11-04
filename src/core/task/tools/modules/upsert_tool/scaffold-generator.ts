@@ -73,7 +73,7 @@ const env = {
     upsertText: noOp,
     streamText: async () => ({ write: noOp, end: noOp }),
   },
-  config: { cwd: process.cwd(), isSubagentExecution: true },
+  config: { cwd: process.cwd() },
   interaction: { askPermission: async () => ({ approved: true, action: "approve" }) },
   orchestration: {
     runHook: async () => ({}), switchToActMode: async () => true,

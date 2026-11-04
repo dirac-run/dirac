@@ -372,7 +372,6 @@ export class ToolExecutor {
 			lowVerbosityEnabled: settings.lowVerbosityEnabled,
 			vscodeTerminalExecutionMode: this.terminalExecutionMode,
 			enableParallelToolCalling: settings.enableParallelToolCalling,
-			isSubagentExecution: false,
 			backgroundEditEnabled: !!settings.backgroundEditEnabled,
 			providerId: this.requestProviderId(),
 			customPrompt: settings.customPrompt,

@@ -217,17 +217,15 @@ describe("ConversationCondensationTraitBuilder", () => {
 		sinon.assert.notCalled(config.messageState.getApiConversationHistory)
 	})
 
-	it("exposes a narrow facade for parent tasks and no capability for subagents", () => {
-		const { config } = createEnvironment()
-		config.isSubagentExecution = false
-		const parentEnvironment = new SurfaceAdapter(config)
+	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+		it(`exposes a narrow task-owned condensation facade for ${executionProfile}`, () => {
+			const { config } = createEnvironment()
+			config.executionProfile = executionProfile
+			const environment = new SurfaceAdapter(config)
 
-		assert.ok(parentEnvironment.conversationCondensation)
-		assert.equal("api" in parentEnvironment.conversationCondensation!, false)
-		assert.equal("createHandler" in parentEnvironment.conversationCondensation!, false)
-
-		config.isSubagentExecution = true
-		const subagentEnvironment = new SurfaceAdapter(config)
-		assert.equal(subagentEnvironment.conversationCondensation, undefined)
-	})
+			assert.ok(environment.conversationCondensation)
+			assert.equal("api" in environment.conversationCondensation, false)
+			assert.equal("createHandler" in environment.conversationCondensation, false)
+		})
+	}
 })

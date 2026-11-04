@@ -22,7 +22,6 @@ function controls() {
 function fixture() {
 	const { config } = createMockTaskConfig()
 	config.executionProfile = "standalone"
-	config.isSubagentExecution = false
 	const callbacks = controls()
 	config.callbacks.tasklets = callbacks as TaskletControls
 	return { config, callbacks }
@@ -63,11 +62,6 @@ describe("Tasklet environment control bindings", () => {
 		})
 	}
 
-	it("does not let legacy subagents inherit root controls", () => {
-		const { config } = fixture()
-		config.isSubagentExecution = true
-		assert.equal(buildOrchestrationTrait(config).tasklets, undefined)
-	})
 
 	it("leaves controls absent without an owner binding", () => {
 		const { config } = fixture()

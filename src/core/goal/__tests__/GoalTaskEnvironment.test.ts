@@ -22,7 +22,7 @@ function owner(overrides: Partial<GoalChildSurfaceOwner> = {}): GoalChildSurface
 describe("GoalChildToolEnvironmentFactory", () => {
 	it("routes a real child interaction to its Goal owner without using the Task wait queue", async () => {
 		const { config, taskState } = createMockTaskConfig({
-			overrides: { yoloModeToggled: false, isSubagentExecution: false },
+			overrides: { yoloModeToggled: false },
 		})
 		let waits = 0
 		const environment = new GoalChildToolEnvironmentFactory(
@@ -47,7 +47,6 @@ describe("GoalChildToolEnvironmentFactory", () => {
 		const { config } = createMockTaskConfig({
 			overrides: {
 				yoloModeToggled: true,
-				isSubagentExecution: false,
 				autoApprover: { isUnrestrictedAutoApprove: () => true } as any,
 			},
 		})
@@ -85,7 +84,6 @@ describe("GoalChildToolEnvironmentFactory", () => {
 			const { config } = createMockTaskConfig({
 				overrides: {
 					yoloModeToggled: false,
-					isSubagentExecution: false,
 					autoApprover: { isUnrestrictedAutoApprove: () => false } as any,
 				},
 			})
@@ -103,7 +101,7 @@ describe("GoalChildToolEnvironmentFactory", () => {
 
 	it("persists response cards with the recovery identity", async () => {
 		const { config, taskMessenger } = createMockTaskConfig({
-			overrides: { yoloModeToggled: false, isSubagentExecution: false },
+			overrides: { yoloModeToggled: false },
 		})
 		const environment = new GoalChildToolEnvironmentFactory("child-1", "task", owner()).create(config, "respond")
 

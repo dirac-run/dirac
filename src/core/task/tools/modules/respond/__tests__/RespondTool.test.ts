@@ -12,7 +12,6 @@ function environment(mode: "plan" | "act") {
 	return {
 		config: {
 			mode,
-			isSubagentExecution: false,
 			yoloModeToggled: true,
 			autoApprovalSettings: { enableNotifications: false },
 		},

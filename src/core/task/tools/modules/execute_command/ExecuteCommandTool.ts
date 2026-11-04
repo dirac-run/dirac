@@ -261,14 +261,12 @@ export class ExecuteCommandTool implements IDiracTool {
 	): Promise<{ result: string; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
 		const header = `Executing ${index} of ${total}: ${shortenCommandForDisplay(cmd.displayName, env.config.cwd)}`
 
-		const activeCard = !env.config.isSubagentExecution
-			? await env.ui.createCard({
-				header,
-				icon: DiracIcon.COMMAND,
-				collapsed: true,
-				rawInput: { command: cmd.command, displayName: cmd.displayName, language: cmd.language ?? "bash" },
-			})
-			: null
+		const activeCard = await env.ui.createCard({
+			header,
+			icon: DiracIcon.COMMAND,
+			collapsed: true,
+			rawInput: { command: cmd.command, displayName: cmd.displayName, language: cmd.language ?? "bash" },
+		})
 
 		let usedWorkspaceHint = false
 		let resolvedToNonPrimary = false

@@ -44,7 +44,6 @@ function makeCard(params: any) {
 }
 
 function createEnvironment(options: {
-	subagent?: boolean
 	result?: any
 	outlineResult?: any
 	implementationResult?: any
@@ -64,7 +63,7 @@ function createEnvironment(options: {
 		}],
 	}
 	const env = {
-		config: { isSubagentExecution: options.subagent === true },
+		config: {},
 		context: {
 			task: {
 				get: async (key: string) => taskContext.get(key),
@@ -370,11 +369,6 @@ describe("InspectAstTool", () => {
 		})
 	}
 
-	it("does not create interactive cards during subagent execution", async () => {
-		const { env, cards } = createEnvironment({ subagent: true })
-		await new InspectAstTool().processCall({ operation: "outline", paths: "src/a.ts" }, env)
-		assert.equal(cards.length, 0)
-	})
 
 	it("returns valid empty inspections without an execution-error wrapper", async () => {
 		const { env } = createEnvironment({ implementationResult: { targets: [] } })

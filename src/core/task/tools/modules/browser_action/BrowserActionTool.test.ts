@@ -11,7 +11,6 @@ function createPermissionEnvironment() {
 	return {
 		env: {
 			config: {
-				isSubagentExecution: true,
 				autoApprover: { isUnrestrictedAutoApprove, shouldAutoApproveTool },
 				services: { commandPermissionController: { validateTool } },
 			},
@@ -26,7 +25,7 @@ describe("BrowserActionTool", () => {
 	it("intercepts browser permissions before unrestricted and matching-rule approvals", () => {
 		const tool = new BrowserActionTool()
 		const { env, validateTool, isUnrestrictedAutoApprove, shouldAutoApproveTool } = createPermissionEnvironment()
-		;(env.config.autoApprover as any).requiresCounterpartyApproval = true
+			; (env.config.autoApprover as any).requiresCounterpartyApproval = true
 		isUnrestrictedAutoApprove.returns(true)
 		validateTool.returns({ allowed: true, reason: "allowed", matchedPattern: "**" })
 
@@ -82,7 +81,7 @@ describe("BrowserActionTool", () => {
 		assert.equal((tool as any).resolveLaunchPermission(env, "https://example.com/page"), "auto_approve")
 	})
 
-	it("keeps residual subagent browser launches Utility-eligible", () => {
+	it("keeps unmatched browser launches Utility-eligible", () => {
 		const tool = new BrowserActionTool()
 		const { env } = createPermissionEnvironment()
 
@@ -100,7 +99,6 @@ describe("BrowserActionTool", () => {
 		const resolveLaunchPermission = sinon.stub(tool as any, "resolveLaunchPermission").returns("auto_approve")
 		const env = {
 			config: {
-				isSubagentExecution: true,
 				autoApprover: {
 					isUnrestrictedAutoApprove: sinon.stub().returns(true),
 					shouldAutoApproveTool: sinon.stub().returns(true),

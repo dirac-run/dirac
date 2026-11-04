@@ -14,7 +14,7 @@ function createEnvironment(
 		images?: string[]
 		files?: string[]
 	},
-	config: { isSubagentExecution?: boolean; enableNotifications?: boolean; yoloModeToggled?: boolean } = {},
+	config: { enableNotifications?: boolean; yoloModeToggled?: boolean } = {},
 ) {
 	const card = {
 		update: sinon.stub().resolves(),
@@ -33,7 +33,6 @@ function createEnvironment(
 			updateMessage: sinon.stub().resolves(),
 		},
 		config: {
-			isSubagentExecution: config.isSubagentExecution ?? true,
 			autoApprovalSettings: { enableNotifications: config.enableNotifications ?? false },
 			yoloModeToggled: config.yoloModeToggled ?? false,
 			mode: "act",
@@ -119,7 +118,7 @@ describe("question response operation", () => {
 				images: ["data:image/png;base64,AA=="],
 				files: ["file.txt"],
 			},
-			{ isSubagentExecution: false, enableNotifications: true },
+			{ enableNotifications: true },
 		)
 
 		await requestQuestionResponse("Choose", ["Option A", "Option B"], env)
@@ -159,7 +158,7 @@ describe("question response operation", () => {
 	it("returns the autonomous-mode instruction without creating an interaction card", async () => {
 		const { env } = createEnvironment(
 			{ response: DiracAskResponse.APPROVE },
-			{ isSubagentExecution: false, yoloModeToggled: true },
+			{ yoloModeToggled: true },
 		)
 
 		const result = await requestQuestionResponse("Where is it?", [], env)

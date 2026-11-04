@@ -121,7 +121,6 @@ class GoalChildToolEnvironment implements ToolExecutionEnvironment {
 		private readonly base: SurfaceAdapter,
 		private readonly taskId: string,
 		private readonly owner: GoalChildSurfaceOwner,
-		observeResponses: boolean,
 	) {
 		this.config = base.config
 		this.toolName = base.toolName
@@ -156,24 +155,22 @@ class GoalChildToolEnvironment implements ToolExecutionEnvironment {
 		this.interaction = {
 			askPermission: (message, preview) => askPermissionOnCard((params) => this.ui.createCard(params), message, preview),
 		}
-		this.responseObserver = observeResponses
-			? {
-				recordResponse: async (response) => {
-					const card = await base.ui.createCard({
-						header: "Goal Task Response",
-						toolName: "goal_child_response",
-						body: response.text,
-						rawInput: { tool: "respond", ...response },
-						status: CardStatus.RUNNING,
-						renderType: "markdown",
-						collapsed: true,
-					})
-					await card.finalize(CardStatus.SUCCESS)
-					await base.config.messageState.flushPendingWrites()
-					await owner.recordResponse(taskId, response)
-				},
-			}
-			: base.responseObserver
+		this.responseObserver = {
+			recordResponse: async (response) => {
+				const card = await base.ui.createCard({
+					header: "Goal Task Response",
+					toolName: "goal_child_response",
+					body: response.text,
+					rawInput: { tool: "respond", ...response },
+					status: CardStatus.RUNNING,
+					renderType: "markdown",
+					collapsed: true,
+				})
+				await card.finalize(CardStatus.SUCCESS)
+				await base.config.messageState.flushPendingWrites()
+				await owner.recordResponse(taskId, response)
+			},
+		}
 	}
 
 	getCustomMetadata(): Record<string, unknown> {
@@ -198,10 +195,8 @@ export class GoalChildToolEnvironmentFactory implements ToolEnvironmentFactory {
 			this.role === "verification" ? `goal/verification:${this.taskId}` : `goal/child:${this.taskId}`
 		surface.customMetadata = {
 			goalId: this.owner.goalId,
-			goalAttribution: config.isSubagentExecution
-				? `${baseAttribution}/subagent:${config.agentIdentity?.id ?? "unknown"}`
-				: baseAttribution,
+			goalAttribution: baseAttribution,
 		}
-		return new GoalChildToolEnvironment(surface, this.taskId, this.owner, !config.isSubagentExecution)
+		return new GoalChildToolEnvironment(surface, this.taskId, this.owner)
 	}
 }

@@ -28,7 +28,6 @@ export function validateResponseArguments(args: unknown, env: IToolEnvironment):
 }
 
 function validateMode(operation: ResponseOperation, env: IToolEnvironment): void {
-	if (env.config.isSubagentExecution) return
 	if (operation === ResponseOperation.PLAN && env.config.mode !== "plan") {
 		throw new ResponseArgumentsError("The 'plan' response operation is available only in Plan Mode.", env)
 	}

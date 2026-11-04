@@ -102,9 +102,7 @@ export class GoalCoordinatorToolEnvironmentFactory implements ToolEnvironmentFac
 		const surface = new SurfaceAdapter(config, toolName)
 		surface.customMetadata = {
 			goalId: config.taskId,
-			goalAttribution: config.isSubagentExecution
-				? `goal/subagent:${config.agentIdentity?.id ?? "unknown"}`
-				: "goal",
+			goalAttribution: "goal",
 		}
 		return new GoalCoordinatorToolEnvironment(surface, this.createGoalTrait(surface), this.interactionOwner)
 	}

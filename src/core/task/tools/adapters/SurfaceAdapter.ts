@@ -86,7 +86,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.skills = buildSkillsTrait(config)
 		this.architecture = buildArchitectureTrait({
 			taskId: config.taskId,
-			foreground: !config.isSubagentExecution && config.executionProfile !== "goal_child" && config.executionProfile !== "tasklet",
+			foreground: config.executionProfile !== "goal_child" && config.executionProfile !== "tasklet",
 			canWaitForInput: !config.yoloModeToggled,
 			resolveTaskDirectory: () => getTaskDirectoryPath(config.storageAddress ?? config.taskId),
 		})
@@ -112,9 +112,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.context = config.context
 		this.orchestration = buildOrchestrationTrait(config)
 		this.responseObserver = { recordResponse: (response) => config.taskMessenger.recordResponse(response) }
-		this.conversationCondensation = config.isSubagentExecution
-			? undefined
-			: buildConversationCondensationTrait(config)
+		this.conversationCondensation = buildConversationCondensationTrait(config)
 	}
 
 	public getCustomMetadata(): Record<string, any> {

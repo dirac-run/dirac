@@ -36,24 +36,22 @@ export class CompletionResponseOperation {
 			}
 
 			try {
-				if (!env.config.isSubagentExecution && env.config.autoApprovalSettings.enableNotifications) {
+				if (env.config.autoApprovalSettings.enableNotifications) {
 					env.system.showNotification({
 						subtitle: "Task Completed",
 						message: result.replace(/\n/g, " "),
 					})
 				}
-				if (!env.config.isSubagentExecution) {
-					env.telemetry.captureTaskCompleted()
-					if (env.config.executionProfile === "standalone") {
-						await env.orchestration.runHook("Notification", {
-							notification: {
-								event: "task_completed",
-								source: `${DiracDefaultTool.RESPOND}:${ResponseOperation.COMPLETE}`,
-								message: result,
-								waitingForUserInput: true,
-							},
-						})
-					}
+				env.telemetry.captureTaskCompleted()
+				if (env.config.executionProfile === "standalone") {
+					await env.orchestration.runHook("Notification", {
+						notification: {
+							event: "task_completed",
+							source: `${DiracDefaultTool.RESPOND}:${ResponseOperation.COMPLETE}`,
+							message: result,
+							waitingForUserInput: true,
+						},
+					})
 				}
 			} catch (error) {
 				env.logging.warn("Completion succeeded, but a completion notification failed", error)

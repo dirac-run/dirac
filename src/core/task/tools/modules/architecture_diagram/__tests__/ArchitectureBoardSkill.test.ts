@@ -39,12 +39,11 @@ const context = {
 	executionProfile: "standalone",
 } as SystemPromptContext
 
-function configFor(profile: TaskExecutionProfile, subagent = false, yolo = false): TaskConfig {
+function configFor(profile: TaskExecutionProfile, yolo = false): TaskConfig {
 	const taskState = new TaskState()
 	taskState.discoveredSkillsCache = BUILTIN_SKILLS
 	return {
 		executionProfile: profile,
-		isSubagentExecution: subagent,
 		yoloModeToggled: yolo,
 		supportsNativeWebSearch: false,
 		cwd: "/unused",
@@ -184,22 +183,20 @@ describe("architecture-board skill integration", () => {
 		const baseline = spec.parameters!.find((parameter) => parameter.name === "start_version")!.instruction
 		assert.match(String(baseline), /inspected baseline snapshot/)
 	})
-	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child"] as const) {
-		for (const subagent of [false, true]) {
-			for (const yolo of [false, true]) {
-				it(`gates skill discovery/activation for ${profile}, subagent=${subagent}, yolo=${yolo}`, async () => {
-					const config = configFor(profile, subagent, yolo)
-					const trait = buildSkillsTrait(config)
-					const available = await trait.getAvailableSkills()
-					const expected = profile !== "goal_child" && !subagent
-					assert.equal(isSkillAvailableToTaskProfile(profile, skill, subagent), expected)
-					assert.equal(
-						available.some((candidate) => candidate.name === skill.name),
-						expected,
-					)
-					assert.equal(Boolean(await trait.getSkillContent(skill.name, available)), expected)
-				})
-			}
+	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+		for (const yolo of [false, true]) {
+			it(`gates skill discovery/activation for ${profile}, yolo=${yolo}`, async () => {
+				const config = configFor(profile, yolo)
+				const trait = buildSkillsTrait(config)
+				const available = await trait.getAvailableSkills()
+				const expected = profile !== "goal_child" && profile !== "tasklet"
+				assert.equal(isSkillAvailableToTaskProfile(profile, skill), expected)
+				assert.equal(
+					available.some((candidate) => candidate.name === skill.name),
+					expected,
+				)
+				assert.equal(Boolean(await trait.getSkillContent(skill.name, available)), expected)
+			})
 		}
 	}
 
@@ -293,7 +290,7 @@ describe("architecture-board skill integration", () => {
 		assert.match(await useSkill.processCall({ skill_name: skill.name }, env), /already active/)
 		sinon.assert.calledOnce(persist)
 
-		const restored = configFor("goal_followup", false, true)
+		const restored = configFor("goal_followup", true)
 		restored.taskState.availableSkills = await buildSkillsTrait(restored).getAvailableSkills()
 		restored.taskState.activeSkillIds = JSON.parse(JSON.stringify(metadata.active_skill_ids))
 		const recovered = await managerFor(restored).getSnapshotForRequest(context, {

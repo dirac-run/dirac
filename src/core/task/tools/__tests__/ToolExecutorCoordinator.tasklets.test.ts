@@ -12,7 +12,7 @@ import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import { createMockTaskConfig } from "./helpers/mockTaskConfig"
 
 function fixture(strict = true) {
-	const { config, context } = createMockTaskConfig({ overrides: { isSubagentExecution: false } })
+	const { config, context } = createMockTaskConfig()
 	const controls = {
 		list: sinon.stub().returns([]),
 		sleep: sinon.stub().resolves({ reason: "timeout" }),

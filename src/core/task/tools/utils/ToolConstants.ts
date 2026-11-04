@@ -20,7 +20,6 @@ export const TASK_CONFIG_KEYS = [
 	"lowVerbosityEnabled",
 	"vscodeTerminalExecutionMode",
 	"enableParallelToolCalling",
-	"isSubagentExecution",
 	"backgroundEditEnabled",
 	"providerId",
 	"model",

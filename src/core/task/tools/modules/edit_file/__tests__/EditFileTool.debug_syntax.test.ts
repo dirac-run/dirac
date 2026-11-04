@@ -84,7 +84,6 @@ function createConfig() {
 		ulid: "ulid-1",
 		cwd: tmpDir,
 		mode: "act",
-		isSubagentExecution: true,
 		taskState,
 		services: {
 			fileContextTracker: {

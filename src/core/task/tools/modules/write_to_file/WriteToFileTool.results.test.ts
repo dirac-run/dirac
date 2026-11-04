@@ -7,7 +7,7 @@ import { WriteToFileTool } from "./WriteToFileTool"
 
 function createEnvironment(problemCount: number): IToolEnvironment {
 	return {
-		config: { isSubagentExecution: false },
+		config: {},
 		editor: { reset: sinon.stub().resolves() },
 		diagnostics: {
 			prepare: sinon.stub().resolves(),

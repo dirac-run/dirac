@@ -109,14 +109,11 @@ export class SearchFilesTool implements IDiracTool<SearchFilesArgs, string> {
 				? Math.max(0, Math.min(10, Math.trunc(parsedContextLines)))
 				: undefined
 		const headerPath = paths.length === 1 ? paths[0] : `${paths[0]} (+${paths.length - 1} more)`
-		const isSubagent = env.config.isSubagentExecution
-		const card = !isSubagent
-			? await env.ui.createCard({
-				header: `Searching '${regex}' in ${headerPath}`,
-				icon: DiracIcon.SEARCH,
-				collapsed: true,
-			})
-			: undefined
+		const card = await env.ui.createCard({
+			header: `Searching '${regex}' in ${headerPath}`,
+			icon: DiracIcon.SEARCH,
+			collapsed: true,
+		})
 
 		try {
 			// 1. Resolve paths

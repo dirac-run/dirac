@@ -36,7 +36,7 @@ class EditFileToolHandler {
 
 let tmpDir: string
 
-function createConfig(opts: { isSubagent?: boolean; diracIgnore?: any } = {}) {
+function createConfig(opts: { diracIgnore?: any } = {}) {
 	const taskState = new TaskState()
 	const diffViewProvider = {
 		readText: sinon.stub().callsFake(async (filePath: string) => await fs.readFile(filePath, "utf8")),
@@ -97,7 +97,6 @@ function createConfig(opts: { isSubagent?: boolean; diracIgnore?: any } = {}) {
 		yoloModeToggled: true,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: true,
-		isSubagentExecution: opts.isSubagent ?? true,
 		taskState,
 		messageState: { getApiConversationHistory: sinon.stub().returns([]) },
 		model: { id: "test-model", info: { supportsImages: false } },
@@ -591,7 +590,7 @@ describe("EditFileTool – characterization edge cases", () => {
 		})
 
 		it("finalizes every progress card when a batch save fails", async () => {
-			const { config, taskState, validator, diffViewProvider, taskMessenger } = createConfig({ isSubagent: false })
+			const { config, taskState, validator, diffViewProvider, taskMessenger } = createConfig()
 			const handler = new EditFileToolHandler(validator, false)
 			const files = ["failed-a.txt", "failed-b.txt"]
 			const blocks = []

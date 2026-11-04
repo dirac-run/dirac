@@ -188,7 +188,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 		}
 		const config = executor.asToolConfig()
 		assert.equal(config.yoloModeToggled, false)
-		assert.equal(config.isSubagentExecution, false)
+		assert.equal(config.executionProfile, "tasklet")
 		assert.equal(config.permissionDecisionBinding, undefined)
 		sinon.assert.notCalled(executor.createPermissionDecisionBinding)
 		executor.executionProfile = "standalone"

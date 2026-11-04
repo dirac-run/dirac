@@ -176,14 +176,12 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 			usedWorkspaceHint = displayPath !== relPath
 
 			const rangeLabel = lineRange ? `lines ${lineRange.start}-${lineRange.end ?? "end"}` : undefined
-			card = !env.config.isSubagentExecution
-				? await env.ui.createCard({
-					header: rangeLabel ? `Reading ${rangeLabel} from ${displayPath}` : `Reading from ${displayPath}`,
-					icon: DiracIcon.FILE_READ,
-					collapsed: true,
-					locations: [{ path: relPath, ...(lineRange ? { line: lineRange.start } : {}) }],
-				})
-				: undefined
+			card = await env.ui.createCard({
+				header: rangeLabel ? `Reading ${rangeLabel} from ${displayPath}` : `Reading from ${displayPath}`,
+				icon: DiracIcon.FILE_READ,
+				collapsed: true,
+				locations: [{ path: relPath, ...(lineRange ? { line: lineRange.start } : {}) }],
+			})
 
 			const extension = path.extname(absolutePath).toLowerCase()
 			if (includeAnchors && NON_EDITABLE_RICH_EXTENSIONS.has(extension)) {

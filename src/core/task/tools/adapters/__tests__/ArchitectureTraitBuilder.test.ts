@@ -6,10 +6,10 @@ import proxyquire from "proxyquire"
 import sinon from "sinon"
 import { buildArchitectureTrait } from "../traits/ArchitectureTraitBuilder"
 
-function config(executionProfile: TaskExecutionProfile, isSubagentExecution = false) {
+function config(executionProfile: TaskExecutionProfile) {
 	return {
 		taskId: "owner",
-		foreground: !isSubagentExecution && executionProfile !== "goal_child",
+		foreground: executionProfile !== "goal_child" && executionProfile !== "tasklet",
 		canWaitForInput: true,
 		resolveTaskDirectory: () => "/tasks/owner",
 	}
@@ -30,7 +30,7 @@ describe("architecture environment capability", () => {
 
 	it("is absent for private workers but available to foreground Task and Goal profiles", () => {
 		expect(buildArchitectureTrait(config("goal_child"))).to.equal(undefined)
-		expect(buildArchitectureTrait(config("standalone", true))).to.equal(undefined)
+		expect(buildArchitectureTrait(config("tasklet"))).to.equal(undefined)
 		for (const profile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
 			expect(buildArchitectureTrait(config(profile))).to.have.keys(
 				"upsertDiagram",

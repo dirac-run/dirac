@@ -95,7 +95,7 @@ export class EditAstTool implements IDiracTool<EditAstArgs, string> {
 				return this.formatter.invalidPlan(plan)
 			}
 
-			if (!env.config.isSubagentExecution) await this.createProgressCards(args, plan, env, progressCards)
+			await this.createProgressCards(args, plan, env, progressCards)
 
 			const approvalResult = await this.approval.request(env, args, plan, progressCards)
 			autoApproved = approvalResult.autoApproved

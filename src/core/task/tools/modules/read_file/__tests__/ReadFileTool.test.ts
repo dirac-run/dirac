@@ -23,7 +23,7 @@ import { ReadFileTool } from "../ReadFileTool"
  * End-to-end tests for ReadFileToolHandler.execute().
  *
  * These exercise the actual handler with a mock TaskConfig (following the
- * SubagentToolHandler.test.ts pattern), verifying that:
+ * existing tool test pattern), verifying that:
  *
  *   1. Reading a non-existent file returns a tool error (not a thrown exception)
  *   2. consecutiveMistakeCount is NOT incremented for non-existent files (valid outcome)
@@ -78,7 +78,6 @@ function createConfig(supportsImages = false) {
 		yoloModeToggled: true,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: true,
-		isSubagentExecution: true, // skip UI calls and approval flow
 		taskState,
 		messageState: {
 			getApiConversationHistory: sinon.stub().returns([]),
@@ -300,7 +299,6 @@ describe("ReadFileToolHandler.execute – .diracignore (issue 277)", () => {
 
 	it("finalizes a denied read card as an error without exposing the canary", async () => {
 		const config = createIgnoredConfig()
-		config.isSubagentExecution = false
 		const card = {
 			finalize: sandbox.stub().resolves(),
 			setBody: sandbox.stub().resolves(),
@@ -346,7 +344,6 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 	for (const order of [["tasklet", "main", "sibling"], ["main", "tasklet", "sibling"]] as const) {
 		it(`isolates full-read history in ${order.join(" → ")} order`, async () => {
 			const { config } = createConfig()
-			config.isSubagentExecution = false
 			const configs = {
 				main: config,
 				tasklet: { ...config, context: createMockContext() },
@@ -870,7 +867,7 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 
 	it("gives each card its own location when reading several files", async () => {
 		const { config } = createConfig()
-		const uiConfig = { ...config, isSubagentExecution: false } as TaskConfig
+		const uiConfig = config
 		const handler = new ReadFileToolHandler()
 		const a = "multi-loc-a.md"
 		const b = "multi-loc-b.md"
@@ -896,7 +893,7 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 
 	it("includes the requested start line in the card location", async () => {
 		const { config } = createConfig()
-		const uiConfig = { ...config, isSubagentExecution: false } as TaskConfig
+		const uiConfig = config
 		const handler = new ReadFileToolHandler()
 		const realFile = "multi-loc-range.md"
 		await fs.writeFile(path.join(tmpDir, realFile), "one\ntwo\nthree\n")

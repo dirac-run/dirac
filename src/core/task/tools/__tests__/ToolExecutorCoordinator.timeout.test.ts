@@ -29,9 +29,7 @@ class TimedOutTool implements IDiracTool {
 
 describe("ToolExecutorCoordinator timeout handling", () => {
 	it("returns a typed model result after the tool terminalizes its timeout card", async () => {
-		const { config, taskMessenger, taskState } = createMockTaskConfig({
-			overrides: { isSubagentExecution: false },
-		})
+		const { config, taskMessenger, taskState } = createMockTaskConfig()
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(new TimedOutTool())
 

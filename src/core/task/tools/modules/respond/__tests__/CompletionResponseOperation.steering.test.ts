@@ -17,7 +17,6 @@ describe("completion response operation steering arbitration", () => {
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: false },
 			},
 			ui: { createCard },
@@ -27,7 +26,7 @@ describe("completion response operation steering arbitration", () => {
 					state[key] = value as never
 				},
 				commitCompletionResponse: (response: string) => {
-					;(state as Record<string, unknown>).completionResponse = response
+					; (state as Record<string, unknown>).completionResponse = response
 				},
 				commitAttemptCompletion,
 				saveCheckpoint,
@@ -52,7 +51,6 @@ describe("completion response operation steering arbitration", () => {
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: false },
 			},
 			ui: { createCard: sinon.stub().rejects(new Error("card failed")) },
@@ -69,7 +67,7 @@ describe("completion response operation steering arbitration", () => {
 					return { committed: true }
 				}),
 				commitCompletionResponse: (response: string) => {
-					;(state as Record<string, unknown>).completionResponse = response
+					; (state as Record<string, unknown>).completionResponse = response
 				},
 				runHook: sinon.stub(),
 			},
@@ -91,7 +89,6 @@ describe("completion response operation steering arbitration", () => {
 		const env = {
 			config: {
 				executionProfile: "standalone",
-				isSubagentExecution: false,
 				autoApprovalSettings: { enableNotifications: true },
 				taskId: "task",
 				ulid: "ulid",
@@ -105,7 +102,7 @@ describe("completion response operation steering arbitration", () => {
 				getTaskState: (key: keyof typeof state) => state[key],
 				setTaskState: (key: keyof typeof state, value: boolean) => (state[key] = value),
 				commitCompletionResponse: (response: string) => {
-					;(state as Record<string, unknown>).completionResponse = response
+					; (state as Record<string, unknown>).completionResponse = response
 				},
 				commitAttemptCompletion: sinon.stub().resolves({ committed: true }),
 				saveCheckpoint,

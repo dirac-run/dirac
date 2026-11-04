@@ -39,16 +39,13 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			const content = this.preprocessContent(rawContent, env, relPath)
 
 			// 3. Create card
-			if (!env.config.isSubagentExecution) {
-				const lineCount = content.split("\n").length
-				card = await env.ui.createCard({
-					header: `Writing ${displayPath}`,
-					icon: DiracIcon.FILE_WRITE,
-					status: CardStatus.RUNNING,
-					collapsed: true,
-					diffs: [{ path: displayPath, oldText: originalContent, newText: content }],
-				})
-			}
+			card = await env.ui.createCard({
+				header: `Writing ${displayPath}`,
+				icon: DiracIcon.FILE_WRITE,
+				status: CardStatus.RUNNING,
+				collapsed: true,
+				diffs: [{ path: displayPath, oldText: originalContent, newText: content }],
+			})
 
 			// 4. Handle approval and save
 			const utilityPermissionHandlingEnabled = env.config.permissionDecisionBinding !== undefined
@@ -93,9 +90,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 
 		if (!relPath) {
 			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
-			if (!env.config.isSubagentExecution) {
-				await env.ui.upsertText("Missing value for required parameter 'path'.")
-			}
+			await env.ui.upsertText("Missing value for required parameter 'path'.")
 			return { error: formatResponse.missingToolParameterError("path") }
 		}
 
@@ -106,9 +101,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					error: formatResponse.writeToFileMissingContentError(relPath, env.config.taskState.consecutiveMistakeCount),
 				}
 			}
-			if (!env.config.isSubagentExecution) {
-				await env.ui.upsertText("Missing value for required parameter 'content'.")
-			}
+			await env.ui.upsertText("Missing value for required parameter 'content'.")
 			return { error: formatResponse.missingToolParameterError("content") }
 		}
 
@@ -124,9 +117,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		if (fileInfo.exists && !fileInfo.isFile) {
 			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
 			const errorMsg = `Cannot write to '${relPath}' because it is a directory.`
-			if (!env.config.isSubagentExecution) {
-				await env.ui.upsertText(`Dirac tried to write to '${relPath}', but it is a directory.`)
-			}
+			await env.ui.upsertText(`Dirac tried to write to '${relPath}', but it is a directory.`)
 			return { error: formatResponse.toolError(errorMsg) }
 		}
 
@@ -286,7 +277,6 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 			relPath,
 			fileExists,
 			shouldAutoApprove,
-			isSubagentExecution: env.config.isSubagentExecution,
 			filesCreated: fileExists ? 0 : 1,
 		})
 

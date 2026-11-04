@@ -17,8 +17,7 @@ export function buildUiTrait(
 		createCard: createCardFn,
 		createManualInteractionCard: createManualInteractionCardFn,
 		upsertText: async (text: string, isReasoning?: boolean, role?: "user" | "assistant") => {
-			const visibleText = config.agentIdentity && role !== "user" ? `**${config.agentIdentity.name}:** ${text}` : text
-			await config.taskMessenger.upsertText(visibleText, isReasoning, undefined, undefined, role, config.agentIdentity)
+			await config.taskMessenger.upsertText(text, isReasoning, undefined, undefined, role)
 		},
 		streamText: async (type: "markdown" | "reasoning") => {
 			return await config.taskMessenger.streamText(type)
@@ -136,7 +135,7 @@ function createUtilityPermissionRequest(config: TaskConfig, params: CardParams):
 		runtime: {
 			cwd: config.cwd,
 			mode: config.mode,
-			isSubagent: config.isSubagentExecution,
+			isSubagent: false,
 		},
 	}
 }

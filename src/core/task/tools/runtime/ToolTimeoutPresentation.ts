@@ -8,7 +8,7 @@ export async function presentToolTimeout(
 	cards: readonly ICardHandle[] = [],
 ): Promise<never> {
 	const timeoutCards = [...cards]
-	if (timeoutCards.length === 0 && !environment.config.isSubagentExecution) {
+	if (timeoutCards.length === 0) {
 		timeoutCards.push(
 			await environment.ui.createCard({
 				header: `Timed out: ${error.toolName}`,

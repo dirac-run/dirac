@@ -7,7 +7,7 @@ import { GoalCoordinatorToolEnvironmentFactory } from "../GoalCoordinatorEnviron
 describe("GoalCoordinatorToolEnvironmentFactory", () => {
 	it("keeps coordinator tracking attached to the card that tools finalize", async () => {
 		const { config } = createMockTaskConfig({
-			overrides: { yoloModeToggled: false, isSubagentExecution: false },
+			overrides: { yoloModeToggled: false },
 		})
 		const factory = new GoalCoordinatorToolEnvironmentFactory(() => ({}) as any)
 		const environment = factory.create(config, "execute_command")
@@ -21,7 +21,7 @@ describe("GoalCoordinatorToolEnvironmentFactory", () => {
 
 	it("owns only interactions that actually wait for the user", async () => {
 		const { config } = createMockTaskConfig({
-			overrides: { yoloModeToggled: false, isSubagentExecution: false },
+			overrides: { yoloModeToggled: false },
 		})
 		let ownedInteractions = 0
 		const factory = new GoalCoordinatorToolEnvironmentFactory(() => ({}) as any, {
@@ -42,7 +42,6 @@ describe("GoalCoordinatorToolEnvironmentFactory", () => {
 		const { config } = createMockTaskConfig({
 			overrides: {
 				yoloModeToggled: true,
-				isSubagentExecution: false,
 				autoApprover: { isUnrestrictedAutoApprove: () => true } as any,
 			},
 		})

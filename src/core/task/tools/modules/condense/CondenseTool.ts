@@ -161,10 +161,6 @@ export class CondenseTool implements IDiracTool {
 	}
 
 	private async requestUserApproval(context: string, env: IToolEnvironment): Promise<ApprovalResult> {
-		if (env.config.isSubagentExecution) {
-			throw new Error("Subagents cannot condense the parent conversation.")
-		}
-
 		if (env.config.autoApprovalSettings.enableNotifications) {
 			env.system.showNotification({
 				subtitle: "Dirac wants to condense the conversation...",
@@ -214,7 +210,6 @@ export class CondenseTool implements IDiracTool {
 			await approval.card.finalize(CardStatus.SUCCESS)
 			return
 		}
-		if (env.config.isSubagentExecution) return
 
 		const card = await env.ui.createCard({
 			header: "Conversation Condensed",
