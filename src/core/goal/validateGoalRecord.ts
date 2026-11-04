@@ -301,8 +301,20 @@ function validateEvent(value: unknown, path: string): asserts value is GoalEvent
 	if (kind === "task_interaction") stringAt(event.interactionId, `${path}.interactionId`)
 }
 
+/** Legacy records are ownership evidence only, never executable Goal state. */
+export function isLegacyGoalRecord(value: unknown): boolean {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false
+	const record = value as JsonRecord
+	return record.version === 1 || (record.version === undefined && typeof record.schemaVersion === "number")
+}
+
 export function assertGoalRecord(value: unknown, expectedGoalId: string): asserts value is GoalRecord {
 	const record = recordAt(value, `Goal(${expectedGoalId})`)
+	if (isLegacyGoalRecord(record)) {
+		throw new Error(
+			`Goal ${expectedGoalId} uses a legacy execution format and cannot be opened or resumed. Create a new Goal with /goal. Existing files have not been changed.`,
+		)
+	}
 	assertKnownKeys(
 		record,
 		[
@@ -327,7 +339,7 @@ export function assertGoalRecord(value: unknown, expectedGoalId: string): assert
 		],
 		`Goal(${expectedGoalId})`,
 	)
-	if (record.version !== 1) invalid(`Goal(${expectedGoalId}).version`, "unsupported schema version")
+	if (record.version !== 2) invalid(`Goal(${expectedGoalId}).version`, "unsupported schema version")
 	if (stringAt(record.id, `Goal(${expectedGoalId}).id`) !== expectedGoalId) {
 		invalid(`Goal(${expectedGoalId}).id`, "does not match its storage identity")
 	}

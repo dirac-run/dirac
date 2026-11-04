@@ -18,6 +18,7 @@ import { PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk"
 import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { isGoalHistoryItem } from "@shared/HistoryItem"
 import { isPlanResponseCard } from "@shared/responseTool"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
 import { getExplicitDiracSettingsFromEnv, getProviderFromEnv, getSettingsFromEnv } from "@shared/storage/env-config"
@@ -34,6 +35,7 @@ import simpleGit from "simple-git"
 import { ApiConfigurationError, ApiConfigurationErrorCode, validateApiConfiguration } from "@/core/api"
 import { Controller } from "@/core/controller"
 import { getAvailableSlashCommands } from "@/core/controller/slash/getAvailableSlashCommands"
+import { GoalStore } from "@/core/goal/GoalStore"
 import { CommandPermissionController } from "@/core/permissions/CommandPermissionController.js"
 import type { ToolPermissionRule } from "@/core/permissions/types.js"
 import { getSavedDiracMessages, setRuntimeHooksDir } from "@/core/storage/disk"
@@ -249,14 +251,25 @@ export class DiracAgent implements acp.Agent {
 
 			await withTaskHistoryInventoryLock(async () => {
 				const taskIds = getTaskIdsForSession(sessionId)
+				const directoryIds = new Set(taskIds)
 				const releases: Array<() => Promise<void>> = []
 				try {
-					// Acquire the complete set before removing storage or a shared worktree.
-					for (const taskId of taskIds) releases.push(await acquireTaskLock(getTaskDirectoryPath(taskId)))
-					await this.releaseOwnedSessionWorktree(sessionId)
+					// Lock every session root before discovering any Goal's legacy private children.
+					for (const taskId of directoryIds) releases.push(await acquireTaskLock(getTaskDirectoryPath(taskId)))
 					const stateManager = StateManager.get()
-					for (const taskId of taskIds) {
-						await deleteTaskDirectory(taskId)
+					const goalStore = new GoalStore()
+					for (const item of stateManager.getGlobalStateKey("taskHistory")) {
+						if (!taskIds.includes(item.id) || !isGoalHistoryItem(item)) continue
+						for (const directoryId of await goalStore.readOwnedDirectoryIds(item.id)) {
+							if (directoryIds.has(directoryId)) continue
+							releases.push(await acquireTaskLock(getTaskDirectoryPath(directoryId)))
+							directoryIds.add(directoryId)
+						}
+					}
+					// Acquire the complete set before removing storage or a shared worktree.
+					await this.releaseOwnedSessionWorktree(sessionId)
+					for (const directoryId of directoryIds) {
+						await deleteTaskDirectory(directoryId)
 					}
 					stateManager.removeTaskHistoryItems(taskIds)
 					await stateManager.flushPendingState()

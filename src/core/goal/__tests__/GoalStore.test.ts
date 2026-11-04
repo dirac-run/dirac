@@ -29,14 +29,18 @@ describe("GoalStore discovery", () => {
 		}
 		await fs.writeFile(path.join(legacyDirectory, "goal.json"), JSON.stringify(legacyRecord))
 
-		assert.deepEqual(await new GoalStore().scanRecords(), { records: [], failures: [] })
+		assert.deepEqual(await new GoalStore().scanRecords(), {
+			records: [],
+			ownedDirectoryIds: ["legacy-goal"],
+			failures: [],
+		})
 		assert.deepEqual(JSON.parse(await fs.readFile(path.join(legacyDirectory, "goal.json"), "utf8")), legacyRecord)
 	})
 
 	it("reports an invalid current Goal record without failing the complete startup scan", async () => {
 		const invalidDirectory = path.join(storagePath, "tasks", "current-goal")
 		await fs.mkdir(invalidDirectory, { recursive: true })
-		await fs.writeFile(path.join(invalidDirectory, "goal.json"), JSON.stringify({ version: 1 }))
+		await fs.writeFile(path.join(invalidDirectory, "goal.json"), JSON.stringify({ version: 2 }))
 
 		const report = await new GoalStore().scanRecords()
 		assert.deepEqual(report.records, [])

@@ -98,7 +98,7 @@ class ControlledTask {
 
 function goalRecord(): GoalRecord {
 	return {
-		version: 1,
+		version: 2,
 		id: "goal",
 		conversationUlid: "conversation",
 		status: "working",

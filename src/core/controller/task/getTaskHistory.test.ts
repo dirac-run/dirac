@@ -1,4 +1,5 @@
 import * as disk from "@core/storage/disk"
+import type { GoalStore } from "@core/goal/GoalStore"
 import type { HistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
 import { GetTaskHistoryRequest } from "@shared/proto/dirac/task"
 import { expect } from "chai"
@@ -98,20 +99,25 @@ describe("getTaskHistory workspace filtering", () => {
 				.rejects(new Error("Saved task transcript uses an unsupported or unreadable format"))
 			getSavedDiracMessages.withArgs("valid-empty").resolves([])
 
-			const historyController = new TaskHistoryController({
-				getGlobalStateKey: () => [
-					task("legacy-unreadable", {
-						ts: 20,
-						task: "legacy prompt text",
-						workspaceRootPath: "/workspace/current",
-					}),
-					task("valid-empty", {
-						ts: 10,
-						task: "second prompt text",
-						workspaceRootPath: "/workspace/current",
-					}),
-				],
-			} as any)
+			const historyController = new TaskHistoryController(
+				{
+					getGlobalStateKey: () => [
+						task("legacy-unreadable", {
+							ts: 20,
+							task: "legacy prompt text",
+							workspaceRootPath: "/workspace/current",
+						}),
+						task("valid-empty", {
+							ts: 10,
+							task: "second prompt text",
+							workspaceRootPath: "/workspace/current",
+						}),
+					],
+				} as any,
+				{
+					scanRecords: sinon.stub().resolves({ records: [], ownedDirectoryIds: [], failures: [] }),
+				} as unknown as GoalStore,
+			)
 
 			const prompts = await historyController.getPromptHistory("/workspace/current")
 

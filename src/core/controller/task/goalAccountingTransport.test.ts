@@ -9,7 +9,7 @@ import { goalHistoryItemToTaskResponse } from "./showTaskWithId"
 
 function goalRecord(accounting: GoalAccounting): GoalRecord {
 	return {
-		version: 1,
+		version: 2,
 		id: "goal",
 		conversationUlid: "conversation",
 		status: "paused",

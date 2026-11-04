@@ -247,6 +247,7 @@ export class Controller implements ITaskHost {
 			await this.goalController.select(historyItem.id)
 			return historyItem.id
 		}
+		if (historyItem) await this.taskHistoryController.assertStandaloneTask(historyItem.id)
 		if (this.goalController.selectedGoalId) {
 			await this.goalController.pauseAndDeselect("Paused after starting another run")
 		}

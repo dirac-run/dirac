@@ -2,15 +2,17 @@ import fs from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { GoalHistoryItem } from "@shared/HistoryItem"
 import { ArchitectureStorage } from "@/core/architecture/ArchitectureStorage"
 import { serializeArchitectureWrite } from "@/core/architecture/architectureOperations"
+import { GoalStore } from "@/core/goal/GoalStore"
 import * as atomicWrite from "@/core/storage/atomicWrite"
 import { acquireTaskLock } from "@/core/task/TaskLockUtils"
 import { HostProvider } from "@/hosts/host-provider"
 import { DiracAgent } from "./DiracAgent.js"
 
 const mocks = vi.hoisted(() => ({
-	taskHistory: [] as Array<{ id: string; ulid?: string }>,
+	taskHistory: [] as Array<{ id: string; ulid?: string; runKind?: "task" | "goal" }>,
 	removeTaskHistoryItems: vi.fn(),
 	flushPendingState: vi.fn(async () => undefined),
 	withTaskHistoryInventoryLock: vi.fn(async (action: () => Promise<void>) => action()),
@@ -67,6 +69,56 @@ describe("DiracAgent session deletion", () => {
 		return new ArchitectureStorage(taskId, taskDirectory(taskId))
 	}
 
+	async function createLegacyGoal(goalId: string, sessionId: string, childIds: string[]): Promise<void> {
+		const historyItem: GoalHistoryItem = {
+			id: goalId,
+			ulid: sessionId,
+			runKind: "goal",
+			conversationUlid: sessionId,
+			ts: 1,
+			task: "Legacy Goal",
+			initialDisplayText: "Legacy Goal",
+			objectivePreview: "Legacy Goal",
+			objectiveRevision: 1,
+			status: "paused",
+			createdAt: 1,
+			updatedAt: 1,
+			activeDurationMs: 0,
+			accounting: {},
+		}
+		mocks.taskHistory.push(historyItem)
+		await fs.mkdir(taskDirectory(goalId), { recursive: true })
+		await fs.writeFile(
+			path.join(taskDirectory(goalId), "goal.json"),
+			JSON.stringify({
+				version: 1,
+				id: goalId,
+				conversationUlid: sessionId,
+				status: "paused",
+				objective: { markdown: "Legacy Goal", revision: 1, updatedAt: 1 },
+				createdAt: 1,
+				updatedAt: 1,
+				lastPausedAt: 1,
+				activeDurationMs: 0,
+				wakeSequence: 0,
+				eventSequence: 0,
+				events: [],
+				children: childIds.map((id, index) => ({
+					id,
+					title: id,
+					role: index === 0 ? "task" : "verification",
+					status: "completed",
+					createdAt: 1,
+					lastActivityAt: 1,
+					endedAt: 1,
+					deliveredResponseCursor: 0,
+				})),
+				accountingSources: {},
+				accounting: {},
+			}),
+		)
+	}
+
 	function expectSessionMetadataDeleted(sessionId: string): void {
 		expect(mocks.deleteTasksForSession).toHaveBeenCalledWith(sessionId)
 		expect(mocks.deleteSessionUpdates).toHaveBeenCalledWith(sessionId)
@@ -121,6 +173,88 @@ describe("DiracAgent session deletion", () => {
 		expect(mocks.withTaskHistoryInventoryLock).toHaveBeenCalledOnce()
 		expect(mocks.removeTaskHistoryItems).toHaveBeenCalledWith(["first", "replacement"])
 		expect(mocks.flushPendingState).toHaveBeenCalledOnce()
+		expectSessionMetadataDeleted("session")
+	})
+
+	it("cascades a version 1 Goal session into its private child directories without loading the Goal runtime", async () => {
+		const childIds = ["private-task", "private-verification"]
+		await createLegacyGoal("legacy-goal", "session", childIds)
+		mocks.taskHistory.push({ id: "replacement", ulid: "session" }, { id: "other", ulid: "other-session" })
+		const directoryIds = ["legacy-goal", "replacement", ...childIds]
+		const ownedStorage = await Promise.all(directoryIds.map(createStorage))
+		const other = await createStorage("other")
+		for (const storage of [...ownedStorage, other]) await storage.upsertDiagram("cli", diagram)
+		await ownedStorage[2].mutateReview({
+			identity: { taskId: childIds[0], name: "cli", version: 1 },
+			operation: "add_comment",
+			comment: { id: "private-comment", target: { kind: "diagram" }, text: "Private child review" },
+		})
+		const readGoal = vi
+			.spyOn(GoalStore.prototype, "read")
+			.mockRejectedValue(new Error("Do not load or convert Goals for deletion"))
+		const releaseWorktree = vi.spyOn(agent as any, "releaseOwnedSessionWorktree").mockImplementation(async () => {
+			for (const directoryId of directoryIds) {
+				expect((await fs.stat(taskDirectory(directoryId))).isDirectory()).toBe(true)
+				await expect(acquireTaskLock(taskDirectory(directoryId))).rejects.toThrow("another Dirac instance")
+			}
+		})
+
+		await expect(agent.deleteSession({ sessionId: "session" })).resolves.toEqual({})
+
+		expect(releaseWorktree).toHaveBeenCalledWith("session")
+		expect(readGoal).not.toHaveBeenCalled()
+		expect(await fs.readdir(path.join(root, "tasks"))).toEqual(["other"])
+		for (const storage of ownedStorage) {
+			await expect(storage.upsertDiagram("cli", diagram)).rejects.toThrow("owning task was deleted")
+		}
+		await expect(other.upsertDiagram("cli", diagram)).resolves.toEqual({ name: "cli", version: 2 })
+		expect(mocks.removeTaskHistoryItems).toHaveBeenCalledWith(["legacy-goal", "replacement"])
+		expect(mocks.flushPendingState).toHaveBeenCalledOnce()
+		expectSessionMetadataDeleted("session")
+	})
+
+	it("retains a version 1 Goal, all session roots, and metadata when a private child lock is held", async () => {
+		const childIds = ["private-first", "private-locked"]
+		await createLegacyGoal("legacy-goal", "session", childIds)
+		mocks.taskHistory.push({ id: "replacement", ulid: "session" })
+		const directoryIds = ["legacy-goal", "replacement", ...childIds]
+		const storage = await Promise.all(directoryIds.map(createStorage))
+		for (const entry of storage) await entry.upsertDiagram("cli", diagram)
+		const goalPath = path.join(taskDirectory("legacy-goal"), "goal.json")
+		const originalGoal = await fs.readFile(goalPath, "utf8")
+		const readGoal = vi
+			.spyOn(GoalStore.prototype, "read")
+			.mockRejectedValue(new Error("Do not load or convert Goals for deletion"))
+		const release = await acquireTaskLock(taskDirectory("private-locked"))
+		try {
+			await expect(agent.deleteSession({ sessionId: "session" })).rejects.toThrow("another Dirac instance")
+
+			expect(await fs.readdir(path.join(root, "tasks"))).toEqual([
+				"legacy-goal",
+				"private-first",
+				"private-locked",
+				"private-locked.lock",
+				"replacement",
+			])
+			expect(await fs.readFile(goalPath, "utf8")).toBe(originalGoal)
+			expect(readGoal).not.toHaveBeenCalled()
+			expect(mocks.getSessionWorktree).not.toHaveBeenCalled()
+			expect(mocks.removeTaskHistoryItems).not.toHaveBeenCalled()
+			expect(mocks.flushPendingState).not.toHaveBeenCalled()
+			expectSessionMetadataRetained()
+			for (const entry of storage) {
+				await expect(entry.upsertDiagram("cli", diagram)).resolves.toEqual({ name: "cli", version: 2 })
+			}
+			// A later private-child lock failure releases both session roots and earlier child locks.
+			for (const directoryId of ["legacy-goal", "replacement", "private-first"]) {
+				const releaseEarlier = await acquireTaskLock(taskDirectory(directoryId))
+				await releaseEarlier()
+			}
+		} finally {
+			await release()
+		}
+		await expect(agent.deleteSession({ sessionId: "session" })).resolves.toEqual({})
+		expect(await fs.readdir(path.join(root, "tasks"))).toEqual([])
 		expectSessionMetadataDeleted("session")
 	})
 

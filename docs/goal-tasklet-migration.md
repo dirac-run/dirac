@@ -2,9 +2,10 @@
 
 ## Status and scope
 
-**6.1: completed and contract approved.** No Goal
-execution, storage or public tool behavior has changed. Next is 6.2's approved
-new-format storage boundary; there is no legacy conversion project.
+**6.1: committed as `6606ef65`. 6.2: implemented and verified.** New Goals use
+version 2. Legacy execution/reopening is rejected, while read-only ownership
+preserves history exclusion and explicit deletion. Runtime hosting and public
+cutover remain later items; this intermediate commit is not the phase-6 release.
 
 This is the tracked phase-6 audit and implementation breakdown. It supplements
 the local `ascratch/docs/tasklet-design-and-migration.md` decision record; it does
@@ -116,8 +117,8 @@ implementation are engineering details within these guarantees.
 
 | Item | Scope and completion evidence | Status |
 |---|---|---|
-| 6.1 — Contract/source audit | Source audit and D32–D34 approval; finalized dependent split. Documentation only. | Completed |
-| 6.2 — Storage/restoration boundary | Distinguish new-format Goals from old runs; reject legacy execution/reopening and keep startup from rewriting old files. Preserve old child history exclusions and explicit deletion ownership. Verify real temporary-storage preservation/rejection, malformed/current records and new-format storage. No importer, public cutover or legacy child resumption. | Not started; follows the 6.1 commit |
+| 6.1 — Contract/source audit | Source audit and D32–D34 approval; finalized dependent split. Documentation only. | Committed `6606ef65` |
+| 6.2 — Storage/restoration boundary | Version-2-only execution; read-only legacy ownership; rejection and byte preservation through startup, history/prompt reconstruction and selection; explicit root/private-child deletion. No importer or public cutover. Evidence below. | Implemented and verified |
 | 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Not started; depends on 6.2 |
 | 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Not started; depends on 6.3 |
 | 6.5 — Integrated acceptance/cleanup | Compose real Goal-root/child scenarios, restored data, permissions, accounting, selection/deletion and frontend behavior; remove remaining dead paths. Record controlled-provider, rendered and application evidence separately. | Not started; depends on 6.4 |
@@ -159,3 +160,39 @@ fixtures in the source audit, not production paths. No tests, builds, applicatio
 runs or new architecture-check results are claimed for this documentation-only
 item. A follow-up read-only review found no blocking issues; whitespace checks
 pass. Existing phase-5 verification is historical evidence, not a new run.
+
+## Verification performed for 6.2
+
+- New `GoalLegacyBoundary` real temporary-storage tests cover version-2
+  creation/mutation/recovery; actionable version-1 and superseded-schema rejection;
+  unchanged Goal, event/accounting, transcript and binary-context bytes; startup,
+  repair, direct reconstruction and corrupt-index recovery; prompt-history reads;
+  actual indexed-history selection; non-disruption of an existing coordinator;
+  explicit legacy/nested deletion and child-lock failure; malformed/unsafe ownership.
+- Historical ownership discovery retains safe private siblings even when another
+  reference is invalid, reports the failure, and keeps explicit deletion strict
+  and all-or-nothing before any file removal. Discovery never loads transcripts.
+- Shared history deletion and ACP session deletion still acquire the complete
+  ownership set before removing storage/worktrees. Existing indexed private runs
+  are rejected before retiring the current foreground execution.
+- **102 backend tests pass**, no failures/skips: every Goal suite, task-history
+  repair/containment, workspace history/prompt handling and TaskController lifecycle.
+  **20 CLI tests pass**, no failures/skips: session deletion/worktrees and prompt
+  history. These include 14 new backend boundary tests, two new ACP deletion tests,
+  and a current-format Goal prompt regression. Logs:
+  `/tmp/dirac-62-tests.log`, `/tmp/dirac-62-cli-tests.log`.
+- `npm run compile` (protobufs, four typechecks, lint/proto lint, extension build),
+  `npm run cli:build`, `npm run check:arch` and `git diff --check` pass. Architecture
+  baselines remain unchanged, with zero new violations. Logs:
+  `/tmp/dirac-62-{compile,cli-build,arch}.log`.
+- Independent review found and prompted the safe-sibling fix, updated prompt-test
+  dependencies and the indexed-selection preflight. Focused follow-up review found
+  no remaining blockers; its evidence is source inspection, not another test run.
+- Separate accounting transport selection: two pass, one unchanged
+  `unavailable accounting` assertion fails on undefined properties versus `{}`.
+  The same failure was reproduced using the HEAD test loaded in memory with
+  unchanged production dependencies (`/tmp/dirac-62-transport-baseline.log`). It is
+  not counted as passing coverage or fixed by this storage item.
+- No child runtime migration, provider/application execution, rendered UI, live
+  network, data importer or automatic legacy cleanup is claimed. New-format Goal
+  execution still uses the interim runtime until 6.3/6.4 complete the cutover.

@@ -8,7 +8,8 @@ import fs from "fs/promises"
 import Mutex from "p-mutex"
 import path from "path"
 import { applyGoalStatusTransition, interruptNonterminalGoalChildren } from "./GoalLifecycle"
-import { assertGoalRecord } from "./validateGoalRecord"
+import { assertGoalRecord, isLegacyGoalRecord } from "./validateGoalRecord"
+import { TASKLET_ID_PREFIX } from "@/shared/taskletId"
 
 const GOAL_STATE_FILE = "goal.json"
 const goalLocks = new Map<string, Mutex>()
@@ -22,6 +23,8 @@ export interface GoalStartupReconciliationFailure {
 
 export interface GoalStartupReconciliationReport {
 	records: GoalRecord[]
+	/** Root directories and historical private children, including non-executable Goals. */
+	ownedDirectoryIds: string[]
 	failures: GoalStartupReconciliationFailure[]
 }
 
@@ -90,19 +93,27 @@ async function readGoalRecord(goalId: string): Promise<GoalRecord> {
 	return parsed
 }
 
-async function containsCurrentGoalRecord(goalId: string): Promise<boolean> {
-	const filePath = goalStatePath(goalId)
-	if (!(await fileExistsAtPath(filePath))) return false
-	const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"))
-	if (isSupersededGoalRecord(parsed)) return false
-	assertGoalRecord(parsed, goalId)
-	return true
-}
-
-function isSupersededGoalRecord(value: unknown): boolean {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false
+/** Reads ownership IDs without loading transcripts or accepting historical execution state. */
+function ownedGoalDirectoryIds(goalId: string, value: unknown): { directoryIds: string[]; errors: Error[] } {
+	const ids = new Set([goalId])
+	const errors: Error[] = []
+	if (!value || typeof value !== "object" || Array.isArray(value)) return { directoryIds: [...ids], errors }
 	const record = value as Record<string, unknown>
-	return record.version === undefined && typeof record.schemaVersion === "number"
+	if (!Array.isArray(record.children)) return { directoryIds: [...ids], errors }
+	for (const child of record.children) {
+		if (!child || typeof child !== "object" || Array.isArray(child)) continue
+		const id = (child as Record<string, unknown>).id
+		if (typeof id !== "string" || !id) continue
+		// New contained handles are nested under the root, not independent directories.
+		if (record.version === 2 && id.startsWith(TASKLET_ID_PREFIX)) continue
+		try {
+			getTaskDirectoryPath(id)
+			ids.add(id)
+		} catch (error) {
+			errors.push(error instanceof Error ? error : new Error(String(error)))
+		}
+	}
+	return { directoryIds: [...ids], errors }
 }
 
 async function writeGoalRecord(record: GoalRecord): Promise<void> {
@@ -125,7 +136,7 @@ export class GoalStore {
 				assertClockTime(now)
 				await ensureTaskDirectoryExists(goalId)
 				const record: GoalRecord = {
-					version: 1,
+					version: 2,
 					id: goalId,
 					conversationUlid,
 					status: "paused",
@@ -154,14 +165,25 @@ export class GoalStore {
 		return withGoalLock(goalId, async () => structuredClone(await readGoalRecord(goalId)))
 	}
 
-	async list(): Promise<GoalRecord[]> {
-		const taskIds = await listTaskDirectoryIds()
-		const goalIds: string[] = []
-		for (const taskId of taskIds) {
-			if (await containsCurrentGoalRecord(taskId)) goalIds.push(taskId)
+	/** Historical ownership is used only for exclusion and explicit user-requested deletion. */
+	async readOwnedDirectoryIds(goalId: string): Promise<string[]> {
+		const parsed: unknown = JSON.parse(await fs.readFile(goalStatePath(goalId), "utf8"))
+		const ownership = ownedGoalDirectoryIds(goalId, parsed)
+		if (ownership.errors.length > 0) {
+			throw new AggregateError(ownership.errors, ownership.errors.map((error) => error.message).join("; "))
 		}
-		const records = await Promise.all(goalIds.map((goalId) => this.read(goalId)))
-		return records.sort((left, right) => left.createdAt - right.createdAt)
+		return ownership.directoryIds
+	}
+
+	async list(): Promise<GoalRecord[]> {
+		const report = await this.scanRecords()
+		if (report.failures.length > 0) {
+			throw new AggregateError(
+				report.failures.map(({ error }) => error),
+				"Could not read persisted Goals",
+			)
+		}
+		return report.records
 	}
 
 	async update(goalId: string, update: GoalRecordUpdate): Promise<GoalRecord> {
@@ -211,15 +233,31 @@ export class GoalStore {
 	/** Discovery is read-only: another process may own any of these Goals. */
 	async scanRecords(): Promise<GoalStartupReconciliationReport> {
 		const records: GoalRecord[] = []
+		const ownedDirectoryIds = new Set<string>()
 		const failures: GoalStartupReconciliationFailure[] = []
 		for (const goalId of await listTaskDirectoryIds()) {
 			try {
-				if (await containsCurrentGoalRecord(goalId)) records.push(await this.read(goalId))
+				const filePath = goalStatePath(goalId)
+				if (!(await fileExistsAtPath(filePath))) continue
+				ownedDirectoryIds.add(goalId)
+				const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"))
+				const ownership = ownedGoalDirectoryIds(goalId, parsed)
+				for (const id of ownership.directoryIds) ownedDirectoryIds.add(id)
+				if (ownership.errors.length > 0) {
+					throw new AggregateError(ownership.errors, `Goal ${goalId} has invalid child directory ownership`)
+				}
+				if (isLegacyGoalRecord(parsed)) continue
+				assertGoalRecord(parsed, goalId)
+				records.push(parsed)
 			} catch (error) {
 				failures.push({ goalId, error: error instanceof Error ? error : new Error(String(error)) })
 			}
 		}
-		return { records: records.sort((left, right) => left.createdAt - right.createdAt), failures }
+		return {
+			records: records.sort((left, right) => left.createdAt - right.createdAt),
+			ownedDirectoryIds: [...ownedDirectoryIds],
+			failures,
+		}
 	}
 
 	/** Call only while holding this Goal's task-directory execution lock. */

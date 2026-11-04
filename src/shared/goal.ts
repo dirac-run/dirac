@@ -65,7 +65,7 @@ export type GoalEvent =
 	| { kind: "user_steering"; sequence: number; occurredAt: number }
 
 export interface GoalRecord {
-	version: 1
+	version: 2
 	id: string
 	conversationUlid: string
 	status: GoalStatus

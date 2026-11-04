@@ -88,12 +88,12 @@ export class GoalController {
 
 	private async selectSerial(goalId: string): Promise<GoalViewState> {
 		await this.ready
+		await this.store.read(goalId)
 		if (this.selectedLoop?.hasRunningCoordinator) {
 			await this.selectedLoop.cancelCurrentExecution("Interrupted after selecting another run")
 		}
 		await this.dependencies.clearStandaloneTask()
 		const historyItem = this.goalHistoryItem(goalId)
-		await this.store.read(goalId)
 		this.selectedLoop = await this.createLoop(goalId, historyItem.initialDisplayText)
 		await this.dependencies.postState()
 		return this.selectedLoop.inspect()

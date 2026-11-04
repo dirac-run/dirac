@@ -43,8 +43,7 @@ export async function deleteRunsStorage(items: RunHistoryItem[], goalStore = new
 		for (const item of items) await acquire(item.id)
 		for (const item of items) {
 			if (!isGoalHistoryItem(item)) continue
-			const goal = await goalStore.read(item.id)
-			for (const child of goal.children) await acquire(child.id)
+			for (const id of await goalStore.readOwnedDirectoryIds(item.id)) await acquire(id)
 		}
 		for (const id of directoryIds) await deleteTaskDirectory(id)
 	} finally {
@@ -56,7 +55,7 @@ export class TaskHistoryController {
 	constructor(
 		private readonly stateManager: import("@core/storage/StateManager").StateManager,
 		private readonly goalStore = new GoalStore(),
-	) {}
+	) { }
 
 	async readOpenRouterModels(): Promise<Record<string, import("@shared/api").ModelInfo> | undefined> {
 		const openRouterModelsFilePath = path.join(await ensureCacheDirectoryExists(), GlobalFileNames.openRouterModels)
@@ -70,6 +69,14 @@ export class TaskHistoryController {
 			Logger.error("Error reading cached OpenRouter models:", error)
 		}
 		return undefined
+	}
+
+	/** Validate history selection before retiring the current run or opening its artifacts. */
+	async assertStandaloneTask(id: string): Promise<void> {
+		const inventory = await this.goalStore.scanRecords()
+		if (inventory.ownedDirectoryIds.includes(id)) {
+			throw new Error(`Run ${id} belongs to a Goal and cannot be loaded as a Task`)
+		}
 	}
 
 	async getTaskWithId(id: string): Promise<{
@@ -88,6 +95,7 @@ export class TaskHistoryController {
 		}
 		const historyItem = runHistoryItem && isTaskHistoryItem(runHistoryItem) ? runHistoryItem : undefined
 		if (historyItem) {
+			await this.assertStandaloneTask(id)
 			const taskDirPath = getTaskDirectoryPath(id)
 			const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 			const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
@@ -119,6 +127,9 @@ export class TaskHistoryController {
 
 	/** Read recent public conversations only; Goal child prompts are agent-authored and private. */
 	async getPromptHistory(workspacePath: string, excludedRunId?: string): Promise<UserPrompt[]> {
+		const inventory = await this.goalStore.scanRecords()
+		const currentGoalIds = new Set(inventory.records.map((goal) => goal.id))
+		const ownedDirectoryIds = new Set(inventory.ownedDirectoryIds)
 		const runs = this.stateManager
 			.getGlobalStateKey("taskHistory")
 			.filter(
@@ -132,13 +143,16 @@ export class TaskHistoryController {
 			.slice(0, 20)
 		const prompts = await Promise.all(
 			runs.map(async (run) => {
+				const fallback = run.task.trim() ? [{ text: run.task, ts: run.ts }] : []
+				if (isGoalHistoryItem(run) && !currentGoalIds.has(run.id)) return fallback
+				if (!isGoalHistoryItem(run) && ownedDirectoryIds.has(run.id)) return []
 				try {
 					const saved = getUserPrompts(await getSavedDiracMessages(run.id))
 					if (saved.length > 0) return saved
 				} catch (error) {
 					Logger.warn(`[TaskHistoryController] Skipping unreadable transcript for task ${run.id}:`, error)
 				}
-				return run.task.trim() ? [{ text: run.task, ts: run.ts }] : []
+				return fallback
 			}),
 		)
 		return prompts.flat()
