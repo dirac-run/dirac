@@ -22,9 +22,11 @@ describe("OrchestrationTraitBuilder", () => {
 		})
 	}
 
-	it("has no synchronous delegation entry point or runtime callback", () => {
-		const { config } = createMockTaskConfig()
-		assert.equal("runSubagent" in buildOrchestrationTrait(config), false)
-		assert.equal("createSubagentRuntime" in config.callbacks, false)
-	})
+	for (const executionProfile of ["standalone", "tasklet", "goal_coordinator", "goal_followup", "goal_child"] as const) {
+		it(`has no synchronous delegation entry point or runtime callback for ${executionProfile}`, () => {
+			const { config } = createMockTaskConfig({ overrides: { executionProfile } })
+			assert.equal("runSubagent" in buildOrchestrationTrait(config), false)
+			assert.equal("createSubagentRuntime" in config.callbacks, false)
+		})
+	}
 })

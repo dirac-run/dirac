@@ -26,6 +26,7 @@ import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurat
 import type { TaskInteractionRequest } from "../types/task-messenger"
 import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
 import { createMockTaskConfig } from "../tools/__tests__/helpers/mockTaskConfig"
+import { buildOrchestrationTrait } from "../tools/adapters/traits/OrchestrationTraitBuilder"
 import type { ICardHandle, TaskletControls, TaskletInspection, TaskletTranscript, TaskletWakeResult } from "../tools/interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment } from "../tools/interfaces/ToolEnvironmentFactory"
 import { create, createSecondary } from "../tools/modules/use_subagents/tool"
@@ -46,7 +47,6 @@ describe("TaskletsTool public controls", () => {
 	let config: ReturnType<typeof createMockTaskConfig>["config"]
 	let children: ReturnType<typeof controlledTask>[]
 	let constructed: sinon.SinonStub
-	let legacyRun: sinon.SinonStub
 	let rootMessages: MessageStateHandler | undefined
 	let options: TaskletTaskOptions
 	let cards: Array<ICardHandle & { update: sinon.SinonStub; finalize: sinon.SinonStub }>
@@ -97,7 +97,6 @@ describe("TaskletsTool public controls", () => {
 		children = []
 		cards = []
 		rootMessages = undefined
-		legacyRun = sandbox.stub().throws(new Error("Legacy runner must not execute"))
 		sandbox.stub(AgentConfigLoader, "getInstance").returns({
 			ready: async () => { },
 			getCachedConfig: (name: string) => name === "Research" ? {
@@ -138,21 +137,22 @@ describe("TaskletsTool public controls", () => {
 			resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
 			sleep: (options) => host.sleep(options),
 		}
-		config = createMockTaskConfig({ overrides: { hooksEnabled: false, subagentsEnabled: true } }).config
+		config = createMockTaskConfig({
+			overrides: { executionProfile: "standalone", hooksEnabled: false, subagentsEnabled: true },
+			callbackOverrides: { tasklets: controls },
+		}).config
+		config.messageState.getDiracMessages.callsFake(() => rootMessages?.getDiracMessages() ?? [])
 		coordinator = new ToolExecutorCoordinator({
 			create: (toolConfig, toolName) => {
 				const callCards: ICardHandle[] = []
+				const orchestration = buildOrchestrationTrait(toolConfig)
+				assert.equal("runSubagent" in orchestration, false)
+				assert.equal("createSubagentRuntime" in toolConfig.callbacks, false)
 				return {
 					config: toolConfig,
 					toolName,
 					logging: { warn: sandbox.stub(), debug: sandbox.stub() },
-					orchestration: {
-						tasklets: controls,
-						runSubagent: legacyRun,
-						getHistory: () => rootMessages?.getDiracMessages() ?? [],
-						getTaskState: (key: keyof TaskState) => toolConfig.taskState[key],
-						setTaskState: (key: string, value: unknown) => { Object.assign(toolConfig.taskState, { [key]: value }) },
-					},
+					orchestration,
 					ui: {
 						createCard: async (params: Record<string, unknown>) => {
 							const card = {
@@ -281,7 +281,6 @@ describe("TaskletsTool public controls", () => {
 		sinon.assert.notCalled(children[0].task.retirePersistence)
 		assert.equal(cards[0].status, CardStatus.SUCCESS)
 		sinon.assert.calledOnceWithExactly(cards[0].finalize, CardStatus.SUCCESS)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("dispatches a configured named agent through the same asynchronous host and public controls", async () => {
@@ -296,7 +295,6 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(children[0].params.taskId, id)
 		assert.equal(cards[0].status, CardStatus.SUCCESS)
 		sinon.assert.notCalled(children[0].task.retirePersistence)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("accepts multiple assignments without joining them and publicly supervises only the selected child", async () => {
@@ -323,7 +321,6 @@ describe("TaskletsTool public controls", () => {
 		assert.equal((await inspect(sibling)).outcome, undefined)
 		sinon.assert.notCalled(siblingChild.task.abortTask)
 		assert.equal(cards.every((card) => card.status === CardStatus.SUCCESS), true)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("retains accepted IDs across malformed assignments, option failures and a constructor startup failure", async () => {
@@ -358,7 +355,6 @@ describe("TaskletsTool public controls", () => {
 		assert.equal((await loadTaskletRecords("root")).length, 3)
 		assert.equal(cards[0].status, CardStatus.ERROR)
 		sinon.assert.calledOnceWithExactly(cards[0].finalize, CardStatus.ERROR)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("keeps spawned communication and full committed results addressable under the accepted ID", async () => {
@@ -698,7 +694,6 @@ describe("TaskletsTool public controls", () => {
 			assert.equal(record.outcomePersisted, true)
 		}
 		assert.deepEqual(await call({ operation: "transcript", tasklet_id: namedId }), transcript)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("accounts public spawn usage only through replaceable host snapshots, not the former batch result path", async () => {
@@ -722,7 +717,6 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(presentation(id).card.rawOutput?.source, undefined)
 		assert.equal(cards.some((card) => card.rawOutput?.source === "subagents" || card.rawOutput?.source === "tasklet"), false)
 		assert.deepEqual((await loadTaskletRecords("root"))[0].usage, usage)
-		sinon.assert.notCalled(legacyRun)
 	})
 
 	it("returns full retained results, responses and interactions, and live/persisted transcripts rather than previews", async () => {

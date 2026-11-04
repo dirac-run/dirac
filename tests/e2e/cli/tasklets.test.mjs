@@ -77,10 +77,17 @@ function assertAgents(snapshot, ids, statuses) {
 	}
 }
 
-async function inspectAlpha(session, expected) {
-	await requestSession(session, { operation: "key", key: "Down" })
+async function inspectTasklet(session, id, expected) {
+	const snapshot = await requestSession(session, { operation: "screen" })
+	const taskletRows = snapshot.lines.filter((line) => line.includes("Tasklet ") && line.includes(": Fixture "))
+	const index = taskletRows.findIndex((line) => line.includes(`Tasklet ${id}: Fixture`))
+	assert.notEqual(index, -1, snapshot.screen)
+	// Concurrent startup does not promise list order. Select the stable ID, not the first child.
+	await requestSession(session, { operation: "key", key: "Up", count: 2 })
+	await requestSession(session, { operation: "key", key: "Down", count: index + 1 })
 	await requestSession(session, { operation: "key", key: "Enter" })
 	const inspected = await requestSession(session, { operation: "wait", text: expected })
+	assert.match(inspected.screen, new RegExp(`Tasklet ${id}: Fixture`))
 	await requestSession(session, { operation: "key", key: "Escape" })
 	return inspected
 }
@@ -127,7 +134,7 @@ test(
 		}
 		const waiting = await openAgents(session)
 		assertAgents(waiting, ids, ["waiting", "waiting"])
-		const preview = await inspectAlpha(session, "Waiting for the parent")
+		const preview = await inspectTasklet(session, ids[0], "Waiting for the parent")
 		assert.match(preview.screen, /ALPHA_QUESTION_PRIVATE/)
 		await requestSession(session, { operation: "key", key: "Escape" })
 		const reopenedWaiting = await openAgents(session)
@@ -149,7 +156,7 @@ test(
 		)
 		assert.ok(entries.some((entry) => entry.result?.reason === "user_message"))
 		assertAgents(await openAgents(session), ids, ["completed", "waiting"])
-		await inspectAlpha(session, ALPHA_RESULT)
+		await inspectTasklet(session, ids[0], ALPHA_RESULT)
 		await requestSession(session, { operation: "key", key: "Escape" })
 		await submit(session, "Reopen Alpha, then finish Beta.")
 		await requestSession(session, { operation: "wait", text: TASKLET_DONE, timeoutMs: 30000 })
@@ -174,7 +181,7 @@ test(
 			),
 		)
 		assertAgents(await openAgents(session), ids, ["completed", "completed"])
-		await inspectAlpha(session, ALPHA_REOPENED)
+		await inspectTasklet(session, ids[0], ALPHA_REOPENED)
 		await requestSession(session, { operation: "key", key: "Escape" })
 		assertAgents(await openAgents(session), ids, ["completed", "completed"])
 		const rootId = entries.find((entry) => entry.result?.rootTaskId).result.rootTaskId
@@ -204,7 +211,7 @@ test(
 		const restoredList = await openAgents(restored)
 		assertAgents(restoredList, ids, ["completed", "completed"])
 		assert.equal(restoredList.fixtureRequests, null)
-		await inspectAlpha(restored, ALPHA_REOPENED)
+		await inspectTasklet(restored, ids[0], ALPHA_REOPENED)
 		passed = true
 	},
 )

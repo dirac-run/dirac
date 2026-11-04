@@ -98,6 +98,61 @@ beforeEach(() => {
 	})
 })
 
+describe("webview persisted legacy subagent cards", () => {
+	it("restores the historical preview and terminal status without tasklet controls", () => {
+		const message: DiracMessage = JSON.parse(
+			JSON.stringify({
+				id: "legacy-subagent",
+				ts: 1000,
+				content: {
+					type: "card",
+					card: {
+						id: "legacy-subagent",
+						header: "Curie: Review legacy artifacts",
+						status: "success",
+						renderType: "markdown",
+						rawInput: {
+							isSubagent: true,
+							agentId: 7,
+							agentName: "Curie",
+							taskTitle: "Review legacy artifacts",
+							prompt: "Inspect retained audit artifacts",
+						},
+						rawOutput: {
+							status: "running",
+							trajectory: [
+								{ type: "tool", text: "read_file(legacy.md)" },
+								{ type: "tool_result", text: "Retained audit contents" },
+								{ type: "result", text: "Legacy review complete" },
+							],
+						},
+					},
+				},
+			}),
+		)
+		useChatStore.getState().applyExtensionState({
+			diracMessages: [root, message],
+			presentationSurfaceId: "legacy-restored",
+			presentationOffset: -1,
+			taskStatus: TaskStatus.COMPLETED,
+		})
+
+		const { container } = render(<StoreCards />)
+		fireEvent.click(screen.getByTitle("Expand Curie: Review legacy artifacts"))
+
+		expect(screen.getByText("Inspect retained audit artifacts")).toBeInTheDocument()
+		expect(screen.getByText("read_file(legacy.md)")).toBeInTheDocument()
+		expect(screen.getByText(/Legacy review complete/)).toBeInTheDocument()
+		expect(container.textContent).toContain("completed")
+		expect(container.textContent).not.toContain("running")
+		// The historical webview preview intentionally omits verbose tool results.
+		expect(container.textContent).not.toContain("Retained audit contents")
+		expect(container.querySelector(".modular-card-actions")).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: /Approve|Reject|View Changes/ })).not.toBeInTheDocument()
+		expect(useChatStore.getState().visibleMessageIds).toEqual(["legacy-subagent"])
+	})
+})
+
 describe("webview informational tasklet cards", () => {
 	it.each<TaskletPresentationStatus>([
 		"running",

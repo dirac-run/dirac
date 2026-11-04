@@ -42,25 +42,25 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 		},
 	}
 	const createCard = sinon.stub().resolves(card)
-	const legacyCall = () => {
-		throw new Error("Legacy batch execution/accounting must not be used")
+	const unexpectedBatchAccounting = () => {
+		throw new Error("The spawn tool must not perform batch execution accounting")
 	}
 	let mistakes = 0
 	const env = {
 		toolName: "use_subagents",
 		orchestration: {
 			tasklets: { start },
-			runSubagent: legacyCall,
-			getHistory: legacyCall,
+			getHistory: unexpectedBatchAccounting,
 			getTaskState: () => mistakes,
 			setTaskState: (_key: string, value: number) => {
 				mistakes = value
 			},
 		},
 		ui: { createCard },
-		telemetry: { captureCustomMetadata: legacyCall },
+		telemetry: { captureCustomMetadata: unexpectedBatchAccounting },
 		logging: { warn: (...args: unknown[]) => warnings.push(args) },
 	} as unknown as IToolEnvironment
+	assert.equal("runSubagent" in env.orchestration, false)
 	return { env, card, createCard, updates, finalized, warnings, mistakes: () => mistakes }
 }
 
