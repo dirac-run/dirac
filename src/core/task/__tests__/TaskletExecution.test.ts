@@ -37,6 +37,15 @@ import * as skillsModule from "@core/context/instructions/user-instructions/skil
 import type { DiracStorageMessage } from "@shared/messages/content"
 import { TaskletsTool } from "../tools/modules/use_subagents/UseSubagentsTool"
 import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
+import { GoalCoordinatorToolEnvironmentFactory } from "@core/goal/GoalCoordinatorEnvironment"
+import { GoalLoop } from "@core/goal/GoalLoop"
+import { GoalStore } from "@core/goal/GoalStore"
+import { GoalTaskFactory } from "@core/goal/GoalTaskFactory"
+import { createGoalHistoryItem } from "@core/goal/GoalHistory"
+import * as modelProviderPresets from "@core/models/modelProviderPresets"
+import { SurfaceAdapter } from "../tools/adapters/SurfaceAdapter"
+import type { IGoalTrait } from "../tools/interfaces/IToolEnvironment"
+import type { HistoryItem } from "@shared/HistoryItem"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
 
@@ -55,7 +64,8 @@ describe("Tasklet real Task execution", function () {
 	let requests: Request[]
 	let forbidden: sinon.SinonStub[]
 	let stateManager: StateManager
-	let nextTurn: ((mode: Mode) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense" | "allowed_skill" | "excluded_skill">) | undefined
+	let requestLimit: number
+	let nextTurn: ((mode: Mode, request: Request) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense" | "allowed_skill" | "excluded_skill">) | undefined
 
 	function rejectCall(name: string) {
 		const spy = sandbox.stub().callsFake(() => { throw new Error(`Tasklet escaped to ${name}`) })
@@ -69,6 +79,7 @@ describe("Tasklet real Task execution", function () {
 		requests = []
 		forbidden = []
 		nextTurn = undefined
+		requestLimit = 3
 		directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-execution-")))
 		cwd = path.join(directory, "workspace")
 		await fs.mkdir(cwd)
@@ -117,9 +128,10 @@ describe("Tasklet real Task execution", function () {
 			const handler: ApiHandler = {
 				getModel: () => ({ id: model, info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
 				async *createMessage(systemPrompt, messages, tools): ApiStream {
-					requests.push({ mode, model, systemPrompt, messages: structuredClone(messages), tools: (tools ?? []).map((tool) => (tool as { name: string }).name) })
-					assert.ok(requests.length <= 3, "Unexpected retry/request after controlled completion")
-					const operation = await nextTurn?.(mode) ?? (requests.length === 1 ? "read_file" : "complete")
+					const request = { mode, model, systemPrompt, messages: structuredClone(messages), tools: (tools ?? []).map((tool) => (tool as { name: string }).name) }
+					requests.push(request)
+					assert.ok(requests.length <= requestLimit, "Unexpected retry/request after controlled completion")
+					const operation = await nextTurn?.(mode, request) ?? (requests.length === 1 ? "read_file" : "complete")
 					yield {
 						type: "tool_calls", tool_call: {
 							call_id: `call-${requests.length}`, function: {
@@ -243,6 +255,333 @@ describe("Tasklet real Task execution", function () {
 			hasPendingUserInput: () => false,
 		}, options)
 	}
+
+	function deferred<T>() {
+		let resolve!: (value: T) => void
+		const promise = new Promise<T>((settle) => { resolve = settle })
+		return { promise, resolve }
+	}
+
+	async function createGoalExecution(status: "paused" | "achieved" = "paused") {
+		const acquisition = taskLocks.acquireTaskLock as sinon.SinonStub
+		acquisition.restore()
+		// Successful foreground turns may remember model presets; this fixture never changes user preferences.
+		sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+		requestLimit = 20
+		const store = new GoalStore()
+		let record = await store.create("root", "01M0TW092EXA0KHTW38ZXJ1GCQ", "ROOT_GOAL_ASSIGNMENT")
+		if (status === "achieved") {
+			await store.transition("root", { status: "working" })
+			record = await store.transition("root", { status: "achieved" })
+		}
+		const history: HistoryItem[] = [createGoalHistoryItem(record, "ROOT_GOAL_ASSIGNMENT", cwd)]
+		sandbox.stub(stateManager, "getGlobalStateKey").callsFake((key) => key === "taskHistory" ? history : undefined)
+		const factory = new GoalTaskFactory({
+			controller: parameters().controller as any, stateManager, cwd,
+			workspaceManager: undefined as any,
+			workingConfiguration: configuration("act"),
+			postCoordinatorState: async () => { },
+		})
+		const created = sandbox.spy(factory, "create")
+		const loop = new GoalLoop({
+			goalId: "root", initialDisplayText: "ROOT_GOAL_ASSIGNMENT", store,
+			createTaskFactory: () => factory, stateManager,
+			updateHistory: async (item) => { history[0] = item; return history },
+			postState: async () => { }, workspaceRootPath: cwd,
+		})
+		return { loop, store, history, created }
+	}
+
+	function isGoalRequest(request: Request) {
+		return /# GOAL (?:COORDINATOR|FOLLOW-UP)/.test(request.systemPrompt)
+	}
+
+	for (const executionProfile of ["goal_coordinator", "goal_followup"] as const) {
+		it(`owns contained real Tasks for ${executionProfile} without inheriting Goal controls`, async () => {
+			const params = parameters()
+			const createGoalTrait = sandbox.stub().callsFake(() => {
+				throw new Error("A contained Task acquired Goal controls")
+			})
+			const root = create({
+				...params, taskId: "root", executionProfile, tasklet: undefined,
+				toolEnvironmentFactory: new GoalCoordinatorToolEnvironmentFactory(createGoalTrait),
+				updateTaskHistory: async () => [], postStateToWebview: async () => { },
+				postPresentationToWebview: async () => { },
+			})
+			nextTurn = async () => "complete"
+			const host = root.taskletHost!
+			assert.ok(host)
+			const child = await host.start({ title: "private", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.equal(child.rootTaskId, "root")
+			assert.equal(child.configuration?.timeoutSeconds, 600)
+			assert.match(requests[0].systemPrompt, /# CONTAINED TASKLET/)
+			assert.equal(requests[0].mode, "act")
+			sinon.assert.notCalled(createGoalTrait)
+			await fs.stat(getTaskDirectoryPath({ kind: "tasklet", rootTaskId: "root", taskletId: child.id }))
+			assert.deepEqual(await fs.readdir(path.dirname(getTaskDirectoryPath("root"))), ["root"])
+			await root.retirePersistence()
+		})
+	}
+
+	for (const operation of ["pause", "stop"] as const) {
+		it(`joins real Goal children and outcome writes before ${operation} releases ownership`, async () => {
+			expectLoggerErrors() // Controlled provider chunks return after cancellation.
+			const h = await createGoalExecution()
+			const providerGate = deferred<void>()
+			const rootEntered = deferred<void>()
+			const childEntered = deferred<void>()
+			nextTurn = async (_mode, request) => {
+				if (isGoalRequest(request)) rootEntered.resolve()
+				else childEntered.resolve()
+				await providerGate.promise
+				return "complete"
+			}
+			const storage = await import("@core/storage/taskStorage")
+			const saveRecord = storage.saveTaskletRecord
+			const writeEntered = deferred<void>()
+			const writeGate = deferred<void>()
+			sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+				if (record.outcome) { writeEntered.resolve(); await writeGate.promise }
+				await saveRecord(record)
+			})
+			let closing: Promise<unknown> | undefined
+			try {
+				await h.loop.start()
+				await rootEntered.promise
+				const root = h.loop.coordinator!
+				const host = root.taskletHost!
+				const child = await host.start({ title: "owned", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
+				await childEntered.promise
+				closing = h.loop[operation]()
+				providerGate.resolve()
+				await writeEntered.promise
+				await assert.rejects(taskLocks.acquireTaskLock(getTaskDirectoryPath("root")), /another Dirac instance/)
+				await assert.rejects(host.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+				assert.equal(h.loop.hasRunningCoordinator, true)
+				assert.equal(host.inspect(child.id).outcomePersisted, false)
+				writeGate.resolve()
+				await closing
+				assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+				assert.equal(host.inspect(child.id).outcomePersisted, true)
+				assert.equal((await h.store.read("root")).status, operation === "pause" ? "paused" : "stopped")
+				assert.equal(h.loop.hasRunningCoordinator, false)
+				const release = await taskLocks.acquireTaskLock(getTaskDirectoryPath("root"))
+				await release()
+			} finally {
+				providerGate.resolve()
+				writeGate.resolve()
+				await closing
+				await h.loop.cancelCurrentExecution()
+			}
+		})
+	}
+
+	it("retains real Goal ownership when a contained outcome cannot be persisted", async () => {
+		expectLoggerErrors()
+		const h = await createGoalExecution()
+		const acquisition = sandbox.spy(taskLocks, "acquireTaskLock")
+		const rootGate = deferred<void>()
+		const rootEntered = deferred<void>()
+		nextTurn = async (_mode, request) => {
+			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			return "question"
+		}
+		await h.loop.start()
+		const release = await acquisition.firstCall.returnValue
+		try {
+			await rootEntered.promise
+			const root = h.loop.coordinator!
+			const child = await root.taskletHost!.start({ title: "failed writer", prompt: "PRIVATE_UNPERSISTED_GOAL_CHILD" })
+			await waitForInteraction(root.taskletHost!, child.id)
+			const storage = await import("@core/storage/taskStorage")
+			const saveRecord = storage.saveTaskletRecord
+			sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+				if (record.outcome) throw new Error("contained outcome disk failure")
+				await saveRecord(record)
+			})
+			const settlement = assert.rejects(h.loop["runtime"]!.settlement!, /owned activity failed to retire/)
+			const closing = assert.rejects(h.loop.pause(), /owned activity failed to retire/)
+			rootGate.resolve()
+			await Promise.all([settlement, closing])
+			assert.equal(root.taskletHost!.inspect(child.id).outcomePersisted, false)
+			assert.match(root.taskletHost!.inspect(child.id).settlementError!.message, /contained outcome disk failure/)
+			assert.equal(h.loop.hasRunningCoordinator, true)
+			await assert.rejects(taskLocks.acquireTaskLock(getTaskDirectoryPath("root")), /another Dirac instance/)
+		} finally {
+			rootGate.resolve()
+			// Only test teardown releases this deliberately failed owner's retained lock.
+			await release()
+		}
+	})
+
+	it("reconstructs a resumed Goal host without restarting its private conversation", async () => {
+		expectLoggerErrors()
+		const h = await createGoalExecution()
+		const rootGate = deferred<void>()
+		const rootEntered = deferred<void>()
+		nextTurn = async (_mode, request) => {
+			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise }
+			return "complete"
+		}
+		try {
+			await h.loop.start()
+			await rootEntered.promise
+			const original = h.loop.coordinator!
+			const child = await original.taskletHost!.start({ title: "retained", prompt: "PRIVATE_ORIGINAL_GOAL_ASSIGNMENT" })
+			await waitForOutcome(original.taskletHost!, child.id)
+			const pause = h.loop.pause()
+			rootGate.resolve()
+			await pause
+			const resumedGate = deferred<void>()
+			const resumedEntered = deferred<void>()
+			nextTurn = async (_mode, request) => {
+				if (isGoalRequest(request)) { resumedEntered.resolve(); await resumedGate.promise }
+				return "complete"
+			}
+			try {
+				await h.loop.resume()
+				await resumedEntered.promise
+				const resumed = h.loop.coordinator!
+				assert.notEqual(resumed, original)
+				assert.notEqual(resumed.taskletHost, original.taskletHost)
+				assert.equal(resumed.taskId, original.taskId)
+				assert.equal(resumed.ulid, original.ulid)
+				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 1)
+				assert.equal(resumed.taskletHost!.inspect(child.id).outcome?.kind, "completed")
+				await resumed.taskletHost!.resume(child.id, "PRIVATE_EXPLICIT_GOAL_CHILD_FOLLOWUP")
+				await waitForOutcome(resumed.taskletHost!, child.id)
+				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 2)
+				const transcript = await resumed.taskletHost!.readTranscript(child.id)
+				assert.match(JSON.stringify(transcript.conversation), /PRIVATE_ORIGINAL_GOAL_ASSIGNMENT/)
+				assert.match(JSON.stringify(transcript.conversation), /PRIVATE_EXPLICIT_GOAL_CHILD_FOLLOWUP/)
+			} finally {
+				const closing = h.loop.pause()
+				resumedGate.resolve()
+				await closing
+			}
+		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+	})
+
+	for (const status of ["paused", "achieved"] as const) {
+		it(`lets an explicit ${status} Goal follow-up use children without changing pursuit status`, async () => {
+			const h = await createGoalExecution(status)
+			const rootGate = deferred<void>()
+			const rootEntered = deferred<void>()
+			nextTurn = async (_mode, request) => {
+				if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise }
+				return "complete"
+			}
+			try {
+				await h.loop.sendMessage("Explicit follow-up work")
+				await rootEntered.promise
+				const root = h.loop.coordinator!
+				assert.equal(root.executionProfile, "goal_followup")
+				const child = await root.taskletHost!.start({ title: "follow-up child", prompt: "PRIVATE_FOLLOWUP_ASSIGNMENT" })
+				await waitForOutcome(root.taskletHost!, child.id)
+				assert.equal((await h.store.read("root")).status, status)
+				const settlement = h.loop["runtime"]!.settlement!
+				rootGate.resolve()
+				await settlement
+				assert.equal((await h.store.read("root")).status, status)
+				assert.equal(h.loop.hasRunningCoordinator, false)
+				const release = await taskLocks.acquireTaskLock(getTaskDirectoryPath("root"))
+				await release()
+			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		})
+	}
+
+	it("rejects Goal completion and blocking while contained starts or interactions remain active", async () => {
+		expectLoggerErrors()
+		const h = await createGoalExecution()
+		const rootGate = deferred<void>()
+		const rootEntered = deferred<void>()
+		nextTurn = async (_mode, request) => {
+			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			return "question"
+		}
+		try {
+			await h.loop.start()
+			await rootEntered.promise
+			const runtime = h.loop["runtime"]!
+			const root = runtime.coordinator
+			const executor = (root as any).toolExecutor
+			const surface = new SurfaceAdapter(executor.asToolConfig(), "respond")
+			const goal: IGoalTrait = h.created.firstCall.args[0].environmentFactory.create(executor.asToolConfig(), "respond").goal!
+			const storage = await import("@core/storage/taskStorage")
+			const saveRecord = storage.saveTaskletRecord
+			const writeEntered = deferred<void>()
+			const writeGate = deferred<void>()
+			const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+				if (!record.configuration || !record.outcome) { writeEntered.resolve(); await writeGate.promise }
+				await saveRecord(record)
+			})
+			const starting = root.taskletHost!.start({ title: "active child", prompt: "PRIVATE_WAITING_GOAL_ASSIGNMENT" })
+			await writeEntered.promise
+			try {
+				const completion = await goal.commitCompletion("too early")
+				assert.equal(completion.committed, false)
+				assert.match(completion.error!, /active child/)
+				await assert.rejects(goal.blockGoal("Cannot continue"), /Active tasklets:.*active child/)
+				assert.equal(h.loop["requestedEnd"], undefined)
+			} finally { writeGate.resolve() }
+			const child = await starting
+			await waitForInteraction(root.taskletHost!, child.id)
+			assert.equal((await goal.commitCompletion("still too early")).committed, false)
+			await assert.rejects(goal.blockGoal("Still active"), new RegExp(child.id))
+			assert.equal(root.taskletHost!.inspect(child.id).outcome, undefined)
+			save.restore()
+			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
+			assert.deepEqual(await h.loop["commitCompletion"](runtime.host, surface, "Goal completed"), { committed: true })
+			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+			rootGate.resolve()
+			await runtime.settlement
+			assert.equal((await h.store.read("root")).status, "achieved")
+		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+	})
+
+	it("rechecks contained admission when Goal blocking races a new child", async () => {
+		expectLoggerErrors()
+		const h = await createGoalExecution()
+		const rootGate = deferred<void>()
+		const rootEntered = deferred<void>()
+		nextTurn = async (_mode, request) => {
+			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			return "question"
+		}
+		try {
+			await h.loop.start()
+			await rootEntered.promise
+			const runtime = h.loop["runtime"]!
+			const root = runtime.coordinator
+			const config = (root as any).toolExecutor.asToolConfig()
+			const goal = h.created.firstCall.args[0].environmentFactory.create(config, "block_goal").goal!
+			const guardEntered = deferred<void>()
+			const guardGate = deferred<void>()
+			const originalGuard = runtime.host.guardTerminalTransition.bind(runtime.host)
+			const guard = sandbox.stub(runtime.host, "guardTerminalTransition").callsFake(async () => {
+				guardEntered.resolve()
+				await guardGate.promise
+				await originalGuard()
+			})
+			const blocked = assert.rejects(goal.blockGoal("Cannot continue"), /Active tasklets:.*racing child/)
+			await guardEntered.promise
+			const starting = root.taskletHost!.start({ title: "racing child", prompt: "PRIVATE_RACING_ASSIGNMENT" })
+			guardGate.resolve()
+			await blocked
+			const child = await starting
+			await waitForInteraction(root.taskletHost!, child.id)
+			assert.equal(h.loop["requestedEnd"], undefined)
+			assert.equal(root.taskletHost!.inspect(child.id).outcome, undefined)
+			guard.restore()
+			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
+			await goal.blockGoal("No work remains active")
+			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+			rootGate.resolve()
+			await runtime.settlement
+			assert.equal((await h.store.read("root")).status, "blocked")
+		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+	})
 
 	for (const includeHistory of [undefined, false, true]) {
 		it(`starts a real Task with ${includeHistory === true ? "an independent parent history snapshot" : `no inherited history (${includeHistory})`}`, async () => {

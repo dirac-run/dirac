@@ -1410,9 +1410,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(host.inspect(sibling.id).outcomePersisted, true)
 	})
 
-	it("rejects recursive/Goal ownership, invalid roots and empty assignments", async () => {
-		for (const executionProfile of ["tasklet", "goal_child", "goal_coordinator", "goal_followup"] as const) {
-			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /ordinary root/)
+	it("rejects recursive ownership, invalid roots and empty assignments", async () => {
+		for (const executionProfile of ["tasklet", "goal_child"] as const) {
+			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /Only root Tasks/)
 		}
 		assert.throws(
 			() => new TaskletHost({ ...owner, taskId: "../escape" }, taskOptions()),

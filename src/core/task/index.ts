@@ -229,6 +229,11 @@ export class Task {
 			postStateToWebview: () => this.postStateToWebview(),
 			withStateLock: (fn) => this.withStateLock(fn),
 			onUserInputAccepted: () => this.taskletHost?.notifyUserMessage(),
+			onCompletionCommitted: () => {
+				if (this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup") {
+					this.taskletHost?.closeAdmissionIfIdle()
+				}
+			},
 			getCompletionBlocker: () => {
 				if (this.hasPendingChatInput()) return "Completion was superseded by pending user input."
 				const active = this.taskletHost?.listActive() ?? []
@@ -1067,7 +1072,7 @@ export class Task {
 			assistantStreamManager: this.assistantStreamManager,
 		})
 
-		if (this.executionProfile === "standalone") {
+		if (this.executionProfile === "standalone" || this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup") {
 			const root = this
 			this.taskletHost = new TaskletHost({
 				taskId: this.taskId, executionProfile: this.executionProfile,
@@ -1102,7 +1107,8 @@ export class Task {
 					return root.taskState.pinnedContext
 				},
 				toolSelectionPolicy: params.toolSelectionPolicy,
-				toolEnvironmentFactory: params.toolEnvironmentFactory,
+				// Goal controls belong only to the coordinator, never to a private child.
+				toolEnvironmentFactory: this.executionProfile === "standalone" ? params.toolEnvironmentFactory : undefined,
 			})
 		}
 	}
@@ -1720,7 +1726,7 @@ interface OwnedTasklet {
 }
 
 /**
- * One ordinary root Task's in-memory child owner, retained through shutdown.
+ * One root Task's in-memory child owner, retained through shutdown.
  * Co-located with Task because roots construct hosts and hosts construct contained Tasks;
  * separate classes retain separate ownership without a circular module dependency.
  * Explicit decisions are checked against the owner; communications persist until parent delivery.
@@ -1743,7 +1749,9 @@ export class TaskletHost {
 		// Constructor substitution is only a controlled-execution test seam, not a factory service.
 		private readonly TaskConstructor: typeof Task = Task,
 	) {
-		if (owner.executionProfile !== "standalone") throw new Error("Only ordinary root Tasks may own tasklets")
+		if (owner.executionProfile !== "standalone" && owner.executionProfile !== "goal_coordinator" && owner.executionProfile !== "goal_followup") {
+			throw new Error("Only root Tasks may own tasklets")
+		}
 		getTaskDirectoryPath(owner.taskId)
 		this.rootTaskId = owner.taskId
 	}
@@ -2096,6 +2104,15 @@ export class TaskletHost {
 			if (!record.outcome) active.set(record.id, { id: record.id, title: record.title })
 		}
 		return [...active.values()]
+	}
+
+	/** Commit an idle root's terminal boundary without admitting a later child. */
+	closeAdmissionIfIdle(): void {
+		const active = this.listActive()
+		if (active.length) {
+			throw new Error(`Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before ending the root.`)
+		}
+		this.closing = true
 	}
 
 	/** Close admission synchronously, then join every admitted writer and execution. */

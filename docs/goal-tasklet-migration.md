@@ -2,10 +2,11 @@
 
 ## Status and scope
 
-**6.1: committed as `6606ef65`. 6.2: implemented and verified.** New Goals use
-version 2. Legacy execution/reopening is rejected, while read-only ownership
-preserves history exclusion and explicit deletion. Runtime hosting and public
-cutover remain later items; this intermediate commit is not the phase-6 release.
+**6.1: committed as `6606ef65`. 6.2: committed as `481d1858`. 6.3: implemented and verified.**
+Goal coordinators/follow-ups now own shared hosts with safe child environments and
+lifecycle settlement. Public delegation remains disabled until 6.4 removes the
+interim legacy supervisor and completes interactions, accounting and presentation.
+This intermediate commit is not the phase-6 release.
 
 This is the tracked phase-6 audit and implementation breakdown. It supplements
 the local `ascratch/docs/tasklet-design-and-migration.md` decision record; it does
@@ -118,8 +119,8 @@ implementation are engineering details within these guarantees.
 | Item | Scope and completion evidence | Status |
 |---|---|---|
 | 6.1 — Contract/source audit | Source audit and D32–D34 approval; finalized dependent split. Documentation only. | Committed `6606ef65` |
-| 6.2 — Storage/restoration boundary | Version-2-only execution; read-only legacy ownership; rejection and byte preservation through startup, history/prompt reconstruction and selection; explicit root/private-child deletion. No importer or public cutover. Evidence below. | Implemented and verified |
-| 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Not started; depends on 6.2 |
+| 6.2 — Storage/restoration boundary | Version-2-only execution; read-only legacy ownership; rejection and byte preservation through startup, history/prompt reconstruction and selection; explicit root/private-child deletion. No importer or public cutover. Evidence below. | Committed `481d1858` |
+| 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Implemented and verified |
 | 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Not started; depends on 6.3 |
 | 6.5 — Integrated acceptance/cleanup | Compose real Goal-root/child scenarios, restored data, permissions, accounting, selection/deletion and frontend behavior; remove remaining dead paths. Record controlled-provider, rendered and application evidence separately. | Not started; depends on 6.4 |
 
@@ -196,3 +197,40 @@ pass. Existing phase-5 verification is historical evidence, not a new run.
 - No child runtime migration, provider/application execution, rendered UI, live
   network, data importer or automatic legacy cleanup is claimed. New-format Goal
   execution still uses the interim runtime until 6.3/6.4 complete the cutover.
+
+## Verification performed for 6.3
+
+- Coordinator/follow-up Tasks construct the existing shared host, storing private
+  child conversations beneath the Goal root. Goal environment factories are never
+  inherited by those children; ordinary standalone test/custom bindings remain
+  unchanged. The shared default deadline remains 600 seconds.
+- GoalLoop joins actual coordinator persistence retirement as well as interim
+  legacy-host shutdown before releasing ownership. A failed contained outcome write
+  retains the runtime/root lock; a final Goal metadata transition failure after safe
+  retirement still releases it. Removed the legacy host's redundant blanket Goal
+  cleanup write; registered child outcomes/interactions still settle normally.
+- Goal completion and blocking reject active and acceptance-pending children.
+  Successful terminal commits synchronously close shared admission, including a
+  tested start racing the intervening legacy guard. Ordinary root follow-up behavior
+  is unchanged.
+- **223 backend tests pass**, no failures/skips: all Goal suites plus real Tasklet
+  execution, host and persistence-ownership suites. New composed real GoalLoop,
+  GoalTaskFactory and Task cases verify safe child environments, pause/stop waiting
+  for final writes, failed-write ownership retention, fresh-host reconstruction with
+  no automatic child restart, explicit same-handle child resumption, paused/achieved
+  follow-up status preservation and terminal guards/admission. Focused ownership
+  tests separately cover natural failure, failed retirement and metadata failure.
+  Provider/checkpoint/host resources are controlled, not live-network or application
+  evidence. Log: `/tmp/dirac-63-tests.log`.
+- Unit-test TypeScript checking, full `npm run compile`, `npm run cli:build`,
+  `npm run check:arch` and `git diff --check` pass. Architecture baselines are
+  unchanged with zero new violations. Logs: `/tmp/dirac-63-unit-types.log`,
+  `/tmp/dirac-63-{compile,cli-build,arch}.log`.
+- Independent review identified the redundant cleanup-write and block/start race;
+  both were fixed with regressions. A focused follow-up review found no remaining
+  blockers; that review was source inspection, not an extra test run.
+- Public Goal delegation/inventories, shared user escalation/status callbacks,
+  accounting/projections and removal of GoalTaskHost/Goal child environments remain
+  6.4. No rendered UI, CLI application/PTY or live-provider execution is claimed for
+  this backend lifecycle item. The separately baseline-confirmed accounting transport
+  assertion from 6.2 remains outside this passing selection.

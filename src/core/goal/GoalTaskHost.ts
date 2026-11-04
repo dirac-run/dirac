@@ -23,7 +23,6 @@ import { Logger } from "@shared/services/Logger"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import Mutex from "p-mutex"
 import { ulid } from "ulid"
-import { interruptNonterminalGoalChildren } from "./GoalLifecycle"
 import { GoalStore } from "./GoalStore"
 import {
 	type GoalChildInteractionResult,
@@ -530,13 +529,6 @@ ${childSummary || "No contained Tasks have been recorded."}
 					}
 				}),
 			)
-			try {
-				await this.store.update(this.goalId, (goal, now) => {
-					interruptNonterminalGoalChildren(goal, now)
-				})
-			} catch (error) {
-				failures.push(error)
-			}
 			if (failures.length === 1) throw failures[0]
 			if (failures.length > 1) throw new AggregateError(failures, "Goal Task host shutdown failed")
 		})

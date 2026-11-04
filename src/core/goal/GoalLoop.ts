@@ -288,24 +288,25 @@ export class GoalLoop {
 		)
 		runtime.settling = true
 		await this.lifecycleMutex.withLock(async () => {
+			const requested = this.requestedEnd
+			const transition = requested && outcome.kind !== "failed" ? requested : transitionForOutcome(outcome)
+			// Task outcomes also report retirement failures. Join the actual retirement boundary
+			// before releasing GoalLoop's lock; a settled outcome alone does not prove safety.
+			const retirement = await Promise.allSettled([
+				runtime.coordinator.retirePersistence(),
+				runtime.host.shutdown(
+					outcome.kind === "cancelled" || transition.status === "stopped" ? "cancelled" : "interrupted",
+					this.followUpEndReason ?? transition.reason ?? followUpOutcomeReason(outcome),
+				),
+			])
+			const failures = retirement.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+			if (failures.length) throw new AggregateError(failures, `Goal ${this.goalId} owned activity failed to retire`)
+
+			// Metadata failures after safe retirement must not retain a dead runtime or its lock.
 			try {
 				if (runtime.kind === "followup") {
-					await runtime.host.shutdown(
-						outcome.kind === "cancelled" ? "cancelled" : "interrupted",
-						this.followUpEndReason ?? followUpOutcomeReason(outcome),
-					)
 					await this.syncHistory(await this.dependencies.store.read(this.goalId))
 					return
-				}
-				const requested = this.requestedEnd
-				let transition = requested && outcome.kind !== "failed" ? requested : transitionForOutcome(outcome)
-				try {
-					await runtime.host.shutdown(
-						transition.status === "stopped" ? "cancelled" : "interrupted",
-						transition.reason ?? `Goal became ${transition.status}`,
-					)
-				} catch (error) {
-					transition = { status: "blocked", reason: `Owned activity failed to stop: ${errorMessage(error)}` }
 				}
 				const record = await this.dependencies.store.transition(this.goalId, {
 					status: transition.status,
@@ -513,8 +514,14 @@ export class GoalLoop {
 	private async blockGoal(host: GoalTaskHost, surface: SurfaceAdapter, reason: string): Promise<void> {
 		const detail = reason.trim()
 		if (!detail) throw new Error("A blocked Goal requires a non-empty reason")
+		const active = this.runtime?.coordinator.taskletHost?.listActive() ?? []
+		if (active.length) {
+			throw new GoalTerminalGuardError(`Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before blocking.`)
+		}
 		await host.guardTerminalTransition()
 		await this.lifecycleMutex.withLock(async () => {
+			// Recheck and close shared admission synchronously at the transition commit.
+			this.runtime?.coordinator.taskletHost?.closeAdmissionIfIdle()
 			if (this.runtime?.kind === "followup") this.followUpEndReason ??= detail
 			else this.requestedEnd ??= { status: "blocked", reason: detail }
 		})

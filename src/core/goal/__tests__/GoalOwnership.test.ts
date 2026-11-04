@@ -18,6 +18,7 @@ import { createGoalHistoryItem } from "../GoalHistory"
 import { GoalLoop } from "../GoalLoop"
 import { GoalStore } from "../GoalStore"
 import type { GoalTaskFactory } from "../GoalTaskFactory"
+import * as taskLocks from "@core/task/TaskLockUtils"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -46,6 +47,7 @@ describe("Goal execution ownership", () => {
 			startTask: () => outcome.promise,
 			resumeTaskFromHistory: () => outcome.promise,
 			abortTask: async () => outcome.resolve({ kind: "cancelled", cancelledAt: Date.now() }),
+			retirePersistence: sinon.stub().resolves(),
 		} as unknown as Task
 		const create = sinon.stub().resolves(task)
 		const dependencies = {
@@ -94,6 +96,49 @@ describe("Goal execution ownership", () => {
 		}
 	})
 
+	for (const execution of ["goal", "followup"] as const) {
+		it(`retains ${execution} ownership when contained persistence cannot retire`, async () => {
+			expectLoggerErrors()
+			const h = await harness(`unsafe-${execution}`)
+			const acquisition = sinon.spy(taskLocks, "acquireTaskLock")
+			if (execution === "goal") await h.loop.start()
+			else await h.loop.sendMessage("Explicit follow-up")
+			// Test teardown alone may release this deliberately failed owner's real lock.
+			const release = await acquisition.firstCall.returnValue
+			try {
+				const task = await h.create.firstCall.returnValue
+				const retirement = task.retirePersistence as sinon.SinonStub
+				retirement.rejects(new Error("child outcome write failed"))
+				const settlement = h.loop["runtime"]!.settlement!
+				const rejected = assert.rejects(settlement, (error) => {
+					assert.ok(error instanceof AggregateError)
+					assert.match(error.errors[0].message, /child outcome write failed/)
+					return true
+				})
+				h.outcome.resolve({ kind: "failed", error: { name: "Error", message: "Task termination failed" }, failedAt: Date.now() })
+				await rejected
+				assert.equal(h.loop.hasRunningCoordinator, true)
+				await assert.rejects(acquireTaskLock(getTaskDirectoryPath(h.loop.goalId)), /another Dirac instance/)
+				await assert.rejects(new GoalLoop(h.dependencies).sendMessage("Cannot reopen"), /another Dirac instance/)
+				await assert.rejects(deleteRunStorage(h.history[0]), /another Dirac instance/)
+				if (execution === "followup") assert.equal((await h.store.read(h.loop.goalId)).status, "paused")
+			} finally { await release() }
+		})
+	}
+
+	it("blocks a naturally failed coordinator and releases ownership after successful retirement", async () => {
+		const h = await harness("natural-failure")
+		await h.loop.start()
+		const settlement = h.loop["runtime"]!.settlement!
+		h.outcome.resolve({ kind: "failed", error: { name: "Error", message: "provider failed" }, failedAt: Date.now() })
+		await settlement
+		assert.equal((await h.store.read(h.loop.goalId)).status, "blocked")
+		assert.match((await h.store.read(h.loop.goalId)).statusReason!, /provider failed/)
+		assert.equal(h.loop.hasRunningCoordinator, false)
+		const release = await acquireTaskLock(getTaskDirectoryPath(h.loop.goalId))
+		await release()
+	})
+
 	it("holds ownership through final history persistence", async () => {
 		const h = await harness("1004")
 		const writing = deferred<void>()
@@ -118,7 +163,7 @@ describe("Goal execution ownership", () => {
 		assert.equal(h.loop.hasRunningCoordinator, false)
 	})
 
-	it("clears a dead runtime and releases ownership even when its final transition fails", async () => {
+	it("releases a retired runtime when its final Goal metadata transition fails", async () => {
 		expectLoggerErrors()
 		const h = await harness("1005")
 		await h.loop.start()
@@ -129,6 +174,19 @@ describe("Goal execution ownership", () => {
 		await rejected
 		assert.equal(h.loop.hasRunningCoordinator, false)
 		const release = await acquireTaskLock(getTaskDirectoryPath("1005"))
+		await release()
+	})
+
+	it("does not retain an empty retired host for an unrelated Goal-record cleanup write", async () => {
+		const h = await harness("empty-host")
+		await h.loop.start()
+		const settlement = h.loop["runtime"]!.settlement!
+		const update = sinon.stub(h.store, "update").rejects(new Error("unnecessary cleanup disk failure"))
+		h.outcome.resolve({ kind: "completed", response: "Done", completedAt: Date.now() })
+		await settlement
+		sinon.assert.notCalled(update)
+		assert.equal(h.loop.hasRunningCoordinator, false)
+		const release = await acquireTaskLock(getTaskDirectoryPath(h.loop.goalId))
 		await release()
 	})
 

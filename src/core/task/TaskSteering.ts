@@ -21,6 +21,7 @@ export interface TaskSteeringContext {
 	taskMessenger: TaskMessenger
 	allowWhileWaitingForInteraction?: boolean
 	getCompletionBlocker?: () => string | undefined
+	onCompletionCommitted?: () => void
 	postStateToWebview: () => void | Promise<void>
 	withStateLock: <T>(fn: () => T | Promise<T>) => Promise<T>
 	onUserInputAccepted?: () => void
@@ -260,6 +261,7 @@ export async function commitAttemptCompletion(
 		ctx.taskState.completionCommitted = true
 		ctx.taskState.didAttemptCompletion = true
 		ctx.taskState.commitCompletionResponse(response)
+		ctx.onCompletionCommitted?.()
 		return { committed: true }
 	})
 }

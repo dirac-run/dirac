@@ -60,23 +60,27 @@ describe("Task persistence ownership", () => {
 		}
 	})
 
-	it("retires Goal-owned task writers when their run finishes", async () => {
+	for (const executionProfile of ["goal_child", "goal_coordinator", "goal_followup"] as const) {
+		it(`retires ${executionProfile} writers and contained work when their run finishes`, async () => {
 		const task = taskWithPersistenceOwner()
-		task.executionProfile = "goal_child"
+			task.executionProfile = executionProfile
+			task.taskletHost = executionProfile === "goal_child" ? undefined : { shutdown: sinon.stub().resolves() }
 		await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
 		sinon.assert.callOrder(task.lifecycleManager.finalizeTaskRun, task.releaseTaskLock)
 		sinon.assert.calledOnce(task.messageStateHandler.retirePersistence)
 		sinon.assert.calledOnce(task.releaseTaskLock)
+			if (task.taskletHost) sinon.assert.callOrder(task.taskletHost.shutdown, task.releaseTaskLock)
 	})
 
-	it("retires Goal-owned writers even if resource cleanup fails", async () => {
+		it(`retires ${executionProfile} writers even if resource cleanup fails`, async () => {
 		const task = taskWithPersistenceOwner()
-		task.executionProfile = "goal_child"
+			task.executionProfile = executionProfile
 		task.lifecycleManager.finalizeTaskRun.rejects(new Error("cleanup failed"))
 		const outcome = await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
 		assert.equal(outcome.kind, "failed")
 		sinon.assert.calledOnce(task.releaseTaskLock)
 	})
+	}
 	it("joins tasklet shutdown before retiring the root writer or releasing its lock", async () => {
 		const task = taskWithPersistenceOwner()
 		let finish!: () => void

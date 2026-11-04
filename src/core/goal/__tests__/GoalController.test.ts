@@ -176,6 +176,7 @@ describe("GoalController startup transaction", () => {
 			capturedConfigurations.push(this["workingConfiguration"](input.executionProfile))
 			return {
 				resumeTaskFromHistory: async () => ({ kind: "completed", response: "Done", completedAt: Date.now() }),
+				retirePersistence: async () => { },
 			} as unknown as Task
 		})
 		const goalController = new GoalController({
