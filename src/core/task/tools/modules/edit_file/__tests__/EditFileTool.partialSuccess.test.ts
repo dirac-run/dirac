@@ -93,7 +93,6 @@ function createConfig() {
 		shouldAutoApproveTool: sinon.stub().returns([true, true]),
 		applyLatestBrowserSettings: sinon.stub().resolves(undefined),
 		createUtilityModelRunner: sinon.stub(),
-		createSubagentRuntime: sinon.stub(),
 		assertMutationAuthorized: sinon.stub(),
 		commitAttemptCompletion: sinon.stub().resolves({ committed: true }),
 		getDiracMessages: sinon.stub().returns([]),

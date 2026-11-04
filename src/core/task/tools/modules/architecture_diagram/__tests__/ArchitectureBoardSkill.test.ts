@@ -20,7 +20,6 @@ import { ToolDiscoveryService } from "../../../discovery/ToolDiscoveryService"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
 import { ToolRegistry } from "../../../registry/ToolRegistry"
 import { ToolSnapshotManager } from "../../../runtime/ToolSnapshotManager"
-import { SubagentContextBuilder } from "../../../subagent/SubagentContextBuilder"
 import type { TaskConfig } from "../../../types/TaskConfig"
 import { UseSkillTool } from "../../use_skill/UseSkillTool"
 import { create, exposure, spec } from "../tool"
@@ -314,12 +313,5 @@ describe("architecture-board skill integration", () => {
 		assert.deepEqual(privateSnapshot.promptVisibleSpecs, [])
 		assert.deepEqual(privateSnapshot.activeSkillIds, [])
 
-		config.activeToolSnapshot = after
-		config.coordinator = after.coordinator
-		const subagent = new SubagentContextBuilder(config, {} as any, [spec.name], {} as any)
-		const subagentSnapshot = await subagent.buildSubagentRequestSnapshot(context)
-		assert.deepEqual(subagentSnapshot.promptVisibleSpecs, [])
-		assert.deepEqual(subagentSnapshot.inventoryEnabledTools, [])
-		assert.deepEqual(subagentSnapshot.activeSkillIds, [])
 	})
 })

@@ -1,6 +1,5 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
-import { SubagentToolContext } from "../../../context/SubagentToolContext"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
 import { InspectAstTool, inspect_ast_spec } from "../InspectAstTool"
 
@@ -332,7 +331,7 @@ describe("InspectAstTool", () => {
 		assert.match(output, /card creation failed/)
 	})
 
-	for (const order of [["subagent", "main", "sibling"], ["main", "subagent", "sibling"]] as const) {
+	for (const order of [["tasklet", "main", "sibling"], ["main", "tasklet", "sibling"]] as const) {
 		it(`isolates implementation-read history in ${order.join(" → ")} order`, async () => {
 			const main = definition()
 			const target = {
@@ -346,12 +345,10 @@ describe("InspectAstTool", () => {
 			}
 			const implementationResult = { targets: [target] }
 			const parent = createEnvironment({ implementationResult }).env
-			const subagent = createEnvironment({ subagent: true, implementationResult }).env
-			const sibling = createEnvironment({ subagent: true, implementationResult }).env
 			const environments = {
 				main: parent,
-				subagent: { ...subagent, context: new SubagentToolContext(parent.context) },
-				sibling: { ...sibling, context: new SubagentToolContext(parent.context) },
+				tasklet: createEnvironment({ implementationResult }).env,
+				sibling: createEnvironment({ implementationResult }).env,
 			}
 			const args = { operation: "implementation" as const, paths: ["src/a.ts"], symbols: ["main"] }
 

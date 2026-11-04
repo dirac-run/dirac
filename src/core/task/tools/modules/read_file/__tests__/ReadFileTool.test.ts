@@ -16,7 +16,6 @@ import sinon from "sinon"
 import { TaskState } from "../../../../TaskState"
 import { createMockContext, createMockTaskMessenger } from "../../../__tests__/helpers/mockTaskConfig"
 import { SurfaceAdapter } from "../../../adapters/SurfaceAdapter"
-import { SubagentToolContext } from "../../../context/SubagentToolContext"
 import type { TaskConfig } from "../../../types/TaskConfig"
 import { ReadFileTool } from "../ReadFileTool"
 
@@ -344,14 +343,14 @@ describe("ReadFileToolHandler.execute – include_anchors visibility and cache",
 		}
 	}
 
-	for (const order of [["subagent", "main", "sibling"], ["main", "subagent", "sibling"]] as const) {
+	for (const order of [["tasklet", "main", "sibling"], ["main", "tasklet", "sibling"]] as const) {
 		it(`isolates full-read history in ${order.join(" → ")} order`, async () => {
 			const { config } = createConfig()
 			config.isSubagentExecution = false
 			const configs = {
 				main: config,
-				subagent: { ...config, isSubagentExecution: true, context: new SubagentToolContext(config.context) },
-				sibling: { ...config, isSubagentExecution: true, context: new SubagentToolContext(config.context) },
+				tasklet: { ...config, context: createMockContext() },
+				sibling: { ...config, context: createMockContext() },
 			}
 			const realFile = "agent-read-history.ts"
 			await fs.writeFile(path.join(tmpDir, realFile), "const original = true")

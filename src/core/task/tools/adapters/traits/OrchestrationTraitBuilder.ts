@@ -1,75 +1,15 @@
 import type { Hooks } from "@core/hooks/hook-factory"
 import { activateTaskSkill } from "@core/task/activateTaskSkill"
 import { getCurrentTurnUserRequests } from "@core/text-condensation/CurrentTurnUserRequests"
-import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
 import type { DiracMessage } from "@shared/ExtensionMessage"
-import { Logger } from "@shared/services/Logger"
 import type { IOrchestrationTrait } from "../../interfaces/IToolEnvironment"
-import { SubagentRunner } from "../../subagent/SubagentRunner"
-import { SubagentRunRecorder } from "../../subagent/SubagentRunRecorder"
 import type { TaskConfig } from "../../types/TaskConfig"
-import { SubagentUsagePublisher } from "./SubagentUsagePublisher"
-// Builds the orchestration trait — subagent execution, hooks, mode switching, state management.
+// Builds the orchestration trait — tasklet supervision, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
 		tasklets: config.executionProfile === "standalone" && !config.isSubagentExecution
 			? config.callbacks.tasklets
 			: undefined,
-		runSubagent: async (prompt, options) => {
-			const agentIdentity = options?.agentIdentity ?? { id: 1, name: options?.subagentName ?? "subagent" }
-			const utilityModelSelection = options?.useUtilityModel
-				? getConfiguredUtilityModelSelection(config.utilityModelSelection)
-				: undefined
-			if (options?.useUtilityModel && !utilityModelSelection) {
-				throw new Error("Utility model is not configured.")
-			}
-			const providerId = utilityModelSelection?.provider ?? config.providerId
-			let recorder: SubagentRunRecorder | undefined
-			try {
-				recorder = await SubagentRunRecorder.create({
-					taskId: config.taskId,
-					agent: agentIdentity,
-					taskTitle: options?.taskTitle ?? "Subagent task",
-					prompt,
-					timeoutSeconds: options?.timeout ?? 600,
-					includeHistory: options?.includeHistory === true,
-					providerId,
-					modelId: utilityModelSelection?.modelId ?? config.model.id,
-				})
-			} catch (error) {
-				Logger.error("[OrchestrationTraitBuilder] failed to initialize subagent recorder", error)
-			}
-			const runner = new SubagentRunner(config, options?.subagentName, {
-				allowedTools: options?.allowedTools,
-				utilityModelSelection,
-				systemSuffix: options?.systemSuffix,
-				agentIdentity,
-				recorder,
-			})
-			const signal = options?.signal
-			const onAbort = () => {
-				void runner.abort(signal?.reason ? `Aborted: ${String(signal.reason)}` : "Aborted by external signal")
-			}
-			if (signal) {
-				if (signal.aborted) {
-					await runner.abort("Aborted by external signal")
-				} else {
-					signal.addEventListener("abort", onAbort, { once: true })
-				}
-			}
-
-			const usage = new SubagentUsagePublisher(config.messageState, config.callbacks.postStateToWebview, agentIdentity.name)
-			try {
-				const result = await runner.run(prompt, async (update) => {
-					if (update.stats) await usage.update(update.stats)
-					await options?.onUpdate?.(update)
-				}, options?.timeout, options?.includeHistory)
-				await usage.finish(result.stats)
-				return result
-			} finally {
-				signal?.removeEventListener("abort", onAbort)
-			}
-		},
 		runHook: async (name, input, options) => {
 			const { executeHook } = await import("@core/hooks/hook-executor")
 			return await executeHook({

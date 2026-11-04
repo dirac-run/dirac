@@ -134,13 +134,6 @@ export function createMockCallbacks(): TaskCallbacks {
 		resetTransientState: sinon.stub().resolves(),
 		notifyContextCompacted: sinon.stub(),
 		createUtilityModelRunner: sinon.stub(),
-		createSubagentRuntime: sinon.stub().returns({
-			providerId: "test-provider",
-			model: { id: "test-model", info: {} },
-			supportsNativeWebSearch: false,
-			createMessage: sinon.stub(),
-			abort: sinon.stub(),
-		}),
 	}
 }
 

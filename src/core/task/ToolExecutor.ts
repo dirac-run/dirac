@@ -1,4 +1,4 @@
-import { ApiHandler, buildApiHandler, buildApiHandlerForSelection } from "@core/api"
+import type { ApiHandler } from "@core/api"
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { formatResponse } from "@core/formatResponse"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
@@ -15,12 +15,11 @@ import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
 import type { CommandExecutionOptions } from "@integrations/terminal"
 import { BrowserSession } from "@services/browser/BrowserSession"
 import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
-import type { ApiConfiguration, ApiProvider, ModelProviderSelection } from "@shared/api"
+import type { ApiConfiguration, ModelProviderSelection } from "@shared/api"
 import { CardStatus, DiracMessage } from "@shared/ExtensionMessage"
 import { Logger } from "@shared/services/Logger"
 import { DiracContent } from "@shared/messages/content"
 import { canonicalizeResponseToolCall, isCompletionResponseCall } from "@shared/responseTool"
-import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { modelDoesntSupportWebp } from "@/utils/model-utils"
@@ -41,7 +40,7 @@ import type { ToolRequestSnapshot, ToolSnapshotDirtyReason } from "./tools/runti
 import { ToolSnapshotManager } from "./tools/runtime/ToolSnapshotManager"
 import { ToolExecutorCoordinator } from "./tools/ToolExecutorCoordinator"
 import type { ToolEnvironmentFactory } from "./tools/interfaces/ToolEnvironmentFactory"
-import { type SubagentRuntime, TaskConfig, validateTaskConfig } from "./tools/types/TaskConfig"
+import { TaskConfig, validateTaskConfig } from "./tools/types/TaskConfig"
 import { ToolDisplayUtils } from "./tools/utils/ToolDisplayUtils"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
 import { isDiscoveredToolAvailableToTaskProfile } from "./TaskExecutionProfile"
@@ -352,38 +351,6 @@ export class ToolExecutor {
 		}
 	}
 
-	private createSubagentRuntime(options: {
-		modelId?: string
-		utilityModelSelection?: ModelProviderSelection
-	}): SubagentRuntime {
-		const requestRuntime = this.requestRuntime()
-		const configuration = requestRuntime.workingConfiguration.apiConfiguration as ApiConfiguration
-		let handler: ApiHandler
-		let providerId: string
-		if (options.utilityModelSelection) {
-			handler = buildApiHandlerForSelection(configuration, options.utilityModelSelection, { ulid: this.ulid })
-			providerId = options.utilityModelSelection.provider
-		} else {
-			const mode = requestRuntime.workingConfiguration.settings.mode
-			const candidate = { ...configuration, ulid: this.ulid } as ApiConfiguration
-			providerId = ((mode === "plan" ? candidate.planModeApiProvider : candidate.actModeApiProvider) ??
-				candidate.apiProvider ??
-				"unknown") as string
-			const modelId = options.modelId?.trim()
-			if (modelId && providerId !== "unknown") {
-				; (candidate as Record<string, unknown>)[getProviderModelIdKey(providerId as ApiProvider, mode)] = modelId
-			}
-			handler = buildApiHandler(candidate, mode)
-		}
-
-		return Object.freeze({
-			providerId,
-			model: deepFreezeConfiguration(structuredClone(handler.getModel())),
-			supportsNativeWebSearch: handler.supportsNativeWebSearch?.() === true,
-			createMessage: handler.createMessage.bind(handler),
-			abort: () => handler.abort?.(),
-		})
-	}
 
 	private asToolConfig(coordinator = this.coordinator): TaskConfig {
 		const runtime = this.requestRuntime()
@@ -478,7 +445,6 @@ export class ToolExecutor {
 				resetTransientState: this.resetTransientState,
 				notifyContextCompacted: this.notifyContextCompacted,
 				createUtilityModelRunner: (selection, options) => this.createUtilityRunner(selection, options),
-				createSubagentRuntime: (options) => this.createSubagentRuntime(options),
 			},
 			coordinator,
 			taskMessenger: this.taskMessenger,

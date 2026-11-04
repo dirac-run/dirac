@@ -1,5 +1,4 @@
-import type { ApiConversationRequestOptions, ApiHandlerModel } from "@core/api"
-import type { ApiStream } from "@core/api/transform/stream"
+import type { ApiHandlerModel } from "@core/api"
 import type { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
 import type { CommandPermissionController } from "@core/permissions"
@@ -13,11 +12,11 @@ import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
 import type { ModelProviderSelection } from "@shared/api"
 import type { BrowserSettings } from "@shared/BrowserSettings"
 import type { DiracMessage } from "@shared/ExtensionMessage"
-import type { DiracContent, DiracStorageMessage } from "@shared/messages/content"
+import type { DiracContent } from "@shared/messages/content"
 import type { Mode } from "@shared/storage/types"
 import type { SubagentIdentity } from "@shared/subagents"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
-import type { DiracDefaultTool, DiracTool, DiracToolSpec } from "@shared/tools"
+import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { WorkspaceRootManager } from "@/core/workspace"
 import type { ContextManager } from "../../../context/context-management/ContextManager"
 import type { MessageStateHandler } from "../../message-state"
@@ -111,18 +110,6 @@ export interface TaskServices {
 	commandPermissionController: CommandPermissionController
 	contextManager: ContextManager
 }
-export interface SubagentRuntime {
-	readonly providerId: string
-	readonly model: DeepReadonly<ApiHandlerModel>
-	readonly supportsNativeWebSearch: boolean
-	createMessage(
-		systemPrompt: string,
-		messages: DiracStorageMessage[],
-		tools?: DiracTool[],
-		options?: ApiConversationRequestOptions,
-	): ApiStream
-	abort(): void
-}
 
 
 
@@ -186,8 +173,6 @@ export interface TaskCallbacks {
 
 	/** Build a Utility runner without exposing the credential-bearing API configuration to tools. */
 	createUtilityModelRunner: (selection: ModelProviderSelection, options?: BuildUtilityModelRunnerOptions) => UtilityModelRunner
-	/** Build a subagent handler inside the trusted Task runtime. */
-	createSubagentRuntime: (options: { modelId?: string; utilityModelSelection?: ModelProviderSelection }) => SubagentRuntime
 }
 
 /**

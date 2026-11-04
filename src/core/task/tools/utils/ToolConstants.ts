@@ -84,7 +84,6 @@ export const TASK_CALLBACKS_KEYS = [
 	"resetTransientState",
 	"notifyContextCompacted",
 	"createUtilityModelRunner",
-	"createSubagentRuntime",
 ] as const
 
 /**

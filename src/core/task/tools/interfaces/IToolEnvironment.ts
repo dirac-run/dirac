@@ -18,14 +18,12 @@ import type { GoalChildRecord, GoalChildRole, GoalChildStatus, GoalObjectiveRevi
 import type { TranscriptPage } from "@shared/messages/content"
 import { FileDiagnostics } from "@shared/proto/index.dirac"
 import type { ResponseArguments } from "@shared/responseTool"
-import type { SubagentIdentity } from "@shared/subagents"
 import type { TextFileWindow, TextFileWindowOptions } from "@shared/text-file-window"
 import { FileInfo } from "../../../../services/glob/list-files"
 import { BrowserActionResult, DiracMessage } from "../../../../shared/ExtensionMessage"
 import { SkillContent, SkillMetadata } from "../../../../shared/skills"
 import { HookExecutionResult } from "../../../hooks/hook-executor"
 import { TaskState, type TaskStateWritableKey } from "../../TaskState"
-import { SubagentProgressUpdate, SubagentRunResult } from "../subagent/SubagentRunner"
 import { TaskConfig } from "../types/TaskConfig"
 import { IDiracContext } from "./IDiracContext"
 export type { CardParams, ICardHandle } from "./ICardHandle"
@@ -311,22 +309,6 @@ export interface IOrchestrationTrait {
 	/** Available only to an owning ordinary root; never exposes a live Task or host. */
 	readonly tasklets?: TaskletControls
 
-	runSubagent(
-		prompt: string,
-		options?: {
-			subagentName?: string
-			taskTitle?: string
-			agentIdentity?: SubagentIdentity
-			timeout?: number
-			includeHistory?: boolean
-			useUtilityModel?: boolean
-			allowedTools?: string[]
-			systemSuffix?: string
-			onUpdate?: (update: SubagentProgressUpdate) => void | Promise<void>
-			/** Abort signal to cancel the subagent run (e.g., parent task cancellation). */
-			signal?: AbortSignal
-		},
-	): Promise<SubagentRunResult>
 
 	/**
 	 * Executes a lifecycle hook.

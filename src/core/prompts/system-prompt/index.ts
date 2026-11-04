@@ -3,7 +3,6 @@ import type { SystemPromptContext } from "./types"
 import type { ToolRequestSnapshot } from "@core/task/tools/runtime/ToolSnapshot"
 
 export { DiracToolSet } from "./registry/DiracToolSet"
-export { SubagentBuilder } from "../../task/tools/subagent/SubagentBuilder"
 export { PromptBuilder } from "./registry/PromptBuilder"
 export { PromptRegistry } from "./registry/PromptRegistry"
 export * from "./templates/placeholders"
