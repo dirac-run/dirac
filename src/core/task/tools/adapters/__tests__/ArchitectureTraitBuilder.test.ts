@@ -9,7 +9,7 @@ import { buildArchitectureTrait } from "../traits/ArchitectureTraitBuilder"
 function config(executionProfile: TaskExecutionProfile) {
 	return {
 		taskId: "owner",
-		foreground: executionProfile !== "goal_child" && executionProfile !== "tasklet",
+		foreground: executionProfile !== "tasklet",
 		canWaitForInput: true,
 		resolveTaskDirectory: () => "/tasks/owner",
 	}
@@ -29,7 +29,6 @@ describe("architecture environment capability", () => {
 	afterEach(() => setHostCapabilities(undefined))
 
 	it("is absent for private workers but available to foreground Task and Goal profiles", () => {
-		expect(buildArchitectureTrait(config("goal_child"))).to.equal(undefined)
 		expect(buildArchitectureTrait(config("tasklet"))).to.equal(undefined)
 		for (const profile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
 			expect(buildArchitectureTrait(config(profile))).to.have.keys(

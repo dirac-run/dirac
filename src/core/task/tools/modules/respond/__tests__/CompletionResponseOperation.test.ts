@@ -58,6 +58,25 @@ describe("CompletionResponseOperation", () => {
 		}
 	}
 
+	it("keeps private tasklet completion free of foreground artifacts and notifications", async () => {
+		const { env, state, commitAttemptCompletion, createCard, saveCheckpoint } = makeEnvironment({}, true)
+		const showNotification = sinon.stub()
+		const taskletEnvironment = {
+			...env,
+			config: { ...env.config, executionProfile: "tasklet", autoApprovalSettings: { enableNotifications: true } },
+			system: { showNotification },
+		} as unknown as IToolEnvironment
+		assert.equal(await new CompletionResponseOperation().execute("Private result", taskletEnvironment), "Private result")
+		sinon.assert.calledOnceWithExactly(commitAttemptCompletion, "Private result")
+		sinon.assert.notCalled(createCard)
+		sinon.assert.notCalled(saveCheckpoint)
+		sinon.assert.notCalled(taskletEnvironment.orchestration.runHook as sinon.SinonStub)
+		sinon.assert.notCalled(showNotification)
+		sinon.assert.notCalled(taskletEnvironment.telemetry.captureTaskCompleted as sinon.SinonStub)
+		assert.equal(state.completionCommitted, true)
+		assert.equal(state.completionResponse, "Private result")
+	})
+
 	for (const committed of [false, true]) {
 		it(`retains the Goal completion decision (${committed ? "accepted" : "rejected"})`, async () => {
 			const { env, state, commitAttemptCompletion, createCard } = makeEnvironment(

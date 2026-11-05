@@ -57,6 +57,7 @@ export class ToolExecutor {
 	private errorHandler: ToolErrorHandler
 	private activeRequestRuntime?: TaskRequestRuntime
 	private buildingRequestRuntime?: TaskRequestRuntime
+	private toolSnapshotSubagentsEnabled?: boolean
 
 	private static readonly PLAN_MODE_RESTRICTED_TOOLS: DiracDefaultTool[] = [
 		DiracDefaultTool.FILE_NEW,
@@ -138,7 +139,8 @@ export class ToolExecutor {
 				const activeIds = new Set(this.taskState.activeSkillIds)
 				return this.taskState.availableSkills.filter((skill) => activeIds.has(skill.name))
 			},
-			isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(this.executionProfile, tool),
+			isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(this.executionProfile, tool) &&
+				(tool.id !== DiracDefaultTool.USE_SUBAGENTS || this.requestRuntime().workingConfiguration.settings.subagentsEnabled === true),
 			environmentFactory: this.environmentFactory,
 		})
 		this.hookRunner = new ToolHookRunner(
@@ -412,7 +414,7 @@ export class ToolExecutor {
 				contextManager: this.contextManager,
 			},
 			callbacks: {
-				tasklets: this.executionProfile === "standalone" ? this.getTaskletControls?.() : undefined,
+				tasklets: this.executionProfile !== "tasklet" ? this.getTaskletControls?.() : undefined,
 				assertMutationAuthorized: (toolName) => this.assertMutationAuthorized(toolName),
 				withMutationAuthorization: (toolName, mutation) => this.withMutationAuthorization(toolName, mutation),
 				transitionFromMutation: (transition) => this.transitionFromMutation(transition),
@@ -465,6 +467,11 @@ export class ToolExecutor {
 	): Promise<ToolRequestSnapshot> {
 		this.buildingRequestRuntime = requestRuntime
 		try {
+			const subagentsEnabled = requestRuntime.workingConfiguration.settings.subagentsEnabled === true
+			if (this.toolSnapshotSubagentsEnabled !== subagentsEnabled) {
+				this.markToolsDirty("tool_toggles_changed")
+			}
+			this.toolSnapshotSubagentsEnabled = subagentsEnabled
 			return await this.snapshotManager.getSnapshotForRequest(context, {
 				requestId: requestRuntime.requestId,
 				configurationRevision: requestRuntime.workingConfiguration.revision,

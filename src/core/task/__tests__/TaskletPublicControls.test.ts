@@ -518,7 +518,8 @@ describe("TaskletsTool public controls", () => {
 			assert.equal(stopped.settlementError, undefined)
 			assert.equal(stopped.presentationError?.message, "Controlled event display failure")
 			const events = await loadTaskletEvents(address(id))
-			assert.equal(events.length, 3)
+			assert.equal(events.length, 4)
+			assert.deepEqual(events[3].communication, { type: "outcome", outcome: stopped.outcome })
 			assert.deepEqual(events[0].communication, { type: "response", response: { operation: ResponseOperation.PROGRESS, text: "Durable progress" } })
 			const interactions = events.flatMap((event) => event.communication.type === "interaction" ? [event.communication.request] : [])
 			assert.deepEqual(interactions.map(({ id, status }) => ({ id, status })), [
@@ -869,6 +870,40 @@ describe("TaskletsTool public controls", () => {
 		assert.notEqual(fresh.requestId, pending.requestId)
 		await resolve(record.id, fresh.requestId, "answer", { answer: "Current answer" })
 		assert.equal((await fresh.waiting).text, "Current answer")
+	})
+
+	it("wakes public unbounded sleep for a silent failed outcome and retains its notification until acknowledgement", async () => {
+		const id = acceptedId(await spawn([{ task_title: "Silent failure", prompt: "Work without a response" }]))
+		const sleeping = call<TaskletWakeResult>({ operation: "sleep", tasklet_ids: [id] })
+		await inspect(id) // The later dispatch proves the public sleeper is registered.
+		assert.equal(host.isSleeping, true)
+		const outcome: TaskRunOutcome = { kind: "failed", failedAt: 130, error: { name: "Error", message: "Provider stopped silently" } }
+		children[0].outcome.resolve(outcome)
+		await host["children"].get(id)!.settlement
+		const events = await loadTaskletEvents(address(id))
+		assert.equal(events.length, 1)
+		assert.deepEqual(events[0].communication, { type: "outcome", outcome })
+		const wake = { reason: "event", taskletId: id, eventId: events[0].id }
+		assert.deepEqual(await sleeping, wake)
+		assert.deepEqual(await call({ operation: "sleep", tasklet_ids: [id] }), wake)
+		const snapshot = await inspect(id)
+		assert.deepEqual(snapshot.outcome, outcome)
+		assert.equal(snapshot.outcomePersisted, true)
+		assert.deepEqual(snapshot.responses, [], "The host notification must not fabricate an agent response")
+		const delivery = (await host.prepareEventDelivery())!
+		assert.equal(delivery.content.length, 1)
+		assert.deepEqual(delivery.content[0].taskletEventIds, [events[0].id])
+		assert.match(delivery.content[0].text, /"type":"outcome"/)
+		await delivery.acknowledge()
+		const acknowledged = await loadTaskletEvents(address(id))
+		assert.equal(acknowledged.length, 1)
+		assert.equal(typeof acknowledged[0].deliveredAt, "number")
+		assert.equal(await host.prepareEventDelivery(), undefined)
+		const nextSleep = call({ operation: "sleep", tasklet_ids: [id] })
+		await inspect(id)
+		assert.equal(host.isSleeping, true)
+		host.notifyUserMessage()
+		assert.deepEqual(await nextSleep, { reason: "user_message" })
 	})
 
 	it("sleeps for selected communication without consuming it or joining the child", async () => {

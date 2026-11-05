@@ -28,40 +28,40 @@ function fixture() {
 }
 
 describe("Tasklet environment control bindings", () => {
-	it("forwards root controls and exact child/request identity without joining assignments", async () => {
-		const { config, callbacks } = fixture()
-		const tasklets = buildOrchestrationTrait(config).tasklets!
-		const input = { title: "investigate", prompt: "Find the cause" }
-		assert.deepEqual(await tasklets.start(input), { id: "child" })
-		assert.deepEqual(await tasklets.resume("child", "follow up"), { id: "child" })
-		assert.deepEqual(tasklets.list(), [])
-		assert.deepEqual(tasklets.inspect("child"), { id: "child" })
-		assert.deepEqual(await tasklets.readTranscript("child"), { conversation: [], presentation: [] })
-		assert.deepEqual(await tasklets.steer("child", "focus"), { id: "child", messageId: "guidance", accepted: true })
-		await tasklets.interrupt("child", "stop")
-		const decision = { operation: "reject" as const }
-		assert.deepEqual(await tasklets.resolveInteraction("child", "request", decision), { status: "resolved" })
-		const sleep = { taskletIds: ["child"], timeoutMs: 10 }
-		assert.deepEqual(await tasklets.sleep(sleep), { reason: "timeout" })
-		sinon.assert.calledOnceWithExactly(callbacks.start, input)
-		sinon.assert.calledOnceWithExactly(callbacks.resume, "child", "follow up")
-		sinon.assert.calledOnceWithExactly(callbacks.list)
-		sinon.assert.calledOnceWithExactly(callbacks.inspect, "child")
-		sinon.assert.calledOnceWithExactly(callbacks.readTranscript, "child")
-		sinon.assert.calledOnceWithExactly(callbacks.steer, "child", "focus")
-		sinon.assert.calledOnceWithExactly(callbacks.interrupt, "child", "stop")
-		sinon.assert.calledOnceWithExactly(callbacks.resolveInteraction, "child", "request", decision)
-		sinon.assert.calledOnceWithExactly(callbacks.sleep, sleep)
-	})
-
-	for (const executionProfile of ["tasklet", "goal_coordinator", "goal_followup", "goal_child"] as const) {
-		it(`does not expose controls to ${executionProfile} even when callbacks are supplied`, () => {
-			const { config } = fixture()
+	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
+		it(`forwards ${executionProfile} controls and exact child/request identity without joining assignments`, async () => {
+			const { config, callbacks } = fixture()
 			config.executionProfile = executionProfile
-			assert.equal(buildOrchestrationTrait(config).tasklets, undefined)
+			const tasklets = buildOrchestrationTrait(config).tasklets!
+			const input = { title: "investigate", prompt: "Find the cause" }
+			assert.deepEqual(await tasklets.start(input), { id: "child" })
+			assert.deepEqual(await tasklets.resume("child", "follow up"), { id: "child" })
+			assert.deepEqual(tasklets.list(), [])
+			assert.deepEqual(tasklets.inspect("child"), { id: "child" })
+			assert.deepEqual(await tasklets.readTranscript("child"), { conversation: [], presentation: [] })
+			assert.deepEqual(await tasklets.steer("child", "focus"), { id: "child", messageId: "guidance", accepted: true })
+			await tasklets.interrupt("child", "stop")
+			const decision = { operation: "reject" as const }
+			assert.deepEqual(await tasklets.resolveInteraction("child", "request", decision), { status: "resolved" })
+			const sleep = { taskletIds: ["child"], timeoutMs: 10 }
+			assert.deepEqual(await tasklets.sleep(sleep), { reason: "timeout" })
+			sinon.assert.calledOnceWithExactly(callbacks.start, input)
+			sinon.assert.calledOnceWithExactly(callbacks.resume, "child", "follow up")
+			sinon.assert.calledOnceWithExactly(callbacks.list)
+			sinon.assert.calledOnceWithExactly(callbacks.inspect, "child")
+			sinon.assert.calledOnceWithExactly(callbacks.readTranscript, "child")
+			sinon.assert.calledOnceWithExactly(callbacks.steer, "child", "focus")
+			sinon.assert.calledOnceWithExactly(callbacks.interrupt, "child", "stop")
+			sinon.assert.calledOnceWithExactly(callbacks.resolveInteraction, "child", "request", decision)
+			sinon.assert.calledOnceWithExactly(callbacks.sleep, sleep)
 		})
 	}
 
+	it("does not expose controls to tasklets even when callbacks are supplied", () => {
+		const { config } = fixture()
+		config.executionProfile = "tasklet"
+		assert.equal(buildOrchestrationTrait(config).tasklets, undefined)
+	})
 
 	it("leaves controls absent without an owner binding", () => {
 		const { config } = fixture()

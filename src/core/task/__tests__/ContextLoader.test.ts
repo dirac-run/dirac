@@ -271,14 +271,14 @@ describe("ContextLoader (characterization)", () => {
 			result[3].some((skill) => skill.name === "architecture-board").should.equal(false)
 		})
 
-		for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child"] as const) {
+		for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 			it(`filters foreground-only skills before slash-command activation for ${executionProfile}`, async () => {
 				setHostCapabilities({ architectureViewer: { prepare: async () => { }, createPanel: async () => { throw new Error("not used") } } })
 				stubParseMentions("p"), stubParseSlashCommands(), stubWorkflows()
 				stubSkills(skillsModule.BUILTIN_SKILLS)
 				const loader = new ContextLoader(makeDependencies({ executionProfile }))
 				const result = await loader.loadContext([{ type: "text", isUserInput: true, text: "<task>x</task>" }])
-				result[3].some((skill) => skill.name === "architecture-board").should.equal(executionProfile !== "goal_child")
+				result[3].some((skill) => skill.name === "architecture-board").should.equal(executionProfile !== "tasklet")
 			})
 		}
 

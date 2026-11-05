@@ -105,8 +105,13 @@ function ChildSummary({ child }: { child: GoalTaskSummary }) {
 			</div>
 			<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-description">
 				{child.runningDurationMs !== undefined && <span>Running {formatDuration(child.runningDurationMs)}</span>}
-				<span>Idle {formatDuration(child.idleDurationMs)}</span>
-				{child.pendingInteraction && <span className="text-warning">Needs {child.pendingInteraction.kind}</span>}
+				{child.idleDurationMs !== undefined && <span>Idle {formatDuration(child.idleDurationMs)}</span>}
+				{child.pendingInteractionCount > 0 && (
+					<span className="text-warning">
+						{child.pendingInteractionCount} pending request{child.pendingInteractionCount === 1 ? "" : "s"}
+						{child.pendingInteraction ? ` · ${child.pendingInteraction.kind}` : ""}
+					</span>
+				)}
 			</div>
 			{child.terminalSummary && <p className="mb-0 mt-1 line-clamp-2 text-xs text-description">{child.terminalSummary}</p>}
 		</li>
@@ -129,7 +134,7 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 	const cancelStopRef = useRef<HTMLButtonElement>(null)
 	const objectivePreview = useMemo(() => plainTextObjective(goal.objective.markdown), [goal.objective.markdown])
 	const taskChildren = useMemo(() => goal.children.filter((child) => child.role === "task"), [goal.children])
-	const pendingChildren = useMemo(() => goal.children.filter((child) => child.pendingInteraction), [goal.children])
+	const pendingChildren = useMemo(() => goal.children.filter((child) => child.pendingInteractionCount > 0), [goal.children])
 	const activeStatus = goal.status === "working" || goal.status === "waiting"
 	const canResume = goal.status === "paused" || goal.status === "blocked" || (activeStatus && goal.hasLocalExecution === false)
 	const canPause = activeStatus && goal.hasLocalExecution !== false
@@ -298,14 +303,15 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 								<p className="mb-0 mt-1 text-description">
 									<span className="font-medium text-foreground">Pending: </span>
 									{goal.pendingInteractionCount === 0
-										? "No user interactions."
-										: `${goal.pendingInteractionCount} user interaction${goal.pendingInteractionCount === 1 ? "" : "s"}.`}
+										? "No pending tasklet requests."
+										: `${goal.pendingInteractionCount} pending tasklet request${goal.pendingInteractionCount === 1 ? "" : "s"}.`}
 								</p>
 								{pendingChildren.length > 0 && (
 									<ul className="mb-0 mt-1 list-none space-y-0.5 p-0 text-description">
 										{pendingChildren.map((child) => (
 											<li key={child.id}>
-												{child.title} · {child.pendingInteraction?.kind}
+												{child.title} · {child.pendingInteractionCount} pending request{child.pendingInteractionCount === 1 ? "" : "s"}
+												{child.pendingInteraction ? ` · ${child.pendingInteraction.kind}` : ""}
 											</li>
 										))}
 									</ul>

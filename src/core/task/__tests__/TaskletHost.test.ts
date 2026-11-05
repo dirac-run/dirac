@@ -209,6 +209,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	it("cancels an unfinished Task at its configured positive timeout", async () => {
 		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
 		const record = await host.start({ title: "Timed child", prompt: "Work", timeoutSeconds: 2 })
+		const sleeping = host.sleep()
 		await clock.tickAsync(1999)
 		sinon.assert.notCalled(children[0].task.abortTask)
 		await clock.tickAsync(1)
@@ -218,6 +219,11 @@ describe("TaskletHost asynchronous ownership", () => {
 		const stopped = await host.interrupt(record.id)
 		assert.equal(stopped.outcome?.kind, "interrupted")
 		assert.equal(stopped.outcomePersisted, true)
+		const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: record.id })
+		assert.equal(events.length, 1)
+		assert.deepEqual(events[0].communication, { type: "outcome", outcome: stopped.outcome })
+		assert.deepEqual(await sleeping, { reason: "event", taskletId: record.id, eventId: events[0].id })
+		assert.deepEqual(stopped.responses, [], "A deadline notification is not an agent response")
 		assert.equal(clock.countTimers(), 0)
 	})
 
@@ -809,6 +815,76 @@ describe("TaskletHost asynchronous ownership", () => {
 	describe("sleep", () => {
 		afterEach(() => host.notifyUserMessage())
 
+		for (const outcome of [
+			completed,
+			{ kind: "failed", failedAt: 124, error: { name: "Error", message: "Silent provider failure" } },
+			{ kind: "interrupted", interruptedAt: 125, reason: "Silent interruption" },
+		] satisfies TaskRunOutcome[]) {
+			it(`wakes an unbounded sleep for a silent ${outcome.kind} outcome without fabricating a response`, async () => {
+				const child = await host.start({ title: "Silent worker", prompt: "work" })
+				const sleeping = host.sleep()
+				assert.equal(host.isSleeping, true)
+				children[0].outcome.resolve(outcome)
+				await host["children"].get(child.id)!.settlement
+				const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+				assert.equal(events.length, 1)
+				assert.deepEqual(events[0].communication, { type: "outcome", outcome })
+				assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: events[0].id })
+				assert.equal(host.isSleeping, false)
+				assert.equal(host.inspect(child.id).outcomePersisted, true)
+				assert.deepEqual(host.inspect(child.id).responses, [])
+				assert.deepEqual(host.inspect(child.id).interactions, [])
+				sinon.assert.notCalled(children[0].task.abortTask)
+			})
+		}
+
+		it("retains terminal notifications until delivery acknowledgement without duplicating them", async () => {
+			const child = await host.start({ title: "Silent worker", prompt: "work" })
+			children[0].outcome.resolve(completed)
+			await host["children"].get(child.id)!.settlement
+			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			const event = events[0]
+			assert.equal(events.length, 1)
+			for (let attempt = 0; attempt < 2; attempt++) {
+				assert.deepEqual(await host.sleep(), { reason: "event", taskletId: child.id, eventId: event.id })
+				const delivery = (await host.prepareEventDelivery())!
+				assert.equal(delivery.content.length, 1)
+				assert.deepEqual(delivery.content[0].taskletEventIds, [event.id])
+				assert.match(delivery.content[0].text, /"type":"outcome"/)
+				assert.deepEqual(await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id }), events)
+			}
+			await (await host.prepareEventDelivery())!.acknowledge()
+			const acknowledged = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			assert.equal(acknowledged.length, 1)
+			assert.equal(acknowledged[0].id, event.id)
+			assert.equal(typeof acknowledged[0].deliveredAt, "number")
+			assert.equal(await host.prepareEventDelivery(), undefined)
+			const sleeping = host.sleep()
+			assert.equal(host.isSleeping, true, "An acknowledged outcome does not wake later sleeps")
+			host.notifyUserMessage()
+			assert.deepEqual(await sleeping, { reason: "user_message" })
+			assert.deepEqual(host.inspect(child.id).responses, [])
+		})
+
+		it("filters terminal notifications until the selected child settles", async () => {
+			const first = await host.start({ title: "Excluded worker", prompt: "work" })
+			const selected = await host.start({ title: "Selected worker", prompt: "work" })
+			const sleeping = host.sleep({ taskletIds: [selected.id] })
+			children[0].outcome.resolve({ kind: "failed", failedAt: 124, error: { name: "Error", message: "Excluded failure" } })
+			await host["children"].get(first.id)!.settlement
+			assert.equal(host.isSleeping, true)
+			const excludedEvents = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: first.id })
+			assert.equal(excludedEvents.length, 1)
+			assert.equal(excludedEvents[0].communication.type, "outcome")
+			children[1].outcome.resolve(completed)
+			await host["children"].get(selected.id)!.settlement
+			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: selected.id })
+			assert.deepEqual(await sleeping, { reason: "event", taskletId: selected.id, eventId: events[0].id })
+			assert.equal(excludedEvents[0].deliveredAt, undefined)
+			assert.deepEqual(host.inspect(first.id).responses, [])
+			assert.deepEqual(host.inspect(selected.id).responses, [])
+		})
+
 		it("wakes for pending responses without acknowledging or removing them", async () => {
 			const { child, counterparty } = await respondingChild()
 			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "still pending" })
@@ -906,7 +982,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			assert.equal((await savedEvents(first.child.id)).every((event) => event.deliveredAt === undefined), true)
 		})
 
-		it("does not treat routine child activity or settlement as communication", async () => {
+		it("does not treat routine child activity as communication before settlement", async () => {
 			const { child } = await respondingChild()
 			const bindings = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!
 			const sleeping = host.sleep()
@@ -914,10 +990,12 @@ describe("TaskletHost asynchronous ownership", () => {
 			await bindings.postPresentationToOwner?.()
 			bindings.updateBackgroundCommandState(true, child.id)
 			await host.steer(child.id, "continue")
-			await host.interrupt(child.id)
 			assert.equal(host.isSleeping, true)
-			host.notifyUserMessage()
-			assert.deepEqual(await sleeping, { reason: "user_message" })
+			await host.interrupt(child.id)
+			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			assert.equal(events.length, 1)
+			assert.equal(events[0].communication.type, "outcome")
+			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: events[0].id })
 		})
 
 		it("selects an already-pending communication from the requested tasklet", async () => {
@@ -1411,7 +1489,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("rejects recursive ownership, invalid roots and empty assignments", async () => {
-		for (const executionProfile of ["tasklet", "goal_child"] as const) {
+		for (const executionProfile of ["tasklet"] as const) {
 			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /Only root Tasks/)
 		}
 		assert.throws(

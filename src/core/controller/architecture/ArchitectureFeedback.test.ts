@@ -361,7 +361,7 @@ describe("Durable architecture feedback integration", () => {
 	})
 
 	it("blocks wrong selection, unrelated permission/question, cancellation and private workers", async () => {
-		for (const profile of ["goal_child", "private", "standalone"]) {
+		for (const profile of ["tasklet", "private", "standalone"]) {
 			task.executionProfile = profile
 			if (profile === "standalone") selected = { ...task, taskId: "other" }
 			await assert.rejects(boards.submitFeedback(request))

@@ -19,10 +19,6 @@ function goalRecord(accounting: GoalAccounting): GoalRecord {
 		updatedAt: 10,
 		lastPausedAt: 10,
 		activeDurationMs: 0,
-		wakeSequence: 0,
-		eventSequence: 0,
-		events: [],
-		children: [],
 		accountingSources: {},
 		accounting,
 	}
@@ -65,6 +61,13 @@ function assertLegacyAccountingAbsent(value: object): void {
 	assert.equal(fields.cacheReads, undefined)
 }
 
+function assertAccountingFields(actual: GoalAccounting | undefined, expected: GoalAccounting): void {
+	assert.notEqual(actual, undefined)
+	for (const field of ["totalTokens", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens", "cost"] as const) {
+		assert.equal(actual![field], expected[field], field)
+	}
+}
+
 describe("Goal accounting transports", () => {
 	for (const testCase of cases) {
 		it(`round trips ${testCase.name} accounting without legacy fabrication`, () => {
@@ -74,15 +77,15 @@ describe("Goal accounting transports", () => {
 			const historyProto = TaskItem.decode(TaskItem.encode(historyItemToTaskItem(historyItem)).finish())
 			assert.equal(historyProto.runKind, "goal")
 			assertLegacyAccountingAbsent(historyProto)
-			assert.deepEqual(historyProto.accounting, testCase.accounting)
+			assertAccountingFields(historyProto.accounting, testCase.accounting)
 			const restoredHistory = historyItemFromProto(historyProto)
 			assert.equal(restoredHistory.runKind, "goal")
-			assert.deepEqual(restoredHistory.accounting, testCase.accounting)
+			assertAccountingFields(restoredHistory.accounting, testCase.accounting)
 
 			const detailProto = TaskResponse.decode(TaskResponse.encode(goalHistoryItemToTaskResponse(historyItem)).finish())
 			assert.equal(detailProto.runKind, "goal")
 			assertLegacyAccountingAbsent(detailProto)
-			assert.deepEqual(detailProto.accounting, testCase.accounting)
+			assertAccountingFields(detailProto.accounting, testCase.accounting)
 		})
 	}
 })

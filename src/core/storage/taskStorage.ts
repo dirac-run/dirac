@@ -17,6 +17,7 @@ import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
 
 /** Durable child identity/assignment; an absent outcome means accepted, not completed. */
 export interface TaskletRecord {
+	purpose?: "goal_verification"
 	configuration?: import("@core/task/TaskletConfiguration").TaskletConfiguration
 	id: string
 	rootTaskId: string
@@ -34,7 +35,10 @@ export interface TaskletEvent {
 	taskletId: string
 	createdAt: number
 	deliveredAt?: number
-	communication: { type: "response"; response: ResponseArguments } | { type: "interaction"; request: TaskletInteraction }
+	communication:
+	| { type: "response"; response: ResponseArguments }
+	| { type: "interaction"; request: TaskletInteraction }
+	| { type: "outcome"; outcome: TaskRunOutcome }
 }
 
 /** Read only the owning root's contained records; reconstruction never starts executions. */
@@ -64,6 +68,7 @@ export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRec
 					typeof record.title !== "string" ||
 					typeof record.prompt !== "string" ||
 					!Number.isFinite(record.createdAt) ||
+					(record.purpose !== undefined && record.purpose !== "goal_verification") ||
 					(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
 				)
 					throw new Error(`Invalid tasklet record for ${entry.name} under root ${rootTaskId}`)
@@ -96,10 +101,12 @@ export async function loadTaskletEvents(address: Extract<TaskStorageAddress, { k
 				!event.communication ||
 				(event.communication.type === "response"
 					? !event.communication.response || typeof event.communication.response !== "object"
-					: event.communication.type !== "interaction" ||
-					!event.communication.request ||
-					typeof event.communication.request.id !== "string" ||
-					!["pending", "resolved", "retired"].includes(event.communication.request.status)),
+					: event.communication.type === "outcome"
+						? !event.communication.outcome || !["completed", "failed", "cancelled", "interrupted"].includes(event.communication.outcome.kind)
+						: event.communication.type !== "interaction" ||
+						!event.communication.request ||
+						typeof event.communication.request.id !== "string" ||
+						!["pending", "resolved", "retired"].includes(event.communication.request.status)),
 		)
 	)
 		throw new Error(`Invalid tasklet events for ${address.taskletId} under root ${address.rootTaskId}`)

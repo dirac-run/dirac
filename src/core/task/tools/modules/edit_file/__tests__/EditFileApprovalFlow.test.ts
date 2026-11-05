@@ -36,7 +36,7 @@ function environment(executionProfile: string) {
 }
 
 describe("EditFileApprovalFlow current execution profiles", () => {
-	for (const profile of ["standalone", "tasklet", "goal_coordinator", "goal_followup", "goal_child"]) {
+	for (const profile of ["standalone", "tasklet", "goal_coordinator", "goal_followup"]) {
 		it(`requires path permission for ${profile} without Utility`, async () => {
 			const { env, card } = environment(profile)
 			const result = await new EditFileApprovalFlow().handle(env, batches, {})

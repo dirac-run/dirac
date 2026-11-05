@@ -21,7 +21,12 @@ export function createArchitectureBoardController(owner: ArchitectureBoardOwner)
 	return new ArchitectureBoardController(
 		(taskId) => {
 			const active = owner.selected().task
-			if (active?.taskId === taskId && active.executionProfile !== "goal_child") return
+			if (active?.taskId === taskId) {
+				if (active.executionProfile === "tasklet") {
+					throw new Error("Architecture boards are unavailable to private tasklets")
+				}
+				return
+			}
 			if (!owner.history().some((item) => item.id === taskId)) {
 				throw new Error("Architecture board owner is missing, deleted, or not a foreground conversation")
 			}

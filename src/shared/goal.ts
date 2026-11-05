@@ -1,32 +1,17 @@
-import type { Card } from "./ExtensionMessage"
-
 export type GoalStatus = "working" | "waiting" | "paused" | "blocked" | "achieved" | "stopped"
 
 export type GoalChildRole = "task" | "verification"
 
-export type GoalChildStatus = "starting" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted"
+/** Accepted does not claim that a local execution exists or has settled. */
+export type GoalChildStatus = "accepted" | "starting" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted"
 
 export type GoalInteractionKind = "approval" | "feedback" | "action"
 
+/** Read-only presentation of one shared request, never an authorization handle. */
 export interface GoalPendingInteraction {
 	id: string
 	kind: GoalInteractionKind
 	createdAt: number
-	card: Card
-}
-
-export interface GoalChildRecord {
-	id: string
-	title: string
-	role: GoalChildRole
-	status: GoalChildStatus
-	createdAt: number
-	startedAt?: number
-	lastActivityAt: number
-	endedAt?: number
-	terminalSummary?: string
-	pendingInteraction?: GoalPendingInteraction
-	deliveredResponseCursor: number
 }
 
 export interface GoalAccounting {
@@ -45,25 +30,7 @@ export interface GoalObjectiveRevision {
 	updatedAt: number
 }
 
-export type GoalEvent =
-	| {
-			kind: "task_response"
-			sequence: number
-			taskId: string
-			responseCursor: number
-			occurredAt: number
-	  }
-	| {
-			kind: "task_interaction"
-			sequence: number
-			taskId: string
-			interactionId: string
-			occurredAt: number
-	  }
-	| { kind: "task_failed"; sequence: number; taskId: string; occurredAt: number }
-	| { kind: "task_finished"; sequence: number; taskId: string; occurredAt: number }
-	| { kind: "user_steering"; sequence: number; occurredAt: number }
-
+/** Goal lifecycle and replaceable accounting projections; tasklets own child state. */
 export interface GoalRecord {
 	version: 2
 	id: string
@@ -76,11 +43,6 @@ export interface GoalRecord {
 	lastActivatedAt?: number
 	lastPausedAt?: number
 	activeDurationMs: number
-	wakeSequence: number
-	lastWakeAt?: number
-	eventSequence: number
-	events: GoalEvent[]
-	children: GoalChildRecord[]
 	accountingSources: Record<string, GoalAccounting>
 	accounting: GoalAccounting
 }
@@ -90,9 +52,21 @@ export interface GoalStatusTransition {
 	statusReason?: string
 }
 
-export interface GoalTaskSummary extends GoalChildRecord {
+/** Derived display data, not a second durable child registry. */
+export interface GoalTaskSummary {
+	id: string
+	title: string
+	role: GoalChildRole
+	status: GoalChildStatus
+	createdAt: number
+	endedAt?: number
+	terminalSummary?: string
+	/** Persisted requests may be stale when no local execution owns the Goal. */
+	pendingInteraction?: GoalPendingInteraction
+	pendingInteractionCount: number
+	/** Omitted when shared tasklet data cannot establish this duration. */
 	runningDurationMs?: number
-	idleDurationMs: number
+	idleDurationMs?: number
 }
 
 export interface GoalViewState {
@@ -128,8 +102,4 @@ export function isActiveGoalStatus(status: GoalStatus): boolean {
 
 export function isResumableGoalStatus(status: GoalStatus): boolean {
 	return status === "paused" || status === "blocked" || status === "stopped"
-}
-
-export function isTerminalGoalChildStatus(status: GoalChildStatus): boolean {
-	return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted"
 }

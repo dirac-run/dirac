@@ -659,6 +659,7 @@ function isReadableApiStatus(value: unknown): boolean {
 		isOptional(value.cacheReads, isFiniteNumber) &&
 		isOptional(value.cost, isFiniteNumber) &&
 		isOptional(value.usageAvailability, isReadableUsageAvailability) &&
+		isOptional(value.deletedUsageAvailability, isReadableUsageAvailability) &&
 		isOptional(value.contextWindow, isFiniteNumber) &&
 		isOptional(value.contextUsagePercentage, isFiniteNumber) &&
 		isOptional(value.deletedMetrics, isReadableDeletedMetrics) &&

@@ -374,6 +374,8 @@ export interface DiracApiReqInfo {
 	}
 	contextWindow?: number
 	contextUsagePercentage?: number
+	/** Availability of cumulative archived usage; older archives without it retain unknown optional totals. */
+	deletedUsageAvailability?: DiracApiReqInfo["usageAvailability"]
 	/** Prior checkpoint/deleted or failed-attempt usage, excluded from current context-window counts. */
 	deletedMetrics?: {
 		tokensIn?: number

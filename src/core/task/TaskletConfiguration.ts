@@ -1,6 +1,8 @@
 import type { ModelProviderSelection } from "@shared/api"
 
 export interface TaskletStartOptions {
+	/** Assignment purpose, stored atomically with acceptance; not another execution path. */
+	purpose?: "goal_verification"
 	agentName?: string
 	useUtilityModel?: boolean
 	includeHistory?: boolean

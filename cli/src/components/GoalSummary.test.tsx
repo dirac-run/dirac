@@ -33,9 +33,8 @@ function terminalChild(index: number): GoalTaskSummary {
 		role: index === 1 ? "verification" : "task",
 		status: index === 1 ? "failed" : "completed",
 		createdAt: index,
-		lastActivityAt: index,
 		endedAt: index,
-		deliveredResponseCursor: 0,
+		pendingInteractionCount: 0,
 		idleDurationMs: 0,
 	}
 }
@@ -58,8 +57,7 @@ function goalWithOlderChildren(): GoalViewState {
 				role: "task",
 				status: "running",
 				createdAt: 8,
-				lastActivityAt: 8,
-				deliveredResponseCursor: 0,
+				pendingInteractionCount: 0,
 				idleDurationMs: 0,
 			},
 		],
@@ -136,6 +134,21 @@ describe("GoalSummary", () => {
 
 		await pressPageKey("pageUp")
 		expect(view.lastFrame()).toContain("page 1/2")
+	})
+
+	it("keeps accepted handles before terminal work without inventing activity durations", () => {
+		const goal = goalWithOlderChildren()
+		goal.children = [
+			...goal.children.slice(0, 7),
+			{ id: "accepted", title: "Saved handle", role: "task", status: "accepted", createdAt: 0, pendingInteractionCount: 2 },
+		]
+		goal.pendingInteractionCount = 2
+		const frame = renderSummary(goal, true).lastFrame() ?? ""
+		expect(frame).toContain("accepted · task · Saved handle (accepted)")
+		expect(frame).toContain("2 pending interactions")
+		expect(frame).not.toContain("(terminal-1)")
+		expect(frame).not.toContain("run unavailable")
+		expect(frame).not.toContain("idle unavailable")
 	})
 
 	it("keeps per-turn Escape cancellation distinct from durable Goal status", () => {

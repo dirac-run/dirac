@@ -8,7 +8,7 @@ import { MessageStateHandler } from "@core/task/message-state"
 import type { TaskMessenger } from "@core/task/TaskMessenger"
 import { TaskState } from "@core/task/TaskState"
 import { CardStatus, DiracMessageType, type DiracApiReqInfo, type DiracMessage } from "@shared/ExtensionMessage"
-import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
+import { getApiMetrics, getApiUsageKnowledge, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { createTaskletPresentationCard, readTaskletPresentation, type TaskletPresentationData } from "@shared/taskletPresentation"
 import { afterEach, beforeEach, describe, it } from "mocha"
@@ -165,11 +165,60 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 				cacheWrites: 0,
 				cacheReads: 0,
 				cost: 3,
+				usageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: false, cacheReads: false, cost: true, reasoningTokens: false },
+				deletedUsageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: false, cacheReads: false, cost: true, reasoningTokens: false },
 				deletedMetrics: { tokensIn: 30, tokensOut: 3, cacheWrites: undefined, cacheReads: undefined, reasoningTokens: 0 },
 			})
 			sinon.assert.calledOnce(cancel)
 			sinon.assert.calledOnce(reset)
 			assert.equal(resetHead.callCount, restoreType === "taskAndWorkspace" ? 1 : 0)
+		})
+	}
+
+	it("retains known zero and unknown field availability across repeated checkpoint restoration", async () => {
+		const known = { inputTokens: true, outputTokens: true, reasoningTokens: true, cacheReads: true, cacheWrites: true, cost: true }
+		await messages.addToDiracMessages({ id: "checkpoint", ts: 1, content: { type: DiracMessageType.CHECKPOINT } })
+		await messages.flushPendingWrites()
+		await messages.addToDiracMessages({
+			id: "unknown-request", ts: 2, content: {
+				type: DiracMessageType.API_STATUS, status: {
+					tokensIn: 3, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0,
+					usageAvailability: { ...known, cost: false },
+				}
+			}
+		})
+		await messages.flushPendingWrites()
+		for (let attempt = 0; attempt < 2; attempt++) {
+			assert.deepEqual(await restore.restoreCheckpoint("checkpoint", "task"), {})
+			const saved = (await getSavedPresentationHistory("root")).messages
+			assert.deepEqual(getApiUsageKnowledge(saved), { usageObserved: true, usageAvailability: { ...known, cost: false } })
+			assert.equal(getApiMetrics(saved).totalTokensIn, 3)
+			assert.equal(getApiMetrics(saved).totalCost, 0)
+		}
+	})
+
+	for (const emptyRequest of [false, true]) {
+		it(`does not invent observed usage while archiving ${emptyRequest ? "an unreported request" : "no API messages"}`, async () => {
+			const unavailable = { inputTokens: false, outputTokens: false, reasoningTokens: false, cacheReads: false, cacheWrites: false, cost: false }
+			await messages.addToDiracMessages({ id: "checkpoint", ts: 1, content: { type: DiracMessageType.CHECKPOINT } })
+			await messages.flushPendingWrites()
+			if (emptyRequest) {
+				await messages.addToDiracMessages({
+					id: "unreported", ts: 2, content: {
+						type: DiracMessageType.API_STATUS, status: {
+							tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: unavailable,
+						}
+					}
+				})
+				await messages.flushPendingWrites()
+			}
+			for (let attempt = 0; attempt < 2; attempt++) {
+				assert.deepEqual(await restore.restoreCheckpoint("checkpoint", "task"), {})
+				const saved = (await getSavedPresentationHistory("root")).messages
+				assert.equal(getApiUsageKnowledge(saved).usageObserved, false)
+				assert.equal(getApiMetrics(saved).totalTokensIn, 0)
+				assert.equal(getApiMetrics(saved).totalCost, 0)
+			}
 		})
 	}
 

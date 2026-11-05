@@ -20,7 +20,7 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 	const currentCwd = cwd || process.cwd()
 
 	const taskletParentGuidance =
-		context.executionProfile === "standalone" && context.subagentsEnabled === true
+		(context.executionProfile === "standalone" || context.executionProfile === "goal_coordinator" || context.executionProfile === "goal_followup") && context.subagentsEnabled === true
 			? `\nTASKLET DELEGATION
 
 - Generic and configured named-agent spawn tools start tasklets asynchronously. A returned stable tasklet ID confirms startup acceptance, not assignment success or completion; startup failures are reported separately.

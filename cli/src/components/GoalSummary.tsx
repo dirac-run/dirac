@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react"
 import { theme } from "../constants/theme"
 import { useStdinContext } from "../context/StdinContext"
 
-const ACTIVE_CHILD_STATUSES: readonly GoalChildStatus[] = ["starting", "running", "waiting"]
+const NONTERMINAL_CHILD_STATUSES: readonly GoalChildStatus[] = ["accepted", "starting", "running", "waiting"]
 const CHILD_PAGE_SIZE = 5
 
 function formatDuration(durationMs: number | undefined): string {
@@ -30,6 +30,7 @@ function statusSymbol(status: GoalViewState["status"] | GoalChildStatus): string
 	if (status === "blocked" || status === "failed") return theme.symbols.failure
 	if (status === "waiting" || status === "paused" || status === "interrupted") return theme.symbols.warning
 	if (status === "stopped" || status === "cancelled") return theme.symbols.inactive
+	if (status === "accepted") return theme.symbols.inactive
 	return theme.symbols.active
 }
 
@@ -90,9 +91,9 @@ export const GoalSummary: React.FC<{
 		return [...counts.entries()].map(([status, count]) => `${count} ${status}`).join(` ${theme.symbols.separator} `)
 	}, [goal.children])
 	const orderedChildren = useMemo(() => {
-		const activeChildren = goal.children.filter((child) => ACTIVE_CHILD_STATUSES.includes(child.status))
-		const terminalChildren = goal.children.filter((child) => !ACTIVE_CHILD_STATUSES.includes(child.status)).reverse()
-		return [...activeChildren, ...terminalChildren]
+		const nonterminalChildren = goal.children.filter((child) => NONTERMINAL_CHILD_STATUSES.includes(child.status))
+		const terminalChildren = goal.children.filter((child) => !NONTERMINAL_CHILD_STATUSES.includes(child.status)).reverse()
+		return [...nonterminalChildren, ...terminalChildren]
 	}, [goal.children])
 	const childPageCount = Math.max(1, Math.ceil(orderedChildren.length / CHILD_PAGE_SIZE))
 	const visibleChildren = orderedChildren.slice(childPageIndex * CHILD_PAGE_SIZE, (childPageIndex + 1) * CHILD_PAGE_SIZE)
@@ -180,9 +181,12 @@ export const GoalSummary: React.FC<{
 							</Text>
 							<Text color={theme.muted}>{` ${theme.symbols.separator} ${child.role}`}</Text>
 							{` ${theme.symbols.separator} ${child.title} (${child.id})`}
-							<Text color={theme.muted}>
-								{` ${theme.symbols.separator} run ${formatDuration(child.runningDurationMs)} ${theme.symbols.separator} idle ${formatDuration(child.idleDurationMs)}`}
-							</Text>
+							{child.runningDurationMs !== undefined && (
+								<Text color={theme.muted}>{` ${theme.symbols.separator} run ${formatDuration(child.runningDurationMs)}`}</Text>
+							)}
+							{child.idleDurationMs !== undefined && (
+								<Text color={theme.muted}>{` ${theme.symbols.separator} idle ${formatDuration(child.idleDurationMs)}`}</Text>
+							)}
 						</Text>
 					))}
 					{childPageCount > 1 && (

@@ -104,15 +104,15 @@ describe("Goal legacy storage boundary", () => {
 		assert.deepEqual(await store.read(GOAL_ID), record)
 		record.objective.markdown = "Detached result"
 		assert.equal((await store.read(GOAL_ID)).objective.markdown, "New objective")
-		await store.update(GOAL_ID, (goal) => {
-			goal.wakeSequence = 1
-			goal.lastWakeAt = 200
+		await store.update(GOAL_ID, (goal, now) => {
+			goal.objective = { markdown: "Revised objective", revision: 2, updatedAt: now }
 		})
 		await store.transition(GOAL_ID, { status: "working" })
 		const recovered = await store.recoverInterruptedExecution(GOAL_ID)
 		assert.equal(recovered.status, "paused")
 		assert.equal(recovered.version, 2)
-		assert.equal(recovered.wakeSequence, 1)
+		assert.equal(recovered.objective.revision, 2)
+		assert.equal(recovered.objective.markdown, "Revised objective")
 		assert.deepEqual(await store.list(), [JSON.parse(JSON.stringify(recovered))])
 	})
 

@@ -17,7 +17,7 @@ export class CompletionResponseOperation {
 		env.orchestration.setTaskState("didAttemptCompletion", true)
 		env.orchestration.commitCompletionResponse(result)
 
-		if (env.config.executionProfile !== "goal_child") {
+		if (env.config.executionProfile !== "tasklet") {
 			try {
 				await this.handleCompletionResult(env, result)
 				if (env.config.executionProfile === "standalone") {

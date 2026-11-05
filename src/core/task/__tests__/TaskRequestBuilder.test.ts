@@ -280,7 +280,7 @@ describe("TaskRequestBuilder", () => {
 		assert.equal(context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"), false)
 	})
 
-	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child"] as const) {
+	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 		it(`advertises foreground-only skills correctly in ${executionProfile} request assembly`, async () => {
 			setHostCapabilities({ architectureViewer: { prepare: async () => { }, createPanel: async () => { throw new Error("not used") } } })
 				; (skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
@@ -288,8 +288,8 @@ describe("TaskRequestBuilder", () => {
 			context.executionProfile = executionProfile
 			context.getPinnedContext = async () => undefined
 			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-			assert.equal(getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"), executionProfile !== "goal_child")
-			assert.equal(context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"), executionProfile !== "goal_child")
+			assert.equal(getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"), executionProfile !== "tasklet")
+			assert.equal(context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"), executionProfile !== "tasklet")
 		})
 	}
 

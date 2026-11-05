@@ -8,9 +8,9 @@ import GoalHeader, { plainTextObjective } from "./GoalHeader"
 vi.stubGlobal(
 	"ResizeObserver",
 	class ResizeObserver {
-		observe() {}
-		unobserve() {}
-		disconnect() {}
+		observe() { }
+		unobserve() { }
+		disconnect() { }
 	},
 )
 
@@ -75,9 +75,8 @@ describe("GoalHeader", () => {
 						role: "verification",
 						status: "completed",
 						createdAt: 1_700_000_001_000,
-						lastActivityAt: 1_700_000_002_000,
 						endedAt: 1_700_000_002_000,
-						deliveredResponseCursor: 0,
+						pendingInteractionCount: 0,
 						idleDurationMs: 0,
 						terminalSummary: "All checks passed.",
 					},
@@ -103,6 +102,31 @@ describe("GoalHeader", () => {
 		).toEqual(["Status and pending work", "Objective", "Contained Tasks", "Latest verification", "Timing and accounting"])
 		expect(within(details).getByText("All checks passed.")).toBeInTheDocument()
 		expect(within(details).queryByText("Revision 3")).not.toBeInTheDocument()
+	})
+
+	it("renders saved acceptance and every pending tasklet request without fabricated activity", async () => {
+		const user = userEvent.setup()
+		render(<GoalHeader goal={createGoal("paused", {
+			pendingInteractionCount: 2,
+			children: [{
+				id: "saved-handle",
+				title: "Saved tasklet",
+				role: "task",
+				status: "accepted",
+				createdAt: 1_700_000_000_000,
+				pendingInteractionCount: 2,
+				pendingInteraction: { id: "request-1", kind: "approval", createdAt: 1_700_000_000_001 },
+			}],
+		})} />)
+		await user.click(screen.getByRole("button", { name: "Expand Goal details" }))
+		const details = screen.getByRole("region", { name: "Goal operational details" })
+		expect(within(details).getByText("accepted")).toBeInTheDocument()
+		expect(within(details).getByText("2 pending tasklet requests.")).toBeInTheDocument()
+		expect(within(details).getByText("Saved tasklet · 2 pending requests · approval")).toBeInTheDocument()
+		expect(within(details).getByText("2 pending requests · approval")).toBeInTheDocument()
+		expect(within(details).queryByText(/Running/)).not.toBeInTheDocument()
+		expect(within(details).queryByText(/Idle/)).not.toBeInTheDocument()
+		expect(within(details).queryByText(/user interactions/)).not.toBeInTheDocument()
 	})
 
 	it("shows only the contextual primary lifecycle action", () => {

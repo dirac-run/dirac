@@ -86,7 +86,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.skills = buildSkillsTrait(config)
 		this.architecture = buildArchitectureTrait({
 			taskId: config.taskId,
-			foreground: config.executionProfile !== "goal_child" && config.executionProfile !== "tasklet",
+			foreground: config.executionProfile !== "tasklet",
 			canWaitForInput: !config.yoloModeToggled,
 			resolveTaskDirectory: () => getTaskDirectoryPath(config.storageAddress ?? config.taskId),
 		})

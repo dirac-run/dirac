@@ -7,7 +7,8 @@ import { getSavedApiConversationState, getSavedPresentationHistory } from "@core
 import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRecord, type TaskletRecord, type TaskletEvent } from "@core/storage/taskStorage"
 import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
 import { createTaskletId } from "@shared/taskletId"
-import { taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
+import { taskletUsageAvailability, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
+import { getApiMetrics, getApiUsageKnowledge } from "@shared/getApiMetrics"
 import { taskletActivityPreview, type TaskletPresentationData } from "@shared/taskletPresentation"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
@@ -67,7 +68,7 @@ import { EnvironmentManager } from "./EnvironmentManager"
 import { HookManager } from "./HookManager"
 import { LifecycleManager, type ResumeTaskOptions } from "./LifecycleManager"
 import { LocalConversationCompaction } from "./LocalConversationCompaction"
-import { MessageStateHandler } from "./message-state"
+import { MessageStateHandler, type DiracMessageChange } from "./message-state"
 import { ResponseProcessor } from "./ResponseProcessor"
 import {
 	assertTaskMutationAuthorized,
@@ -177,6 +178,8 @@ export type TaskParams = {
 	switchToActMode?: () => Promise<boolean>
 	enqueuePreRequestSteeringMessages?: () => Promise<void>
 	updateBackgroundCommandState?: (running: boolean, taskId: string) => void
+	/** Root lifecycle presentation around genuine user escalation, never child-local waiting. */
+	duringTaskletUserInteraction?: <T>(operation: () => Promise<T>) => Promise<T>
 	conversationPersistenceHooks?: TaskConversationPersistenceHooks
 }
 
@@ -635,24 +638,72 @@ export class Task {
 			this.taskState.utilityPermissionCacheReadTokens = utility.cacheReads ?? 0
 			this.taskState.utilityPermissionCost = utility.cost
 			this.taskState.utilityModelReasoningTokens = utility.reasoningTokens
+			const availability = taskletUsageAvailability(utility)
+			this.taskState.utilityModelUsageObserved = utility.usageObserved !== false
+			this.taskState.utilityModelReasoningAvailable = availability.reasoningTokens
+			this.taskState.utilityModelCacheWriteAvailable = availability.cacheWrites
+			this.taskState.utilityModelCacheReadAvailable = availability.cacheReads
+			this.taskState.utilityModelCostAvailable = availability.cost
 		}
 		const recordOwnerUsage = contained?.recordUsage
-		let restoredPrimary = contained?.usage?.primary
-		let primaryShortfall: TaskletUsageSnapshot["primary"] | undefined
-		const recordUsage = recordOwnerUsage ? () => {
+		const restoredPrimary = contained?.usage?.primary ? structuredClone(contained.usage.primary) : undefined
+		let restoredMessageIds: Set<string> | undefined
+		const newPrimaryUsage = new Map<string, TaskletUsageSnapshot["primary"]>()
+		const recordUsage = recordOwnerUsage ? (change?: DiracMessageChange) => {
 			const snapshot = this.getUsageSnapshot()
-			if (restoredPrimary) {
-				// A durable usage write can precede the transcript flush at a crash.
-				// Preserve that shortfall once, then add only new transcript usage.
-				primaryShortfall = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0 }
-				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
-					if (restoredPrimary[key] !== undefined) primaryShortfall[key] = Math.max(0, restoredPrimary[key]! - (snapshot.primary[key] ?? 0))
+			if (restoredPrimary && !restoredMessageIds) {
+				// Utility can report before history restoration. The durable primary
+				// snapshot remains authoritative until the actual restored prefix arrives.
+				if (change?.type !== "set") {
+					snapshot.primary = structuredClone(restoredPrimary)
+					recordOwnerUsage(snapshot)
+					return
 				}
-				restoredPrimary = undefined
-			}
-			if (primaryShortfall) {
+				restoredMessageIds = new Set(change.messages.map((message) => message.id))
+				const fields = ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const
+				const transcriptAhead = fields.some((key) => (snapshot.primary[key] ?? 0) > (restoredPrimary[key] ?? 0))
+				// A transcript ahead of its usage record contains additional historical
+				// spend; only that case may further constrain the durable prefix knowledge.
+				if (transcriptAhead) {
+					const combined = taskletUsageTotal({ primary: restoredPrimary, utility: snapshot.primary })
+					restoredPrimary.usageObserved = combined.usageObserved
+					restoredPrimary.usageAvailability = combined.usageAvailability
+				}
 				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
-					if (primaryShortfall[key] !== undefined) snapshot.primary[key] = (snapshot.primary[key] ?? 0) + primaryShortfall[key]!
+					if (snapshot.primary[key] !== undefined) restoredPrimary[key] = Math.max(restoredPrimary[key] ?? 0, snapshot.primary[key]!)
+				}
+			}
+			if (restoredPrimary && restoredMessageIds) {
+				for (const message of this.messageStateHandler.getDiracMessages()) {
+					if (restoredMessageIds.has(message.id) || message.content.type !== "api_status") continue
+					// Checkpoint summaries duplicate already observed requests (including
+					// the restored prefix); they are not new usage sources. Retry archives
+					// update an existing request and remain part of that request's lifetime.
+					if (message.content.status.deletedMetrics && !newPrimaryUsage.has(message.id)) continue
+					const metrics = getApiMetrics([message])
+					newPrimaryUsage.set(message.id, {
+						tokensIn: metrics.totalTokensIn, tokensOut: metrics.totalTokensOut,
+						cacheWrites: metrics.totalCacheWrites, cacheReads: metrics.totalCacheReads,
+						cost: metrics.totalCost, reasoningTokens: metrics.totalReasoningTokens,
+						...getApiUsageKnowledge([message]),
+					})
+				}
+				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
+					const incurred = [...newPrimaryUsage.values()].reduce((total, usage) => total + (usage[key] ?? 0), restoredPrimary[key] ?? 0)
+					if (incurred || restoredPrimary[key] !== undefined || snapshot.primary[key] !== undefined) {
+						snapshot.primary[key] = Math.max(snapshot.primary[key] ?? 0, incurred)
+					}
+				}
+				const sources = [restoredPrimary, ...newPrimaryUsage.values()].filter((source) => source.usageObserved !== false)
+				const knowledge = sources.map(taskletUsageAvailability)
+				snapshot.primary.usageObserved = sources.length > 0
+				snapshot.primary.usageAvailability = {
+					inputTokens: knowledge.every((source) => source.inputTokens),
+					outputTokens: knowledge.every((source) => source.outputTokens),
+					reasoningTokens: knowledge.every((source) => source.reasoningTokens),
+					cacheWrites: knowledge.every((source) => source.cacheWrites),
+					cacheReads: knowledge.every((source) => source.cacheReads),
+					cost: knowledge.every((source) => source.cost),
 				}
 			}
 			recordOwnerUsage(snapshot)
@@ -1083,7 +1134,10 @@ export class Task {
 				},
 				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
 				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
-				escalateInteraction: (child, request, signal) => this.taskMessenger.escalateTaskletInteraction(child, request, signal),
+				escalateInteraction: (child, request, signal) => {
+					const operation = () => this.taskMessenger.escalateTaskletInteraction(child, request, signal)
+					return params.duringTaskletUserInteraction ? params.duringTaskletUserInteraction(operation) : operation()
+				},
 				hasPendingUserInput: () => this.taskState.steeringMessages.some((message) => message.deliveryState === SteeringDeliveryState.QUEUED)
 					|| this.hasPendingChatInput(),
 			}, {
@@ -1361,11 +1415,13 @@ export class Task {
 	/** Conversation-lifetime primary usage plus contained Utility counters restored on resumption. */
 	private getUsageSnapshot(): TaskletUsageSnapshot {
 		const metrics = this.messageStateHandler.getApiUsage()
+		const knowledge = getApiUsageKnowledge(this.messageStateHandler.getDiracMessages())
 		return {
 			primary: {
 				tokensIn: metrics.totalTokensIn, tokensOut: metrics.totalTokensOut,
 				cacheWrites: metrics.totalCacheWrites, cacheReads: metrics.totalCacheReads,
 				cost: metrics.totalCost, reasoningTokens: metrics.totalReasoningTokens,
+				...knowledge,
 			},
 			utility: {
 				tokensIn: this.taskState.utilityPermissionInputTokens,
@@ -1373,6 +1429,14 @@ export class Task {
 				cacheWrites: this.taskState.utilityPermissionCacheWriteTokens,
 				cacheReads: this.taskState.utilityPermissionCacheReadTokens,
 				cost: this.taskState.utilityPermissionCost, reasoningTokens: this.taskState.utilityModelReasoningTokens,
+				usageObserved: this.taskState.utilityModelUsageObserved,
+				usageAvailability: {
+					inputTokens: true, outputTokens: true,
+					reasoningTokens: this.taskState.utilityModelReasoningAvailable,
+					cacheWrites: this.taskState.utilityModelCacheWriteAvailable,
+					cacheReads: this.taskState.utilityModelCacheReadAvailable,
+					cost: this.taskState.utilityModelCostAvailable,
+				},
 			},
 		}
 	}
@@ -1956,6 +2020,7 @@ export class TaskletHost {
 			title,
 			prompt,
 			createdAt: Date.now(),
+			...(input.purpose ? { purpose: input.purpose } : {}),
 		}
 		const acceptance = this.acceptAndStart(record, input)
 		this.starting.set(record.id, { record, acceptance })
@@ -2337,8 +2402,16 @@ export class TaskletHost {
 		try {
 			await this.persistRecord(child)
 			if (child.usageProjectionError) throw child.usageProjectionError
-			await child.eventWrites
 			child.outcomePersisted = true
+			// Termination may have no agent response (provider failure/deadline).
+			// Publish a host notification through the same durable channel, not a
+			// fabricated response or a second Goal event supervisor.
+			child.events.push({
+				id: ulid(), taskletId: child.record.id, createdAt: Date.now(),
+				communication: { type: "outcome", outcome: structuredClone(outcome) },
+			})
+			this.sleepWaiter?.check()
+			await this.persistEvents(child)
 			await this.projectChild(child)
 		} catch (error) {
 			child.settlementError = serializeTaskError(error)

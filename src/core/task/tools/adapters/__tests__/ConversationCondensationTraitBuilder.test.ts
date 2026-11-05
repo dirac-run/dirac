@@ -217,7 +217,7 @@ describe("ConversationCondensationTraitBuilder", () => {
 		sinon.assert.notCalled(config.messageState.getApiConversationHistory)
 	})
 
-	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 		it(`exposes a narrow task-owned condensation facade for ${executionProfile}`, () => {
 			const { config } = createEnvironment()
 			config.executionProfile = executionProfile

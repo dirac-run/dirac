@@ -13,7 +13,7 @@ export type ToolExposure =
 export const CONFIGURABLE_TOOL_EXPOSURE: ToolExposure = { kind: "configurable" }
 export const GOAL_COORDINATOR_TOOL_EXPOSURE: ToolExposure = {
 	kind: "profile_only",
-	profiles: ["goal_coordinator"],
+	profiles: ["goal_coordinator", "goal_followup"],
 }
 
 export type ToolSource = "builtin" | "global" | "workspace" | "task"

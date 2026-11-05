@@ -2,12 +2,12 @@ import { atomicWriteFile } from "@core/storage/atomicWrite"
 import { ensureTaskDirectoryExists } from "@core/storage/directoryEnsurers"
 import { getTaskDirectoryPath, listTaskDirectoryIds } from "@core/storage/taskDirectory"
 import { acquireTaskLock } from "@core/task/TaskLockUtils"
-import { type GoalRecord, type GoalStatusTransition, isActiveGoalStatus, isSettledGoalStatus } from "@shared/goal"
+import { type GoalRecord, type GoalStatusTransition, isActiveGoalStatus } from "@shared/goal"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
 import Mutex from "p-mutex"
 import path from "path"
-import { applyGoalStatusTransition, interruptNonterminalGoalChildren } from "./GoalLifecycle"
+import { applyGoalStatusTransition } from "./GoalLifecycle"
 import { assertGoalRecord, isLegacyGoalRecord } from "./validateGoalRecord"
 import { TASKLET_ID_PREFIX } from "@/shared/taskletId"
 
@@ -146,10 +146,6 @@ export class GoalStore {
 					updatedAt: now,
 					lastPausedAt: now,
 					activeDurationMs: 0,
-					wakeSequence: 0,
-					eventSequence: 0,
-					events: [],
-					children: [],
 					accountingSources: {},
 					accounting: {},
 				}
@@ -212,7 +208,6 @@ export class GoalStore {
 			if (mutate) await mutate(record, now)
 			assertLifecycleUnchanged(record, before)
 			applyGoalStatusTransition(record, transition, now)
-			if (isSettledGoalStatus(record.status)) record.events = []
 			await writeGoalRecord(record)
 			return structuredClone(record)
 		})
@@ -267,14 +262,8 @@ export class GoalStore {
 			const now = this.clock()
 			assertClockTime(now)
 			if (now < current.updatedAt) throw new Error(`Goal ${goalId} recovery time predates its persisted state`)
-			const interruptedChildren = interruptNonterminalGoalChildren(current, now)
-			const wasActive = isActiveGoalStatus(current.status)
-			if (wasActive) {
+			if (isActiveGoalStatus(current.status)) {
 				applyGoalStatusTransition(current, { status: "paused", statusReason: "Recovered interrupted execution" }, now)
-			}
-			if (interruptedChildren || wasActive) {
-				current.events = []
-				current.updatedAt = now
 				await writeGoalRecord(current)
 			}
 			return structuredClone(current)

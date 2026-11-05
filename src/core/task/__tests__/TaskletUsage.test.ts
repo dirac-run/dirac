@@ -299,6 +299,34 @@ describe("TaskletHost durable usage attribution", () => {
 		assert.deepEqual(children[1].params.tasklet!.usage, usage(2, 0.5))
 	})
 
+	it("persists availability through disk reconstruction and replaces cards without starting historical engines", async () => {
+		const known = { inputTokens: true, outputTokens: true, cost: true, reasoningTokens: true, cacheWrites: true, cacheReads: true }
+		const unknown = { ...known, cost: false, reasoningTokens: false, cacheWrites: false, cacheReads: false }
+		const snapshot: TaskletUsageSnapshot = {
+			primary: { ...usage(2).primary, usageObserved: true, usageAvailability: known },
+			utility: { tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, usageObserved: true, usageAvailability: unknown },
+		}
+		const original = newHost()
+		const child = await original.start({ title: "availability", prompt: "Private work" })
+		record(0, snapshot)
+		children[0].outcome.resolve(completed)
+		await original.interrupt(child.id)
+		await original.shutdown()
+		assert.deepEqual((await saved(child.id)).usage, snapshot)
+		const reopened = newHost()
+		await reopened.reconstruct()
+		await reopened.reconcileRootProjection()
+		await reopened.reconcileRootProjection()
+		sinon.assert.calledOnce(constructed)
+		const cards = rootMessages.getDiracMessages().flatMap((message) => message.content.type === DiracMessageType.CARD ? [getTaskletUsage(message.content.card)] : [])
+		assert.equal(cards.length, 1)
+		assert.deepEqual(cards[0]!.usageAvailability, unknown)
+		assert.equal(cards[0]!.cost, 2)
+		await reopened.resume(child.id, "Explicit follow-up")
+		assert.deepEqual(children[1].params.tasklet!.usage, snapshot)
+		assert.equal(getApiMetrics(rootMessages.getDiracMessages()).totalCost, 2.25)
+	})
+
 	it("surfaces a usage record write failure through settlement and root shutdown", async () => {
 		expectLoggerErrors()
 		const host = newHost()

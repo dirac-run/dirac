@@ -48,4 +48,33 @@ describe("GoalStore discovery", () => {
 		assert.equal(report.failures[0].goalId, "current-goal")
 		assert.match(report.failures[0].error.message, /Invalid Goal state/)
 	})
+
+	it("stores lifecycle and accounting only, rejecting superseded registry fields", async () => {
+		const store = new GoalStore(() => 100)
+		const record = await store.create("goal", "conversation", "New objective")
+		for (const field of ["children", "events", "wakeSequence", "lastWakeAt", "eventSequence"]) {
+			assert.equal(Object.hasOwn(record, field), false)
+			await assert.rejects(store.update("goal", (goal) => {
+				Object.assign(goal, { [field]: field.endsWith("Sequence") ? 0 : [] })
+			}), /unknown field/)
+		}
+		assert.deepEqual(await store.read("goal"), record)
+	})
+
+	it("recovers only Goal lifecycle without changing contained tasklet artifacts", async () => {
+		const store = new GoalStore(() => 100)
+		await store.create("goal", "conversation", "New objective")
+		await store.transition("goal", { status: "working" })
+		const directory = path.join(storagePath, "tasks", "goal", "tasklets", "private-data")
+		await fs.mkdir(directory, { recursive: true })
+		const eventPath = path.join(directory, "tasklet_events.json")
+		const original = Buffer.from("  [ { \"pending\": true } ]\n")
+		await fs.writeFile(eventPath, original)
+
+		const recovered = await new GoalStore(() => 200).recoverInterruptedExecution("goal")
+		assert.equal(recovered.status, "paused")
+		assert.equal(recovered.activeDurationMs, 100)
+		assert.deepEqual(await fs.readFile(eventPath), original)
+		assert.equal(Object.hasOwn(recovered, "children"), false)
+	})
 })

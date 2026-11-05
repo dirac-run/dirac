@@ -62,7 +62,7 @@ export class UseSubagentsTool implements IDiracTool {
 
 	async processCall(args: unknown, env: IToolEnvironment): Promise<string> {
 		const controls = env.orchestration.tasklets
-		if (!controls) throw new Error("Tasklet spawning is available only to an owning ordinary root")
+		if (!controls) throw new Error("Tasklet spawning is available only to an owning root")
 		const agentName = AgentConfigLoader.getInstance().resolveSubagentNameForTool(env.toolName)
 		const batch = args && typeof args === "object" && "subagents" in args ? args.subagents : undefined
 		const assignments: unknown[] = agentName ? [args] : Array.isArray(batch) ? batch : []
@@ -185,7 +185,7 @@ export const tasklets_spec: DiracToolSpec = {
 	id: "tasklets",
 	name: "tasklets",
 	description:
-		"Supervise this ordinary root's private tasklets. Inspect returns retained results, responses and pending interactions; transcript returns full conversation/presentation without preview truncation. Guidance is queued, not necessarily consumed, and does not answer an interaction. Resume explicitly reopens a terminal tasklet under the same ID and returns acceptance, not completion. Resolve questions with answer (optionally action for a displayed choice), permissions with approve/reject/escalate; approval never exceeds current parent authority. Escalate asks the user through the parent. Sleep voluntarily waits for communication, a deadline or any user message without consuming events, joining children or polling. Omit tasklet_ids for any child; [] waits only for time/user input and requires timeout_ms. Inspect after waking; a wake is not completion.",
+		"Supervise this root's private tasklets. Inspect returns retained results, responses and pending interactions; transcript returns full conversation/presentation without preview truncation. Guidance is queued, not necessarily consumed, and does not answer an interaction. Resume explicitly reopens a terminal tasklet under the same ID and returns acceptance, not completion. Resolve questions with answer (optionally action for a displayed choice), permissions with approve/reject/escalate; approval never exceeds current parent authority. Escalate asks the user through the parent. Sleep voluntarily waits for communication, a deadline or any user message without consuming events, joining children or polling. Omit tasklet_ids for any child; [] waits only for time/user input and requires timeout_ms. Inspect after waking; a wake is not completion.",
 	parameters: [
 		{ name: "operation", required: true, instruction: "Control operation.", enum: operations },
 		{
@@ -253,7 +253,7 @@ export class TaskletsTool implements IDiracTool {
 
 	async processCall(input: unknown, env: IToolEnvironment): Promise<string> {
 		const controls = env.orchestration.tasklets
-		if (!controls) throw new Error("Tasklet controls are available only to an owning ordinary root")
+		if (!controls) throw new Error("Tasklet controls are available only to an owning root")
 		const args = requireArguments(input)
 		const operation = requireOperation(args.operation)
 		validateParameters(args, operation)

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict"
 import { describe, it } from "mocha"
 import { CardStatus, type Card, type DiracMessage, DiracMessageType } from "../ExtensionMessage"
-import { getApiMetrics, getLastApiReqInfo, getLastApiReqTotalTokens } from "../getApiMetrics"
+import { getApiMetrics, getApiUsageKnowledge, getLastApiReqInfo, getLastApiReqTotalTokens } from "../getApiMetrics"
 import { getSubagentUsage } from "../subagentUsage"
-import { getTaskletUsage, isTaskletUsageSnapshot, taskletUsageTotal, type TaskletUsageInfo } from "../taskletUsage"
+import { getTaskletUsage, isTaskletUsageSnapshot, taskletUsageAvailability, taskletUsageTotal, type TaskletUsageInfo } from "../taskletUsage"
 
 const usage: TaskletUsageInfo = {
 	source: "tasklet", taskletId: "tasklet-1", tokensIn: 100, tokensOut: 20,
 	cacheWrites: 4, cacheReads: 8, cost: 0.5, reasoningTokens: 3,
 }
+
+const known = { inputTokens: true, outputTokens: true, reasoningTokens: true, cacheWrites: true, cacheReads: true, cost: true }
+const historical = { ...known, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false }
 
 function card(rawOutput: Record<string, unknown> = { ...usage }): Card {
 	return { id: "accounting", header: "Localized accounting label", body: "Not JSON", status: CardStatus.SUCCESS, renderType: "text", rawOutput }
@@ -61,10 +64,61 @@ describe("tasklet usage accounting", () => {
 	it("combines primary and Utility usage without manufacturing unavailable cache counts", () => {
 		const primary = { tokensIn: 10, tokensOut: 4, cost: 0.25, reasoningTokens: 2 }
 		const utility = { tokensIn: 3, tokensOut: 1, cost: 0.125, reasoningTokens: 1 }
-		assert.deepEqual(taskletUsageTotal({ primary, utility }), { tokensIn: 13, tokensOut: 5, cost: 0.375, reasoningTokens: 3 })
+		assert.deepEqual(taskletUsageTotal({ primary, utility }), {
+			tokensIn: 13, tokensOut: 5, cost: 0.375, reasoningTokens: 3,
+			usageObserved: true, usageAvailability: historical,
+		})
 		assert.deepEqual(taskletUsageTotal({ primary: { ...primary, cacheWrites: 2 }, utility: { ...utility, cacheReads: 0 } }), {
 			tokensIn: 13, tokensOut: 5, cost: 0.375, reasoningTokens: 3, cacheWrites: 2, cacheReads: 0,
+			usageObserved: true, usageAvailability: historical,
 		})
+	})
+
+	it("preserves known zeroes while excluding an explicitly unused Utility source", () => {
+		const primary = { tokensIn: 10, tokensOut: 2, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageObserved: true, usageAvailability: known }
+		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false }
+		const total = taskletUsageTotal({ primary, utility })
+		assert.deepEqual(total.usageAvailability, known)
+		assert.equal(total.cost, 0)
+		assert.equal(total.cacheReads, 0)
+		assert.deepEqual(getTaskletUsage(card({ ...total, source: "tasklet", taskletId: "child" })), { ...total, source: "tasklet", taskletId: "child" })
+	})
+
+	it("retains partial incurred counters without certifying unknown primary or Utility totals", () => {
+		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 3, cacheWrites: 2, cacheReads: 4, usageObserved: true, usageAvailability: known }
+		const utility = { tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageObserved: true, usageAvailability: historical }
+		for (const snapshot of [{ primary, utility }, { primary: utility, utility: primary }]) {
+			const total = taskletUsageTotal(snapshot)
+			assert.equal(total.cost, 0.5)
+			assert.equal(total.reasoningTokens, 3)
+			assert.equal(total.cacheReads, 4)
+			assert.deepEqual(total.usageAvailability, historical)
+			assert.deepEqual(taskletUsageAvailability(getTaskletUsage(card({ ...total, source: "tasklet", taskletId: "child" }))!), historical)
+		}
+	})
+
+	it("does not infer historical zero cost or reasoning as known and validates metadata", () => {
+		const part = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0 }
+		assert.deepEqual(taskletUsageAvailability(part), historical)
+		assert.deepEqual(taskletUsageAvailability({ ...part, usageObserved: false }), known)
+		for (const bad of [{ usageObserved: 0 }, { usageObserved: false, tokensIn: 1 }, { usageAvailability: null }, { usageAvailability: {} }, { usageAvailability: { ...known, cost: 1 } }]) {
+			const entry = { ...part, ...bad }
+			assert.equal(isTaskletUsageSnapshot({ primary: entry, utility: part }), false)
+			assert.equal(getTaskletUsage(card({ ...entry, source: "tasklet", taskletId: "child" })), undefined)
+		}
+		assert.equal(isTaskletUsageSnapshot({ primary: { ...part, usageObserved: true, usageAvailability: known }, utility: part }), true)
+	})
+
+	it("aggregates tasklet-only and mixed root/card knowledge without relying on a root usage status", () => {
+		const child = message("child", { ...usage, usageObserved: true, usageAvailability: { ...known, cost: false } })
+		assert.deepEqual(getApiUsageKnowledge([child]), { usageObserved: true, usageAvailability: { ...known, cost: false } })
+		const root: DiracMessage = { id: "root", ts: 1, content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 0, tokensOut: 0, reasoningTokens: 0, cost: 0, cacheWrites: 0, cacheReads: 0, usageAvailability: known } } }
+		assert.deepEqual(getApiUsageKnowledge([root, child]), { usageObserved: true, usageAvailability: { ...known, cost: false } })
+		assert.equal(getApiMetrics([root, child]).totalCost, 0.5)
+		const unused = message("unused", { source: "tasklet", taskletId: "unused", tokensIn: 0, tokensOut: 0, reasoningTokens: 0, cost: 0, usageObserved: false })
+		assert.deepEqual(getApiUsageKnowledge([root, unused]), { usageObserved: true, usageAvailability: known })
+		assert.deepEqual(getApiUsageKnowledge([unused]), { usageObserved: false, usageAvailability: known })
+		assert.deepEqual(getApiUsageKnowledge([message("historical", { ...usage })]), { usageObserved: true, usageAvailability: historical })
 	})
 
 	it("aggregates root, multiple tasklets and legacy subagents without changing root context metrics", () => {

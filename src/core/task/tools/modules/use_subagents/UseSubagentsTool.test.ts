@@ -92,7 +92,7 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 	it("uses the environment capability guard even with no legacy config", async () => {
 		const { env, createCard } = fixture()
 		delete (env.orchestration as { tasklets?: TaskletControls }).tasklets
-		await assert.rejects(new UseSubagentsTool().processCall({ subagents: [assignment] }, env), /owning ordinary root/)
+		await assert.rejects(new UseSubagentsTool().processCall({ subagents: [assignment] }, env), /owning root/)
 		assert.equal(createCard.callCount, 0)
 		assert.equal(resolveName.callCount, 0)
 	})

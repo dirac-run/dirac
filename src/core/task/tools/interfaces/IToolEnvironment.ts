@@ -14,8 +14,7 @@ import type {
 	AstReplacementRequest,
 	SourceMutationPlan,
 } from "@services/source-ast/types"
-import type { GoalChildRecord, GoalChildRole, GoalChildStatus, GoalObjectiveRevision, GoalTaskSummary } from "@shared/goal"
-import type { TranscriptPage } from "@shared/messages/content"
+import type { GoalObjectiveRevision } from "@shared/goal"
 import { FileDiagnostics } from "@shared/proto/index.dirac"
 import type { ResponseArguments } from "@shared/responseTool"
 import type { TextFileWindow, TextFileWindowOptions } from "@shared/text-file-window"
@@ -384,24 +383,7 @@ export interface IResponseObserverTrait {
 export type { TranscriptPage } from "@shared/messages/content"
 
 export interface IGoalTrait {
-	startTask(input: { taskTitle: string; prompt: string }): Promise<GoalChildRecord>
-	listTasks(input: {
-		status?: GoalChildStatus[]
-		role?: GoalChildRole
-		cursor?: string
-		limit?: number
-	}): Promise<{ tasks: GoalTaskSummary[]; nextCursor?: string }>
-	sendTaskMessage(input: { taskId: string; message: string }): Promise<GoalChildRecord>
-	cancelTask(input: { taskId: string; reason?: string }): Promise<GoalChildRecord>
-	readTaskTranscript(input: { taskId: string; cursor?: string; limit?: number }): Promise<TranscriptPage>
-	resolveTaskInteraction(input: {
-		taskId: string
-		interactionId: string
-		resolution: "allow" | "reject" | "answer" | "passthrough"
-		answer?: string
-	}): Promise<{ resolved: true; task: GoalChildRecord }>
-	waitForEvents(): Promise<string>
-	startVerification(input: { focus?: string }): Promise<GoalChildRecord>
+	getObjective(): Promise<GoalObjectiveRevision>
 	replaceObjective(markdown: string): Promise<GoalObjectiveRevision>
 	blockGoal(reason: string): Promise<void>
 	commitCompletion(result: string): Promise<CompletionCommitResult>

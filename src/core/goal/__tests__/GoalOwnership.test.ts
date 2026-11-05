@@ -110,11 +110,7 @@ describe("Goal execution ownership", () => {
 				const retirement = task.retirePersistence as sinon.SinonStub
 				retirement.rejects(new Error("child outcome write failed"))
 				const settlement = h.loop["runtime"]!.settlement!
-				const rejected = assert.rejects(settlement, (error) => {
-					assert.ok(error instanceof AggregateError)
-					assert.match(error.errors[0].message, /child outcome write failed/)
-					return true
-				})
+				const rejected = assert.rejects(settlement, /child outcome write failed/)
 				h.outcome.resolve({ kind: "failed", error: { name: "Error", message: "Task termination failed" }, failedAt: Date.now() })
 				await rejected
 				assert.equal(h.loop.hasRunningCoordinator, true)

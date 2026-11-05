@@ -20,7 +20,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import type { Mode } from "@/shared/storage/types"
 import { DiracAskResponse } from "@/shared/WebviewMessage"
-import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import * as notifications from "@integrations/notifications"
 import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
 import { createTaskletId } from "@/shared/taskletId"
@@ -48,6 +48,7 @@ import type { IGoalTrait } from "../tools/interfaces/IToolEnvironment"
 import type { HistoryItem } from "@shared/HistoryItem"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
+type ProviderToolCall = { name: string; args: Record<string, unknown>; usage?: Extract<import("@core/api/transform/stream").ApiStreamChunk, { type: "usage" }> }
 
 /**
  * Phase 3.4: the Task lifecycle, request loop, tool discovery/dispatch, messages and
@@ -66,6 +67,7 @@ describe("Tasklet real Task execution", function () {
 	let stateManager: StateManager
 	let requestLimit: number
 	let nextTurn: ((mode: Mode, request: Request) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense" | "allowed_skill" | "excluded_skill">) | undefined
+	let nextTool: ((request: Request) => Promise<ProviderToolCall>) | undefined
 
 	function rejectCall(name: string) {
 		const spy = sandbox.stub().callsFake(() => { throw new Error(`Tasklet escaped to ${name}`) })
@@ -79,6 +81,7 @@ describe("Tasklet real Task execution", function () {
 		requests = []
 		forbidden = []
 		nextTurn = undefined
+		nextTool = undefined
 		requestLimit = 3
 		directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-execution-")))
 		cwd = path.join(directory, "workspace")
@@ -131,6 +134,14 @@ describe("Tasklet real Task execution", function () {
 					const request = { mode, model, systemPrompt, messages: structuredClone(messages), tools: (tools ?? []).map((tool) => (tool as { name: string }).name) }
 					requests.push(request)
 					assert.ok(requests.length <= requestLimit, "Unexpected retry/request after controlled completion")
+					if (nextTool) {
+						const callId = `scripted-${requests.length}`
+						const call = await nextTool(request)
+						assert.ok(request.tools.includes(call.name), `Controlled provider tool ${call.name} must be advertised`)
+						yield { type: "tool_calls", tool_call: { call_id: callId, function: { name: call.name, arguments: JSON.stringify(call.args) } } }
+						yield call.usage ?? { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+						return
+					}
 					const operation = await nextTurn?.(mode, request) ?? (requests.length === 1 ? "read_file" : "complete")
 					yield {
 						type: "tool_calls", tool_call: {
@@ -296,6 +307,275 @@ describe("Tasklet real Task execution", function () {
 		return /# GOAL (?:COORDINATOR|FOLLOW-UP)/.test(request.systemPrompt)
 	}
 
+	for (const execution of ["coordinator", "paused follow-up", "achieved follow-up"] as const) {
+		it(`dispatches generic, named, verification and inspection tools through a real Goal ${execution}`, async () => {
+			const h = await createGoalExecution(execution === "achieved follow-up" ? "achieved" : "paused")
+			const profile: AgentBaseConfig = {
+				name: "goal-reviewer", description: "Controlled Goal reviewer", tools: [],
+				systemPrompt: "NAMED_GOAL_REVIEWER_INSTRUCTIONS",
+			}
+			const loader = Object.assign(Object.create(AgentConfigLoader.prototype), {
+				cachedConfigs: new Map<string, AgentBaseConfig>(), cachedAgentToolNames: new Map<string, string>(),
+				cachedToolNameToAgentName: new Map<string, string>(),
+			}) as AgentConfigLoader
+			sandbox.stub(AgentConfigLoader, "getInstance").returns(loader)
+			let rootTurn = 0
+			let genericId = ""
+			let namedId = ""
+			let verificationId = ""
+			const toolResults = (request: Request) => (request.messages as DiracStorageMessage[])
+				.flatMap((message) => typeof message.content === "string" ? [] : message.content)
+				.flatMap((block) => block.type === "tool_result" && typeof block.content === "string" ? [block.content] : [])
+			nextTool = async (request) => {
+				if (!isGoalRequest(request)) {
+					for (const forbiddenTool of ["use_subagents", "use_subagent_goal_reviewer", "tasklets", "verify_goal", "update_goal", "block_goal"]) {
+						assert.equal(request.tools.includes(forbiddenTool), false, forbiddenTool)
+					}
+					assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
+					return { name: "respond", args: { operation: "complete", text: "GOAL_PRIVATE_WORK_COMPLETE" } }
+				}
+				for (const name of ["tasklets", "verify_goal", "update_goal", "block_goal"]) assert.ok(request.tools.includes(name), `Goal must advertise ${name}`)
+				assert.ok(request.tools.includes(rootTurn === 0 ? "use_subagents" : "use_subagent_goal_reviewer"))
+				for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
+					assert.equal(request.tools.includes(name), false, `Retired tool ${name}`)
+				}
+				const root = h.loop.coordinator!
+				const turn = ++rootTurn
+				if (turn === 1) {
+					// Keep this request's generic native schema, then advertise the named
+					// profile on the next request. Dispatch and both children remain real.
+					loader["cachedConfigs"].set(profile.name, profile)
+					loader["cachedAgentToolNames"].set(profile.name, "use_subagent_goal_reviewer")
+					loader["cachedToolNameToAgentName"].set("use_subagent_goal_reviewer", profile.name)
+					const executor = (root as any).toolExecutor
+					executor.markToolsDirty("manual_refresh")
+					return { name: "use_subagents", args: { subagents: [{ task_title: "Generic Goal worker", prompt: "GENERIC_GOAL_ASSIGNMENT" }] } }
+				}
+				if (turn === 2 || turn === 3) {
+					const result = JSON.parse(toolResults(request).at(-1)!).subagents[0]
+					assert.equal(result.accepted, true)
+					assert.equal(result.outcome, undefined, "Public spawn returns acceptance, not assignment completion")
+					assert.match(result.id, /^tasklet_[0-9a-f-]{36}$/)
+					assert.equal((await waitForOutcome(root.taskletHost!, result.id)).outcome?.kind, "completed")
+					if (turn === 2) {
+						genericId = result.id
+						return { name: "use_subagent_goal_reviewer", args: { task_title: "Named Goal reviewer", prompt: "NAMED_GOAL_ASSIGNMENT" } }
+					}
+					namedId = result.id
+					return { name: "verify_goal", args: { focus: "VERIFY_CURRENT_GOAL_FOCUS" } }
+				}
+				if (turn === 4) {
+					const verification = JSON.parse(toolResults(request).at(-1)!)
+					verificationId = verification.id
+					assert.equal(verification.purpose, "goal_verification")
+					assert.match(verification.prompt, /ROOT_GOAL_ASSIGNMENT/)
+					assert.match(verification.prompt, /VERIFY_CURRENT_GOAL_FOCUS/)
+					assert.ok(verification.prompt.includes(genericId) && verification.prompt.includes(namedId))
+					assert.equal((await waitForOutcome(root.taskletHost!, verificationId)).outcome?.kind, "completed")
+					return { name: "tasklets", args: { operation: "inspect", tasklet_id: verificationId } }
+				}
+				assert.equal(turn, 5, "No retry or additional parent loop after public completion")
+				const inspection = JSON.parse(toolResults(request).at(-1)!)
+				assert.equal(inspection.id, verificationId)
+				assert.equal(inspection.outcome.kind, "completed")
+				assert.equal(inspection.responses.at(-1).text, "GOAL_PRIVATE_WORK_COMPLETE")
+				const view = await h.loop.inspect()
+				assert.equal(view.children.length, 3)
+				assert.equal(view.latestVerification?.id, verificationId)
+				assert.equal(view.latestVerification?.status, "completed")
+				assert.equal(view.pendingInteractionCount, 0)
+				return { name: "respond", args: { operation: "complete", text: "GOAL_PUBLIC_SUPERVISION_COMPLETE" } }
+			}
+			try {
+				if (execution === "coordinator") await h.loop.start()
+				else await h.loop.sendMessage("Explicit public Goal follow-up")
+				await h.loop["runtime"]!.settlement!
+				assert.equal(rootTurn, 5)
+				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 3)
+				assert.ok(requests.some((request) => request.systemPrompt.includes("NAMED_GOAL_REVIEWER_INSTRUCTIONS")))
+				assert.equal((await h.store.read("root")).status, execution === "paused follow-up" ? "paused" : "achieved")
+				const saved = await h.loop.inspect()
+				assert.equal(saved.latestVerification?.id, verificationId, "Verification purpose survives disk-only inspection")
+				assert.deepEqual(saved.children.map((child) => child.id).sort(), [genericId, namedId, verificationId].sort())
+			} finally { await h.loop.cancelCurrentExecution() }
+		})
+	}
+
+	for (const execution of ["coordinator", "paused follow-up", "achieved follow-up"] as const) {
+		it(`changes only pursuing Goal user-wait status during shared escalation for ${execution}`, async () => {
+			const h = await createGoalExecution(execution === "achieved follow-up" ? "achieved" : "paused")
+			const rootEntered = deferred<void>()
+			const rootGate = deferred<void>()
+			let childTurn = 0
+			nextTurn = async (_mode, request) => {
+				if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+				return ++childTurn === 1 ? "question" : childTurn <= 3 ? "execute_command" : "complete"
+			}
+			try {
+				if (execution === "coordinator") await h.loop.start()
+				else await h.loop.sendMessage("Explicit escalation follow-up")
+				await rootEntered.promise
+				const root = h.loop.coordinator!
+				const host = root.taskletHost!
+				const expectedStatus = execution === "coordinator" ? "working" : execution === "paused follow-up" ? "paused" : "achieved"
+				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+				const child = await host.start({ title: "Goal permission worker", prompt: "GOAL_CHILD_INTERACTION_ASSIGNMENT" })
+				const question = await waitForInteraction(host, child.id)
+				assert.equal((await h.store.read("root")).status, expectedStatus, "Child-local question is not a user wait")
+				assert.equal(root.stateView.lastWaitingCardId, undefined)
+				await host.resolveInteraction(child.id, question.id, {
+					operation: "answer", response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "GOAL_PARENT_ANSWER" },
+				})
+				const permission = await waitForInteraction(host, child.id)
+				assert.equal(permission.permissionOperation?.kind, "commands")
+				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
+				assert.equal((await h.store.read("root")).status, expectedStatus)
+				assert.deepEqual(await host.resolveInteraction(child.id, permission.id, { operation: "approve" }), { status: "requires_user_approval" })
+				const escalation = host.resolveInteraction(child.id, permission.id, { operation: "escalate" })
+				const card = await waitForRootCard(root)
+				assert.equal((await h.store.read("root")).status, execution === "coordinator" ? "waiting" : expectedStatus)
+				assert.notEqual(card.id, permission.card.id)
+				await root.submitCardResponse(card.id, DiracAskResponse.REJECT)
+				assert.deepEqual(await escalation, { status: "resolved" })
+				assert.equal((await h.store.read("root")).status, expectedStatus)
+				const nextPermission = await waitForInteraction(host, child.id)
+				assert.notEqual(nextPermission.id, permission.id)
+				assert.deepEqual(await host.resolveInteraction(child.id, nextPermission.id, { operation: "approve" }), { status: "requires_user_approval" })
+				await host.resolveInteraction(child.id, nextPermission.id, { operation: "reject" })
+				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+				const settlement = h.loop["runtime"]!.settlement!
+				rootGate.resolve()
+				await settlement
+				assert.equal((await h.store.read("root")).status, execution === "coordinator" ? "achieved" : expectedStatus)
+			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		})
+	}
+
+	for (const unknownSource of ["none", "root primary", "root Utility", "child primary", "child Utility"] as const) {
+		it(`counts shared Goal usage once across reconstruction and explicit child resume (${unknownSource} unavailable)`, async () => {
+			expectLoggerErrors() // Pausing deliberately releases controlled provider chunks after cancellation.
+			const h = await createGoalExecution()
+			const started = sandbox.spy(Task.prototype, "startTask")
+			let rootEntered = deferred<void>()
+			let rootGate = deferred<void>()
+			let rootTurn = 0
+			let addChildUtility = true
+			const knownUsage = { type: "usage" as const, inputTokens: 100, outputTokens: 20, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0, stopReason: "tool_use" }
+			const utilityHandler = {
+				getModel: () => ({ id: "controlled-goal-utility", info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false } }),
+				async *createMessage(): ApiStream {
+					yield unknownSource === "child Utility"
+						? { type: "usage", inputTokens: 11, outputTokens: 7 }
+						: { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 }
+					yield { type: "text", text: "Continue under the Goal parent's assignment and current constraints." }
+				},
+			} as ApiHandler
+			const rootUtilityHandler = {
+				...utilityHandler,
+				async *createMessage(): ApiStream {
+					yield unknownSource === "root Utility"
+						? { type: "usage", inputTokens: 11, outputTokens: 7 }
+						: { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 }
+					yield { type: "text", text: "Continue the Goal objective without replaying contained work." }
+				},
+			} as ApiHandler
+			const incurUtility = async (task: Task, handler: ApiHandler) => {
+				assert.ok(await (task as any).localConversationCompaction.generateSummary(
+					{ provider: "anthropic", modelId: "controlled-goal-utility" }, () => handler,
+					createDefaultTextCondensationTemplateRegistry(), undefined, [],
+				))
+			}
+			nextTool = async (request) => {
+				if (isGoalRequest(request)) {
+					const usage = unknownSource === "root primary" ? { type: "usage" as const, inputTokens: 100, outputTokens: 20, stopReason: "tool_use" } : knownUsage
+					if (++rootTurn === 1) return { name: "respond", args: { operation: "progress", text: "Accounting scenario in progress" }, usage }
+					rootEntered.resolve()
+					await rootGate.promise
+					return { name: "respond", args: { operation: "complete", text: "Goal accounting complete" }, usage }
+				}
+				if (addChildUtility) {
+					addChildUtility = false
+					await incurUtility(started.lastCall.thisValue as Task, utilityHandler)
+				}
+				return {
+					name: "respond", args: { operation: "complete", text: "Accounted private work complete" },
+					usage: unknownSource === "child primary" ? { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" } : knownUsage,
+				}
+			}
+			const assertAvailability = (accounting: import("@shared/goal").GoalAccounting) => {
+				for (const field of ["cost", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"] as const) {
+					assert.equal(accounting[field], unknownSource === "none" ? 0 : undefined, `${field}: known zero must not replace unavailable usage`)
+				}
+			}
+			try {
+				await h.loop.start()
+				await rootEntered.promise
+				const original = h.loop.coordinator!
+				const child = await original.taskletHost!.start({ title: "Accounted Goal worker", prompt: "GOAL_ACCOUNTING_PRIVATE_ASSIGNMENT" })
+				await waitForOutcome(original.taskletHost!, child.id)
+				await incurUtility(original, rootUtilityHandler)
+				await original.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+				const whileParentWaiting = await h.store.read("root")
+				assert.equal(whileParentWaiting.accounting.inputTokens, 222, "Completed child and both Utility uses are accounted without another parent request")
+				assert.equal(whileParentWaiting.accounting.outputTokens, 54)
+				assert.equal(whileParentWaiting.accounting.totalTokens, 276)
+				assertAvailability(whileParentWaiting.accounting)
+				const pause = h.loop.pause()
+				rootGate.resolve()
+				await pause
+				const paused = await h.store.read("root")
+				const beforeResume = paused.accounting.inputTokens!
+				const beforeOutput = paused.accounting.outputTokens!
+				assert.equal(paused.status, "paused")
+				assertAvailability(paused.accounting)
+				const requestsBeforeResume = requests.length
+				rootEntered = deferred<void>()
+				rootGate = deferred<void>()
+				await h.loop.resume()
+				await rootEntered.promise
+				const resumed = h.loop.coordinator!
+				assert.notEqual(resumed.taskletHost, original.taskletHost)
+				assert.equal(requests.length, requestsBeforeResume + 1, "Only the explicit root resumes; restoring children incurs nothing")
+				assert.equal(resumed.taskletHost!.inspect(child.id).outcome?.kind, "completed")
+				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeResume)
+				assertAvailability((await h.store.read("root")).accounting)
+				await incurUtility(resumed, rootUtilityHandler)
+				await resumed.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeResume + 11, "A fresh coordinator records its own Utility use without replacing prior incurred spend")
+				await resumed.taskletHost!.resume(child.id, "EXPLICIT_ACCOUNTED_GOAL_CHILD_FOLLOWUP")
+				const resumedChild = await waitForOutcome(resumed.taskletHost!, child.id)
+				assert.equal(resumedChild.usage?.primary.tokensIn, 200)
+				assert.equal(resumedChild.usage?.utility.tokensIn, 11, "Same-ID resume retains rather than recharges Utility")
+				const afterChild = await h.store.read("root")
+				assert.equal(afterChild.accounting.inputTokens, beforeResume + 111)
+				assert.equal(afterChild.accounting.outputTokens, beforeOutput + 27)
+				assert.equal(Object.keys(afterChild.accountingSources).length, 3, "One root lifetime snapshot plus separate per-execution root Utility sources")
+				assert.ok(Object.keys(afterChild.accountingSources).every((id) => id === "goal" || id.startsWith("goal/aux:")))
+				assertAvailability(afterChild.accounting)
+				await resumed.messageStateHandler.saveDiracMessagesAndUpdateHistory()
+				assert.deepEqual((await h.store.read("root")).accounting, afterChild.accounting, "Repeated snapshots replace the same cumulative sources")
+				const repause = h.loop.pause()
+				rootGate.resolve()
+				await repause
+				const beforeFollowUp = (await h.store.read("root")).accounting.inputTokens!
+				rootEntered = deferred<void>()
+				rootGate = deferred<void>()
+				await h.loop.sendMessage("Explicit accounting follow-up without new child work")
+				await rootEntered.promise
+				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeFollowUp)
+				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 2, "Follow-up never restarts historical children")
+				const followUpSettlement = h.loop["runtime"]!.settlement!
+				rootGate.resolve()
+				await followUpSettlement
+				const followed = await h.store.read("root")
+				assert.equal(followed.status, "paused")
+				assert.equal(followed.accounting.inputTokens, beforeFollowUp + 100, "Follow-up adds only its newly incurred root request")
+				assertAvailability(followed.accounting)
+			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		})
+	}
+
 	for (const executionProfile of ["goal_coordinator", "goal_followup"] as const) {
 		it(`owns contained real Tasks for ${executionProfile} without inheriting Goal controls`, async () => {
 			const params = parameters()
@@ -400,8 +680,11 @@ describe("Tasklet real Task execution", function () {
 				if (record.outcome) throw new Error("contained outcome disk failure")
 				await saveRecord(record)
 			})
-			const settlement = assert.rejects(h.loop["runtime"]!.settlement!, /owned activity failed to retire/)
-			const closing = assert.rejects(h.loop.pause(), /owned activity failed to retire/)
+			const containsWriteFailure = (error: unknown): boolean => error instanceof AggregateError
+				? error.errors.some(containsWriteFailure)
+				: error instanceof Error && error.message.includes("contained outcome disk failure")
+			const settlement = assert.rejects(h.loop["runtime"]!.settlement!, containsWriteFailure)
+			const closing = assert.rejects(h.loop.pause(), containsWriteFailure)
 			rootGate.resolve()
 			await Promise.all([settlement, closing])
 			assert.equal(root.taskletHost!.inspect(child.id).outcomePersisted, false)
@@ -532,7 +815,7 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(root.taskletHost!.inspect(child.id).outcome, undefined)
 			save.restore()
 			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
-			assert.deepEqual(await h.loop["commitCompletion"](runtime.host, surface, "Goal completed"), { committed: true })
+			assert.deepEqual(await h.loop["commitCompletion"](surface, "Goal completed"), { committed: true })
 			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
 			rootGate.resolve()
 			await runtime.settlement
@@ -556,24 +839,22 @@ describe("Tasklet real Task execution", function () {
 			const root = runtime.coordinator
 			const config = (root as any).toolExecutor.asToolConfig()
 			const goal = h.created.firstCall.args[0].environmentFactory.create(config, "block_goal").goal!
-			const guardEntered = deferred<void>()
-			const guardGate = deferred<void>()
-			const originalGuard = runtime.host.guardTerminalTransition.bind(runtime.host)
-			const guard = sandbox.stub(runtime.host, "guardTerminalTransition").callsFake(async () => {
-				guardEntered.resolve()
-				await guardGate.promise
-				await originalGuard()
+			const transitionEntered = deferred<void>()
+			const transitionGate = deferred<void>()
+			const holdingTransition = h.loop["lifecycleMutex"].withLock(async () => {
+				transitionEntered.resolve()
+				await transitionGate.promise
 			})
+			await transitionEntered.promise
 			const blocked = assert.rejects(goal.blockGoal("Cannot continue"), /Active tasklets:.*racing child/)
-			await guardEntered.promise
 			const starting = root.taskletHost!.start({ title: "racing child", prompt: "PRIVATE_RACING_ASSIGNMENT" })
-			guardGate.resolve()
+			transitionGate.resolve()
+			await holdingTransition
 			await blocked
 			const child = await starting
 			await waitForInteraction(root.taskletHost!, child.id)
 			assert.equal(h.loop["requestedEnd"], undefined)
 			assert.equal(root.taskletHost!.inspect(child.id).outcome, undefined)
-			guard.restore()
 			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
 			await goal.blockGoal("No work remains active")
 			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
@@ -2359,6 +2640,8 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(resumed.conversationUlid, child.conversationUlid)
 			assert.deepEqual(resumed.usage?.primary, {
 				tokensIn: 300, tokensOut: 60, cacheWrites: 6, cacheReads: 8, cost: 1.25, reasoningTokens: 10,
+				usageObserved: true,
+				usageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: false, cacheReads: false, cost: false, reasoningTokens: false },
 			})
 			const metrics = getApiMetrics(reopened.messageStateHandler.getDiracMessages())
 			assert.equal(metrics.totalTokensIn, 300)
@@ -2447,6 +2730,8 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(first.usage?.primary.tokensIn, 100)
 				assert.deepEqual(first.usage?.utility, {
 					tokensIn: 11, tokensOut: 7, cacheWrites: 1, cacheReads: 2, cost: 0.5, reasoningTokens: 3,
+					usageObserved: true,
+					usageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: true, cacheReads: true, cost: true, reasoningTokens: true },
 				})
 				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 111)
 				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
@@ -2493,7 +2778,11 @@ describe("Tasklet real Task execution", function () {
 		sinon.assert.called(params.tasklet!.postPresentationToOwner as sinon.SinonStub)
 		const transcript = await getSavedApiConversationState(address)
 		assert.match(JSON.stringify(transcript.messages), /Private assignment complete/)
-		assert.match(JSON.stringify((await getSavedPresentationHistory(address)).messages), /Private assignment complete/)
+		const presentation = (await getSavedPresentationHistory(address)).messages
+		assert.match(JSON.stringify(presentation), /Read from assignment.txt/)
+		assert.equal(presentation.some((message) => message.content.type === DiracMessageType.CARD && message.content.card.kind === CardKind.TASK_COMPLETION), false,
+			"Private tasklets report completion to their counterparty, not through foreground completion cards")
+		sinon.assert.calledWithMatch(params.tasklet!.counterparty.recordResponse as sinon.SinonStub, { operation: "complete", text: "Private assignment complete." })
 		assert.deepEqual(await getSavedApiConversationProviderState(address), task.messageStateHandler.getApiConversationProviderState())
 		assert.equal((await getSavedApiConversationProviderState(address)).deliveredSteeringMessageIds?.length, 1)
 		const base = getTaskDirectoryPath(address)

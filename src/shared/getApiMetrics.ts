@@ -1,6 +1,6 @@
 import { DiracApiReqInfo, DiracMessage } from "./ExtensionMessage"
 import { getSubagentUsage } from "./subagentUsage"
-import { getTaskletUsage } from "./taskletUsage"
+import { getTaskletUsage, taskletUsageAvailability, type TaskletUsageAvailability } from "./taskletUsage"
 
 export interface ApiMetrics {
 	totalTokensIn: number
@@ -11,6 +11,52 @@ export interface ApiMetrics {
 	totalReasoningTokens: number
 	/** Weighted-average cache hit rate: totalCacheReads / total prompt tokens */
 	cacheHitRate: number
+}
+
+/** Availability is separate from numeric incurred counters, whose unknown fields retain placeholder zeroes. */
+export function getApiUsageKnowledge(messages: DiracMessage[]): { usageObserved: boolean; usageAvailability: TaskletUsageAvailability } {
+	const fields = {
+		inputTokens: "tokensIn", outputTokens: "tokensOut", reasoningTokens: "reasoningTokens",
+		cacheWrites: "cacheWrites", cacheReads: "cacheReads", cost: "cost",
+	} as const
+	const sources: TaskletUsageAvailability[] = []
+	for (const message of messages) {
+		if (message.content.type === "api_status") {
+			const status = message.content.status
+			const currentObserved = status.usageAvailability?.inputTokens || status.usageAvailability?.outputTokens ||
+				Object.values(fields).some((key) => (status[key] ?? 0) > 0 || (!status.usageAvailability && status[key] !== undefined))
+			const archivedObserved = status.deletedUsageAvailability?.inputTokens || status.deletedUsageAvailability?.outputTokens ||
+				Object.values(fields).some((key) => (status.deletedMetrics?.[key] ?? 0) > 0 ||
+					(!status.deletedUsageAvailability && status.deletedMetrics?.[key] !== undefined))
+			for (const archived of [false, true]) {
+				if (!(archived ? archivedObserved : currentObserved)) continue
+				const availability = {} as TaskletUsageAvailability
+				for (const field of Object.keys(fields) as Array<keyof typeof fields>) {
+					availability[field] = archived
+						? (status.deletedUsageAvailability?.[field] ??
+							((field === "inputTokens" || field === "outputTokens") && status.deletedMetrics?.[fields[field]] !== undefined))
+						: (status.usageAvailability?.[field] ?? status[fields[field]] !== undefined)
+				}
+				sources.push(availability)
+			}
+		} else if (message.content.type === "card") {
+			const usage = getTaskletUsage(message.content.card)
+			if (usage && usage.usageObserved !== false) sources.push(taskletUsageAvailability(usage))
+			const legacy = getSubagentUsage(message.content.card)
+			if (legacy) sources.push({ inputTokens: true, outputTokens: true, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false })
+		}
+	}
+	return {
+		usageObserved: sources.length > 0,
+		usageAvailability: {
+			inputTokens: sources.every((source) => source.inputTokens),
+			outputTokens: sources.every((source) => source.outputTokens),
+			reasoningTokens: sources.every((source) => source.reasoningTokens),
+			cacheWrites: sources.every((source) => source.cacheWrites),
+			cacheReads: sources.every((source) => source.cacheReads),
+			cost: sources.every((source) => source.cost),
+		},
+	}
 }
 
 /**

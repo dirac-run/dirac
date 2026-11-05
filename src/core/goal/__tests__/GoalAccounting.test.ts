@@ -14,10 +14,6 @@ function record(): GoalRecord {
 		updatedAt: 0,
 		lastPausedAt: 0,
 		activeDurationMs: 0,
-		wakeSequence: 0,
-		eventSequence: 0,
-		events: [],
-		children: [],
 		accountingSources: {},
 		accounting: {},
 	}

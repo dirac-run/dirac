@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
+import sinon from "sinon"
 import type { ApiConfiguration } from "@shared/api"
 import type { Settings } from "@shared/storage/state-keys"
+import * as taskModule from "@core/task"
+import type { TaskParams } from "@core/task"
 import {
 	createTaskWorkingConfiguration,
 	type TaskWorkingConfiguration,
@@ -22,23 +25,39 @@ function configuration(hooksEnabled: boolean): TaskWorkingConfiguration {
 	})
 }
 
-describe("GoalTaskFactory working configuration", () => {
-	it("disables hooks for children without changing the owning Goal configuration", () => {
-		const source = configuration(true)
-		const factory = new GoalTaskFactory({ workingConfiguration: source } as ConstructorParameters<typeof GoalTaskFactory>[0])
-		const workingConfiguration = factory["workingConfiguration"].bind(factory)
+describe("GoalTaskFactory root construction", () => {
+	afterEach(() => sinon.restore())
 
-		const child = workingConfiguration("goal_child")
-		assert.equal(child.settings.hooksEnabled, false)
-		assert.strictEqual(workingConfiguration("goal_coordinator"), source)
-		assert.strictEqual(workingConfiguration("goal_followup"), source)
-		assert.equal(source.settings.hooksEnabled, true)
-	})
+	for (const executionProfile of ["goal_coordinator", "goal_followup"] as const) {
+		for (const hooksEnabled of [true, false]) {
+			it(`inherits the current configuration for ${executionProfile} with hooks ${hooksEnabled ? "enabled" : "disabled"}`, async () => {
+				const source = configuration(hooksEnabled)
+				const constructed = sinon.stub(taskModule, "Task").callsFake(function (params: TaskParams) {
+					return { params } as unknown as taskModule.Task
+				})
+				const postCoordinatorState = sinon.stub().resolves()
+				const factory = new GoalTaskFactory({
+					workingConfiguration: source,
+					postCoordinatorState,
+				} as unknown as ConstructorParameters<typeof GoalTaskFactory>[0])
+				const environmentFactory = {} as Parameters<GoalTaskFactory["create"]>[0]["environmentFactory"]
 
-	it("reuses the configuration when child hooks are already disabled", () => {
-		const source = configuration(false)
-		const factory = new GoalTaskFactory({ workingConfiguration: source } as ConstructorParameters<typeof GoalTaskFactory>[0])
+				await factory.create({
+					id: "goal",
+					conversationUlid: "conversation",
+					executionProfile,
+					environmentFactory,
+					onHistorySnapshot: async () => { },
+				})
 
-		assert.strictEqual(factory["workingConfiguration"]("goal_child"), source)
-	})
+				const params = constructed.firstCall.args[0] as TaskParams
+				assert.strictEqual(params.workingConfiguration, source)
+				assert.equal(params.workingConfiguration?.settings.hooksEnabled, hooksEnabled)
+				assert.equal(params.executionProfile, executionProfile)
+				assert.equal(params.releaseTaskLock, undefined)
+				assert.strictEqual(params.toolEnvironmentFactory, environmentFactory)
+				assert.strictEqual(params.postStateToWebview, postCoordinatorState)
+			})
+		}
+	}
 })

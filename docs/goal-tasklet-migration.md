@@ -2,11 +2,11 @@
 
 ## Status and scope
 
-**6.1: committed as `6606ef65`. 6.2: committed as `481d1858`. 6.3: implemented and verified.**
-Goal coordinators/follow-ups now own shared hosts with safe child environments and
-lifecycle settlement. Public delegation remains disabled until 6.4 removes the
-interim legacy supervisor and completes interactions, accounting and presentation.
-This intermediate commit is not the phase-6 release.
+**6.1: committed as `6606ef65`. 6.2: committed as `481d1858`. 6.3: committed as `26b5ada9`. 6.4: implemented and verified.**
+Goal coordinators/follow-ups now use their Task-owned shared host and public
+controls. The legacy Goal supervisor, private child environment and seven
+superseded tools are removed. Integrated application acceptance remains 6.5;
+this is not yet the final phase-6 acceptance declaration.
 
 This is the tracked phase-6 audit and implementation breakdown. It supplements
 the local `ascratch/docs/tasklet-design-and-migration.md` decision record; it does
@@ -120,8 +120,8 @@ implementation are engineering details within these guarantees.
 |---|---|---|
 | 6.1 — Contract/source audit | Source audit and D32–D34 approval; finalized dependent split. Documentation only. | Committed `6606ef65` |
 | 6.2 — Storage/restoration boundary | Version-2-only execution; read-only legacy ownership; rejection and byte preservation through startup, history/prompt reconstruction and selection; explicit root/private-child deletion. No importer or public cutover. Evidence below. | Committed `481d1858` |
-| 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Implemented and verified |
-| 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Not started; depends on 6.3 |
+| 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Committed `26b5ada9` |
+| 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Implemented and verified |
 | 6.5 — Integrated acceptance/cleanup | Compose real Goal-root/child scenarios, restored data, permissions, accounting, selection/deletion and frontend behavior; remove remaining dead paths. Record controlled-provider, rendered and application evidence separately. | Not started; depends on 6.4 |
 
 D34 removes the need for legacy artifact, event or accounting conversion. New
@@ -234,3 +234,63 @@ pass. Existing phase-5 verification is historical evidence, not a new run.
   6.4. No rendered UI, CLI application/PTY or live-provider execution is claimed for
   this backend lifecycle item. The separately baseline-confirmed accounting transport
   assertion from 6.2 remains outside this passing selection.
+
+## Verification performed for 6.4
+
+- Coordinator and explicit follow-up inventories/dispatch use shared generic or
+  named asynchronous spawning and `tasklets` supervision. Disabling subagents
+  rejects generic/named spawn dispatch as well as hiding schemas; existing handles
+  remain supervisable. Private tasklets have neither delegation nor Goal controls.
+- Removed GoalTaskHost, GoalTaskEnvironment, the `goal_child` execution profile and
+  all seven old control-tool modules. Goal records contain lifecycle/objective and
+  replaceable accounting projections, not a second children/events registry. Raw
+  read-only historical ownership remains for D34 privacy and explicit deletion.
+- `verify_goal` builds its objective/revision, existing-handle and focus assignment
+  in its own module and accepts an ordinary tasklet with an atomic purpose marker.
+  Completion has no implicit verification gate. Goal summaries derive live or
+  disk-only tasklet data without reconstructing a host or inventing live status,
+  durations or successful settlement. All pending requests are counted.
+- Genuine shared user escalation updates pursuing Goal waiting/working status;
+  private child questions do not. Paused/achieved follow-up status never changes.
+  Current-parent permission revocation and operation-scoped escalation remain in
+  the shared boundary. Terminal admission and failed-retirement ownership remain
+  covered after removal of the legacy host.
+- Root metrics include each child's replaceable lifetime primary/Utility snapshot
+  once; root Utility remains per-execution. Durable usage knowledge distinguishes
+  unavailable values from known zeroes, survives stale transcript restoration and
+  same-ID resumption, and does not fabricate zero usage from unobserved retries or
+  checkpoint archives. Legacy shared records do not acquire invented knowledge.
+- Independent review found silent child termination could leave unbounded parent
+  sleep pending. Shared settlement now publishes a durable host outcome event in
+  the existing channel (not a fabricated agent response), including silent failure
+  and deadline interruption. Filtering, acknowledgement, repeated reconstruction
+  and fresh notifications on explicit resume have regressions. In-memory removal
+  reproduces all three silent-outcome failures. Review also found the stale-prefix
+  knowledge and empty-archive defects above; both were reproduced and fixed.
+- **421 backend tests pass**, no failures/skips in the final combined selection:
+  every retained Goal suite, real Tasklet execution, shared host/reopening/public
+  controls, durable usage/availability/checkpoints, root persistence ownership,
+  profile eligibility, real tool dispatch/inventories and accounting transports.
+  Log: `/tmp/dirac-64-final-tests.log`. Earlier focused selections additionally
+  covered profile/architecture/completion/prompt regressions; they overlap and are
+  not added to this count. **7 CLI and 7 webview Goal rendering tests pass**;
+  logs: `/tmp/dirac-64-cli-goal-summary.log`,
+  `/tmp/dirac-64-webview-goal-header.log`.
+- Full `npm run compile`, unit-test TypeScript checking, fresh `npm run cli:build`,
+  full webview build, `npm run check:arch` and whitespace checks pass. Architecture
+  baselines are unchanged. Goal projection functions remain in the existing
+  GoalLoop module rather than adding a cyclic module. Logs:
+  `/tmp/dirac-64-final-{compile,unit-types,cli-build,arch}.log`,
+  `/tmp/dirac-64-cleanup-webview-build.log`.
+- The old unavailable-accounting transport assertion now checks optional fields
+  individually and passes; production transport behavior was unchanged. Other
+  separately baseline-reproduced failures remain excluded: ToolRegistry priority
+  replacement, ToolExecutor permission-binding onUsage expectation and three
+  SurfaceAdapter cases. Logs: `/tmp/dirac-64-registry-baseline.log`,
+  `/tmp/dirac-64-request-runtime-baseline.log`,
+  `/tmp/dirac-64-surface-baseline.log`. They are not claimed as passing coverage.
+- Controlled providers and host resources support the composed runtime evidence;
+  rendered component tests are separate. No live-provider or real CLI application
+  Goal scenario is claimed yet; the latter remains 6.5. An initial combined test
+  launch raced protobuf regeneration and was rerun after both builds completed;
+  the missing generated files were a verification-order failure, not a source fix.

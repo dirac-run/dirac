@@ -55,7 +55,7 @@ describe("TaskRequestLoop interrupted response persistence", () => {
 			const revert = sinon.spy(editor, "revertChanges")
 			const context = {
 				taskState,
-				executionProfile: "goal_child",
+				executionProfile: "tasklet",
 				ulid: "interrupted-child",
 				requestRuntime: {
 					requestId: "request-1",

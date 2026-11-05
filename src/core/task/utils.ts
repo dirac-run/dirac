@@ -2,6 +2,7 @@ import { ApiHandler } from "@core/api"
 import { execSync } from "child_process"
 import { showSystemNotification } from "@/integrations/notifications"
 import { DiracApiReqCancelReason, DiracApiReqInfo, DiracMessageType } from "@/shared/ExtensionMessage"
+import { getApiUsageKnowledge } from "@shared/getApiMetrics"
 import { calculateApiCostAnthropic, calculateApiCostOpenAI, calculateApiCostQwen } from "@/utils/cost"
 import { MessageStateHandler } from "./message-state"
 import type { UsageMetricAvailability } from "./StreamingMetricsManager"
@@ -121,6 +122,14 @@ export const updateApiReqMsg = async (params: UpdateApiReqMsgParams) => {
 
 	if (params.archiveForRetry) {
 		const archived = { ...currentApiReqInfo.deletedMetrics }
+		const knowledge = getApiUsageKnowledge([{
+			...msg,
+			content: { type: DiracMessageType.API_STATUS, status: { ...currentApiReqInfo, ...patch, cost } },
+		}])
+		// Empty-source availability is vacuously true, not evidence of a reported
+		// zero. Preserve unobserved attempts as unobserved when reading the archive.
+		patch.deletedUsageAvailability = knowledge.usageObserved ? knowledge.usageAvailability
+			: { inputTokens: false, outputTokens: false, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false }
 		for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
 			const value = patch[key]
 			if (value !== undefined) archived[key] = (archived[key] ?? 0) + value

@@ -1,6 +1,5 @@
 import { CardStatus, isFinalStatus, type Card } from "@shared/ExtensionMessage"
 import { toError } from "@shared/errors"
-import type { GoalChildRecord } from "@shared/goal"
 import { DiracIcon } from "@shared/icons"
 import type { CardParams, ICardHandle, IToolEnvironment } from "../interfaces/IToolEnvironment"
 
@@ -53,20 +52,6 @@ async function finalizeFailedGoalTaskAction(
 	throw actionError
 }
 
-export function goalTaskCardBody(
-	task: Pick<GoalChildRecord, "id" | "title" | "role" | "status">,
-	detail?: { label: string; markdown: string },
-): string {
-	const lines = [
-		`**Task:** ${task.title}`,
-		`**Task ID:** \`${task.id}\``,
-		`**Role:** ${task.role}`,
-		`**Status:** ${task.status}`,
-	]
-	if (detail) lines.push("", `**${detail.label}:**`, detail.markdown)
-	return lines.join("\n")
-}
-
 export function pendingGoalTaskCardBody(
 	taskTitleOrId: string,
 	detail?: { label: string; markdown: string },
@@ -74,8 +59,4 @@ export function pendingGoalTaskCardBody(
 	const lines = [`**Task:** ${taskTitleOrId}`]
 	if (detail) lines.push("", `**${detail.label}:**`, detail.markdown)
 	return lines.join("\n")
-}
-
-export function goalTaskCardOutput(task: GoalChildRecord): Record<string, unknown> {
-	return { ...task }
 }

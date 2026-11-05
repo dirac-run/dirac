@@ -155,6 +155,84 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		await fs.rm(directory, { recursive: true, force: true })
 	})
 
+	for (const acknowledge of [false, true]) {
+		it(`retains a ${acknowledge ? "delivered" : "pending"} terminal notification across repeated reconstruction without duplicating it`, async () => {
+			const original = newHost()
+			const record = await original.start({ title: "Silent completed child", prompt: "Work" })
+			children[0].outcome.resolve(completed)
+			await original["children"].get(record.id)!.settlement
+			const terminalEvents = await storage.loadTaskletEvents(address(record.id))
+			assert.equal(terminalEvents.length, 1)
+			assert.deepEqual(terminalEvents[0].communication, { type: "outcome", outcome: completed })
+			if (acknowledge) await (await original.prepareEventDelivery())!.acknowledge()
+			const savedEvents = await storage.loadTaskletEvents(address(record.id))
+			await original.shutdown()
+
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const reopened = newHost()
+				await reopened.reconstruct()
+				await reopened.reconstruct()
+				sinon.assert.calledOnce(constructed)
+				assert.deepEqual(await storage.loadTaskletEvents(address(record.id)), savedEvents)
+				assert.deepEqual(reopened.inspect(record.id).responses, [])
+				assert.deepEqual(reopened.inspect(record.id).outcome, completed)
+				const delivery = await reopened.prepareEventDelivery()
+				if (acknowledge) assert.equal(delivery, undefined)
+				else {
+					assert.ok(delivery)
+					assert.equal(delivery.content.length, 1)
+					assert.deepEqual(delivery.content[0].taskletEventIds, [terminalEvents[0].id])
+					assert.deepEqual(await reopened.sleep(), { reason: "event", taskletId: record.id, eventId: terminalEvents[0].id })
+				}
+				await reopened.shutdown()
+			}
+		})
+	}
+
+	it("publishes a new terminal notification only after an explicitly resumed execution settles", async () => {
+		const original = newHost()
+		const record = await original.start({ title: "Same handle", prompt: "Work" })
+		children[0].outcome.resolve(completed)
+		await original["children"].get(record.id)!.settlement
+		const firstEvents = await storage.loadTaskletEvents(address(record.id))
+		assert.equal(firstEvents.length, 1)
+		await (await original.prepareEventDelivery())!.acknowledge()
+		const delivered = await storage.loadTaskletEvents(address(record.id))
+		await original.shutdown()
+
+		const reopened = newHost()
+		await reopened.reconstruct()
+		const resumed = await reopened.resume(record.id, "Explicit second assignment")
+		assert.equal(resumed.id, record.id)
+		assert.equal(resumed.conversationUlid, record.conversationUlid)
+		assert.equal(resumed.outcome, undefined)
+		assert.deepEqual(await storage.loadTaskletEvents(address(record.id)), delivered)
+		const sleeping = reopened.sleep()
+		await Promise.resolve() // Sleep first awaits this host's completed reconstruction.
+		assert.equal(reopened.isSleeping, true)
+		const secondOutcome: TaskRunOutcome = { kind: "failed", failedAt: 150, error: { name: "Error", message: "Silent resumed failure" } }
+		children[1].outcome.resolve(secondOutcome)
+		await reopened["children"].get(record.id)!.settlement
+		const events = await storage.loadTaskletEvents(address(record.id))
+		assert.equal(events.length, 2)
+		assert.deepEqual(events[0], delivered[0])
+		assert.notEqual(events[1].id, events[0].id)
+		assert.deepEqual(events[1].communication, { type: "outcome", outcome: secondOutcome })
+		assert.equal(events[1].deliveredAt, undefined)
+		assert.deepEqual(await sleeping, { reason: "event", taskletId: record.id, eventId: events[1].id })
+		assert.deepEqual(reopened.inspect(record.id).responses, [])
+		const delivery = (await reopened.prepareEventDelivery())!
+		assert.equal(delivery.content.length, 1)
+		assert.deepEqual(delivery.content[0].taskletEventIds, [events[1].id])
+		await delivery.acknowledge()
+		await reopened.shutdown()
+		const final = newHost()
+		await final.reconstruct()
+		sinon.assert.calledTwice(constructed)
+		assert.equal((await storage.loadTaskletEvents(address(record.id))).length, 2)
+		assert.equal(await final.prepareEventDelivery(), undefined)
+	})
+
 	it("preserves durable configuration across reopening without reinjecting parent history on resume", async () => {
 		const getParentHistory = sandbox.stub().returns({ messages: [{ role: "user", content: "Original root context" }] })
 		const original = newHost({ getParentHistory })

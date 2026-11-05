@@ -71,7 +71,12 @@ describe("ToolRegistry", () => {
 		const toolNames = ToolDiscoveryService.scanBuiltinTools().map((tool) => tool.spec.name)
 		assert.equal(toolNames.includes("new_task"), false)
 		assert.ok(toolNames.includes("condense"))
-		assert.ok(toolNames.includes("start_task"))
+		for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
+			assert.equal(toolNames.includes(name), false, name)
+		}
+		for (const name of ["use_subagents", "tasklets", "verify_goal", "update_goal", "block_goal"]) {
+			assert.ok(toolNames.includes(name), name)
+		}
 	})
 
 	describe("registration", () => {

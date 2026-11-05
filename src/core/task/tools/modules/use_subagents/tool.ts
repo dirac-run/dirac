@@ -12,7 +12,7 @@ export function create(): IDiracTool {
 }
 
 export const secondarySpec: DiracToolSpec = tasklets_spec
-export const secondaryExposure: ToolExposure = { kind: "profile_only", profiles: ["standalone"] }
+export const secondaryExposure: ToolExposure = { kind: "profile_only", profiles: ["standalone", "goal_coordinator", "goal_followup"] }
 
 export function createSecondary(): IDiracTool {
 	return new TaskletsTool()

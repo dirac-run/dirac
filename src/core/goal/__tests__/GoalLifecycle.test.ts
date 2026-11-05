@@ -1,12 +1,10 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
 import type { GoalRecord } from "@shared/goal"
-import { CardStatus } from "@shared/ExtensionMessage"
 import {
 	applyGoalStatusTransition,
 	goalActiveDurationAt,
 	goalWallDurationAt,
-	interruptNonterminalGoalChildren,
 } from "../GoalLifecycle"
 
 function record(overrides: Partial<GoalRecord> = {}): GoalRecord {
@@ -20,10 +18,6 @@ function record(overrides: Partial<GoalRecord> = {}): GoalRecord {
 		updatedAt: 100,
 		lastActivatedAt: 100,
 		activeDurationMs: 10,
-		wakeSequence: 0,
-		eventSequence: 0,
-		events: [],
-		children: [],
 		accountingSources: {},
 		accounting: {},
 		...overrides,
@@ -77,57 +71,6 @@ describe("Goal lifecycle", () => {
 		assert.equal(goal.statusReason, "Resumed by user")
 	})
 
-	it("interrupts every nonterminal child and invalidates interactions", () => {
-		const goal = record({
-			children: [
-				{
-					id: "running",
-					title: "Running",
-					role: "task",
-					status: "running",
-					createdAt: 100,
-					lastActivityAt: 120,
-					deliveredResponseCursor: 0,
-				},
-				{
-					id: "waiting",
-					title: "Waiting",
-					role: "task",
-					status: "waiting",
-					createdAt: 100,
-					lastActivityAt: 130,
-					deliveredResponseCursor: 0,
-					pendingInteraction: {
-						id: "interaction",
-						kind: "approval",
-						createdAt: 130,
-						card: { id: "card", header: "Approve", status: CardStatus.WAITING_FOR_INPUT, renderType: "text" },
-					},
-				},
-				{
-					id: "done",
-					title: "Done",
-					role: "verification",
-					status: "completed",
-					createdAt: 100,
-					lastActivityAt: 125,
-					endedAt: 125,
-					deliveredResponseCursor: 1,
-				},
-			],
-		})
-
-		assert.equal(interruptNonterminalGoalChildren(goal, 150), true)
-		assert.deepEqual(
-			goal.children.map((child) => child.status),
-			["interrupted", "interrupted", "completed"],
-		)
-		assert.equal(goal.children[1].pendingInteraction, undefined)
-		assert.equal(goal.children[0].endedAt, 150)
-		assert.equal(goal.children[0].lastActivityAt, 120)
-		assert.equal(goal.children[1].lastActivityAt, 130)
-		assert.equal(goal.children[2].endedAt, 125)
-	})
 
 	it("freezes wall duration at a terminal transition", () => {
 		const goal = record()

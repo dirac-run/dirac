@@ -60,11 +60,11 @@ describe("Task persistence ownership", () => {
 		}
 	})
 
-	for (const executionProfile of ["goal_child", "goal_coordinator", "goal_followup"] as const) {
+	for (const executionProfile of ["tasklet", "goal_coordinator", "goal_followup"] as const) {
 		it(`retires ${executionProfile} writers and contained work when their run finishes`, async () => {
 		const task = taskWithPersistenceOwner()
 			task.executionProfile = executionProfile
-			task.taskletHost = executionProfile === "goal_child" ? undefined : { shutdown: sinon.stub().resolves() }
+			task.taskletHost = executionProfile === "tasklet" ? undefined : { shutdown: sinon.stub().resolves() }
 		await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
 		sinon.assert.callOrder(task.lifecycleManager.finalizeTaskRun, task.releaseTaskLock)
 		sinon.assert.calledOnce(task.messageStateHandler.retirePersistence)

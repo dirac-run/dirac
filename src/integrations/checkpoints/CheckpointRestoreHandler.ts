@@ -4,7 +4,7 @@ import { getPresentationHistoryAtMessage } from "@core/storage/disk"
 import { findLastIndex } from "@shared/array"
 import { combineCardSequences } from "@shared/combineCardSequences"
 import { DiracMessage } from "@shared/ExtensionMessage"
-import { getApiMetrics } from "@shared/getApiMetrics"
+import { getApiMetrics, getApiUsageKnowledge } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { DiracCheckpointRestore } from "@shared/WebviewMessage"
@@ -251,13 +251,16 @@ export class CheckpointRestoreHandler {
 				const diracMessages = this.services.messageStateHandler.getDiracMessages()
 				const deletedMessages = diracMessages.slice(messageIndex + 1)
 				// Tasklet snapshots remain separately attributed; never fold them into deleted root API usage.
-				const deletedApiReqsMetrics = getApiMetrics(
-					combineCardSequences(
-						deletedMessages.filter(
-							(message) => message.content.type !== "card" || !getTaskletUsage(message.content.card),
-						),
+				const deletedApiMessages = combineCardSequences(
+					deletedMessages.filter(
+						(message) => message.content.type !== "card" || !getTaskletUsage(message.content.card),
 					),
 				)
+				const deletedApiReqsMetrics = getApiMetrics(deletedApiMessages)
+				const deletedKnowledge = getApiUsageKnowledge(deletedApiMessages)
+				// Do not turn an empty/unreported source into a reported known-zero one.
+				const deletedAvailability = deletedKnowledge.usageObserved ? deletedKnowledge.usageAvailability
+					: { inputTokens: false, outputTokens: false, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false }
 
 				// Detect files edited after this message timestamp for file context warning
 				if (restoreType === "task") {
@@ -305,6 +308,8 @@ export class CheckpointRestoreHandler {
 					cacheWrites: 0,
 					cacheReads: 0,
 					cost: deletedApiReqsMetrics.totalCost,
+					usageAvailability: deletedAvailability,
+					deletedUsageAvailability: deletedAvailability,
 					deletedMetrics: {
 						tokensIn: deletedApiReqsMetrics.totalTokensIn,
 						tokensOut: deletedApiReqsMetrics.totalTokensOut,

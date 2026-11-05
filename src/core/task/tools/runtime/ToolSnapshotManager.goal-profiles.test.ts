@@ -25,7 +25,9 @@ import type { ToolSelectionPolicy } from "./ToolSelectionPolicy"
 import type { ToolRequestSnapshot } from "./ToolSnapshot"
 import { ToolSnapshotManager } from "./ToolSnapshotManager"
 
-const nonDelegatingProfiles = ["goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const
+const rootProfiles = ["standalone", "goal_coordinator", "goal_followup"] as const
+const nonDelegatingProfiles = ["tasklet"] as const
+const retiredGoalTools = ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]
 const agentConfigs: AgentBaseConfig[] = ["reviewer", "implementer"].map((name) => ({
 	name,
 	description: `Fixture ${name}`,
@@ -43,8 +45,8 @@ function nativeNames(snapshot: ToolRequestSnapshot): string[] {
 }
 
 function assertGoalTools(snapshot: ToolRequestSnapshot, profile: TaskExecutionProfile): void {
-	// Current discovery exposes Goal tools only to coordinators, NOT follow-ups.
-	const expected = profile === "goal_coordinator" ? [...GOAL_TOOL_NAMES].sort() : []
+	const goalRoot = profile === "goal_coordinator" || profile === "goal_followup"
+	const expected = goalRoot ? [...GOAL_TOOL_NAMES].sort() : []
 	const goalNames = new Set<string>(GOAL_TOOL_NAMES)
 	for (const names of [
 		snapshot.inventoryEnabledTools.map((tool) => tool.spec.name),
@@ -53,9 +55,10 @@ function assertGoalTools(snapshot: ToolRequestSnapshot, profile: TaskExecutionPr
 		[...snapshot.executableToolNames],
 	]) {
 		assert.deepEqual(names.filter((name) => goalNames.has(name)).sort(), expected)
+		assert.deepEqual(names.filter((name) => retiredGoalTools.includes(name)), [])
 	}
 	for (const name of GOAL_TOOL_NAMES) {
-		assert.equal(snapshot.coordinator.has(name), profile === "goal_coordinator", name)
+		assert.equal(snapshot.coordinator.has(name), goalRoot, name)
 	}
 }
 
@@ -77,6 +80,7 @@ async function createSnapshot(
 	selectionPolicy?: ToolSelectionPolicy,
 	activeSkills: readonly SkillMetadata[] = [],
 	mode: TaskConfig["mode"] = "act",
+	subagentsEnabled = true,
 ) {
 	const config = {
 		taskId: `snapshot-${profile}`,
@@ -84,7 +88,7 @@ async function createSnapshot(
 		cwd: "/goal-profile-fixture",
 		executionProfile: profile,
 		mode,
-		subagentsEnabled: true,
+		subagentsEnabled,
 		hooksEnabled: false,
 		vscodeTerminalExecutionMode: "backgroundExec",
 		providerId: "anthropic",
@@ -106,14 +110,15 @@ async function createSnapshot(
 		getSelectionPolicy: () => selectionPolicy,
 		getActiveSkills: () => activeSkills,
 		// Same availability wiring as ToolExecutor; no mocked profile decisions.
-		isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(profile, tool),
+		isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(profile, tool) &&
+			(tool.id !== DiracDefaultTool.USE_SUBAGENTS || subagentsEnabled),
 		environmentFactory: { create: createEnvironment },
 	})
 	const context = {
 		providerInfo: { providerId: config.providerId, model: config.model },
 		executionProfile: profile,
 		ide: "cli",
-		subagentsEnabled: true,
+		subagentsEnabled,
 	} as SystemPromptContext
 	const snapshot = await manager.getSnapshotForRequest(context, { requestId: config.taskId, configurationRevision: 1 })
 	config.coordinator = snapshot.coordinator
@@ -222,14 +227,14 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 
 	it("keeps parent controls out of legacy worker allowlists", async () => {
 		const tool = ToolDiscoveryService.scanBuiltinTools().find((candidate) => candidate.name === "tasklets")!
-		assert.deepEqual(tool.exposure, { kind: "profile_only", profiles: ["standalone"] })
+		assert.deepEqual(tool.exposure, { kind: "profile_only", profiles: [...rootProfiles] })
 		assert.equal(ToolRegistry.getInstance().scopeToolForSubagent(tool, ["tasklets"]), undefined)
 	})
 
-	for (const profile of ["standalone", ...nonDelegatingProfiles] as const) {
-		it(`${profile} exposes tasklet controls only to the owning ordinary-root profile`, async () => {
+	for (const profile of [...rootProfiles, ...nonDelegatingProfiles] as const) {
+		it(`${profile} exposes tasklet controls only to root profiles`, async () => {
 			const { snapshot, config } = await createSnapshot(profile)
-			const expected = profile === "standalone"
+			const expected = profile !== "tasklet"
 			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.spec.name === "tasklets"), expected)
 			assert.equal(snapshot.promptVisibleSpecs.some((spec) => spec.name === "tasklets"), expected)
 			assert.equal(nativeNames(snapshot).includes("tasklets"), expected)
@@ -268,38 +273,86 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 		})
 	}
 
-	for (const namedAgents of [false, true]) {
-		it(`standalone preserves ordinary inventory and dispatch with named configs ${namedAgents ? "present" : "absent"}`, async () => {
-			if (!namedAgents) configuredAgents = []
-			const processCall = sinon.stub(UseSubagentsTool.prototype, "processCall").resolves("fixture dispatched")
-			const { snapshot, config, createEnvironment, environment } = await createSnapshot("standalone")
-			const expectedVisible = namedAgents ? namedToolNames : [DiracDefaultTool.USE_SUBAGENTS]
-			assert.deepEqual(
-				snapshot.promptVisibleSpecs.filter((spec) => spec.id === DiracDefaultTool.USE_SUBAGENTS).map((spec) => spec.name),
-				expectedVisible,
-			)
-			assert.deepEqual(nativeNames(snapshot).filter((name) => subagentToolNames.includes(name)), expectedVisible)
-			assert.deepEqual([...snapshot.dynamicSubagentToolNames], namedAgents ? namedToolNames : [])
-			assert.ok(snapshot.inventoryEnabledTools.some((tool) => tool.id === DiracDefaultTool.USE_SUBAGENTS))
-			assertGoalTools(snapshot, "standalone")
+	for (const profile of rootProfiles) {
+		for (const namedAgents of [false, true]) {
+			it(`${profile} disables generic and named spawning, not retained controls, when subagents are disabled (${namedAgents ? "named" : "generic"})`, async () => {
+				if (!namedAgents) configuredAgents = []
+				const { snapshot, config, createEnvironment } = await createSnapshot(profile, undefined, [], "act", false)
+				assertNoSubagents(snapshot)
+				assertGoalTools(snapshot, profile)
+				assert.ok(snapshot.coordinator.has("tasklets"), "existing children remain controllable")
+				for (const name of subagentToolNames) {
+					await assert.rejects(snapshot.coordinator.execute(config, { type: "tool_use", name, params: {}, isComplete: true }), {
+						message: `No modular tool registered for: ${name}`,
+					})
+				}
+				sinon.assert.notCalled(createEnvironment)
+			})
+		}
+	}
 
-			// Named configs replace generic prompt/native entries, but the generic
-			// dispatcher remains executable alongside their dynamic aliases.
-			const executable = namedAgents ? subagentToolNames : [DiracDefaultTool.USE_SUBAGENTS]
-			for (const name of executable) {
-				assert.ok(snapshot.executableToolNames.has(name), name)
-				assert.ok(snapshot.coordinator.has(name), name)
-				const params = name === DiracDefaultTool.USE_SUBAGENTS
-					? { subagents: [{ task_title: "Fixture task", prompt: "Do the fixture task" }] }
-					: { task_title: "Fixture task", prompt: "Do the fixture task" }
-				assert.equal(
-					await snapshot.coordinator.execute(config, { type: "tool_use", name, params, isComplete: true }),
-					"fixture dispatched",
-				)
-				sinon.assert.calledWithExactly(processCall, params, environment)
+	for (const profile of ["goal_coordinator", "goal_followup"] as const) {
+		it(`${profile} dispatches real shared spawn/list/resume tools through the environment`, async () => {
+			configuredAgents = []
+			const { snapshot, config, environment } = await createSnapshot(profile)
+			const tasklet = { id: "tasklet_stable", title: "Inspect", rootTaskId: config.taskId, conversationUlid: "child-conversation", prompt: "Inspect it", createdAt: 1 }
+			const start = sinon.stub().resolves(tasklet)
+			const list = sinon.stub().returns([{ ...tasklet, status: "completed" }])
+			const resume = sinon.stub().resolves(tasklet)
+			Object.assign(environment, {
+				toolName: "use_subagents",
+				orchestration: { tasklets: { start, list, resume } },
+				ui: { createCard: async () => ({ id: "tool-card", update: async () => undefined, finalize: async () => undefined }) },
+			})
+			const spawnParams = { subagents: [{ task_title: "Inspect", prompt: "Inspect it" }] }
+			const spawned = await snapshot.coordinator.execute(config, { type: "tool_use", name: "use_subagents", params: spawnParams, isComplete: true })
+			assert.deepEqual(JSON.parse(spawned as string).subagents, [{ index: 0, id: tasklet.id, title: "Inspect", accepted: true }])
+			sinon.assert.calledOnceWithExactly(start, { title: "Inspect", prompt: "Inspect it", agentName: undefined, timeoutSeconds: 600, includeHistory: false, useUtilityModel: false })
+			const listed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "tasklets", params: { operation: "list" }, isComplete: true })
+			assert.equal(JSON.parse(listed as string)[0].id, tasklet.id)
+			const resumed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "tasklets", params: { operation: "resume", tasklet_id: tasklet.id, message: "Continue" }, isComplete: true })
+			assert.equal(JSON.parse(resumed as string).id, tasklet.id)
+			sinon.assert.calledOnceWithExactly(resume, tasklet.id, "Continue")
+			for (const name of retiredGoalTools) {
+				await assert.rejects(snapshot.coordinator.execute(config, { type: "tool_use", name, params: {}, isComplete: true }), { message: `No modular tool registered for: ${name}` })
 			}
-			sinon.assert.callCount(processCall, executable.length)
-			sinon.assert.callCount(createEnvironment, executable.length)
 		})
+	}
+
+	for (const profile of rootProfiles) {
+		for (const namedAgents of [false, true]) {
+			it(`${profile} preserves shared inventory and dispatch with named configs ${namedAgents ? "present" : "absent"}`, async () => {
+				if (!namedAgents) configuredAgents = []
+				const processCall = sinon.stub(UseSubagentsTool.prototype, "processCall").resolves("fixture dispatched")
+				const { snapshot, config, createEnvironment, environment } = await createSnapshot(profile)
+				const expectedVisible = namedAgents ? namedToolNames : [DiracDefaultTool.USE_SUBAGENTS]
+				assert.deepEqual(
+					snapshot.promptVisibleSpecs.filter((spec) => spec.id === DiracDefaultTool.USE_SUBAGENTS).map((spec) => spec.name),
+					expectedVisible,
+				)
+				assert.deepEqual(nativeNames(snapshot).filter((name) => subagentToolNames.includes(name)), expectedVisible)
+				assert.deepEqual([...snapshot.dynamicSubagentToolNames], namedAgents ? namedToolNames : [])
+				assert.ok(snapshot.inventoryEnabledTools.some((tool) => tool.id === DiracDefaultTool.USE_SUBAGENTS))
+				assertGoalTools(snapshot, profile)
+
+				// Named configs replace generic prompt/native entries, but the generic
+				// dispatcher remains executable alongside their dynamic aliases.
+				const executable = namedAgents ? subagentToolNames : [DiracDefaultTool.USE_SUBAGENTS]
+				for (const name of executable) {
+					assert.ok(snapshot.executableToolNames.has(name), name)
+					assert.ok(snapshot.coordinator.has(name), name)
+					const params = name === DiracDefaultTool.USE_SUBAGENTS
+						? { subagents: [{ task_title: "Fixture task", prompt: "Do the fixture task" }] }
+						: { task_title: "Fixture task", prompt: "Do the fixture task" }
+					assert.equal(
+						await snapshot.coordinator.execute(config, { type: "tool_use", name, params, isComplete: true }),
+						"fixture dispatched",
+					)
+					sinon.assert.calledWithExactly(processCall, params, environment)
+				}
+				sinon.assert.callCount(processCall, executable.length)
+				sinon.assert.callCount(createEnvironment, executable.length)
+			})
+		}
 	}
 })

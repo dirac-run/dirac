@@ -90,10 +90,10 @@ describe("SurfaceAdapter", () => {
 					createPanel: async () => { throw new Error("not used") },
 				}
 			})
-			for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+			for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 				const worker = new SurfaceAdapter({ ...config, executionProfile })
 				expect(worker.architecture !== undefined).to.equal(
-					executionProfile !== "goal_child" && executionProfile !== "tasklet",
+					executionProfile !== "tasklet",
 				)
 				for (const trait of ["system", "workspace", "editor", "browser", "sourceAst", "skills"] as const) {
 					expect(worker[trait], trait).not.to.equal(undefined)

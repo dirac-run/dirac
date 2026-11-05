@@ -183,13 +183,13 @@ describe("architecture-board skill integration", () => {
 		const baseline = spec.parameters!.find((parameter) => parameter.name === "start_version")!.instruction
 		assert.match(String(baseline), /inspected baseline snapshot/)
 	})
-	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "goal_child", "tasklet"] as const) {
+	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 		for (const yolo of [false, true]) {
 			it(`gates skill discovery/activation for ${profile}, yolo=${yolo}`, async () => {
 				const config = configFor(profile, yolo)
 				const trait = buildSkillsTrait(config)
 				const available = await trait.getAvailableSkills()
-				const expected = profile !== "goal_child" && profile !== "tasklet"
+				const expected = profile !== "tasklet"
 				assert.equal(isSkillAvailableToTaskProfile(profile, skill), expected)
 				assert.equal(
 					available.some((candidate) => candidate.name === skill.name),
@@ -300,7 +300,7 @@ describe("architecture-board skill integration", () => {
 		assert.deepEqual(recovered.promptVisibleSpecs, [spec])
 		assert.deepEqual(recovered.activeSkillIds, [skill.name])
 
-		const worker = configFor("goal_child")
+		const worker = configFor("tasklet")
 		worker.taskState.availableSkills = await buildSkillsTrait(worker).getAvailableSkills()
 		worker.taskState.activeSkillIds = [...metadata.active_skill_ids]
 		const privateSnapshot = await managerFor(worker).getSnapshotForRequest(context, {

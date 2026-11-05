@@ -32,7 +32,7 @@ describe("TaskletsTool input and result contracts", () => {
 	it("rejects environments without parent controls", async () => {
 		await assert.rejects(
 			new TaskletsTool().processCall({ operation: "list" }, { orchestration: {} } as IToolEnvironment),
-			/owning ordinary root/,
+			/owning root/,
 		)
 	})
 
