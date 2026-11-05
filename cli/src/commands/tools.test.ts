@@ -39,7 +39,7 @@ describe("createToolConfiguration", () => {
 		const profileTool = tool("profile_tool", {
 			exposure: { kind: "profile_only", profiles: ["goal_coordinator"] },
 		})
-		const goalTool = tool("start_task")
+		const goalTool = tool("verify_goal")
 
 		expect(
 			createToolConfiguration(
@@ -59,7 +59,7 @@ describe("formatToolConfiguration", () => {
 			}),
 		).toBe(
 			[
-				"current config:",
+				"Current config:",
 				"",
 				"--enable-tool global_search,read_file",
 				"--disable-tool browser_action,workspace_lint",

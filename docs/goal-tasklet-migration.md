@@ -2,11 +2,12 @@
 
 ## Status and scope
 
-**6.1: committed as `6606ef65`. 6.2: committed as `481d1858`. 6.3: committed as `26b5ada9`. 6.4: implemented and verified.**
-Goal coordinators/follow-ups now use their Task-owned shared host and public
-controls. The legacy Goal supervisor, private child environment and seven
-superseded tools are removed. Integrated application acceptance remains 6.5;
-this is not yet the final phase-6 acceptance declaration.
+**Phase 6 complete.** 6.1: `6606ef65`; 6.2: `481d1858`; 6.3: `26b5ada9`;
+6.4: `d3a16d56`; 6.5: integrated acceptance and cleanup recorded in this commit.
+Goal coordinators/follow-ups use their Task-owned shared host and public controls.
+The legacy Goal supervisor, private child environment and seven superseded tools
+are removed. D32–D34 are implemented and verified within the evidence boundaries
+below; no live-provider or launched-VS-Code acceptance is claimed.
 
 This is the tracked phase-6 audit and implementation breakdown. It supplements
 the local `ascratch/docs/tasklet-design-and-migration.md` decision record; it does
@@ -121,8 +122,8 @@ implementation are engineering details within these guarantees.
 | 6.1 — Contract/source audit | Source audit and D32–D34 approval; finalized dependent split. Documentation only. | Committed `6606ef65` |
 | 6.2 — Storage/restoration boundary | Version-2-only execution; read-only legacy ownership; rejection and byte preservation through startup, history/prompt reconstruction and selection; explicit root/private-child deletion. No importer or public cutover. Evidence below. | Committed `481d1858` |
 | 6.3 — Execution/lifecycle | Attach coordinator/follow-up Tasks to their own existing host with child-safe environment bindings. Verify pause/stop/resume, follow-up status preservation, completion/block guards, natural failures and lock/shutdown ordering. | Committed `26b5ada9` |
-| 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Implemented and verified |
-| 6.5 — Integrated acceptance/cleanup | Compose real Goal-root/child scenarios, restored data, permissions, accounting, selection/deletion and frontend behavior; remove remaining dead paths. Record controlled-provider, rendered and application evidence separately. | Not started; depends on 6.4 |
+| 6.4 — Supervision/public cutover | Use shared interactions, events, escalation, controls and accounting; retain Goal-specific verification/objective/lifecycle work and derived presentation. Remove superseded GoalTaskHost/environment ownership. Verify actual inventories and public dispatch. | Committed `d3a16d56` |
+| 6.5 — Integrated acceptance/cleanup | Compose real Goal-root/child scenarios, restored data, permissions, accounting, selection/deletion and frontend behavior; remove remaining dead paths. Record controlled-provider, rendered and application evidence separately. | Complete; evidence below |
 
 D34 removes the need for legacy artifact, event or accounting conversion. New
 contained handles and transcripts reuse existing tasklet storage/restoration; any
@@ -294,3 +295,54 @@ pass. Existing phase-5 verification is historical evidence, not a new run.
   Goal scenario is claimed yet; the latter remains 6.5. An initial combined test
   launch raced protobuf regeneration and was rerun after both builds completed;
   the missing generated files were a verification-order failure, not a source fix.
+
+## Verification performed for 6.5 — final phase-6 acceptance
+
+- **Two real CLI application/PTY scenarios pass** against the freshly rebuilt CLI
+  with the isolated deterministic loopback provider: ordinary root (189.7 seconds)
+  and `/goal` root (162.6 seconds). Both cover asynchronous sibling acceptance,
+  private questions, parent sleep/user wake, mixed sibling progress, parent answer
+  delivery, full private results/transcripts, completed same-ID child resumption
+  and stable Agents-panel previews. Logs:
+  `/tmp/dirac-65-{standalone,goal}-final-pty.log`.
+- The Goal remains `working` while children privately await the parent, and explicit
+  root completion achieves it without an automatic verification gate. Top-level
+  directories/history contain only the root. A new CLI process selects the saved
+  root with the provider stopped; browsing neither restarts children nor changes
+  the child records, events or conversation/presentation transcript bytes. The
+  achieved Goal record also remains byte-identical.
+- Removed the unused Goal-only transcript pager and its now-unreachable tests.
+  Shared tasklet transcript controls remain covered. Removed retired
+  `resolve_task_interaction` composer passthroughs from CLI and webview. Actual
+  shared escalation cards are answered by root card identity, not treated as Goal
+  steering. Updated rendered regressions cover both ordinary and Goal escalation.
+  The tool-configuration fixture now uses retained `verify_goal`; a stale expected
+  `Current config:` capitalization was corrected without changing production output.
+- **396 backend tests pass**, no failures/skips, after the cleanup: every retained
+  Goal suite plus real Tasklet execution, shared host/reopening/public controls,
+  usage/availability/checkpoints, persistence ownership, inventories/dispatch and
+  accounting transports. This rechecks the controlled-provider Goal compositions
+  from 6.3/6.4, including coordinator/follow-up authorization and escalation,
+  pause/stop/final-write ownership, explicit restoration, once-only accounting and
+  D34 selection/history/deletion. Log: `/tmp/dirac-65-backend-tests.log`.
+- **43 CLI tests pass** in five files: ChatView/GoalSummary rendering and routing,
+  tool configuration, ACP deletion/worktrees and prompt-history storage.
+  **16 webview tests pass** in two files: shared interaction routing and GoalHeader
+  rendering. Logs: `/tmp/dirac-65-{cli,webview}-tests.log`. These are focused
+  selections, not additive counts with earlier phase runs or universal suite green.
+- Full compile (protobufs, all production typechecks, lint/proto lint, extension
+  build), unit-test TypeScript checking, fresh CLI build and full webview build
+  pass. Architecture checks pass with zero new violations and unchanged baselines;
+  syntax/whitespace checks pass. Logs:
+  `/tmp/dirac-65-{compile,unit-types,cli-build,webview-build,arch}.log`.
+  Independent read-only review of this acceptance/cleanup diff found no actionable
+  findings; it did not run additional tests or builds.
+- The application scenarios establish question resolution and completed-child
+  reopening, not permission escalation, interrupted-child reopening or active-child
+  reconstruction in a launched UI. Those guarantees are covered by controlled
+  backend compositions; component tests separately verify rendering/routing. No
+  live-provider or launched VS Code run is claimed. Previously baseline-confirmed
+  broader-suite failures listed under 6.4 remain excluded, not passing results.
+- **No numbered phase-6 implementation items remain.** Old Goal artifacts are not
+  converted or automatically deleted. Fork compatibility remains a separate task;
+  this acceptance does not claim a fix for it.

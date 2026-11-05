@@ -56,13 +56,10 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 				activeCard?.content.type === DiracMessageType.CARD
 					? getCardKind(activeCard.content.card)
 					: CardKind.GENERIC
-			const isGoalPassthrough =
-				activeCard?.content.type === DiracMessageType.CARD &&
-				activeCard.content.card.toolName === "resolve_task_interaction"
 
 			try {
 				setExpandTaskHeader(false)
-				if (goal && (interactionState !== InteractionState.AWAITING_RESPONSE || isGoalPassthrough)) {
+				if (goal && interactionState !== InteractionState.AWAITING_RESPONSE) {
 					if (images.length > 0 || files.length > 0) {
 						throw new Error("Goal messages currently support text only")
 					}

@@ -58,7 +58,7 @@ const waitingChild = cardMessage(
 )
 const escalation = cardMessage({
 	id: "root-escalation",
-	toolName: "resolve_task_interaction",
+	toolName: "execute_command",
 	header: "Approve the tasklet verification command",
 	status: CardStatus.WAITING_FOR_INPUT,
 	renderType: "text",
@@ -75,8 +75,27 @@ function runningActions(activeCardId?: string): UIActionState {
 	}
 }
 
-function hydrate(uiActionState = runningActions()) {
+function hydrate(uiActionState = runningActions(), withGoal = false) {
 	useChatStore.getState().applyExtensionState({
+		goal: withGoal
+			? {
+					id: root.id,
+					status: "waiting",
+					followUpActive: false,
+					hasLocalExecution: true,
+					objective: { markdown: "Review the implementation", revision: 1, updatedAt: 0 },
+					createdAt: 0,
+					updatedAt: 1,
+					wallDurationMs: 1,
+					activeDurationMs: 1,
+					children: [],
+					pendingInteractionCount: 1,
+					accounting: {},
+					mode: "act",
+					modeSwitchingDisabled: true,
+					modeSwitchingExplanation: "Goal pursuit is Act-only",
+				}
+			: undefined,
 		diracMessages: [root, spawn, waitingChild],
 		presentationSurfaceId: root.id,
 		presentationOffset: -1,
@@ -159,8 +178,11 @@ describe("useMessageHandlers tasklet routing", () => {
 		expect(useSettingsStore.getState().expandTaskHeader).toBe(false)
 	})
 
-	it("routes a text response to the actual root escalation, never the waiting child's card", async () => {
-		hydrate()
+	it.each([
+		false,
+		true,
+	])("routes a text response to the actual shared root escalation (Goal: %s), never the waiting child's card", async (withGoal) => {
+		hydrate(runningActions(), withGoal)
 		const { result } = mountHandlers()
 		publishRootEscalation()
 

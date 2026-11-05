@@ -215,7 +215,7 @@ or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-f
 
 ## Tasklet lifecycle and Agents panel
 
-After a fresh `npm run cli:build`, run the focused scenario with:
+After a fresh `npm run cli:build`, run the standalone and Goal-root scenarios with:
 
 ```bash
 node --test tests/e2e/cli/tasklets.test.mjs
@@ -231,6 +231,11 @@ answering the questions, then submits user messages to wake the parent. It check
 one completed sibling while the other remains waiting, parent answer delivery,
 retained results/transcripts, same-ID resume, and completed previews after reopening
 the persisted root in a new CLI process with the provider stopped.
+The Goal variant starts through `/goal`, stays `working` during private child
+questions, and becomes `achieved` after explicit completion without a hidden
+verification gate. Both variants assert root-only top-level storage/history and
+byte-preserved child records, events and transcripts during restored browsing;
+the Goal record also stays unchanged on selection/reopening.
 
 No live credentials, command execution, or workspace edits are requested by the
 model. The provider writes only a diagnostic `tasklet-fixture.jsonl` in the temporary

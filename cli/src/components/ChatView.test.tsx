@@ -545,7 +545,7 @@ describe("ChatView active input", () => {
 		app.unmount()
 	})
 
-	it.each([false, true])("preserves Goal message routing (interaction passthrough: %s)", async (passthrough) => {
+	it.each([false, true])("routes Goal guidance or an actual shared root interaction (interaction: %s)", async (interaction) => {
 		const card = {
 			id: "goal-interaction",
 			ts: 1,
@@ -553,7 +553,7 @@ describe("ChatView active input", () => {
 				type: DiracMessageType.CARD,
 				card: {
 					status: "pending",
-					toolName: "resolve_task_interaction",
+					toolName: "execute_command",
 					content: "question",
 					requireFeedback: true,
 				},
@@ -561,13 +561,25 @@ describe("ChatView active input", () => {
 		}
 		const { task, controller } = activeChat({
 			goal: { id: "goal", status: "waiting" },
-			diracMessages: passthrough ? [card] : [],
-			uiActionState: { activeCardId: passthrough ? card.id : undefined, globalButtons: [], cardButtons: [] },
+			diracMessages: interaction ? [card] : [],
+			uiActionState: { activeCardId: interaction ? card.id : undefined, globalButtons: [], cardButtons: [] },
 		})
 		const app = render(<ChatView controller={controller} />)
 		await latestChatInputProps.handleSubmit("goal guidance", [])
-		expect(controller.sendGoalMessage).toHaveBeenCalledWith("goal", "goal guidance")
-		expect(task.submitCardResponse).not.toHaveBeenCalled()
+		if (interaction) {
+			expect(task.submitCardResponse).toHaveBeenCalledWith(
+				card.id,
+				DiracAskResponse.MESSAGE,
+				"goal guidance",
+				undefined,
+				undefined,
+				undefined,
+			)
+			expect(controller.sendGoalMessage).not.toHaveBeenCalled()
+		} else {
+			expect(controller.sendGoalMessage).toHaveBeenCalledWith("goal", "goal guidance")
+			expect(task.submitCardResponse).not.toHaveBeenCalled()
+		}
 		app.unmount()
 	})
 

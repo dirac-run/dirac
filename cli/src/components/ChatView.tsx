@@ -756,10 +756,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			if (isProcessing || (isSpinnerActive && !taskState.goal)) return
 			setLastError(null)
 			const goal = taskState.goal
-			const isGoalPassthrough =
-				pendingAsk?.content.type === DiracMessageType.CARD &&
-				pendingAsk.content.card.toolName === "resolve_task_interaction"
-			if (goal && (!pendingAsk || isGoalPassthrough)) {
+			if (goal && !pendingAsk) {
 				if (images.length > 0) {
 					setLastError("Goal messages currently accept text only.")
 					return
