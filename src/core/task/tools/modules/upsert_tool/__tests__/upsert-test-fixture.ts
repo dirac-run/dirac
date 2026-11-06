@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import sinon from "sinon"
 import { CardStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import { SMOKE_COMPLETION_MARKER } from "../constants"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
 import { ToolRegistry } from "../../../registry/ToolRegistry"
@@ -38,7 +39,14 @@ export async function createUpsertFixture() {
 
 	const update = sandbox.stub().resolves()
 	const finalize = sandbox.stub().resolves()
-	const createCard = sandbox.stub().resolves({ update, finalize })
+	const waitForInteraction = sandbox.stub().resolves({ action: DiracAskResponse.APPROVE })
+	const createCard = sandbox.stub().resolves({ update, finalize, waitForInteraction })
+	const autoApprover = {
+		requiresCounterpartyApproval: false,
+		isUnrestrictedAutoApprove: sandbox.stub().returns(false),
+		isCommandAutoApproved: sandbox.stub().returns(true),
+	}
+	const commandPermissionController = { validateTool: sandbox.stub().returns({ allowed: true, reason: "no_config" }) }
 	const executeCommand = sandbox.stub().resolves({ ...successfulSmoke })
 	const runSubagent = sandbox.stub().rejects(new Error("upsert_tool must not generate or repair implementations"))
 	const withMutationAuthorization = sandbox.stub().callsFake(async (_name: string, mutation: () => Promise<unknown>) => mutation())
@@ -50,15 +58,18 @@ export async function createUpsertFixture() {
 		config: {
 			cwd: root,
 			taskId: "test-owner",
+			autoApprover,
+			services: { commandPermissionController },
 			callbacks: { withMutationAuthorization, transitionFromMutation, commitEnabledToolToggles },
 		},
-		ui: { createCard },
+		ui: { createCard, upsertText: sandbox.stub().resolves() },
 		system: { executeCommand },
 		orchestration: { runSubagent, getHistory: () => [], getTaskState, setTaskState },
 	} as unknown as IToolEnvironment
 
 	return {
 		root, env, sandbox, update, finalize, createCard, executeCommand, runSubagent,
+		waitForInteraction, autoApprover, commandPermissionController,
 		withMutationAuthorization, transitionFromMutation, commitEnabledToolToggles, getTaskState, setTaskState,
 		toolDir: (name = "example_tool") => path.join(root, ".dirac", "tools", name),
 		buildsDir: path.join(root, ".dirac", "tool-builds"),

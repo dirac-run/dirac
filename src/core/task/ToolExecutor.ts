@@ -22,6 +22,7 @@ import { DiracContent } from "@shared/messages/content"
 import { canonicalizeResponseToolCall, isCompletionResponseCall } from "@shared/responseTool"
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { modelDoesntSupportWebp } from "@/utils/model-utils"
 import { ToolUse } from "../assistant-message"
 import { ContextManager } from "../context/context-management/ContextManager"
@@ -130,7 +131,7 @@ export class ToolExecutor {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
 			createTaskConfig: (coordinator) => this.asToolConfig(coordinator),
-			getTaskId: () => this.taskId,
+			getTaskToolOwnerKey: () => getTaskScopedStateKey(this.taskId, this.storageAddress),
 			getWorkspaceRoot: () => this.workspaceManager?.getPrimaryRoot()?.path,
 			getToggles: () => this.requestRuntime().workingConfiguration.settings.toolToggles || {},
 			getSelectionPolicy: () => this.toolSelectionPolicy,
@@ -223,7 +224,9 @@ export class ToolExecutor {
 		const tool = request.toolCall!.name as DiracDefaultTool
 		switch (operation.kind) {
 			case "commands": {
-				if (tool !== DiracDefaultTool.EXECUTE_COMMAND || !operation.commands.length) return "manual_only"
+				if ((tool !== DiracDefaultTool.EXECUTE_COMMAND && tool !== DiracDefaultTool.UPSERT_TOOL) || !operation.commands.length) {
+					return "manual_only"
+				}
 				// Classified permission cards apply the shared unrestricted override even when
 				// the tool's initial disposition is manual-only (including Utility restrictions).
 				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"

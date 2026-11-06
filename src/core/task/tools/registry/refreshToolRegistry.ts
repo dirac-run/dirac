@@ -1,4 +1,5 @@
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import * as path from "path"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { UserToolLoader } from "../discovery/UserToolLoader"
@@ -50,9 +51,10 @@ export async function refreshTaskTools(taskId: string, storageAddress: string | 
 	const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
 	const taskDir = await ensureTaskDirectoryExists(storageAddress)
 	const toolsDir = path.join(taskDir, "tools")
+	const ownerTaskId = getTaskScopedStateKey(taskId, storageAddress)
 	const taskTools = (await ToolDiscoveryService.scanUserToolDirectory(toolsDir, "task")).map((tool) => ({
 		...tool,
-		ownerTaskId: taskId,
+		ownerTaskId,
 	}))
-	return ToolRegistry.withExclusiveAccess((registry) => registry.reconcileTaskTools(taskId, taskTools))
+	return ToolRegistry.withExclusiveAccess((registry) => registry.reconcileTaskTools(ownerTaskId, taskTools))
 }

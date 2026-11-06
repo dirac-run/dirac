@@ -16,7 +16,7 @@ import { Logger } from "@/shared/services/Logger"
 
 interface ToolSnapshotManagerOptions {
 	createTaskConfig: (coordinator: ToolExecutorCoordinator) => TaskConfig
-	getTaskId: () => string
+	getTaskToolOwnerKey: () => string
 	getWorkspaceRoot: () => string | undefined
 	getToggles: () => Record<string, boolean>
 	getSelectionPolicy: () => ToolSelectionPolicy | undefined
@@ -66,7 +66,7 @@ export class ToolSnapshotManager {
 			const activeSkills = this.options.getActiveSkills().filter(meetsHostCapabilityRequirement)
 			const skillTools = registry.resolveSkillDependencyTools(
 				activeSkills,
-				this.options.getTaskId(),
+				this.options.getTaskToolOwnerKey(),
 				this.options.getWorkspaceRoot(),
 			)
 			const selectedConfiguredTools = applyToolSelectionPolicy(
@@ -135,7 +135,7 @@ export class ToolSnapshotManager {
 		// Detach the inventory before releasing the process-global registry lock.
 		// Tool definitions are immutable runtime descriptors; copying the arrays is
 		// sufficient to prevent later per-Task toggle loads from changing membership.
-		const ownerTaskId = this.options.getTaskId()
+		const ownerTaskId = this.options.getTaskToolOwnerKey()
 		const workspaceRoot = this.options.getWorkspaceRoot()
 		const tools = [...registry.getAllTools(ownerTaskId, workspaceRoot)]
 		const enabledTools = [...registry.getEnabledTools(ownerTaskId, workspaceRoot)].filter(

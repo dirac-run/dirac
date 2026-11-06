@@ -13,7 +13,7 @@ import {
 	type TaskletEvent,
 } from "@core/storage/taskStorage"
 import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
-import { createTaskletId } from "@shared/taskletId"
+import { createTaskletId, getTaskScopedStateKey } from "@shared/taskletId"
 import { taskletUsageAvailability, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { getApiMetrics, getApiUsageKnowledge } from "@shared/getApiMetrics"
 import { taskletActivityPreview, taskletCommunicationPreview, type TaskletPresentationData } from "@shared/taskletPresentation"
@@ -58,7 +58,7 @@ import { DiracContent, DiracStorageMessage, DiracTextContentBlock, DiracToolResp
 import { ShowMessageType } from "@shared/proto/index.host"
 import { Logger } from "@shared/services/Logger"
 import { type Mode } from "@shared/storage/types"
-import type { DiracToolSpec } from "@shared/tools"
+import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import Mutex from "p-mutex"
@@ -265,9 +265,7 @@ export class Task {
 			},
 			getCompletionBlocker: () => {
 				if (this.hasPendingChatInput()) return "Completion was superseded by pending user input."
-				const active = this.taskletHost?.listActive() ?? []
-				if (!active.length) return undefined
-				return `Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before completing.`
+				return this.taskletHost?.getCompletionBlocker()
 			},
 		}
 	}
@@ -1029,7 +1027,7 @@ export class Task {
 
 		this.contextLoader = new ContextLoader({
 			executionProfile: this.executionProfile,
-			ulid: this.ulid,
+			ulid: getTaskScopedStateKey(this.ulid, this.storageAddress),
 			stateManager: this.stateManager,
 			getRequestRuntime: () => {
 				if (!this.activeRequestRuntime) throw new Error("Context loading requires an active request runtime")
@@ -1314,7 +1312,13 @@ export class Task {
 	): Promise<T> {
 		const mutate = () =>
 			this.mutationGate.withMutation(
-				() => assertTaskMutationAuthorized(requestConfiguration, this.workingConfiguration, toolName),
+				() => {
+					// Commands have their own permission policy, including in strict Plan.
+					// Keep their execution lease without treating every command as a file edit.
+					if (toolName !== DiracDefaultTool.EXECUTE_COMMAND) {
+						assertTaskMutationAuthorized(requestConfiguration, this.workingConfiguration, toolName)
+					}
+				},
 				mutation,
 			)
 		return this.ownerBindings ? this.ownerBindings.withMutationAuthorization(toolName, mutate) : mutate()
@@ -2027,9 +2031,9 @@ export class TaskletHost {
 					interruptedAt: Date.now(),
 				})
 			} else {
-				child.outcomePersisted = true
 				// Repair a crash between the durable outcome write and its notification.
 				await this.persistOutcomeEvent(child, record.outcome)
+				child.outcomePersisted = true
 			}
 		}
 	}
@@ -2375,24 +2379,32 @@ export class TaskletHost {
 		}
 	}
 
-	/** Includes admitted starts and input waits, not just provider activity. */
+	/** Includes admitted starts, input waits and unsettled outcomes, not just provider activity. */
 	listActive(): Array<Pick<TaskletRecord, "id" | "title">> {
 		const active = new Map<string, Pick<TaskletRecord, "id" | "title">>()
 		for (const { record } of this.starting.values()) active.set(record.id, { id: record.id, title: record.title })
-		for (const { record } of this.children.values()) {
-			if (!record.outcome) active.set(record.id, { id: record.id, title: record.title })
+		for (const child of this.children.values()) {
+			if (!child.outcomePersisted || child.settlementError) {
+				active.set(child.record.id, { id: child.record.id, title: child.record.title })
+			}
 		}
 		return [...active.values()]
 	}
 
+	getCompletionBlocker(): string | undefined {
+		const failed = [...this.children.values()].filter((child) => child.settlementError)
+		if (failed.length) {
+			return `Tasklet settlement failed: ${failed.map(({ record, settlementError }) => `${record.id} (${record.title}): ${settlementError!.message}`).join("; ")}. The root cannot complete with unsettled child results.`
+		}
+		const active = this.listActive()
+		if (!active.length) return undefined
+		return `Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before completing.`
+	}
+
 	/** Commit an idle root's terminal boundary without admitting a later child. */
 	closeAdmissionIfIdle(): void {
-		const active = this.listActive()
-		if (active.length) {
-			throw new Error(
-				`Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before ending the root.`,
-			)
-		}
+		const blocker = this.getCompletionBlocker()
+		if (blocker) throw new Error(blocker)
 		this.closing = true
 	}
 
@@ -2779,6 +2791,7 @@ export class TaskletHost {
 			await task.retirePersistence()
 		} catch (error) {
 			settlementFailures.push(error)
+			child.settlementError = serializeTaskError(error)
 			if (outcome.kind !== "failed") {
 				outcome = { kind: "failed", failedAt: Date.now(), error: serializeTaskError(error) }
 			}

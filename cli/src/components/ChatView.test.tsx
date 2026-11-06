@@ -5,7 +5,7 @@
  * the input field is properly hidden before the app terminates.
  */
 
-import { DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
+import { DiracMessageType, TaskStatus, UIActionButtonType } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { Text } from "ink"
 import { render } from "ink-testing-library"
@@ -402,6 +402,38 @@ describe("ChatView conversation follow-ups", () => {
 		expect(controller.initTask).not.toHaveBeenCalled()
 		unmount()
 	})
+
+	it.each([UIActionButtonType.APPROVE, UIActionButtonType.PROCEED, UIActionButtonType.RETRY])(
+		"routes the cancelled task's %s action as lifecycle input to the restored task",
+		async (action) => {
+			const oldTask = { taskId: "saved-task", canAcceptSteeringMessage: () => false, submitCardResponse: vi.fn() }
+			const restored = { taskId: "saved-task", submitCardResponse: vi.fn(async () => undefined) }
+			const controller = {
+				task: oldTask,
+				getPromptHistory: vi.fn(async () => []),
+				initTask: vi.fn(),
+				prepareTaskForFollowUp: vi.fn(async () => restored),
+			}
+			vi.mocked(useTaskState).mockReturnValue({
+				diracMessages: [],
+				mode: "act",
+				taskStatus: TaskStatus.CANCELLED,
+				uiActionState: {
+					globalButtons: [{ label: "Resume", action, primary: true }],
+					cardButtons: [],
+					sendingDisabled: false,
+				},
+			} as any)
+			vi.mocked(useTaskContext).mockReturnValue({ controller, setLastError: vi.fn() } as any)
+			const { unmount } = render(<ChatView controller={controller} />)
+			await latestChatInputProps.handleButtonAction(action, true)
+			expect(controller.prepareTaskForFollowUp).toHaveBeenCalledOnce()
+			expect(restored.submitCardResponse).toHaveBeenCalledExactlyOnceWith("", DiracAskResponse.MESSAGE, undefined, undefined)
+			expect(oldTask.submitCardResponse).not.toHaveBeenCalled()
+			expect(controller.initTask).not.toHaveBeenCalled()
+			unmount()
+		},
+	)
 
 	it("submits a reopened completed chat to the restored backing task", async () => {
 		const oldTask = { taskId: "saved-task", canAcceptSteeringMessage: () => false, submitCardResponse: vi.fn() }

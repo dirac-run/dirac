@@ -180,7 +180,7 @@ export const GoalSummary: React.FC<{
 								{statusSymbol(child.status)} {child.status}
 							</Text>
 							<Text color={theme.muted}>{` ${theme.symbols.separator} ${child.role}`}</Text>
-							{` ${theme.symbols.separator} ${child.title} (${child.id})`}
+							{` ${theme.symbols.separator} ${child.title}`}
 							{child.runningDurationMs !== undefined && (
 								<Text color={theme.muted}>{` ${theme.symbols.separator} run ${formatDuration(child.runningDurationMs)}`}</Text>
 							)}

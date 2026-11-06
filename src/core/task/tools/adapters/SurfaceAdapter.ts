@@ -1,4 +1,5 @@
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { IDiracContext } from "../interfaces/IDiracContext"
 import {
 	CardParams,
@@ -94,16 +95,17 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		this.telemetry = buildTelemetryTrait(this, config)
 		this.workspace = buildWorkspaceTrait(config)
 		this.sourceAst = buildSourceAstTrait(config)
+		const anchorStateKey = getTaskScopedStateKey(config.ulid, config.storageAddress)
 		this.anchors = {
 			reconcile: (absolutePath, lines) => {
-				const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, config.ulid)
+				const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, anchorStateKey)
 				if (result.changed) config.context.markAnchorStateDirty(absolutePath)
 				return result.anchors
 			},
 			getDocumentFingerprint: (absolutePath) =>
-				AnchorStateManager.getDocumentFingerprint(absolutePath, config.ulid),
+				AnchorStateManager.getDocumentFingerprint(absolutePath, anchorStateKey),
 			clear: (absolutePath) => {
-				AnchorStateManager.clearState(absolutePath, config.ulid)
+				AnchorStateManager.clearState(absolutePath, anchorStateKey)
 				config.context.markAnchorStateDirty(absolutePath)
 			},
 		}

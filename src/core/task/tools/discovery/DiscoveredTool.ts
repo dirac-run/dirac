@@ -25,7 +25,7 @@ export interface DiscoveredTool {
 	name: string
 	/** Where this tool was discovered */
 	source: ToolSource
-	/** Owning Task for task-scoped tools. Required when source is "task". */
+	/** Process-local owner key for task tools; tasklets include their root namespace. */
 	ownerTaskId?: string
 	/** Controls whether this tool is user-configurable, context-only, skill-only, or restricted to execution profiles. */
 	exposure: ToolExposure

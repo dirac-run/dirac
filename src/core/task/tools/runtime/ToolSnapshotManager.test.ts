@@ -5,6 +5,7 @@ import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
 import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { diagnostics_scan_spec, DiagnosticsScanTool } from "../modules/diagnostics_scan"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { ToolDiscoveryService } from "../discovery/ToolDiscoveryService"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { ToolRegistry } from "../registry/ToolRegistry"
@@ -41,7 +42,7 @@ function createManager(
 ) {
 	return new ToolSnapshotManager({
 		createTaskConfig: () => ({}) as never,
-		getTaskId: () => taskId,
+		getTaskToolOwnerKey: () => taskId,
 		getWorkspaceRoot: () => workspaceRoot,
 		getToggles: () => toggles,
 		getSelectionPolicy: () => selectionPolicy,
@@ -351,6 +352,52 @@ describe("ToolSnapshotManager task isolation", () => {
 		assert.equal(registry.getAllTools("task-b").find((tool) => tool.id === "same-name")?.modulePath, taskBTool.modulePath)
 	})
 
+	it("executes source/fork task tool versions independently and retains the fork after source cleanup", async () => {
+		const taskId = "tasklet_00000000-0000-4000-8000-000000000001"
+		const addresses = ["source", "fork"].map((rootTaskId) => ({ kind: "tasklet" as const, rootTaskId, taskletId: taskId }))
+		const owners = addresses.map((address) => getTaskScopedStateKey(taskId, address))
+		const diskModule = await import("@core/storage/disk")
+		sinon.stub(diskModule, "ensureTaskDirectoryExists").callsFake(async (address) => {
+			assert.ok(typeof address !== "string" && address.kind === "tasklet")
+			return `/test/${address.rootTaskId}`
+		})
+		sinon.stub(ToolDiscoveryService, "scanWorkspaceTools").resolves([])
+		sinon.stub(ToolDiscoveryService, "scanUserToolDirectory").callsFake(async (directory) => {
+			const label = directory.includes("/fork/") ? "fork version" : "source version"
+			const spec = { ...makeTool("fork-tool").spec, description: label }
+			return [{
+				...makeTool("fork-tool"), source: "task" as const, spec,
+				modulePath: `${directory}/tool.ts`, sourceHash: label,
+				factory: () => ({ spec: () => spec, supportedSurfaces: () => ["all"], processCall: async () => label }),
+			}]
+		})
+		await Promise.all(addresses.map((address) => refreshTaskTools(taskId, address)))
+		const config = {
+			taskId, ulid: "copied-conversation", mode: "act", hooksEnabled: false,
+			vscodeTerminalExecutionMode: "backgroundExec", providerId: "anthropic",
+			model: { id: "test-model", info: {} }, taskState: { consecutiveMistakeCount: 0 },
+		} as TaskConfig
+		const environment = {
+			context: { save: sinon.stub().resolves() }, getCustomMetadata: () => ({}), getCreatedCards: () => [],
+		} as unknown as ToolExecutionEnvironment
+		sinon.stub(telemetry, "telemetryService").value({ captureToolUsage: sinon.stub() })
+		const managers = owners.map((owner) => createManager({}, owner, "/test-workspace", undefined, {
+			createTaskConfig: () => config, environmentFactory: { create: () => environment },
+		}))
+		const execute = async (index: number, requestId: string) => {
+			const snapshot = await managers[index].getSnapshotForRequest(context, { requestId, configurationRevision: 1 })
+			assert.equal(snapshot.inventoryEnabledTools.find((tool) => tool.id === "fork-tool")?.ownerTaskId, owners[index])
+			config.activeToolSnapshot = snapshot
+			return snapshot.coordinator.execute(config, {
+				type: "tool_use", id: requestId, name: "fork-tool", params: {}, isNativeToolCall: true,
+			})
+		}
+		assert.equal(await execute(0, "source-request"), "source version")
+		assert.equal(await execute(1, "fork-request"), "fork version")
+		ToolRegistry.getInstance().removeTaskTools(owners[0])
+		assert.equal(await execute(1, "fork-after-source-cleanup"), "fork version")
+		assert.equal(ToolRegistry.getInstance().getAllTools(owners[0]).some((tool) => tool.source === "task"), false)
+	})
 
 	it("reconciles deleted task tools out of the owner inventory", async () => {
 		const diskModule = require("@core/storage/disk")

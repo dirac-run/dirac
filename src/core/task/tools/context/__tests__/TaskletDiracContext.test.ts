@@ -6,6 +6,7 @@ import { GlobalFileNames } from "@core/storage/fileNames"
 import type { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
@@ -25,6 +26,9 @@ const secondTasklet: TaskStorageAddress = {
 }
 const addresses: (string | TaskStorageAddress)[] = [rootTaskId, firstTasklet, secondTasklet]
 const conversations = ["root-conversation", "first-conversation", "second-conversation", "other-root-conversation"]
+const anchorKeys = addresses.map((address, index) => getTaskScopedStateKey(conversations[index], address))
+const forkTasklet: TaskStorageAddress = { ...firstTasklet, rootTaskId: "fork-context-root" }
+const forkAnchorKey = getTaskScopedStateKey(conversations[1], forkTasklet)
 
 function contextFile(address: string | TaskStorageAddress, fileName: string): string {
 	return path.join(getTaskDirectoryPath(address), fileName)
@@ -47,12 +51,12 @@ describe("DiracContext tasklet addressing", () => {
 		sandbox = sinon.createSandbox()
 		sandbox.stub(process, "env").value({ ...process.env, DIRAC_DIR: storageDirectory })
 		stateManager = { flushPendingState: sandbox.stub().resolves() } as unknown as StateManager
-		for (const conversation of conversations) AnchorStateManager.reset(conversation)
+		for (const key of [...anchorKeys, forkAnchorKey]) AnchorStateManager.reset(key)
 	})
 
 	afterEach(async () => {
 		sandbox.restore()
-		for (const conversation of conversations) AnchorStateManager.reset(conversation)
+		for (const key of [...anchorKeys, forkAnchorKey]) AnchorStateManager.reset(key)
 		HostProvider.reset()
 		await fs.rm(storageDirectory, { recursive: true, force: true })
 	})
@@ -66,7 +70,7 @@ describe("DiracContext tasklet addressing", () => {
 					AnchorStateManager.reconcile(
 						sourcePath,
 						Array.from({ length: index + 1 }, () => `execution-${index}`),
-						conversations[index],
+						anchorKeys[index],
 					)
 					context.markAnchorStateDirty(sourcePath)
 					await Promise.all([
@@ -78,17 +82,17 @@ describe("DiracContext tasklet addressing", () => {
 					await Promise.all([context.save(), context.save()])
 				}),
 			)
-			const expectedAnchors = conversations.slice(0, 3).map((conversation) => AnchorStateManager.exportState(conversation))
-			for (const conversation of conversations) AnchorStateManager.reset(conversation)
+			const expectedAnchors = anchorKeys.map((key) => AnchorStateManager.exportState(key))
+			for (const key of anchorKeys) AnchorStateManager.reset(key)
 			const restored = addresses.map(createContext)
 			await Promise.all(restored.map((context) => context.load()))
-			for (const conversation of conversations) assert.equal(AnchorStateManager.getAnchors(sourcePath, conversation), null)
+			for (const key of anchorKeys) assert.equal(AnchorStateManager.getAnchors(sourcePath, key), null)
 
 			for (const [index, context] of restored.entries()) {
 				await context.ensureAnchorState()
-				assert.deepEqual(AnchorStateManager.exportState(conversations[index]), expectedAnchors[index])
+				assert.deepEqual(AnchorStateManager.exportState(anchorKeys[index]), expectedAnchors[index])
 				for (let pending = index + 1; pending < restored.length; pending++) {
-					assert.equal(AnchorStateManager.getAnchors(sourcePath, conversations[pending]), null)
+					assert.equal(AnchorStateManager.getAnchors(sourcePath, anchorKeys[pending]), null)
 				}
 				assert.deepEqual(await context.task.get("fileHashes"), { [sourcePath]: { contentHash: `hash-${index}` } })
 				assert.deepEqual(await context.task.get("inspectAstImplementationCache"), { [sourcePath]: `ast-${index}` })
@@ -175,31 +179,42 @@ describe("DiracContext tasklet addressing", () => {
 		})
 	}
 
-	it("qualifies the same tasklet ID by its root while keeping conversation ownership distinct", async () => {
-		const otherRoot: TaskStorageAddress = { ...firstTasklet, rootTaskId: "other-context-root" }
-		const pairs = [
-			{ address: firstTasklet, index: 1 },
-			{ address: otherRoot, index: 3 },
-		]
-		await Promise.all(
-			pairs.map(async ({ address, index }) => {
-				const context = createContext(address, index)
-				await context.ensureAnchorState()
-				AnchorStateManager.reconcile(sourcePath, [`root-${index}`], conversations[index])
-				context.markAnchorStateDirty()
-				await context.task.set("owner", index)
-				await context.save()
-			}),
-		)
-		const expected = pairs.map(({ index }) => AnchorStateManager.exportState(conversations[index]))
-		for (const conversation of conversations) AnchorStateManager.reset(conversation)
-		for (const [pairIndex, { address, index }] of pairs.entries()) {
-			const restored = createContext(address, index)
-			assert.equal(await restored.task.get("owner"), index)
-			await restored.ensureAnchorState()
-			assert.deepEqual(AnchorStateManager.exportState(conversations[index]), expected[pairIndex])
-		}
-		assert.notEqual(getTaskDirectoryPath(firstTasklet), getTaskDirectoryPath(otherRoot))
+	it("isolates copied conversation anchors during concurrent source/fork use, cleanup and restoration", async () => {
+		const conversation = conversations[1]
+		const sourceKey = anchorKeys[1]
+		const source = new DiracContext(firstTasklet, stateManager, conversation)
+		await source.ensureAnchorState()
+		AnchorStateManager.reconcile(sourcePath, ["copied baseline"], sourceKey)
+		source.markAnchorStateDirty(sourcePath)
+		await source.save()
+		await fs.mkdir(path.dirname(getTaskDirectoryPath(forkTasklet)), { recursive: true })
+		await fs.cp(getTaskDirectoryPath(firstTasklet), getTaskDirectoryPath(forkTasklet), { recursive: true })
+
+		// The source remains live while the fork hydrates the same persisted conversation ULID.
+		AnchorStateManager.reconcile(sourcePath, ["source live", "source second", "source third"], sourceKey)
+		const sourceState = AnchorStateManager.exportState(sourceKey)
+		const fork = new DiracContext(forkTasklet, stateManager, conversation)
+		await fork.ensureAnchorState()
+		assert.deepEqual(AnchorStateManager.exportState(sourceKey), sourceState)
+		AnchorStateManager.reconcile(sourcePath, ["fork live", "fork second"], forkAnchorKey)
+		const forkState = AnchorStateManager.exportState(forkAnchorKey)
+		assert.notDeepEqual(sourceState, forkState)
+		source.markAnchorStateDirty(sourcePath)
+		fork.markAnchorStateDirty(sourcePath)
+		await Promise.all([source.save(), fork.save()])
+
+		// Resource cleanup of the source must not clear the fork's active anchors.
+		AnchorStateManager.reset(sourceKey)
+		assert.deepEqual(AnchorStateManager.exportState(forkAnchorKey), forkState)
+		const restoredSource = new DiracContext(firstTasklet, stateManager, conversation)
+		await restoredSource.ensureAnchorState()
+		assert.deepEqual(AnchorStateManager.exportState(sourceKey), sourceState)
+		assert.deepEqual(AnchorStateManager.exportState(forkAnchorKey), forkState)
+		AnchorStateManager.reset(forkAnchorKey)
+		const restoredFork = new DiracContext(forkTasklet, stateManager, conversation)
+		await restoredFork.ensureAnchorState()
+		assert.deepEqual(AnchorStateManager.exportState(forkAnchorKey), forkState)
+		assert.deepEqual(AnchorStateManager.exportState(sourceKey), sourceState)
 	})
 
 	it("resets only the selected sibling cache and preserves its conversation anchors", async () => {
@@ -207,20 +222,20 @@ describe("DiracContext tasklet addressing", () => {
 		await Promise.all(
 			contexts.map(async (context, index) => {
 				await context.ensureAnchorState()
-				AnchorStateManager.reconcile(sourcePath, [`execution-${index}`], conversations[index])
+				AnchorStateManager.reconcile(sourcePath, [`execution-${index}`], anchorKeys[index])
 				context.markAnchorStateDirty()
 				await context.task.set("owner", index)
 				await context.save()
 			}),
 		)
-		const expected = conversations.slice(0, 3).map((conversation) => AnchorStateManager.exportState(conversation))
+		const expected = anchorKeys.map((key) => AnchorStateManager.exportState(key))
 		await contexts[1].resetTaskContext()
-		for (const conversation of conversations) AnchorStateManager.reset(conversation)
+		for (const key of anchorKeys) AnchorStateManager.reset(key)
 		for (const [index, address] of addresses.entries()) {
 			const restored = createContext(address, index)
 			assert.equal(await restored.task.get("owner"), index === 1 ? undefined : index)
 			await restored.ensureAnchorState()
-			assert.deepEqual(AnchorStateManager.exportState(conversations[index]), expected[index])
+			assert.deepEqual(AnchorStateManager.exportState(anchorKeys[index]), expected[index])
 		}
 	})
 
@@ -271,23 +286,23 @@ describe("DiracContext tasklet addressing", () => {
 				addresses.map(async (address, index) => {
 					const context = createContext(address, index)
 					await context.ensureAnchorState()
-					AnchorStateManager.reconcile(sourcePath, [`execution-${index}`], conversations[index])
+					AnchorStateManager.reconcile(sourcePath, [`execution-${index}`], anchorKeys[index])
 					context.markAnchorStateDirty()
 					await context.task.set("owner", index)
 					await context.save()
 				}),
 			)
-			const expected = conversations.slice(0, 3).map((conversation) => AnchorStateManager.exportState(conversation))
-			for (const conversation of conversations) AnchorStateManager.reset(conversation)
+			const expected = anchorKeys.map((key) => AnchorStateManager.exportState(key))
+			for (const key of anchorKeys) AnchorStateManager.reset(key)
 			await fs.writeFile(contextFile(firstTasklet, fileName), "not JSON\n")
 			const corrupted = createContext(firstTasklet, 1)
 			await assert.rejects(corrupted.ensureAnchorState(), /malformed JSON|Invalid operation record/)
-			assert.equal(AnchorStateManager.getAnchors(sourcePath, conversations[1]), null)
+			assert.equal(AnchorStateManager.getAnchors(sourcePath, anchorKeys[1]), null)
 			for (const index of [0, 2]) {
 				const restored = createContext(addresses[index], index)
 				assert.equal(await restored.task.get("owner"), index)
 				await restored.ensureAnchorState()
-				assert.deepEqual(AnchorStateManager.exportState(conversations[index]), expected[index])
+				assert.deepEqual(AnchorStateManager.exportState(anchorKeys[index]), expected[index])
 				await restored.task.set("afterCorruption", index)
 				await restored.save()
 				assert.equal(await createContext(addresses[index], index).task.get("afterCorruption"), index)

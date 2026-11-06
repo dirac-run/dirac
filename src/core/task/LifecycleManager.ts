@@ -16,6 +16,7 @@ import { findLastIndex } from "@shared/array"
 import { isResumePromptCard, isSuccessfulTaskCompletionCard } from "@shared/cardIdentity"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { readTaskletPresentation } from "@shared/taskletPresentation"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import {
 	DiracContent,
 	DiracImageContentBlock,
@@ -129,6 +130,8 @@ export class LifecycleManager {
 		} catch (error) {
 			Logger.error("Failed to initialize DiracIgnoreController:", error)
 		}
+		if (this.dependencies.taskState.abort) return
+
 		this.dependencies.messageStateHandler.setDiracMessages([])
 		this.dependencies.messageStateHandler.setApiConversationHistory([])
 		this.dependencies.taskState.conversationHistoryDeletedRange = initialHistory?.deletedRange
@@ -163,6 +166,8 @@ export class LifecycleManager {
 				})
 			}
 		}
+
+		if (this.dependencies.taskState.abort) return
 
 		const hooksEnabled = getHooksEnabledSafe(this.dependencies.getWorkingConfiguration().settings.hooksEnabled)
 		if (hooksEnabled) {
@@ -744,7 +749,7 @@ export class LifecycleManager {
 		try {
 			const { ToolRegistry } = await import("@core/task/tools/registry/ToolRegistry")
 			await ToolRegistry.withExclusiveAccess((registry) => {
-				registry.removeTaskTools(this.dependencies.taskId)
+				registry.removeTaskTools(getTaskScopedStateKey(this.dependencies.taskId, this.dependencies.storageAddress))
 			})
 			this.dependencies.taskState.taskScopedToolIds = []
 		} catch (error) {
@@ -779,7 +784,7 @@ export class LifecycleManager {
 		await attempt(() => this.dependencies.fileContextTracker.dispose())
 		// Cancellation releases views, not shared workspace contents (including partial writes).
 		await attempt(() => this.dependencies.diffViewProvider.reset())
-		await attempt(() => AnchorStateManager.reset(this.dependencies.ulid))
+		await attempt(() => AnchorStateManager.reset(getTaskScopedStateKey(this.dependencies.ulid, this.dependencies.storageAddress)))
 
 		return failures
 	}

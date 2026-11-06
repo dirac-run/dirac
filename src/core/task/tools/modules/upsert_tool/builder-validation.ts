@@ -4,6 +4,10 @@ import * as ts from "typescript"
 import { z } from "zod"
 import { getErrorMessage } from "@/shared/errors"
 import { safeParseJson } from "@/shared/safe-json-parse"
+import { CardStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
+import { resolveCommandApproval } from "../../autoApprove"
+import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
 import { UserToolLoader } from "../../discovery/UserToolLoader"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
@@ -100,6 +104,7 @@ async function validateSmokeArguments(toolDir: string): Promise<string | undefin
 async function runSmokeHarness(env: IToolEnvironment, toolDir: string): Promise<string | undefined> {
 	const harnessPath = path.join(toolDir, "test-harness.ts")
 	const command = `npx tsx '${harnessPath.replace(/'/g, "'\\''")}'`
+	if (!await approveSmokeCommand(env, command)) return "Smoke-test command was rejected by the user."
 	let result
 	try {
 		result = await env.system.executeCommand(command, { timeout: 60_000 })
@@ -123,6 +128,43 @@ async function runSmokeHarness(env: IToolEnvironment, toolDir: string): Promise<
 	}
 
 	return undefined
+}
+
+async function approveSmokeCommand(env: IToolEnvironment, command: string): Promise<boolean> {
+	const utilityEnabled = env.config.permissionDecisionBinding !== undefined
+	const approval = resolveCommandApproval(
+		[command], utilityEnabled, env.config.autoApprover, env.config.services.commandPermissionController,
+	)
+	if (!approval.required) return true
+
+	const card = await env.ui.createCard({
+		header: "Execute custom-tool smoke test",
+		status: CardStatus.WAITING_FOR_INPUT,
+		requireApproval: true,
+		permissionOperation: { kind: "commands", commands: [command] },
+		permissionRequestKind: utilityEnabled ? (approval.utilityEligible ? "tool" : "manual_tool") : undefined,
+		renderType: "markdown",
+		body: `Runs the supplied implementation with smoke_args and empty arguments. This code is not sandboxed.\n\n\`\`\`bash\n${command}\n\`\`\``,
+		rawInput: { commands: [{ command, displayName: command, language: "bash" }] },
+		collapsed: false,
+	})
+	let status = CardStatus.CANCELLED
+	try {
+		const interaction = await card.waitForInteraction()
+		if (interaction.action === DiracAskResponse.MESSAGE) {
+			if (interaction.text) await env.ui.upsertText(interaction.text, false, "user")
+			status = CardStatus.SKIPPED
+			return false
+		}
+		if (interaction.action !== DiracAskResponse.APPROVE) return false
+		status = CardStatus.SUCCESS
+		return true
+	} catch (error) {
+		if (error instanceof ToolSkippedByUserMessage) status = CardStatus.SKIPPED
+		throw error
+	} finally {
+		await card.finalize(status)
+	}
 }
 
 function formatOutput(output: unknown): string {

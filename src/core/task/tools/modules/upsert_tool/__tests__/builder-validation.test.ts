@@ -4,7 +4,10 @@ import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, it } from "mocha"
+import { CardStatus } from "@shared/ExtensionMessage"
+import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
+import { createCardFromMessenger } from "../../../adapters/traits/UiTraitBuilder"
 import { validateStagedTool } from "../builder-validation"
 import { buildManifest, SMOKE_ARGS_FILE } from "../constants"
 import { buildToolSource, writeTestHarness } from "../scaffold-generator"
@@ -56,6 +59,63 @@ describe("validateStagedTool smoke-args boundary", () => {
 		assert.equal(fixture.executeCommand.callCount, 1)
 	})
 
+	it("waits for approval of the exact smoke command before execution", async () => {
+		fixture.autoApprover.isCommandAutoApproved.returns(false)
+		let approve!: (interaction: { action: DiracAskResponse }) => void
+		let showPermission!: () => void
+		const permissionShown = new Promise<void>((resolve) => { showPermission = resolve })
+		fixture.waitForInteraction.callsFake(() => new Promise((resolve) => {
+			approve = resolve
+			showPermission()
+		}))
+		const directory = await staged("{}")
+		const validation = validateStagedTool(fixture.env, directory, "workspace")
+		await permissionShown
+		assert.equal(fixture.executeCommand.callCount, 0)
+		const params = fixture.createCard.firstCall.args[0]
+		assert.equal(params.requireApproval, true)
+		assert.deepEqual(params.permissionOperation, { kind: "commands", commands: [`npx tsx '${path.join(directory, "test-harness.ts")}'`] })
+		approve({ action: DiracAskResponse.APPROVE })
+		assert.equal((await validation).error, undefined)
+		assert.equal(fixture.executeCommand.firstCall.args[0], params.permissionOperation.commands[0])
+		assert.equal(fixture.finalize.firstCall.args[0], CardStatus.SUCCESS)
+	})
+
+	it("does not execute the smoke implementation after permission rejection", async () => {
+		fixture.autoApprover.isCommandAutoApproved.returns(false)
+		fixture.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+		const result = await validateStagedTool(fixture.env, await staged("{}"), "workspace")
+		assert.match(result.error ?? "", /rejected/)
+		assert.equal(fixture.executeCommand.callCount, 0)
+		assert.equal(fixture.finalize.firstCall.args[0], CardStatus.CANCELLED)
+	})
+
+	it("requires a command decision from the tasklet owner even when local policy approves", async () => {
+		fixture.autoApprover.requiresCounterpartyApproval = true
+		fixture.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+		fixture.env.config.taskMessenger = {
+			routesToOwner: true, createCard: fixture.createCard,
+		} as unknown as IToolEnvironment["config"]["taskMessenger"]
+		fixture.env.config.toolUse = { name: "upsert_tool", params: { tools: [] } }
+		fixture.env.ui.createCard = (params) => createCardFromMessenger(fixture.env.config, params, [])
+		const result = await validateStagedTool(fixture.env, await staged("{}"), "workspace")
+		assert.match(result.error ?? "", /rejected/)
+		assert.equal(fixture.autoApprover.isCommandAutoApproved.callCount, 0)
+		assert.equal(fixture.executeCommand.callCount, 0)
+		const forwarded = fixture.createCard.firstCall.args[0]
+		assert.equal(forwarded.permissionOperation.kind, "commands")
+		assert.deepEqual(forwarded.toolCall, { name: "upsert_tool", arguments: { tools: [] } })
+	})
+
+	it("keeps deterministic command restrictions manual-only with Utility enabled", async () => {
+		fixture.env.config.permissionDecisionBinding = {} as NonNullable<IToolEnvironment["config"]["permissionDecisionBinding"]>
+		fixture.commandPermissionController.validateTool.returns({ allowed: false, reason: "denied" })
+		fixture.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+		await validateStagedTool(fixture.env, await staged("{}"), "workspace")
+		assert.equal(fixture.createCard.firstCall.args[0].permissionRequestKind, "manual_tool")
+		assert.equal(fixture.executeCommand.callCount, 0)
+	})
+
 	it("rejects invalid syntax without executing the smoke command", async () => {
 		const result = await validateStagedTool(fixture.env, await staged("{}", "return ("), "workspace")
 		assert.match(result.error ?? "", /failed to compile or load/)
@@ -85,6 +145,7 @@ describe("validateStagedTool smoke-args boundary", () => {
 			const directory = await staged('{"message":"hello"}', scenario.implementation)
 			let commands = 0
 			const env = {
+				...fixture.env,
 				system: {
 					executeCommand: async () => {
 						commands++

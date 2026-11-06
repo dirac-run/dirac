@@ -1,12 +1,14 @@
 import { resolveWorkspacePath } from "@core/workspace"
 import { SourceAstService } from "@services/source-ast/SourceAstService"
 import { AnchorStateManager } from "@utils/AnchorStateManager"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import type { ISourceAstTrait } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 
 export function buildSourceAstTrait(config: TaskConfig): ISourceAstTrait {
+	const anchorStateKey = getTaskScopedStateKey(config.ulid, config.storageAddress)
 	const reconcileAnchors = (absolutePath: string, lines: string[]): string[] => {
-		const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, config.ulid)
+		const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, anchorStateKey)
 		if (result.changed) config.context.markAnchorStateDirty(absolutePath)
 		return result.anchors
 	}
@@ -20,7 +22,7 @@ export function buildSourceAstTrait(config: TaskConfig): ISourceAstTrait {
 		},
 		validateAccess: (absolutePath) => config.services.diracIgnoreController.validateAccess(absolutePath),
 		reconcileAnchors,
-		getAnchorFingerprint: (absolutePath) => AnchorStateManager.getDocumentFingerprint(absolutePath, config.ulid),
+		getAnchorFingerprint: (absolutePath) => AnchorStateManager.getDocumentFingerprint(absolutePath, anchorStateKey),
 	})
 
 	return {

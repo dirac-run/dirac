@@ -23,6 +23,11 @@ export class HookManager {
 
 	public async setActiveHookExecution(hookExecution: HookExecution | undefined): Promise<void> {
 		await this.dependencies.withStateLock(() => {
+			// Hook discovery and card creation may finish after cancellation has already settled.
+			if (hookExecution && this.dependencies.taskState.abort) {
+				hookExecution.abortController.abort()
+				return
+			}
 			this.dependencies.taskState.activeHookExecution = hookExecution
 		})
 	}

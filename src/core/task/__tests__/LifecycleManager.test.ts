@@ -89,6 +89,34 @@ describe("LifecycleManager", () => {
 	})
 
 	describe("startTask", () => {
+		for (const boundary of ["initialization", "initial presentation"]) {
+			it(`does not start TaskStart after cancellation during ${boundary}`, async () => {
+				deps.getWorkingConfiguration = () => ({
+					settings: { enableCheckpointsSetting: false, hooksEnabled: true, mode: "act" },
+					apiConfiguration: {},
+				})
+				const executeHook = sinon.stub(require("@core/hooks/hook-executor"), "executeHook").resolves({ wasCancelled: false })
+				let release!: () => void
+				const paused = new Promise<void>((resolve) => { release = resolve })
+				const initialization = boundary === "initialization"
+				const pendingOperation = initialization
+					? deps.diracIgnoreController.initialize
+					: deps.taskMessenger.upsertText
+				pendingOperation.returns(paused)
+
+				const run = manager.startTask("task")
+				await pWaitFor(() => pendingOperation.calledOnce, { interval: 1 })
+				await manager.abortTask()
+				release()
+				await run
+
+				sinon.assert.notCalled(executeHook)
+				sinon.assert.notCalled(deps.hookManager.runUserPromptSubmitHook)
+				sinon.assert.notCalled(deps.initiateTaskLoop)
+				if (initialization) sinon.assert.notCalled(deps.taskMessenger.upsertText)
+			})
+		}
+
 		it("initializes ignore and permission controllers", async () => {
 			await manager.startTask("test task")
 			sinon.assert.calledOnce(deps.diracIgnoreController.initialize)

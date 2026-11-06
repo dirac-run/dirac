@@ -69,6 +69,21 @@ describe("ToolExecutor tasklet parent authority", () => {
 		assert.throws(result.assertCurrent, /authority changed/)
 	})
 
+	it("applies current command rules to custom-tool smoke execution", async () => {
+		const h = harness()
+		const smoke = request("upsert_tool", { kind: "commands", commands: ["npx tsx '/task/test-harness.ts'"] })
+		assert.equal((await h.executor.authorizeTaskletPermission(smoke, signal())).approved, false)
+		h.settings.userApprovedCommands = [{ command: "npx tsx '/task/test-harness.ts'", match: "exact" }]
+		h.change()
+		const approved = await h.executor.authorizeTaskletPermission(smoke, signal())
+		assert.equal(approved.approved, true)
+		approved.assertCurrent()
+		h.settings.userApprovedCommands = []
+		h.change()
+		assert.throws(approved.assertCurrent, /authority changed/)
+		assert.equal((await h.executor.authorizeTaskletPermission(smoke, signal())).approved, false)
+	})
+
 	it("checks every exact normalized command, including workspace prefixes", async () => {
 		const h = harness()
 		h.permissions.validateTool.callsFake((_tool, command) => command === "echo trusted"

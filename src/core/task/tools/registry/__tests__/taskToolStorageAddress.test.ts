@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
 import type { DiracToolSpec } from "@shared/tools"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
@@ -54,7 +55,7 @@ describe("task tool storage addresses", () => {
 		assert.deepEqual(await fs.readdir(path.join(storageDirectory, "tasks")), [rootTaskId])
 	})
 
-	it("discovers addressed tools but reconciles by logical owner, without cross-owner replacement or removal", async () => {
+	it("discovers addressed tools and root-qualifies contained owners without cross-owner replacement or removal", async () => {
 		// Keep directory discovery and registry reconciliation real; compilation is outside this API's scope.
 		sinon.stub(UserToolLoader, "load").callsFake(async (toolDir, source) => {
 			const label = await fs.readFile(path.join(toolDir, "tool.ts"), "utf8")
@@ -82,9 +83,10 @@ describe("task tool storage addresses", () => {
 		assert.deepEqual(await refreshTaskTools(owners[2], secondTasklet), ["same_tool"])
 		const registry = ToolRegistry.getInstance()
 		for (const [index, owner] of owners.entries()) {
-			const tools = registry.getAllTools(owner)
+			const ownerKey = getTaskScopedStateKey(owner, addresses[index])
+			const tools = registry.getAllTools(ownerKey)
 			assert.equal(tools.length, 1)
-			assert.equal(tools[0].ownerTaskId, owner)
+			assert.equal(tools[0].ownerTaskId, ownerKey)
 			assert.equal(tools[0].spec.description, `tool-${index}`)
 			assert.equal(tools[0].modulePath, path.join(getTaskDirectoryPath(addresses[index]), "tools", "same_tool", "tool.ts"))
 		}
@@ -94,9 +96,9 @@ describe("task tool storage addresses", () => {
 		const firstTools = await resolveTaskToolDir("same_tool", firstTasklet)
 		await fs.rm(firstTools, { recursive: true })
 		assert.deepEqual(await refreshTaskTools(owners[1], firstTasklet), [])
-		assert.deepEqual(registry.getAllTools(owners[1]), [])
+		assert.deepEqual(registry.getAllTools(getTaskScopedStateKey(owners[1], firstTasklet)), [])
 		assert.equal(registry.getAllTools(rootTaskId)[0].spec.description, "tool-0")
-		assert.equal(registry.getAllTools(owners[2])[0].spec.description, "tool-2")
+		assert.equal(registry.getAllTools(getTaskScopedStateKey(owners[2], secondTasklet))[0].spec.description, "tool-2")
 		assert.deepEqual(await fs.readdir(path.join(storageDirectory, "tasks")), [rootTaskId])
 	})
 

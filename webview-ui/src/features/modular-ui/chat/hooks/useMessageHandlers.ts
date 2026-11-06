@@ -1,4 +1,4 @@
-import { CardKind, DiracMessageType, isFinalStatus, UIActionButtonType } from "@shared/ExtensionMessage"
+import { CardKind, DiracMessageType, isFinalStatus, TaskStatus, UIActionButtonType } from "@shared/ExtensionMessage"
 import { getCardKind } from "@shared/cardIdentity"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 
@@ -17,6 +17,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 	const backgroundCommandRunning = useSettingsStore((state) => state.backgroundCommandRunning)
 	const setExpandTaskHeader = useSettingsStore((state) => state.setExpandTaskHeader)
 	const goal = useChatStore((state) => state.goal)
+	const taskStatus = useChatStore((state) => state.taskStatus)
 	const {
 		setInputValue,
 		activeQuote,
@@ -180,6 +181,25 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 
 			const finalCardId = cardId || uiActionState?.activeCardId || ""
 
+			// A global Resume continues the lifecycle; only addressed cards receive approval decisions.
+			if (
+				!finalCardId &&
+				taskStatus === TaskStatus.CANCELLED &&
+				(actionType === DiracAskResponse.APPROVE || actionType === "proceed" || actionType === "retry")
+			) {
+				await TaskServiceClient.askResponse(
+					AskResponseRequest.create({
+						cardId: "",
+						responseType: DiracAskResponse.MESSAGE,
+						text: trimmedInput,
+						images,
+						files,
+					}),
+				)
+				clearInputState()
+				return
+			}
+
 			switch (actionType) {
 				case "retry":
 					// For API retry (api_req_failed), always send simple approval without content
@@ -324,7 +344,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 					break
 			}
 		},
-		[uiActionState, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled],
+		[uiActionState, taskStatus, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled],
 	)
 
 	// Handle task close button click

@@ -2490,6 +2490,30 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
 	})
 
+	it("executes an approved read-only child command under a strict-Plan parent", async () => {
+		const root = createResolutionRoot()
+		await root.applyWorkingConfigurationUpdate({ settings: { mode: "plan", strictPlanModeEnabled: true } })
+		let turn = 0
+		nextTool = async () => ++turn === 1
+			? { name: "execute_command", args: { commands: ["printf strict-plan-command-ok"] } }
+			: { name: "respond", args: { operation: "complete", text: "Read-only review finished" } }
+		const host = root.taskletHost!
+		const child = await host.start({ title: "read-only command", prompt: "Run the approved read-only command" })
+		const request = await waitForInteraction(host, child.id)
+		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
+		const card = await waitForRootCard(root)
+		await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)
+		assert.deepEqual(await escalation, { status: "resolved" })
+		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		const transcript = await host.readTranscript(child.id)
+		assert.ok(transcript.presentation.some((message) =>
+			message.content.type === DiracMessageType.CARD &&
+			message.content.card.status === CardStatus.SUCCESS &&
+			String(message.content.card.rawOutput?.output).includes("strict-plan-command-ok"),
+		), "The actual command output, not only the requested command, must contain the marker")
+		assert.doesNotMatch(JSON.stringify(transcript), /Plan Mode does not permit file mutations/)
+	})
+
 	it("keeps the current parent mutation ceiling and background lease on an Act child", async () => {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
@@ -2789,6 +2813,62 @@ describe("Tasklet real Task execution", function () {
 		}
 	})
 
+	for (const failWrite of [false, true]) {
+		it(`blocks real root completion while child outcome persistence ${failWrite ? "fails" : "is pending"}`, async () => {
+			if (failWrite) expectLoggerErrors() // The final outcome write deliberately fails.
+			const root = createResolutionRoot()
+			const host = root.taskletHost!
+			const storage = await import("@core/storage/taskStorage")
+			const originalSave = storage.saveTaskletRecord
+			const entered = deferred<void>()
+			const releaseWrite = deferred<void>()
+			sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+				if (record.outcome) {
+					entered.resolve()
+					await releaseWrite.promise
+					if (failWrite) throw new Error("controlled final outcome write failure")
+				}
+				await originalSave(record)
+			})
+			nextTurn = async () => "complete"
+			const child = await host.start({ title: "settling child", prompt: "Finish this assignment" })
+			try {
+				await entered.promise
+				assert.ok(host.inspect(child.id).outcome)
+				assert.equal(host.inspect(child.id).outcomePersisted, false)
+				assert.deepEqual(host.listActive(), [{ id: child.id, title: "settling child" }])
+				const pending = await (root as any).commitAttemptCompletion("too soon")
+				assert.equal(pending.committed, false)
+				assert.match(pending.error, /Active tasklets/)
+				releaseWrite.resolve()
+				if (failWrite) {
+					await assert.rejects(host["children"].get(child.id)!.settlement!, /controlled final outcome write failure/)
+					const failed = await (root as any).commitAttemptCompletion("not durable")
+					assert.equal(failed.committed, false)
+					assert.match(failed.error, /Tasklet settlement failed.*controlled final outcome write failure/)
+				} else {
+					await waitForOutcome(host, child.id)
+					assert.deepEqual(host.listActive(), [])
+					assert.equal((await (root as any).commitAttemptCompletion("durable result")).committed, true)
+				}
+			} finally {
+				releaseWrite.resolve()
+				if (failWrite) {
+					await assert.rejects(root.abortTask(), /Tasklet shutdown failed/)
+					tasks.splice(tasks.indexOf(root), 1)
+				}
+			}
+		})
+	}
+
+	it("accepts lifecycle continuation without an unidentified permission decision", async () => {
+		const root = createResolutionRoot()
+		await assert.rejects(root.submitCardResponse("", DiracAskResponse.APPROVE), /exact card ID/)
+		await root.submitCardResponse("", DiracAskResponse.MESSAGE)
+		assert.equal(root.stateView.askResponse, DiracAskResponse.MESSAGE)
+		assert.equal(root.stateView.askResponseCardId, undefined)
+	})
+
 	it("owns real children through root abort, final record persistence, lock release and deletion", async () => {
 		expectLoggerErrors() // Controlled providers deliberately return late chunks after abort.
 		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub
@@ -2999,13 +3079,16 @@ describe("Tasklet real Task execution", function () {
 		})
 		try {
 			const first = await host.start({ title: "failure", prompt: "Complete privately" })
-			await waitForOutcome(host, first.id)
+			await assert.rejects(host["children"].get(first.id)!.settlement!, /child transcript disk failure/)
 			const second = await host.start({ title: "sibling", prompt: "Sibling completes independently" })
 			await waitForOutcome(host, second.id)
 			assert.equal(host.inspect(first.id).outcome?.kind, "failed")
 			assert.match(host.inspect(first.id).settlementError!.message, /child transcript disk failure/)
 			assert.equal(host.inspect(second.id).outcome?.kind, "completed")
 			assert.equal(host.inspect(second.id).outcomePersisted, true)
+			const completion = await (root as any).commitAttemptCompletion("not durable")
+			assert.equal(completion.committed, false)
+			assert.match(completion.error, /Tasklet settlement failed.*child transcript disk failure/)
 			await assert.rejects(root.abortTask(), /Tasklet shutdown failed/)
 			await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
 			sinon.assert.calledOnce(writerRetirement!)
@@ -3040,7 +3123,8 @@ describe("Tasklet real Task execution", function () {
 		})
 		const record = await host.start({ title: "failure", prompt: "Complete privately" })
 		try {
-			const result = await waitForOutcome(host, record.id)
+			await assert.rejects(host["children"].get(record.id)!.settlement!, /final transcript flush failed/)
+			const result = host.inspect(record.id)
 			assert.equal(result.outcome?.kind, "failed", JSON.stringify(result))
 			assert.equal(result.usage?.primary.tokensIn, 100, "Failed final persistence retains already observed primary spend")
 			assert.equal(result.usage?.primary.tokensOut, 20)

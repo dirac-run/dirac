@@ -104,7 +104,7 @@ async function createSnapshot(
 	const createEnvironment = sinon.stub().returns(environment)
 	const manager = new ToolSnapshotManager({
 		createTaskConfig: (coordinator) => ({ ...config, coordinator }),
-		getTaskId: () => config.taskId,
+		getTaskToolOwnerKey: () => config.taskId,
 		getWorkspaceRoot: () => config.cwd,
 		getToggles: () => ({ use_subagents: true }),
 		getSelectionPolicy: () => selectionPolicy,

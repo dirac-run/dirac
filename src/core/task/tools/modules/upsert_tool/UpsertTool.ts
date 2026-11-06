@@ -5,6 +5,7 @@ import { diracHomeDir } from "@/shared/config/environment"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
 import { DiracToolSpec } from "@/shared/tools"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import { UserToolLoader } from "../../discovery/UserToolLoader"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
@@ -267,7 +268,7 @@ async function promoteAndActivateTool(
 		}
 
 		const loadedTool = prepared.scope === "task"
-			? { ...loadResult.tool, ownerTaskId: env.config.taskId }
+			? { ...loadResult.tool, ownerTaskId: getTaskScopedStateKey(env.config.taskId, env.config.storageAddress) }
 			: loadResult.tool
 		const workspaceRoot = env.config.workspaceManager?.getPrimaryRoot()?.path ?? env.config.cwd
 		await updateProgress(`[${prepared.name}] Registering`, "promotion and loading passed")

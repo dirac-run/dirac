@@ -123,14 +123,16 @@ describe("GoalSummary", () => {
 		expect(capturedInput.options?.isActive).toBe(true)
 		expect(view.lastFrame()).not.toContain("Objective r1")
 		expect(view.lastFrame()).toContain("page 1/2")
-		expect(view.lastFrame()).toContain("(active)")
+		expect(view.lastFrame()).toContain("Active child")
+		expect(view.lastFrame()).not.toContain("(active)")
 		expect(view.lastFrame()).not.toContain("(terminal-1)")
 
 		await pressPageKey("pageDown")
 
 		expect(onPageNavigation).toHaveBeenCalledOnce()
 		expect(view.lastFrame()).toContain("page 2/2")
-		expect(view.lastFrame()).toContain("failed · verification · Terminal child 1 (terminal-1)")
+		expect(view.lastFrame()).toContain("failed · verification · Terminal child 1")
+		expect(view.lastFrame()).not.toContain("(terminal-1)")
 
 		await pressPageKey("pageUp")
 		expect(view.lastFrame()).toContain("page 1/2")
@@ -144,7 +146,8 @@ describe("GoalSummary", () => {
 		]
 		goal.pendingInteractionCount = 2
 		const frame = renderSummary(goal, true).lastFrame() ?? ""
-		expect(frame).toContain("accepted · task · Saved handle (accepted)")
+		expect(frame).toContain("accepted · task · Saved handle")
+		expect(frame).not.toContain("(accepted)")
 		expect(frame).toContain("2 pending interactions")
 		expect(frame).not.toContain("(terminal-1)")
 		expect(frame).not.toContain("run unavailable")

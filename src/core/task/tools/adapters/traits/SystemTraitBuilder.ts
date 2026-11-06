@@ -5,6 +5,7 @@ import * as os from "os"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
 import { DiracDefaultTool } from "@/shared/tools"
+import { getTaskScopedStateKey } from "@shared/taskletId"
 import type { ISystemTrait, SystemCommandResult } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 
@@ -30,7 +31,7 @@ export function buildSystemTrait(
 				regex,
 				options?.filePattern,
 				config.services.diracIgnoreController,
-				config.ulid,
+				getTaskScopedStateKey(config.ulid, config.storageAddress),
 				options?.contextLines,
 				options?.excludeFilePatterns,
 				options?.includeAnchors,

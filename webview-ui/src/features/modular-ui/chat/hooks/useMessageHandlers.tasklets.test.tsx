@@ -231,6 +231,62 @@ describe("useMessageHandlers tasklet routing", () => {
 		expect(taskService.newTask).not.toHaveBeenCalled()
 	})
 
+	it.each([DiracAskResponse.APPROVE, "proceed", "retry"] as const)(
+		"routes a global cancelled-task %s as lifecycle input without approving a card",
+		async (action) => {
+			hydrate()
+			useChatStore.getState().applyExtensionState({
+				taskStatus: TaskStatus.CANCELLED,
+				uiActionState: {
+					globalButtons: [{ label: "Resume", action: UIActionButtonType.APPROVE, primary: true }],
+					cardButtons: [],
+					sendingDisabled: false,
+				},
+			})
+			const { result } = mountHandlers()
+			expect(result.current.interactionState).toBe(InteractionState.AWAITING_RESPONSE)
+			await act(async () => {
+				await result.current.handlers.executeButtonAction(action)
+			})
+			expect(taskService.askResponse).toHaveBeenCalledExactlyOnceWith(
+				AskResponseRequest.create({ cardId: "", responseType: DiracAskResponse.MESSAGE }),
+			)
+			expect(taskService.steerTask).not.toHaveBeenCalled()
+			expect(taskService.newTask).not.toHaveBeenCalled()
+		},
+	)
+
+	it("preserves the draft and attachments when the global Resume action continues a task", async () => {
+		hydrate()
+		useChatStore.getState().applyExtensionState({
+			taskStatus: TaskStatus.CANCELLED,
+			uiActionState: {
+				globalButtons: [{ label: "Resume", action: UIActionButtonType.APPROVE, primary: true }],
+				cardButtons: [],
+				sendingDisabled: false,
+			},
+		})
+		const { result } = mountHandlers()
+		await act(async () => {
+			await result.current.handlers.executeButtonAction(
+				DiracAskResponse.APPROVE,
+				undefined,
+				"  Continue with these files  ",
+				["image-data"],
+				["src/example.ts"],
+			)
+		})
+		expect(taskService.askResponse).toHaveBeenCalledExactlyOnceWith(
+			AskResponseRequest.create({
+				cardId: "",
+				responseType: DiracAskResponse.MESSAGE,
+				text: "Continue with these files",
+				images: ["image-data"],
+				files: ["src/example.ts"],
+			}),
+		)
+	})
+
 	it.each([
 		{ label: "image", text: "Inspect this screenshot", images: ["data:image/png;base64,draft"], files: [] },
 		{ label: "file", text: "Inspect this file", images: [], files: ["src/example.ts"] },

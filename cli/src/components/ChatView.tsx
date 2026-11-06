@@ -564,12 +564,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	)
 
 	const submitResumeResponse = useCallback(
-		async (responseType: DiracAskResponse, text?: string, images?: string[]) => {
+		async (text?: string, images?: string[]) => {
 			if (!ctrl?.task) return
 			const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
 			setLastError(null)
 			const task = await ctrl.prepareTaskForFollowUp()
-			await task.submitCardResponse("", responseType, expandedText, images)
+			// Resuming is lifecycle input, not an approval of an unidentified card.
+			await task.submitCardResponse("", DiracAskResponse.MESSAGE, expandedText, images)
 			resetInput()
 		},
 		[ctrl, pastedTexts, resetInput, setLastError],
@@ -595,7 +596,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			setIsProcessing(true)
 			try {
 				const validImages = images.length > 0 ? await processImagePaths(images, footerStatus.workspacePath) : undefined
-				await submitResumeResponse(DiracAskResponse.MESSAGE, trimmedText, validImages)
+				await submitResumeResponse(trimmedText, validImages)
 				return true
 			} finally {
 				setIsProcessing(false)
@@ -632,7 +633,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					case UIActionButtonType.APPROVE:
 					case UIActionButtonType.RETRY:
 						if (isResumeChoiceActive) {
-							await submitResumeResponse(DiracAskResponse.APPROVE)
+							await submitResumeResponse()
 						} else {
 							await sendAskResponse(DiracAskResponse.APPROVE)
 						}
@@ -646,7 +647,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 						break
 					case UIActionButtonType.PROCEED:
 						if (isResumeChoiceActive) {
-							await submitResumeResponse(DiracAskResponse.APPROVE)
+							await submitResumeResponse()
 						} else {
 							await sendAskResponse(DiracAskResponse.APPROVE)
 						}

@@ -57,7 +57,7 @@ function configFor(profile: TaskExecutionProfile, yolo = false): TaskConfig {
 function managerFor(config: TaskConfig) {
 	return new ToolSnapshotManager({
 		createTaskConfig: () => config,
-		getTaskId: () => config.taskId,
+		getTaskToolOwnerKey: () => config.taskId,
 		getWorkspaceRoot: () => undefined,
 		getToggles: () => ({ architecture_diagram: true }),
 		getSelectionPolicy: () => undefined,
