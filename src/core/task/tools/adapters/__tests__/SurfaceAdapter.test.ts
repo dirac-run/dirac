@@ -3,10 +3,12 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import { expect } from "chai"
+import { DiracDefaultTool } from "@shared/tools"
 import sinon from "sinon"
 import { Logger } from "@/shared/services/Logger"
 import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { SurfaceAdapter } from "../SurfaceAdapter"
+import type { CardParams, SystemCommandResult } from "../../interfaces/IToolEnvironment"
 import * as taskDirectory from "@core/storage/taskDirectory"
 import { ArchitectureStorage } from "@core/architecture/ArchitectureStorage"
 
@@ -48,6 +50,7 @@ describe("SurfaceAdapter", () => {
 					const forwarded = config.taskMessenger.createCard.firstCall.args[0]
 					expect(forwarded.permissionRequestKind).to.equal(permissionRequestKind)
 					expect(forwarded.requireApproval).to.equal(true)
+					expect(forwarded.permissionOperation).to.deep.equal({ kind: "tool", manualOnly: permissionRequestKind === "manual_tool" })
 					expect(forwarded.isAutoApproved).to.equal(undefined)
 					expect(forwarded.toolCall).to.deep.equal({ name: "execute_command", arguments: { commands: ["echo retained"] } })
 					config.toolUse.params.commands[0] = "changed"
@@ -61,6 +64,43 @@ describe("SurfaceAdapter", () => {
 				})
 			}
 		}
+
+		for (const manual of [false, true]) {
+			for (const permissionOperation of [
+				{ kind: "commands", commands: ["@root:echo retained"] },
+				{ kind: "paths", paths: ["src/a.ts", "/outside/b.ts"] },
+				{ kind: "browser", url: "https://example.com" },
+			] satisfies NonNullable<CardParams["permissionOperation"]>[]) {
+				it(`preserves the resolved ${permissionOperation.kind} operation for the owner (${manual ? "manual" : "ordinary"} card)`, async () => {
+					config.taskMessenger.routesToOwner = true
+					config.yoloModeToggled = true
+					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
+					const protocol = attachCardState({ id: "owner-operation" })
+					config.taskMessenger.createCard.resolves(protocol)
+					const params: CardParams = {
+						header: "Exact operation", requireApproval: true,
+						permissionRequestKind: "manual_tool", permissionOperation,
+					}
+					if (manual) await adapter.ui.createManualInteractionCard(params)
+					else await adapter.ui.createCard(params)
+
+					const forwarded = config.taskMessenger.createCard.firstCall.args[0]
+					expect(forwarded.permissionOperation).to.deep.equal(permissionOperation)
+					expect(forwarded.requireApproval).to.equal(true)
+					sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+				})
+			}
+		}
+
+		it("does not synthesize security grants for owner-routed operational choices or informational cards", async () => {
+			config.taskMessenger.routesToOwner = true
+			config.taskMessenger.createCard.resolves(attachCardState({ id: "owner-choice" }))
+			await adapter.ui.createCard({ header: "Condense", requireApproval: true, operationalInput: true })
+			await adapter.ui.createCard({ header: "Progress" })
+			for (const call of config.taskMessenger.createCard.getCalls()) {
+				expect(call.args[0].permissionOperation).to.equal(undefined)
+			}
+		})
 	})
 
 	describe("constructor", () => {
@@ -306,7 +346,7 @@ describe("SurfaceAdapter", () => {
 					name: "write_to_file",
 					arguments: { path: "src/index.ts", content: "export {}\n" },
 				},
-				permission: { header: "Permission" },
+				permission: { header: "Permission", locations: [{ path: "src/index.ts" }] },
 				runtime: { cwd: "/test", mode: "act", isSubagent: false },
 			})
 			sinon.assert.calledOnceWithExactly(config.taskMessenger.createCard, {
@@ -318,7 +358,7 @@ describe("SurfaceAdapter", () => {
 				body: "**Result:** Auto Approved by permission agent\n\n**Reason:** Allowed by policy.",
 				rawInput: { tool: "write_to_file" },
 				rawOutput: { decision: "approve", reason: "Allowed by policy.", approvedTool: "write_to_file" },
-				locations: undefined,
+				locations: [{ path: "src/index.ts" }],
 				collapsed: true,
 			})
 			sinon.assert.notCalled(auditCardHandle.waitForInteraction)
@@ -406,7 +446,8 @@ describe("SurfaceAdapter", () => {
 				})
 			).waitForInteraction()
 
-			sinon.assert.calledWithMatch(config.taskMessenger.createCard, { requireApproval: false })
+			sinon.assert.calledOnce(config.autoApprover.isUnrestrictedAutoApprove)
+			sinon.assert.notCalled(config.taskMessenger.createCard)
 			sinon.assert.notCalled(fakeHandle.waitForInteraction)
 			result.action.should.equal(DiracAskResponse.APPROVE)
 		})
@@ -687,12 +728,42 @@ describe("SurfaceAdapter", () => {
 				exitCode: 2,
 				signal: null,
 				logFilePath: "/tmp/output.log",
+				backgroundCompletion: undefined,
 			})
 			const callArgs = config.callbacks.executeCommandTool.getCall(0).args
 			callArgs[0].should.equal("ls")
 			callArgs[1].should.equal(5000)
 			callArgs[2].suppressUserInteraction.should.equal(true)
 			callArgs[2].useBackgroundExecution.should.equal(true)
+			sinon.assert.notCalled(config.callbacks.retainMutationUntil)
+		})
+
+		it("retains mutation authority until the forwarded background command completes", async () => {
+			let complete!: () => void
+			const backgroundCompletion = new Promise<void>((resolve) => { complete = resolve })
+			config.callbacks.executeCommandTool.resolves([false, "running", { completed: false, backgroundCompletion }])
+			const order: string[] = []
+			config.callbacks.withMutationAuthorization = sinon.stub().callsFake(async (toolName: string, mutation: () => Promise<SystemCommandResult>) => {
+				expect(toolName).to.equal(DiracDefaultTool.EXECUTE_COMMAND)
+				order.push("authorized")
+				const result = await mutation()
+				order.push("returned")
+				return result
+			})
+			config.callbacks.retainMutationUntil.callsFake((completion: Promise<void>) => {
+				expect(completion).to.equal(backgroundCompletion)
+				order.push("retained")
+			})
+
+			const result = await adapter.system.executeCommand("sleep 1")
+
+			expect(result.completed).to.equal(false)
+			expect(result.backgroundCompletion).to.equal(backgroundCompletion)
+			expect(order).to.deep.equal(["authorized", "retained", "returned"])
+			sinon.assert.calledOnce(config.callbacks.withMutationAuthorization)
+			sinon.assert.calledOnceWithExactly(config.callbacks.retainMutationUntil, backgroundCompletion)
+			complete()
+			await result.backgroundCompletion
 		})
 
 		it("searchFiles delegates to regexSearchFiles with config params", async () => {
@@ -944,6 +1015,7 @@ function createMockConfig(): any {
 		callbacks: {
 			assertMutationAuthorized: sinon.stub(),
 			withMutationAuthorization: async (_toolName: string, mutation: () => Promise<unknown>) => await mutation(),
+			retainMutationUntil: sinon.stub(),
 			saveCheckpoint: sinon.stub(),
 			executeCommandTool: sinon.stub(),
 			doesLatestTaskCompletionHaveNewChanges: sinon.stub(),

@@ -402,6 +402,69 @@ describe("ToolRegistry", () => {
 			assert.strictEqual(registry.getVersion(), version)
 		})
 
+		it("rejects a lower-priority replacement that collides by name and preserves the disabled tool", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "workspace_tool", name: "shared_name", source: "workspace" })
+			registry.registerUserTool(existing)
+			registry.disable(existing.id)
+			const version = registry.getVersion()
+			const toggles = registry.getToggles()
+
+			assert.deepStrictEqual(
+				registry.replaceUserToolWithResult(makeTool({ id: "global_tool", name: "shared_name", source: "global" }), true),
+				{ replaced: false, enabledNewTool: false },
+			)
+			assert.strictEqual(registry.getAllTools()[0], existing)
+			assert.strictEqual(registry.isEnabled(existing.id), false)
+			assert.deepStrictEqual(registry.getToggles(), toggles)
+			assert.strictEqual(registry.getVersion(), version)
+			assert.deepStrictEqual(registry.getAllTools(undefined, "/other-workspace"), [])
+		})
+
+		it("lets a higher-priority replacement overlay a global tool without mutating it", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "user_tool", source: "global", modulePath: "global" })
+			const replacement = makeTool({ id: "user_tool", source: "workspace", modulePath: "workspace" })
+			registry.registerUserTool(existing)
+			registry.enable(existing.id)
+			const version = registry.getVersion()
+
+			assert.strictEqual(registry.replaceUserTool(replacement), true)
+			assert.strictEqual(registry.getAllTools()[0], replacement)
+			assert.strictEqual(registry.isEnabled(existing.id), true)
+			assert.strictEqual(registry.getVersion(), version + 1)
+			assert.strictEqual(existing.modulePath, "global")
+			assert.strictEqual(registry.getAllTools(undefined, "/other-workspace")[0], existing)
+		})
+
+		it("checks lower-priority replacements against the requested workspace, not the last active one", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "user_tool", source: "workspace" })
+			registry.registerUserTool(existing, "/workspace-a")
+			registry.reconcileWorkspaceUserTools([], false, "/workspace-b")
+			const version = registry.getVersion()
+
+			assert.strictEqual(
+				registry.replaceUserTool(makeTool({ id: "user_tool", source: "global" }), true, "/workspace-a"),
+				false,
+			)
+			assert.strictEqual(registry.getAllTools(undefined, "/workspace-a")[0], existing)
+			assert.deepStrictEqual(registry.getAllTools(undefined, "/workspace-b"), [])
+			assert.deepStrictEqual(registry.getToggles(), {})
+			assert.strictEqual(registry.getVersion(), version)
+		})
+
+		it("allows a global replacement when the collision belongs only to another workspace", () => {
+			const registry = ToolRegistry.getInstance()
+			const existing = makeTool({ id: "user_tool", source: "workspace" })
+			const replacement = makeTool({ id: "user_tool", source: "global" })
+			registry.registerUserTool(existing, "/workspace-a")
+
+			assert.strictEqual(registry.replaceUserTool(replacement, true, "/workspace-b"), true)
+			assert.strictEqual(registry.getAllTools(undefined, "/workspace-b")[0], replacement)
+			assert.strictEqual(registry.getAllTools(undefined, "/workspace-a")[0], existing)
+		})
+
 		it("rejects a user tool that would shadow a built-in by name", () => {
 			const registry = ToolRegistry.getInstance()
 			registry.registerBuiltin(makeTool({ id: "read_file_builtin", name: "read_file", source: "builtin" }))

@@ -154,6 +154,18 @@ export class ToolRegistry {
 					? this.workspaceToolsForModule(tool.modulePath)
 					: this.workspaceToolsForRoot(workspaceRoot)
 				: this.userTools
+		// Check the effective shared inventory before writing to a lower-priority storage layer.
+		const sharedTools = workspaceRoot === undefined ? this.getAllTools() : this.getAllTools(undefined, workspaceRoot)
+		const higherPriorityTool = sharedTools.find(
+			(existing) =>
+				this.toolsCollide(existing, tool) && (SOURCE_PRIORITY[tool.source] ?? 0) < (SOURCE_PRIORITY[existing.source] ?? 0),
+		)
+		if (higherPriorityTool) {
+			Logger.warn(
+				`[ToolRegistry] User tool '${tool.id}' conflicts with existing tool '${higherPriorityTool.id}' (source: ${higherPriorityTool.source}). Keeping existing.`,
+			)
+			return { replaced: false, enabledNewTool: false }
+		}
 		return this.replaceSharedUserTool(tools, tool, enableIfNew)
 	}
 

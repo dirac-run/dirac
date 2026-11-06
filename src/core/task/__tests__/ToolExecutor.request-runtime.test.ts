@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
 import sinon from "sinon"
+import * as utility from "@core/utility-model/UtilityModelRunner"
 import { DiracDefaultTool } from "@shared/tools"
 import { ToolExecutor } from "../ToolExecutor"
+import { TaskState } from "../TaskState"
 import { createTaskRequestRuntime } from "../runtime/TaskRequestRuntime"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 import { TASK_CALLBACKS_KEYS } from "../tools/utils/ToolConstants"
@@ -226,8 +228,90 @@ describe("ToolExecutor request-runtime authorization", () => {
 		const binding = createBinding.call(harness, enabled)
 		assert.ok(binding)
 		assert.equal(binding.configurationRevision, enabled.revision)
-		assert.equal(typeof harness.createUtilityRunner.firstCall.args[1].onUsage, "function")
+		sinon.assert.calledOnceWithExactly(harness.createUtilityRunner, enabled.settings.utilityModelSelection, {}, enabled.apiConfiguration)
 		assert.equal(createBinding.call(harness, disabled), undefined)
+		sinon.assert.calledOnce(harness.createUtilityRunner)
+	})
+
+	it("accounts permission and other Utility requests once while keeping primary usage separate", async () => {
+		const current = configuration("act", 2)
+		const enabled = {
+			...current,
+			settings: {
+				...current.settings,
+				utilityModelUsePermissionHandling: true,
+				utilityModelPermissionPolicy: "Allow repository edits.",
+				utilityModelSelection: { provider: "openai" as const, modelId: "utility-model" },
+			},
+		}
+		const state = new TaskState()
+		const primaryUsage = {
+			totalInputTokens: 100, totalOutputTokens: 50, totalReasoningTokens: 10,
+			totalCacheWriteTokens: 20, totalCacheReadTokens: 30, totalCost: 2,
+		}
+		Object.assign(state, primaryUsage)
+		const usage = {
+			type: "usage" as const, inputTokens: 11, outputTokens: 7, reasoningTokens: 3,
+			cacheWriteTokens: 2, cacheReadTokens: 5, totalCost: 0.25,
+		}
+		const createRunner = sinon.stub(utility, "createUtilityModelRunner").callsFake((_configuration, selection, options) =>
+			new utility.UtilityModelRunner(selection, () => ({
+				getModel: () => ({ id: selection.modelId, info: { supportsPromptCache: false } }),
+				async *createMessage() {
+					yield usage
+					yield { type: "text" as const, text: '{"decision":"approve","reason":"Allowed by policy."}' }
+				},
+			}), options),
+		)
+		let notificationCount = 0
+		const notified = sinon.spy(() => {
+			assert.equal(state.utilityPermissionInputTokens, ++notificationCount * usage.inputTokens)
+		})
+		const harness = {
+			taskState: state,
+			ulid: "utility-accounting-test",
+			onUtilityUsageRecorded: notified,
+			requestRuntime: () => ({ workingConfiguration: current }),
+			createUtilityRunner: (ToolExecutor.prototype as any).createUtilityRunner,
+		}
+		try {
+			const binding = (ToolExecutor.prototype as any).createPermissionDecisionBinding.call(harness, enabled)
+			assert.deepEqual(await binding.service.decide({
+				toolCall: { name: "write_to_file", arguments: { path: "src/index.ts" } },
+				permission: { header: "Permission" },
+				runtime: { cwd: "/test", mode: "act", isSubagent: false },
+			}), { decision: "approve", reason: "Allowed by policy." })
+			assert.equal(state.utilityPermissionInputTokens, 11)
+			assert.equal(state.utilityPermissionOutputTokens, 7)
+			assert.equal(state.utilityPermissionCost, 0.25)
+			sinon.assert.calledOnce(notified)
+
+			const observer = sinon.spy((event: utility.UtilityModelUsageEvent) => {
+				assert.deepEqual(event, { selection: enabled.settings.utilityModelSelection, usage })
+				assert.equal(state.utilityPermissionInputTokens, 22)
+				sinon.assert.calledTwice(notified)
+			})
+			const runner = harness.createUtilityRunner(enabled.settings.utilityModelSelection, { onUsage: observer })
+			for await (const _chunk of runner.run({ systemPrompt: "Summarize", messages: [] })) { }
+
+			sinon.assert.calledTwice(createRunner)
+			assert.equal(createRunner.firstCall.args[0], enabled.apiConfiguration)
+			assert.equal(createRunner.secondCall.args[0], current.apiConfiguration)
+			assert.equal(createRunner.firstCall.args[2]!.ulid, harness.ulid)
+			sinon.assert.calledOnce(observer)
+			assert.equal(state.utilityPermissionInputTokens, 22)
+			assert.equal(state.utilityPermissionOutputTokens, 14)
+			assert.equal(state.utilityModelReasoningTokens, 6)
+			assert.equal(state.utilityPermissionCacheWriteTokens, 4)
+			assert.equal(state.utilityPermissionCacheReadTokens, 10)
+			assert.equal(state.utilityPermissionCost, 0.5)
+			assert.equal(state.utilityModelUsageObserved, true)
+			for (const [key, value] of Object.entries(primaryUsage)) {
+				assert.equal(state[key as keyof typeof primaryUsage], value)
+			}
+		} finally {
+			createRunner.restore()
+		}
 	})
 
 	it("keeps concurrent calls bound to the same request runtime", async () => {
