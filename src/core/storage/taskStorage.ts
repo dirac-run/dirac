@@ -43,6 +43,18 @@ export interface TaskletEvent {
 
 /** Read only the owning root's contained records; reconstruction never starts executions. */
 export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRecord[]> {
+	return readTaskletRecords(rootTaskId, rootTaskId)
+}
+
+/** Rebind only the copied snapshot, never an earlier read of children still writing in the source. */
+export async function rebindCopiedTaskletRecords(sourceRootTaskId: string, destinationRootTaskId: string): Promise<void> {
+	const records = await readTaskletRecords(destinationRootTaskId, sourceRootTaskId)
+	for (const record of records) {
+		await saveTaskletRecord({ ...record, rootTaskId: destinationRootTaskId })
+	}
+}
+
+async function readTaskletRecords(rootTaskId: string, recordRootTaskId: string): Promise<TaskletRecord[]> {
 	const collectionDirectory = path.join(getTaskDirectoryPath(rootTaskId), "tasklets")
 	let entries: import("fs").Dirent[]
 	try {
@@ -62,7 +74,7 @@ export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRec
 				if (
 					!record ||
 					record.id !== entry.name ||
-					record.rootTaskId !== rootTaskId ||
+					record.rootTaskId !== recordRootTaskId ||
 					typeof record.conversationUlid !== "string" ||
 					!record.conversationUlid ||
 					typeof record.title !== "string" ||

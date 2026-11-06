@@ -12,6 +12,7 @@ import { getTaskDirectoryPath } from "../taskDirectory"
 import {
 	loadTaskletEvents,
 	loadTaskletRecords,
+	rebindCopiedTaskletRecords,
 	saveTaskletEvents,
 	saveTaskletRecord,
 	type TaskletEvent,
@@ -66,6 +67,30 @@ describe("tasklet reconstruction storage", () => {
 		loaded[0].prompt = "local mutation"
 		assert.equal((await loadTaskletRecords("root")).find((value) => value.id === firstId)?.prompt, first.prompt)
 		assert.deepEqual(await fs.readdir(path.join(directory, "tasks")), ["other", "root"])
+	})
+
+	it("rebinds the copied records, retaining the snapshot rather than rereading the live source", async () => {
+		const original = record()
+		await saveTaskletRecord(original)
+		const sourceDirectory = getTaskDirectoryPath("root")
+		const copiedDirectory = getTaskDirectoryPath("fork")
+		await fs.cp(sourceDirectory, copiedDirectory, { recursive: true })
+		const copiedRecord = {
+			...original,
+			outcome: { kind: "completed" as const, response: "Copied result", completedAt: 456 },
+		}
+		await fs.writeFile(path.join(getTaskDirectoryPath(address("fork")), GlobalFileNames.taskletRecord), JSON.stringify(copiedRecord))
+		await rebindCopiedTaskletRecords("root", "fork")
+		assert.deepEqual(await loadTaskletRecords("fork"), [{ ...copiedRecord, rootTaskId: "fork" }])
+		assert.deepEqual(await loadTaskletRecords("root"), [original])
+	})
+
+	it("rejects a copied record with unexpected ownership without rewriting it", async () => {
+		await saveTaskletRecord(record("fork"))
+		const file = path.join(getTaskDirectoryPath(address("fork")), GlobalFileNames.taskletRecord)
+		const bytes = await fs.readFile(file)
+		await assert.rejects(rebindCopiedTaskletRecords("root", "fork"), /Invalid tasklet record/)
+		assert.deepEqual(await fs.readFile(file), bytes)
 	})
 
 	it("retains full events, delivery receipts and pending/resolved/retired request history unchanged", async () => {

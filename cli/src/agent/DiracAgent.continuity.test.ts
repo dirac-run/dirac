@@ -873,8 +873,9 @@ describe("DiracAgent ACP conversation continuity", () => {
 		expect((agent as any).sessions.has(sessionId)).toBe(false)
 	})
 
-	it("forks an active session with a fresh sessionId, isolated runtime state, and copied task directory", async () => {
+	it.each([false, true])("forks an active session with isolated artifacts (child settles during copy: %s)", async (settlesDuringCopy) => {
 		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-test-"))
+		taskStorageDirectory = tempDataDir
 		try {
 			const agent = new DiracAgent({ cwd: "/tmp/workspace", mode: "plan" })
 				; (agent as any).ctx = { extensionContext: {}, DATA_DIR: tempDataDir }
@@ -892,6 +893,31 @@ describe("DiracAgent ACP conversation continuity", () => {
 			const sourceTaskDir = path.join(tempDataDir, "tasks", mocks.task.taskId)
 			fs.mkdirSync(sourceTaskDir, { recursive: true })
 			fs.writeFileSync(path.join(sourceTaskDir, "ui_messages.json"), "[]")
+			const taskletId = `tasklet_${crypto.randomUUID()}`
+			const sourceChildDirectory = path.join(sourceTaskDir, "tasklets", taskletId)
+			const sourceRecord = {
+				id: taskletId,
+				rootTaskId: mocks.task.taskId,
+				conversationUlid: crypto.randomUUID(),
+				title: "Retained child",
+				prompt: "Private assignment",
+				createdAt: Date.now(),
+				configuration: { includeHistory: false, timeoutSeconds: 600 },
+				outcome: { kind: "completed", response: "Private result", completedAt: Date.now() },
+			}
+			fs.mkdirSync(sourceChildDirectory, { recursive: true })
+			const sourceRecordBytes = JSON.stringify(sourceRecord)
+			fs.writeFileSync(
+				path.join(sourceChildDirectory, "tasklet.json"),
+				settlesDuringCopy ? JSON.stringify({ ...sourceRecord, outcome: undefined }) : sourceRecordBytes,
+			)
+			if (settlesDuringCopy) {
+				fsCpInterceptor = async (actualCp, ...args) => {
+					// Child settlement is not serialized by the parent session's fork barrier.
+					fs.writeFileSync(path.join(sourceChildDirectory, "tasklet.json"), sourceRecordBytes)
+					await actualCp(...args)
+				}
+			}
 
 			const forkResponse = await agent.unstable_forkSession({
 				sessionId: sourceSessionId,
@@ -911,6 +937,10 @@ describe("DiracAgent ACP conversation continuity", () => {
 			expect(forkedTaskId).toBeDefined()
 			expect(forkedTaskId).not.toBe(mocks.task.taskId)
 			expect(fs.existsSync(path.join(tempDataDir, "tasks", forkedTaskId, "ui_messages.json"))).toBe(true)
+			expect(JSON.parse(fs.readFileSync(path.join(tempDataDir, "tasks", forkedTaskId, "tasklets", taskletId, "tasklet.json"), "utf8"))).toEqual({
+				...sourceRecord, rootTaskId: forkedTaskId,
+			})
+			expect(fs.readFileSync(path.join(sourceChildDirectory, "tasklet.json"), "utf8")).toBe(sourceRecordBytes)
 			expect(stateManager.upsertTaskHistoryItem).toHaveBeenCalledWith(
 				expect.objectContaining({
 					id: forkedTaskId,
@@ -988,6 +1018,7 @@ describe("DiracAgent ACP conversation continuity", () => {
 
 	it("serializes a prompt starting during snapshot copy so task files and journal stay consistent", async () => {
 		const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-fork-copy-prompt-race-"))
+		taskStorageDirectory = tempDataDir
 		let sourceSessionId: string | undefined
 		let forkedSessionId: string | undefined
 		try {

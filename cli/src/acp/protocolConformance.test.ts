@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -677,6 +677,114 @@ describe("ACP protocol conformance over raw stdio", () => {
 			expect(modelContext).toContain("Continue the saved work.")
 			await client.request("session/close", { sessionId })
 			await client.close()
+		} finally {
+			server.closeAllConnections()
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+		}
+	}, 30_000)
+
+	it("forks retained tasklets into an independent root without replaying their executions", async () => {
+		const requests: unknown[] = []
+		const server = createServer(async (request, response) => {
+			if (request.method === "GET") {
+				response.setHeader("Content-Type", "application/json")
+				response.end(JSON.stringify({ data: [{ id: "test-model", object: "model" }] }))
+				return
+			}
+			let body = ""
+			for await (const chunk of request) body += chunk
+			requests.push(JSON.parse(body))
+			response.setHeader("Content-Type", "text/event-stream")
+			response.end(`data: ${JSON.stringify({
+				id: `fork-completion-${requests.length}`,
+				object: "chat.completion.chunk",
+				choices: [{
+					index: 0, delta: {
+						tool_calls: [{
+							index: 0, id: `fork-respond-${requests.length}`, type: "function",
+							function: { name: "respond", arguments: JSON.stringify({ operation: "complete", text: "Fork follow-up complete." }) },
+						}]
+					}, finish_reason: "tool_calls"
+				}],
+			})}\n\ndata: [DONE]\n\n`)
+		})
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+		const address = server.address() as { port: number }
+		try {
+			const configDir = await temporaryDirectory("dirac-acp-config-")
+			const cwd = await temporaryDirectory("dirac-acp-workspace-")
+			const sourceSessionId = crypto.randomUUID()
+			await seedPersistedSession(configDir, cwd, sourceSessionId, "test-model", "openai")
+			const dataDir = path.join(configDir, "data")
+			const historyFile = path.join(dataDir, "state", "taskHistory.json")
+			const [sourceHistory] = JSON.parse(await readFile(historyFile, "utf8"))
+			const sourceTaskDir = path.join(dataDir, "tasks", sourceHistory.id)
+			const timestamp = Date.now()
+			const records = ["completed", "interrupted"].map((kind) => ({
+				id: `tasklet_${crypto.randomUUID()}`,
+				rootTaskId: sourceHistory.id,
+				conversationUlid: crypto.randomUUID(),
+				title: `Retained ${kind} child`,
+				prompt: `Private ${kind} assignment`,
+				createdAt: timestamp,
+				outcome: kind === "completed"
+					? { kind, response: "Private completed result", completedAt: timestamp }
+					: { kind, reason: "Stopped before fork", interruptedAt: timestamp },
+			}))
+			for (const record of records) {
+				const directory = path.join(sourceTaskDir, "tasklets", record.id)
+				await mkdir(directory, { recursive: true })
+				await writeFile(path.join(directory, "tasklet.json"), JSON.stringify(record))
+				await writeFile(path.join(directory, "tasklet_events.json"), JSON.stringify([{
+					id: crypto.randomUUID(), taskletId: record.id, createdAt: timestamp,
+					communication: { type: "outcome", outcome: record.outcome },
+				}]))
+				await writeFile(path.join(directory, "api_conversation_history.json"), JSON.stringify([
+					{ role: "user", content: [{ type: "text", text: record.prompt }] },
+				]))
+				await writeFile(path.join(directory, "ui_messages.json"), "[]")
+			}
+			await writeFile(path.join(dataDir, "globalState.json"), JSON.stringify({
+				welcomeViewCompleted: true, subagentsEnabled: true, enableCheckpointsSetting: false,
+				telemetrySetting: "disabled", openTelemetryEnabled: false,
+				utilityModelUseCases: { condense: false, approval: false, earlyExit: false },
+			}))
+			const client = createRawClient(configDir, cwd)
+			await client.initialize()
+			expect(await client.request("providers/set", {
+				providerId: "openai", apiType: "openai", baseUrl: `http://127.0.0.1:${address.port}/v1`,
+				headers: { Authorization: "Bearer local-test" },
+			})).toHaveProperty("result")
+			expect(await client.request("session/load", { sessionId: sourceSessionId, cwd, mcpServers: [] })).toHaveProperty("result")
+			expect(await client.request("session/prompt", {
+				sessionId: sourceSessionId, prompt: [{ type: "text", text: "Check the original session." }],
+			})).toMatchObject({ result: { stopReason: "end_turn" } })
+			await client.request("session/close", { sessionId: sourceSessionId })
+			const artifactNames = ["tasklet.json", "tasklet_events.json", "api_conversation_history.json", "ui_messages.json"]
+			const sourceFiles = records.flatMap((record) => artifactNames.map((name) => path.join(sourceTaskDir, "tasklets", record.id, name)))
+			const sourceBytes = await Promise.all(sourceFiles.map((file) => readFile(file)))
+			const fork = await client.request("session/fork", { sessionId: sourceSessionId, cwd, mcpServers: [] })
+			expect(fork.error).toBeUndefined()
+			const forkSessionId = fork.result?.sessionId as string
+			const history = JSON.parse(await readFile(historyFile, "utf8")) as Array<{ id: string; ulid: string }>
+			const forkHistory = history.find((item) => item.ulid === forkSessionId)!
+			expect(forkHistory.id).not.toBe(sourceHistory.id)
+			const followUp = await client.request("session/prompt", {
+				sessionId: forkSessionId, prompt: [{ type: "text", text: "Continue the independent fork." }],
+			})
+			expect(followUp).toMatchObject({ result: { stopReason: "end_turn" } })
+			expect(requests).toHaveLength(2)
+			for (const record of records) {
+				const directory = path.join(dataDir, "tasks", forkHistory.id, "tasklets", record.id)
+				expect(JSON.parse(await readFile(path.join(directory, "tasklet.json"), "utf8"))).toEqual({ ...record, rootTaskId: forkHistory.id })
+				for (const name of artifactNames.slice(1)) {
+					expect(await readFile(path.join(directory, name))).toEqual(await readFile(path.join(sourceTaskDir, "tasklets", record.id, name)))
+				}
+			}
+			await client.request("session/close", { sessionId: forkSessionId })
+			expect(await client.request("session/delete", { sessionId: forkSessionId })).toHaveProperty("result")
+			expect(JSON.parse(await readFile(historyFile, "utf8"))).toEqual([expect.objectContaining({ id: sourceHistory.id })])
+			expect(await Promise.all(sourceFiles.map((file) => readFile(file)))).toEqual(sourceBytes)
 		} finally {
 			server.closeAllConnections()
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))

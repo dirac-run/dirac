@@ -163,6 +163,10 @@ The default Dirac home is `~/.dirac`; state is stored below `~/.dirac/data`:
 
 `--config <path>` and `DIRAC_DIR` override the Dirac home. The selected working directory determines workspace storage and defaults to the current directory.
 
+ACP session forks copy retained tasklets into the new root's directory and rebind their ownership to that root. Child handles, conversation IDs, outcomes, events, and private transcripts are retained; forking does not restart child execution. Changes or deletion in the fork must not affect the source session.
+
+After a fresh CLI build, verify this contract over actual ACP stdio with `cd cli && npx vitest run src/acp/protocolConformance.test.ts -t 'forks retained tasklets'`.
+
 ## Public library
 
 The package exports its embeddable API from `cli/src/exports.ts`. Importing the library bundle must not install CLI signal handlers, suppress the caller's console, parse argv, or otherwise mutate process-global CLI state. Keep command-entry side effects in `cli/src/index.ts`.

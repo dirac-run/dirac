@@ -4,6 +4,7 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { HistoryItem, TaskHistoryItem } from "@shared/HistoryItem"
 import type { Settings } from "@shared/storage/state-keys"
 import { StateManager } from "@/core/storage/StateManager"
+import { rebindCopiedTaskletRecords } from "@/core/storage/taskStorage"
 import { arePathsEqual } from "@/utils/path"
 import { copyTaskRuntimeSettings, getSessionRuntimeConfig } from "../acp/acp-session-runtime-config.js"
 import { getLatestTaskIdForSession } from "../acp/acp-session-tasks.js"
@@ -186,6 +187,8 @@ export async function cloneForkedSessionArtifacts(options: {
 	const newTaskDir = path.join(dataDir, "tasks", newTaskId)
 	await fs.mkdir(path.dirname(newTaskDir), { recursive: true })
 	await fs.cp(sourceTaskDir, newTaskDir, { recursive: true })
+	// Child handles are root-scoped; retain their identity and history under the fork's ownership.
+	await rebindCopiedTaskletRecords(sourceTaskId, newTaskId)
 
 	const sourceTaskHistory = sourceState.sourceHistoryItem as TaskHistoryItem | undefined
 	const historyItem: TaskHistoryItem = {
