@@ -53,12 +53,18 @@ describe("TaskletConfiguration", () => {
 		const parent = parentConfiguration()
 		const resolved = await resolveTaskletConfiguration({}, parent)
 		assert.deepEqual(resolved, { includeHistory: false, timeoutSeconds: 600 })
-		assert.equal(taskletWorkingConfiguration(parent, resolved), parent)
+		const child = taskletWorkingConfiguration(parent, resolved)
+		assert.equal(child.settings.mode, "act")
+		assert.equal(child.apiConfiguration.actModeApiModelId, parent.apiConfiguration.planModeApiModelId)
+		assert.equal(parent.settings.mode, "plan")
 
 		const updated = buildTaskWorkingConfigurationUpdate(parent, {
 			apiConfiguration: { planModeApiModelId: "claude-sonnet-4-6", apiKey: "rotated-secret" },
 		})
-		assert.equal(taskletWorkingConfiguration(updated, resolved), updated)
+		const refreshed = taskletWorkingConfiguration(updated, resolved)
+		assert.equal(refreshed.settings.mode, "act")
+		assert.equal(refreshed.apiConfiguration.actModeApiModelId, "claude-sonnet-4-6")
+		assert.equal(refreshed.apiConfiguration.apiKey, "rotated-secret")
 		assert.doesNotMatch(JSON.stringify(resolved), /secret|apiKey|apiConfiguration/)
 	})
 
@@ -120,7 +126,7 @@ describe("TaskletConfiguration", () => {
 		assert.equal(resolved.modelSelection?.provider, "openrouter")
 		assert.equal(resolved.modelSelection?.modelId, "vendor/research-model")
 		const child = taskletWorkingConfiguration(parent, resolved)
-		assert.equal(child.settings.mode, "plan")
+		assert.equal(child.settings.mode, "act")
 		assert.equal(child.settings.preferredLanguage, "French")
 		assert.equal(child.settings.planModeOpenRouterModelId, "vendor/research-model")
 		assert.equal(child.settings.actModeOpenRouterModelId, "vendor/research-model")

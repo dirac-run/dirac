@@ -1,6 +1,7 @@
 /**
  * Prints finalized, displaced snapshots exactly once through Ink's <Static>.
  * Revisable items can return to the live tail without rewriting terminal history.
+ * A caller's revisable snapshots need not be mutable archival barriers; only active root output/input is.
  */
 import { useRef } from "react"
 

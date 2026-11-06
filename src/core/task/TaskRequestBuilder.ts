@@ -58,6 +58,7 @@ export interface TaskRequestBuilderContext {
 	executionProfile: TaskExecutionProfile
 	getPinnedContext: () => Promise<string | undefined>
 	taskletConfiguration?: import("./TaskletConfiguration").TaskletConfiguration
+	getTaskletSupervisionContext?: () => string | undefined
 	writePromptMetadataArtifacts: (params: {
 		systemPrompt: string
 		providerInfo: ApiProviderInfo
@@ -228,12 +229,18 @@ export async function buildApiRequestParams(
 	const configuredPrompt = configuration?.systemPrompt
 		? `${configuration.systemPrompt}\n\n${taskProfileSystemInstructions(ctx.executionProfile) ?? ""}`
 		: baseSystemPrompt
+	const supervisionContext = ctx.getTaskletSupervisionContext?.()
 	const systemPrompt = [
 		configuredPrompt,
 		configuration?.name ? `# Agent Profile\nName: ${configuration.name}\n${configuration.description ?? ""}` : undefined,
-		configuration ? `# Execution Deadline\nComplete the assignment within ${configuration.timeoutSeconds} seconds.` : undefined,
+		configuration
+			? `# Execution Deadline\nComplete the assignment within ${configuration.timeoutSeconds} seconds.`
+			: undefined,
 		ctx.executionProfile !== "standalone" ? pinnedContext : undefined,
-	].filter(Boolean).join("\n\n")
+		supervisionContext ? `# Current Tasklet Supervision\n${supervisionContext}` : undefined,
+	]
+		.filter(Boolean)
+		.join("\n\n")
 	const boundRequestRuntime = bindToolSnapshotToRequestRuntime(requestRuntime, toolSnapshot)
 	ctx.toolExecutor.activateSnapshot(toolSnapshot, boundRequestRuntime)
 	ctx.taskState.useNativeToolCalls = toolSnapshot.nativeTools.length > 0

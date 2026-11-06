@@ -3,17 +3,11 @@ import type { TaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurati
 import type { TaskRequestRuntime } from "../runtime/TaskRequestRuntime"
 import { MessageStateHandler } from "../message-state"
 import { TaskState } from "../TaskState"
-import type { Card, ICardHandle } from "@shared/ExtensionMessage"
+import type { ICardHandle } from "@shared/ExtensionMessage"
 import type { ResponseArguments } from "@shared/responseTool"
-import type { PermissionOperation } from "../tools/interfaces/ICardHandle"
 
-/** Data retained by the owner; presentation is not an authorization decision. */
-export interface TaskInteractionRequest {
-	card: Readonly<Card>
-	permissionRequestKind?: "tool" | "manual_tool"
-	permissionOperation?: PermissionOperation
-	toolCall?: { name: string; arguments: Record<string, unknown> }
-}
+export type { TaskInteractionRequest } from "./tasklet"
+import type { TaskInteractionRequest } from "./tasklet"
 
 export interface TaskCounterparty {
 	recordResponse(response: ResponseArguments): Promise<void>

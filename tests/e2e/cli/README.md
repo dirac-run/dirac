@@ -228,14 +228,18 @@ assignment markers, not global request ordering. Two siblings report progress an
 ask private parent-directed questions; the parent inspects them and voluntarily
 sleeps. The test opens `/agent` (singular), inspects/reopens previews without
 answering the questions, then submits user messages to wake the parent. It checks
-one completed sibling while the other remains waiting, parent answer delivery,
-retained results/transcripts, same-ID resume, and completed previews after reopening
+one completed sibling while the other remains waiting, addressed `message` replies,
+bounded selected assignment/transcript evidence, same-ID resume, and title/status-only
+completed previews after reopening
 the persisted root in a new CLI process with the provider stopped.
 The Goal variant starts through `/goal`, stays `working` during private child
 questions, and becomes `achieved` after explicit completion without a hidden
 verification gate. Both variants assert root-only top-level storage/history and
 byte-preserved child records, events and transcripts during restored browsing;
 the Goal record also stays unchanged on selection/reopening.
+It also reproduces the 80×24 case with two waiting children: displaced parent control
+output remains accessible in scrollback and accounting-only cards/UUID headings
+never become conversation rows. Activity-only changes do not create transcript revisions.
 
 No live credentials, command execution, or workspace edits are requested by the
 model. The provider writes only a diagnostic `tasklet-fixture.jsonl` in the temporary

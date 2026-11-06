@@ -106,9 +106,15 @@ describe("TaskMessenger tasklet escalation", () => {
 	function request(): TaskInteractionRequest {
 		return {
 			card: {
-				id: "private-card", kind: CardKind.GENERIC, header: "Execute?", body: "Full operation",
-				status: CardStatus.WAITING_FOR_INPUT, renderType: "text", requireApproval: true,
-				startTime: 1, rawInput: { commands: ["echo example"] },
+				id: "private-card",
+				kind: CardKind.GENERIC,
+				header: "Execute?",
+				body: "Full operation",
+				status: CardStatus.WAITING_FOR_INPUT,
+				renderType: "text",
+				requireApproval: true,
+				startTime: 1,
+				rawInput: { commands: ["echo example"] },
 				actions: [{ label: "Approve", value: DiracAskResponse.APPROVE, primary: true }],
 			},
 			permissionOperation: { kind: "commands", commands: ["echo example"] },
@@ -127,7 +133,7 @@ describe("TaskMessenger tasklet escalation", () => {
 		assert.equal(result.action, DiracAskResponse.APPROVE)
 		assert.notEqual(card.id, input.card.id)
 		assert.notEqual(card.startTime, 1)
-		assert.match(card.header, /Private worker.*tasklet-private/)
+		assert.match(card.header, /Private worker.*Execute/)
 		assert.deepEqual(card.rawInput, input.card.rawInput)
 		assert.deepEqual(card.actions, input.card.actions)
 		assert.equal(card.status, CardStatus.SUCCESS)
@@ -141,8 +147,11 @@ describe("TaskMessenger tasklet escalation", () => {
 		controller.abort(new Error("retired"))
 		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /retired/)
 		assert.deepEqual(messages, [])
-		const owner = createMessenger(undefined, { recordResponse: async () => { }, requestInteraction: sinon.stub() })
-		await assert.rejects(owner.messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), /root messenger/)
+		const owner = createMessenger(undefined, { recordResponse: async () => {}, requestInteraction: sinon.stub() })
+		await assert.rejects(
+			owner.messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
+			/root messenger/,
+		)
 		assert.deepEqual(owner.messages, [])
 	})
 
@@ -151,7 +160,9 @@ describe("TaskMessenger tasklet escalation", () => {
 		let release!: () => void
 		messageStateHandler.addToDiracMessages.callsFake(async (message) => {
 			messages.push(message)
-			await new Promise<void>((resolve) => { release = resolve })
+			await new Promise<void>((resolve) => {
+				release = resolve
+			})
 		})
 		const controller = new AbortController()
 		const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /retired/)
@@ -193,7 +204,11 @@ describe("TaskMessenger tasklet escalation", () => {
 				assert.equal(error.cause, failure)
 				return true
 			})
-			await pWaitFor(() => queued ? taskState.waitingCardIds.length === 2 : messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+			await pWaitFor(
+				() =>
+					queued ? taskState.waitingCardIds.length === 2 : messageStateHandler.publishCardInteractionReady.calledOnce,
+				{ interval: 1 },
+			)
 			messageStateHandler.patchCardById.rejects(failure)
 			controller.abort(new Error("child retired"))
 			await rejected
@@ -213,11 +228,14 @@ describe("TaskMessenger tasklet escalation", () => {
 		const { messenger, taskState, messageStateHandler, postStateToWebview } = createMessenger()
 		const controller = new AbortController()
 		const failure = new Error("publication failed")
-		const rejected = assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), (error: unknown) => {
-			assert.ok(error instanceof TaskletEscalationCleanupError)
-			assert.equal(error.cause, failure)
-			return true
-		})
+		const rejected = assert.rejects(
+			messenger.escalateTaskletInteraction(child, request(), controller.signal),
+			(error: unknown) => {
+				assert.ok(error instanceof TaskletEscalationCleanupError)
+				assert.equal(error.cause, failure)
+				return true
+			},
+		)
 		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
 		postStateToWebview.rejects(failure)
 		controller.abort()
@@ -233,11 +251,14 @@ describe("TaskMessenger tasklet escalation", () => {
 			messages.push(message)
 			throw failure
 		})
-		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), (error: unknown) => {
-			assert.ok(error instanceof TaskletEscalationCleanupError)
-			assert.equal(error.cause, failure)
-			return true
-		})
+		await assert.rejects(
+			messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
+			(error: unknown) => {
+				assert.ok(error instanceof TaskletEscalationCleanupError)
+				assert.equal(error.cause, failure)
+				return true
+			},
+		)
 		assert.equal(messages.length, 1)
 	})
 
@@ -274,7 +295,10 @@ describe("TaskMessenger tasklet escalation", () => {
 			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE })
 			taskState.askResponseUserEdits = { "file.ts": "changed" }
 		})
-		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), /cannot change/)
+		await assert.rejects(
+			messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
+			/cannot change/,
+		)
 		assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
 	})
 
@@ -283,7 +307,10 @@ describe("TaskMessenger tasklet escalation", () => {
 		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
 			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.MESSAGE, text: "Stop and reconsider" })
 		})
-		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal), ToolSkippedByUserMessage)
+		await assert.rejects(
+			messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
+			ToolSkippedByUserMessage,
+		)
 		assert.equal(messages[0].content.card.status, CardStatus.CANCELLED)
 		assert.deepEqual(taskState.waitingCardIds, [])
 	})
@@ -293,9 +320,12 @@ describe("TaskMessenger owner interactions", () => {
 	function owner() {
 		return {
 			recordResponse: sinon.stub().resolves(),
-			requestInteraction: sinon.stub().callsFake((_request, signal: AbortSignal) => new Promise<never>((_resolve, reject) => {
-				signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-			})),
+			requestInteraction: sinon.stub().callsFake(
+				(_request, signal: AbortSignal) =>
+					new Promise<never>((_resolve, reject) => {
+						signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+					}),
+			),
 		}
 	}
 
@@ -305,7 +335,12 @@ describe("TaskMessenger owner interactions", () => {
 		const notification = sinon.stub(messenger, "runNotificationHook").resolves()
 		const autoApprove = sinon.stub().returns(true)
 		let release!: () => void
-		messageStateHandler.flushPendingWrites.callsFake(() => new Promise<void>((resolve) => { release = resolve }))
+		messageStateHandler.flushPendingWrites.callsFake(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
 		const card = await messenger.createCard({ header: "Permission", requireApproval: true, isAutoApproved: autoApprove })
 		const waiting = card.waitForInteraction()
 		const rejected = assert.rejects(waiting)
@@ -322,7 +357,10 @@ describe("TaskMessenger owner interactions", () => {
 	})
 
 	it("forwards the trusted operation descriptor to its owner", async () => {
-		const counterparty = { recordResponse: sinon.stub().resolves(), requestInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT }) }
+		const counterparty = {
+			recordResponse: sinon.stub().resolves(),
+			requestInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT }),
+		}
 		const { messenger } = createMessenger(undefined, counterparty)
 		const operation = { kind: "commands" as const, commands: ["exact normalized command"] }
 		const card = await messenger.createCard({ header: "Permission", requireApproval: true, permissionOperation: operation })
@@ -334,7 +372,12 @@ describe("TaskMessenger owner interactions", () => {
 		const counterparty = owner()
 		const { messenger, taskState, messageStateHandler } = createMessenger(undefined, counterparty)
 		let release!: () => void
-		messageStateHandler.flushPendingWrites.callsFake(() => new Promise<void>((resolve) => { release = resolve }))
+		messageStateHandler.flushPendingWrites.callsFake(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
 		const card = await messenger.createCard({ header: "Question", requireFeedback: true })
 		const rejected = assert.rejects(card.waitForInteraction())
 		taskState.abort = true
@@ -446,18 +489,29 @@ describe("TaskMessenger text authorship", () => {
 		const { CardHandle } = await import("../tools/adapters/CardHandle")
 		for (const cancel of [false, true]) {
 			const { messenger, taskState, messages, messageStateHandler } = createMessenger()
-			const operation = create().processCall({ operation: "display_diagram", name: "tools" }, {
-				ui: { createCard: async (params) => new CardHandle(await messenger.createCard(params)) },
-				architecture: {
-					openDisplay: async (selection) => ({ available: true, waitForInput: true, selection: { ...selection, taskId: "owner" } }),
-				} as import("../tools/interfaces/IArchitectureTrait").IArchitectureTrait,
-			})
+			const operation = create().processCall(
+				{ operation: "display_diagram", name: "tools" },
+				{
+					ui: { createCard: async (params) => new CardHandle(await messenger.createCard(params)) },
+					architecture: {
+						openDisplay: async (selection) => ({
+							available: true,
+							waitForInput: true,
+							selection: { ...selection, taskId: "owner" },
+						}),
+					} as import("../tools/interfaces/IArchitectureTrait").IArchitectureTrait,
+				},
+			)
 			const settled = assert.rejects(operation, cancel ? /aborted/ : ToolSkippedByUserMessage)
 			await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT, { timeout: 1500 })
 			assert.ok(messageStateHandler.flushPendingWrites.called)
 			assert.equal(messages[0].content.card.architectureReference.mode, "latest")
 			if (cancel) taskState.abort = true
-			else await submitCardResponse({ taskState }, { cardId: "", response: DiracAskResponse.MESSAGE, text: "Keep the boundary", images: [], files: [] })
+			else
+				await submitCardResponse(
+					{ taskState },
+					{ cardId: "", response: DiracAskResponse.MESSAGE, text: "Keep the boundary", images: [], files: [] },
+				)
 			await settled
 			assert.equal(messages[0].content.card.status, cancel ? CardStatus.CANCELLED : CardStatus.SKIPPED)
 			assert.equal(messages[0].content.card.architectureReference.taskId, "owner")
@@ -487,7 +541,7 @@ describe("TaskMessenger text authorship", () => {
 
 	for (const stage of ["persistence", "presentation"]) {
 		for (const response of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
-			for (const explicitCardId of [true, false]) {
+			for (const explicitCardId of [true]) {
 				it(`keeps an immediate ${response} during ${stage} ${explicitCardId ? "with" : "without"} a card ID`, async () => {
 					let answered = false
 					const answer = async () => {
@@ -505,7 +559,7 @@ describe("TaskMessenger text authorship", () => {
 							},
 						)
 					}
-					const publication = sinon.stub().callsFake(stage === "presentation" ? answer : async () => { })
+					const publication = sinon.stub().callsFake(stage === "presentation" ? answer : async () => {})
 					const { messenger, taskState, messageStateHandler } = createMessenger(publication)
 					if (stage === "persistence") messageStateHandler.flushPendingWrites.callsFake(answer)
 					const card = await messenger.createCard({ header: "Permission", requireApproval: true })
@@ -652,7 +706,7 @@ describe("TaskMessenger text authorship", () => {
 	})
 
 	it("does not block card lifecycle operations on state delivery", async () => {
-		const postStateToWebview = sinon.stub().returns(new Promise<void>(() => { }))
+		const postStateToWebview = sinon.stub().returns(new Promise<void>(() => {}))
 		const { messenger, messages, messageStateHandler } = createMessenger(postStateToWebview)
 
 		const card = await messenger.createCard({ header: "Long-running publication" })

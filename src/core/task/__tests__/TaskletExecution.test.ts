@@ -9,11 +9,18 @@ import { TaskletEscalationCleanupError } from "../TaskMessenger"
 import * as apiModule from "@core/api"
 import type { ApiHandler } from "@core/api"
 import type { ApiStream } from "@core/api/transform/stream"
-import { getSavedApiConversationState, getSavedApiConversationProviderState, getSavedPresentationHistory, saveApiConversationProviderState, saveApiConversationHistory, saveDiracMessages } from "@core/storage/conversationHistory"
+import {
+	getSavedApiConversationState,
+	getSavedApiConversationProviderState,
+	getSavedPresentationHistory,
+	saveApiConversationProviderState,
+	saveApiConversationHistory,
+	saveDiracMessages,
+} from "@core/storage/conversationHistory"
 import { GlobalFileNames } from "@core/storage/fileNames"
 import { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
-import { writeTaskSettingsToStorage, updateTaskMetadata } from "@core/storage/taskStorage"
+import { updateTaskMetadata } from "@core/storage/taskStorage"
 import * as checkpointFactory from "@integrations/checkpoints/factory"
 import { ErrorService } from "@/services/error/ErrorService"
 import { HostProvider } from "@/hosts/host-provider"
@@ -48,7 +55,11 @@ import type { IGoalTrait } from "../tools/interfaces/IToolEnvironment"
 import type { HistoryItem } from "@shared/HistoryItem"
 
 type Request = { mode: Mode; model: string; systemPrompt: string; messages: unknown; tools: string[] }
-type ProviderToolCall = { name: string; args: Record<string, unknown>; usage?: Extract<import("@core/api/transform/stream").ApiStreamChunk, { type: "usage" }> }
+type ProviderToolCall = {
+	name: string
+	args: Record<string, unknown>
+	usage?: Extract<import("@core/api/transform/stream").ApiStreamChunk, { type: "usage" }>
+}
 
 /**
  * Phase 3.4: the Task lifecycle, request loop, tool discovery/dispatch, messages and
@@ -66,11 +77,28 @@ describe("Tasklet real Task execution", function () {
 	let forbidden: sinon.SinonStub[]
 	let stateManager: StateManager
 	let requestLimit: number
-	let nextTurn: ((mode: Mode, request: Request) => Promise<"progress" | "plan" | "complete" | "question" | "read_file" | "execute_command" | "condense" | "allowed_skill" | "excluded_skill">) | undefined
+	let nextTurn:
+		| ((
+			mode: Mode,
+			request: Request,
+		) => Promise<
+			| "progress"
+			| "plan"
+			| "complete"
+			| "question"
+			| "read_file"
+			| "execute_command"
+			| "condense"
+			| "allowed_skill"
+			| "excluded_skill"
+		>)
+		| undefined
 	let nextTool: ((request: Request) => Promise<ProviderToolCall>) | undefined
 
 	function rejectCall(name: string) {
-		const spy = sandbox.stub().callsFake(() => { throw new Error(`Tasklet escaped to ${name}`) })
+		const spy = sandbox.stub().callsFake(() => {
+			throw new Error(`Tasklet escaped to ${name}`)
+		})
 		forbidden.push(spy)
 		return spy
 	}
@@ -93,20 +121,26 @@ describe("Tasklet real Task execution", function () {
 			globalStorageFsPath: path.join(directory, "storage"),
 			extensionFsPath: process.cwd(),
 			terminalManagerCreator: (() => ({
-				setShellIntegrationTimeout() { }, setTerminalReuseEnabled() { },
-				setTerminalOutputLineLimit() { }, setDefaultTerminalProfile() { },
-				getTerminals: () => [], disposeAll: async () => { },
+				setShellIntegrationTimeout() { },
+				setTerminalReuseEnabled() { },
+				setTerminalOutputLineLimit() { },
+				setDefaultTerminalProfile() { },
+				getTerminals: () => [],
+				disposeAll: async () => { },
 			})) as any,
 		})
 		sandbox.stub(HostProvider, "env" as any).value({ getHostVersion: async () => ({ platform: "linux", diracType: 0 }) })
 		sandbox.stub(HostProvider, "window" as any).value({
-			getOpenTabs: async () => ({ paths: [] }), getVisibleTabs: async () => ({ paths: [] }),
+			getOpenTabs: async () => ({ paths: [] }),
+			getVisibleTabs: async () => ({ paths: [] }),
 			showMessage: rejectCall("host message"),
 		})
 		// No checkpoint capability is disabled in production or in the working configuration.
 		sandbox.stub(checkpointFactory, "buildCheckpointManager").returns({
-			isEnabled: () => true, initialize: async () => { },
-			commit: async () => undefined, saveCheckpoint: async () => { },
+			isEnabled: () => true,
+			initialize: async () => { },
+			commit: async () => undefined,
+			saveCheckpoint: async () => { },
 			doesLatestTaskCompletionHaveNewChanges: async () => false,
 		} as any)
 		stateManager = {
@@ -122,39 +156,73 @@ describe("Tasklet real Task execution", function () {
 			flushPendingState: async () => { },
 		} as unknown as StateManager
 		sandbox.stub(StateManager, "get").returns(stateManager)
-		sandbox.stub(ErrorService, "get").returns({ toDiracError: (error: unknown) => { throw error } } as unknown as ErrorService)
+		sandbox.stub(ErrorService, "get").returns({
+			toDiracError: (error: unknown) => {
+				throw error
+			},
+		} as unknown as ErrorService)
 		sandbox.stub(taskLocks, "acquireTaskLock").callsFake(rejectCall("root lock acquisition"))
 		sandbox.stub(SqliteLockManager.prototype, "registerFolderLock").callsFake(rejectCall("SQLite lock acquisition"))
 		sandbox.stub(SqliteLockManager.prototype, "releaseFolderLockByTarget").callsFake(rejectCall("SQLite lock release"))
 		sandbox.stub(apiModule, "buildApiHandler").callsFake((configuration, mode) => {
 			const model = (mode === "plan" ? configuration.planModeApiModelId : configuration.actModeApiModelId)!
 			const handler: ApiHandler = {
-				getModel: () => ({ id: model, info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				getModel: () => ({
+					id: model,
+					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
+				}),
 				async *createMessage(systemPrompt, messages, tools): ApiStream {
-					const request = { mode, model, systemPrompt, messages: structuredClone(messages), tools: (tools ?? []).map((tool) => (tool as { name: string }).name) }
+					const request = {
+						mode,
+						model,
+						systemPrompt,
+						messages: structuredClone(messages),
+						tools: (tools ?? []).map((tool) => (tool as { name: string }).name),
+					}
 					requests.push(request)
 					assert.ok(requests.length <= requestLimit, "Unexpected retry/request after controlled completion")
 					if (nextTool) {
 						const callId = `scripted-${requests.length}`
 						const call = await nextTool(request)
 						assert.ok(request.tools.includes(call.name), `Controlled provider tool ${call.name} must be advertised`)
-						yield { type: "tool_calls", tool_call: { call_id: callId, function: { name: call.name, arguments: JSON.stringify(call.args) } } }
+						yield {
+							type: "tool_calls",
+							tool_call: { call_id: callId, function: { name: call.name, arguments: JSON.stringify(call.args) } },
+						}
 						yield call.usage ?? { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
 						return
 					}
-					const operation = await nextTurn?.(mode, request) ?? (requests.length === 1 ? "read_file" : "complete")
+					const operation = (await nextTurn?.(mode, request)) ?? (requests.length === 1 ? "read_file" : "complete")
 					yield {
-						type: "tool_calls", tool_call: {
-							call_id: `call-${requests.length}`, function: {
-								name: operation === "allowed_skill" || operation === "excluded_skill" ? "use_skill"
-									: operation === "read_file" || operation === "execute_command" || operation === "condense" ? operation : "respond",
-								arguments: JSON.stringify(operation === "allowed_skill" || operation === "excluded_skill" ? { skill_name: operation }
-									: operation === "read_file" ? { paths: ["assignment.txt"] }
-										: operation === "execute_command" ? { commands: ["touch permission-bypass-marker"] }
-											: operation === "condense" ? { context: "Private continuation summary" }
-												: { operation, text: operation === "complete" ? "Private assignment complete." : "Private Plan analysis." }),
-							}
-						}
+						type: "tool_calls",
+						tool_call: {
+							call_id: `call-${requests.length}`,
+							function: {
+								name:
+									operation === "allowed_skill" || operation === "excluded_skill"
+										? "use_skill"
+										: operation === "read_file" || operation === "execute_command" || operation === "condense"
+											? operation
+											: "respond",
+								arguments: JSON.stringify(
+									operation === "allowed_skill" || operation === "excluded_skill"
+										? { skill_name: operation }
+										: operation === "read_file"
+											? { paths: ["assignment.txt"] }
+											: operation === "execute_command"
+												? { commands: ["touch permission-bypass-marker"] }
+												: operation === "condense"
+													? { context: "Private continuation summary" }
+													: {
+														operation,
+														text:
+															operation === "complete"
+																? "Private assignment complete."
+																: "Private Plan analysis.",
+													},
+								),
+							},
+						},
 					}
 					yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
 				},
@@ -179,16 +247,25 @@ describe("Tasklet real Task execution", function () {
 	function configuration(mode: Mode) {
 		return createTaskWorkingConfiguration({
 			settings: {
-				...SETTINGS_DEFAULTS, mode, enableCheckpointsSetting: true, subagentsEnabled: true,
+				...SETTINGS_DEFAULTS,
+				mode,
+				enableCheckpointsSetting: true,
+				subagentsEnabled: true,
 				autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: false },
 				toolToggles: { read_file: true, execute_command: true },
 			} as Settings,
 			apiConfiguration: {
-				planModeApiProvider: "anthropic", actModeApiProvider: "anthropic",
-				planModeApiModelId: "claude-sonnet-4-20250514", actModeApiModelId: "claude-opus-4-20250514"
+				planModeApiProvider: "anthropic",
+				actModeApiProvider: "anthropic",
+				planModeApiModelId: "claude-sonnet-4-20250514",
+				actModeApiModelId: "claude-opus-4-20250514",
 			},
 			workspaceConfiguration: {} as any,
-			executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "vscodeTerminal", multiRootEnabled: false },
+			executionOptions: {
+				terminalReuseEnabled: true,
+				vscodeTerminalExecutionMode: "vscodeTerminal",
+				multiRootEnabled: false,
+			},
 		})
 	}
 
@@ -197,25 +274,43 @@ describe("Tasklet real Task execution", function () {
 		return {
 			controller: {
 				updateBackgroundCommandState: rejectCall("controller background state"),
-				toggleActModeForYoloMode: rejectCall("controller mode"), getWorkspaceManager: rejectCall("controller workspace")
+				toggleActModeForYoloMode: rejectCall("controller mode"),
+				getWorkspaceManager: rejectCall("controller workspace"),
 			} as any,
-			updateTaskHistory: rejectCall("root history"), postStateToWebview: rejectCall("root state"),
-			postPresentationToWebview: rejectCall("root presentation"), reinitExistingTaskFromId: rejectCall("root reinit"),
-			cancelTask: rejectCall("root cancellation"), updateBackgroundCommandState: rejectCall("root background state"),
+			updateTaskHistory: rejectCall("root history"),
+			postStateToWebview: rejectCall("root state"),
+			postPresentationToWebview: rejectCall("root presentation"),
+			reinitExistingTaskFromId: rejectCall("root reinit"),
+			cancelTask: rejectCall("root cancellation"),
+			updateBackgroundCommandState: rejectCall("root background state"),
 			switchToActMode: rejectCall("root mode"),
-			shellIntegrationTimeout: 5000, terminalReuseEnabled: true, terminalOutputLineLimit: 500,
-			defaultTerminalProfile: "default", vscodeTerminalExecutionMode: "vscodeTerminal",
-			cwd, stateManager, workingConfiguration: configuration(mode), task: "Complete a private assignment.",
-			taskId: address.taskletId, executionProfile: "tasklet", pinnedContext: "PINNED_PRIVATE_CONSTRAINT",
+			shellIntegrationTimeout: 5000,
+			terminalReuseEnabled: true,
+			terminalOutputLineLimit: 500,
+			defaultTerminalProfile: "default",
+			vscodeTerminalExecutionMode: "vscodeTerminal",
+			cwd,
+			stateManager,
+			workingConfiguration: configuration(mode),
+			task: "Complete a private assignment.",
+			taskId: address.taskletId,
+			executionProfile: "tasklet",
+			pinnedContext: "PINNED_PRIVATE_CONSTRAINT",
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file"] },
 			tasklet: {
 				// Controlled answers exercise legacy execution/resource cases, not production host authorization.
 				counterparty: {
 					recordResponse: sandbox.stub().resolves(),
-					requestInteraction: sandbox.stub().resolves({ response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE }),
+					requestInteraction: sandbox
+						.stub()
+						.resolves({ response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE }),
 				},
-				storageAddress: address, postStateToOwner: sandbox.stub().resolves(),
-				postPresentationToOwner: sandbox.stub().resolves(), updateBackgroundCommandState: sandbox.stub()
+				storageAddress: address,
+				postStateToOwner: sandbox.stub().resolves(),
+				withMutationAuthorization: (_toolName, mutation) => mutation(),
+				retainMutationUntil: () => { },
+				postPresentationToOwner: sandbox.stub().resolves(),
+				updateBackgroundCommandState: sandbox.stub(),
 			},
 		}
 	}
@@ -229,14 +324,21 @@ describe("Tasklet real Task execution", function () {
 	async function seedPreservedArtifacts(address: TaskStorageAddress) {
 		const base = getTaskDirectoryPath(address)
 		await fs.mkdir(base, { recursive: true })
-		const files = [GlobalFileNames.apiConversationHistoryOperations, GlobalFileNames.apiConversationProviderState,
-		GlobalFileNames.uiMessageOperations, GlobalFileNames.taskMetadata, "settings.json"]
-		return Promise.all(files.map(async (name) => {
-			const file = path.join(base, name)
-			const contents = `preserve:${JSON.stringify(address)}:${name}\n`
-			await fs.writeFile(file, contents)
-			return { file, contents }
-		}))
+		const files = [
+			GlobalFileNames.apiConversationHistoryOperations,
+			GlobalFileNames.apiConversationProviderState,
+			GlobalFileNames.uiMessageOperations,
+			GlobalFileNames.taskMetadata,
+			"settings.json",
+		]
+		return Promise.all(
+			files.map(async (name) => {
+				const file = path.join(base, name)
+				const contents = `preserve:${JSON.stringify(address)}:${name}\n`
+				await fs.writeFile(file, contents)
+				return { file, contents }
+			}),
+		)
 	}
 
 	async function waitForOutcome(host: TaskletHost, id: string) {
@@ -251,25 +353,39 @@ describe("Tasklet real Task execution", function () {
 
 	function createHost(params = parameters(), getParentHistory?: TaskletTaskOptions["getParentHistory"]) {
 		const options: TaskletTaskOptions = {
-			controller: params.controller, cwd, stateManager, workingConfiguration: params.workingConfiguration,
-			shellIntegrationTimeout: params.shellIntegrationTimeout, terminalReuseEnabled: params.terminalReuseEnabled,
-			terminalOutputLineLimit: params.terminalOutputLineLimit, defaultTerminalProfile: params.defaultTerminalProfile,
-			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode, toolSelectionPolicy: params.toolSelectionPolicy,
+			controller: params.controller,
+			cwd,
+			stateManager,
+			workingConfiguration: params.workingConfiguration,
+			shellIntegrationTimeout: params.shellIntegrationTimeout,
+			terminalReuseEnabled: params.terminalReuseEnabled,
+			terminalOutputLineLimit: params.terminalOutputLineLimit,
+			defaultTerminalProfile: params.defaultTerminalProfile,
+			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode,
+			toolSelectionPolicy: params.toolSelectionPolicy,
 			pinnedContext: params.pinnedContext,
 			getParentHistory,
 		}
-		return new TaskletHost({
-			taskId: "root", executionProfile: "standalone",
-			authorizePermission: rejectCall("unconfigured owner authorization"),
-			assertPermissionAllowed: rejectCall("unconfigured owner authority"),
-			escalateInteraction: rejectCall("unconfigured owner escalation"),
-			hasPendingUserInput: () => false,
-		}, options)
+		return new TaskletHost(
+			{
+				taskId: "root",
+				executionProfile: "standalone",
+				authorizePermission: rejectCall("unconfigured owner authorization"),
+				assertPermissionAllowed: rejectCall("unconfigured owner authority"),
+				escalateInteraction: rejectCall("unconfigured owner escalation"),
+				hasPendingUserInput: () => false,
+				withMutationAuthorization: (_toolName, mutation) => mutation(),
+				retainMutationUntil: () => { },
+			},
+			options,
+		)
 	}
 
 	function deferred<T>() {
 		let resolve!: (value: T) => void
-		const promise = new Promise<T>((settle) => { resolve = settle })
+		const promise = new Promise<T>((settle) => {
+			resolve = settle
+		})
 		return { promise, resolve }
 	}
 
@@ -286,19 +402,28 @@ describe("Tasklet real Task execution", function () {
 			record = await store.transition("root", { status: "achieved" })
 		}
 		const history: HistoryItem[] = [createGoalHistoryItem(record, "ROOT_GOAL_ASSIGNMENT", cwd)]
-		sandbox.stub(stateManager, "getGlobalStateKey").callsFake((key) => key === "taskHistory" ? history : undefined)
+		sandbox.stub(stateManager, "getGlobalStateKey").callsFake((key) => (key === "taskHistory" ? history : undefined))
 		const factory = new GoalTaskFactory({
-			controller: parameters().controller as any, stateManager, cwd,
+			controller: parameters().controller as any,
+			stateManager,
+			cwd,
 			workspaceManager: undefined as any,
 			workingConfiguration: configuration("act"),
 			postCoordinatorState: async () => { },
 		})
 		const created = sandbox.spy(factory, "create")
 		const loop = new GoalLoop({
-			goalId: "root", initialDisplayText: "ROOT_GOAL_ASSIGNMENT", store,
-			createTaskFactory: () => factory, stateManager,
-			updateHistory: async (item) => { history[0] = item; return history },
-			postState: async () => { }, workspaceRootPath: cwd,
+			goalId: "root",
+			initialDisplayText: "ROOT_GOAL_ASSIGNMENT",
+			store,
+			createTaskFactory: () => factory,
+			stateManager,
+			updateHistory: async (item) => {
+				history[0] = item
+				return history
+			},
+			postState: async () => { },
+			workspaceRootPath: cwd,
 		})
 		return { loop, store, history, created }
 	}
@@ -311,11 +436,14 @@ describe("Tasklet real Task execution", function () {
 		it(`dispatches generic, named, verification and inspection tools through a real Goal ${execution}`, async () => {
 			const h = await createGoalExecution(execution === "achieved follow-up" ? "achieved" : "paused")
 			const profile: AgentBaseConfig = {
-				name: "goal-reviewer", description: "Controlled Goal reviewer", tools: [],
+				name: "goal-reviewer",
+				description: "Controlled Goal reviewer",
+				tools: [],
 				systemPrompt: "NAMED_GOAL_REVIEWER_INSTRUCTIONS",
 			}
 			const loader = Object.assign(Object.create(AgentConfigLoader.prototype), {
-				cachedConfigs: new Map<string, AgentBaseConfig>(), cachedAgentToolNames: new Map<string, string>(),
+				cachedConfigs: new Map<string, AgentBaseConfig>(),
+				cachedAgentToolNames: new Map<string, string>(),
 				cachedToolNameToAgentName: new Map<string, string>(),
 			}) as AgentConfigLoader
 			sandbox.stub(AgentConfigLoader, "getInstance").returns(loader)
@@ -323,20 +451,39 @@ describe("Tasklet real Task execution", function () {
 			let genericId = ""
 			let namedId = ""
 			let verificationId = ""
-			const toolResults = (request: Request) => (request.messages as DiracStorageMessage[])
-				.flatMap((message) => typeof message.content === "string" ? [] : message.content)
-				.flatMap((block) => block.type === "tool_result" && typeof block.content === "string" ? [block.content] : [])
+			const toolResults = (request: Request) =>
+				(request.messages as DiracStorageMessage[])
+					.flatMap((message) => (typeof message.content === "string" ? [] : message.content))
+					.flatMap((block) =>
+						block.type === "tool_result" && typeof block.content === "string" ? [block.content] : [],
+					)
 			nextTool = async (request) => {
 				if (!isGoalRequest(request)) {
-					for (const forbiddenTool of ["use_subagents", "use_subagent_goal_reviewer", "tasklets", "verify_goal", "update_goal", "block_goal"]) {
+					for (const forbiddenTool of [
+						"use_subagents",
+						"use_subagent_goal_reviewer",
+						"tasklets",
+						"verify_goal",
+						"update_goal",
+						"block_goal",
+					]) {
 						assert.equal(request.tools.includes(forbiddenTool), false, forbiddenTool)
 					}
 					assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
 					return { name: "respond", args: { operation: "complete", text: "GOAL_PRIVATE_WORK_COMPLETE" } }
 				}
-				for (const name of ["tasklets", "verify_goal", "update_goal", "block_goal"]) assert.ok(request.tools.includes(name), `Goal must advertise ${name}`)
+				for (const name of ["tasklets", "verify_goal", "update_goal", "block_goal"])
+					assert.ok(request.tools.includes(name), `Goal must advertise ${name}`)
 				assert.ok(request.tools.includes(rootTurn === 0 ? "use_subagents" : "use_subagent_goal_reviewer"))
-				for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
+				for (const name of [
+					"start_task",
+					"list_tasks",
+					"send_task_message",
+					"cancel_task",
+					"read_task_transcript",
+					"resolve_task_interaction",
+					"wait_for_goal_events",
+				]) {
 					assert.equal(request.tools.includes(name), false, `Retired tool ${name}`)
 				}
 				const root = h.loop.coordinator!
@@ -349,7 +496,10 @@ describe("Tasklet real Task execution", function () {
 					loader["cachedToolNameToAgentName"].set("use_subagent_goal_reviewer", profile.name)
 					const executor = (root as any).toolExecutor
 					executor.markToolsDirty("manual_refresh")
-					return { name: "use_subagents", args: { subagents: [{ task_title: "Generic Goal worker", prompt: "GENERIC_GOAL_ASSIGNMENT" }] } }
+					return {
+						name: "use_subagents",
+						args: { subagents: [{ task_title: "Generic Goal worker", prompt: "GENERIC_GOAL_ASSIGNMENT" }] },
+					}
 				}
 				if (turn === 2 || turn === 3) {
 					const result = JSON.parse(toolResults(request).at(-1)!).subagents[0]
@@ -359,7 +509,10 @@ describe("Tasklet real Task execution", function () {
 					assert.equal((await waitForOutcome(root.taskletHost!, result.id)).outcome?.kind, "completed")
 					if (turn === 2) {
 						genericId = result.id
-						return { name: "use_subagent_goal_reviewer", args: { task_title: "Named Goal reviewer", prompt: "NAMED_GOAL_ASSIGNMENT" } }
+						return {
+							name: "use_subagent_goal_reviewer",
+							args: { task_title: "Named Goal reviewer", prompt: "NAMED_GOAL_ASSIGNMENT" },
+						}
 					}
 					namedId = result.id
 					return { name: "verify_goal", args: { focus: "VERIFY_CURRENT_GOAL_FOCUS" } }
@@ -376,9 +529,9 @@ describe("Tasklet real Task execution", function () {
 				}
 				assert.equal(turn, 5, "No retry or additional parent loop after public completion")
 				const inspection = JSON.parse(toolResults(request).at(-1)!)
-				assert.equal(inspection.id, verificationId)
-				assert.equal(inspection.outcome.kind, "completed")
-				assert.equal(inspection.responses.at(-1).text, "GOAL_PRIVATE_WORK_COMPLETE")
+				assert.equal(inspection.items[0].id, verificationId)
+				assert.equal(inspection.items[0].outcome.kind, "completed")
+				assert.equal(inspection.items[0].outcome.summary, "GOAL_PRIVATE_WORK_COMPLETE")
 				const view = await h.loop.inspect()
 				assert.equal(view.children.length, 3)
 				assert.equal(view.latestVerification?.id, verificationId)
@@ -397,7 +550,9 @@ describe("Tasklet real Task execution", function () {
 				const saved = await h.loop.inspect()
 				assert.equal(saved.latestVerification?.id, verificationId, "Verification purpose survives disk-only inspection")
 				assert.deepEqual(saved.children.map((child) => child.id).sort(), [genericId, namedId, verificationId].sort())
-			} finally { await h.loop.cancelCurrentExecution() }
+			} finally {
+				await h.loop.cancelCurrentExecution()
+			}
 		})
 	}
 
@@ -408,7 +563,11 @@ describe("Tasklet real Task execution", function () {
 			const rootGate = deferred<void>()
 			let childTurn = 0
 			nextTurn = async (_mode, request) => {
-				if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+				if (isGoalRequest(request)) {
+					rootEntered.resolve()
+					await rootGate.promise
+					return "complete"
+				}
 				return ++childTurn === 1 ? "question" : childTurn <= 3 ? "execute_command" : "complete"
 			}
 			try {
@@ -417,20 +576,28 @@ describe("Tasklet real Task execution", function () {
 				await rootEntered.promise
 				const root = h.loop.coordinator!
 				const host = root.taskletHost!
-				const expectedStatus = execution === "coordinator" ? "working" : execution === "paused follow-up" ? "paused" : "achieved"
+				const expectedStatus =
+					execution === "coordinator" ? "working" : execution === "paused follow-up" ? "paused" : "achieved"
 				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 				const child = await host.start({ title: "Goal permission worker", prompt: "GOAL_CHILD_INTERACTION_ASSIGNMENT" })
 				const question = await waitForInteraction(host, child.id)
 				assert.equal((await h.store.read("root")).status, expectedStatus, "Child-local question is not a user wait")
 				assert.equal(root.stateView.lastWaitingCardId, undefined)
 				await host.resolveInteraction(child.id, question.id, {
-					operation: "answer", response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "GOAL_PARENT_ANSWER" },
+					operation: "answer",
+					response: {
+						action: DiracAskResponse.MESSAGE,
+						response: DiracAskResponse.MESSAGE,
+						text: "GOAL_PARENT_ANSWER",
+					},
 				})
 				const permission = await waitForInteraction(host, child.id)
 				assert.equal(permission.permissionOperation?.kind, "commands")
 				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
 				assert.equal((await h.store.read("root")).status, expectedStatus)
-				assert.deepEqual(await host.resolveInteraction(child.id, permission.id, { operation: "approve" }), { status: "requires_user_approval" })
+				assert.deepEqual(await host.resolveInteraction(child.id, permission.id, { operation: "approve" }), {
+					status: "requires_user_approval",
+				})
 				const escalation = host.resolveInteraction(child.id, permission.id, { operation: "escalate" })
 				const card = await waitForRootCard(root)
 				assert.equal((await h.store.read("root")).status, execution === "coordinator" ? "waiting" : expectedStatus)
@@ -440,7 +607,9 @@ describe("Tasklet real Task execution", function () {
 				assert.equal((await h.store.read("root")).status, expectedStatus)
 				const nextPermission = await waitForInteraction(host, child.id)
 				assert.notEqual(nextPermission.id, permission.id)
-				assert.deepEqual(await host.resolveInteraction(child.id, nextPermission.id, { operation: "approve" }), { status: "requires_user_approval" })
+				assert.deepEqual(await host.resolveInteraction(child.id, nextPermission.id, { operation: "approve" }), {
+					status: "requires_user_approval",
+				})
 				await host.resolveInteraction(child.id, nextPermission.id, { operation: "reject" })
 				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
@@ -448,7 +617,10 @@ describe("Tasklet real Task execution", function () {
 				rootGate.resolve()
 				await settlement
 				assert.equal((await h.store.read("root")).status, execution === "coordinator" ? "achieved" : expectedStatus)
-			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+			} finally {
+				rootGate.resolve()
+				await h.loop.cancelCurrentExecution()
+			}
 		})
 	}
 
@@ -461,13 +633,33 @@ describe("Tasklet real Task execution", function () {
 			let rootGate = deferred<void>()
 			let rootTurn = 0
 			let addChildUtility = true
-			const knownUsage = { type: "usage" as const, inputTokens: 100, outputTokens: 20, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0, stopReason: "tool_use" }
+			const knownUsage = {
+				type: "usage" as const,
+				inputTokens: 100,
+				outputTokens: 20,
+				reasoningTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				totalCost: 0,
+				stopReason: "tool_use",
+			}
 			const utilityHandler = {
-				getModel: () => ({ id: "controlled-goal-utility", info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false } }),
+				getModel: () => ({
+					id: "controlled-goal-utility",
+					info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false },
+				}),
 				async *createMessage(): ApiStream {
 					yield unknownSource === "child Utility"
 						? { type: "usage", inputTokens: 11, outputTokens: 7 }
-						: { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 }
+						: {
+							type: "usage",
+							inputTokens: 11,
+							outputTokens: 7,
+							reasoningTokens: 0,
+							cacheReadTokens: 0,
+							cacheWriteTokens: 0,
+							totalCost: 0,
+						}
 					yield { type: "text", text: "Continue under the Goal parent's assignment and current constraints." }
 				},
 			} as ApiHandler
@@ -476,20 +668,41 @@ describe("Tasklet real Task execution", function () {
 				async *createMessage(): ApiStream {
 					yield unknownSource === "root Utility"
 						? { type: "usage", inputTokens: 11, outputTokens: 7 }
-						: { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 }
+						: {
+							type: "usage",
+							inputTokens: 11,
+							outputTokens: 7,
+							reasoningTokens: 0,
+							cacheReadTokens: 0,
+							cacheWriteTokens: 0,
+							totalCost: 0,
+						}
 					yield { type: "text", text: "Continue the Goal objective without replaying contained work." }
 				},
 			} as ApiHandler
 			const incurUtility = async (task: Task, handler: ApiHandler) => {
-				assert.ok(await (task as any).localConversationCompaction.generateSummary(
-					{ provider: "anthropic", modelId: "controlled-goal-utility" }, () => handler,
-					createDefaultTextCondensationTemplateRegistry(), undefined, [],
-				))
+				assert.ok(
+					await (task as any).localConversationCompaction.generateSummary(
+						{ provider: "anthropic", modelId: "controlled-goal-utility" },
+						() => handler,
+						createDefaultTextCondensationTemplateRegistry(),
+						undefined,
+						[],
+					),
+				)
 			}
 			nextTool = async (request) => {
 				if (isGoalRequest(request)) {
-					const usage = unknownSource === "root primary" ? { type: "usage" as const, inputTokens: 100, outputTokens: 20, stopReason: "tool_use" } : knownUsage
-					if (++rootTurn === 1) return { name: "respond", args: { operation: "progress", text: "Accounting scenario in progress" }, usage }
+					const usage =
+						unknownSource === "root primary"
+							? { type: "usage" as const, inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+							: knownUsage
+					if (++rootTurn === 1)
+						return {
+							name: "respond",
+							args: { operation: "progress", text: "Accounting scenario in progress" },
+							usage,
+						}
 					rootEntered.resolve()
 					await rootGate.promise
 					return { name: "respond", args: { operation: "complete", text: "Goal accounting complete" }, usage }
@@ -499,25 +712,40 @@ describe("Tasklet real Task execution", function () {
 					await incurUtility(started.lastCall.thisValue as Task, utilityHandler)
 				}
 				return {
-					name: "respond", args: { operation: "complete", text: "Accounted private work complete" },
-					usage: unknownSource === "child primary" ? { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" } : knownUsage,
+					name: "respond",
+					args: { operation: "complete", text: "Accounted private work complete" },
+					usage:
+						unknownSource === "child primary"
+							? { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+							: knownUsage,
 				}
 			}
 			const assertAvailability = (accounting: import("@shared/goal").GoalAccounting) => {
 				for (const field of ["cost", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"] as const) {
-					assert.equal(accounting[field], unknownSource === "none" ? 0 : undefined, `${field}: known zero must not replace unavailable usage`)
+					assert.equal(
+						accounting[field],
+						unknownSource === "none" ? 0 : undefined,
+						`${field}: known zero must not replace unavailable usage`,
+					)
 				}
 			}
 			try {
 				await h.loop.start()
 				await rootEntered.promise
 				const original = h.loop.coordinator!
-				const child = await original.taskletHost!.start({ title: "Accounted Goal worker", prompt: "GOAL_ACCOUNTING_PRIVATE_ASSIGNMENT" })
+				const child = await original.taskletHost!.start({
+					title: "Accounted Goal worker",
+					prompt: "GOAL_ACCOUNTING_PRIVATE_ASSIGNMENT",
+				})
 				await waitForOutcome(original.taskletHost!, child.id)
 				await incurUtility(original, rootUtilityHandler)
 				await original.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 				const whileParentWaiting = await h.store.read("root")
-				assert.equal(whileParentWaiting.accounting.inputTokens, 222, "Completed child and both Utility uses are accounted without another parent request")
+				assert.equal(
+					whileParentWaiting.accounting.inputTokens,
+					222,
+					"Completed child and both Utility uses are accounted without another parent request",
+				)
 				assert.equal(whileParentWaiting.accounting.outputTokens, 54)
 				assert.equal(whileParentWaiting.accounting.totalTokens, 276)
 				assertAvailability(whileParentWaiting.accounting)
@@ -536,13 +764,21 @@ describe("Tasklet real Task execution", function () {
 				await rootEntered.promise
 				const resumed = h.loop.coordinator!
 				assert.notEqual(resumed.taskletHost, original.taskletHost)
-				assert.equal(requests.length, requestsBeforeResume + 1, "Only the explicit root resumes; restoring children incurs nothing")
+				assert.equal(
+					requests.length,
+					requestsBeforeResume + 1,
+					"Only the explicit root resumes; restoring children incurs nothing",
+				)
 				assert.equal(resumed.taskletHost!.inspect(child.id).outcome?.kind, "completed")
 				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeResume)
 				assertAvailability((await h.store.read("root")).accounting)
 				await incurUtility(resumed, rootUtilityHandler)
 				await resumed.messageStateHandler.saveDiracMessagesAndUpdateHistory()
-				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeResume + 11, "A fresh coordinator records its own Utility use without replacing prior incurred spend")
+				assert.equal(
+					(await h.store.read("root")).accounting.inputTokens,
+					beforeResume + 11,
+					"A fresh coordinator records its own Utility use without replacing prior incurred spend",
+				)
 				await resumed.taskletHost!.resume(child.id, "EXPLICIT_ACCOUNTED_GOAL_CHILD_FOLLOWUP")
 				const resumedChild = await waitForOutcome(resumed.taskletHost!, child.id)
 				assert.equal(resumedChild.usage?.primary.tokensIn, 200)
@@ -550,11 +786,19 @@ describe("Tasklet real Task execution", function () {
 				const afterChild = await h.store.read("root")
 				assert.equal(afterChild.accounting.inputTokens, beforeResume + 111)
 				assert.equal(afterChild.accounting.outputTokens, beforeOutput + 27)
-				assert.equal(Object.keys(afterChild.accountingSources).length, 3, "One root lifetime snapshot plus separate per-execution root Utility sources")
+				assert.equal(
+					Object.keys(afterChild.accountingSources).length,
+					3,
+					"One root lifetime snapshot plus separate per-execution root Utility sources",
+				)
 				assert.ok(Object.keys(afterChild.accountingSources).every((id) => id === "goal" || id.startsWith("goal/aux:")))
 				assertAvailability(afterChild.accounting)
 				await resumed.messageStateHandler.saveDiracMessagesAndUpdateHistory()
-				assert.deepEqual((await h.store.read("root")).accounting, afterChild.accounting, "Repeated snapshots replace the same cumulative sources")
+				assert.deepEqual(
+					(await h.store.read("root")).accounting,
+					afterChild.accounting,
+					"Repeated snapshots replace the same cumulative sources",
+				)
 				const repause = h.loop.pause()
 				rootGate.resolve()
 				await repause
@@ -564,15 +808,26 @@ describe("Tasklet real Task execution", function () {
 				await h.loop.sendMessage("Explicit accounting follow-up without new child work")
 				await rootEntered.promise
 				assert.equal((await h.store.read("root")).accounting.inputTokens, beforeFollowUp)
-				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 2, "Follow-up never restarts historical children")
+				assert.equal(
+					requests.filter((request) => !isGoalRequest(request)).length,
+					2,
+					"Follow-up never restarts historical children",
+				)
 				const followUpSettlement = h.loop["runtime"]!.settlement!
 				rootGate.resolve()
 				await followUpSettlement
 				const followed = await h.store.read("root")
 				assert.equal(followed.status, "paused")
-				assert.equal(followed.accounting.inputTokens, beforeFollowUp + 100, "Follow-up adds only its newly incurred root request")
+				assert.equal(
+					followed.accounting.inputTokens,
+					beforeFollowUp + 100,
+					"Follow-up adds only its newly incurred root request",
+				)
 				assertAvailability(followed.accounting)
-			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+			} finally {
+				rootGate.resolve()
+				await h.loop.cancelCurrentExecution()
+			}
 		})
 	}
 
@@ -583,9 +838,13 @@ describe("Tasklet real Task execution", function () {
 				throw new Error("A contained Task acquired Goal controls")
 			})
 			const root = create({
-				...params, taskId: "root", executionProfile, tasklet: undefined,
+				...params,
+				taskId: "root",
+				executionProfile,
+				tasklet: undefined,
 				toolEnvironmentFactory: new GoalCoordinatorToolEnvironmentFactory(createGoalTrait),
-				updateTaskHistory: async () => [], postStateToWebview: async () => { },
+				updateTaskHistory: async () => [],
+				postStateToWebview: async () => { },
 				postPresentationToWebview: async () => { },
 			})
 			nextTurn = async () => "complete"
@@ -622,7 +881,10 @@ describe("Tasklet real Task execution", function () {
 			const writeEntered = deferred<void>()
 			const writeGate = deferred<void>()
 			sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
-				if (record.outcome) { writeEntered.resolve(); await writeGate.promise }
+				if (record.outcome) {
+					writeEntered.resolve()
+					await writeGate.promise
+				}
 				await saveRecord(record)
 			})
 			let closing: Promise<unknown> | undefined
@@ -664,7 +926,11 @@ describe("Tasklet real Task execution", function () {
 		const rootGate = deferred<void>()
 		const rootEntered = deferred<void>()
 		nextTurn = async (_mode, request) => {
-			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			if (isGoalRequest(request)) {
+				rootEntered.resolve()
+				await rootGate.promise
+				return "complete"
+			}
 			return "question"
 		}
 		await h.loop.start()
@@ -680,9 +946,10 @@ describe("Tasklet real Task execution", function () {
 				if (record.outcome) throw new Error("contained outcome disk failure")
 				await saveRecord(record)
 			})
-			const containsWriteFailure = (error: unknown): boolean => error instanceof AggregateError
-				? error.errors.some(containsWriteFailure)
-				: error instanceof Error && error.message.includes("contained outcome disk failure")
+			const containsWriteFailure = (error: unknown): boolean =>
+				error instanceof AggregateError
+					? error.errors.some(containsWriteFailure)
+					: error instanceof Error && error.message.includes("contained outcome disk failure")
 			const settlement = assert.rejects(h.loop["runtime"]!.settlement!, containsWriteFailure)
 			const closing = assert.rejects(h.loop.pause(), containsWriteFailure)
 			rootGate.resolve()
@@ -704,7 +971,10 @@ describe("Tasklet real Task execution", function () {
 		const rootGate = deferred<void>()
 		const rootEntered = deferred<void>()
 		nextTurn = async (_mode, request) => {
-			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise }
+			if (isGoalRequest(request)) {
+				rootEntered.resolve()
+				await rootGate.promise
+			}
 			return "complete"
 		}
 		try {
@@ -719,7 +989,10 @@ describe("Tasklet real Task execution", function () {
 			const resumedGate = deferred<void>()
 			const resumedEntered = deferred<void>()
 			nextTurn = async (_mode, request) => {
-				if (isGoalRequest(request)) { resumedEntered.resolve(); await resumedGate.promise }
+				if (isGoalRequest(request)) {
+					resumedEntered.resolve()
+					await resumedGate.promise
+				}
 				return "complete"
 			}
 			try {
@@ -743,7 +1016,10 @@ describe("Tasklet real Task execution", function () {
 				resumedGate.resolve()
 				await closing
 			}
-		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		} finally {
+			rootGate.resolve()
+			await h.loop.cancelCurrentExecution()
+		}
 	})
 
 	for (const status of ["paused", "achieved"] as const) {
@@ -752,7 +1028,10 @@ describe("Tasklet real Task execution", function () {
 			const rootGate = deferred<void>()
 			const rootEntered = deferred<void>()
 			nextTurn = async (_mode, request) => {
-				if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise }
+				if (isGoalRequest(request)) {
+					rootEntered.resolve()
+					await rootGate.promise
+				}
 				return "complete"
 			}
 			try {
@@ -770,7 +1049,10 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(h.loop.hasRunningCoordinator, false)
 				const release = await taskLocks.acquireTaskLock(getTaskDirectoryPath("root"))
 				await release()
-			} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+			} finally {
+				rootGate.resolve()
+				await h.loop.cancelCurrentExecution()
+			}
 		})
 	}
 
@@ -780,7 +1062,11 @@ describe("Tasklet real Task execution", function () {
 		const rootGate = deferred<void>()
 		const rootEntered = deferred<void>()
 		nextTurn = async (_mode, request) => {
-			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			if (isGoalRequest(request)) {
+				rootEntered.resolve()
+				await rootGate.promise
+				return "complete"
+			}
 			return "question"
 		}
 		try {
@@ -790,13 +1076,17 @@ describe("Tasklet real Task execution", function () {
 			const root = runtime.coordinator
 			const executor = (root as any).toolExecutor
 			const surface = new SurfaceAdapter(executor.asToolConfig(), "respond")
-			const goal: IGoalTrait = h.created.firstCall.args[0].environmentFactory.create(executor.asToolConfig(), "respond").goal!
+			const goal: IGoalTrait = h.created.firstCall.args[0].environmentFactory.create(executor.asToolConfig(), "respond")
+				.goal!
 			const storage = await import("@core/storage/taskStorage")
 			const saveRecord = storage.saveTaskletRecord
 			const writeEntered = deferred<void>()
 			const writeGate = deferred<void>()
 			const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
-				if (!record.configuration || !record.outcome) { writeEntered.resolve(); await writeGate.promise }
+				if (!record.configuration || !record.outcome) {
+					writeEntered.resolve()
+					await writeGate.promise
+				}
 				await saveRecord(record)
 			})
 			const starting = root.taskletHost!.start({ title: "active child", prompt: "PRIVATE_WAITING_GOAL_ASSIGNMENT" })
@@ -807,7 +1097,9 @@ describe("Tasklet real Task execution", function () {
 				assert.match(completion.error!, /active child/)
 				await assert.rejects(goal.blockGoal("Cannot continue"), /Active tasklets:.*active child/)
 				assert.equal(h.loop["requestedEnd"], undefined)
-			} finally { writeGate.resolve() }
+			} finally {
+				writeGate.resolve()
+			}
 			const child = await starting
 			await waitForInteraction(root.taskletHost!, child.id)
 			assert.equal((await goal.commitCompletion("still too early")).committed, false)
@@ -820,7 +1112,10 @@ describe("Tasklet real Task execution", function () {
 			rootGate.resolve()
 			await runtime.settlement
 			assert.equal((await h.store.read("root")).status, "achieved")
-		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		} finally {
+			rootGate.resolve()
+			await h.loop.cancelCurrentExecution()
+		}
 	})
 
 	it("rechecks contained admission when Goal blocking races a new child", async () => {
@@ -829,7 +1124,11 @@ describe("Tasklet real Task execution", function () {
 		const rootGate = deferred<void>()
 		const rootEntered = deferred<void>()
 		nextTurn = async (_mode, request) => {
-			if (isGoalRequest(request)) { rootEntered.resolve(); await rootGate.promise; return "complete" }
+			if (isGoalRequest(request)) {
+				rootEntered.resolve()
+				await rootGate.promise
+				return "complete"
+			}
 			return "question"
 		}
 		try {
@@ -861,7 +1160,10 @@ describe("Tasklet real Task execution", function () {
 			rootGate.resolve()
 			await runtime.settlement
 			assert.equal((await h.store.read("root")).status, "blocked")
-		} finally { rootGate.resolve(); await h.loop.cancelCurrentExecution() }
+		} finally {
+			rootGate.resolve()
+			await h.loop.cancelCurrentExecution()
+		}
 	})
 
 	for (const includeHistory of [undefined, false, true]) {
@@ -889,17 +1191,32 @@ describe("Tasklet real Task execution", function () {
 				}
 				assert.match(JSON.stringify(requests[1].messages), /PRIVATE_FILE_CONTENT/)
 				const transcript = await host.readTranscript(child.id)
-				assert.equal(JSON.stringify(transcript.conversation).includes("PARENT_HISTORY_PRIVATE_CONTEXT"), includeHistory === true)
+				assert.equal(
+					JSON.stringify(transcript.conversation).includes("PARENT_HISTORY_PRIVATE_CONTEXT"),
+					includeHistory === true,
+				)
 				assert.doesNotMatch(JSON.stringify(transcript.presentation), /PARENT_HISTORY_PRIVATE_CONTEXT/)
+				assert.doesNotMatch(
+					JSON.stringify(await host.query(child.id, { view: "transcript" })),
+					/PARENT_HISTORY_PRIVATE_CONTEXT|PARENT_HISTORY_PRIOR_ANSWER/,
+				)
 				if (includeHistory === true) {
 					parentHistory.messages[0].content = "PARENT_HISTORY_REPLACED_AFTER_START"
 					await host.resume(child.id, "CHILD_HISTORY_FOLLOWUP")
 					assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
-					assert.equal(getParentHistory.callCount, 1, "resume restores the child transcript, never recaptures parent history")
+					assert.equal(
+						getParentHistory.callCount,
+						1,
+						"resume restores the child transcript, never recaptures parent history",
+					)
 					assert.match(JSON.stringify(requests[2].messages), /PARENT_HISTORY_PRIVATE_CONTEXT/)
 					assert.match(JSON.stringify(requests[2].messages), /PRIVATE_FILE_CONTENT/)
 					assert.match(JSON.stringify(requests[2].messages), /CHILD_HISTORY_FOLLOWUP/)
 					assert.doesNotMatch(JSON.stringify(requests[2].messages), /PARENT_HISTORY_REPLACED_AFTER_START/)
+					assert.doesNotMatch(
+						JSON.stringify(await host.query(child.id, { view: "transcript" })),
+						/PARENT_HISTORY_PRIVATE_CONTEXT|PARENT_HISTORY_PRIOR_ANSWER/,
+					)
 				}
 			} finally {
 				await host.shutdown()
@@ -909,26 +1226,39 @@ describe("Tasklet real Task execution", function () {
 
 	it("applies a named profile prompt, skills, model and tool scope to real provider requests", async () => {
 		const profile: AgentBaseConfig = {
-			name: "controlled-reviewer", description: "Controlled profile",
-			systemPrompt: "NAMED_PROFILE_PRIVATE_INSTRUCTIONS", skills: ["allowed_skill"],
-			tools: ["use_skill", "read_file"], modelId: "claude-sonnet-4-20250514",
+			name: "controlled-reviewer",
+			description: "Controlled profile",
+			systemPrompt: "NAMED_PROFILE_PRIVATE_INSTRUCTIONS",
+			skills: ["allowed_skill"],
+			tools: ["use_skill", "read_file"],
+			modelId: "claude-sonnet-4-20250514",
 		}
 		const loader = AgentConfigLoader.getInstance()
 		sandbox.stub(loader, "ready").resolves()
 		sandbox.stub(loader, "getCachedConfig").withArgs(profile.name).returns(profile)
-		const skills = await Promise.all(["allowed_skill", "excluded_skill"].map(async (name) => {
-			const skillPath = path.join(directory, name, "SKILL.md")
-			await fs.mkdir(path.dirname(skillPath), { recursive: true })
-			await fs.writeFile(skillPath, `---\nname: ${name}\ndescription: Fixture skill\n---\n${name.toUpperCase()}_PRIVATE_INSTRUCTIONS\n`)
-			return { name, description: "Fixture skill", path: skillPath, source: "global" as const }
-		}))
+		const skills = await Promise.all(
+			["allowed_skill", "excluded_skill"].map(async (name) => {
+				const skillPath = path.join(directory, name, "SKILL.md")
+				await fs.mkdir(path.dirname(skillPath), { recursive: true })
+				await fs.writeFile(
+					skillPath,
+					`---\nname: ${name}\ndescription: Fixture skill\n---\n${name.toUpperCase()}_PRIVATE_INSTRUCTIONS\n`,
+				)
+				return { name, description: "Fixture skill", path: skillPath, source: "global" as const }
+			}),
+		)
 		sandbox.stub(skillsModule, "getOrDiscoverSkills").resolves(skills)
 		const params = parameters()
 		params.toolSelectionPolicy = { mode: "exact", toolIds: ["respond", "use_skill", "read_file", "execute_command"] }
-		nextTurn = async () => requests.length === 1 ? "allowed_skill" : requests.length === 2 ? "excluded_skill" : "complete"
+		nextTurn = async () => (requests.length === 1 ? "allowed_skill" : requests.length === 2 ? "excluded_skill" : "complete")
 		const host = createHost(params)
 		try {
-			const child = await host.start({ title: "profile", prompt: "PROFILE_ASSIGNMENT", agentName: profile.name, timeoutSeconds: 120 })
+			const child = await host.start({
+				title: "profile",
+				prompt: "PROFILE_ASSIGNMENT",
+				agentName: profile.name,
+				timeoutSeconds: 120,
+			})
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			assert.equal(requests.length, 3)
 			for (const request of requests) {
@@ -955,19 +1285,91 @@ describe("Tasklet real Task execution", function () {
 		return host.inspect(id).interactions.find((request) => request.status === "pending")!
 	}
 
-	function createResolutionRoot() {
+	function createResolutionRoot(executionProfile: "standalone" | "goal_coordinator" | "goal_followup" = "standalone") {
 		const params = parameters()
 		return create({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			...params,
+			taskId: "root",
+			executionProfile,
+			tasklet: undefined,
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
 			vscodeTerminalExecutionMode: "backgroundExec",
 			workingConfiguration: {
 				...params.workingConfiguration,
-				executionOptions: { ...params.workingConfiguration.executionOptions, vscodeTerminalExecutionMode: "backgroundExec" },
+				executionOptions: {
+					...params.workingConfiguration.executionOptions,
+					vscodeTerminalExecutionMode: "backgroundExec",
+				},
 			},
-			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			releaseTaskLock: async () => { },
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
+	}
+
+	for (const profile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
+		for (const useUtilityModel of [false, true]) {
+			it(`inherits changed parent preferences at the next child request, including resume (${profile}, Utility=${useUtilityModel})`, async () => {
+				const root = createResolutionRoot(profile)
+				await root.applyWorkingConfigurationUpdate({
+					settings: {
+						backgroundEditEnabled: false,
+						preferredLanguage: "English",
+						utilityModelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+					},
+				})
+				const host = root.taskletHost!
+				let turn = 0
+				let childTask!: Task
+				let secondRequest!: Request
+				let toolBackgroundEdit: boolean | undefined
+				nextTurn = async (_mode, request) => {
+					if (++turn === 1) {
+						const [owned] = [...(host as any).children.values()]
+						childTask = owned.task
+						assert.equal(childTask.getWorkingConfiguration().settings.backgroundEditEnabled, false)
+						await root.applyWorkingConfigurationUpdate({
+							settings: {
+								backgroundEditEnabled: true,
+								preferredLanguage: "French - Français",
+								lowVerbosityEnabled: false,
+								enableParallelToolCalling: true,
+								mode: profile === "standalone" ? "plan" : "act",
+							},
+							workspaceConfiguration: { localSkillsToggles: { disabledSkill: false } },
+						})
+						assert.equal(childTask.getWorkingConfiguration().settings.backgroundEditEnabled, false,
+							"An in-flight request retains its immutable settings")
+						return "progress"
+					}
+					secondRequest = request
+					toolBackgroundEdit = (childTask as any).toolExecutor.asToolConfig().backgroundEditEnabled
+					return "complete"
+				}
+				const record = await host.start({ title: "Preference worker", prompt: "Check preferences", useUtilityModel })
+				assert.equal((await waitForOutcome(host, record.id)).outcome?.kind, "completed")
+				const settings = childTask.getWorkingConfiguration().settings
+				assert.equal(settings.backgroundEditEnabled, true)
+				assert.equal(toolBackgroundEdit, true, "The next tool environment uses the inherited preference")
+				assert.equal(settings.lowVerbosityEnabled, false)
+				assert.equal(settings.enableParallelToolCalling, true)
+				assert.equal(settings.mode, "act")
+				assert.equal(childTask.getWorkingConfiguration().workspaceConfiguration.localSkillsToggles?.disabledSkill, false)
+				assert.match(secondRequest.systemPrompt, /Speak in fr\./)
+				assert.equal(secondRequest.model,
+					useUtilityModel || profile === "standalone" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514",
+					"Act execution preserves explicit Utility selection or the parent's active model")
+				await root.applyWorkingConfigurationUpdate({ settings: { backgroundEditEnabled: false } })
+				nextTurn = async () => {
+					const [owned] = [...(host as any).children.values()]
+					assert.equal(owned.task.getWorkingConfiguration().settings.backgroundEditEnabled, false)
+					return "complete"
+				}
+				await host.resume(record.id, "Check the latest preferences")
+				assert.equal((await waitForOutcome(host, record.id)).outcome?.kind, "completed")
+			})
+		}
 	}
 
 	async function waitForRootCard(root: Task) {
@@ -999,9 +1401,13 @@ describe("Tasklet real Task execution", function () {
 			let requestId = ""
 			let userWoke = false
 			let releaseSibling!: () => void
-			const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve })
+			const siblingGate = new Promise<void>((resolve) => {
+				releaseSibling = resolve
+			})
 			let siblingReadFile!: () => void
-			const siblingRead = new Promise<void>((resolve) => { siblingReadFile = resolve })
+			const siblingRead = new Promise<void>((resolve) => {
+				siblingReadFile = resolve
+			})
 			const lockReleases: string[] = []
 			let parentRequests = 0
 			let maxParentRequests = 0
@@ -1010,7 +1416,10 @@ describe("Tasklet real Task execution", function () {
 				const role = handlerNumber++ // Original root, permission child, sibling, reopened root, resumed child.
 				assert.ok(role < turns.length, "Reconstruction must not construct historical children")
 				return {
-					getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+					getModel: () => ({
+						id: "claude-opus-4-20250514",
+						info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
+					}),
 					async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
 						const turn = ++turns[role]
 						const serialized = JSON.stringify(messages)
@@ -1023,7 +1432,8 @@ describe("Tasklet real Task execution", function () {
 						}
 						try {
 							assert.ok(turn <= (role === 0 ? 4 : 2), "Unexpected request after controlled completion")
-							if (role === 0 && turn === 2) assert.ok(serialized.includes(requestId), "Parent model receives the permission request")
+							if (role === 0 && turn === 2)
+								assert.ok(serialized.includes(requestId), "Parent model receives the permission request")
 							if (role === 0 && turn === 3) {
 								assert.match(serialized, /Active tasklets:/)
 								assert.ok(serialized.includes(childId) && serialized.includes(siblingId))
@@ -1043,15 +1453,33 @@ describe("Tasklet real Task execution", function () {
 								assert.match(serialized, /FOUNDATION_EXPLICIT_FOLLOWUP/)
 								assert.equal(serialized.split("Tasklet resumed.").length - 1, 1)
 							}
-							const name = role === 1 && turn === 1 ? "execute_command" : role === 2 && turn === 1 ? "read_file" : "respond"
-							const operation = role === 0 ? (turn === 1 || turn === 3 ? "progress" : "complete")
-								: role === 3 && turn === 1 ? "progress" : "complete"
+							const name =
+								role === 1 && turn === 1 ? "execute_command" : role === 2 && turn === 1 ? "read_file" : "respond"
+							const operation =
+								role === 0
+									? turn === 1 || turn === 3
+										? "progress"
+										: "complete"
+									: role === 3 && turn === 1
+										? "progress"
+										: "complete"
 							yield {
-								type: "tool_calls", tool_call: {
-									call_id: `foundation-${role}-${turn}`, function: {
-										name, arguments: JSON.stringify(name === "execute_command" ? { commands: ["touch foundation-permission-marker"] }
-											: name === "read_file" ? { paths: ["assignment.txt"] }
-												: { operation, text: role === 2 ? fullResult : `Foundation role ${role} turn ${turn}` }),
+								type: "tool_calls",
+								tool_call: {
+									call_id: `foundation-${role}-${turn}`,
+									function: {
+										name,
+										arguments: JSON.stringify(
+											name === "execute_command"
+												? { commands: ["touch foundation-permission-marker"] }
+												: name === "read_file"
+													? { paths: ["assignment.txt"] }
+													: {
+														operation,
+														text:
+															role === 2 ? fullResult : `Foundation role ${role} turn ${turn}`,
+													},
+										),
 									},
 								},
 							}
@@ -1066,19 +1494,27 @@ describe("Tasklet real Task execution", function () {
 			function foundationRoot(reopening: boolean) {
 				const params = parameters()
 				const root = create({
-					...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+					...params,
+					taskId: "root",
+					executionProfile: "standalone",
+					tasklet: undefined,
 					toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "execute_command"] },
 					vscodeTerminalExecutionMode: "backgroundExec",
 					workingConfiguration: {
 						...params.workingConfiguration,
-						executionOptions: { ...params.workingConfiguration.executionOptions, vscodeTerminalExecutionMode: "backgroundExec" },
+						executionOptions: {
+							...params.workingConfiguration.executionOptions,
+							vscodeTerminalExecutionMode: "backgroundExec",
+						},
 					},
 					releaseTaskLock: async () => {
 						assert.deepEqual(root.taskletHost!.listActive(), [])
 						for (const record of root.taskletHost!.list()) assert.equal(record.outcomePersisted, true)
 						lockReleases.push(reopening ? "reopened" : "original")
 					},
-					updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+					updateTaskHistory: async () => [],
+					postStateToWebview: async () => { },
+					postPresentationToWebview: async () => { },
 					toolEnvironmentFactory: {
 						create(config, toolName) {
 							const env = surface.create(config, toolName)
@@ -1093,10 +1529,25 @@ describe("Tasklet real Task execution", function () {
 								if (response.operation !== "progress") return
 								if (reopening) {
 									assert.deepEqual(root.taskletHost!.listActive(), [])
-									assert.equal(controls.inspect(childId).interactions[0].status, interrupt ? "retired" : "resolved")
-									await assert.rejects(controls.resolveInteraction(childId, requestId, { operation: "approve" }), /not pending/)
-									assert.equal(controls.inspect(siblingId).responses.at(-1)?.text, fullResult)
-									const before = controls.inspect(childId)
+									assert.equal(
+										root.taskletHost!.inspect(childId).interactions[0].status,
+										interrupt ? "retired" : "resolved",
+									)
+									const [retry] = await controls.message([
+										{
+											taskletId: childId,
+											type: "permission_decision",
+											replyTo: requestId,
+											decision: "approve",
+										},
+									])
+									assert.equal(retry.status, interrupt ? "stale" : "failed")
+									assert.equal(
+										(root.taskletHost!.inspect(siblingId).outcome as { kind: "completed"; response: string })
+											.response,
+										fullResult,
+									)
+									const before = root.taskletHost!.inspect(childId)
 									const resumed = await controls.resume(childId, "FOUNDATION_EXPLICIT_FOLLOWUP")
 									assert.equal(resumed.id, childId)
 									assert.equal(resumed.conversationUlid, before.conversationUlid)
@@ -1104,33 +1555,80 @@ describe("Tasklet real Task execution", function () {
 									return
 								}
 								if (turns[0] === 1) {
-									childId = (await controls.start({ title: "permission child", prompt: "FOUNDATION_PERMISSION_ASSIGNMENT" })).id
-									siblingId = (await controls.start({ title: "private reader", prompt: "Read the private file, then report fully" })).id
+									childId = (
+										await controls.start({
+											title: "permission child",
+											prompt: "FOUNDATION_PERMISSION_ASSIGNMENT",
+										})
+									).id
+									siblingId = (
+										await controls.start({
+											title: "private reader",
+											prompt: "Read the private file, then report fully",
+										})
+									).id
 									const wake = await controls.sleep({ taskletIds: [childId], timeoutMs: 5_000 })
 									assert.equal(wake.reason, "event")
 									requestId = (await waitForInteraction(root.taskletHost!, childId)).id
 									await siblingRead
-									assert.equal(controls.inspect(childId).interactions[0].status, "pending", "Sibling reads while the permission child is waiting")
-									assert.equal(controls.inspect(siblingId).outcome, undefined)
+									assert.equal(
+										root.taskletHost!.inspect(childId).interactions[0].status,
+										"pending",
+										"Sibling reads while the permission child is waiting",
+									)
+									assert.equal(root.taskletHost!.inspect(siblingId).outcome, undefined)
 									return
 								}
 								assert.equal(turns[0], 3, "Rejected completion continues the same serial parent loop")
 								assert.deepEqual(lockReleases, [])
-								assert.equal(controls.inspect(childId).outcome, undefined, "Completion must not interrupt children")
-								assert.deepEqual(await controls.resolveInteraction(childId, requestId, { operation: "approve" }), { status: "requires_user_approval" })
+								assert.equal(
+									root.taskletHost!.inspect(childId).outcome,
+									undefined,
+									"Completion must not interrupt children",
+								)
+								assert.equal(
+									(
+										await controls.message([
+											{
+												taskletId: childId,
+												type: "permission_decision",
+												replyTo: requestId,
+												decision: "approve",
+											},
+										])
+									)[0].status,
+									"requires_user_approval",
+								)
 								await assert.rejects(fs.stat(path.join(cwd, "foundation-permission-marker")), { code: "ENOENT" })
 								if (interrupt) {
-									assert.equal((await controls.interrupt(childId, "Parent explicitly stops the pending permission")).outcome?.kind, "interrupted")
+									assert.equal(
+										(await controls.interrupt(childId, "Parent explicitly stops the pending permission"))
+											.outcome?.kind,
+										"interrupted",
+									)
 								} else {
-									const escalation = controls.resolveInteraction(childId, requestId, { operation: "escalate" })
+									const escalation = controls.message([
+										{
+											taskletId: childId,
+											type: "permission_decision",
+											replyTo: requestId,
+											decision: "escalate",
+										},
+									])
 									const card = await waitForRootCard(root)
 									await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)
-									assert.deepEqual(await escalation, { status: "resolved" })
+									assert.equal((await escalation)[0].status, "resolved")
 									assert.equal((await waitForOutcome(root.taskletHost!, childId)).outcome?.kind, "completed")
 									await fs.unlink(path.join(cwd, "foundation-permission-marker"))
 								}
-								assert.equal(controls.inspect(siblingId).outcome, undefined, "Sibling survives permission resolution/interruption")
-								assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), { reason: "user_message" })
+								assert.equal(
+									root.taskletHost!.inspect(siblingId).outcome,
+									undefined,
+									"Sibling survives permission resolution/interruption",
+								)
+								assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), {
+									reason: "user_message",
+								})
 								userWoke = true
 								releaseSibling()
 								assert.equal((await waitForOutcome(root.taskletHost!, siblingId)).outcome?.kind, "completed")
@@ -1149,7 +1647,10 @@ describe("Tasklet real Task execution", function () {
 				const deadline = Date.now() + 10_000
 				while (!(turns[0] === 3 && root.taskletHost!.isSleeping)) {
 					assert.ok(Date.now() < deadline, `Parent did not reach the user-wake sleep; turns: ${turns}`)
-					await Promise.race([new Promise((resolve) => setTimeout(resolve, 5)), run.then((outcome) => assert.fail(JSON.stringify(outcome)))])
+					await Promise.race([
+						new Promise((resolve) => setTimeout(resolve, 5)),
+						run.then((outcome) => assert.fail(JSON.stringify(outcome))),
+					])
 				}
 				assert.equal(turns[0], 3, "Sleeping parent makes no idle model requests")
 				await root.enqueueSteeringMessage("FOUNDATION_USER_GUIDANCE")
@@ -1160,13 +1661,27 @@ describe("Tasklet real Task execution", function () {
 				await root.retirePersistence()
 				assert.deepEqual(lockReleases, ["original"])
 				const reopened = foundationRoot(true)
-				assert.equal((await reopened.resumeTaskFromHistory(() => {
-					assert.deepEqual(turns, [4, interrupt ? 1 : 2, 2, 0, 0])
-					assert.equal(handlerNumber, 4, "Root restoration constructs no child engines")
-					assert.deepEqual(reopened.taskletHost!.listActive(), [])
-					assert.equal(reopened.taskletHost!.inspect(childId).outcome?.kind, interrupt ? "interrupted" : "completed")
-					assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, initialTokens)
-				}, { initialUserInput: { text: "Resume the selected child explicitly" } })).kind, "completed")
+				assert.equal(
+					(
+						await reopened.resumeTaskFromHistory(
+							() => {
+								assert.deepEqual(turns, [4, interrupt ? 1 : 2, 2, 0, 0])
+								assert.equal(handlerNumber, 4, "Root restoration constructs no child engines")
+								assert.deepEqual(reopened.taskletHost!.listActive(), [])
+								assert.equal(
+									reopened.taskletHost!.inspect(childId).outcome?.kind,
+									interrupt ? "interrupted" : "completed",
+								)
+								assert.equal(
+									getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn,
+									initialTokens,
+								)
+							},
+							{ initialUserInput: { text: "Resume the selected child explicitly" } },
+						)
+					).kind,
+					"completed",
+				)
 				await reopened.abortTask()
 				await reopened.retirePersistence()
 				assert.deepEqual(lockReleases, ["original", "reopened"])
@@ -1176,18 +1691,28 @@ describe("Tasklet real Task execution", function () {
 				const persistedRoot = (await getSavedPresentationHistory("root")).messages
 				assert.equal(getApiMetrics(persistedRoot).totalTokensIn, initialTokens + 300)
 				assert.equal(getApiMetrics(persistedRoot).totalTokensOut, (initialTokens + 300) / 5)
-				const contributions = persistedRoot.flatMap((message) => message.content.type === DiracMessageType.CARD
-					? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined) : [])
+				const contributions = persistedRoot.flatMap((message) =>
+					message.content.type === DiracMessageType.CARD
+						? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined)
+						: [],
+				)
 				assert.deepEqual(contributions.map((usage) => usage.taskletId).sort(), [childId, siblingId].sort())
 				const childTranscript = JSON.stringify(await reopened.taskletHost!.readTranscript(childId))
 				assert.match(childTranscript, /FOUNDATION_EXPLICIT_FOLLOWUP/)
 				assert.doesNotMatch(childTranscript, /PRIVATE_FILE_CONTENT|FOUNDATION_RESULT_END/)
 				assert.match(JSON.stringify(await reopened.taskletHost!.readTranscript(siblingId)), /PRIVATE_FILE_CONTENT/)
-				assert.equal(reopened.taskletHost!.inspect(siblingId).responses.at(-1)?.text, fullResult)
+				assert.equal(
+					(reopened.taskletHost!.inspect(siblingId).outcome as { kind: "completed"; response: string }).response,
+					fullResult,
+				)
 				await assert.rejects(fs.stat(path.join(cwd, "foundation-permission-marker")), { code: "ENOENT" })
 				const rootPath = getTaskDirectoryPath("root")
 				assert.deepEqual((await fs.readdir(path.join(rootPath, "tasklets"))).sort(), [childId, siblingId].sort())
-				assert.deepEqual(await fs.readdir(path.dirname(rootPath)), ["root"], "No independent top-level tasklet directories")
+				assert.deepEqual(
+					await fs.readdir(path.dirname(rootPath)),
+					["root"],
+					"No independent top-level tasklet directories",
+				)
 			} finally {
 				releaseSibling()
 				await root.abortTask()
@@ -1201,11 +1726,17 @@ describe("Tasklet real Task execution", function () {
 		sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
 		const fullResult = `PUBLIC_RESULT_START ${"private detail ".repeat(1000)} PUBLIC_RESULT_END`
 		let releaseChild!: () => void
-		const childGate = new Promise<void>((resolve) => { releaseChild = resolve })
+		const childGate = new Promise<void>((resolve) => {
+			releaseChild = resolve
+		})
 		let releaseCompletion!: () => void
-		const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve })
+		const completionGate = new Promise<void>((resolve) => {
+			releaseCompletion = resolve
+		})
 		let childAnswered!: () => void
-		const answerReceived = new Promise<void>((resolve) => { childAnswered = resolve })
+		const answerReceived = new Promise<void>((resolve) => {
+			childAnswered = resolve
+		})
 		let childId = ""
 		let questionId = ""
 		let handlerNumber = 0
@@ -1217,7 +1748,9 @@ describe("Tasklet real Task execution", function () {
 			try {
 				return await Promise.race([
 					promise,
-					new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}; turns: ${turns}`)), 5_000) }),
+					new Promise<never>((_, reject) => {
+						timer = setTimeout(() => reject(new Error(`${label}; turns: ${turns}`)), 5_000)
+					}),
 				])
 			} finally {
 				clearTimeout(timer)
@@ -1225,11 +1758,13 @@ describe("Tasklet real Task execution", function () {
 		}
 
 		function toolOutput(messages: DiracStorageMessage[], callId: string): string {
-			const result = messages.flatMap((message) => typeof message.content === "string" ? [] : message.content)
+			const result = messages
+				.flatMap((message) => (typeof message.content === "string" ? [] : message.content))
 				.find((block) => block.type === "tool_result" && block.tool_use_id === callId)
 			assert.ok(result?.type === "tool_result", `Missing public tool result ${callId}`)
-			return typeof result.content === "string" ? result.content
-				: (result.content ?? []).map((block) => block.type === "text" ? block.text : "").join("\n")
+			return typeof result.content === "string"
+				? result.content
+				: (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("\n")
 		}
 
 		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
@@ -1237,7 +1772,10 @@ describe("Tasklet real Task execution", function () {
 			const role = handlerNumber++
 			assert.ok(role < 2, "Both engines must be real Tasks, with no replacement child")
 			return {
-				getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				getModel: () => ({
+					id: "claude-opus-4-20250514",
+					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
+				}),
 				async *createMessage(_systemPrompt, messages, tools): ApiStream {
 					const turn = ++turns[role]
 					const history = messages as DiracStorageMessage[]
@@ -1253,7 +1791,14 @@ describe("Tasklet real Task execution", function () {
 						if (turn < 6) assert.doesNotMatch(serialized, /PUBLIC_RESULT_END/)
 						if (turn === 1) {
 							name = "use_subagents"
-							args = { subagents: [{ task_title: "Public question worker", prompt: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully" }] }
+							args = {
+								subagents: [
+									{
+										task_title: "Public question worker",
+										prompt: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully",
+									},
+								],
+							}
 						} else if (turn === 2) {
 							const accepted = JSON.parse(toolOutput(history, "public-0-1")).subagents
 							assert.equal(accepted.length, 1)
@@ -1268,33 +1813,50 @@ describe("Tasklet real Task execution", function () {
 						} else if (turn === 3) {
 							assert.match(toolOutput(history, "public-0-2"), /Active tasklets:/)
 							assert.ok(toolOutput(history, "public-0-2").includes(childId))
-							const communication = history.flatMap((message) => typeof message.content === "string" ? [] : message.content)
-								.find((block) => block.type === "text" && block.text.includes('[Tasklet communication:') && block.text.includes('"type":"interaction"'))
-							assert.ok(communication?.type === "text", "Question must reach the parent provider, not an internal control callback")
+							const communication = history
+								.flatMap((message) => (typeof message.content === "string" ? [] : message.content))
+								.find(
+									(block) =>
+										block.type === "text" &&
+										block.text.includes("[Tasklet communication:") &&
+										block.text.includes('"type":"interaction"'),
+								)
+							assert.ok(
+								communication?.type === "text",
+								"Question must reach the parent provider, not an internal control callback",
+							)
 							assert.match(communication.text, /PUBLIC_CHILD_QUESTION/)
 							assert.ok(communication.text.includes(childId))
 							questionId = JSON.parse(communication.text.slice(communication.text.indexOf("\n") + 1)).request.id
 							assert.ok(questionId)
 							name = "tasklets"
-							args = { operation: "resolve", tasklet_id: childId, request_id: questionId, resolution: "answer", answer: "PUBLIC_PARENT_ANSWER" }
+							args = {
+								operation: "message",
+								messages: [
+									{ tasklet_id: childId, type: "reply", reply_to: questionId, text: "PUBLIC_PARENT_ANSWER" },
+								],
+							}
 						} else if (turn === 4) {
-							assert.deepEqual(JSON.parse(toolOutput(history, "public-0-3")), { status: "resolved" })
+							assert.equal(JSON.parse(toolOutput(history, "public-0-3"))[0].status, "resolved")
 							await bounded(answerReceived, "Child did not receive the public answer")
 							releaseCompletion()
 							assert.equal((await waitForOutcome(root.taskletHost!, childId)).outcome?.kind, "completed")
 							args = { operation: "progress", text: "Inspect the retained result next" }
 						} else if (turn === 5) {
 							assert.match(serialized, /PUBLIC_RESULT_START/)
-							assert.match(serialized, /preview truncated/)
+							assert.match(serialized, /preview only/)
 							name = "tasklets"
-							args = { operation: "inspect", tasklet_id: childId }
+							args = { operation: "inspect", tasklet_id: childId, view: "assignment" }
 						} else {
 							const inspection = JSON.parse(toolOutput(history, "public-0-5"))
-							assert.equal(inspection.id, childId, "Public inspection retains the accepted stable ID")
-							assert.equal(inspection.outcome.kind, "completed")
-							assert.equal(inspection.responses.at(-1).text, fullResult, "Explicit inspect returns the unabridged result")
-							assert.equal(inspection.interactions[0].id, questionId)
-							assert.equal(inspection.interactions[0].status, "resolved")
+							assert.equal(inspection.items[0].id, childId, "Public inspection retains the accepted stable ID")
+							assert.equal(inspection.items[0].outcome.kind, "completed")
+							assert.equal(
+								inspection.items[0].outcome.response,
+								fullResult,
+								"Assignment inspection retains the exact committed result",
+							)
+							assert.equal(root.taskletHost!.inspect(childId).interactions[0].status, "resolved")
 							args = { operation: "complete", text: "Public supervision complete" }
 						}
 					} else {
@@ -1314,17 +1876,28 @@ describe("Tasklet real Task execution", function () {
 						}
 					}
 					assert.ok(advertised.includes(name), `Provider call ${name} must be advertised`)
-					yield { type: "tool_calls", tool_call: { call_id: `public-${role}-${turn}`, function: { id: `public-${role}-${turn}`, name, arguments: JSON.stringify(args) } } }
+					yield {
+						type: "tool_calls",
+						tool_call: {
+							call_id: `public-${role}-${turn}`,
+							function: { id: `public-${role}-${turn}`, name, arguments: JSON.stringify(args) },
+						},
+					}
 					yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
 				},
 			} satisfies ApiHandler
 		})
 		const params = parameters()
 		const root = create({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "use_subagents", "tasklets"] },
-			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			releaseTaskLock: async () => { },
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
 		// Only skip the user follow-up wait; tool discovery, dispatch and both engines are real.
 		sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
@@ -1357,8 +1930,12 @@ describe("Tasklet real Task execution", function () {
 		let maxParentRequests = 0
 		let releaseSibling!: () => void
 		let siblingEntered!: () => void
-		const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve })
-		const siblingStarted = new Promise<void>((resolve) => { siblingEntered = resolve })
+		const siblingGate = new Promise<void>((resolve) => {
+			releaseSibling = resolve
+		})
+		const siblingStarted = new Promise<void>((resolve) => {
+			siblingEntered = resolve
+		})
 		const parentMessages: string[] = []
 		const siblingMessages: string[] = []
 		let handlerNumber = 0
@@ -1367,7 +1944,10 @@ describe("Tasklet real Task execution", function () {
 			const role = handlerNumber++
 			let turn = 0
 			return {
-				getModel: () => ({ id: "claude-opus-4-20250514", info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				getModel: () => ({
+					id: "claude-opus-4-20250514",
+					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
+				}),
 				async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
 					const currentTurn = ++turn
 					const serialized = JSON.stringify(messages)
@@ -1386,7 +1966,7 @@ describe("Tasklet real Task execution", function () {
 						}
 						if (currentTurn === 3) {
 							assert.match(serialized, /CHILD_RESULT_START/)
-							assert.match(serialized, /preview truncated/)
+							assert.match(serialized, /preview only/)
 						}
 					} else if (role === 2) {
 						siblingMessages.push(serialized)
@@ -1397,16 +1977,29 @@ describe("Tasklet real Task execution", function () {
 					}
 					try {
 						const read = role === 1 && currentTurn === 1
-						const operation = role === 0 ? (currentTurn < 4 ? "progress" : "complete")
-							: role === 1 ? (currentTurn === 2 ? "question" : "complete")
-								: currentTurn === 1 ? "progress" : "complete"
-						const text = role === 1 ? (currentTurn === 2 ? "CHILD_QUESTION" : fullResult) : `role ${role} turn ${currentTurn}`
+						const operation =
+							role === 0
+								? currentTurn < 4
+									? "progress"
+									: "complete"
+								: role === 1
+									? currentTurn === 2
+										? "question"
+										: "complete"
+									: currentTurn === 1
+										? "progress"
+										: "complete"
+						const text =
+							role === 1 ? (currentTurn === 2 ? "CHILD_QUESTION" : fullResult) : `role ${role} turn ${currentTurn}`
 						yield {
-							type: "tool_calls", tool_call: {
-								call_id: `call-${role}-${currentTurn}`, function: {
-									name: read ? "read_file" : "respond", arguments: JSON.stringify(read ? { paths: ["assignment.txt"] } : { operation, text }),
-								}
-							}
+							type: "tool_calls",
+							tool_call: {
+								call_id: `call-${role}-${currentTurn}`,
+								function: {
+									name: read ? "read_file" : "respond",
+									arguments: JSON.stringify(read ? { paths: ["assignment.txt"] } : { operation, text }),
+								},
+							},
 						}
 						yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
 					} finally {
@@ -1417,9 +2010,14 @@ describe("Tasklet real Task execution", function () {
 		})
 		const params = parameters()
 		const root = create({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
-			releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
+			releaseTaskLock: async () => { },
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 			toolEnvironmentFactory: {
 				create(config, toolName) {
 					const env = surface.create(config, toolName)
@@ -1434,7 +2032,12 @@ describe("Tasklet real Task execution", function () {
 						await recordResponse(response)
 						if (response.operation !== "progress") return
 						if (rootTurn === 1) {
-							childId = (await controls.start({ title: "question worker", prompt: "Read privately then ask CHILD_QUESTION" })).id
+							childId = (
+								await controls.start({
+									title: "question worker",
+									prompt: "Read privately then ask CHILD_QUESTION",
+								})
+							).id
 							questionId = (await waitForInteraction(root.taskletHost!, childId)).id
 							siblingId = (await controls.start({ title: "running sibling", prompt: "Work independently" })).id
 							await siblingStarted
@@ -1442,21 +2045,37 @@ describe("Tasklet real Task execution", function () {
 							return
 						}
 						if (rootTurn === 2) {
-							assert.equal(controls.list().length, 2)
-							assert.equal(controls.inspect(siblingId).outcome, undefined)
-							assert.match(JSON.stringify(await controls.readTranscript(childId)), /PRIVATE_FILE_CONTENT/)
-							assert.equal((await controls.steer(siblingId, "SIBLING_STEERING")).accepted, true)
-							assert.deepEqual(await controls.resolveInteraction(childId, questionId, {
-								operation: "answer", response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "PARENT_ANSWER" },
-							}), { status: "resolved" })
+							assert.equal(controls.list().totalItems, 2)
+							assert.equal(root.taskletHost!.inspect(siblingId).outcome, undefined)
+							assert.match(
+								JSON.stringify(await controls.inspect(childId, { view: "transcript" })),
+								/PRIVATE_FILE_CONTENT/,
+							)
+							assert.equal(
+								(
+									await controls.message([{ taskletId: siblingId, type: "guidance", text: "SIBLING_STEERING" }])
+								)[0].status,
+								"queued",
+							)
+							assert.equal(
+								(
+									await controls.message([
+										{ taskletId: childId, type: "reply", replyTo: questionId, text: "PARENT_ANSWER" },
+									])
+								)[0].status,
+								"resolved",
+							)
 							await waitForOutcome(root.taskletHost!, childId)
-							assert.equal(controls.inspect(siblingId).outcome, undefined)
+							assert.equal(root.taskletHost!.inspect(siblingId).outcome, undefined)
 							return
 						}
 						assert.equal(rootTurn, 3)
-						assert.equal(controls.inspect(siblingId).outcome, undefined)
-						assert.equal(controls.inspect(childId).responses.at(-1)?.text, fullResult)
-						const transcript = JSON.stringify(await controls.readTranscript(childId))
+						assert.equal(root.taskletHost!.inspect(siblingId).outcome, undefined)
+						assert.equal(
+							(root.taskletHost!.inspect(childId).outcome as { kind: "completed"; response: string }).response,
+							fullResult,
+						)
+						const transcript = JSON.stringify((await root.taskletHost!.readTranscript(childId)).conversation)
 						assert.match(transcript, /CHILD_RESULT_END/)
 						assert.match(transcript, /PARENT_ANSWER/)
 						releaseSibling()
@@ -1492,7 +2111,9 @@ describe("Tasklet real Task execution", function () {
 			try {
 				return await Promise.race([
 					promise,
-					new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(label)), 5_000) }),
+					new Promise<never>((_, reject) => {
+						timer = setTimeout(() => reject(new Error(label)), 5_000)
+					}),
 				])
 			} finally {
 				clearTimeout(timer)
@@ -1514,9 +2135,14 @@ describe("Tasklet real Task execution", function () {
 			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
 			const params = parameters()
 			const root = create({
-				...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
-				releaseTaskLock: async () => { }, updateTaskHistory: async () => [],
-				postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+				...params,
+				taskId: "root",
+				executionProfile: "standalone",
+				tasklet: undefined,
+				releaseTaskLock: async () => { },
+				updateTaskHistory: async () => [],
+				postStateToWebview: async () => { },
+				postPresentationToWebview: async () => { },
 				toolEnvironmentFactory: {
 					create(config, toolName) {
 						const env = surface.create(config, toolName)
@@ -1542,8 +2168,12 @@ describe("Tasklet real Task execution", function () {
 		it("keeps the executing parent paused until a real child's communication arrives, then delivers it on the serial next request", async () => {
 			let releaseChild!: () => void
 			let childEntered!: () => void
-			const childGate = new Promise<void>((resolve) => { releaseChild = resolve })
-			const childStarted = new Promise<void>((resolve) => { childEntered = resolve })
+			const childGate = new Promise<void>((resolve) => {
+				releaseChild = resolve
+			})
+			const childStarted = new Promise<void>((resolve) => {
+				childEntered = resolve
+			})
 			let childId = ""
 			let woke = false
 			nextTurn = async () => {
@@ -1572,9 +2202,15 @@ describe("Tasklet real Task execution", function () {
 				const { loadTaskletEvents } = await import("@core/storage/taskStorage")
 				const events = await loadTaskletEvents({ kind: "tasklet", rootTaskId: parent.taskId, taskletId: childId })
 				assert.equal(events.find((event) => event.id === result.eventId)?.deliveredAt, undefined)
-				assert.ok(events.some((event) => event.id === result.eventId), "Wake identifies persisted child communication")
-				assert.deepEqual(await controls.sleep({ taskletIds: [childId], timeoutMs: 0 }), result,
-					"Sleep does not consume or acknowledge communication")
+				assert.ok(
+					events.some((event) => event.id === result.eventId),
+					"Wake identifies persisted child communication",
+				)
+				assert.deepEqual(
+					await controls.sleep({ taskletIds: [childId], timeoutMs: 0 }),
+					result,
+					"Sleep does not consume or acknowledge communication",
+				)
 				woke = true
 			})
 			const run = root.startTask("Wait voluntarily for the contained worker")
@@ -1598,7 +2234,13 @@ describe("Tasklet real Task execution", function () {
 			}
 		})
 
-		for (const input of ["chat with attachments", "already queued chat with attachments", "steering", "already queued steering", "contextual feedback"] as const) {
+		for (const input of [
+			"chat with attachments",
+			"already queued chat with attachments",
+			"steering",
+			"already queued steering",
+			"contextual feedback",
+		] as const) {
 			it(`wakes the executing parent for ${input} despite an empty child filter and retains input for the next provider request`, async () => {
 				const text = `SLEEP_USER_INPUT_${input.replaceAll(" ", "_")}`
 				const image = "data:image/png;base64,iVBORw0KGgo="
@@ -1619,7 +2261,8 @@ describe("Tasklet real Task execution", function () {
 				}
 				const root = await createSleepingRoot(async (controls, parent) => {
 					if (input === "already queued steering") await parent.enqueueSteeringMessage(text)
-					if (input === "already queued chat with attachments") await parent.submitCardResponse("", DiracAskResponse.MESSAGE, text, [image], [attachment])
+					if (input === "already queued chat with attachments")
+						await parent.submitCardResponse("", DiracAskResponse.MESSAGE, text, [image], [attachment])
 					assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 5_000 }), { reason: "user_message" })
 					assert.equal(parent.taskletHost!.isSleeping, false)
 					assert.equal(requests.length, 1, "User wake must not start a second provider loop")
@@ -1632,7 +2275,9 @@ describe("Tasklet real Task execution", function () {
 					}
 					// A later completion tool in this same assistant turn must not bypass
 					// input that woke the wait (or arrived just before registration).
-					const completion = await (parent as unknown as { commitAttemptCompletion(text: string): Promise<{ committed: boolean }> }).commitAttemptCompletion("Premature completion")
+					const completion = await (
+						parent as unknown as { commitAttemptCompletion(text: string): Promise<{ committed: boolean }> }
+					).commitAttemptCompletion("Premature completion")
 					assert.equal(completion.committed, false)
 					woke = true
 				})
@@ -1647,9 +2292,14 @@ describe("Tasklet real Task execution", function () {
 						} else if (input === "steering") {
 							await root.enqueueSteeringMessage(text)
 						} else {
-							assert.deepEqual(await root.submitContextualInput(
-								{ text, references: ["OPAQUE_FEEDBACK_SOURCE"] }, { kind: "steering" }, () => { },
-							), { persisted: true })
+							assert.deepEqual(
+								await root.submitContextualInput(
+									{ text, references: ["OPAQUE_FEEDBACK_SOURCE"] },
+									{ kind: "steering" },
+									() => { },
+								),
+								{ persisted: true },
+							)
 						}
 					}
 					assert.equal((await bounded(run, "User input did not resume parent")).kind, "completed")
@@ -1670,8 +2320,12 @@ describe("Tasklet real Task execution", function () {
 			const processFiles = extract.processFilesIntoText
 			let releaseRead!: () => void
 			let enteredRead!: () => void
-			const readGate = new Promise<void>((resolve) => { releaseRead = resolve })
-			const readEntered = new Promise<void>((resolve) => { enteredRead = resolve })
+			const readGate = new Promise<void>((resolve) => {
+				releaseRead = resolve
+			})
+			const readEntered = new Promise<void>((resolve) => {
+				enteredRead = resolve
+			})
 			const firstFile = path.join(cwd, "first-sleep-input.txt")
 			const secondFile = path.join(cwd, "second-sleep-input.txt")
 			await fs.writeFile(firstFile, "FIRST_ATTACHMENT_CONTENT")
@@ -1704,7 +2358,13 @@ describe("Tasklet real Task execution", function () {
 				await waitForSleep(root)
 				await root.submitCardResponse("", DiracAskResponse.MESSAGE, "FIRST_CHAT", undefined, [firstFile])
 				await bounded(readEntered, "First attachment extraction did not start")
-				await root.submitCardResponse("", DiracAskResponse.MESSAGE, "SECOND_CHAT", ["data:image/png;base64,iVBORw0KGgo="], [secondFile])
+				await root.submitCardResponse(
+					"",
+					DiracAskResponse.MESSAGE,
+					"SECOND_CHAT",
+					["data:image/png;base64,iVBORw0KGgo="],
+					[secondFile],
+				)
 				releaseRead()
 				assert.equal((await bounded(run, "Second input did not reach the parent")).kind, "completed")
 				assert.equal(requests.length, 3, "Completion must reject until the second accepted batch reaches the model")
@@ -1718,7 +2378,7 @@ describe("Tasklet real Task execution", function () {
 
 		it("continues the real serial request loop after a time-only sleep expires", async () => {
 			let woke = false
-			nextTurn = async () => requests.length === 1 ? "progress" : "complete"
+			nextTurn = async () => (requests.length === 1 ? "progress" : "complete")
 			const root = await createSleepingRoot(async (controls, parent) => {
 				assert.deepEqual(await controls.sleep({ taskletIds: [], timeoutMs: 0 }), { reason: "timeout" })
 				assert.equal(parent.taskletHost!.isSleeping, false)
@@ -1770,18 +2430,24 @@ describe("Tasklet real Task execution", function () {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "question" : "complete"
+		nextTurn = async () => (++turn === 1 ? "question" : "complete")
 		const child = await host.start({ title: "question", prompt: "Ask privately" })
 		const request = await waitForInteraction(host, child.id)
 		assert.equal(request.permissionOperation, undefined)
 		const sibling = await host.start({ title: "sibling", prompt: "Finish independently" })
 		assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
 		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
-		assert.deepEqual(await host.resolveInteraction(child.id, request.id, {
-			operation: "answer", response: {
-				action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "PRIVATE_PARENT_ANSWER",
-			},
-		}), { status: "resolved" })
+		assert.deepEqual(
+			await host.resolveInteraction(child.id, request.id, {
+				operation: "answer",
+				response: {
+					action: DiracAskResponse.MESSAGE,
+					response: DiracAskResponse.MESSAGE,
+					text: "PRIVATE_PARENT_ANSWER",
+				},
+			}),
+			{ status: "resolved" },
+		)
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 		assert.match(JSON.stringify(requests[2].messages), /PRIVATE_PARENT_ANSWER/)
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
@@ -1792,7 +2458,7 @@ describe("Tasklet real Task execution", function () {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		const child = await host.start({ title: "command", prompt: "Ask command permission" })
 		const request = await waitForInteraction(host, child.id)
 		assert.deepEqual(request.permissionOperation, { kind: "commands", commands: ["touch permission-bypass-marker"] })
@@ -1808,11 +2474,13 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		const child = await host.start({ title: "command", prompt: "Ask command permission" })
 		const request = await waitForInteraction(host, child.id)
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
-		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), {
+			status: "requires_user_approval",
+		})
 		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
 		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
@@ -1822,14 +2490,57 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
 	})
 
+	it("keeps the current parent mutation ceiling and background lease on an Act child", async () => {
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let turn = 0
+		nextTurn = async () => (++turn === 1 ? "question" : "complete")
+		const record = await host.start({ title: "mutation boundary", prompt: "Wait for guidance" })
+		const request = await waitForInteraction(host, record.id)
+		const child = host["children"].get(record.id)!.task!
+		const callbacks = (child as any).toolExecutor.asToolConfig().callbacks
+		const completion = deferred<void>()
+		try {
+			await callbacks.withMutationAuthorization("edit_file", async () => callbacks.retainMutationUntil(completion.promise))
+			let transitioned = false
+			const transition = root
+				.applyWorkingConfigurationUpdate({ settings: { mode: "plan", strictPlanModeEnabled: true } })
+				.then(() => {
+					transitioned = true
+				})
+			await new Promise((resolve) => setImmediate(resolve))
+			assert.equal(transitioned, false, "The parent's mutation lease covers a child's detached background work")
+			completion.resolve()
+			await transition
+			assert.equal(child.getWorkingConfiguration().settings.mode, "act")
+			const mutation = sandbox.stub().resolves()
+			await assert.rejects(callbacks.withMutationAuthorization("edit_file", mutation), /Plan Mode/)
+			sinon.assert.notCalled(mutation)
+			await host.resolveInteraction(record.id, request.id, {
+				operation: "answer",
+				response: {
+					action: DiracAskResponse.MESSAGE,
+					response: DiracAskResponse.MESSAGE,
+					text: "Finish read-only",
+				},
+			})
+			assert.equal((await waitForOutcome(host, record.id)).outcome?.kind, "completed")
+		} finally {
+			completion.resolve()
+			await root.abortTask()
+		}
+	})
+
 	it("escalates a real command through root input without granting approval to the next operation", async () => {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
 		let turn = 0
-		nextTurn = async () => ++turn <= 2 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn <= 2 ? "execute_command" : "complete")
 		const child = await host.start({ title: "command", prompt: "Ask command permission twice" })
 		const request = await waitForInteraction(host, child.id)
-		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), {
+			status: "requires_user_approval",
+		})
 		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
 		const card = await waitForRootCard(root)
 		assert.notEqual(card.id, request.card.id)
@@ -1842,7 +2553,9 @@ describe("Tasklet real Task execution", function () {
 		assert.notEqual(next.id, request.id)
 		await fs.access(path.join(cwd, "permission-bypass-marker"))
 		await fs.unlink(path.join(cwd, "permission-bypass-marker"))
-		assert.deepEqual(await host.resolveInteraction(child.id, next.id, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.deepEqual(await host.resolveInteraction(child.id, next.id, { operation: "approve" }), {
+			status: "requires_user_approval",
+		})
 		await host.resolveInteraction(child.id, next.id, { operation: "reject" })
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
@@ -1856,7 +2569,7 @@ describe("Tasklet real Task execution", function () {
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		const host = root.taskletHost!
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		const child = await host.start({ title: "command", prompt: "Explicitly escalate" })
 		const request = await waitForInteraction(host, child.id)
 		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
@@ -1886,12 +2599,21 @@ describe("Tasklet real Task execution", function () {
 		const executor = (root as any).toolExecutor
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(new TaskletsTool())
-		executor.activeRequestRuntime = { requestId: "public-resolution", workingConfiguration: root.getWorkingConfiguration(), api: root.api }
+		executor.activeRequestRuntime = {
+			requestId: "public-resolution",
+			workingConfiguration: root.getWorkingConfiguration(),
+			api: root.api,
+		}
 		const result = await coordinator.execute(executor.asToolConfig(coordinator), {
-			type: "tool_use", name: "tasklets", isComplete: true,
-			params: { operation: "resolve", tasklet_id: child.id, request_id: request.id, resolution: "answer", action: "approve" },
+			type: "tool_use",
+			name: "tasklets",
+			isComplete: true,
+			params: {
+				operation: "message",
+				messages: [{ tasklet_id: child.id, type: "reply", reply_to: request.id, action: "approve" }],
+			},
 		})
-		assert.deepEqual(JSON.parse(result as string), { status: "resolved" })
+		assert.equal(JSON.parse(result as string)[0].status, "resolved")
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 		assert.equal(requests.length, 2)
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
@@ -1899,18 +2621,23 @@ describe("Tasklet real Task execution", function () {
 
 	it("retains directed progress and completion without emitting routine presentation as communication", async () => {
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "progress" : "complete"
+		nextTurn = async () => (++turn === 1 ? "progress" : "complete")
 		const host = createHost()
 		try {
 			const child = await host.start({ title: "updates", prompt: "Report privately" })
 			const result = await waitForOutcome(host, child.id)
 			assert.equal(result.outcome?.kind, "completed")
-			assert.deepEqual(result.responses.map((response) => response.operation), ["progress", "complete"])
+			assert.deepEqual(
+				result.responses.map((response) => response.operation),
+				["progress"],
+			)
 			assert.deepEqual(result.interactions, [])
 			assert.ok((await host.readTranscript(child.id)).presentation.length > result.responses.length)
 			result.responses[0].text = "mutated snapshot"
 			assert.notEqual(host.inspect(child.id).responses[0].text, "mutated snapshot")
-		} finally { await host.shutdown() }
+		} finally {
+			await host.shutdown()
+		}
 	})
 
 	for (const operation of ["question", "execute_command", "condense"] as const) {
@@ -1922,15 +2649,22 @@ describe("Tasklet real Task execution", function () {
 			params.workingConfiguration = createTaskWorkingConfiguration({
 				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
 				workspaceConfiguration: {} as any,
-				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "vscodeTerminal", multiRootEnabled: false },
+				executionOptions: {
+					terminalReuseEnabled: true,
+					vscodeTerminalExecutionMode: "vscodeTerminal",
+					multiRootEnabled: false,
+				},
 				settings: {
-					...SETTINGS_DEFAULTS, mode: "act", hooksEnabled: false, yoloModeToggled: true,
+					...SETTINGS_DEFAULTS,
+					mode: "act",
+					hooksEnabled: false,
+					yoloModeToggled: true,
 					toolToggles: { read_file: true, execute_command: true },
-					autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: true }
+					autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: true },
 				} as Settings,
 			})
 			let turn = 0
-			nextTurn = async () => ++turn === 1 ? operation : "complete"
+			nextTurn = async () => (++turn === 1 ? operation : "complete")
 			const host = createHost(params)
 			try {
 				const child = await host.start({ title: "waiting", prompt: "Private request" })
@@ -1949,13 +2683,17 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(host.inspect(child.id).interactions[0].status, "retired")
 				assert.ok(host.inspect(child.id).interactions[0].retiredAt)
 				sinon.assert.notCalled(notification)
-			} finally { await host.shutdown() }
+			} finally {
+				await host.shutdown()
+			}
 		})
 	}
 
 	it("routes real runtime authentication intervention to the owner and retires it on interruption", async () => {
 		expectLoggerErrors()
-		nextTurn = async () => { throw new Error("authentication failed: controlled provider") }
+		nextTurn = async () => {
+			throw new Error("authentication failed: controlled provider")
+		}
 		const host = createHost()
 		try {
 			const child = await host.start({ title: "runtime", prompt: "Runtime wait" })
@@ -1966,7 +2704,9 @@ describe("Tasklet real Task execution", function () {
 			await host.interrupt(child.id)
 			assert.equal(host.inspect(child.id).interactions[0].status, "retired")
 			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
-		} finally { await host.shutdown() }
+		} finally {
+			await host.shutdown()
+		}
 	})
 
 	it("keeps ordinary real Task transport retry automatic and out of pending interactions", async () => {
@@ -1984,9 +2724,14 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(result.outcome?.kind, "completed")
 			assert.equal(requests.length, 2)
 			assert.deepEqual(result.interactions, [])
-			assert.deepEqual(result.responses.map((response) => response.operation), ["complete"])
+			assert.deepEqual(
+				result.responses.map((response) => response.operation),
+				[],
+			)
 			assert.match(JSON.stringify(await host.readTranscript(child.id)), /API Error \(Retrying\)/)
-		} finally { await host.shutdown() }
+		} finally {
+			await host.shutdown()
+		}
 	})
 
 	it("cancels a running root and its running child without changing ordinary root lock lifetime", async () => {
@@ -1994,16 +2739,27 @@ describe("Tasklet real Task execution", function () {
 		const params = parameters()
 		const release = sandbox.stub().resolves()
 		const root = create({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
-			releaseTaskLock: release, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
+			releaseTaskLock: release,
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
 		let releaseProviders!: () => void
 		let enteredRoot!: () => void
 		let enteredChild!: () => void
-		const gate = new Promise<void>((resolve) => { releaseProviders = resolve })
-		const rootEntered = new Promise<void>((resolve) => { enteredRoot = resolve })
-		const childEntered = new Promise<void>((resolve) => { enteredChild = resolve })
+		const gate = new Promise<void>((resolve) => {
+			releaseProviders = resolve
+		})
+		const rootEntered = new Promise<void>((resolve) => {
+			enteredRoot = resolve
+		})
+		const childEntered = new Promise<void>((resolve) => {
+			enteredChild = resolve
+		})
 		let turns = 0
 		nextTurn = async () => {
 			if (++turns === 1) enteredRoot()
@@ -2042,16 +2798,25 @@ describe("Tasklet real Task execution", function () {
 		const release = sandbox.spy(releaseLock)
 		const params = parameters()
 		const root = create({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
-			releaseTaskLock: release, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
+			releaseTaskLock: release,
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
 		const host = root.taskletHost!
 		assert.ok(host)
 		let releaseProviders!: () => void
 		let enteredBoth!: () => void
-		const providers = new Promise<void>((resolve) => { releaseProviders = resolve })
-		const entered = new Promise<void>((resolve) => { enteredBoth = resolve })
+		const providers = new Promise<void>((resolve) => {
+			releaseProviders = resolve
+		})
+		const entered = new Promise<void>((resolve) => {
+			enteredBoth = resolve
+		})
 		let turns = 0
 		nextTurn = async () => {
 			if (++turns === 2) enteredBoth()
@@ -2060,12 +2825,19 @@ describe("Tasklet real Task execution", function () {
 		}
 		let releaseRecord!: () => void
 		let writingRecord!: () => void
-		const recordGate = new Promise<void>((resolve) => { releaseRecord = resolve })
-		const recordEntered = new Promise<void>((resolve) => { writingRecord = resolve })
+		const recordGate = new Promise<void>((resolve) => {
+			releaseRecord = resolve
+		})
+		const recordEntered = new Promise<void>((resolve) => {
+			writingRecord = resolve
+		})
 		const storage = await import("@core/storage/taskStorage")
 		const originalSave = storage.saveTaskletRecord
 		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
-			if (record.outcome) { writingRecord(); await recordGate }
+			if (record.outcome) {
+				writingRecord()
+				await recordGate
+			}
 			await originalSave(record)
 		})
 		let abort: Promise<void> | undefined
@@ -2096,7 +2868,9 @@ describe("Tasklet real Task execution", function () {
 			try {
 				const { deleteTaskDirectory } = await import("@core/storage/taskDirectory")
 				await deleteTaskDirectory("root")
-			} finally { await deletionLock() }
+			} finally {
+				await deletionLock()
+			}
 			await new Promise((resolve) => setTimeout(resolve, 30))
 			assert.equal(save.callCount, writesAtDeletion)
 			await assert.rejects(fs.stat(rootDirectory), { code: "ENOENT" })
@@ -2130,14 +2904,19 @@ describe("Tasklet real Task execution", function () {
 		const params = parameters()
 		// This failed owner is deliberately not registered with ordinary successful afterEach shutdown.
 		const root = new Task({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
-			releaseTaskLock: release, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			releaseTaskLock: release,
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
 		const host = root.taskletHost!
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		let expectedShutdownFailure = false
 		try {
 			const child = await host.start({ title: "permission", prompt: "Wait for command approval" })
@@ -2159,10 +2938,7 @@ describe("Tasklet real Task execution", function () {
 				return patch(id, update)
 			})
 			expectedShutdownFailure = true
-			await Promise.all([
-				assert.rejects(root.abortTask(), /Tasklet shutdown failed/),
-				failedEscalation,
-			])
+			await Promise.all([assert.rejects(root.abortTask(), /Tasklet shutdown failed/), failedEscalation])
 			await assert.rejects(root.retirePersistence(), /Tasklet shutdown failed/)
 			assert.deepEqual(root.stateView.waitingCardIds, [])
 			assert.equal(root.stateView.lastWaitingCardId, undefined)
@@ -2199,9 +2975,14 @@ describe("Tasklet real Task execution", function () {
 		const release = sandbox.spy(releaseLock)
 		const params = parameters()
 		const root = new Task({
-			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
-			releaseTaskLock: release, updateTaskHistory: async () => [],
-			postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
+			releaseTaskLock: release,
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
 		})
 		const host = root.taskletHost!
 		nextTurn = async () => "complete"
@@ -2284,15 +3065,31 @@ describe("Tasklet real Task execution", function () {
 		let releaseSecond!: () => void
 		let enteredFirst!: () => void
 		let enteredSecond!: () => void
-		const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
-		const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve })
-		const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve })
-		const secondEntered = new Promise<void>((resolve) => { enteredSecond = resolve })
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const secondGate = new Promise<void>((resolve) => {
+			releaseSecond = resolve
+		})
+		const firstEntered = new Promise<void>((resolve) => {
+			enteredFirst = resolve
+		})
+		const secondEntered = new Promise<void>((resolve) => {
+			enteredSecond = resolve
+		})
 		let turn = 0
 		nextTurn = async () => {
 			turn++
-			if (turn === 1) { enteredFirst(); await firstGate; return "complete" }
-			if (turn === 2) { enteredSecond(); await secondGate; return "progress" }
+			if (turn === 1) {
+				enteredFirst()
+				await firstGate
+				return "complete"
+			}
+			if (turn === 2) {
+				enteredSecond()
+				await secondGate
+				return "progress"
+			}
 			return "complete"
 		}
 		try {
@@ -2326,7 +3123,9 @@ describe("Tasklet real Task execution", function () {
 			assert.doesNotMatch(JSON.stringify(transcript), /FIRST_PRIVATE_ASSIGNMENT/)
 			assert.equal(requests.length, 3)
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: second.id }
-			const record = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"))
+			const record = JSON.parse(
+				await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"),
+			)
 			assert.deepEqual(record.outcome, result.outcome)
 			assert.equal(record.conversationUlid, second.conversationUlid)
 			assert.deepEqual(await fs.readdir(path.join(directory, "storage", "tasks")), ["root"])
@@ -2344,14 +3143,27 @@ describe("Tasklet real Task execution", function () {
 		try {
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
-			await updateTaskMetadata(address, (metadata) => { metadata.active_skill_ids = ["retained-tasklet-skill"] })
+			await updateTaskMetadata(address, (metadata) => {
+				metadata.active_skill_ids = ["retained-tasklet-skill"]
+			})
 			const toolDirectory = path.join(getTaskDirectoryPath(address), "tools", "retained_tasklet_tool")
 			await fs.mkdir(toolDirectory, { recursive: true })
-			await fs.writeFile(path.join(toolDirectory, "dirac-tool.json"), JSON.stringify({
-				schemaVersion: 1, id: "retained_tasklet_tool", name: "retained_tasklet_tool", scope: "task", entry: "tool.ts",
-				createdBy: "dirac", createdAt: "2026-05-29T00:00:00.000Z",
-			}))
-			await fs.writeFile(path.join(toolDirectory, "tool.ts"), `export const spec = { id: "retained_tasklet_tool", name: "retained_tasklet_tool", description: "Retained context" }; export function create() { return { spec() { return spec }, supportedSurfaces() { return ["all"] }, async processCall() { return "retained" } } }`)
+			await fs.writeFile(
+				path.join(toolDirectory, "dirac-tool.json"),
+				JSON.stringify({
+					schemaVersion: 1,
+					id: "retained_tasklet_tool",
+					name: "retained_tasklet_tool",
+					scope: "task",
+					entry: "tool.ts",
+					createdBy: "dirac",
+					createdAt: "2026-05-29T00:00:00.000Z",
+				}),
+			)
+			await fs.writeFile(
+				path.join(toolDirectory, "tool.ts"),
+				`export const spec = { id: "retained_tasklet_tool", name: "retained_tasklet_tool", description: "Retained context" }; export function create() { return { spec() { return spec }, supportedSurfaces() { return ["all"] }, async processCall() { return "retained" } } }`,
+			)
 			const { UserToolLoader } = await import("../tools/discovery/UserToolLoader")
 			const loaded = await UserToolLoader.loadWithDiagnostics(toolDirectory, "task")
 			assert.ok(loaded.tool, loaded.error)
@@ -2411,21 +3223,30 @@ describe("Tasklet real Task execution", function () {
 			const presentation = await getSavedPresentationHistory(address)
 			presentation.messages.at(-1)!.conversationHistoryDeletedRange = [2, 3]
 			await saveDiracMessages(address, presentation.messages)
-			assert.deepEqual((await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange, [2, 3])
+			assert.deepEqual(
+				(await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange,
+				[2, 3],
+			)
 			assert.deepEqual(await getSavedApiConversationProviderState(address), {})
 			let finishRoot: (() => void) | undefined
 			let rootRun: Promise<unknown> | undefined
 			try {
 				if (reopenRoot) {
-					await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_CONTEXT" }] }])
+					await root.messageStateHandler.overwriteApiConversationHistory([
+						{ role: "user", content: [{ type: "text", text: "ROOT_CONTEXT" }] },
+					])
 					await root.abortTask()
 					const reopenedRoot = createResolutionRoot()
 					sandbox.stub(reopenedRoot as any, "waitForFollowUp").resolves(undefined)
 					const modelPresets = await import("@core/models/modelProviderPresets")
 					sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
 					let rootEntered!: () => void
-					const rootStarted = new Promise<void>((resolve) => { rootEntered = resolve })
-					const rootGate = new Promise<void>((resolve) => { finishRoot = resolve })
+					const rootStarted = new Promise<void>((resolve) => {
+						rootEntered = resolve
+					})
+					const rootGate = new Promise<void>((resolve) => {
+						finishRoot = resolve
+					})
 					let rootRequest = true
 					nextTurn = async () => {
 						if (rootRequest) {
@@ -2448,7 +3269,10 @@ describe("Tasklet real Task execution", function () {
 				assert.match(dispatched, /RETAINED_PLAINTEXT_SUMMARY/)
 				assert.match(dispatched, /PARENT_COMPACTED_FOLLOWUP/)
 				assert.doesNotMatch(dispatched, /COMPACTED_AWAY_USER_CONTEXT|COMPACTED_AWAY_ASSISTANT_CONTEXT/)
-				assert.deepEqual((await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange, [2, 3])
+				assert.deepEqual(
+					(await getSavedPresentationHistory(address)).messages.at(-1)!.conversationHistoryDeletedRange,
+					[2, 3],
+				)
 				assert.match(JSON.stringify(await host.readTranscript(child.id)), /COMPACTED_AWAY_USER_CONTEXT/)
 			} finally {
 				await host.shutdown()
@@ -2464,7 +3288,9 @@ describe("Tasklet real Task execution", function () {
 		nextTurn = async () => "complete"
 		const child = await host.start({ title: "persisted child", prompt: "COMPLETED_BEFORE_ROOT_CLOSE" })
 		await waitForOutcome(host, child.id)
-		await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_CONTEXT" }] }])
+		await root.messageStateHandler.overwriteApiConversationHistory([
+			{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_CONTEXT" }] },
+		])
 		await root.messageStateHandler.flushPendingWrites()
 		await root.abortTask()
 		const reopenedRoot = createResolutionRoot()
@@ -2473,12 +3299,15 @@ describe("Tasklet real Task execution", function () {
 		sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
 		const requestsBeforeRootResume = requests.length
 		let rootRestored = false
-		const outcome = await reopenedRoot.resumeTaskFromHistory(() => {
-			rootRestored = true
-			assert.equal(requests.length, requestsBeforeRootResume, "Reconstruction must not start a child provider request")
-			assert.deepEqual(reopenedRoot.taskletHost!.listActive(), [])
-			assert.equal(reopenedRoot.taskletHost!.inspect(child.id).outcome?.kind, "completed")
-		}, { initialUserInput: { text: "ROOT_FOLLOWUP" } })
+		const outcome = await reopenedRoot.resumeTaskFromHistory(
+			() => {
+				rootRestored = true
+				assert.equal(requests.length, requestsBeforeRootResume, "Reconstruction must not start a child provider request")
+				assert.deepEqual(reopenedRoot.taskletHost!.listActive(), [])
+				assert.equal(reopenedRoot.taskletHost!.inspect(child.id).outcome?.kind, "completed")
+			},
+			{ initialUserInput: { text: "ROOT_FOLLOWUP" } },
+		)
 		assert.equal(outcome.kind, "completed", JSON.stringify(outcome))
 		assert.equal(rootRestored, true)
 		assert.equal(requests.length, requestsBeforeRootResume + 1, "Only the root model ran")
@@ -2490,7 +3319,9 @@ describe("Tasklet real Task execution", function () {
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
 			const saved = await getSavedApiConversationState(address)
 			const checkpoint = {
-				providerId: "anthropic", modelId: "claude-opus-4-20250514", compactedThroughHistoryIndex: saved.messages.length - 1,
+				providerId: "anthropic",
+				modelId: "claude-opus-4-20250514",
+				compactedThroughHistoryIndex: saved.messages.length - 1,
 				input: [{ type: "compaction", encrypted_content: "PRIVATE_OPAQUE_CHILD_CHECKPOINT" }],
 			}
 			await saveApiConversationProviderState(address, { checkpoint })
@@ -2524,7 +3355,7 @@ describe("Tasklet real Task execution", function () {
 		expectLoggerErrors() // Interrupting the actual command approval wait is expected cancellation.
 		const root = createResolutionRoot()
 		let turn = 0
-		nextTurn = async () => ++turn === 1 ? "execute_command" : "complete"
+		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		const child = await root.taskletHost!.start({ title: "permission wait", prompt: "REQUEST_COMMAND_ONCE" })
 		const oldRequest = await waitForInteraction(root.taskletHost!, child.id)
 		await root.abortTask()
@@ -2579,8 +3410,11 @@ describe("Tasklet real Task execution", function () {
 			const metrics = getApiMetrics(messages)
 			assert.equal(metrics.totalTokensIn, 300)
 			assert.equal(metrics.totalTokensOut, 60)
-			const contributions = messages.flatMap((message) => message.content.type === DiracMessageType.CARD
-				? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined) : [])
+			const contributions = messages.flatMap((message) =>
+				message.content.type === DiracMessageType.CARD
+					? [getTaskletUsage(message.content.card)].filter((usage) => usage !== undefined)
+					: [],
+			)
 			assert.deepEqual(contributions.map((usage) => usage.taskletId).sort(), ids.sort())
 			for (const id of ids) {
 				assert.equal(root.taskletHost!.inspect(id).usage?.primary.tokensIn, 100)
@@ -2604,11 +3438,14 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(resumed.usage?.primary.tokensIn, 200)
 			assert.equal(resumed.usage?.primary.tokensOut, 40)
 			assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
-			const cards = root.messageStateHandler.getDiracMessages().filter((message) =>
-				message.content.type === DiracMessageType.CARD && getTaskletUsage(message.content.card))
+			const cards = root.messageStateHandler
+				.getDiracMessages()
+				.filter((message) => message.content.type === DiracMessageType.CARD && getTaskletUsage(message.content.card))
 			assert.equal(cards.length, 1, "Follow-up replaces the stable accounting projection")
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
-			const record = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"))
+			const record = JSON.parse(
+				await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"),
+			)
 			assert.deepEqual(record.usage, resumed.usage)
 		})
 
@@ -2623,7 +3460,12 @@ describe("Tasklet real Task execution", function () {
 			const recordPath = path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord)
 			const record = JSON.parse(await fs.readFile(recordPath, "utf8"))
 			record.usage.primary = {
-				tokensIn: 200, tokensOut: 40, cacheWrites: 6, cacheReads: 8, cost: 1.25, reasoningTokens: 10,
+				tokensIn: 200,
+				tokensOut: 40,
+				cacheWrites: 6,
+				cacheReads: 8,
+				cost: 1.25,
+				reasoningTokens: 10,
 			}
 			await fs.writeFile(recordPath, JSON.stringify(record))
 
@@ -2639,9 +3481,21 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(resumed.outcome?.kind, "completed")
 			assert.equal(resumed.conversationUlid, child.conversationUlid)
 			assert.deepEqual(resumed.usage?.primary, {
-				tokensIn: 300, tokensOut: 60, cacheWrites: 6, cacheReads: 8, cost: 1.25, reasoningTokens: 10,
+				tokensIn: 300,
+				tokensOut: 60,
+				cacheWrites: 6,
+				cacheReads: 8,
+				cost: 1.25,
+				reasoningTokens: 10,
 				usageObserved: true,
-				usageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: false, cacheReads: false, cost: false, reasoningTokens: false },
+				usageAvailability: {
+					inputTokens: true,
+					outputTokens: true,
+					cacheWrites: false,
+					cacheReads: false,
+					cost: false,
+					reasoningTokens: false,
+				},
 			})
 			const metrics = getApiMetrics(reopened.messageStateHandler.getDiracMessages())
 			assert.equal(metrics.totalTokensIn, 300)
@@ -2658,7 +3512,7 @@ describe("Tasklet real Task execution", function () {
 			expectLoggerErrors() // Interrupting the real permission wait is expected tool cancellation.
 			const root = createResolutionRoot()
 			const host = root.taskletHost!
-			nextTurn = async () => requests.length === 1 ? "execute_command" : "complete"
+			nextTurn = async () => (requests.length === 1 ? "execute_command" : "complete")
 			const child = await host.start({ title: "interrupted usage", prompt: "REQUEST_USAGE_THEN_PERMISSION" })
 			await waitForInteraction(host, child.id)
 			const stopped = await host.interrupt(child.id, "Retain incurred spend")
@@ -2678,20 +3532,30 @@ describe("Tasklet real Task execution", function () {
 			nextTurn = async () => "complete"
 			const child = await root.taskletHost!.start({ title: "durable usage", prompt: "PERSIST_USAGE" })
 			await waitForOutcome(root.taskletHost!, child.id)
-			await root.messageStateHandler.overwriteApiConversationHistory([{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_USAGE" }] }])
+			await root.messageStateHandler.overwriteApiConversationHistory([
+				{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_USAGE" }] },
+			])
 			await root.abortTask()
 			const reopened = createResolutionRoot()
 			sandbox.stub(reopened as any, "waitForFollowUp").resolves(undefined)
 			const modelPresets = await import("@core/models/modelProviderPresets")
 			sandbox.stub(modelPresets, "recordSuccessfulModelProviderPreset")
 			let restored = false
-			assert.equal((await reopened.resumeTaskFromHistory(() => {
-				restored = true
-				assert.equal(requests.length, 1, "Reconstruction does not run child providers")
-				assert.deepEqual(reopened.taskletHost!.listActive(), [])
-				assert.equal(reopened.taskletHost!.inspect(child.id).usage?.primary.tokensIn, 100)
-				assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 100)
-			}, { initialUserInput: { text: "ROOT_ONLY_NEW_USAGE" } })).kind, "completed")
+			assert.equal(
+				(
+					await reopened.resumeTaskFromHistory(
+						() => {
+							restored = true
+							assert.equal(requests.length, 1, "Reconstruction does not run child providers")
+							assert.deepEqual(reopened.taskletHost!.listActive(), [])
+							assert.equal(reopened.taskletHost!.inspect(child.id).usage?.primary.tokensIn, 100)
+							assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 100)
+						},
+						{ initialUserInput: { text: "ROOT_ONLY_NEW_USAGE" } },
+					)
+				).kind,
+				"completed",
+			)
 			assert.equal(restored, true)
 			assert.equal(requests.length, 2)
 			assert.equal(getApiMetrics(reopened.messageStateHandler.getDiracMessages()).totalTokensIn, 200)
@@ -2704,10 +3568,24 @@ describe("Tasklet real Task execution", function () {
 				const host = root.taskletHost!
 				const started = sandbox.spy(Task.prototype, "startTask")
 				const utilityHandler = {
-					getModel: () => ({ id: "controlled-utility", info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false } }),
+					getModel: () => ({
+						id: "controlled-utility",
+						info: { contextWindow: 200_000, maxTokens: 8192, supportsPromptCache: false },
+					}),
 					async *createMessage(): ApiStream {
-						yield { type: "usage", inputTokens: 11, outputTokens: 7, reasoningTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalCost: 0.5 }
-						yield { type: "text", text: invalidSummary ? "" : "Continue the private assignment under the parent's constraints." }
+						yield {
+							type: "usage",
+							inputTokens: 11,
+							outputTokens: 7,
+							reasoningTokens: 3,
+							cacheReadTokens: 2,
+							cacheWriteTokens: 1,
+							totalCost: 0.5,
+						}
+						yield {
+							type: "text",
+							text: invalidSummary ? "" : "Continue the private assignment under the parent's constraints.",
+						}
 					},
 				} as ApiHandler
 				let generated = false
@@ -2716,8 +3594,11 @@ describe("Tasklet real Task execution", function () {
 						generated = true
 						const task = started.firstCall.thisValue as Task
 						const summary = (task as any).localConversationCompaction.generateSummary(
-							{ provider: "anthropic", modelId: "controlled-utility" }, () => utilityHandler,
-							createDefaultTextCondensationTemplateRegistry(), undefined, [],
+							{ provider: "anthropic", modelId: "controlled-utility" },
+							() => utilityHandler,
+							createDefaultTextCondensationTemplateRegistry(),
+							undefined,
+							[],
 						)
 						if (invalidSummary) await assert.rejects(summary, /empty|output/i)
 						else assert.match(await summary, /private assignment/)
@@ -2729,9 +3610,21 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(first.outcome?.kind, "completed")
 				assert.equal(first.usage?.primary.tokensIn, 100)
 				assert.deepEqual(first.usage?.utility, {
-					tokensIn: 11, tokensOut: 7, cacheWrites: 1, cacheReads: 2, cost: 0.5, reasoningTokens: 3,
+					tokensIn: 11,
+					tokensOut: 7,
+					cacheWrites: 1,
+					cacheReads: 2,
+					cost: 0.5,
+					reasoningTokens: 3,
 					usageObserved: true,
-					usageAvailability: { inputTokens: true, outputTokens: true, cacheWrites: true, cacheReads: true, cost: true, reasoningTokens: true },
+					usageAvailability: {
+						inputTokens: true,
+						outputTokens: true,
+						cacheWrites: true,
+						cacheReads: true,
+						cost: true,
+						reasoningTokens: true,
+					},
 				})
 				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalTokensIn, 111)
 				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
@@ -2749,9 +3642,9 @@ describe("Tasklet real Task execution", function () {
 		const params = parameters()
 		const address = params.tasklet!.storageAddress
 		const sibling = { ...address, taskletId: createTaskletId() }
-		const preserved = (await Promise.all([
-			seedPreservedArtifacts({ kind: "task", taskId: "root" }), seedPreservedArtifacts(sibling),
-		])).flat()
+		const preserved = (
+			await Promise.all([seedPreservedArtifacts({ kind: "task", taskId: "root" }), seedPreservedArtifacts(sibling)])
+		).flat()
 		let steeringQueued = false
 		params.enqueuePreRequestSteeringMessages = async () => {
 			if (steeringQueued) return
@@ -2780,10 +3673,21 @@ describe("Tasklet real Task execution", function () {
 		assert.match(JSON.stringify(transcript.messages), /Private assignment complete/)
 		const presentation = (await getSavedPresentationHistory(address)).messages
 		assert.match(JSON.stringify(presentation), /Read from assignment.txt/)
-		assert.equal(presentation.some((message) => message.content.type === DiracMessageType.CARD && message.content.card.kind === CardKind.TASK_COMPLETION), false,
-			"Private tasklets report completion to their counterparty, not through foreground completion cards")
-		sinon.assert.calledWithMatch(params.tasklet!.counterparty.recordResponse as sinon.SinonStub, { operation: "complete", text: "Private assignment complete." })
-		assert.deepEqual(await getSavedApiConversationProviderState(address), task.messageStateHandler.getApiConversationProviderState())
+		assert.equal(
+			presentation.some(
+				(message) =>
+					message.content.type === DiracMessageType.CARD && message.content.card.kind === CardKind.TASK_COMPLETION,
+			),
+			false,
+			"Private tasklets report completion to their counterparty, not through foreground completion cards",
+		)
+		sinon.assert.neverCalledWithMatch(params.tasklet!.counterparty.recordResponse as sinon.SinonStub, {
+			operation: "complete",
+		})
+		assert.deepEqual(
+			await getSavedApiConversationProviderState(address),
+			task.messageStateHandler.getApiConversationProviderState(),
+		)
 		assert.equal((await getSavedApiConversationProviderState(address)).deliveredSteeringMessageIds?.length, 1)
 		const base = getTaskDirectoryPath(address)
 		const metadata = JSON.parse(await fs.readFile(path.join(base, GlobalFileNames.taskMetadata), "utf8"))
@@ -2796,46 +3700,44 @@ describe("Tasklet real Task execution", function () {
 		await assert.rejects(fs.stat(path.join(process.env.DIRAC_DIR!, "data", "tasks", address.taskletId)), { code: "ENOENT" })
 	})
 
-	it("allows Plan requests then commits an Act configuration locally without singleton/default mutation", async () => {
-		const params = parameters("plan")
-		params.toolSelectionPolicy = undefined
-		const original = params.workingConfiguration
+	it("rejects Plan construction and mode changes for contained Tasks without changing parent configuration", async () => {
+		assert.throws(() => create(parameters("plan")), /Act-mode/)
+		const params = parameters()
+		const original = structuredClone(params.workingConfiguration)
 		const task = create(params)
-		nextTurn = async (mode) => {
-			if (mode === "act") return "complete"
-			await task.applyWorkingConfigurationUpdate({ settings: { mode: "act", toolToggles: { read_file: false } } },
-				(candidate) => writeTaskSettingsToStorage(params.tasklet!.storageAddress, { mode: candidate.settings.mode, toolToggles: { ...candidate.settings.toolToggles } }))
-			return "progress"
-		}
-		const outcome = await task.startTask(params.task)
-		assert.equal(outcome.kind, "completed", JSON.stringify(outcome))
-		assert.deepEqual(requests.map(({ mode }) => mode), ["plan", "act"])
-		assert.deepEqual(requests.map(({ model }) => model), ["claude-sonnet-4-20250514", "claude-opus-4-20250514"])
-		assert.ok(requests[0].tools.includes("read_file"))
-		assert.ok(!requests[1].tools.includes("read_file"))
-		assert.equal(original.settings.mode, "plan")
-		assert.equal(original.settings.toolToggles.read_file, true)
+		await assert.rejects(task.applyWorkingConfigurationUpdate({ settings: { mode: "plan" } }), /Act/)
 		assert.equal(task.getWorkingConfiguration().settings.mode, "act")
-		assert.equal(task.getWorkingConfiguration().settings.toolToggles.read_file, false)
-		assert.deepEqual(JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(params.tasklet!.storageAddress), "settings.json"), "utf8")),
-			{ mode: "act", toolToggles: { read_file: false } })
-		assert.deepEqual(await fs.readdir(path.join(directory, "storage", "tasks")), ["root"])
+		assert.deepEqual(params.workingConfiguration, original)
+		nextTurn = async () => "complete"
+		assert.equal((await task.startTask(params.task)).kind, "completed")
+		assert.deepEqual(
+			requests.map(({ mode }) => mode),
+			["act"],
+		)
 	})
 
-	it("routes controlled Plan-to-Act input through the child's configuration, not the foreground host", async () => {
+	it("forces a Plan parent's real child to Act while preserving the active Plan model on start and resume", async () => {
 		const params = parameters("plan")
-		const task = create(params)
-		params.tasklet!.counterparty.requestInteraction = async () => {
-			await task.applyWorkingConfigurationUpdate({ settings: { mode: "act" } })
-			return { response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE, text: "Proceed" }
+		const original = structuredClone(params.workingConfiguration)
+		const host = createHost(params)
+		nextTurn = async () => "complete"
+		try {
+			const child = await host.start({ title: "Read-only review", prompt: "Finish the review" })
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			await host.resume(child.id, "Follow up")
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.deepEqual(
+				requests.map(({ mode }) => mode),
+				["act", "act"],
+			)
+			assert.deepEqual(
+				requests.map(({ model }) => model),
+				["claude-sonnet-4-20250514", "claude-sonnet-4-20250514"],
+			)
+			assert.deepEqual(params.workingConfiguration, original)
+		} finally {
+			await host.shutdown()
 		}
-		await task.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
-		nextTurn = async (mode) => mode === "plan" ? "plan" : "complete"
-		const outcome = await task.startTask(params.task)
-		assert.equal(outcome.kind, "completed", JSON.stringify(outcome))
-		assert.deepEqual(requests.map(({ mode }) => mode), ["plan", "act"])
-		assert.equal(task.getWorkingConfiguration().settings.mode, "act")
-		assert.equal(params.workingConfiguration.settings.mode, "plan")
 	})
 
 	it("rejects missing bindings, mismatched identity, and root lock ownership before execution", () => {
@@ -2844,13 +3746,20 @@ describe("Tasklet real Task execution", function () {
 		assert.throws(() => new Task({ ...params, executionProfile: "standalone" }), /private owner bindings/)
 		assert.throws(() => new Task({ ...params, taskId: createTaskletId() }), /identity/)
 		assert.throws(() => new Task({ ...params, releaseTaskLock: rejectCall("root lock release") }), /root Task lock/)
-		assert.throws(() => new Task({
-			...params, tasklet: {
-				...params.tasklet!, storageAddress: {
-					...params.tasklet!.storageAddress, rootTaskId: "../escape",
-				}
-			}
-		}), /rootTaskId|Invalid/)
+		assert.throws(
+			() =>
+				new Task({
+					...params,
+					tasklet: {
+						...params.tasklet!,
+						storageAddress: {
+							...params.tasklet!.storageAddress,
+							rootTaskId: "../escape",
+						},
+					},
+				}),
+			/rootTaskId|Invalid/,
+		)
 		assert.equal(requests.length, 0)
 	})
 })

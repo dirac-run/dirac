@@ -50,15 +50,16 @@ export class TaskMessenger implements ITaskMessenger {
 	private ownerWaitCount = 0
 	private statusBeforeOwnerWait?: TaskStatus
 
-	constructor(private dependencies: TaskMessengerDependencies) { }
+	constructor(private dependencies: TaskMessengerDependencies) {}
 
 	get routesToOwner(): boolean {
 		return this.dependencies.counterparty !== undefined
 	}
 
 	async recordResponse(response: ResponseArguments): Promise<void> {
-		// Questions and plans are retained once, with their actionable card, at the wait boundary.
-		if (response.operation === ResponseOperation.QUESTION || response.operation === ResponseOperation.PLAN) return
+		// Requests are retained at their wait boundary; completion is published only
+		// after the host settles execution and persistence, never from an attempt.
+		if (response.operation !== ResponseOperation.PROGRESS) return
 		await this.dependencies.counterparty?.recordResponse(response)
 	}
 
@@ -74,21 +75,22 @@ export class TaskMessenger implements ITaskMessenger {
 		let handle: TaskCardHandle | undefined
 		let finalization: Promise<void> | undefined
 		const finalize = (status: CardStatus) => {
-			if (handle) finalization ??= handle.finalize(status).catch((error) => {
-				throw new TaskletEscalationCleanupError(error)
-			})
+			if (handle)
+				finalization ??= handle.finalize(status).catch((error) => {
+					throw new TaskletEscalationCleanupError(error)
+				})
 			return finalization
 		}
 		const cancel = () => {
 			// Observe immediately, then await the same cleanup before returning below.
-			void finalize(CardStatus.CANCELLED)?.catch(() => { })
+			void finalize(CardStatus.CANCELLED)?.catch(() => {})
 		}
 		cancellation.addEventListener("abort", cancel, { once: true })
 		try {
 			const card = structuredClone(request.card)
 			handle = await this.createCard({
 				kind: card.kind,
-				header: `Tasklet ${child.title} (${child.id}): ${card.header}`,
+				header: `${child.title} — ${card.header}`,
 				toolName: card.toolName,
 				icon: card.icon,
 				status: CardStatus.WAITING_FOR_INPUT,
@@ -344,12 +346,19 @@ export class TaskMessenger implements ITaskMessenger {
 					if (!(card.requireApproval || card.requireFeedback) || isFinalStatus(card.status)) {
 						throw new Error(`Card ${id} is not in a state that requires interaction`)
 					}
-					return this.waitForOwnerInteraction({
-						card: structuredClone(card),
-						permissionRequestKind: params.permissionRequestKind,
-						permissionOperation: params.permissionOperation,
-						toolCall: params.toolCall,
-					}, AbortSignal.any([this.dependencies.taskState.abortSignal, ownerWaitCancellation.signal, ...(signal ? [signal] : [])]))
+					return this.waitForOwnerInteraction(
+						{
+							card: structuredClone(card),
+							permissionRequestKind: params.permissionRequestKind,
+							permissionOperation: params.permissionOperation,
+							toolCall: params.toolCall,
+						},
+						AbortSignal.any([
+							this.dependencies.taskState.abortSignal,
+							ownerWaitCancellation.signal,
+							...(signal ? [signal] : []),
+						]),
+					)
 				}
 				if (params.isAutoApproved?.() === true) return autoApprovedInteraction()
 				const card = getCard()

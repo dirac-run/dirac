@@ -1,10 +1,10 @@
 import * as vscode from "vscode"
-import { arePathsEqual } from "@/utils/path"
-import { DIFF_VIEW_URI_SCHEME } from "./diff-view-constants"
+import type { EditorReviewRequest } from "@shared/editorReview"
 import { TabManager } from "./TabManager"
 
 export class ReviewContextManager {
 	private reviewingFiles = new Map<string, string>()
+	private request?: EditorReviewRequest
 	private static reviews = new Set<ReviewContextManager>()
 	private static contextKeyDisposables: vscode.Disposable[] = []
 
@@ -21,27 +21,45 @@ export class ReviewContextManager {
 		)
 	}
 
+	/** Resolve only a registered preview URI, never whichever conversation currently waits. */
+	static getRequest(
+		uri: vscode.Uri | undefined = vscode.window.activeTextEditor?.document.uri,
+	): EditorReviewRequest | undefined {
+		if (!uri) return undefined
+		const review = [...this.reviews].find((candidate) => candidate.reviewingFiles.has(uri.toString()))
+		return review?.request ? { ...review.request } : undefined
+	}
+
 	private static updateContextKeys(editor: vscode.TextEditor | undefined): void {
-		const proposedContents =
-			editor && editor.document.uri.scheme !== DIFF_VIEW_URI_SCHEME
-				? [...this.reviews].flatMap((review) =>
-						[...review.reviewingFiles]
-							.filter(([filePath]) => arePathsEqual(filePath, editor.document.uri.fsPath))
-							.map(([, content]) => content),
-					)
-				: []
-		vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", proposedContents.length > 0)
+		const uri = editor?.document.uri
+		const review = uri && [...this.reviews].find((candidate) => candidate.reviewingFiles.has(uri.toString()))
+		const actionable = review?.request !== undefined
+		const proposedContent = uri && review?.reviewingFiles.get(uri.toString())
+		vscode.commands.executeCommand("setContext", "dirac.isFileUnderReview", actionable)
 		vscode.commands.executeCommand(
 			"setContext",
 			"dirac.isFileModified",
-			proposedContents.some((content) => content !== editor!.document.getText()),
+			actionable && proposedContent !== editor!.document.getText(),
 		)
 	}
 
 	async showReview(
 		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
+		request?: EditorReviewRequest,
 	): Promise<void> {
-		this.reviewingFiles = new Map(files.map((file) => [file.absolutePath, file.content]))
+		if (request && (!request.taskId || !request.cardId)) throw new Error("Editor review requires an exact task and card")
+		this.request = request ? { ...request } : undefined
+		const changes = files.map((file) => {
+			const original = this.tabs.originalUri(file.absolutePath, file.originalContent ?? "", request?.cardId)
+			const proposed = this.tabs.originalUri(file.absolutePath, file.content, request?.cardId)
+			return { file, original, proposed }
+		})
+		this.reviewingFiles = new Map(
+			changes.flatMap(({ file, original, proposed }) => [
+				[original.toString(), file.content],
+				[proposed.toString(), file.content],
+			]),
+		)
 		ReviewContextManager.reviews.add(this)
 		ReviewContextManager.initialize()
 		ReviewContextManager.updateContextKeys(vscode.window.activeTextEditor)
@@ -49,17 +67,14 @@ export class ReviewContextManager {
 		await vscode.commands.executeCommand(
 			"vscode.changes",
 			this.tabs.reviewTitle,
-			files.map((file) => [
-				vscode.Uri.file(file.absolutePath),
-				this.tabs.originalUri(file.absolutePath, file.originalContent ?? ""),
-				this.tabs.originalUri(file.absolutePath, file.content),
-			]),
+			changes.map(({ file, original, proposed }) => [vscode.Uri.file(file.absolutePath), original, proposed]),
 		)
 		vscode.commands.executeCommand("workbench.action.closePanel")
 	}
 
 	hideReview(): void {
 		this.reviewingFiles.clear()
+		this.request = undefined
 		ReviewContextManager.reviews.delete(this)
 		ReviewContextManager.updateContextKeys(vscode.window.activeTextEditor)
 		if (ReviewContextManager.reviews.size === 0) {

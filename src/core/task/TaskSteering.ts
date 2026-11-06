@@ -12,6 +12,7 @@ import {
 	SteeringDeliveryState,
 	SteeringMessage,
 } from "./steering"
+import { materializeModelBoundInput } from "./TaskInputMaterialization"
 import type { TaskMessenger } from "./TaskMessenger"
 import type { TaskState } from "./TaskState"
 
@@ -210,35 +211,18 @@ export async function appendQueuedSteeringToNextApiRequest(
 		return
 	}
 
-	const messageIds = steeringClaim.messages.map((message) => message.transcriptMessageId)
-	const steeringBlock: DiracTextContentBlock = {
-		type: "text",
-		text: formatSteeringMessages(steeringClaim.messages),
-		steeringMessageIds: messageIds,
-	}
-	const outboundUserMessage = outboundHistory.at(-1)
-	if (!outboundUserMessage || outboundUserMessage.role !== "user") {
-		await rollbackSteeringClaim(ctx, steeringClaim.id)
-		throw new Error("Cannot steer a model request without a final user message")
-	}
-
-	let userMessageStaged = false
 	try {
-		const persistedUserMessage = await ctx.messageStateHandler.appendToLastApiConversationUserMessage(steeringBlock)
-		userMessageStaged = true
-		if (outboundUserMessage !== persistedUserMessage) {
-			if (typeof outboundUserMessage.content === "string") {
-				outboundUserMessage.content = [{ type: "text", text: outboundUserMessage.content }, steeringBlock]
-			} else {
-				outboundUserMessage.content.push(steeringBlock)
-			}
-		}
-		await ctx.messageStateHandler.flushPendingWrites()
-		await settleConsumedSteeringClaim(ctx, steeringClaim)
+		await materializeModelBoundInput(
+			ctx.messageStateHandler,
+			outboundHistory,
+			steeringContent(steeringClaim.messages),
+			"steeringMessageIds",
+			() => settleConsumedSteeringClaim(ctx, steeringClaim),
+		)
 	} catch (error) {
-		// A failed flush leaves this block in the existing history/write buffer for retry.
-		// Do not append it twice; restart restores any input absent from durable history.
-		if (!userMessageStaged) await rollbackSteeringClaim(ctx, steeringClaim.id)
+		// A staged write may still need flushing. Release the claim so a retry reuses
+		// its conversation identity and finishes persistence before recording inclusion.
+		await rollbackSteeringClaim(ctx, steeringClaim.id)
 		throw error
 	}
 }
@@ -251,9 +235,7 @@ export async function commitAttemptCompletion(
 		const hasQueuedSteering = ctx.taskState.steeringMessages.some(
 			(message) => message.deliveryState === SteeringDeliveryState.QUEUED,
 		)
-		const blocker = hasQueuedSteering
-			? "Completion was superseded by queued user steering."
-			: ctx.getCompletionBlocker?.()
+		const blocker = hasQueuedSteering ? "Completion was superseded by queued user steering." : ctx.getCompletionBlocker?.()
 		if (blocker) {
 			ctx.taskState.didAttemptCompletion = false
 			return { committed: false, error: blocker }

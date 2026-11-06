@@ -123,6 +123,26 @@ describe("getSubagentCardElapsedTime", () => {
 })
 
 describe("tasklet header rendering", () => {
+	it.each([
+		"running",
+		"waiting",
+		"completed",
+		"failed",
+		"interrupted",
+	] as const)("shows only the assignment title for a %s tasklet", (status) => {
+		const view = render(
+			createElement(ModularCardHeader, {
+				card: createTaskletCard(status),
+				contentId: "body",
+				isCollapsed: true,
+				onToggleCollapse: vi.fn(),
+			}),
+		)
+		expect(view.container.textContent).toContain("Review implementation")
+		expect(view.container.textContent).not.toContain("tl-stable")
+		view.unmount()
+	})
+
 	it("uses a neutral icon rather than forged completion state for a tasklet marker without its payload", () => {
 		const card = createSubagentCard({
 			status: CardStatus.SUCCESS,

@@ -35,23 +35,83 @@ function snapshot(messages: DiracMessage[], state = new TaskState()): TaskletUsa
 
 describe("Tasklet usage knowledge", () => {
 	it("distinguishes unobserved sources, placeholder zeroes, unknown metrics and reported zeroes", () => {
-		const empty = snapshot([apiMessage({ usageAvailability: { ...known, inputTokens: false, outputTokens: false, reasoningTokens: false, cacheWrites: false, cacheReads: false, cost: false }, tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0 })])
+		const empty = snapshot([
+			apiMessage({
+				usageAvailability: {
+					...known,
+					inputTokens: false,
+					outputTokens: false,
+					reasoningTokens: false,
+					cacheWrites: false,
+					cacheReads: false,
+					cost: false,
+				},
+				tokensIn: 0,
+				tokensOut: 0,
+				cost: 0,
+				reasoningTokens: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+			}),
+		])
 		assert.equal(empty.primary.usageObserved, false)
 		assert.equal(empty.utility.usageObserved, false)
 		assert.deepEqual(taskletUsageTotal(empty).usageAvailability, known)
-		const unknown = snapshot([apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageAvailability: optionalUnknown })])
+		const unknown = snapshot([
+			apiMessage({
+				tokensIn: 10,
+				tokensOut: 2,
+				cost: 0,
+				reasoningTokens: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				usageAvailability: optionalUnknown,
+			}),
+		])
 		assert.equal(unknown.primary.usageObserved, true)
 		assert.deepEqual(unknown.primary.usageAvailability, optionalUnknown)
 		assert.deepEqual(taskletUsageTotal(unknown).usageAvailability, optionalUnknown)
-		const zero = snapshot([apiMessage({ tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageAvailability: known })])
+		const zero = snapshot([
+			apiMessage({
+				tokensIn: 0,
+				tokensOut: 0,
+				cost: 0,
+				reasoningTokens: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				usageAvailability: known,
+			}),
+		])
 		assert.equal(zero.primary.usageObserved, true)
 		assert.deepEqual(taskletUsageTotal(zero).usageAvailability, known)
 	})
 
 	it("requires every attributable primary request to report each optional metric", () => {
 		const usage = snapshot([
-			apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 3, cacheWrites: 2, cacheReads: 4, usageAvailability: known }, "first"),
-			apiMessage({ tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageAvailability: optionalUnknown }, "second"),
+			apiMessage(
+				{
+					tokensIn: 10,
+					tokensOut: 2,
+					cost: 0.5,
+					reasoningTokens: 3,
+					cacheWrites: 2,
+					cacheReads: 4,
+					usageAvailability: known,
+				},
+				"first",
+			),
+			apiMessage(
+				{
+					tokensIn: 5,
+					tokensOut: 1,
+					cost: 0,
+					reasoningTokens: 0,
+					cacheWrites: 0,
+					cacheReads: 0,
+					usageAvailability: optionalUnknown,
+				},
+				"second",
+			),
 		])
 		assert.equal(usage.primary.cost, 0.5)
 		assert.equal(usage.primary.reasoningTokens, 3)
@@ -60,7 +120,15 @@ describe("Tasklet usage knowledge", () => {
 	})
 
 	it("does not certify archived placeholder zeroes whose historical availability was not retained", () => {
-		const usage = snapshot([apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0, usageAvailability: known, deletedMetrics: { tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheReads: 0 } })])
+		const usage = snapshot([
+			apiMessage({
+				tokensIn: 10,
+				tokensOut: 2,
+				cost: 0,
+				usageAvailability: known,
+				deletedMetrics: { tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheReads: 0 },
+			}),
+		])
 		assert.equal(usage.primary.tokensIn, 15)
 		assert.equal(usage.primary.cost, 0)
 		assert.deepEqual(usage.primary.usageAvailability, optionalUnknown)
@@ -76,10 +144,27 @@ describe("Tasklet usage knowledge", () => {
 					for (const key of deletions) delete (message.content as any).status[key]
 				},
 			}
-			const manager = new StreamingMetricsManager(messages as any, 0, { shouldEstimateCost: () => false, getModel: () => ({ info: {} }) } as any)
-			manager.updateFromChunk({ inputTokens: 10, outputTokens: 2, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, ...(priced ? { totalCost: 0 } : {}) })
+			const manager = new StreamingMetricsManager(messages as any, 0, {
+				shouldEstimateCost: () => false,
+				getModel: () => ({ info: {} }),
+			} as any)
+			manager.updateFromChunk({
+				inputTokens: 10,
+				outputTokens: 2,
+				reasoningTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				...(priced ? { totalCost: 0 } : {}),
+			})
 			await manager.archiveForRetry()
-			manager.updateFromChunk({ inputTokens: 5, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 })
+			manager.updateFromChunk({
+				inputTokens: 5,
+				outputTokens: 1,
+				reasoningTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				totalCost: 0,
+			})
 			await manager.updateApiReqMsgFromMetrics()
 			const restored = snapshot(JSON.parse(JSON.stringify([message])))
 			assert.equal(restored.primary.tokensIn, 15)
@@ -97,7 +182,10 @@ describe("Tasklet usage knowledge", () => {
 				for (const key of deletions) delete (message.content as any).status[key]
 			},
 		}
-		const manager = new StreamingMetricsManager(messages as any, 0, { shouldEstimateCost: () => false, getModel: () => ({ info: {} }) } as any)
+		const manager = new StreamingMetricsManager(messages as any, 0, {
+			shouldEstimateCost: () => false,
+			getModel: () => ({ info: {} }),
+		} as any)
 		for (let attempt = 0; attempt < 2; attempt++) {
 			await manager.archiveForRetry()
 			const restored = snapshot(JSON.parse(JSON.stringify([message])))
@@ -105,7 +193,14 @@ describe("Tasklet usage knowledge", () => {
 			assert.equal(restored.primary.tokensIn, 0)
 			assert.equal(restored.primary.cost, 0)
 		}
-		manager.updateFromChunk({ inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0 })
+		manager.updateFromChunk({
+			inputTokens: 0,
+			outputTokens: 0,
+			reasoningTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			totalCost: 0,
+		})
 		await manager.updateApiReqMsgFromMetrics()
 		assert.equal(snapshot([message]).primary.usageObserved, true)
 		assert.deepEqual(snapshot([message]).primary.usageAvailability, known)
@@ -114,7 +209,22 @@ describe("Tasklet usage knowledge", () => {
 	it("keeps root numeric metrics unchanged when structured cards retain unknown knowledge", () => {
 		const value = snapshot([apiMessage({ tokensIn: 10, tokensOut: 2, usageAvailability: optionalUnknown })])
 		const total = taskletUsageTotal(value)
-		const metrics = getApiMetrics([{ id: "usage", ts: 1, content: { type: DiracMessageType.CARD, card: { id: "usage", header: "Usage", status: CardStatus.SUCCESS, renderType: "text", rawOutput: { source: "tasklet", taskletId: "child", ...total } } } }])
+		const metrics = getApiMetrics([
+			{
+				id: "usage",
+				ts: 1,
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: "usage",
+						header: "Usage",
+						status: CardStatus.SUCCESS,
+						renderType: "text",
+						rawOutput: { source: "tasklet", taskletId: "child", ...total },
+					},
+				},
+			},
+		])
 		assert.equal(metrics.totalTokensIn, 10)
 		assert.equal(metrics.totalCost, 0)
 		assert.equal(total.usageAvailability!.cost, false)
@@ -137,20 +247,28 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		setVscodeHostProviderMock({
 			globalStorageFsPath: directory,
 			terminalManagerCreator: (() => ({
-				setShellIntegrationTimeout() { }, setTerminalReuseEnabled() { },
-				setTerminalOutputLineLimit() { }, setDefaultTerminalProfile() { },
-				getTerminals: () => [], disposeAll: async () => { },
+				setShellIntegrationTimeout() {},
+				setTerminalReuseEnabled() {},
+				setTerminalOutputLineLimit() {},
+				setDefaultTerminalProfile() {},
+				getTerminals: () => [],
+				disposeAll: async () => {},
 			})) as any,
 		})
 		sandbox.stub(HostProvider, "env" as any).value({ getHostVersion: async () => ({ platform: "linux", diracType: 0 }) })
 		sandbox.stub(StateManager, "get").callsFake(() => stateManager)
 		tasks = []
 		stateManager = {
-			getGlobalStateKey: sandbox.stub().returns(undefined), getTaskSettings: sandbox.stub().returns(undefined),
-			getWorkspaceStateKey: sandbox.stub().returns(undefined), getSecretKey: sandbox.stub().returns(undefined),
-			registerCallbacks: sandbox.stub(), setTaskSettingsBatch: sandbox.stub(),
+			getGlobalStateKey: sandbox.stub().returns(undefined),
+			getTaskSettings: sandbox.stub().returns(undefined),
+			getWorkspaceStateKey: sandbox.stub().returns(undefined),
+			getSecretKey: sandbox.stub().returns(undefined),
+			registerCallbacks: sandbox.stub(),
+			setTaskSettingsBatch: sandbox.stub(),
 		} as unknown as StateManager
-		sandbox.stub(api, "buildApiHandler").returns({ getModel: () => ({ id: "controlled", info: { contextWindow: 200000 } }) } as any)
+		sandbox
+			.stub(api, "buildApiHandler")
+			.returns({ getModel: () => ({ id: "controlled", info: { contextWindow: 200000 } }) } as any)
 	})
 
 	afterEach(async () => {
@@ -170,20 +288,45 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		let latest: TaskletUsageSnapshot | undefined
 		const task = new Task({
 			controller: { getWorkspaceManager: () => undefined } as any,
-			updateTaskHistory: async () => [], postStateToWebview: async () => { }, reinitExistingTaskFromId: async () => { }, cancelTask: async () => { },
-			shellIntegrationTimeout: 5000, terminalReuseEnabled: true, terminalOutputLineLimit: 500, defaultTerminalProfile: "default", vscodeTerminalExecutionMode: "vscodeTerminal",
-			cwd: directory, stateManager, task: "Private assignment", taskId: id, executionProfile: "tasklet",
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => {},
+			reinitExistingTaskFromId: async () => {},
+			cancelTask: async () => {},
+			shellIntegrationTimeout: 5000,
+			terminalReuseEnabled: true,
+			terminalOutputLineLimit: 500,
+			defaultTerminalProfile: "default",
+			vscodeTerminalExecutionMode: "vscodeTerminal",
+			cwd: directory,
+			stateManager,
+			task: "Private assignment",
+			taskId: id,
+			executionProfile: "tasklet",
 			workingConfiguration: createTaskWorkingConfiguration({
 				settings: { ...SETTINGS_DEFAULTS, mode: "act", enableCheckpointsSetting: false } as Settings,
-				apiConfiguration: { planModeApiProvider: "anthropic", actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				apiConfiguration: {
+					planModeApiProvider: "anthropic",
+					actModeApiProvider: "anthropic",
+					actModeApiModelId: "claude-opus-4-20250514",
+				},
 				workspaceConfiguration: {} as any,
-				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "vscodeTerminal", multiRootEnabled: false },
+				executionOptions: {
+					terminalReuseEnabled: true,
+					vscodeTerminalExecutionMode: "vscodeTerminal",
+					multiRootEnabled: false,
+				},
 			}),
 			tasklet: {
-				storageAddress: { kind: "tasklet", rootTaskId: "root", taskletId: id }, usage,
-				counterparty: { recordResponse: async () => { }, requestInteraction: sandbox.stub() },
-				postStateToOwner: async () => { }, updateBackgroundCommandState: () => { },
-				recordUsage: (value) => { latest = value },
+				storageAddress: { kind: "tasklet", rootTaskId: "root", taskletId: id },
+				usage,
+				counterparty: { recordResponse: async () => {}, requestInteraction: sandbox.stub() },
+				postStateToOwner: async () => {},
+				updateBackgroundCommandState: () => {},
+				withMutationAuthorization: (_toolName, mutation) => mutation(),
+				retainMutationUntil: () => {},
+				recordUsage: (value) => {
+					latest = value
+				},
 			},
 		})
 		tasks.push(task)
@@ -191,8 +334,23 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 	}
 
 	it("restores unknown Utility knowledge before adding known usage and retains primary crash shortfall", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 3, usageObserved: true, usageAvailability: optionalUnknown }
-		const utility = { tokensIn: 4, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheReads: 0, usageObserved: true, usageAvailability: optionalUnknown }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 3,
+			usageObserved: true,
+			usageAvailability: optionalUnknown,
+		}
+		const utility = {
+			tokensIn: 4,
+			tokensOut: 1,
+			cost: 0,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			usageObserved: true,
+			usageAvailability: optionalUnknown,
+		}
 		const first = create({ primary, utility })
 		assert.equal(first.task.taskState.utilityModelUsageObserved, true)
 		assert.equal(first.task.taskState.utilityModelCostAvailable, false)
@@ -203,8 +361,28 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		assert.equal(first.latest().primary.tokensIn, 10)
 		assert.deepEqual(first.latest().primary.usageAvailability, optionalUnknown)
 		const selection = { provider: "anthropic", modelId: "controlled" }
-		recordUtilityModelUsage(first.task.taskState, first.task.ulid, { selection, usage: { inputTokens: 5, outputTokens: 2, totalCost: 0.25, reasoningTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } } as any)
-		await first.task.messageStateHandler.overwriteDiracMessages([apiMessage({ tokensIn: 5, tokensOut: 1, cost: 0.125, reasoningTokens: 0, cacheWrites: 0, cacheReads: 0, usageAvailability: known })])
+		recordUtilityModelUsage(first.task.taskState, first.task.ulid, {
+			selection,
+			usage: {
+				inputTokens: 5,
+				outputTokens: 2,
+				totalCost: 0.25,
+				reasoningTokens: 2,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+			},
+		} as any)
+		await first.task.messageStateHandler.overwriteDiracMessages([
+			apiMessage({
+				tokensIn: 5,
+				tokensOut: 1,
+				cost: 0.125,
+				reasoningTokens: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				usageAvailability: known,
+			}),
+		])
 		assert.equal(first.latest().primary.cost, 0.625)
 		assert.equal(first.latest().primary.tokensIn, 15)
 		assert.equal(first.latest().utility.cost, 0.25)
@@ -220,10 +398,30 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 	})
 
 	it("trusts durable knowledge over an older restored prefix, but includes unknown new usage", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageObserved: true, usageAvailability: known }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			cacheWrites: 0,
+			usageObserved: true,
+			usageAvailability: known,
+		}
 		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false, usageAvailability: known }
 		const restored = create({ primary, utility })
-		const old = apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: optionalUnknown }, "restored-prefix")
+		const old = apiMessage(
+			{
+				tokensIn: 10,
+				tokensOut: 2,
+				cost: 0,
+				reasoningTokens: 0,
+				cacheReads: 0,
+				cacheWrites: 0,
+				usageAvailability: optionalUnknown,
+			},
+			"restored-prefix",
+		)
 		await restored.task.messageStateHandler.overwriteDiracMessages([old])
 		assert.equal(restored.latest().primary.tokensIn, 10)
 		assert.equal(restored.latest().primary.cost, 0.5)
@@ -231,52 +429,151 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		// Resume can restore/reset the presentation more than once before new work.
 		await restored.task.messageStateHandler.overwriteDiracMessages([structuredClone(old)])
 		assert.deepEqual(restored.latest().primary.usageAvailability, known)
-		await restored.task.messageStateHandler.addToDiracMessages(apiMessage({ tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: optionalUnknown }, "new-request"))
+		await restored.task.messageStateHandler.addToDiracMessages(
+			apiMessage(
+				{
+					tokensIn: 5,
+					tokensOut: 1,
+					cost: 0,
+					reasoningTokens: 0,
+					cacheReads: 0,
+					cacheWrites: 0,
+					usageAvailability: optionalUnknown,
+				},
+				"new-request",
+			),
+		)
 		assert.equal(restored.latest().primary.tokensIn, 15)
 		assert.equal(restored.latest().primary.cost, 0.5)
 		assert.deepEqual(restored.latest().primary.usageAvailability, optionalUnknown)
 	})
 
 	it("does not count checkpoint archive knowledge as new usage over a restored prefix", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageObserved: true, usageAvailability: known }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			cacheWrites: 0,
+			usageObserved: true,
+			usageAvailability: known,
+		}
 		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false, usageAvailability: known }
 		const restored = create({ primary, utility })
-		await restored.task.messageStateHandler.overwriteDiracMessages([apiMessage({ tokensIn: 10, tokensOut: 2, usageAvailability: optionalUnknown }, "restored-prefix")])
-		await restored.task.messageStateHandler.overwriteDiracMessages([apiMessage({
-			tokensIn: 0, tokensOut: 0, cost: 0.5, usageAvailability: optionalUnknown, deletedUsageAvailability: optionalUnknown,
-			deletedMetrics: { tokensIn: 10, tokensOut: 2 },
-		}, "checkpoint-archive")])
+		await restored.task.messageStateHandler.overwriteDiracMessages([
+			apiMessage({ tokensIn: 10, tokensOut: 2, usageAvailability: optionalUnknown }, "restored-prefix"),
+		])
+		await restored.task.messageStateHandler.overwriteDiracMessages([
+			apiMessage(
+				{
+					tokensIn: 0,
+					tokensOut: 0,
+					cost: 0.5,
+					usageAvailability: optionalUnknown,
+					deletedUsageAvailability: optionalUnknown,
+					deletedMetrics: { tokensIn: 10, tokensOut: 2 },
+				},
+				"checkpoint-archive",
+			),
+		])
 		assert.equal(restored.latest().primary.tokensIn, 10)
 		assert.equal(restored.latest().primary.cost, 0.5)
 		assert.deepEqual(restored.latest().primary.usageAvailability, known)
-		await restored.task.messageStateHandler.addToDiracMessages(apiMessage({ tokensIn: 5, tokensOut: 1, cost: 0.25, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: known }, "new-known-request"))
+		await restored.task.messageStateHandler.addToDiracMessages(
+			apiMessage(
+				{
+					tokensIn: 5,
+					tokensOut: 1,
+					cost: 0.25,
+					reasoningTokens: 0,
+					cacheReads: 0,
+					cacheWrites: 0,
+					usageAvailability: known,
+				},
+				"new-known-request",
+			),
+		)
 		assert.equal(restored.latest().primary.tokensIn, 15)
 		assert.deepEqual(restored.latest().primary.usageAvailability, known)
 	})
 
 	it("keeps new unknown retry usage unknown through a later checkpoint summary", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageObserved: true, usageAvailability: known }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			cacheWrites: 0,
+			usageObserved: true,
+			usageAvailability: known,
+		}
 		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false, usageAvailability: known }
 		const restored = create({ primary, utility })
-		const prefix = apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: known }, "restored-prefix")
+		const prefix = apiMessage(
+			{
+				tokensIn: 10,
+				tokensOut: 2,
+				cost: 0.5,
+				reasoningTokens: 0,
+				cacheReads: 0,
+				cacheWrites: 0,
+				usageAvailability: known,
+			},
+			"restored-prefix",
+		)
 		await restored.task.messageStateHandler.overwriteDiracMessages([prefix])
-		await restored.task.messageStateHandler.addToDiracMessages(apiMessage({ tokensIn: 5, tokensOut: 1, usageAvailability: optionalUnknown }, "new-request"))
+		await restored.task.messageStateHandler.addToDiracMessages(
+			apiMessage({ tokensIn: 5, tokensOut: 1, usageAvailability: optionalUnknown }, "new-request"),
+		)
 		await restored.task.messageStateHandler.patchApiStatusById("new-request", {
-			tokensIn: 0, tokensOut: 0, cost: 0, usageAvailability: { ...known, inputTokens: false, outputTokens: false, reasoningTokens: false, cacheReads: false, cacheWrites: false, cost: false },
-			deletedUsageAvailability: optionalUnknown, deletedMetrics: { tokensIn: 5, tokensOut: 1 },
+			tokensIn: 0,
+			tokensOut: 0,
+			cost: 0,
+			usageAvailability: {
+				...known,
+				inputTokens: false,
+				outputTokens: false,
+				reasoningTokens: false,
+				cacheReads: false,
+				cacheWrites: false,
+				cost: false,
+			},
+			deletedUsageAvailability: optionalUnknown,
+			deletedMetrics: { tokensIn: 5, tokensOut: 1 },
 		})
 		assert.equal(restored.latest().primary.tokensIn, 15)
 		assert.deepEqual(restored.latest().primary.usageAvailability, optionalUnknown)
-		await restored.task.messageStateHandler.overwriteDiracMessages([prefix, apiMessage({
-			tokensIn: 0, tokensOut: 0, cost: 0, usageAvailability: optionalUnknown, deletedUsageAvailability: optionalUnknown,
-			deletedMetrics: { tokensIn: 5, tokensOut: 1 },
-		}, "checkpoint-archive")])
+		await restored.task.messageStateHandler.overwriteDiracMessages([
+			prefix,
+			apiMessage(
+				{
+					tokensIn: 0,
+					tokensOut: 0,
+					cost: 0,
+					usageAvailability: optionalUnknown,
+					deletedUsageAvailability: optionalUnknown,
+					deletedMetrics: { tokensIn: 5, tokensOut: 1 },
+				},
+				"checkpoint-archive",
+			),
+		])
 		assert.equal(restored.latest().primary.tokensIn, 15)
 		assert.deepEqual(restored.latest().primary.usageAvailability, optionalUnknown)
 	})
 
 	it("defers the restored primary boundary when Utility reports before transcript loading", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageObserved: true, usageAvailability: known }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			cacheWrites: 0,
+			usageObserved: true,
+			usageAvailability: known,
+		}
 		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false, usageAvailability: known }
 		const restored = create({ primary, utility })
 		// Invoke the existing Utility callback before any presentation is restored.
@@ -284,23 +581,58 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		executor.onUtilityUsageRecorded()
 		assert.equal(restored.latest().primary.tokensIn, 10)
 		assert.equal(restored.latest().primary.cost, 0.5)
-		await restored.task.messageStateHandler.overwriteDiracMessages([apiMessage({ tokensIn: 10, tokensOut: 2, usageAvailability: optionalUnknown }, "restored-prefix")])
+		await restored.task.messageStateHandler.overwriteDiracMessages([
+			apiMessage({ tokensIn: 10, tokensOut: 2, usageAvailability: optionalUnknown }, "restored-prefix"),
+		])
 		assert.equal(restored.latest().primary.tokensIn, 10)
 		assert.deepEqual(restored.latest().primary.usageAvailability, known)
 	})
 
 	it("retains additional transcript usage when its durable snapshot is older", async () => {
-		const primary = { tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageObserved: true, usageAvailability: known }
+		const primary = {
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.5,
+			reasoningTokens: 0,
+			cacheReads: 0,
+			cacheWrites: 0,
+			usageObserved: true,
+			usageAvailability: known,
+		}
 		const utility = { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false, usageAvailability: known }
 		const restored = create({ primary, utility })
 		await restored.task.messageStateHandler.overwriteDiracMessages([
-			apiMessage({ tokensIn: 10, tokensOut: 2, cost: 0.5, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: known }, "restored-prefix"),
+			apiMessage(
+				{
+					tokensIn: 10,
+					tokensOut: 2,
+					cost: 0.5,
+					reasoningTokens: 0,
+					cacheReads: 0,
+					cacheWrites: 0,
+					usageAvailability: known,
+				},
+				"restored-prefix",
+			),
 			apiMessage({ tokensIn: 5, tokensOut: 1, usageAvailability: optionalUnknown }, "unprojected-prefix"),
 		])
 		assert.equal(restored.latest().primary.tokensIn, 15)
 		assert.equal(restored.latest().primary.cost, 0.5)
 		assert.deepEqual(restored.latest().primary.usageAvailability, optionalUnknown)
-		await restored.task.messageStateHandler.addToDiracMessages(apiMessage({ tokensIn: 3, tokensOut: 1, cost: 0.25, reasoningTokens: 0, cacheReads: 0, cacheWrites: 0, usageAvailability: known }, "new-request"))
+		await restored.task.messageStateHandler.addToDiracMessages(
+			apiMessage(
+				{
+					tokensIn: 3,
+					tokensOut: 1,
+					cost: 0.25,
+					reasoningTokens: 0,
+					cacheReads: 0,
+					cacheWrites: 0,
+					usageAvailability: known,
+				},
+				"new-request",
+			),
+		)
 		assert.equal(restored.latest().primary.tokensIn, 18)
 		assert.equal(restored.latest().primary.cost, 0.75)
 		assert.deepEqual(restored.latest().primary.usageAvailability, optionalUnknown)
@@ -311,7 +643,10 @@ describe("Tasklet usage knowledge on explicit restoration", () => {
 		const restored = create({ primary: part, utility: part })
 		assert.equal(restored.task.taskState.utilityModelUsageObserved, false)
 		assert.equal(restored.task.taskState.utilityModelCostAvailable, true)
-		recordUtilityModelUsage(restored.task.taskState, restored.task.ulid, { selection: { provider: "anthropic", modelId: "controlled" }, usage: { inputTokens: 1, outputTokens: 0, totalCost: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } as any)
+		recordUtilityModelUsage(restored.task.taskState, restored.task.ulid, {
+			selection: { provider: "anthropic", modelId: "controlled" },
+			usage: { inputTokens: 1, outputTokens: 0, totalCost: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+		} as any)
 		await restored.task.messageStateHandler.overwriteDiracMessages([])
 		assert.deepEqual(taskletUsageTotal(restored.latest()).usageAvailability, known)
 		assert.equal(restored.latest().utility.usageObserved, true)

@@ -37,25 +37,43 @@ describe("SurfaceAdapter", () => {
 					config.taskMessenger.routesToOwner = true
 					config.yoloModeToggled = true
 					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
-					config.permissionDecisionBinding = { configurationRevision: 1, service: { decide: sinon.stub().resolves({ decision: "approve" }) } }
+					config.permissionDecisionBinding = {
+						configurationRevision: 1,
+						service: { decide: sinon.stub().resolves({ decision: "approve" }) },
+					}
 					config.toolUse = { name: "execute_command", params: { commands: ["echo retained"] } }
 					const liveApproval = sinon.stub().returns(true)
 					const protocol = {
 						getCard: () => ({ id: "owner-card", status: CardStatus.WAITING_FOR_INPUT, requireApproval: true }),
-						waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }),
+						waitForInteraction: sinon
+							.stub()
+							.resolves({ action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }),
 					}
 					config.taskMessenger.createCard.resolves(protocol)
-					const params = { header: "Owner decision", requireApproval: true, permissionRequestKind, isAutoApproved: liveApproval }
-					const card = manual ? await adapter.ui.createManualInteractionCard(params) : await adapter.ui.createCard(params)
+					const params = {
+						header: "Owner decision",
+						requireApproval: true,
+						permissionRequestKind,
+						isAutoApproved: liveApproval,
+					}
+					const card = manual
+						? await adapter.ui.createManualInteractionCard(params)
+						: await adapter.ui.createCard(params)
 					const forwarded = config.taskMessenger.createCard.firstCall.args[0]
 					expect(forwarded.permissionRequestKind).to.equal(permissionRequestKind)
 					expect(forwarded.requireApproval).to.equal(true)
-					expect(forwarded.permissionOperation).to.deep.equal({ kind: "tool", manualOnly: permissionRequestKind === "manual_tool" })
+					expect(forwarded.permissionOperation).to.deep.equal({
+						kind: "tool",
+						manualOnly: permissionRequestKind === "manual_tool",
+					})
 					expect(forwarded.isAutoApproved).to.equal(undefined)
-					expect(forwarded.toolCall).to.deep.equal({ name: "execute_command", arguments: { commands: ["echo retained"] } })
+					expect(forwarded.toolCall).to.deep.equal({
+						name: "execute_command",
+						arguments: { commands: ["echo retained"] },
+					})
 					config.toolUse.params.commands[0] = "changed"
 					expect(forwarded.toolCall.arguments.commands).to.deep.equal(["echo retained"])
-					expect(card.requiresUserInteraction).to.equal(true)
+					expect(card.requiresUserInteraction).to.equal(false)
 					expect((await card.waitForInteraction()).response).to.equal(DiracAskResponse.REJECT)
 					sinon.assert.calledOnce(protocol.waitForInteraction)
 					sinon.assert.notCalled(liveApproval)
@@ -78,8 +96,10 @@ describe("SurfaceAdapter", () => {
 					const protocol = attachCardState({ id: "owner-operation" })
 					config.taskMessenger.createCard.resolves(protocol)
 					const params: CardParams = {
-						header: "Exact operation", requireApproval: true,
-						permissionRequestKind: "manual_tool", permissionOperation,
+						header: "Exact operation",
+						requireApproval: true,
+						permissionRequestKind: "manual_tool",
+						permissionOperation,
 					}
 					if (manual) await adapter.ui.createManualInteractionCard(params)
 					else await adapter.ui.createCard(params)
@@ -126,15 +146,15 @@ describe("SurfaceAdapter", () => {
 		it("keeps architecture presentation root-owned without removing ordinary tasklet traits", () => {
 			setHostCapabilities({
 				architectureViewer: {
-					prepare: async () => { },
-					createPanel: async () => { throw new Error("not used") },
-				}
+					prepare: async () => {},
+					createPanel: async () => {
+						throw new Error("not used")
+					},
+				},
 			})
 			for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 				const worker = new SurfaceAdapter({ ...config, executionProfile })
-				expect(worker.architecture !== undefined).to.equal(
-					executionProfile !== "tasklet",
-				)
+				expect(worker.architecture !== undefined).to.equal(executionProfile !== "tasklet")
 				for (const trait of ["system", "workspace", "editor", "browser", "sourceAst", "skills"] as const) {
 					expect(worker[trait], trait).not.to.equal(undefined)
 				}
@@ -144,9 +164,11 @@ describe("SurfaceAdapter", () => {
 		it("resolves root architecture storage from the explicit address or legacy task identity", async () => {
 			setHostCapabilities({
 				architectureViewer: {
-					prepare: async () => { },
-					createPanel: async () => { throw new Error("not used") },
-				}
+					prepare: async () => {},
+					createPanel: async () => {
+						throw new Error("not used")
+					},
+				},
 			})
 			const resolveDirectory = sinon.stub(taskDirectory, "getTaskDirectoryPath").returns("/fixture/owner")
 			const listDiagrams = sinon.stub(ArchitectureStorage.prototype, "listDiagrams").resolves([])
@@ -490,7 +512,6 @@ describe("SurfaceAdapter", () => {
 			result.action.should.equal(DiracAskResponse.APPROVE)
 		})
 
-
 		it("discards an in-flight Utility approval after its configuration changes", async () => {
 			let resolveDecision!: (decision: { decision: "approve"; reason: string }) => void
 			const decide = sinon.stub().returns(
@@ -577,7 +598,6 @@ describe("SurfaceAdapter", () => {
 			await adapter.ui.upsertText("hello", true, "assistant")
 			sinon.assert.calledWithExactly(config.taskMessenger.upsertText, "hello", true, undefined, undefined, "assistant")
 		})
-
 
 		it("streamText delegates to taskMessenger.streamText", async () => {
 			config.taskMessenger.streamText = sinon.stub().resolves({ write: sinon.stub(), close: sinon.stub() })
@@ -740,16 +760,20 @@ describe("SurfaceAdapter", () => {
 
 		it("retains mutation authority until the forwarded background command completes", async () => {
 			let complete!: () => void
-			const backgroundCompletion = new Promise<void>((resolve) => { complete = resolve })
+			const backgroundCompletion = new Promise<void>((resolve) => {
+				complete = resolve
+			})
 			config.callbacks.executeCommandTool.resolves([false, "running", { completed: false, backgroundCompletion }])
 			const order: string[] = []
-			config.callbacks.withMutationAuthorization = sinon.stub().callsFake(async (toolName: string, mutation: () => Promise<SystemCommandResult>) => {
-				expect(toolName).to.equal(DiracDefaultTool.EXECUTE_COMMAND)
-				order.push("authorized")
-				const result = await mutation()
-				order.push("returned")
-				return result
-			})
+			config.callbacks.withMutationAuthorization = sinon
+				.stub()
+				.callsFake(async (toolName: string, mutation: () => Promise<SystemCommandResult>) => {
+					expect(toolName).to.equal(DiracDefaultTool.EXECUTE_COMMAND)
+					order.push("authorized")
+					const result = await mutation()
+					order.push("returned")
+					return result
+				})
 			config.callbacks.retainMutationUntil.callsFake((completion: Promise<void>) => {
 				expect(completion).to.equal(backgroundCompletion)
 				order.push("retained")
@@ -861,7 +885,10 @@ describe("SurfaceAdapter", () => {
 
 		it("showReview delegates to diffViewProvider.showReview", async () => {
 			config.services.diffViewProvider.showReview = sinon.stub().resolves()
-			await adapter.editor.showReview([{ path: "file1.ts", content: "" }] as any)
+			await adapter.editor.showReview(
+				[{ path: "file1.ts", content: "" }] as any,
+				{ id: "review" } as import("../../interfaces/ICardHandle").ICardHandle,
+			)
 			sinon.assert.calledOnce(config.services.diffViewProvider.showReview)
 		})
 

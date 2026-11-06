@@ -22,14 +22,30 @@ import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurat
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
-	const promise = new Promise<T>((res) => { resolve = res })
+	const promise = new Promise<T>((res) => {
+		resolve = res
+	})
 	return { promise, resolve }
 }
 
 function usage(cost: number, utilityCost = 0): TaskletUsageSnapshot {
 	return {
-		primary: { tokensIn: cost * 100, tokensOut: cost * 20, cacheWrites: cost * 2, cacheReads: cost * 4, cost, reasoningTokens: cost * 3 },
-		utility: { tokensIn: utilityCost * 100, tokensOut: utilityCost * 20, cacheWrites: 0, cacheReads: 0, cost: utilityCost, reasoningTokens: utilityCost * 3 },
+		primary: {
+			tokensIn: cost * 100,
+			tokensOut: cost * 20,
+			cacheWrites: cost * 2,
+			cacheReads: cost * 4,
+			cost,
+			reasoningTokens: cost * 3,
+		},
+		utility: {
+			tokensIn: utilityCost * 100,
+			tokensOut: utilityCost * 20,
+			cacheWrites: 0,
+			cacheReads: 0,
+			cost: utilityCost,
+			reasoningTokens: utilityCost * 3,
+		},
 	}
 }
 
@@ -69,7 +85,11 @@ describe("TaskletHost durable usage attribution", () => {
 				settings: { mode: "act" } as any,
 				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
 				workspaceConfiguration: {} as any,
-				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+				executionOptions: {
+					terminalReuseEnabled: true,
+					vscodeTerminalExecutionMode: "backgroundExec",
+					multiRootEnabled: false,
+				},
 			}),
 		} as TaskletTaskOptions
 		const host = new TaskletHost(owner, options, constructed as unknown as typeof Task)
@@ -94,15 +114,22 @@ describe("TaskletHost durable usage attribution", () => {
 		children = []
 		history = undefined
 		rootMessages = new MessageStateHandler({
-			taskId: "root", ulid: "root-conversation", taskState: new TaskState(),
-			updateTaskHistory: async (item) => { history = item; return [item] },
+			taskId: "root",
+			ulid: "root-conversation",
+			taskState: new TaskState(),
+			updateTaskHistory: async (item) => {
+				history = item
+				return [item]
+			},
 		})
 		await rootMessages.addToDiracMessages({
-			id: "root-user", ts: 1,
+			id: "root-user",
+			ts: 1,
 			content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Root work" },
 		})
 		await rootMessages.addToDiracMessages({
-			id: "root-api", ts: 2,
+			id: "root-api",
+			ts: 2,
 			content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 10, tokensOut: 5, cost: 0.25 } },
 		})
 		constructed = sandbox.stub().callsFake((params: TaskParams) => {
@@ -111,16 +138,25 @@ describe("TaskletHost durable usage attribution", () => {
 			return child.task
 		})
 		owner = {
-			taskId: "root", executionProfile: "standalone",
-			authorizePermission: sandbox.stub(), assertPermissionAllowed: sandbox.stub(), escalateInteraction: sandbox.stub(),
+			taskId: "root",
+			executionProfile: "standalone",
+			authorizePermission: sandbox.stub(),
+			assertPermissionAllowed: sandbox.stub(),
+			escalateInteraction: sandbox.stub(),
 			hasPendingUserInput: () => false,
+			withMutationAuthorization: (_toolName, mutation) => mutation(),
+			retainMutationUntil: () => {},
 			recordTaskletUsage: (id, snapshot) => rootMessages.upsertTaskletUsage(id, taskletUsageTotal(snapshot)),
 		}
 	})
 
 	afterEach(async () => {
 		for (const host of hosts) {
-			try { await host.shutdown() } catch { /* Individual tests assert intentional write failures. */ }
+			try {
+				await host.shutdown()
+			} catch {
+				/* Individual tests assert intentional write failures. */
+			}
 		}
 		await rootMessages.retirePersistence()
 		sandbox.restore()
@@ -145,9 +181,9 @@ describe("TaskletHost durable usage attribution", () => {
 		assert.equal(metrics.totalTokensOut, 115)
 		assert.equal(metrics.totalReasoningTokens, 16.5)
 		assert.equal(getLastApiReqTotalTokens(rootMessages.getDiracMessages()), 15)
-		const cards = rootMessages.getDiracMessages().flatMap((message) =>
-			message.content.type === DiracMessageType.CARD ? [getTaskletUsage(message.content.card)] : [],
-		)
+		const cards = rootMessages
+			.getDiracMessages()
+			.flatMap((message) => (message.content.type === DiracMessageType.CARD ? [getTaskletUsage(message.content.card)] : []))
 		assert.equal(cards.length, 2)
 		assert.deepEqual(new Set(cards.map((entry) => entry!.taskletId)), new Set([first.id, second.id]))
 		assert.deepEqual(host.inspect(first.id).usage, usage(3, 0.5))
@@ -275,7 +311,10 @@ describe("TaskletHost durable usage attribution", () => {
 		const writes: storage.TaskletRecord[] = []
 		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (snapshot) => {
 			writes.push(structuredClone(snapshot))
-			if (writes.length === 1) { entered.resolve(); await release.promise }
+			if (writes.length === 1) {
+				entered.resolve()
+				await release.promise
+			}
 			await write(snapshot)
 		})
 		record(0, usage(1))
@@ -283,7 +322,9 @@ describe("TaskletHost durable usage attribution", () => {
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
 		let settled = false
-		const stopping = host.interrupt(child.id).then(() => { settled = true })
+		const stopping = host.interrupt(child.id).then(() => {
+			settled = true
+		})
 		try {
 			await assert.rejects(host.resume(child.id), /not settled successfully/)
 			assert.equal(settled, false)
@@ -292,7 +333,10 @@ describe("TaskletHost durable usage attribution", () => {
 			release.resolve()
 		}
 		await stopping
-		assert.deepEqual(writes.map((entry) => entry.usage), [usage(1), usage(2, 0.5), usage(2, 0.5)])
+		assert.deepEqual(
+			writes.map((entry) => entry.usage),
+			[usage(1), usage(2, 0.5), usage(2, 0.5)],
+		)
 		assert.equal(writes.at(-1)!.outcome?.kind, "completed")
 		assert.equal(getApiMetrics(rootMessages.getDiracMessages()).totalCost, 2.75)
 		await host.resume(child.id)
@@ -300,7 +344,14 @@ describe("TaskletHost durable usage attribution", () => {
 	})
 
 	it("persists availability through disk reconstruction and replaces cards without starting historical engines", async () => {
-		const known = { inputTokens: true, outputTokens: true, cost: true, reasoningTokens: true, cacheWrites: true, cacheReads: true }
+		const known = {
+			inputTokens: true,
+			outputTokens: true,
+			cost: true,
+			reasoningTokens: true,
+			cacheWrites: true,
+			cacheReads: true,
+		}
 		const unknown = { ...known, cost: false, reasoningTokens: false, cacheWrites: false, cacheReads: false }
 		const snapshot: TaskletUsageSnapshot = {
 			primary: { ...usage(2).primary, usageObserved: true, usageAvailability: known },
@@ -318,7 +369,9 @@ describe("TaskletHost durable usage attribution", () => {
 		await reopened.reconcileRootProjection()
 		await reopened.reconcileRootProjection()
 		sinon.assert.calledOnce(constructed)
-		const cards = rootMessages.getDiracMessages().flatMap((message) => message.content.type === DiracMessageType.CARD ? [getTaskletUsage(message.content.card)] : [])
+		const cards = rootMessages
+			.getDiracMessages()
+			.flatMap((message) => (message.content.type === DiracMessageType.CARD ? [getTaskletUsage(message.content.card)] : []))
 		assert.equal(cards.length, 1)
 		assert.deepEqual(cards[0]!.usageAvailability, unknown)
 		assert.equal(cards[0]!.cost, 2)

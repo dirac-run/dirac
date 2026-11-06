@@ -2,13 +2,14 @@ import { strict as assert } from "node:assert"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { DiracAskResponse } from "@shared/WebviewMessage"
-import { telemetryService } from "@/services/telemetry"
+import * as aiOutputTelemetry from "../../utils/AiOutputTelemetry"
 import type { ToolPermissionDisposition } from "../../autoApprove"
 import { WriteToFileTool } from "./WriteToFileTool"
 
 function makeEnvironment(backgroundEditEnabled: boolean, requiresUserInteraction: boolean) {
 	const permissionCard = {
 		requiresUserInteraction,
+		update: sinon.stub().resolves(),
 		finalize: sinon.stub().resolves(),
 		waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
 	}
@@ -67,8 +68,8 @@ const scenarios = [
 describe("WriteToFileTool background editing", () => {
 	const sandbox = sinon.createSandbox()
 	beforeEach(() => {
-		sandbox.stub(telemetryService, "captureAiOutputAccepted")
-		sandbox.stub(telemetryService, "captureAiOutputRejected")
+		sandbox.stub(aiOutputTelemetry, "captureAccepted")
+		sandbox.stub(aiOutputTelemetry, "captureRejected")
 	})
 	afterEach(() => sandbox.restore())
 
@@ -86,7 +87,13 @@ describe("WriteToFileTool background editing", () => {
 					})
 					permissionCard.waitForInteraction.callsFake(async () => {
 						assertNoWrites(editor)
-						assert.equal(editor.showReview.callCount, scenario.requiresUserInteraction ? 1 : 0)
+						const opensAutomatically = scenario.requiresUserInteraction && !backgroundEditEnabled
+						assert.equal(editor.showReview.callCount, opensAutomatically ? 1 : 0)
+						if (opensAutomatically) assert.equal(editor.showReview.firstCall.args[1], permissionCard)
+						if (backgroundEditEnabled && scenario.requiresUserInteraction) {
+							assert.deepEqual(permissionCard.update.firstCall.args[0].actions.map((action: { value: string }) => action.value),
+								[DiracAskResponse.APPROVE, DiracAskResponse.REJECT, DiracAskResponse.VIEW])
+						}
 						return { action: DiracAskResponse.APPROVE }
 					})
 
@@ -122,7 +129,7 @@ describe("WriteToFileTool background editing", () => {
 						sinon.assert.calledOnceWithExactly(editor.update, "new content", true)
 						sinon.assert.calledOnce(editor.saveChanges)
 					}
-					assert.equal(editor.hideReview.callCount, scenario.requiresUserInteraction ? 1 : 0)
+					assert.equal(editor.hideReview.callCount, scenario.requiresUserInteraction && !backgroundEditEnabled ? 1 : 0)
 				})
 			}
 
@@ -135,7 +142,7 @@ describe("WriteToFileTool background editing", () => {
 				await assert.rejects(write(env, scenario.disposition), /Plan Mode revoked mutation/)
 				sinon.assert.callOrder(permissionCard.waitForInteraction, assertMutationAuthorized)
 				assertNoWrites(editor)
-				assert.equal(editor.hideReview.callCount, scenario.requiresUserInteraction ? 1 : 0)
+				assert.equal(editor.hideReview.callCount, scenario.requiresUserInteraction && !backgroundEditEnabled ? 1 : 0)
 			})
 
 			if (scenario.requiresUserInteraction) {
@@ -148,13 +155,39 @@ describe("WriteToFileTool background editing", () => {
 						permissionCard.waitForInteraction.resolves({ action, text: "Try another approach" })
 						assert.equal(typeof (await write(env, scenario.disposition)), "string")
 						sinon.assert.notCalled(assertMutationAuthorized)
-						sinon.assert.calledOnce(editor.showReview)
-						sinon.assert.calledOnce(editor.hideReview)
+						assert.equal(editor.showReview.callCount, backgroundEditEnabled ? 0 : 1)
+						assert.equal(editor.hideReview.callCount, backgroundEditEnabled ? 0 : 1)
 						assertNoWrites(editor)
 					})
 				}
 			}
 		}
+	}
+
+	for (const action of [DiracAskResponse.VIEW, DiracAskResponse.EDIT]) {
+		it(`opens background review only after explicit ${action}, with a fresh request`, async () => {
+			const { env, editor, createCard, permissionCard } = makeEnvironment(true, true)
+			const nextCard = {
+				...permissionCard,
+				finalize: sinon.stub().resolves(),
+				waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
+			}
+			createCard.onSecondCall().resolves(nextCard)
+			permissionCard.waitForInteraction.callsFake(async () => {
+				sinon.assert.notCalled(editor.showReview)
+				assertNoWrites(editor)
+				return { action }
+			})
+			nextCard.waitForInteraction.callsFake(async () => {
+				sinon.assert.calledOnceWithExactly(editor.showReview,
+					[{ absolutePath: "/workspace/file.ts", displayPath: "file.ts", content: "new content", originalContent: "old content" }], nextCard)
+				assertNoWrites(editor)
+				return { action: DiracAskResponse.APPROVE }
+			})
+			await write(env, "manual_only")
+			sinon.assert.calledOnceWithExactly(permissionCard.finalize, "cancelled")
+			sinon.assert.calledOnce(editor.applyAndSaveSilently)
+		})
 	}
 
 	for (const key of ["file.ts", "/workspace/file.ts"]) {
@@ -168,7 +201,7 @@ describe("WriteToFileTool background editing", () => {
 	}
 
 	it("cleans up review when waiting for approval fails", async () => {
-		const { env, editor, permissionCard } = makeEnvironment(true, true)
+		const { env, editor, permissionCard } = makeEnvironment(false, true)
 		permissionCard.waitForInteraction.rejects(new Error("cancelled"))
 		await assert.rejects(write(env, "manual_only"), /cancelled/)
 		sinon.assert.calledOnce(editor.hideReview)

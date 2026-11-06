@@ -58,7 +58,11 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 				settings: { mode: "act" } as any,
 				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
 				workspaceConfiguration: {} as any,
-				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+				executionOptions: {
+					terminalReuseEnabled: true,
+					vscodeTerminalExecutionMode: "backgroundExec",
+					multiRootEnabled: false,
+				},
 			}),
 		} as TaskletTaskOptions
 		const host = new TaskletHost(owner, { ...options, ...overrides }, constructed as unknown as typeof Task)
@@ -110,9 +114,9 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 					toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
 					...(status === "resolved"
 						? {
-							resolvedAt: 105,
-							resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
-						}
+								resolvedAt: 105,
+								resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
+							}
 						: status === "retired"
 							? { retiredAt: 106 }
 							: {}),
@@ -139,6 +143,8 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub(),
 			hasPendingUserInput: () => false,
+			withMutationAuthorization: (_toolName, mutation) => mutation(),
+			retainMutationUntil: () => {},
 		}
 	})
 
@@ -161,7 +167,9 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			const record = await original.start({ title: "Silent completed child", prompt: "Work" })
 			children[0].outcome.resolve(completed)
 			await original["children"].get(record.id)!.settlement
-			const terminalEvents = await storage.loadTaskletEvents(address(record.id))
+			const terminalEvents = (await storage.loadTaskletEvents(address(record.id))).filter(
+				(event) => event.communication.type === "outcome",
+			)
 			assert.equal(terminalEvents.length, 1)
 			assert.deepEqual(terminalEvents[0].communication, { type: "outcome", outcome: completed })
 			if (acknowledge) await (await original.prepareEventDelivery())!.acknowledge()
@@ -182,7 +190,11 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 					assert.ok(delivery)
 					assert.equal(delivery.content.length, 1)
 					assert.deepEqual(delivery.content[0].taskletEventIds, [terminalEvents[0].id])
-					assert.deepEqual(await reopened.sleep(), { reason: "event", taskletId: record.id, eventId: terminalEvents[0].id })
+					assert.deepEqual(await reopened.sleep(), {
+						reason: "event",
+						taskletId: record.id,
+						eventId: terminalEvents[0].id,
+					})
 				}
 				await reopened.shutdown()
 			}
@@ -194,10 +206,14 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		const record = await original.start({ title: "Same handle", prompt: "Work" })
 		children[0].outcome.resolve(completed)
 		await original["children"].get(record.id)!.settlement
-		const firstEvents = await storage.loadTaskletEvents(address(record.id))
+		const firstEvents = (await storage.loadTaskletEvents(address(record.id))).filter(
+			(event) => event.communication.type === "outcome",
+		)
 		assert.equal(firstEvents.length, 1)
 		await (await original.prepareEventDelivery())!.acknowledge()
-		const delivered = await storage.loadTaskletEvents(address(record.id))
+		const delivered = (await storage.loadTaskletEvents(address(record.id))).filter(
+			(event) => event.communication.type === "outcome",
+		)
 		await original.shutdown()
 
 		const reopened = newHost()
@@ -206,14 +222,23 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		assert.equal(resumed.id, record.id)
 		assert.equal(resumed.conversationUlid, record.conversationUlid)
 		assert.equal(resumed.outcome, undefined)
-		assert.deepEqual(await storage.loadTaskletEvents(address(record.id)), delivered)
+		assert.deepEqual(
+			(await storage.loadTaskletEvents(address(record.id))).filter((event) => event.communication.type === "outcome"),
+			delivered,
+		)
 		const sleeping = reopened.sleep()
 		await Promise.resolve() // Sleep first awaits this host's completed reconstruction.
 		assert.equal(reopened.isSleeping, true)
-		const secondOutcome: TaskRunOutcome = { kind: "failed", failedAt: 150, error: { name: "Error", message: "Silent resumed failure" } }
+		const secondOutcome: TaskRunOutcome = {
+			kind: "failed",
+			failedAt: 150,
+			error: { name: "Error", message: "Silent resumed failure" },
+		}
 		children[1].outcome.resolve(secondOutcome)
 		await reopened["children"].get(record.id)!.settlement
-		const events = await storage.loadTaskletEvents(address(record.id))
+		const events = (await storage.loadTaskletEvents(address(record.id))).filter(
+			(event) => event.communication.type === "outcome",
+		)
 		assert.equal(events.length, 2)
 		assert.deepEqual(events[0], delivered[0])
 		assert.notEqual(events[1].id, events[0].id)
@@ -229,14 +254,23 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		const final = newHost()
 		await final.reconstruct()
 		sinon.assert.calledTwice(constructed)
-		assert.equal((await storage.loadTaskletEvents(address(record.id))).length, 2)
+		assert.equal(
+			(await storage.loadTaskletEvents(address(record.id))).filter((event) => event.communication.type === "outcome")
+				.length,
+			2,
+		)
 		assert.equal(await final.prepareEventDelivery(), undefined)
 	})
 
 	it("preserves durable configuration across reopening without reinjecting parent history on resume", async () => {
 		const getParentHistory = sandbox.stub().returns({ messages: [{ role: "user", content: "Original root context" }] })
 		const original = newHost({ getParentHistory })
-		const record = await original.start({ title: "Retained configuration", prompt: "Work", includeHistory: true, timeoutSeconds: 45 })
+		const record = await original.start({
+			title: "Retained configuration",
+			prompt: "Work",
+			includeHistory: true,
+			timeoutSeconds: 45,
+		})
 		const params = constructed.firstCall.args[0] as TaskParams
 		assert.deepEqual(params.tasklet!.initialHistory, getParentHistory.firstCall.returnValue)
 		children[0].outcome.resolve(completed)
@@ -307,7 +341,8 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		assert.equal(saved[0].communication.request.status, "retired")
 		assert.ok(saved[0].communication.request.retiredAt)
 		assert.equal(saved[0].deliveredAt, 110)
-		assert.deepEqual(saved.slice(1), events.slice(1))
+		assert.deepEqual(saved.slice(1, events.length), events.slice(1))
+		assert.equal(saved.at(-1)!.communication.type, "outcome", "Missing committed outcome is reconciled")
 		assert.deepEqual(
 			host.inspect(record.id).interactions.map((entry) => entry.status),
 			["retired", "resolved", "retired"],
@@ -316,8 +351,8 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sinon.assert.notCalled(owner.authorizePermission as sinon.SinonStub)
 		const delivery = await host.prepareEventDelivery()
 		assert.ok(delivery)
-		assert.equal(delivery.content.length, 1, "Already delivered requests must not be re-delivered")
-		assert.match(delivery.content[0].text, /preview truncated/)
+		assert.equal(delivery.content.length, 2, "Only undelivered progress and the reconciled outcome are delivered")
+		assert.match(delivery.content[0].text, /preview only/)
 		assert.equal(host.inspect(record.id).responses[0].text.length, "full result ".repeat(900).length)
 		await delivery.acknowledge()
 		await host.shutdown()
@@ -376,7 +411,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sinon.assert.notCalled(constructed)
 		assert.deepEqual(host.inspect(record.id).outcome, completed)
 		assert.equal(host.inspect(record.id).outcomePersisted, true)
-		assert.deepEqual((await storage.loadTaskletRecords("root"))[0], record)
+		assert.deepEqual((await storage.loadTaskletRecords("root"))[0], { ...record, inheritedMessageCount: 0 })
 	})
 
 	it("rejects duplicate resume during acceptance and shutdown joins it without launching late work", async () => {

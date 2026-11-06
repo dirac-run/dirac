@@ -84,7 +84,8 @@ describe("CLI tasklet agent view", () => {
 	it("keeps the selected stable ID current through waiting, completion and reopening", async () => {
 		const view = render(<AgentPanelContent messages={messages(data)} onClose={() => {}} taskStatus={TaskStatus.THINKING} />)
 		await delay()
-		expect(view.lastFrame()).toContain("tl-stable")
+		expect(view.lastFrame()).toContain("Trace events · running")
+		expect(view.lastFrame()).not.toContain("tl-stable")
 		key({ downArrow: true })
 		await delay()
 		key({ return: true })
@@ -99,7 +100,7 @@ describe("CLI tasklet agent view", () => {
 				/>,
 			)
 			await delay()
-			expect(view.lastFrame()).toContain(`tl-stable · ${status}`)
+			expect(view.lastFrame()).toContain(`Trace events · ${status}`)
 			expect(view.lastFrame()).toContain(`Result ${status}`)
 			expect(view.lastFrame()).toContain("Parent-directed communication")
 			expect(view.lastFrame()).toContain("Diagnostic activity (not parent requests)")

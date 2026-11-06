@@ -43,7 +43,14 @@ export const respondSpec: DiracToolSpec = {
 			name: ResponseParameter.TEXT,
 			type: "string",
 			required: true,
-			instruction: (context) => isLowVerbosityEnabled(context) ? LOW_VERBOSITY_RESPONSE_INSTRUCTION : "Response text.",
+			instruction: (context) => (isLowVerbosityEnabled(context) ? LOW_VERBOSITY_RESPONSE_INSTRUCTION : "Response text."),
+		},
+		{
+			name: ResponseParameter.REPLY_TO,
+			type: "string",
+			required: false,
+			contextRequirements: (context) => context.executionProfile === "tasklet",
+			instruction: "For a tasklet progress reply: the exact parent question message ID. Omit for unsolicited progress.",
 		},
 		{
 			name: ResponseParameter.OPTIONS,
@@ -70,7 +77,7 @@ export class RespondTool implements IDiracTool {
 
 	async processCall(args: unknown, env: IToolEnvironment): Promise<any> {
 		const request = validateResponseArguments(args, env)
-		await env.responseObserver.recordResponse(request)
+		if (request.operation === ResponseOperation.PROGRESS) await env.responseObserver.recordResponse(request)
 		env.telemetry.captureCustomMetadata({
 			operation: request.operation,
 			textLength: request.text.length,

@@ -1,5 +1,10 @@
-import { type DiracMessage, DiracMessageType } from "@shared/ExtensionMessage"
-import { createTaskletPresentationCard, type TaskletPresentationStatus } from "@shared/taskletPresentation"
+import { type DiracMessage, DiracMessageType, CardStatus } from "@shared/ExtensionMessage"
+import {
+	createTaskletPresentationCard,
+	type TaskletPresentationStatus,
+	type TaskletPresentationData,
+} from "@shared/taskletPresentation"
+import { getApiMetrics } from "@shared/getApiMetrics"
 import { Box, Static, Text } from "ink"
 import { render } from "ink-testing-library"
 // biome-ignore lint/correctness/noUnusedImports: CLI tests use the classic JSX runtime.
@@ -33,7 +38,7 @@ const statuses = (items: ReturnType<typeof messageItems>) =>
 	items.flatMap(({ message }) => (message.content.type === DiracMessageType.CARD ? [message.content.card.status] : []))
 
 describe("tasklet scrollback revisions", () => {
-	it("reopens an already printed same-ID tasklet at the live tail and archives only displaced terminal revisions", async () => {
+	it("reopens an already printed same-ID tasklet at the live tail and archives displaced revisions once", async () => {
 		let timeline!: ChatTimelineResult
 		function Transcript({ messages }: { messages: DiracMessage[] }) {
 			timeline = useChatTimeline({
@@ -87,7 +92,8 @@ describe("tasklet scrollback revisions", () => {
 			message: { id: "tasklet:tl_reopen", content: { card: { status: "waiting_for_input" } } },
 		})
 		expect(view.lastFrame()).toContain("waiting")
-		expect(view.lastFrame()?.split("Tasklet tl_reopen").at(-1)).not.toContain("old result")
+		expect(view.lastFrame()?.split("Worker · waiting").at(-1)).not.toContain("old result")
+		expect(view.lastFrame()).not.toContain("tl_reopen")
 
 		await update("running")
 		expect(view.lastFrame()).toContain("running")
@@ -110,11 +116,11 @@ describe("tasklet scrollback revisions", () => {
 		view.unmount()
 	})
 
-	it("keeps live waiting tasklets mutable while the root and siblings continue", () => {
+	it("archives displaced waiting tasklet snapshots and later parent output instead of hiding them", () => {
 		let timeline!: ChatTimelineResult
 		function Probe() {
 			timeline = useChatTimeline({
-				messages: [text("root"), tasklet("waiting"), text("sibling progress", 20)],
+				messages: [text("root"), tasklet("waiting"), text("completed parent output"), text("sibling progress", 20)],
 				showHeader: false,
 				terminalColumns: 120,
 				layoutRows: { liveViewportRows: 6, activeContentRows: 4, compactHistoryRows: 2 },
@@ -123,8 +129,93 @@ describe("tasklet scrollback revisions", () => {
 			return <Text>probe</Text>
 		}
 		const view = render(<Probe />)
-		expect(statuses(messageItems(timeline.staticItems))).toEqual([])
-		expect(timeline.displayMessages).toHaveLength(3)
+		expect(statuses(messageItems(timeline.staticItems))).toEqual(["waiting_for_input"])
+		expect(messageItems(timeline.staticItems).map(({ message }) => message.id)).toContain("completed parent output")
+		expect(timeline.displayMessages).toHaveLength(4)
+		view.unmount()
+	})
+
+	it("does not archive activity-only updates as revisions, but does archive a new status once", async () => {
+		let timeline!: ChatTimelineResult
+		function Probe({ messages }: { messages: DiracMessage[] }) {
+			timeline = useChatTimeline({
+				messages,
+				showHeader: false,
+				terminalColumns: 120,
+				layoutRows: { liveViewportRows: 6, activeContentRows: 4, compactHistoryRows: 2 },
+				shouldSuppressCardBody: () => false,
+			})
+			return <Text>probe</Text>
+		}
+		const first = tasklet("running")
+		const tail = text("parent tail", 20)
+		const view = render(<Probe messages={[text("root"), first, tail]} />)
+		const archived = timeline.staticItems
+		const activity = JSON.parse(JSON.stringify(first)) as DiracMessage
+		if (activity.content.type !== DiracMessageType.CARD) throw new Error("Expected tasklet card")
+		const presentation = activity.content.card.rawOutput!.tasklet as TaskletPresentationData
+		presentation.activity = ["New private tool activity"]
+		presentation.communications = ["A progress preview"]
+		view.rerender(<Probe messages={[text("root"), activity, tail]} />)
+		await new Promise((resolve) => setTimeout(resolve, 30))
+		expect(timeline.staticItems).toBe(archived)
+		view.rerender(<Probe messages={[text("root"), tasklet("waiting"), tail, text("later", 20)]} />)
+		await new Promise((resolve) => setTimeout(resolve, 30))
+		expect(statuses(messageItems(timeline.staticItems))).toEqual(["running", "waiting_for_input"])
+		const changed = timeline.staticItems
+		view.rerender(
+			<Probe messages={JSON.parse(JSON.stringify([text("root"), tasklet("waiting"), tail, text("later", 20)]))} />,
+		)
+		await new Promise((resolve) => setTimeout(resolve, 30))
+		expect(timeline.staticItems).toBe(changed)
+		view.unmount()
+	})
+
+	it("hides restored accounting-only cards without changing the original contribution or totals", () => {
+		const original: DiracMessage[] = [
+			text("root"),
+			{
+				id: "usage",
+				ts: 3,
+				content: {
+					type: DiracMessageType.CARD,
+					card: {
+						id: "usage",
+						header: "Tasklet usage",
+						renderType: "text",
+						status: CardStatus.SUCCESS,
+						rawOutput: {
+							source: "tasklet",
+							taskletId: "accounting-child",
+							tokensIn: 42,
+							tokensOut: 7,
+							cost: 0.25,
+							reasoningTokens: 0,
+						},
+					},
+				},
+			},
+			tasklet("completed", "Retained result"),
+		]
+		const restored = JSON.parse(JSON.stringify(original))
+		const before = getApiMetrics(restored)
+		let timeline!: ChatTimelineResult
+		function Probe() {
+			timeline = useChatTimeline({
+				messages: restored,
+				showHeader: false,
+				terminalColumns: 80,
+				layoutRows: { liveViewportRows: 6, activeContentRows: 4, compactHistoryRows: 2 },
+				shouldSuppressCardBody: () => false,
+			})
+			return <Text>probe</Text>
+		}
+		const view = render(<Probe />)
+		expect(timeline.displayMessages.map((message) => message.id)).toEqual(["root", "tasklet:tl_reopen"])
+		expect(getApiMetrics(restored)).toEqual(before)
+		expect(before.totalTokensIn).toBe(42)
+		expect(before.totalCost).toBe(0.25)
+		expect(restored).toEqual(original)
 		view.unmount()
 	})
 })

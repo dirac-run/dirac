@@ -180,14 +180,14 @@ async function createOwnerCard(config: TaskConfig, params: CardParams, tracker: 
 	const handle = await config.taskMessenger.createCard({
 		...params,
 		isAutoApproved: undefined,
-		permissionOperation: params.permissionOperation ?? (
-			!params.operationalInput && (params.requireApproval || params.permissionRequestKind)
+		permissionOperation:
+			params.permissionOperation ??
+			(!params.operationalInput && (params.requireApproval || params.permissionRequestKind)
 				? { kind: "tool", manualOnly: params.permissionRequestKind === "manual_tool" }
-				: undefined
-		),
+				: undefined),
 		toolCall: config.toolUse ? { name: config.toolUse.name, arguments: structuredClone(config.toolUse.params) } : undefined,
 	})
-	const adapterHandle = new CardHandle(handle)
+	const adapterHandle = new CardHandle(handle, undefined, undefined, true)
 	tracker.push(adapterHandle)
 	return adapterHandle
 }
@@ -206,19 +206,19 @@ async function createDisplayedCardFromMessenger(
 			: undefined
 	const liveAutoApprovedAction = isAutoApproved
 		? () =>
-			isAutoApproved()
-				? (params.actions?.find((candidate) => candidate.primary)?.value ?? DiracAskResponse.APPROVE)
-				: undefined
+				isAutoApproved()
+					? (params.actions?.find((candidate) => candidate.primary)?.value ?? DiracAskResponse.APPROVE)
+					: undefined
 		: undefined
 	const displayedParams = autoApprovedAction
 		? {
-			...params,
-			status: params.status === CardStatus.WAITING_FOR_INPUT ? CardStatus.RUNNING : params.status,
-			requireApproval: false,
-			requireFeedback: false,
-			feedbackPlaceholder: undefined,
-			actions: undefined,
-		}
+				...params,
+				status: params.status === CardStatus.WAITING_FOR_INPUT ? CardStatus.RUNNING : params.status,
+				requireApproval: false,
+				requireFeedback: false,
+				feedbackPlaceholder: undefined,
+				actions: undefined,
+			}
 		: params
 	const messengerParams = !autoApprovedAction && isAutoApproved ? { ...displayedParams, isAutoApproved } : displayedParams
 	const handle = await config.taskMessenger.createCard(messengerParams)

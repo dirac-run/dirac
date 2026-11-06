@@ -35,8 +35,8 @@ export class AstEditApproval {
 		}
 
 		const diffs = this.formatter.diffs(plan)
-		let reviewShown = false
 		await this.updateProgressCards(progressCards, "Plan validated. Waiting for approval...")
+		let reviewRequested = false
 
 		while (true) {
 			const approvalCard = await this.createApprovalCard(
@@ -47,8 +47,15 @@ export class AstEditApproval {
 				permissionDisposition,
 				utilityPermissionHandlingEnabled,
 			)
-			// Card creation resolves utility approval before any manual review opens.
-			if (!reviewShown && approvalCard.requiresUserInteraction !== false) {
+			// Approval remains required in background mode; editor focus requires an explicit request.
+			if (approvalCard.requiresUserInteraction !== false && env.config.backgroundEditEnabled && !reviewRequested) {
+				await approvalCard.update({ actions: [
+					{ label: "Approve", value: DiracAskResponse.APPROVE, primary: true },
+					{ label: "Reject", value: DiracAskResponse.REJECT, style: "danger" },
+					{ label: "View diff", value: DiracAskResponse.VIEW, style: "secondary" },
+				] })
+			}
+			if (approvalCard.requiresUserInteraction !== false && (!env.config.backgroundEditEnabled || reviewRequested)) {
 				await env.editor.showReview(
 					plan.files.map((file) => ({
 						absolutePath: file.absolutePath,
@@ -56,9 +63,9 @@ export class AstEditApproval {
 						content: file.content,
 						originalContent: file.originalContent,
 					})),
+					approvalCard,
 				)
 				await env.editor.scrollToFirstDiff()
-				reviewShown = true
 			}
 
 			let result: Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
@@ -85,16 +92,8 @@ export class AstEditApproval {
 					"Review reopened for inspection or editing.",
 					{ status: "cancelled", reason: "review_reopened" },
 				)
-				await env.editor.showReview(
-					plan.files.map((file) => ({
-						absolutePath: file.absolutePath,
-						displayPath: file.displayPath,
-						content: file.content,
-						originalContent: file.originalContent,
-					})),
-				)
-				await env.editor.scrollToFirstDiff()
-				reviewShown = true
+				await env.editor.hideReview()
+				reviewRequested = true
 				continue
 			}
 

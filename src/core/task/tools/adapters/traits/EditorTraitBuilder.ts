@@ -12,7 +12,13 @@ export function buildEditorTrait(config: TaskConfig): IEditorTrait {
 	})
 	return {
 		readText: async (path) => await diffView().readText(path),
-		showReview: async (files) => await diffView().showReview(files),
+		showReview: async (files, card) =>
+			await diffView().showReview(
+				files,
+				config.taskMessenger.routesToOwner || card.requiresUserInteraction === false
+					? undefined
+					: { taskId: config.taskId, cardId: card.id },
+			),
 		hideReview: async () => await diffView().hideReview(),
 		open: async (path, options) => await withMutationAuthorization(() => diffView().open(path, options)),
 		update: async (content, finalize) =>

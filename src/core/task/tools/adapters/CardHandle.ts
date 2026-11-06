@@ -8,36 +8,82 @@ export class CardHandle implements ICardHandle {
 		private readonly protocolHandle: TaskCardHandle,
 		private readonly autoApprovedAction?: string,
 		private readonly liveAutoApprovedAction?: () => string | undefined,
+		private readonly routesToOwner = false,
 	) {}
 
 	private get card(): Readonly<Card> {
 		return this.protocolHandle.getCard()
 	}
 
-	get id() { return this.card.id }
-	get header() { return this.card.header }
-	get toolName() { return this.card.toolName }
-	get icon() { return this.card.icon }
-	get status() { return this.card.status }
-	get renderType() { return this.card.renderType }
-	get body() { return this.card.body ?? "" }
-	get rawInput() { return this.card.rawInput }
-	get rawOutput() { return this.card.rawOutput }
-	get diffs() { return this.card.diffs }
-	get locations() { return this.card.locations }
-	get requireApproval() { return this.card.requireApproval }
-	get requireFeedback() { return this.card.requireFeedback }
-	get feedbackPlaceholder() { return this.card.feedbackPlaceholder }
-	get actions() { return this.card.actions }
-	get collapsed() { return this.card.collapsed ?? true }
-	get maxHeight() { return this.card.maxHeight }
-	get cleanupStrategy() { return this.card.cleanupStrategy }
-	get do_not_auto_collapse() { return this.card.do_not_auto_collapse }
-	get startTime() { return this.card.startTime }
-	get endTime() { return this.card.endTime }
-	get outcome() { return this.card.outcome }
+	get id() {
+		return this.card.id
+	}
+	get header() {
+		return this.card.header
+	}
+	get toolName() {
+		return this.card.toolName
+	}
+	get icon() {
+		return this.card.icon
+	}
+	get status() {
+		return this.card.status
+	}
+	get renderType() {
+		return this.card.renderType
+	}
+	get body() {
+		return this.card.body ?? ""
+	}
+	get rawInput() {
+		return this.card.rawInput
+	}
+	get rawOutput() {
+		return this.card.rawOutput
+	}
+	get diffs() {
+		return this.card.diffs
+	}
+	get locations() {
+		return this.card.locations
+	}
+	get requireApproval() {
+		return this.card.requireApproval
+	}
+	get requireFeedback() {
+		return this.card.requireFeedback
+	}
+	get feedbackPlaceholder() {
+		return this.card.feedbackPlaceholder
+	}
+	get actions() {
+		return this.card.actions
+	}
+	get collapsed() {
+		return this.card.collapsed ?? true
+	}
+	get maxHeight() {
+		return this.card.maxHeight
+	}
+	get cleanupStrategy() {
+		return this.card.cleanupStrategy
+	}
+	get do_not_auto_collapse() {
+		return this.card.do_not_auto_collapse
+	}
+	get startTime() {
+		return this.card.startTime
+	}
+	get endTime() {
+		return this.card.endTime
+	}
+	get outcome() {
+		return this.card.outcome
+	}
 	get requiresUserInteraction() {
 		return (
+			!this.routesToOwner &&
 			this.approvedAction() === undefined &&
 			this.status === CardStatus.WAITING_FOR_INPUT &&
 			!!(this.requireApproval || this.requireFeedback)

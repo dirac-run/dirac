@@ -1,0 +1,149 @@
+import type { Card, DiracMessage } from "@shared/ExtensionMessage"
+import type { ResponseArguments } from "@shared/responseTool"
+import type { TaskletUsage, TaskletUsageSnapshot } from "@shared/taskletUsage"
+import type { ICardHandle, PermissionOperation } from "../tools/interfaces/ICardHandle"
+import type { TaskletConfiguration } from "../TaskletConfiguration"
+import type { SerializedTaskError, TaskRunOutcome } from "../TaskRunOutcome"
+
+/** Shared addressed supervision contract; no engine, storage, or presentation implementation dependencies. */
+/** Data retained by the owner; presentation is not an authorization decision. */
+export interface TaskInteractionRequest {
+	card: Readonly<Card>
+	permissionRequestKind?: "tool" | "manual_tool"
+	permissionOperation?: PermissionOperation
+	toolCall?: { name: string; arguments: Record<string, unknown> }
+}
+
+/** Durable child identity/assignment; an absent outcome means accepted, not completed. */
+export interface TaskletRecord {
+	purpose?: "goal_verification"
+	configuration?: TaskletConfiguration
+	id: string
+	rootTaskId: string
+	conversationUlid: string
+	title: string
+	prompt: string
+	createdAt: number
+	outcome?: TaskRunOutcome
+	/** Immutable inherited prefix, excluded from passive child-only monitoring. */
+	inheritedMessageCount?: number
+	/** Lifetime snapshots, replaced rather than added on explicit resumption. */
+	usage?: TaskletUsageSnapshot
+}
+
+export interface TaskletEvent {
+	id: string
+	taskletId: string
+	createdAt: number
+	deliveredAt?: number
+	communication:
+		| { type: "response"; response: ResponseArguments }
+		| { type: "message"; message: TaskletMessage }
+		| { type: "lifecycle"; state: "accepted" | "resumed"; assignment?: string }
+		| { type: "interaction"; request: TaskletInteraction }
+		| { type: "outcome"; outcome: TaskRunOutcome }
+}
+
+export type TaskletInteractionResult = Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
+
+export interface TaskletInteraction extends TaskInteractionRequest {
+	id: string
+	status: "pending" | "resolved" | "retired"
+	createdAt: number
+	retiredAt?: number
+	resolvedAt?: number
+	resolution?: TaskletInteractionResult
+	/** Exact decision retained for idempotent addressed retries. */
+	decision?: TaskletInteractionDecision
+	kind?: "question" | "permission" | "operational"
+}
+
+export interface TaskletInspection extends TaskletRecord {
+	responses: ResponseArguments[]
+	interactions: TaskletInteraction[]
+	/** Live engine status is informational, never evidence of a committed outcome. */
+	executionStatus?: import("@shared/ExtensionMessage").TaskStatus
+	backgroundCommandRunning: boolean
+	lastActivityAt?: number
+	deadlineAt?: number
+	outcomePersisted: boolean
+	settlementError?: SerializedTaskError
+	/** Informational projection failure; does not change child outcome or resumption authority. */
+	presentationError?: SerializedTaskError
+}
+
+export interface TaskletTranscript {
+	conversation: import("@shared/messages/content").DiracStorageMessage[]
+	presentation: DiracMessage[]
+}
+
+export type TaskletInteractionDecision =
+	| { operation: "approve" | "reject" | "escalate" }
+	| { operation: "answer"; response: TaskletInteractionResult }
+
+export type TaskletResolution = { status: "resolved" | "requires_user_approval" }
+
+/** One addressed direct-message protocol; replies never infer permission from prose. */
+export type TaskletMessage =
+	| { taskletId: string; type: "guidance" | "question"; text: string }
+	| { taskletId: string; type: "reply"; replyTo: string; text?: string; action?: string }
+	| { taskletId: string; type: "permission_decision"; replyTo: string; decision: "approve" | "reject" | "escalate" }
+
+export interface TaskletMessageResult {
+	taskletId: string
+	title?: string
+	replyTo?: string
+	messageId?: string
+	request?: string
+	status: "queued" | "resolved" | "already_resolved" | "stale" | "requires_user_approval" | "failed"
+	error?: string
+}
+
+export interface TaskletSleepOptions {
+	/** Omit to wake for any child communication; [] selects time/user-input only. */
+	taskletIds?: string[]
+	/** Optional relative deadline in milliseconds (integer, 0..2147483647). */
+	timeoutMs?: number
+}
+
+export type TaskletWakeResult =
+	| { reason: "event"; taskletId: string; eventId: string }
+	| { reason: "timeout" | "user_message" | "cancelled" }
+
+export interface TaskletInspectionQuery {
+	view?: "status" | "messages" | "pending" | "trajectory" | "call" | "result" | "transcript" | "assignment"
+	cursor?: string
+	limit?: number
+	callId?: string
+	messageType?: string
+}
+
+export interface TaskletInspectionPage<T = unknown> {
+	view?: TaskletInspectionQuery["view"]
+	taskletId?: string
+	title?: string
+	items: T[]
+	totalItems: number
+	/** Concatenate consecutive JSON fragments, then parse once. Offsets count UTF-16 code units. */
+	fragment?: { itemIndex: number; offset: number; totalCharacters: number; totalBytes: number; json: string }
+	/** A read position only, never a delivery receipt. Reuse with the same view/filter/call. */
+	nextCursor?: string
+}
+
+export interface TaskletSummary {
+	id: string
+	title: string
+	createdAt: number
+	executionStatus?: TaskletInspection["executionStatus"]
+	pendingRequestCount: number
+	latestProgress?: string
+	timeoutSeconds?: number
+	lastActivityAt?: number
+	deadlineAt?: number
+	backgroundCommandRunning: boolean
+	outcomePersisted: boolean
+	outcome?: { kind: TaskRunOutcome["kind"]; summary: string; at: number }
+	settlementError?: { name: string; message: string }
+	presentationError?: { name: string; message: string }
+	usage?: TaskletUsage
+}

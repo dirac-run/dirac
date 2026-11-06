@@ -31,9 +31,11 @@ function deferred<T>() {
 	return { promise, resolve, reject }
 }
 
-const deliverTaskletEvents = (taskModule.Task.prototype as unknown as {
-	deliverTaskletEvents(history: import("@shared/messages/content").DiracStorageMessage[]): Promise<void>
-}).deliverTaskletEvents
+const deliverTaskletEvents = (
+	taskModule.Task.prototype as unknown as {
+		deliverTaskletEvents(history: import("@shared/messages/content").DiracStorageMessage[]): Promise<void>
+	}
+).deliverTaskletEvents
 
 /** Controlled executions, real addressed/atomic record storage. Real Task coverage is in TaskletExecution.test.ts. */
 describe("TaskletHost asynchronous ownership", () => {
@@ -58,7 +60,11 @@ describe("TaskletHost asynchronous ownership", () => {
 				settings: { mode: "act" } as any,
 				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
 				workspaceConfiguration: {} as any,
-				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
+				executionOptions: {
+					terminalReuseEnabled: true,
+					vscodeTerminalExecutionMode: "backgroundExec",
+					multiRootEnabled: false,
+				},
 			}),
 		} as TaskletTaskOptions
 	}
@@ -92,17 +98,16 @@ describe("TaskletHost asynchronous ownership", () => {
 			return child.task
 		}) as any)
 		owner = {
-			taskId: "root", executionProfile: "standalone",
-			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
+			taskId: "root",
+			executionProfile: "standalone",
+			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => {} }),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub().resolves(rejected),
 			hasPendingUserInput: sandbox.stub().returns(false),
+			withMutationAuthorization: (_toolName, mutation) => mutation(),
+			retainMutationUntil: () => {},
 		}
-		host = new TaskletHost(
-			owner,
-			taskOptions(),
-			constructed as unknown as typeof taskModule.Task,
-		)
+		host = new TaskletHost(owner, taskOptions(), constructed as unknown as typeof taskModule.Task)
 	})
 
 	afterEach(async () => {
@@ -133,8 +138,13 @@ describe("TaskletHost asynchronous ownership", () => {
 	function request(id: string): TaskInteractionRequest {
 		return {
 			card: {
-				id, kind: CardKind.GENERIC, header: "Permission", body: "Full operation", status: CardStatus.WAITING_FOR_INPUT,
-				renderType: "text", requireApproval: true
+				id,
+				kind: CardKind.GENERIC,
+				header: "Permission",
+				body: "Full operation",
+				status: CardStatus.WAITING_FOR_INPUT,
+				renderType: "text",
+				requireApproval: true,
 			},
 			permissionRequestKind: "manual_tool",
 			permissionOperation: { kind: "commands", commands: ["echo private"] },
@@ -148,7 +158,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const cancellation = new AbortController()
 		const waiting = counterparty.requestInteraction(input, cancellation.signal)
 		// The original promise remains rejecting; individual assertions own cancellation failures.
-		void waiting.catch(() => { })
+		void waiting.catch(() => {})
 		const interaction = host.inspect(child.id).interactions[0]
 		return { child, counterparty, cancellation, waiting, requestId: interaction.id }
 	}
@@ -163,21 +173,61 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, "claude-opus-4-20250514")
 	})
 
+	it("preserves the active Plan provider and model instead of substituting the unrelated Act provider", async () => {
+		const options = taskOptions()
+		options.workingConfiguration = createTaskWorkingConfiguration({
+			workspaceConfiguration: {} as any,
+			executionOptions: options.workingConfiguration.executionOptions,
+			settings: { mode: "plan" } as any,
+			apiConfiguration: {
+				planModeApiProvider: "anthropic",
+				planModeApiModelId: "claude-sonnet-4-20250514",
+				actModeApiProvider: "openai-native",
+				actModeApiModelId: "gpt-4.1",
+			},
+		})
+		host = new TaskletHost(owner, options, constructed as unknown as typeof taskModule.Task)
+		await host.start({ title: "Plan review", prompt: "Read only" })
+		const config = (constructed.firstCall.args[0] as taskModule.TaskParams).workingConfiguration
+		assert.equal(config.settings.mode, "act")
+		assert.equal(config.apiConfiguration.actModeApiProvider, "anthropic")
+		assert.equal(config.apiConfiguration.actModeApiModelId, "claude-sonnet-4-20250514")
+		assert.equal(options.workingConfiguration.settings.mode, "plan")
+		assert.equal(options.workingConfiguration.apiConfiguration.actModeApiProvider, "openai-native")
+	})
+
 	it("forwards named profile configuration and its model selection to the Task", async () => {
 		const profile = {
-			name: "reviewer", description: "Review an assignment", systemPrompt: "Review carefully.",
-			skills: ["review"], tools: ["read_file", "respond"], modelId: "claude-sonnet-5",
+			name: "reviewer",
+			description: "Review an assignment",
+			systemPrompt: "Review carefully.",
+			skills: ["review"],
+			tools: ["read_file", "respond"],
+			modelId: "claude-sonnet-5",
 		}
 		const getCachedConfig = sandbox.stub().withArgs("reviewer").returns(profile)
-		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => { }, getCachedConfig } as any)
-		const record = await host.start({ title: "Review", prompt: "Review this change", agentName: "reviewer", timeoutSeconds: 45 })
+		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => {}, getCachedConfig } as any)
+		const record = await host.start({
+			title: "Review",
+			prompt: "Review this change",
+			agentName: "reviewer",
+			timeoutSeconds: 45,
+		})
 		const params = constructed.firstCall.args[0] as taskModule.TaskParams
 		assert.deepEqual(params.tasklet!.configuration, record.configuration)
 		const { modelSelection, ...configuration } = record.configuration!
-		assert.deepEqual((await saved(record.id)).configuration, { ...configuration, modelSelection: { provider: "anthropic", modelId: profile.modelId } })
+		assert.deepEqual((await saved(record.id)).configuration, {
+			...configuration,
+			modelSelection: { provider: "anthropic", modelId: profile.modelId },
+		})
 		assert.deepEqual(configuration, {
-			name: profile.name, description: profile.description, systemPrompt: profile.systemPrompt,
-			skills: profile.skills, allowedTools: ["read_file", "respond"], includeHistory: false, timeoutSeconds: 45,
+			name: profile.name,
+			description: profile.description,
+			systemPrompt: profile.systemPrompt,
+			skills: profile.skills,
+			allowedTools: ["read_file", "respond"],
+			includeHistory: false,
+			timeoutSeconds: 45,
 		})
 		assert.equal(modelSelection?.provider, "anthropic")
 		assert.equal(modelSelection?.modelId, profile.modelId)
@@ -186,9 +236,16 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	for (const includeHistory of [false, true]) {
 		it(`${includeHistory ? "snapshots" : "omits"} root history on start when includeHistory is ${includeHistory}`, async () => {
-			const history = { messages: [{ role: "user" as const, content: "Root context" }], deletedRange: [1, 2] as [number, number] }
+			const history = {
+				messages: [{ role: "user" as const, content: "Root context" }],
+				deletedRange: [1, 2] as [number, number],
+			}
 			const getParentHistory = sandbox.stub().returns(history)
-			host = new TaskletHost(owner, { ...taskOptions(), getParentHistory }, constructed as unknown as typeof taskModule.Task)
+			host = new TaskletHost(
+				owner,
+				{ ...taskOptions(), getParentHistory },
+				constructed as unknown as typeof taskModule.Task,
+			)
 			await host.start({ title: "History child", prompt: "Work", includeHistory, timeoutSeconds: 30 })
 			const params = constructed.firstCall.args[0] as taskModule.TaskParams
 			if (!includeHistory) {
@@ -201,7 +258,8 @@ describe("TaskletHost asynchronous ownership", () => {
 			history.messages[0].content = "Changed after delegation"
 			history.deletedRange[0] = 9
 			assert.deepEqual(params.tasklet!.initialHistory, {
-				messages: [{ role: "user", content: "Root context" }], deletedRange: [1, 2],
+				messages: [{ role: "user", content: "Root context" }],
+				deletedRange: [1, 2],
 			})
 		})
 	}
@@ -214,12 +272,13 @@ describe("TaskletHost asynchronous ownership", () => {
 		sinon.assert.notCalled(children[0].task.abortTask)
 		await clock.tickAsync(1)
 		sinon.assert.calledOnceWithExactly(children[0].task.abortTask, {
-			kind: "interrupted", reason: "Tasklet execution timed out after 2 seconds",
+			kind: "interrupted",
+			reason: "Tasklet execution timed out after 2 seconds",
 		})
 		const stopped = await host.interrupt(record.id)
 		assert.equal(stopped.outcome?.kind, "interrupted")
 		assert.equal(stopped.outcomePersisted, true)
-		const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: record.id })
+		const events = await savedCommunications(record.id)
 		assert.equal(events.length, 1)
 		assert.deepEqual(events[0].communication, { type: "outcome", outcome: stopped.outcome })
 		assert.deepEqual(await sleeping, { reason: "event", taskletId: record.id, eventId: events[0].id })
@@ -234,7 +293,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		input.permissionOperation = { kind: "commands", commands: ["changed descriptor"] }
 		const assertCurrent = sandbox.stub()
 		owner.authorizePermission.resolves({ approved: true, assertCurrent })
-		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), { status: "resolved" })
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), {
+			status: "resolved",
+		})
 		assert.deepEqual(await entry.waiting, approved)
 		sinon.assert.calledOnce(owner.authorizePermission)
 		const retained = owner.authorizePermission.firstCall.args[0] as TaskInteractionRequest
@@ -253,11 +314,18 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("leaves unauthorized approval pending and prevents answer-based permission bypass", async () => {
 		const entry = await registerInteraction()
-		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), {
+			status: "requires_user_approval",
+		})
 		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
 		sinon.assert.notCalled(owner.escalateInteraction)
-		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response: approved }), /Permission requests/)
-		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), { status: "resolved" })
+		await assert.rejects(
+			host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response: approved }),
+			/Permission requests/,
+		)
+		assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), {
+			status: "resolved",
+		})
 		assert.deepEqual(await entry.waiting, rejected)
 		sinon.assert.calledOnce(owner.authorizePermission)
 		sinon.assert.notCalled(owner.assertPermissionAllowed)
@@ -265,11 +333,15 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("answers questions and runtime choices without security authorization or mode changes", async () => {
 		for (const requireApproval of [false, true]) {
-			const input: TaskInteractionRequest = { card: { ...request("choice").card, requireApproval, requireFeedback: !requireApproval } }
+			const input: TaskInteractionRequest = {
+				card: { ...request("choice").card, requireApproval, requireFeedback: !requireApproval },
+			}
 			const entry = await registerInteraction(input)
 			await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" }), /Use answer/)
 			const response = { ...approved, value: "retry", text: "Continue the same operation" }
-			assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response }), { status: "resolved" })
+			assert.deepEqual(await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "answer", response }), {
+				status: "resolved",
+			})
 			assert.deepEqual(await entry.waiting, response)
 			response.text = "mutated"
 			assert.equal(host.inspect(entry.child.id).interactions[0].resolution?.text, "Continue the same operation")
@@ -286,7 +358,10 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(host.inspect(first.child.id).interactions[0].card.id, "same-card")
 		await assert.rejects(host.resolveInteraction(second.child.id, first.requestId, { operation: "reject" }), /not pending/)
 		await assert.rejects(host.resolveInteraction(first.child.id, "same-card", { operation: "reject" }), /not pending/)
-		await assert.rejects(host.resolveInteraction("unknown-child", first.requestId, { operation: "reject" }), /does not belong/)
+		await assert.rejects(
+			host.resolveInteraction("unknown-child", first.requestId, { operation: "reject" }),
+			/does not belong/,
+		)
 		first.cancellation.abort()
 		await assert.rejects(first.waiting, /retired/)
 		await assert.rejects(host.resolveInteraction(first.child.id, first.requestId, { operation: "reject" }), /not pending/)
@@ -300,8 +375,16 @@ describe("TaskletHost asynchronous ownership", () => {
 		const check = deferred<{ approved: boolean; assertCurrent: () => void }>()
 		owner.authorizePermission.returns(check.promise)
 		const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "approve" })
-		await assert.rejects(host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }), /already being resolved/)
-		check.resolve({ approved: true, assertCurrent: () => { throw new Error("Parent authority changed") } })
+		await assert.rejects(
+			host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" }),
+			/already being resolved/,
+		)
+		check.resolve({
+			approved: true,
+			assertCurrent: () => {
+				throw new Error("Parent authority changed")
+			},
+		})
 		await assert.rejects(resolution, /Parent authority changed/)
 		assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
 		await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
@@ -312,13 +395,17 @@ describe("TaskletHost asynchronous ownership", () => {
 		const first = await registerInteraction(request("same-card"))
 		const second = await registerInteraction(request("same-card"))
 		owner.escalateInteraction.resolves(approved)
-		assert.deepEqual(await host.resolveInteraction(first.child.id, first.requestId, { operation: "escalate" }), { status: "resolved" })
+		assert.deepEqual(await host.resolveInteraction(first.child.id, first.requestId, { operation: "escalate" }), {
+			status: "resolved",
+		})
 		assert.deepEqual(await first.waiting, approved)
 		sinon.assert.calledOnce(owner.escalateInteraction)
 		assert.deepEqual(owner.escalateInteraction.firstCall.args[0], { id: first.child.id, title: first.child.title })
 		assert.equal(owner.escalateInteraction.firstCall.args[1].id, first.requestId)
 		assert.equal(host.inspect(second.child.id).interactions[0].status, "pending")
-		assert.deepEqual(await host.resolveInteraction(second.child.id, second.requestId, { operation: "approve" }), { status: "requires_user_approval" })
+		assert.deepEqual(await host.resolveInteraction(second.child.id, second.requestId, { operation: "approve" }), {
+			status: "requires_user_approval",
+		})
 		sinon.assert.calledOnce(owner.escalateInteraction)
 		owner.escalateInteraction.resolves(rejected)
 		await host.resolveInteraction(second.child.id, second.requestId, { operation: "escalate" })
@@ -360,7 +447,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			await host.interrupt(first.child.id)
 			assert.equal(signal.aborted, true)
 			await assert.rejects(first.waiting, /retired/)
-			decision.resolve(operation === "approve" ? { approved: true, assertCurrent: () => { } } : approved)
+			decision.resolve(operation === "approve" ? { approved: true, assertCurrent: () => {} } : approved)
 			await resolutionRejected
 			assert.equal(host.inspect(first.child.id).interactions[0].status, "retired")
 			assert.equal(host.inspect(sibling.child.id).interactions[0].status, "pending")
@@ -375,7 +462,16 @@ describe("TaskletHost asynchronous ownership", () => {
 		const cleanup = deferred<void>()
 		const aborted = deferred<void>()
 		owner.escalateInteraction.callsFake(async (_child, _request, signal: AbortSignal) => {
-			await new Promise<void>((resolve) => signal.addEventListener("abort", () => { aborted.resolve(); resolve() }, { once: true }))
+			await new Promise<void>((resolve) =>
+				signal.addEventListener(
+					"abort",
+					() => {
+						aborted.resolve()
+						resolve()
+					},
+					{ once: true },
+				),
+			)
 			await cleanup.promise
 			signal.throwIfAborted()
 			return approved
@@ -383,7 +479,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		const resolution = host.resolveInteraction(entry.child.id, entry.requestId, { operation: "escalate" })
 		const resolutionRejected = assert.rejects(resolution, /retired/)
 		let shutdownFinished = false
-		const shutdown = host.shutdown().then(() => { shutdownFinished = true })
+		const shutdown = host.shutdown().then(() => {
+			shutdownFinished = true
+		})
 		await aborted.promise
 		await assert.rejects(entry.waiting, /retired/)
 		await new Promise<void>((resolve) => setImmediate(resolve))
@@ -403,10 +501,16 @@ describe("TaskletHost asynchronous ownership", () => {
 			const cleanup = deferred<void>()
 			const aborted = deferred<void>()
 			owner.escalateInteraction.callsFake(async (_child, _request, signal: AbortSignal) => {
-				await new Promise<void>((resolve) => signal.addEventListener("abort", () => {
-					aborted.resolve()
-					resolve()
-				}, { once: true }))
+				await new Promise<void>((resolve) =>
+					signal.addEventListener(
+						"abort",
+						() => {
+							aborted.resolve()
+							resolve()
+						},
+						{ once: true },
+					),
+				)
 				await cleanup.promise
 				throw failure
 			})
@@ -427,7 +531,9 @@ describe("TaskletHost asynchronous ownership", () => {
 				shutdown = assert.rejects(host.shutdown(), assertShutdownFailure)
 			} else {
 				let settled = false
-				shutdown = assert.rejects(host.shutdown(), assertShutdownFailure).then(() => { settled = true })
+				shutdown = assert.rejects(host.shutdown(), assertShutdownFailure).then(() => {
+					settled = true
+				})
 				await aborted.promise
 				await new Promise<void>((resolve) => setImmediate(resolve))
 				assert.equal(settled, false, "Shutdown must join failed cleanup, not detach it")
@@ -452,13 +558,19 @@ describe("TaskletHost asynchronous ownership", () => {
 		const secondOwner = (constructed.secondCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		const input = request("same-card-id")
 		const firstRejected = assert.rejects(firstOwner.requestInteraction(input, new AbortController().signal), /retired/)
-		const secondRejected = assert.rejects(secondOwner.requestInteraction(request("same-card-id"), new AbortController().signal), /retired/)
+		const secondRejected = assert.rejects(
+			secondOwner.requestInteraction(request("same-card-id"), new AbortController().signal),
+			/retired/,
+		)
 		input.toolCall!.arguments.commands = ["changed"]
 		const snapshot = host.inspect(first.id).interactions[0]
 		assert.deepEqual(snapshot.toolCall!.arguments.commands, ["echo private"])
 		Object.assign(snapshot.card, { body: "mutated snapshot" })
 		assert.equal(host.inspect(first.id).interactions[0].card.body, "Full operation")
-		assert.throws(() => firstOwner.requestInteraction(request("same-card-id"), new AbortController().signal), /already exists/)
+		assert.throws(
+			() => firstOwner.requestInteraction(request("same-card-id"), new AbortController().signal),
+			/already exists/,
+		)
 		await host.interrupt(first.id)
 		await firstRejected
 		assert.equal(host.inspect(first.id).interactions[0].status, "retired")
@@ -657,7 +769,10 @@ describe("TaskletHost asynchronous ownership", () => {
 			await starting
 		}
 		await host.interrupt(running.id)
-		assert.equal(host.listActive().some(({ id }) => id === running.id), false)
+		assert.equal(
+			host.listActive().some(({ id }) => id === running.id),
+			false,
+		)
 		assert.equal(host.listActive().length, 2)
 	})
 
@@ -670,7 +785,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		})
 		const starting = host.start({ title: "starting", prompt: "work" })
 		let settled = false
-		const shutdown = host.shutdown().then(() => { settled = true })
+		const shutdown = host.shutdown().then(() => {
+			settled = true
+		})
 		try {
 			await new Promise<void>((resolve) => setImmediate(resolve))
 			assert.equal(settled, false)
@@ -701,7 +818,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		children[0].outcome.resolve(completed)
 		await writeEntered.promise
 		let settled = false
-		const shutdown = host.shutdown().then(() => { settled = true })
+		const shutdown = host.shutdown().then(() => {
+			settled = true
+		})
 		try {
 			await new Promise<void>((resolve) => setImmediate(resolve))
 			assert.equal(settled, false)
@@ -742,7 +861,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		children[0].task.abortTask.rejects(new Error("cancel failed"))
 		let settled = false
 		const shutdown = host.shutdown()
-		const rejection = assert.rejects(shutdown, /Tasklet shutdown failed/).then(() => { settled = true })
+		const rejection = assert.rejects(shutdown, /Tasklet shutdown failed/).then(() => {
+			settled = true
+		})
 		try {
 			await new Promise<void>((resolve) => setImmediate(resolve))
 			assert.equal(settled, false)
@@ -795,15 +916,20 @@ describe("TaskletHost asynchronous ownership", () => {
 		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
 	})
 
-	async function savedEvents(id: string): Promise<Array<{
-		id: string; deliveredAt?: number; communication: {
-			type: string; response?: { text: string }; request?: { id: string; status: string; resolution?: unknown }
-		}
-	}>> {
-		return JSON.parse(await fs.readFile(path.join(
-			getTaskDirectoryPath({ kind: "tasklet", rootTaskId: "root", taskletId: id }),
-			GlobalFileNames.taskletEvents,
-		), "utf8"))
+	/** Acceptance/resume facts are monitored, not unsolicited model-bound input. */
+	async function savedCommunications(id: string) {
+		return (await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: id })).filter(
+			(event) => event.communication.type !== "lifecycle",
+		) as Array<{
+			id: string
+			deliveredAt?: number
+			communication: {
+				type: string
+				response?: { text: string }
+				request?: { id: string; status: string; resolution?: unknown }
+				outcome?: TaskRunOutcome
+			}
+		}>
 	}
 
 	async function respondingChild() {
@@ -826,7 +952,7 @@ describe("TaskletHost asynchronous ownership", () => {
 				assert.equal(host.isSleeping, true)
 				children[0].outcome.resolve(outcome)
 				await host["children"].get(child.id)!.settlement
-				const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+				const events = await savedCommunications(child.id)
 				assert.equal(events.length, 1)
 				assert.deepEqual(events[0].communication, { type: "outcome", outcome })
 				assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: events[0].id })
@@ -842,7 +968,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			const child = await host.start({ title: "Silent worker", prompt: "work" })
 			children[0].outcome.resolve(completed)
 			await host["children"].get(child.id)!.settlement
-			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			const events = await savedCommunications(child.id)
 			const event = events[0]
 			assert.equal(events.length, 1)
 			for (let attempt = 0; attempt < 2; attempt++) {
@@ -851,10 +977,10 @@ describe("TaskletHost asynchronous ownership", () => {
 				assert.equal(delivery.content.length, 1)
 				assert.deepEqual(delivery.content[0].taskletEventIds, [event.id])
 				assert.match(delivery.content[0].text, /"type":"outcome"/)
-				assert.deepEqual(await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id }), events)
+				assert.deepEqual(await savedCommunications(child.id), events)
 			}
 			await (await host.prepareEventDelivery())!.acknowledge()
-			const acknowledged = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			const acknowledged = await savedCommunications(child.id)
 			assert.equal(acknowledged.length, 1)
 			assert.equal(acknowledged[0].id, event.id)
 			assert.equal(typeof acknowledged[0].deliveredAt, "number")
@@ -873,12 +999,12 @@ describe("TaskletHost asynchronous ownership", () => {
 			children[0].outcome.resolve({ kind: "failed", failedAt: 124, error: { name: "Error", message: "Excluded failure" } })
 			await host["children"].get(first.id)!.settlement
 			assert.equal(host.isSleeping, true)
-			const excludedEvents = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: first.id })
+			const excludedEvents = await savedCommunications(first.id)
 			assert.equal(excludedEvents.length, 1)
 			assert.equal(excludedEvents[0].communication.type, "outcome")
 			children[1].outcome.resolve(completed)
 			await host["children"].get(selected.id)!.settlement
-			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: selected.id })
+			const events = await savedCommunications(selected.id)
 			assert.deepEqual(await sleeping, { reason: "event", taskletId: selected.id, eventId: events[0].id })
 			assert.equal(excludedEvents[0].deliveredAt, undefined)
 			assert.deepEqual(host.inspect(first.id).responses, [])
@@ -888,12 +1014,12 @@ describe("TaskletHost asynchronous ownership", () => {
 		it("wakes for pending responses without acknowledging or removing them", async () => {
 			const { child, counterparty } = await respondingChild()
 			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "still pending" })
-			const event = (await savedEvents(child.id))[0]
+			const event = (await savedCommunications(child.id))[0]
 			assert.equal(host.isSleeping, false)
 			for (let attempt = 0; attempt < 2; attempt++) {
 				assert.deepEqual(await host.sleep(), { reason: "event", taskletId: child.id, eventId: event.id })
 				assert.equal(host.isSleeping, false)
-				assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+				assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 			}
 			const delivery = (await host.prepareEventDelivery())!
 			assert.deepEqual(delivery.content[0].taskletEventIds, [event.id])
@@ -911,7 +1037,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			assert.equal(host.inspect(entry.child.id).interactions[0].status, "pending")
 			const delivery = (await host.prepareEventDelivery())!
 			assert.deepEqual(delivery.content[0].taskletEventIds, [entry.requestId])
-			assert.equal((await savedEvents(entry.child.id))[0].deliveredAt, undefined)
+			assert.equal((await savedCommunications(entry.child.id))[0].deliveredAt, undefined)
 			await host.resolveInteraction(entry.child.id, entry.requestId, { operation: "reject" })
 			await entry.waiting
 		})
@@ -938,7 +1064,10 @@ describe("TaskletHost asynchronous ownership", () => {
 				if (wake.reason !== "event") assert.fail("Expected a communication wake")
 				assert.equal(wake.taskletId, child.id)
 				let delivered = false
-				delivery = host.prepareEventDelivery().then((value) => { delivered = true; return value })
+				delivery = host.prepareEventDelivery().then((value) => {
+					delivered = true
+					return value
+				})
 				await Promise.resolve()
 				assert.equal(delivered, false)
 				sinon.assert.calledOnce(write)
@@ -947,7 +1076,7 @@ describe("TaskletHost asynchronous ownership", () => {
 				await response
 			}
 			const prepared = (await delivery)!
-			const stored = (await savedEvents(child.id))[0]
+			const stored = (await savedCommunications(child.id))[0]
 			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: stored.id })
 			assert.deepEqual(prepared.content[0].taskletEventIds, [stored.id])
 			assert.equal(stored.deliveredAt, undefined)
@@ -958,7 +1087,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			const cancellation = new AbortController()
 			const sleeping = host.sleep()
 			const waiting = counterparty.requestInteraction(request("sleep-request"), cancellation.signal)
-			void waiting.catch(() => { })
+			void waiting.catch(() => {})
 			assert.equal(host.isSleeping, false)
 			const interaction = host.inspect(child.id).interactions[0]
 			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: interaction.id })
@@ -977,9 +1106,14 @@ describe("TaskletHost asynchronous ownership", () => {
 			assert.equal(host.isSleeping, true)
 			await second.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "included" })
 			assert.deepEqual(await sleeping, {
-				reason: "event", taskletId: second.child.id, eventId: (await savedEvents(second.child.id))[0].id,
+				reason: "event",
+				taskletId: second.child.id,
+				eventId: (await savedCommunications(second.child.id))[0].id,
 			})
-			assert.equal((await savedEvents(first.child.id)).every((event) => event.deliveredAt === undefined), true)
+			assert.equal(
+				(await savedCommunications(first.child.id)).every((event) => event.deliveredAt === undefined),
+				true,
+			)
 		})
 
 		it("does not treat routine child activity as communication before settlement", async () => {
@@ -992,7 +1126,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			await host.steer(child.id, "continue")
 			assert.equal(host.isSleeping, true)
 			await host.interrupt(child.id)
-			const events = await storage.loadTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: child.id })
+			const events = await savedCommunications(child.id)
 			assert.equal(events.length, 1)
 			assert.equal(events[0].communication.type, "outcome")
 			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: events[0].id })
@@ -1005,7 +1139,9 @@ describe("TaskletHost asynchronous ownership", () => {
 				await entry.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: entry.child.id })
 			}
 			assert.deepEqual(await host.sleep({ taskletIds: [second.child.id] }), {
-				reason: "event", taskletId: second.child.id, eventId: (await savedEvents(second.child.id))[0].id,
+				reason: "event",
+				taskletId: second.child.id,
+				eventId: (await savedCommunications(second.child.id))[0].id,
 			})
 		})
 
@@ -1046,7 +1182,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			assert.deepEqual(await host.sleep({ taskletIds: [], timeoutMs: 100 }), { reason: "user_message" })
 			assert.equal(host.isSleeping, false)
 			assert.equal(clock.countTimers(), 0)
-			assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+			assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		})
 
 		it("does not retain a user notification when there is no pending sleep", async () => {
@@ -1071,7 +1207,11 @@ describe("TaskletHost asynchronous ownership", () => {
 			const sleeping = host.sleep()
 			assert.equal(host.isSleeping, false)
 			await response
-			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: (await savedEvents(child.id))[0].id })
+			assert.deepEqual(await sleeping, {
+				reason: "event",
+				taskletId: child.id,
+				eventId: (await savedCommunications(child.id))[0].id,
+			})
 		})
 
 		it("does not lose a user notification sent reentrantly while registering sleep", async () => {
@@ -1112,10 +1252,11 @@ describe("TaskletHost asynchronous ownership", () => {
 				const response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "racing event" })
 				if (eventFirst) assert.equal(host.isSleeping, false)
 				await response
-				const event = (await savedEvents(child.id))[0]
-				assert.deepEqual(await sleeping, eventFirst
-					? { reason: "event", taskletId: child.id, eventId: event.id }
-					: { reason: "timeout" })
+				const event = (await savedCommunications(child.id))[0]
+				assert.deepEqual(
+					await sleeping,
+					eventFirst ? { reason: "event", taskletId: child.id, eventId: event.id } : { reason: "timeout" },
+				)
 				await clock.tickAsync(100)
 				cancellation.abort()
 				host.notifyUserMessage()
@@ -1241,7 +1382,9 @@ describe("TaskletHost asynchronous ownership", () => {
 			},
 		}
 		return {
-			history, flush, append,
+			history,
+			flush,
+			append,
 			deliver: (outbound = history) => deliverTaskletEvents.call(root, outbound),
 		}
 	}
@@ -1249,19 +1392,19 @@ describe("TaskletHost asynchronous ownership", () => {
 	it("persists full response payloads independently of bounded parent previews and acknowledgement", async () => {
 		const { child, counterparty } = await respondingChild()
 		const text = "A".repeat(12_000) + "FULL_RESULT_TAIL"
-		await counterparty.recordResponse({ operation: ResponseOperation.COMPLETE, text })
-		const stored = await savedEvents(child.id)
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text })
+		const stored = await savedCommunications(child.id)
 		assert.equal(stored.length, 1)
 		assert.equal(stored[0].communication.response?.text, text)
 		assert.equal(stored[0].deliveredAt, undefined)
 		const delivery = (await host.prepareEventDelivery())!
 		assert.equal(delivery.content.length, 1)
-		assert.match(delivery.content[0].text, /preview truncated/)
+		assert.match(delivery.content[0].text, /preview only/)
 		assert.ok(!delivery.content[0].text.includes("FULL_RESULT_TAIL"))
 		assert.equal(host.inspect(child.id).responses[0].text, text)
 		await delivery.acknowledge()
-		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
-		assert.equal((await savedEvents(child.id))[0].communication.response?.text, text)
+		assert.equal(typeof (await savedCommunications(child.id))[0].deliveredAt, "number")
+		assert.equal((await savedCommunications(child.id))[0].communication.response?.text, text)
 		assert.equal(await host.prepareEventDelivery(), undefined)
 		assert.equal(host.inspect(child.id).responses[0].text, text)
 	})
@@ -1273,18 +1416,28 @@ describe("TaskletHost asynchronous ownership", () => {
 		await bindings.postPresentationToOwner?.()
 		assert.equal(await host.prepareEventDelivery(), undefined)
 		sandbox.stub(Date, "now").returns(12345)
-		for (let index = 0; index < 18; index++) await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: `update ${index}` })
+		for (let index = 0; index < 18; index++)
+			await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: `update ${index}` })
 		const first = (await host.prepareEventDelivery())!
-		assert.equal(first.content.length, 16)
-		assert.deepEqual(first.content.map((block) => JSON.parse(block.text.split("\n")[1]).response.text),
-			Array.from({ length: 16 }, (_, index) => `update ${index}`))
+		assert.equal(first.content.length, 8)
+		assert.deepEqual(
+			first.content.map((block) => JSON.parse(block.text.split("\n")[1]).response.text),
+			Array.from({ length: 8 }, (_, index) => `update ${index}`),
+		)
 		await first.acknowledge()
 		const rest = (await host.prepareEventDelivery())!
-		assert.equal(rest.content.length, 2)
+		assert.equal(rest.content.length, 8)
 		const deliveredIds = new Set(first.content.flatMap((block) => block.taskletEventIds ?? []))
 		assert.ok(rest.content.every((block) => !deliveredIds.has(block.taskletEventIds![0])))
 		await rest.acknowledge()
-		assert.equal((await savedEvents(child.id)).length, 18)
+		const final = (await host.prepareEventDelivery())!
+		assert.equal(final.content.length, 2)
+		assert.deepEqual(
+			final.content.map((block) => JSON.parse(block.text.split("\n")[1]).response.text),
+			["update 16", "update 17"],
+		)
+		await final.acknowledge()
+		assert.equal((await savedCommunications(child.id)).length, 18)
 		assert.equal(await host.prepareEventDelivery(), undefined)
 	})
 
@@ -1297,7 +1450,10 @@ describe("TaskletHost asynchronous ownership", () => {
 		const originalSave = storage.saveTaskletEvents
 		let writes = 0
 		sandbox.stub(storage, "saveTaskletEvents").callsFake(async (address, events) => {
-			if (++writes === 1) { entered.resolve(); await release.promise }
+			if (++writes === 1) {
+				entered.resolve()
+				await release.promise
+			}
 			await originalSave(address, events)
 		})
 		const acknowledgement = delivery.acknowledge()
@@ -1305,7 +1461,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const arrival = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "second" })
 		release.resolve()
 		await Promise.all([acknowledgement, arrival])
-		const stored = await savedEvents(child.id)
+		const stored = await savedCommunications(child.id)
 		assert.equal(typeof stored[0].deliveredAt, "number")
 		assert.equal(stored[1].deliveredAt, undefined)
 		const next = (await host.prepareEventDelivery())!
@@ -1320,12 +1476,15 @@ describe("TaskletHost asynchronous ownership", () => {
 		const write = sandbox.stub(storage, "saveTaskletEvents")
 		write.onFirstCall().rejects(new Error("event disk unavailable"))
 		write.callsFake(originalSave)
-		await assert.rejects(counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained despite disk failure" }), /event disk unavailable/)
+		await assert.rejects(
+			counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained despite disk failure" }),
+			/event disk unavailable/,
+		)
 		assert.equal(host.inspect(child.id).responses[0].text, "retained despite disk failure")
 		assert.equal((await host.prepareEventDelivery())!.content.length, 1)
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "next update" })
-		assert.equal((await savedEvents(child.id)).length, 2)
+		assert.equal((await savedCommunications(child.id)).length, 2)
 		assert.equal((await host.prepareEventDelivery())!.content.length, 2)
 	})
 
@@ -1339,9 +1498,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		write.onFirstCall().rejects(new Error("ack disk unavailable"))
 		write.callsFake(originalSave)
 		await assert.rejects(delivery.acknowledge(), /ack disk unavailable/)
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		await delivery.acknowledge()
-		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal(typeof (await savedCommunications(child.id))[0].deliveredAt, "number")
 		assert.equal(await host.prepareEventDelivery(), undefined)
 	})
 
@@ -1355,11 +1514,11 @@ describe("TaskletHost asynchronous ownership", () => {
 		// The first write prepares delivery; the second acknowledges the persisted parent context.
 		write.onSecondCall().rejects(new Error("receipt disk failure"))
 		await assert.rejects(parent.deliver(), /receipt disk failure/)
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		await parent.deliver()
 		sinon.assert.calledOnce(parent.append)
 		assert.equal((parent.history[0].content as unknown[]).length, 2)
-		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal(typeof (await savedCommunications(child.id))[0].deliveredAt, "number")
 	})
 
 	it("rejects late acknowledgements after shutdown without starting another storage write", async () => {
@@ -1379,13 +1538,13 @@ describe("TaskletHost asynchronous ownership", () => {
 		parent.flush.onFirstCall().rejects(new Error("parent disk unavailable"))
 		const outbound = structuredClone(parent.history)
 		await assert.rejects(parent.deliver(outbound), /parent disk unavailable/)
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		assert.equal((await host.prepareEventDelivery())!.content.length, 1)
 		await parent.deliver(outbound)
 		sinon.assert.calledOnce(parent.append)
 		assert.equal((parent.history[0].content as unknown[]).length, 2)
 		assert.equal((outbound[0].content as unknown[]).length, 2)
-		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal(typeof (await savedCommunications(child.id))[0].deliveredAt, "number")
 		await parent.deliver(outbound)
 		sinon.assert.calledOnce(parent.append)
 		sinon.assert.calledTwice(parent.flush)
@@ -1398,7 +1557,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		parent.append.onFirstCall().rejects(new Error("parent append failed"))
 		await assert.rejects(parent.deliver(), /parent append failed/)
 		sinon.assert.notCalled(parent.flush)
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		assert.equal((parent.history[0].content as unknown[]).length, 1)
 		await parent.deliver()
 		assert.equal((parent.history[0].content as unknown[]).length, 2)
@@ -1411,14 +1570,17 @@ describe("TaskletHost asynchronous ownership", () => {
 		const parent = parentDeliveryFixture()
 		const entered = deferred<void>()
 		const release = deferred<void>()
-		parent.flush.onFirstCall().callsFake(async () => { entered.resolve(); await release.promise })
+		parent.flush.onFirstCall().callsFake(async () => {
+			entered.resolve()
+			await release.promise
+		})
 		const delivery = parent.deliver()
 		await entered.promise
-		assert.equal((await savedEvents(child.id))[0].deliveredAt, undefined)
+		assert.equal((await savedCommunications(child.id))[0].deliveredAt, undefined)
 		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "during parent flush" })
 		release.resolve()
 		await delivery
-		const stored = await savedEvents(child.id)
+		const stored = await savedCommunications(child.id)
 		assert.equal(typeof stored[0].deliveredAt, "number")
 		assert.equal(stored[1].deliveredAt, undefined)
 		assert.equal((parent.history[0].content as unknown[]).length, 2)
@@ -1433,7 +1595,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const parent = parentDeliveryFixture()
 		await parent.deliver()
 		assert.equal((parent.history[0].content as unknown[]).length, 2)
-		assert.equal(typeof (await savedEvents(child.id))[0].deliveredAt, "number")
+		assert.equal(typeof (await savedCommunications(child.id))[0].deliveredAt, "number")
 		sinon.assert.calledOnce(parent.append)
 	})
 
@@ -1441,15 +1603,18 @@ describe("TaskletHost asynchronous ownership", () => {
 		const resolved = await registerInteraction()
 		await host.resolveInteraction(resolved.child.id, resolved.requestId, { operation: "reject" })
 		await resolved.waiting
-		const response = (await savedEvents(resolved.child.id))[0].communication.request!
+		const response = (await savedCommunications(resolved.child.id))[0].communication.request!
 		assert.equal(response.id, resolved.requestId)
 		assert.equal(response.status, "resolved")
 		assert.deepEqual(response.resolution, rejected)
 		const retired = await registerInteraction()
 		await host.interrupt(retired.child.id)
 		await assert.rejects(retired.waiting, /retired/)
-		assert.equal((await savedEvents(retired.child.id))[0].communication.request?.status, "retired")
-		await assert.rejects(host.resolveInteraction(retired.child.id, retired.requestId, { operation: "approve" }), /not pending/)
+		assert.equal((await savedCommunications(retired.child.id))[0].communication.request?.status, "retired")
+		await assert.rejects(
+			host.resolveInteraction(retired.child.id, retired.requestId, { operation: "approve" }),
+			/not pending/,
+		)
 	})
 
 	it("joins communication persistence before shutdown settles", async () => {
@@ -1465,7 +1630,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		const response = counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "shutdown must await this" })
 		await entered.promise
 		let settled = false
-		const shutdown = host.shutdown().then(() => { settled = true })
+		const shutdown = host.shutdown().then(() => {
+			settled = true
+		})
 		try {
 			await new Promise<void>((resolve) => setImmediate(resolve))
 			assert.equal(settled, false)
@@ -1473,7 +1640,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			release.resolve()
 			await Promise.all([response, shutdown])
 		}
-		assert.equal((await savedEvents(child.id))[0].communication.response?.text, "shutdown must await this")
+		assert.equal((await savedCommunications(child.id))[0].communication.response?.text, "shutdown must await this")
 	})
 
 	it("surfaces failed communication persistence through shutdown without skipping sibling cleanup", async () => {
@@ -1481,21 +1648,22 @@ describe("TaskletHost asynchronous ownership", () => {
 		const { child, counterparty } = await respondingChild()
 		const sibling = await host.start({ title: "sibling", prompt: "work" })
 		sandbox.stub(storage, "saveTaskletEvents").rejects(new Error("communication disk failure"))
-		await assert.rejects(counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained" }), /communication disk failure/)
+		await assert.rejects(
+			counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained" }),
+			/communication disk failure/,
+		)
 		await assert.rejects(host.shutdown(), /Tasklet shutdown failed/)
 		for (const execution of children) sinon.assert.calledOnce(execution.task.abortTask)
 		assert.equal(host.inspect(child.id).responses[0].text, "retained")
-		assert.equal(host.inspect(sibling.id).outcomePersisted, true)
+		assert.equal(host.inspect(sibling.id).outcomePersisted, false)
+		assert.match(host.inspect(sibling.id).settlementError!.message, /communication disk failure/)
 	})
 
 	it("rejects recursive ownership, invalid roots and empty assignments", async () => {
 		for (const executionProfile of ["tasklet"] as const) {
 			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /Only root Tasks/)
 		}
-		assert.throws(
-			() => new TaskletHost({ ...owner, taskId: "../escape" }, taskOptions()),
-			/Invalid/,
-		)
+		assert.throws(() => new TaskletHost({ ...owner, taskId: "../escape" }, taskOptions()), /Invalid/)
 		await assert.rejects(host.start({ title: " ", prompt: "work" }), /non-empty/)
 		await assert.rejects(host.start({ title: "work", prompt: " " }), /non-empty/)
 		sinon.assert.notCalled(constructed)

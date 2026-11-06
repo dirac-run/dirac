@@ -1,5 +1,7 @@
 import { DiracMessage, DiracMessageType, SubagentExecutionStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { formatSubagentTrajectory, readSubagentCardData, type SubagentCardData } from "@shared/subagents"
+import { getSubagentUsage } from "@shared/subagentUsage"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import {
 	readTaskletPresentation,
 	type TaskletPresentationData,
@@ -157,8 +159,7 @@ export function buildAgentList(messages: DiracMessage[], taskStatus?: TaskStatus
 		})),
 		...tasklets.map((tasklet) => ({
 			id: tasklet.taskletId,
-			name: `Tasklet ${tasklet.taskletId}`,
-			taskTitle: tasklet.title,
+			name: tasklet.title,
 			status: tasklet.status,
 			prompt: tasklet.prompt,
 			transcript: formatTaskletPreview(tasklet),
@@ -190,7 +191,9 @@ function formatMainTranscript(messages: DiracMessage[]): string {
 				if (
 					message.content.type === DiracMessageType.CARD &&
 					!readSubagentCardData(message.content.card) &&
-					!readTaskletPresentation(message.content.card)
+					!readTaskletPresentation(message.content.card) &&
+					!getTaskletUsage(message.content.card) &&
+					!getSubagentUsage(message.content.card)
 				) {
 					return [
 						`Tool: ${message.content.card.header}${message.content.card.body ? `\n${message.content.card.body}` : ""}`,
@@ -204,13 +207,13 @@ function formatMainTranscript(messages: DiracMessage[]): string {
 
 function formatTaskletPreview(tasklet: TaskletPresentationData): string {
 	return [
-		`Tasklet ${tasklet.taskletId} · ${tasklet.status}`,
+		`${tasklet.title} · ${tasklet.status}`,
 		`Assignment\n${tasklet.prompt}`,
 		tasklet.result === undefined ? undefined : `Result preview\n${tasklet.result}`,
 		tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
 		tasklet.communications.length ? `Parent-directed communication\n${tasklet.communications.join("\n\n")}` : undefined,
 		tasklet.activity.length ? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}` : undefined,
-		"Display preview only; the parent can inspect full results and transcript with tasklets.",
+		"Display preview only; the parent can inspect selected calls, results, messages, and child-only excerpts with tasklets.",
 	]
 		.filter(Boolean)
 		.join("\n\n")

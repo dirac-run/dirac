@@ -27,7 +27,9 @@ import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurat
 
 function deferred() {
 	let resolve!: () => void
-	const promise = new Promise<void>((done) => { resolve = done })
+	const promise = new Promise<void>((done) => {
+		resolve = done
+	})
 	return { promise, resolve }
 }
 
@@ -100,8 +102,11 @@ describe("Tasklet integrated resource cleanup", function () {
 		})
 		sandbox.stub(HostProvider, "env" as any).value({ getHostVersion: async () => ({ platform: "linux", diracType: 0 }) })
 		sandbox.stub(HostProvider, "window" as any).value({
-			getOpenTabs: async () => ({ paths: [] }), getVisibleTabs: async () => ({ paths: [] }),
-			showMessage: () => { throw new Error("Unexpected host message") },
+			getOpenTabs: async () => ({ paths: [] }),
+			getVisibleTabs: async () => ({ paths: [] }),
+			showMessage: () => {
+				throw new Error("Unexpected host message")
+			},
 		})
 		stateManager = {
 			getGlobalSettingsKey: (key: keyof typeof SETTINGS_DEFAULTS) => SETTINGS_DEFAULTS[key],
@@ -111,25 +116,39 @@ describe("Tasklet integrated resource cleanup", function () {
 			getApiConfiguration: () => ({ actModeApiProvider: "anthropic", actModeApiModelId: "root" }),
 			setGlobalState: sandbox.stub().resolves(),
 			setWorkspaceState: sandbox.stub().resolves(),
-			flushPendingState: async () => { },
+			flushPendingState: async () => {},
 		} as unknown as StateManager
 		sandbox.stub(StateManager, "get").returns(stateManager)
-		sandbox.stub(ErrorService, "get").returns({ toDiracError: (error: unknown) => { throw error } } as unknown as ErrorService)
+		sandbox.stub(ErrorService, "get").returns({
+			toDiracError: (error: unknown) => {
+				throw error
+			},
+		} as unknown as ErrorService)
 		sandbox.stub(checkpointFactory, "buildCheckpointManager").callsFake(() => {
 			return {
-				isEnabled: () => true, setEnabled() { }, initialize: async () => { },
-				commit: async () => "controlled-checkpoint", saveCheckpoint: async () => { },
+				isEnabled: () => true,
+				setEnabled() {},
+				initialize: async () => {},
+				commit: async () => "controlled-checkpoint",
+				saveCheckpoint: async () => {},
 				doesLatestTaskCompletionHaveNewChanges: async () => false,
-				restoreCheckpoint: async () => { throw new Error("Cancellation must not restore the shared workspace") },
+				restoreCheckpoint: async () => {
+					throw new Error("Cancellation must not restore the shared workspace")
+				},
 			} satisfies ICheckpointManager
 		})
-		sandbox.stub(BrowserConnectionManager.prototype, "getDetectedChromePath").resolves({ path: "/mock/chrome", isBundled: false })
+		sandbox
+			.stub(BrowserConnectionManager.prototype, "getDetectedChromePath")
+			.resolves({ path: "/mock/chrome", isBundled: false })
 		launch = sandbox.stub(puppeteer, "launch")
 		sandbox.stub(apiModule, "buildApiHandler").callsFake((configuration) => {
 			const name = configuration.actModeApiModelId!
 			const control = controls.get(name)!
 			const handler: ApiHandler = {
-				getModel: () => ({ id: name, info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false } }),
+				getModel: () => ({
+					id: name,
+					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
+				}),
 				abort() {
 					control.aborted = true
 					control.abort.resolve()
@@ -148,9 +167,12 @@ describe("Tasklet integrated resource cleanup", function () {
 					await Promise.race([control.continue.promise, control.abort.promise])
 					if (control.aborted) return
 					yield {
-						type: "tool_calls", tool_call: {
-							call_id: `${name}-continued`, function: {
-								name: "execute_command", arguments: JSON.stringify({ commands: [`printf '${name}-CONTINUED'`] }),
+						type: "tool_calls",
+						tool_call: {
+							call_id: `${name}-continued`,
+							function: {
+								name: "execute_command",
+								arguments: JSON.stringify({ commands: [`printf '${name}-CONTINUED'`] }),
 							},
 						},
 					}
@@ -161,7 +183,9 @@ describe("Tasklet integrated resource cleanup", function () {
 		})
 		// A ready marker records the actual Node child, not just its shell. Heartbeat
 		// and signal markers make liveness/termination observable independently of mocks.
-		await fs.writeFile(path.join(cwd, "hold.cjs"), `
+		await fs.writeFile(
+			path.join(cwd, "hold.cjs"),
+			`
 const fs = require("node:fs")
 const name = process.argv[2]
 let ticks = 0
@@ -172,7 +196,8 @@ process.on("SIGTERM", () => {
   fs.writeFileSync(name + ".stopped", "SIGTERM")
   process.exit(0)
 })
-`)
+`,
+		)
 	})
 
 	afterEach(async () => {
@@ -196,22 +221,39 @@ process.on("SIGTERM", () => {
 
 	function create(name: string, mode: "backgroundExec" | "vscodeTerminal", rootTaskId?: string) {
 		const control: ProviderControl = {
-			ready: gate(), continue: gate(), continued: gate(), abort: gate(),
-			aborted: false, requests: 0, messages: [],
+			ready: gate(),
+			continue: gate(),
+			continued: gate(),
+			abort: gate(),
+			aborted: false,
+			requests: 0,
+			messages: [],
 		}
 		controls.set(name, control)
 		const taskId = rootTaskId ? createTaskletId() : "resource-root"
 		const params: TaskParams = {
 			controller: { getWorkspaceManager: () => undefined } as any,
-			updateTaskHistory: sandbox.stub().resolves([]), postStateToWebview: sandbox.stub().resolves(),
-			postPresentationToWebview: sandbox.stub().resolves(), reinitExistingTaskFromId: sandbox.stub().resolves(),
-			cancelTask: sandbox.stub().resolves(), updateBackgroundCommandState: sandbox.stub(),
-			shellIntegrationTimeout: 5000, terminalReuseEnabled: true, terminalOutputLineLimit: 500,
-			defaultTerminalProfile: "default", vscodeTerminalExecutionMode: mode,
-			cwd, stateManager, taskId, task: `Keep ${name} running until its owner interrupts it.`,
+			updateTaskHistory: sandbox.stub().resolves([]),
+			postStateToWebview: sandbox.stub().resolves(),
+			postPresentationToWebview: sandbox.stub().resolves(),
+			reinitExistingTaskFromId: sandbox.stub().resolves(),
+			cancelTask: sandbox.stub().resolves(),
+			updateBackgroundCommandState: sandbox.stub(),
+			shellIntegrationTimeout: 5000,
+			terminalReuseEnabled: true,
+			terminalOutputLineLimit: 500,
+			defaultTerminalProfile: "default",
+			vscodeTerminalExecutionMode: mode,
+			cwd,
+			stateManager,
+			taskId,
+			task: `Keep ${name} running until its owner interrupts it.`,
 			workingConfiguration: createTaskWorkingConfiguration({
 				settings: {
-					...SETTINGS_DEFAULTS, mode: "act", enableCheckpointsSetting: true, hooksEnabled: false,
+					...SETTINGS_DEFAULTS,
+					mode: "act",
+					enableCheckpointsSetting: true,
+					hooksEnabled: false,
 					yoloModeToggled: true,
 					autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: false },
 					toolToggles: { execute_command: true },
@@ -221,19 +263,27 @@ process.on("SIGTERM", () => {
 				executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: mode, multiRootEnabled: false },
 			}),
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
-			...(rootTaskId ? {
-				executionProfile: "tasklet" as const,
-				tasklet: {
-					// Resource isolation is tested with a controlled owner granting the command.
-					counterparty: {
-						recordResponse: async () => { },
-						requestInteraction: async () => ({ response: DiracAskResponse.APPROVE, action: DiracAskResponse.APPROVE }),
-					},
-					storageAddress: { kind: "tasklet" as const, rootTaskId, taskletId: taskId },
-					postStateToOwner: sandbox.stub().resolves(), postPresentationToOwner: sandbox.stub().resolves(),
-					updateBackgroundCommandState: sandbox.stub(),
-				},
-			} : {}),
+			...(rootTaskId
+				? {
+						executionProfile: "tasklet" as const,
+						tasklet: {
+							// Resource isolation is tested with a controlled owner granting the command.
+							counterparty: {
+								recordResponse: async () => {},
+								requestInteraction: async () => ({
+									response: DiracAskResponse.APPROVE,
+									action: DiracAskResponse.APPROVE,
+								}),
+							},
+							storageAddress: { kind: "tasklet" as const, rootTaskId, taskletId: taskId },
+							postStateToOwner: sandbox.stub().resolves(),
+							postPresentationToOwner: sandbox.stub().resolves(),
+							withMutationAuthorization: <T>(_toolName: unknown, mutation: () => Promise<T>) => mutation(),
+							retainMutationUntil: () => {},
+							updateBackgroundCommandState: sandbox.stub(),
+						},
+					}
+				: {}),
 		}
 		const task = new Task(params)
 		tasks.push(task)
@@ -282,9 +332,20 @@ process.on("SIGTERM", () => {
 	async function waitFor<T>(promise: Promise<T>, label: string): Promise<T> {
 		let timer: ReturnType<typeof setTimeout> | undefined
 		try {
-			return await Promise.race([promise, new Promise<never>((_, reject) => {
-				timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}; messages: ${JSON.stringify(tasks.map((task) => ({ taskId: task.taskId, messages: task.messageStateHandler.getDiracMessages().slice(-3) })))}`)), 10_000)
-			})])
+			return await Promise.race([
+				promise,
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(
+						() =>
+							reject(
+								new Error(
+									`Timed out waiting for ${label}; messages: ${JSON.stringify(tasks.map((task) => ({ taskId: task.taskId, messages: task.messageStateHandler.getDiracMessages().slice(-3) })))}`,
+								),
+							),
+						10_000,
+					)
+				}),
+			])
 		} finally {
 			clearTimeout(timer)
 		}
@@ -296,10 +357,19 @@ process.on("SIGTERM", () => {
 			const cancelled = create("cancelled", mode, root.task.taskId)
 			const sibling = create("sibling", mode, root.task.taskId)
 			const executions = [root, cancelled, sibling]
-			await waitFor(Promise.all(executions.map(({ control, run }) => Promise.race([
-				control.ready.promise,
-				run.then((outcome) => { throw new Error(`Task ended before provider readiness: ${JSON.stringify(outcome)}`) }),
-			]))), "provider readiness")
+			await waitFor(
+				Promise.all(
+					executions.map(({ control, run }) =>
+						Promise.race([
+							control.ready.promise,
+							run.then((outcome) => {
+								throw new Error(`Task ended before provider readiness: ${JSON.stringify(outcome)}`)
+							}),
+						]),
+					),
+				),
+				"provider readiness",
+			)
 			assert.notEqual(root.task.terminalManager, cancelled.task.terminalManager)
 			assert.notEqual(sibling.task.terminalManager, cancelled.task.terminalManager)
 			assert.notEqual(root.task.browserSession, cancelled.task.browserSession)
@@ -319,7 +389,8 @@ process.on("SIGTERM", () => {
 				const command = (label: string) => `${JSON.stringify(process.execPath)} hold.cjs ${label}`
 				const backgroundName = `${name}-background`
 				const background = await task.executeCommandTool(command(backgroundName), 0.1, {
-					useBackgroundExecution: true, suppressUserInteraction: true,
+					useBackgroundExecution: true,
+					suppressUserInteraction: true,
 				})
 				assert.equal(background[2]?.completed, false)
 				assert.ok(background[2]?.backgroundCompletion)
@@ -366,7 +437,10 @@ process.on("SIGTERM", () => {
 				assert.equal(execution.control.aborted, false)
 				execution.control.continue.resolve()
 			}
-			await waitFor(Promise.all([root.control.continued.promise, sibling.control.continued.promise]), "continued provider turns")
+			await waitFor(
+				Promise.all([root.control.continued.promise, sibling.control.continued.promise]),
+				"continued provider turns",
+			)
 			assert.match(JSON.stringify(root.control.messages[1]), /root-CONTINUED/)
 			assert.match(JSON.stringify(sibling.control.messages[1]), /sibling-CONTINUED/)
 			// Confirm these are tool results, not merely echoed command arguments.

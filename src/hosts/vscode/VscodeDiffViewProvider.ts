@@ -136,8 +136,9 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 
 	override async showReview(
 		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
+		request?: import("@shared/editorReview").EditorReviewRequest,
 	): Promise<void> {
-		await this.reviewManager.showReview(files)
+		await this.reviewManager.showReview(files, request)
 	}
 
 	override async applyAndSaveBatchSilently(

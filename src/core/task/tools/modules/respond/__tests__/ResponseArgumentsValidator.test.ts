@@ -69,6 +69,15 @@ describe("response arguments validator", () => {
 		for (const args of invalid) assert.throws(() => validateResponseArguments(args, environment()))
 	})
 
+	it("rejects tasklet Plan responses even with a stale Plan configuration", () => {
+		const env = environment("plan")
+		env.config.executionProfile = "tasklet"
+		assert.throws(
+			() => validateResponseArguments({ operation: ResponseOperation.PLAN, text: "Plan" }, env),
+			/Tasklets cannot/,
+		)
+	})
+
 	it("enforces Plan and Act response modes", () => {
 		assert.throws(() => validateResponseArguments({ operation: ResponseOperation.PLAN, text: "Plan" }, environment("act")))
 		assert.throws(() =>

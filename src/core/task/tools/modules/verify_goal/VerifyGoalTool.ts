@@ -41,7 +41,15 @@ export class VerifyGoalTool implements IDiracTool {
 			objective.markdown,
 			"</goal_objective>",
 			"<goal_tasklets>",
-			...(children.length ? children.map((child) => `- ${child.id} | ${child.title} | ${child.outcome?.kind ?? "accepted"}`) : ["- none"]),
+			...(children.items.length
+				? children.items.map(
+						(child) =>
+							`- ${child.id} | ${child.title} | ${child.outcome?.kind ?? child.executionStatus ?? "accepted"}`,
+					)
+				: ["- none"]),
+			...(children.nextCursor
+				? ["Additional children are available through tasklets list; this is a bounded inventory excerpt."]
+				: []),
 			"</goal_tasklets>",
 			...(focus ? ["<verification_focus>", focus, "</verification_focus>"] : []),
 		].join("\n\n")
@@ -56,7 +64,7 @@ export class VerifyGoalTool implements IDiracTool {
 			operation: () => tasklets.start({ title: "Goal verification", prompt, purpose: "goal_verification" }),
 			completed: (record) => ({
 				header: "Goal verification accepted",
-				body: `**Tasklet:** \`${record.id}\`\n\n**Focus:** ${focusText}\n\nAcceptance is not verification success. Use tasklets to inspect its outcome.`,
+				body: `**Tasklet:** ${record.title}\n\n**Focus:** ${focusText}\n\nAcceptance is not verification success. Use tasklets to inspect its outcome.`,
 				rawOutput: { ...record },
 			}),
 		})

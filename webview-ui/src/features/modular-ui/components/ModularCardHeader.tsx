@@ -41,7 +41,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const tasklet = readTaskletPresentation(card)
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const taskletStatus = tasklet ? TASKLET_STATUS_PRESENTATION[tasklet.status] : undefined
-	const header = tasklet ? `${tasklet.taskletId} · ${tasklet.title}` : card.header
+	const header = tasklet?.title ?? card.header
 	const status = taskletStatus?.status ?? (isTaskletCard ? CardStatus.PENDING : card.status)
 	const isTerminal = isFinalStatus(status)
 	const subagentData = isTaskletCard ? undefined : readSubagentCardData(card)

@@ -20,7 +20,9 @@ const PREVIEW_CHARACTERS = 1200
 const PREVIEW_ITEMS = 40
 
 function preview(text: string): string {
-	return text.length <= PREVIEW_CHARACTERS ? text : `${text.slice(0, PREVIEW_CHARACTERS)}… [preview; inspect tasklet for full contents]`
+	return text.length <= PREVIEW_CHARACTERS
+		? text
+		: `${text.slice(0, PREVIEW_CHARACTERS)}… [preview; inspect tasklet for full contents]`
 }
 
 /** Routine child activity is diagnostic; it never becomes a parent-directed request. */
@@ -33,6 +35,35 @@ export function taskletActivityPreview(messages: readonly DiracMessage[]): strin
 		}
 		return []
 	})
+}
+
+/** Human projection only; routing identities remain in the owner's structured protocol records. */
+export function taskletCommunicationPreview(
+	communication:
+		| { type: "response"; response: { operation: string; text: string } }
+		| { type: "interaction"; request: { status: string; card: Pick<Card, "header" | "body"> } }
+		| { type: "message"; message: { type: string; text?: string; decision?: string; action?: string } }
+		| { type: "lifecycle"; state: string; assignment?: string }
+		| { type: "outcome"; outcome: { kind: string; response?: string; reason?: string; error?: { message: string } } },
+): string {
+	switch (communication.type) {
+		case "response":
+			return preview(`${communication.response.operation}: ${communication.response.text}`)
+		case "interaction":
+			return preview(
+				`${communication.request.card.header} · ${communication.request.status}${communication.request.card.body ? `\n${communication.request.card.body}` : ""}`,
+			)
+		case "message":
+			return preview(
+				`${communication.message.type}: ${communication.message.text ?? communication.message.decision ?? communication.message.action ?? ""}`,
+			)
+		case "lifecycle":
+			return preview(`${communication.state}${communication.assignment ? `\n${communication.assignment}` : ""}`)
+		case "outcome":
+			return preview(
+				`${communication.outcome.kind}: ${communication.outcome.response ?? communication.outcome.error?.message ?? communication.outcome.reason ?? ""}`,
+			)
+	}
 }
 
 export function createTaskletPresentationCard(data: TaskletPresentationData): Card {
@@ -60,13 +91,24 @@ export function createTaskletPresentationCard(data: TaskletPresentationData): Ca
 		rawInput: { isTasklet: true, taskletId: data.taskletId },
 		rawOutput: { tasklet: bounded },
 		body: [
-			`Tasklet ${data.taskletId} · ${data.status}`,
+			`${data.title} · ${data.status}`,
 			bounded.result,
-			data.status === "waiting" ? "Waiting for the parent; use tasklets to inspect and resolve or escalate." : undefined,
-		].filter(Boolean).join("\n\n"),
+			data.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
+		]
+			.filter(Boolean)
+			.join("\n\n"),
 	}
 }
 
 export function readTaskletPresentation(card: Card): TaskletPresentationData | undefined {
-	return card.rawInput?.isTasklet === true ? card.rawOutput?.tasklet as TaskletPresentationData | undefined : undefined
+	if (card.rawInput?.isTasklet !== true) return undefined
+	const data = card.rawOutput?.tasklet as TaskletPresentationData | undefined
+	if (!data) return undefined
+	// Historical cards stored raw (and sometimes truncated) protocol JSON. Do not display routing IDs.
+	return {
+		...data,
+		communications: data.communications.map((text) =>
+			text.startsWith('{"type":') ? "Historical communication; the parent can inspect its exact messages." : text,
+		),
+	}
 }

@@ -57,44 +57,51 @@ async function openAgents(session) {
 	return requestSession(session, { operation: "wait", text: "3 total", timeoutMs: 30000 })
 }
 
+function agentPanelLines(snapshot) {
+	const start = snapshot.lines.findLastIndex((line) => line.includes("Agents (Esc to close)"))
+	assert.notEqual(start, -1, snapshot.screen)
+	return snapshot.lines.slice(start)
+}
+
 function assertAgents(snapshot, ids, statuses) {
+	const lines = agentPanelLines(snapshot)
 	assert.match(snapshot.screen, /3 visible · 3 total/, snapshot.screen)
 	for (let index = 0; index < ids.length; index++) {
+		assert.ok(!snapshot.screen.includes(ids[index]), "Normal UI must not expose routing identities")
 		assert.ok(
-			snapshot.lines.some(
+			lines.some(
 				(line) =>
-					line.includes(ids[index]) &&
 					line.includes(`Fixture ${index ? "BETA" : "ALPHA"}`) &&
 					line.includes(`· ${statuses[index]}`),
 			),
 			snapshot.screen,
 		)
 		assert.equal(
-			snapshot.lines.filter((line) => line.includes(`Tasklet ${ids[index]}: Fixture`)).length,
+			lines.filter((line) => line.includes(`Fixture ${index ? "BETA" : "ALPHA"} ·`)).length,
 			1,
-			"Each stable handle appears once in the list",
+			"Each titled assignment appears once in the list",
 		)
 	}
 }
 
-async function inspectTasklet(session, id, expected) {
+async function inspectTasklet(session, title, expected) {
 	const snapshot = await requestSession(session, { operation: "screen" })
-	const taskletRows = snapshot.lines.filter((line) => line.includes("Tasklet ") && line.includes(": Fixture "))
-	const index = taskletRows.findIndex((line) => line.includes(`Tasklet ${id}: Fixture`))
+	const taskletRows = agentPanelLines(snapshot).filter((line) => line.includes("Fixture ") && line.includes(" · "))
+	const index = taskletRows.findIndex((line) => line.includes(`${title} ·`))
 	assert.notEqual(index, -1, snapshot.screen)
-	// Concurrent startup does not promise list order. Select the stable ID, not the first child.
+	// Concurrent startup does not promise list order; select the requested assignment title.
 	await requestSession(session, { operation: "key", key: "Up", count: 2 })
 	await requestSession(session, { operation: "key", key: "Down", count: index + 1 })
 	await requestSession(session, { operation: "key", key: "Enter" })
 	const inspected = await requestSession(session, { operation: "wait", text: expected })
-	assert.match(inspected.screen, new RegExp(`Tasklet ${id}: Fixture`))
+	assert.match(inspected.screen, new RegExp(`${title} ·`))
 	await requestSession(session, { operation: "key", key: "Escape" })
 	return inspected
 }
 
 for (const rootKind of ["standalone", "goal"]) {
 	test(
-		`tasklets (${rootKind}): real CLI asynchronous siblings, parent sleep/resolve, same-ID resume and retained Agents previews`,
+		`tasklets (${rootKind}): real CLI asynchronous siblings, parent sleep/message, same-ID resume and retained Agents previews`,
 		{ timeout: 300000 },
 		async (context) => {
 			const metadata = await startSession({ fixture: "tasklets", cols: 180, rows: 46 })
@@ -130,9 +137,10 @@ for (const rootKind of ["standalone", "goal"]) {
 			const accepted = entries.find((entry) => entry.actor === "parent" && entry.result?.subagents)?.result.subagents
 			assert.equal(accepted.length, 2)
 			const ids = accepted.map((child) => child.id)
-			const rootId = entries.find((entry) => entry.result?.rootTaskId).result.rootTaskId
 			const dataDirectory = path.join(session, "home", "data")
 			const tasksDirectory = path.join(dataDirectory, "tasks")
+			const [rootId, ...unexpectedRoots] = (await readdir(tasksDirectory, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.endsWith(".lock")).map((entry) => entry.name)
+			assert.deepEqual(unexpectedRoots, [])
 			const goalFile = path.join(tasksDirectory, rootId, "goal.json")
 			if (rootKind === "goal") {
 				const goal = JSON.parse(await readFile(goalFile, "utf8"))
@@ -143,9 +151,18 @@ for (const rootKind of ["standalone", "goal"]) {
 				assert.equal(child.accepted, true)
 				assert.equal(child.outcome, undefined, "Public spawn is asynchronous acceptance, not a join")
 			}
+			// Original screen-fit reproduction: completed parent controls must remain accessible
+			// while neither child can finish, with no empty accounting rows or UUID headings.
+			await requestSession(session, { operation: "resize", cols: 80, rows: 24 })
+			const narrow = await requestSession(session, { operation: "screen", scrollback: true })
+			const accessible = [...narrow.scrollback, ...narrow.lines].join("\n")
+			assert.match(accessible, /Tasklets|Inspect/)
+			assert.doesNotMatch(accessible, /Tasklet usage/)
+			for (const id of ids) assert.ok(!accessible.includes(id), "Routing identity leaked into transcript")
+			await requestSession(session, { operation: "resize", cols: 180, rows: 46 })
 			const waiting = await openAgents(session)
 			assertAgents(waiting, ids, ["waiting", "waiting"])
-			const preview = await inspectTasklet(session, ids[0], "Waiting for the parent")
+			const preview = await inspectTasklet(session, "Fixture ALPHA", "Waiting for the parent")
 			assert.match(preview.screen, /ALPHA_QUESTION_PRIVATE/)
 			await requestSession(session, { operation: "key", key: "Escape" })
 			const reopenedWaiting = await openAgents(session)
@@ -167,7 +184,7 @@ for (const rootKind of ["standalone", "goal"]) {
 			)
 			assert.ok(entries.some((entry) => entry.result?.reason === "user_message"))
 			assertAgents(await openAgents(session), ids, ["completed", "waiting"])
-			await inspectTasklet(session, ids[0], ALPHA_RESULT)
+			await inspectTasklet(session, "Fixture ALPHA", ALPHA_RESULT)
 			await requestSession(session, { operation: "key", key: "Escape" })
 			await submit(session, "Reopen Alpha, then finish Beta.")
 			await requestSession(session, { operation: "wait", text: TASKLET_DONE, timeoutMs: 30000 })
@@ -178,21 +195,21 @@ for (const rootKind of ["standalone", "goal"]) {
 			assert.ok(
 				entries.some(
 					(entry) =>
-						entry.result?.id === ids[0] &&
-						entry.result.outcomePersisted &&
+						entry.result?.items?.[0]?.id === ids[0] &&
+						entry.result.items[0].outcomePersisted &&
 						JSON.stringify(entry.result).includes(ALPHA_REOPENED),
 				),
 			)
 			assert.ok(
 				entries.some(
 					(entry) =>
-						entry.result?.id === ids[1] &&
-						entry.result.outcomePersisted &&
+						entry.result?.items?.[0]?.id === ids[1] &&
+						entry.result.items[0].outcomePersisted &&
 						JSON.stringify(entry.result).includes(BETA_RESULT),
 				),
 			)
 			assertAgents(await openAgents(session), ids, ["completed", "completed"])
-			await inspectTasklet(session, ids[0], ALPHA_REOPENED)
+			await inspectTasklet(session, "Fixture ALPHA", ALPHA_REOPENED)
 			await requestSession(session, { operation: "key", key: "Escape" })
 			assertAgents(await openAgents(session), ids, ["completed", "completed"])
 			await requestSession(session, { operation: "stop" })
@@ -239,7 +256,7 @@ for (const rootKind of ["standalone", "goal"]) {
 			const restoredList = await openAgents(restored)
 			assertAgents(restoredList, ids, ["completed", "completed"])
 			assert.equal(restoredList.fixtureRequests, null)
-			await inspectTasklet(restored, ids[0], ALPHA_REOPENED)
+			await inspectTasklet(restored, "Fixture ALPHA", ALPHA_REOPENED)
 			assert.deepEqual(
 				await Promise.all(retainedFiles.map((file) => readFile(file, "utf8"))),
 				retainedBytes,

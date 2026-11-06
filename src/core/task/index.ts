@@ -4,12 +4,19 @@ import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME } from "@shared/responseTool"
 import { AgentConfigLoader } from "./tools/subagent/AgentConfigLoader"
 import { DEFAULT_SUBAGENT_TIMEOUT_SECONDS } from "./tools/subagent/SubagentExecutionPolicy"
 import { getSavedApiConversationState, getSavedPresentationHistory } from "@core/storage/conversationHistory"
-import { loadTaskletRecords, loadTaskletEvents, saveTaskletEvents, saveTaskletRecord, type TaskletRecord, type TaskletEvent } from "@core/storage/taskStorage"
+import {
+	loadTaskletRecords,
+	loadTaskletEvents,
+	saveTaskletEvents,
+	saveTaskletRecord,
+	type TaskletRecord,
+	type TaskletEvent,
+} from "@core/storage/taskStorage"
 import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
 import { createTaskletId } from "@shared/taskletId"
 import { taskletUsageAvailability, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { getApiMetrics, getApiUsageKnowledge } from "@shared/getApiMetrics"
-import { taskletActivityPreview, type TaskletPresentationData } from "@shared/taskletPresentation"
+import { taskletActivityPreview, taskletCommunicationPreview, type TaskletPresentationData } from "@shared/taskletPresentation"
 import { ApiHandler, ApiProviderInfo, buildApiHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
@@ -43,6 +50,7 @@ import { BrowserSession } from "@services/browser/BrowserSession"
 import { UrlContentFetcher } from "@services/browser/UrlContentFetcher"
 import { telemetryService } from "@services/telemetry"
 import { type ApiConfiguration, type ModelProviderSelection } from "@shared/api"
+import { ApiHandlerSettingsKeys } from "@shared/storage/state-keys"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
@@ -69,6 +77,7 @@ import { HookManager } from "./HookManager"
 import { LifecycleManager, type ResumeTaskOptions } from "./LifecycleManager"
 import { LocalConversationCompaction } from "./LocalConversationCompaction"
 import { MessageStateHandler, type DiracMessageChange } from "./message-state"
+import { materializeModelBoundInput } from "./TaskInputMaterialization"
 import { ResponseProcessor } from "./ResponseProcessor"
 import {
 	assertTaskMutationAuthorized,
@@ -117,14 +126,27 @@ import { SurfaceToolEnvironmentFactory } from "./tools/adapters/SurfaceAdapter"
 import { DiracContext } from "./tools/context/DiracContext"
 import type { ToolEnvironmentFactory } from "./tools/interfaces/ToolEnvironmentFactory"
 import type {
-	TaskletInteraction, TaskletInspection, TaskletTranscript, TaskletInteractionResult,
-	TaskletInteractionDecision, TaskletResolution, TaskletSleepOptions, TaskletWakeResult,
+	TaskletInteraction,
+	TaskletInspection,
+	TaskletTranscript,
+	TaskletInteractionResult,
+	TaskletInteractionDecision,
+	TaskletResolution,
+	TaskletSleepOptions,
+	TaskletWakeResult,
+	TaskletMessage,
+	TaskletMessageResult,
 } from "./tools/interfaces/IToolEnvironment"
+import { inspectTasklet, summarizeTasklet, pageInspectionItems, type TaskletInspectionQuery } from "./TaskletInspection"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
 export type {
-	TaskletInteraction, TaskletInspection, TaskletTranscript, TaskletInteractionResult,
-	TaskletInteractionDecision, TaskletResolution,
+	TaskletInteraction,
+	TaskletInspection,
+	TaskletTranscript,
+	TaskletInteractionResult,
+	TaskletInteractionDecision,
+	TaskletResolution,
 } from "./tools/interfaces/IToolEnvironment"
 
 export type ToolResponse = DiracToolResponseContent
@@ -134,8 +156,12 @@ import type { TaskCounterparty, TaskInteractionRequest } from "./types/task-mess
 /** Private owner bindings; a tasklet never falls back to foreground publication. */
 export interface TaskletExecutionBindings {
 	configuration?: TaskletConfiguration
+	/** Current immutable owner configuration; inherited only between model requests. */
+	getParentWorkingConfiguration?: () => TaskWorkingConfiguration
 	initialHistory?: { messages: DiracStorageMessage[]; deletedRange?: [number, number] }
+	retainMutationUntil: (completion: Promise<void>) => void
 	counterparty: TaskCounterparty
+	withMutationAuthorization: <T>(toolName: DiracToolSpec["id"] | undefined, mutation: () => Promise<T>) => Promise<T>
 	storageAddress: Extract<TaskStorageAddress, { kind: "tasklet" }>
 	postStateToOwner: () => Promise<void>
 	postPresentationToOwner?: () => Promise<void>
@@ -278,6 +304,7 @@ export class Task {
 			executionProfile: this.executionProfile,
 			getPinnedContext: this.getPinnedContext,
 			taskletConfiguration: this.taskletConfiguration,
+			getTaskletSupervisionContext: () => this.taskletHost?.supervisionSnapshot(),
 			writePromptMetadataArtifacts: (params) =>
 				writePromptMetadataArtifacts(
 					{
@@ -338,7 +365,11 @@ export class Task {
 	}
 
 	private hasPendingChatInput(): boolean {
-		return this.taskState.pendingUserMessage !== undefined || !!this.taskState.pendingUserImages?.length || !!this.taskState.pendingUserFiles?.length
+		return (
+			this.taskState.pendingUserMessage !== undefined ||
+			!!this.taskState.pendingUserImages?.length ||
+			!!this.taskState.pendingUserFiles?.length
+		)
 	}
 
 	public canAcceptSteeringMessage(): boolean {
@@ -367,42 +398,13 @@ export class Task {
 	private async deliverTaskletEvents(outboundHistory: DiracStorageMessage[]): Promise<void> {
 		const delivery = await this.taskletHost?.prepareEventDelivery()
 		if (!delivery) return
-		let outboundUserMessage = outboundHistory.at(-1)
-		if (!outboundUserMessage || outboundUserMessage.role !== "user") {
-			throw new Error("Cannot deliver tasklet events without a final user message")
-		}
-		const history = this.messageStateHandler.getApiConversationHistory()
-		const checkpoint = this.messageStateHandler.getApiConversationProviderState().checkpoint
-		const eventIds = (message: DiracStorageMessage): string[] => Array.isArray(message.content)
-			? message.content.flatMap((block) => block.type === "text" ? (block as DiracTextContentBlock).taskletEventIds ?? [] : [])
-			: []
-		const recordedIds = new Set(history.flatMap(eventIds))
-		const newContent = delivery.content.filter((block) => !recordedIds.has(block.taskletEventIds![0]))
-		// A checkpoint is an opaque snapshot: mutating its final user message cannot
-		// update that snapshot. Preserve it and append new communications after its boundary.
-		if (newContent.length && checkpoint && checkpoint.compactedThroughHistoryIndex >= history.length - 1) {
-			await this.messageStateHandler.addToApiConversationHistory({ role: "user", content: newContent })
-			outboundUserMessage = history.at(-1)!
-			if (outboundHistory !== history) outboundHistory.push(outboundUserMessage)
-		} else {
-			for (const block of newContent) await this.messageStateHandler.appendToLastApiConversationUserMessage(block)
-		}
-		for (const block of delivery.content) {
-			const id = block.taskletEventIds![0]
-			if (outboundHistory.some((message) => eventIds(message).includes(id))) continue
-			const recordedIndex = history.findIndex((message) => eventIds(message).includes(id))
-			// Receipt-only retries must not put checkpointed input into the suffix again.
-			if (checkpoint && recordedIndex <= checkpoint.compactedThroughHistoryIndex) continue
-			if (typeof outboundUserMessage.content === "string") {
-				outboundUserMessage.content = [{ type: "text", text: outboundUserMessage.content }, block]
-			} else {
-				outboundUserMessage.content.push(block)
-			}
-		}
-		// A failed flush leaves the receipt in the write buffer, but the host event stays pending.
-		// Retrying flush/ack must not append another copy to the parent's persisted conversation.
-		await this.messageStateHandler.flushPendingWrites()
-		await delivery.acknowledge()
+		await materializeModelBoundInput(
+			this.messageStateHandler,
+			outboundHistory,
+			delivery.content,
+			"taskletEventIds",
+			delivery.acknowledge,
+		)
 	}
 
 	private async claimSteeringMessages(): Promise<SteeringClaim | undefined> {
@@ -525,6 +527,8 @@ export class Task {
 	private readonly getPinnedContext: () => Promise<string | undefined>
 	private readonly taskletConfiguration?: TaskletConfiguration
 	private readonly initialTaskletHistory?: TaskletExecutionBindings["initialHistory"]
+	private readonly ownerBindings?: TaskletExecutionBindings
+	private inheritedParentConfiguration?: TaskWorkingConfiguration
 
 	// Command executor for running shell commands (extracted from executeCommandTool)
 	private commandExecutor!: CommandExecutor
@@ -563,7 +567,9 @@ export class Task {
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
 		this.taskletConfiguration = params.tasklet?.configuration
 		this.initialTaskletHistory = params.tasklet?.initialHistory
-		if (this.executionProfile.startsWith("goal_") && workingConfiguration.settings.mode !== "act") {
+		this.ownerBindings = params.tasklet
+		this.inheritedParentConfiguration = params.tasklet?.getParentWorkingConfiguration?.()
+		if (this.executionProfile !== "standalone" && workingConfiguration.settings.mode !== "act") {
 			throw new Error(`${this.executionProfile} Tasks require an Act-mode working configuration`)
 		}
 		this.contextCompactionObserver = params.onContextCompacted
@@ -580,8 +586,8 @@ export class Task {
 		this.updateTaskHistory = contained ? async () => [] : updateTaskHistory
 		this.postStateToWebview = contained ? contained.postStateToOwner : postStateToWebview
 		this.postPresentationToWebview = contained
-			? contained.postPresentationToOwner ?? contained.postStateToOwner
-			: postPresentationToWebview ?? postStateToWebview
+			? (contained.postPresentationToOwner ?? contained.postStateToOwner)
+			: (postPresentationToWebview ?? postStateToWebview)
 		this.reinitExistingTaskFromId = contained
 			? async () => {
 				throw new Error("Tasklets are reconstructed only by their owner")
@@ -597,10 +603,9 @@ export class Task {
 		this.terminalExecutionMode = vscodeTerminalExecutionMode || "vscodeTerminal"
 		this.switchToActMode = contained
 			? async () => {
-				await this.applyWorkingConfigurationUpdate({ settings: { mode: "act" } })
-				return true
+				throw new Error("Tasklets cannot switch execution mode")
 			}
-			: params.switchToActMode ?? (() => this.host.toggleActModeForYoloMode())
+			: (params.switchToActMode ?? (() => this.host.toggleActModeForYoloMode()))
 		this.enqueuePreRequestSteeringMessages = params.enqueuePreRequestSteeringMessages ?? (async () => undefined)
 		this.conversationPersistenceHooks = params.conversationPersistenceHooks
 
@@ -649,65 +654,90 @@ export class Task {
 		const restoredPrimary = contained?.usage?.primary ? structuredClone(contained.usage.primary) : undefined
 		let restoredMessageIds: Set<string> | undefined
 		const newPrimaryUsage = new Map<string, TaskletUsageSnapshot["primary"]>()
-		const recordUsage = recordOwnerUsage ? (change?: DiracMessageChange) => {
-			const snapshot = this.getUsageSnapshot()
-			if (restoredPrimary && !restoredMessageIds) {
-				// Utility can report before history restoration. The durable primary
-				// snapshot remains authoritative until the actual restored prefix arrives.
-				if (change?.type !== "set") {
-					snapshot.primary = structuredClone(restoredPrimary)
-					recordOwnerUsage(snapshot)
-					return
-				}
-				restoredMessageIds = new Set(change.messages.map((message) => message.id))
-				const fields = ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const
-				const transcriptAhead = fields.some((key) => (snapshot.primary[key] ?? 0) > (restoredPrimary[key] ?? 0))
-				// A transcript ahead of its usage record contains additional historical
-				// spend; only that case may further constrain the durable prefix knowledge.
-				if (transcriptAhead) {
-					const combined = taskletUsageTotal({ primary: restoredPrimary, utility: snapshot.primary })
-					restoredPrimary.usageObserved = combined.usageObserved
-					restoredPrimary.usageAvailability = combined.usageAvailability
-				}
-				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
-					if (snapshot.primary[key] !== undefined) restoredPrimary[key] = Math.max(restoredPrimary[key] ?? 0, snapshot.primary[key]!)
-				}
-			}
-			if (restoredPrimary && restoredMessageIds) {
-				for (const message of this.messageStateHandler.getDiracMessages()) {
-					if (restoredMessageIds.has(message.id) || message.content.type !== "api_status") continue
-					// Checkpoint summaries duplicate already observed requests (including
-					// the restored prefix); they are not new usage sources. Retry archives
-					// update an existing request and remain part of that request's lifetime.
-					if (message.content.status.deletedMetrics && !newPrimaryUsage.has(message.id)) continue
-					const metrics = getApiMetrics([message])
-					newPrimaryUsage.set(message.id, {
-						tokensIn: metrics.totalTokensIn, tokensOut: metrics.totalTokensOut,
-						cacheWrites: metrics.totalCacheWrites, cacheReads: metrics.totalCacheReads,
-						cost: metrics.totalCost, reasoningTokens: metrics.totalReasoningTokens,
-						...getApiUsageKnowledge([message]),
-					})
-				}
-				for (const key of ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const) {
-					const incurred = [...newPrimaryUsage.values()].reduce((total, usage) => total + (usage[key] ?? 0), restoredPrimary[key] ?? 0)
-					if (incurred || restoredPrimary[key] !== undefined || snapshot.primary[key] !== undefined) {
-						snapshot.primary[key] = Math.max(snapshot.primary[key] ?? 0, incurred)
+		const recordUsage = recordOwnerUsage
+			? (change?: DiracMessageChange) => {
+				const snapshot = this.getUsageSnapshot()
+				if (restoredPrimary && !restoredMessageIds) {
+					// Utility can report before history restoration. The durable primary
+					// snapshot remains authoritative until the actual restored prefix arrives.
+					if (change?.type !== "set") {
+						snapshot.primary = structuredClone(restoredPrimary)
+						recordOwnerUsage(snapshot)
+						return
+					}
+					restoredMessageIds = new Set(change.messages.map((message) => message.id))
+					const fields = ["tokensIn", "tokensOut", "cacheWrites", "cacheReads", "cost", "reasoningTokens"] as const
+					const transcriptAhead = fields.some((key) => (snapshot.primary[key] ?? 0) > (restoredPrimary[key] ?? 0))
+					// A transcript ahead of its usage record contains additional historical
+					// spend; only that case may further constrain the durable prefix knowledge.
+					if (transcriptAhead) {
+						const combined = taskletUsageTotal({ primary: restoredPrimary, utility: snapshot.primary })
+						restoredPrimary.usageObserved = combined.usageObserved
+						restoredPrimary.usageAvailability = combined.usageAvailability
+					}
+					for (const key of [
+						"tokensIn",
+						"tokensOut",
+						"cacheWrites",
+						"cacheReads",
+						"cost",
+						"reasoningTokens",
+					] as const) {
+						if (snapshot.primary[key] !== undefined)
+							restoredPrimary[key] = Math.max(restoredPrimary[key] ?? 0, snapshot.primary[key]!)
 					}
 				}
-				const sources = [restoredPrimary, ...newPrimaryUsage.values()].filter((source) => source.usageObserved !== false)
-				const knowledge = sources.map(taskletUsageAvailability)
-				snapshot.primary.usageObserved = sources.length > 0
-				snapshot.primary.usageAvailability = {
-					inputTokens: knowledge.every((source) => source.inputTokens),
-					outputTokens: knowledge.every((source) => source.outputTokens),
-					reasoningTokens: knowledge.every((source) => source.reasoningTokens),
-					cacheWrites: knowledge.every((source) => source.cacheWrites),
-					cacheReads: knowledge.every((source) => source.cacheReads),
-					cost: knowledge.every((source) => source.cost),
+				if (restoredPrimary && restoredMessageIds) {
+					for (const message of this.messageStateHandler.getDiracMessages()) {
+						if (restoredMessageIds.has(message.id) || message.content.type !== "api_status") continue
+						// Checkpoint summaries duplicate already observed requests (including
+						// the restored prefix); they are not new usage sources. Retry archives
+						// update an existing request and remain part of that request's lifetime.
+						if (message.content.status.deletedMetrics && !newPrimaryUsage.has(message.id)) continue
+						const metrics = getApiMetrics([message])
+						newPrimaryUsage.set(message.id, {
+							tokensIn: metrics.totalTokensIn,
+							tokensOut: metrics.totalTokensOut,
+							cacheWrites: metrics.totalCacheWrites,
+							cacheReads: metrics.totalCacheReads,
+							cost: metrics.totalCost,
+							reasoningTokens: metrics.totalReasoningTokens,
+							...getApiUsageKnowledge([message]),
+						})
+					}
+					for (const key of [
+						"tokensIn",
+						"tokensOut",
+						"cacheWrites",
+						"cacheReads",
+						"cost",
+						"reasoningTokens",
+					] as const) {
+						const incurred = [...newPrimaryUsage.values()].reduce(
+							(total, usage) => total + (usage[key] ?? 0),
+							restoredPrimary[key] ?? 0,
+						)
+						if (incurred || restoredPrimary[key] !== undefined || snapshot.primary[key] !== undefined) {
+							snapshot.primary[key] = Math.max(snapshot.primary[key] ?? 0, incurred)
+						}
+					}
+					const sources = [restoredPrimary, ...newPrimaryUsage.values()].filter(
+						(source) => source.usageObserved !== false,
+					)
+					const knowledge = sources.map(taskletUsageAvailability)
+					snapshot.primary.usageObserved = sources.length > 0
+					snapshot.primary.usageAvailability = {
+						inputTokens: knowledge.every((source) => source.inputTokens),
+						outputTokens: knowledge.every((source) => source.outputTokens),
+						reasoningTokens: knowledge.every((source) => source.reasoningTokens),
+						cacheWrites: knowledge.every((source) => source.cacheWrites),
+						cacheReads: knowledge.every((source) => source.cacheReads),
+						cost: knowledge.every((source) => source.cost),
+					}
 				}
+				recordOwnerUsage(snapshot)
 			}
-			recordOwnerUsage(snapshot)
-		} : undefined
+			: undefined
 		if (recordUsage) this.messageStateHandler.on("diracMessagesChanged", recordUsage)
 
 		this.taskMessenger = new TaskMessenger({
@@ -898,7 +928,10 @@ export class Task {
 			updateBackgroundCommandState: (isRunning: boolean) =>
 				(contained
 					? contained.updateBackgroundCommandState
-					: updateBackgroundCommandState ?? this.host.updateBackgroundCommandState.bind(this.host))(isRunning, this.taskId),
+					: (updateBackgroundCommandState ?? this.host.updateBackgroundCommandState.bind(this.host)))(
+						isRunning,
+						this.taskId,
+					),
 			updateDiracMessage: async (index: number, updates: Partial<import("@shared/ExtensionMessage").DiracMessage>) => {
 				await this.messageStateHandler.updateDiracMessage(index, updates)
 				await this.postStateToWebview()
@@ -940,7 +973,10 @@ export class Task {
 			(requestConfiguration, toolName, mutation) =>
 				this.withMutationAuthorization(requestConfiguration, toolName, mutation),
 			(transition) => this.mutationGate.transitionFromMutation(transition),
-			(completion) => this.mutationGate.retainMutationUntil(completion),
+			(completion) => {
+				this.mutationGate.retainMutationUntil(completion)
+				this.ownerBindings?.retainMutationUntil(completion)
+			},
 			this.commitEnabledToolToggles.bind(this),
 			this.saveCheckpointCallback.bind(this),
 			this.commitAttemptCompletion.bind(this),
@@ -967,12 +1003,10 @@ export class Task {
 				return {
 					start: (input) => host.start(input),
 					resume: (id, message) => host.resume(id, message),
-					list: () => host.list(),
-					inspect: (id) => host.inspect(id),
-					readTranscript: (id) => host.readTranscript(id),
-					steer: (id, message) => host.steer(id, message),
-					interrupt: (id, reason) => host.interrupt(id, reason),
-					resolveInteraction: (id, requestId, decision) => host.resolveInteraction(id, requestId, decision),
+					list: (query) => host.listSummaries(query),
+					inspect: (id, query) => host.query(id, query),
+					message: (items) => host.message(items),
+					interrupt: async (id, reason) => summarizeTasklet(await host.interrupt(id, reason)),
 					sleep: (options) => host.sleep(options, this.taskState.abortSignal),
 				}
 			},
@@ -1123,47 +1157,66 @@ export class Task {
 			assistantStreamManager: this.assistantStreamManager,
 		})
 
-		if (this.executionProfile === "standalone" || this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup") {
+		if (
+			this.executionProfile === "standalone" ||
+			this.executionProfile === "goal_coordinator" ||
+			this.executionProfile === "goal_followup"
+		) {
 			const root = this
-			this.taskletHost = new TaskletHost({
-				taskId: this.taskId, executionProfile: this.executionProfile,
-				recordTaskletUsage: (id, usage) => this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage)),
-				projectTasklet: async (data) => {
-					await this.messageStateHandler.upsertTaskletPresentation(data)
-					void this.postPresentationToWebview().catch((error) => Logger.error("Tasklet presentation publication failed:", error))
+			this.taskletHost = new TaskletHost(
+				{
+					taskId: this.taskId,
+					executionProfile: this.executionProfile,
+					recordTaskletUsage: (id, usage) => this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage)),
+					projectTasklet: async (data) => {
+						await this.messageStateHandler.upsertTaskletPresentation(data)
+						void this.postPresentationToWebview().catch((error) =>
+							Logger.error("Tasklet presentation publication failed:", error),
+						)
+					},
+					authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
+					retainMutationUntil: (completion) => this.mutationGate.retainMutationUntil(completion),
+					assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
+					withMutationAuthorization: (toolName, mutation) =>
+						this.withMutationAuthorization(
+							this.activeRequestRuntime?.workingConfiguration ?? this.workingConfiguration,
+							toolName,
+							mutation,
+						),
+					escalateInteraction: (child, request, signal) => {
+						const operation = () => this.taskMessenger.escalateTaskletInteraction(child, request, signal)
+						return params.duringTaskletUserInteraction ? params.duringTaskletUserInteraction(operation) : operation()
+					},
+					hasPendingUserInput: () =>
+						this.taskState.steeringMessages.some(
+							(message) => message.deliveryState === SteeringDeliveryState.QUEUED,
+						) || this.hasPendingChatInput(),
 				},
-				authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
-				assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
-				escalateInteraction: (child, request, signal) => {
-					const operation = () => this.taskMessenger.escalateTaskletInteraction(child, request, signal)
-					return params.duringTaskletUserInteraction ? params.duringTaskletUserInteraction(operation) : operation()
+				{
+					controller,
+					cwd,
+					stateManager,
+					workspaceManager,
+					shellIntegrationTimeout,
+					terminalReuseEnabled,
+					terminalOutputLineLimit,
+					defaultTerminalProfile,
+					vscodeTerminalExecutionMode,
+					get workingConfiguration() {
+						return root.getWorkingConfiguration()
+					},
+					getParentHistory: () => ({
+						messages: this.messageStateHandler.getApiConversationHistory(),
+						deletedRange: this.taskState.conversationHistoryDeletedRange,
+					}),
+					get pinnedContext() {
+						return root.taskState.pinnedContext
+					},
+					toolSelectionPolicy: params.toolSelectionPolicy,
+					// Goal controls belong only to the coordinator, never to a private child.
+					toolEnvironmentFactory: this.executionProfile === "standalone" ? params.toolEnvironmentFactory : undefined,
 				},
-				hasPendingUserInput: () => this.taskState.steeringMessages.some((message) => message.deliveryState === SteeringDeliveryState.QUEUED)
-					|| this.hasPendingChatInput(),
-			}, {
-				controller,
-				cwd,
-				stateManager,
-				workspaceManager,
-				shellIntegrationTimeout,
-				terminalReuseEnabled,
-				terminalOutputLineLimit,
-				defaultTerminalProfile,
-				vscodeTerminalExecutionMode,
-				get workingConfiguration() {
-					return root.getWorkingConfiguration()
-				},
-				getParentHistory: () => ({
-					messages: this.messageStateHandler.getApiConversationHistory(),
-					deletedRange: this.taskState.conversationHistoryDeletedRange,
-				}),
-				get pinnedContext() {
-					return root.taskState.pinnedContext
-				},
-				toolSelectionPolicy: params.toolSelectionPolicy,
-				// Goal controls belong only to the coordinator, never to a private child.
-				toolEnvironmentFactory: this.executionProfile === "standalone" ? params.toolEnvironmentFactory : undefined,
-			})
+			)
 		}
 	}
 
@@ -1186,6 +1239,9 @@ export class Task {
 			this.withStateLock(async () => {
 				const previous = this.workingConfiguration
 				const resolvedPatch = typeof patch === "function" ? patch(previous) : patch
+				if (this.executionProfile === "tasklet" && resolvedPatch.settings?.mode === "plan") {
+					throw new Error("Tasklets always execute in Act mode")
+				}
 				const candidate = buildTaskWorkingConfigurationUpdate(previous, resolvedPatch)
 				validateApiConfiguration(candidate.apiConfiguration as ApiConfiguration, candidate.settings.mode)
 				const candidateApi = this.createApiHandlerForRuntime(
@@ -1209,6 +1265,25 @@ export class Task {
 				return candidate
 			}),
 		)
+	}
+
+	/** Reuse the configuration transaction without changing an in-flight request or constructor-owned resources. */
+	private async inheritParentWorkingConfiguration(): Promise<void> {
+		const parent = this.ownerBindings?.getParentWorkingConfiguration?.()
+		if (!parent || parent === this.inheritedParentConfiguration) return
+		const inherited = taskletWorkingConfiguration(
+			parent,
+			this.taskletConfiguration ?? { includeHistory: false, timeoutSeconds: DEFAULT_SUBAGENT_TIMEOUT_SECONDS },
+		)
+		// The runtime API configuration owns provider/model fields, not legacy Settings defaults.
+		const settings = { ...inherited.settings }
+		for (const key of ApiHandlerSettingsKeys) delete settings[key]
+		await this.applyWorkingConfigurationUpdate({
+			settings: settings as TaskWorkingConfigurationPatch["settings"],
+			apiConfiguration: inherited.apiConfiguration as ApiConfiguration,
+			workspaceConfiguration: inherited.workspaceConfiguration as TaskWorkingConfigurationPatch["workspaceConfiguration"],
+		})
+		this.inheritedParentConfiguration = parent
 	}
 
 	private async commitEnabledToolToggles(toolIds: readonly string[], finalize?: () => Promise<void>): Promise<void> {
@@ -1237,10 +1312,12 @@ export class Task {
 		toolName: DiracToolSpec["id"] | undefined,
 		mutation: () => Promise<T>,
 	): Promise<T> {
-		return this.mutationGate.withMutation(
-			() => assertTaskMutationAuthorized(requestConfiguration, this.workingConfiguration, toolName),
-			mutation,
-		)
+		const mutate = () =>
+			this.mutationGate.withMutation(
+				() => assertTaskMutationAuthorized(requestConfiguration, this.workingConfiguration, toolName),
+				mutation,
+			)
+		return this.ownerBindings ? this.ownerBindings.withMutationAuthorization(toolName, mutate) : mutate()
 	}
 
 	/** Construct a model runtime without installing it on the task. */
@@ -1355,12 +1432,18 @@ export class Task {
 		value?: string,
 	) {
 		await this.withStateLock(async () => {
+			if (!cardId && response !== DiracAskResponse.MESSAGE) {
+				throw new Error("An exact card ID is required for an interaction decision")
+			}
 			if (!cardId && response === DiracAskResponse.MESSAGE && this.taskletHost && this.canAcceptSteeringMessage()) {
 				// Active roots have no chat interaction card, including just before sleep
 				// registration. Preserve input in the existing next-turn slot, not ask state.
-				if (text !== undefined) this.taskState.pendingUserMessage = [this.taskState.pendingUserMessage, text].filter((part) => part !== undefined).join("\n")
-				if (images?.length) this.taskState.pendingUserImages = [...this.taskState.pendingUserImages ?? [], ...images]
-				if (files?.length) this.taskState.pendingUserFiles = [...this.taskState.pendingUserFiles ?? [], ...files]
+				if (text !== undefined)
+					this.taskState.pendingUserMessage = [this.taskState.pendingUserMessage, text]
+						.filter((part) => part !== undefined)
+						.join("\n")
+				if (images?.length) this.taskState.pendingUserImages = [...(this.taskState.pendingUserImages ?? []), ...images]
+				if (files?.length) this.taskState.pendingUserFiles = [...(this.taskState.pendingUserFiles ?? []), ...files]
 				this.taskletHost.notifyUserMessage()
 				return
 			}
@@ -1418,9 +1501,12 @@ export class Task {
 		const knowledge = getApiUsageKnowledge(this.messageStateHandler.getDiracMessages())
 		return {
 			primary: {
-				tokensIn: metrics.totalTokensIn, tokensOut: metrics.totalTokensOut,
-				cacheWrites: metrics.totalCacheWrites, cacheReads: metrics.totalCacheReads,
-				cost: metrics.totalCost, reasoningTokens: metrics.totalReasoningTokens,
+				tokensIn: metrics.totalTokensIn,
+				tokensOut: metrics.totalTokensOut,
+				cacheWrites: metrics.totalCacheWrites,
+				cacheReads: metrics.totalCacheReads,
+				cost: metrics.totalCost,
+				reasoningTokens: metrics.totalReasoningTokens,
 				...knowledge,
 			},
 			utility: {
@@ -1428,10 +1514,12 @@ export class Task {
 				tokensOut: this.taskState.utilityPermissionOutputTokens,
 				cacheWrites: this.taskState.utilityPermissionCacheWriteTokens,
 				cacheReads: this.taskState.utilityPermissionCacheReadTokens,
-				cost: this.taskState.utilityPermissionCost, reasoningTokens: this.taskState.utilityModelReasoningTokens,
+				cost: this.taskState.utilityPermissionCost,
+				reasoningTokens: this.taskState.utilityModelReasoningTokens,
 				usageObserved: this.taskState.utilityModelUsageObserved,
 				usageAvailability: {
-					inputTokens: true, outputTokens: true,
+					inputTokens: true,
+					outputTokens: true,
 					reasoningTokens: this.taskState.utilityModelReasoningAvailable,
 					cacheWrites: this.taskState.utilityModelCacheWriteAvailable,
 					cacheReads: this.taskState.utilityModelCacheReadAvailable,
@@ -1715,6 +1803,7 @@ export class Task {
 	}
 
 	async recursivelyMakeDiracRequests(userContent: DiracContent[], includeFileDetails = false): Promise<boolean> {
+		await this.inheritParentWorkingConfiguration()
 		const runtime = createTaskRequestRuntime(this.workingConfiguration, this.api)
 		this.activeRequestRuntime = runtime
 		try {
@@ -1751,16 +1840,16 @@ export type TaskletTaskOptions = Pick<
 	| "toolEnvironmentFactory"
 > & { getParentHistory?: () => NonNullable<TaskletExecutionBindings["initialHistory"]> }
 
-
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
+	retainMutationUntil: TaskletExecutionBindings["retainMutationUntil"]
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
+	withMutationAuthorization: TaskletExecutionBindings["withMutationAuthorization"]
 	escalateInteraction: TaskMessenger["escalateTaskletInteraction"]
 	hasPendingUserInput: () => boolean
 	recordTaskletUsage?: (id: string, usage: TaskletUsageSnapshot) => Promise<void>
 	projectTasklet?: (data: TaskletPresentationData) => Promise<void>
 }
-
 
 interface PendingTaskletInteraction {
 	record: TaskletInteraction
@@ -1769,7 +1858,6 @@ interface PendingTaskletInteraction {
 	resolve: (result: TaskletInteractionResult) => void
 	retire: () => void
 }
-
 
 interface OwnedTasklet {
 	events: TaskletEvent[]
@@ -1785,6 +1873,7 @@ interface OwnedTasklet {
 	failedTranscript?: TaskletTranscript
 	settlement?: Promise<void>
 	backgroundCommandRunning: boolean
+	deadlineAt?: number
 	outcomePersisted: boolean
 	settlementError?: SerializedTaskError
 }
@@ -1813,7 +1902,11 @@ export class TaskletHost {
 		// Constructor substitution is only a controlled-execution test seam, not a factory service.
 		private readonly TaskConstructor: typeof Task = Task,
 	) {
-		if (owner.executionProfile !== "standalone" && owner.executionProfile !== "goal_coordinator" && owner.executionProfile !== "goal_followup") {
+		if (
+			owner.executionProfile !== "standalone" &&
+			owner.executionProfile !== "goal_coordinator" &&
+			owner.executionProfile !== "goal_followup"
+		) {
 			throw new Error("Only root Tasks may own tasklets")
 		}
 		getTaskDirectoryPath(owner.taskId)
@@ -1860,7 +1953,12 @@ export class TaskletHost {
 				const event = [...this.children.values()]
 					.filter((child) => !ids || ids.has(child.record.id))
 					.flatMap((child) => child.events)
-					.filter((event) => event.deliveredAt === undefined)
+					.filter(
+						(event) =>
+							event.deliveredAt === undefined &&
+							event.communication.type !== "lifecycle" &&
+							event.communication.type !== "message",
+					)
 					.sort((a, b) => a.createdAt - b.createdAt)[0]
 				if (event) finish({ reason: "event", taskletId: event.taskletId, eventId: event.id })
 			}
@@ -1885,11 +1983,33 @@ export class TaskletHost {
 		this.usageProjectionReady = false
 		const records = await loadTaskletRecords(this.rootTaskId)
 		for (const record of records) {
+			if (record.inheritedMessageCount === undefined) {
+				const conversation = record.configuration?.includeHistory
+					? (await getSavedApiConversationState(this.address(record.id))).messages
+					: []
+				const marker = `<task>\n${record.prompt}\n</task>`
+				const assignmentIndex = conversation.findIndex(
+					(message) =>
+						message.role === "user" &&
+						(typeof message.content === "string"
+							? message.content.includes(marker)
+							: message.content.some((block) => block.type === "text" && block.text.includes(marker))),
+				)
+				// Legacy provenance is reconstructed once. If the assignment cannot be
+				// identified, exclude the uncertain prefix rather than leak inherited context.
+				record.inheritedMessageCount = assignmentIndex < 0 ? conversation.length : assignmentIndex
+				await saveTaskletRecord(record)
+			}
 			const events = await loadTaskletEvents(this.address(record.id))
 			const child: OwnedTasklet = {
-				record, events, eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: true,
+				record,
+				events,
+				eventWrites: Promise.resolve(),
+				interactions: new Map(),
+				interactionsClosed: true,
 				recordWrites: Promise.resolve(),
-				backgroundCommandRunning: false, outcomePersisted: false,
+				backgroundCommandRunning: false,
+				outcomePersisted: false,
 			}
 			this.children.set(record.id, child)
 			let retired = false
@@ -1902,10 +2022,14 @@ export class TaskletHost {
 			if (retired) await this.persistEvents(child)
 			if (!record.outcome) {
 				await this.persistOutcome(child, {
-					kind: "interrupted", reason: "Root reopened; explicit tasklet resumption required", interruptedAt: Date.now(),
+					kind: "interrupted",
+					reason: "Root reopened; explicit tasklet resumption required",
+					interruptedAt: Date.now(),
 				})
 			} else {
 				child.outcomePersisted = true
+				// Repair a crash between the durable outcome write and its notification.
+				await this.persistOutcomeEvent(child, record.outcome)
 			}
 		}
 	}
@@ -1927,24 +2051,41 @@ export class TaskletHost {
 		const project = async () => {
 			const { record } = child
 			const outcome = record.outcome
-			const presentation = child.task?.messageStateHandler.getDiracMessages()
-				?? child.failedTranscript?.presentation
-				?? (await getSavedPresentationHistory(this.address(record.id))).messages
+			const presentation =
+				child.task?.messageStateHandler.getDiracMessages() ??
+				child.failedTranscript?.presentation ??
+				(await getSavedPresentationHistory(this.address(record.id))).messages
 			await this.owner.projectTasklet!({
-				taskletId: record.id, title: record.title, prompt: record.prompt, createdAt: record.createdAt,
+				taskletId: record.id,
+				title: record.title,
+				prompt: record.prompt,
+				createdAt: record.createdAt,
 				status: outcome
-					? outcome.kind === "cancelled" ? "interrupted" : outcome.kind
-					: child.events.some((event) => event.communication.type === "interaction" && event.communication.request.status === "pending")
-						? "waiting" : "running",
-				result: outcome?.kind === "completed" ? outcome.response
-					: outcome?.kind === "failed" ? outcome.error.message : outcome?.reason,
-				communications: child.events.slice(-40).map((event) => JSON.stringify(event.communication)),
+					? outcome.kind === "cancelled"
+						? "interrupted"
+						: outcome.kind
+					: child.events.some(
+						(event) =>
+							event.communication.type === "interaction" &&
+							event.communication.request.status === "pending",
+					)
+						? "waiting"
+						: "running",
+				result:
+					outcome?.kind === "completed"
+						? outcome.response
+						: outcome?.kind === "failed"
+							? outcome.error.message
+							: outcome?.reason,
+				communications: child.events.slice(-40).map((event) => taskletCommunicationPreview(event.communication)),
 				activity: taskletActivityPreview(presentation),
 				usage: record.usage ? taskletUsageTotal(record.usage) : undefined,
 			})
 		}
 		child.presentationWrites = (child.presentationWrites ?? Promise.resolve()).then(project).then(
-			() => { child.presentationError = undefined },
+			() => {
+				child.presentationError = undefined
+			},
 			(error) => {
 				// Display failure is visible to supervision, not a failed child outcome or lost acceptance.
 				child.presentationError = serializeTaskError(error)
@@ -1974,7 +2115,9 @@ export class TaskletHost {
 		if (JSON.stringify(child.record.usage) === JSON.stringify(usage)) return
 		child.record = { ...child.record, usage: structuredClone(usage) }
 		// Observe rejection now, but retain the rejecting write for settlement and shutdown.
-		void this.persistRecord(child).catch((error) => Logger.error(`[Tasklet ${child.record.id}] Usage persistence failed:`, error))
+		void this.persistRecord(child).catch((error) =>
+			Logger.error(`[Tasklet ${child.record.id}] Usage persistence failed:`, error),
+		)
 	}
 
 	/** Resume the existing conversation; acceptance never joins the new assignment. */
@@ -2003,6 +2146,12 @@ export class TaskletHost {
 		child.settlement = undefined
 		child.interactions.clear()
 		child.interactionsClosed = false
+		child.events.push({
+			id: ulid(),
+			taskletId: record.id,
+			createdAt: Date.now(),
+			communication: { type: "lifecycle", state: "resumed", assignment: message },
+		})
 		return this.launch(child, message)
 	}
 
@@ -2033,33 +2182,56 @@ export class TaskletHost {
 
 	private async acceptAndStart(record: TaskletRecord, input: TaskletStartOptions): Promise<TaskletRecord> {
 		record.configuration = await resolveTaskletConfiguration(input, this.options.workingConfiguration)
+		const initialHistory = record.configuration.includeHistory
+			? structuredClone(this.options.getParentHistory?.())
+			: undefined
+		record.inheritedMessageCount = initialHistory?.messages.length ?? 0
 		// No Task or live handle exists if this initial write fails.
 		await saveTaskletRecord(record)
 		const child: OwnedTasklet = {
-			record, backgroundCommandRunning: false, outcomePersisted: false,
-			events: [], eventWrites: Promise.resolve(), interactions: new Map(), interactionsClosed: false,
+			record,
+			backgroundCommandRunning: false,
+			outcomePersisted: false,
+			events: [],
+			eventWrites: Promise.resolve(),
+			interactions: new Map(),
+			interactionsClosed: false,
 			recordWrites: Promise.resolve(),
 		}
 		this.children.set(record.id, child)
-		return this.launch(child)
+		child.events.push({
+			id: ulid(),
+			taskletId: record.id,
+			createdAt: record.createdAt,
+			communication: { type: "lifecycle", state: "accepted" },
+		})
+		return this.launch(child, undefined, initialHistory)
 	}
 
-	private async launch(child: OwnedTasklet, resumeMessage?: string): Promise<TaskletRecord> {
+	private async launch(
+		child: OwnedTasklet,
+		resumeMessage?: string,
+		initialHistory?: TaskletExecutionBindings["initialHistory"],
+	): Promise<TaskletRecord> {
 		const record = child.record
 		// A start admitted before shutdown still owns its write, but must not launch late work.
 		if (this.closing) {
 			child.settlement = this.persistOutcome(child, {
-				kind: "interrupted", reason: "Root Task closed during tasklet startup", interruptedAt: Date.now(),
+				kind: "interrupted",
+				reason: "Root Task closed during tasklet startup",
+				interruptedAt: Date.now(),
 			})
 			await child.settlement
 			return structuredClone(child.record)
 		}
 		try {
+			await this.persistEvents(child)
 			child.task = new this.TaskConstructor({
 				...this.options,
-				workingConfiguration: record.configuration
-					? taskletWorkingConfiguration(this.options.workingConfiguration, record.configuration)
-					: this.options.workingConfiguration,
+				workingConfiguration: taskletWorkingConfiguration(
+					this.options.workingConfiguration,
+					record.configuration ?? { includeHistory: false, timeoutSeconds: DEFAULT_SUBAGENT_TIMEOUT_SECONDS },
+				),
 				taskId: record.id,
 				conversationUlid: record.conversationUlid,
 				task: record.prompt,
@@ -2070,13 +2242,30 @@ export class TaskletHost {
 				cancelTask: unavailableForegroundCallback,
 				tasklet: {
 					configuration: record.configuration,
-					initialHistory: resumeMessage === undefined && record.configuration?.includeHistory
-						? structuredClone(this.options.getParentHistory?.()) : undefined,
+					getParentWorkingConfiguration: () => this.options.workingConfiguration,
+					withMutationAuthorization: (toolName, mutation) => this.owner.withMutationAuthorization(toolName, mutation),
+					retainMutationUntil: (completion) => this.owner.retainMutationUntil(completion),
+					initialHistory,
 					counterparty: {
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
+							if (response.operation !== "progress")
+								throw new Error("Only progress/replies may be observed before settlement")
+							if (
+								response.reply_to &&
+								!child.events.some(
+									(event) =>
+										event.id === response.reply_to &&
+										event.communication.type === "message" &&
+										event.communication.message.type === "question",
+								)
+							) {
+								throw new Error("Reply does not address a parent question for this tasklet")
+							}
 							child.events.push({
-								id: ulid(), taskletId: record.id, createdAt: Date.now(),
+								id: ulid(),
+								taskletId: record.id,
+								createdAt: Date.now(),
 								communication: { type: "response", response: structuredClone(response) },
 							})
 							this.sleepWaiter?.check()
@@ -2117,7 +2306,7 @@ export class TaskletHost {
 			const deliveredAt = Date.now()
 			const snapshot = child.events.map((event) => ({
 				...event,
-				deliveredAt: deliveredIds.has(event.id) ? event.deliveredAt ?? deliveredAt : event.deliveredAt,
+				deliveredAt: deliveredIds.has(event.id) ? (event.deliveredAt ?? deliveredAt) : event.deliveredAt,
 			}))
 			await saveTaskletEvents(this.address(child.record.id), structuredClone(snapshot))
 			for (const event of child.events) {
@@ -2126,17 +2315,33 @@ export class TaskletHost {
 		}
 		// A subsequent full snapshot may retry a failed write; the original caller still sees its failure.
 		child.eventWrites = child.eventWrites.then(write, write)
-		void child.eventWrites.catch((error) => Logger.error(`[Tasklet ${child.record.id}] Communication persistence failed:`, error))
-		void child.eventWrites.then(() => this.projectChild(child), () => { })
+		void child.eventWrites.catch((error) =>
+			Logger.error(`[Tasklet ${child.record.id}] Communication persistence failed:`, error),
+		)
+		void child.eventWrites.then(
+			() => this.projectChild(child),
+			() => { },
+		)
 		return child.eventWrites
 	}
 
 	/** No claims or model execution: the root consumes this bounded snapshot in its serial request flow. */
 	async prepareEventDelivery(): Promise<{ content: DiracTextContentBlock[]; acknowledge: () => Promise<void> } | undefined> {
 		if (this.closing) return undefined
-		const pending = [...this.children.values()].flatMap((child) =>
-			child.events.filter((event) => event.deliveredAt === undefined).map((event) => ({ child, event })),
-		).sort((a, b) => a.event.createdAt - b.event.createdAt).slice(0, 16)
+		const pending = [...this.children.values()]
+			.flatMap((child) =>
+				// Acceptance/resumption are returned by the initiating control, not unsolicited child input.
+				child.events
+					.filter(
+						(event) =>
+							event.deliveredAt === undefined &&
+							event.communication.type !== "lifecycle" &&
+							event.communication.type !== "message",
+					)
+					.map((event) => ({ child, event })),
+			)
+			.sort((a, b) => a.event.createdAt - b.event.createdAt)
+			.slice(0, 8)
 		if (!pending.length) return undefined
 		const children = [...new Set(pending.map(({ child }) => child))]
 		// A new delivery attempt also retries a previously failed full snapshot/receipt write.
@@ -2144,19 +2349,28 @@ export class TaskletHost {
 		if (this.closing) return undefined
 		const content: DiracTextContentBlock[] = pending.map(({ child, event }) => {
 			const full = JSON.stringify(event.communication)
-			const preview = full.length > 4000 ? `${full.slice(0, 4000)}… [preview truncated; inspect tasklet for full contents]` : full
+			const preview =
+				full.length > 1200
+					? `${full.slice(0, 1200)}… [preview only; tasklets inspect view=messages retrieves exact paged content]`
+					: full
 			return {
-				type: "text", taskletEventIds: [event.id],
-				text: `[Tasklet communication: ${event.taskletId}; event ${event.id}; title ${JSON.stringify(child.record.title)}]\n${preview}`,
+				type: "text",
+				taskletEventIds: [event.id],
+				text: `[Tasklet communication: ${event.taskletId}; event ${event.id}; title ${JSON.stringify(child.record.title.slice(0, 300))}]\n${preview}`,
 			}
 		})
 		return {
 			content,
 			acknowledge: async () => {
 				if (this.closing) throw new Error("Tasklet host is shutting down")
-				await Promise.all(children.map((child) => this.persistEvents(child,
-					new Set(pending.filter((entry) => entry.child === child).map(({ event }) => event.id)),
-				)))
+				await Promise.all(
+					children.map((child) =>
+						this.persistEvents(
+							child,
+							new Set(pending.filter((entry) => entry.child === child).map(({ event }) => event.id)),
+						),
+					),
+				)
 			},
 		}
 	}
@@ -2175,7 +2389,9 @@ export class TaskletHost {
 	closeAdmissionIfIdle(): void {
 		const active = this.listActive()
 		if (active.length) {
-			throw new Error(`Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before ending the root.`)
+			throw new Error(
+				`Active tasklets: ${active.map(({ id, title }) => `${id} (${title})`).join(", ")}. Let them finish or interrupt them before ending the root.`,
+			)
 		}
 		this.closing = true
 	}
@@ -2197,15 +2413,42 @@ export class TaskletHost {
 		])
 		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
 		await Promise.allSettled([...this.resolutions])
-		const eventResults = await Promise.allSettled([...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites, child.presentationWrites]))
+		const eventResults = await Promise.allSettled(
+			[...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites, child.presentationWrites]),
+		)
 		const failures = [
-			...reconstruction.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
+			...reconstruction.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
 			...this.interactionCleanupFailures,
 			...eventResults.filter((result) => result.status === "rejected").map((result) => result.reason),
-			...[...this.children.values()].flatMap((child) => child.usageProjectionError ? [child.usageProjectionError] : []),
+			...[...this.children.values()].flatMap((child) => (child.usageProjectionError ? [child.usageProjectionError] : [])),
 		]
 		if (failures.length) throw new AggregateError(failures, "Tasklet shutdown failed")
+	}
+
+	listSummaries(query: TaskletInspectionQuery = {}) {
+		return pageInspectionItems(
+			[...this.children.keys()].map((id) => summarizeTasklet(this.inspect(id))),
+			query,
+		)
+	}
+
+	async query(id: string, query: TaskletInspectionQuery = {}) {
+		const child = this.requireChild(id)
+		return inspectTasklet(
+			{
+				inspection: this.inspect(id),
+				events: structuredClone(child.events),
+				inheritedMessageCount: child.record.inheritedMessageCount ?? 0,
+				readConversation: async () =>
+					structuredClone(
+						child.failedTranscript?.conversation ??
+						child.task?.messageStateHandler.getApiConversationHistory() ??
+						(await getSavedApiConversationState(this.address(id))).messages,
+					),
+			},
+			query,
+		)
 	}
 
 	list(): TaskletInspection[] {
@@ -2216,10 +2459,16 @@ export class TaskletHost {
 		const child = this.requireChild(id)
 		return structuredClone({
 			...child.record,
-			responses: child.events.flatMap((event) => event.communication.type === "response" ? [event.communication.response] : []),
-			interactions: child.events.flatMap((event) => event.communication.type === "interaction" ? [event.communication.request] : []),
+			responses: child.events.flatMap((event) =>
+				event.communication.type === "response" ? [event.communication.response] : [],
+			),
+			interactions: child.events.flatMap((event) =>
+				event.communication.type === "interaction" ? [event.communication.request] : [],
+			),
 			executionStatus: child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
+			lastActivityAt: child.task?.messageStateHandler.getDiracMessages().at(-1)?.ts ?? child.events.at(-1)?.createdAt,
+			deadlineAt: child.deadlineAt,
 			outcomePersisted: child.outcomePersisted,
 			settlementError: child.settlementError,
 			presentationError: child.presentationError,
@@ -2240,6 +2489,150 @@ export class TaskletHost {
 			getSavedPresentationHistory(this.address(id)),
 		])
 		return { conversation: conversation.messages, presentation: presentation.messages }
+	}
+
+	/** Validate the entire fixed batch before applying independent addressed messages. */
+	async message(items: TaskletMessage[]): Promise<TaskletMessageResult[]> {
+		if (!Array.isArray(items) || items.length === 0 || items.length > 20)
+			throw new Error("messages must contain between 1 and 20 addressed items")
+		const targets = new Set<string>()
+		for (const item of items) {
+			if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each message must be an object")
+			const identity = (value: unknown) =>
+				typeof value === "string" && value.trim().length > 0 && Buffer.byteLength(JSON.stringify(value), "utf8") <= 128
+			const text = (value: unknown) => typeof value === "string" && value.trim().length > 0 && value.length <= 8000
+			if (!identity(item.taskletId)) throw new Error("Message requires a bounded tasklet ID")
+			let fields: string[]
+			if (item.type === "guidance" || item.type === "question") {
+				fields = ["taskletId", "type", "text"]
+				if (!text(item.text)) throw new Error("Guidance/question requires text of at most 8000 characters")
+			} else if (item.type === "reply" || item.type === "permission_decision") {
+				if (!identity(item.replyTo)) throw new Error("Reply requires the exact bounded request ID")
+				if (item.type === "permission_decision") {
+					fields = ["taskletId", "type", "replyTo", "decision"]
+					if (!["approve", "reject", "escalate"].includes(item.decision)) throw new Error("Invalid permission decision")
+				} else {
+					fields = ["taskletId", "type", "replyTo", "text", "action"]
+					if (
+						(item.text === undefined && item.action === undefined) ||
+						(item.text !== undefined && !text(item.text)) ||
+						(item.action !== undefined && !text(item.action))
+					) {
+						throw new Error("A reply requires bounded text or an exact displayed action")
+					}
+				}
+			} else throw new Error("Unknown tasklet message type")
+			if (Object.keys(item).some((key) => !fields.includes(key))) throw new Error("Unexpected message field")
+			const target = JSON.stringify([
+				item.taskletId,
+				"replyTo" in item ? ["request", item.replyTo] : [item.type, item.text],
+			])
+			if (targets.has(target)) throw new Error("Duplicate or conflicting message targets in batch")
+			targets.add(target)
+		}
+		return Promise.all(items.map((item) => this.applyMessage(item)))
+	}
+
+	private async applyMessage(item: TaskletMessage): Promise<TaskletMessageResult> {
+		const child = this.children.get(item.taskletId)
+		const base = {
+			taskletId: item.taskletId,
+			title: child?.record.title,
+			...("replyTo" in item ? { replyTo: item.replyTo } : {}),
+		}
+		if (!child) return { ...base, status: "stale", error: "Tasklet does not belong to this root" }
+		try {
+			if (item.type === "guidance" || item.type === "question") {
+				const id = ulid()
+				const text =
+					item.type === "question"
+						? `[Parent question; message ${id}]\n${item.text}\nReply using respond progress with reply_to: ${id}.`
+						: item.text
+				child.events.push({
+					id,
+					taskletId: item.taskletId,
+					createdAt: Date.now(),
+					communication: { type: "message", message: structuredClone(item) },
+				})
+				await this.persistEvents(child)
+				await this.steer(item.taskletId, text)
+				return { ...base, messageId: id, status: "queued" }
+			}
+			if (!("replyTo" in item)) throw new Error("Reply requires a request ID")
+			const request = child.events
+				.flatMap((event) => (event.communication.type === "interaction" ? [event.communication.request] : []))
+				.find((request) => request.id === item.replyTo)
+			const addressed = { ...base, request: request?.card.header.slice(0, 200) }
+			if (!request || request.status === "retired") return { ...addressed, status: "stale" }
+			if (item.type === "permission_decision" && !request.permissionOperation && !request.permissionRequestKind) {
+				throw new Error("Use a reply for questions and operational choices")
+			}
+			if (
+				item.type === "reply" &&
+				item.action !== undefined &&
+				item.action !== DiracAskResponse.MESSAGE &&
+				!request.card.actions?.some((action) => action.value === item.action)
+			)
+				throw new Error("Reply action is not a displayed choice")
+			const decision: TaskletInteractionDecision =
+				item.type === "permission_decision"
+					? { operation: item.decision }
+					: {
+						operation: "answer",
+						response: {
+							action: item.action ?? DiracAskResponse.MESSAGE,
+							response: Object.values(DiracAskResponse).includes(item.action as DiracAskResponse)
+								? (item.action as DiracAskResponse)
+								: DiracAskResponse.MESSAGE,
+							...(item.action === undefined ? {} : { value: item.action }),
+							...(item.text === undefined ? {} : { text: item.text }),
+						},
+					}
+			if (request.status === "resolved") {
+				if (JSON.stringify(request.decision) !== JSON.stringify(decision))
+					throw new Error("Request already resolved with a different decision")
+				await this.persistEvents(child)
+				return { ...addressed, status: "already_resolved" }
+			}
+			const result = await this.resolveInteraction(item.taskletId, item.replyTo, decision)
+			return { ...addressed, status: result.status }
+		} catch (error) {
+			return { ...base, status: "failed", error: getErrorMessage(error).slice(0, 1000) }
+		}
+	}
+
+	/** Rebuilt from authoritative records on every request, independently of narrative compaction. */
+	supervisionSnapshot(): string | undefined {
+		if (!this.children.size) return undefined
+		const children = [...this.children.values()]
+		const relevant = [
+			...children.filter((child) => !child.record.outcome),
+			...children.filter((child) => child.record.outcome).slice(-5),
+		]
+		const entries = relevant.map((child) => {
+			const pending = child.events.flatMap((event) =>
+				event.communication.type === "interaction" && event.communication.request.status === "pending"
+					? [event.communication.request]
+					: [],
+			)
+			return {
+				id: child.record.id,
+				title: child.record.title.slice(0, 80),
+				status: child.record.outcome?.kind ?? child.task?.stateView.status ?? "accepted",
+				pendingRequestCount: pending.length,
+				pendingRequests: pending.slice(0, 10).map((request) => ({
+					id: request.id,
+					kind: request.kind,
+					header: request.card.header.slice(0, 160),
+				})),
+			}
+		})
+		return JSON.stringify({
+			totalOwned: children.length,
+			current: pageInspectionItems(entries, { limit: 20 }),
+			instruction:
+				"Authoritative supervision snapshot, not a message or acknowledgement. Use tasklets list/inspect for additional children, exact requests, or committed results. Completion requires no active children.",
+		})
 	}
 
 	/** Uses the engine's admission check; startup/terminal states can reject steering. */
@@ -2303,18 +2696,22 @@ export class TaskletHost {
 			case "escalate":
 				if (permission) this.owner.assertPermissionAllowed(request)
 				result = await this.owner.escalateInteraction(
-					{ id: child.record.id, title: child.record.title }, structuredClone(request), signal,
+					{ id: child.record.id, title: child.record.title },
+					structuredClone(request),
+					signal,
 				)
 				break
 			default:
 				throw new Error("Unknown tasklet interaction decision")
 		}
 		signal.throwIfAborted()
-		if (permission && result.userEdits !== undefined) throw new Error("Tasklet approval cannot change the requested operation")
+		if (permission && result.userEdits !== undefined)
+			throw new Error("Tasklet approval cannot change the requested operation")
 		if (permission && (result.action === DiracAskResponse.APPROVE || result.response === DiracAskResponse.APPROVE)) {
 			this.owner.assertPermissionAllowed(request)
 			assertAuthorityCurrent?.()
 		}
+		request.decision = structuredClone(decision)
 		interaction.resolve(result)
 		await this.persistEvents(child)
 		return { status: "resolved" }
@@ -2339,14 +2736,24 @@ export class TaskletHost {
 		let outcome: TaskRunOutcome
 		let timeoutAbort: Promise<void> | undefined
 		const timeoutSeconds = child.record.configuration?.timeoutSeconds
-		const timer = timeoutSeconds === undefined ? undefined : setTimeout(() => {
-			timeoutAbort = task.abortTask({ kind: "interrupted", reason: `Tasklet execution timed out after ${timeoutSeconds} seconds` })
-			void timeoutAbort.catch((error) => Logger.error(`[Tasklet ${child.record.id}] Timeout cancellation failed:`, error))
-		}, timeoutSeconds * 1000)
+		child.deadlineAt = timeoutSeconds === undefined ? undefined : Date.now() + timeoutSeconds * 1000
+		const timer =
+			timeoutSeconds === undefined
+				? undefined
+				: setTimeout(() => {
+					timeoutAbort = task.abortTask({
+						kind: "interrupted",
+						reason: `Tasklet execution timed out after ${timeoutSeconds} seconds`,
+					})
+					void timeoutAbort.catch((error) =>
+						Logger.error(`[Tasklet ${child.record.id}] Timeout cancellation failed:`, error),
+					)
+				}, timeoutSeconds * 1000)
 		try {
-			outcome = resumeMessage === undefined
-				? await task.startTask(child.record.prompt)
-				: await task.resumeTaskFromHistory(undefined, { taskletResumeMessage: resumeMessage })
+			outcome =
+				resumeMessage === undefined
+					? await task.startTask(child.record.prompt)
+					: await task.resumeTaskFromHistory(undefined, { taskletResumeMessage: resumeMessage })
 			await timeoutAbort
 		} catch (error) {
 			// Task normally returns a failed outcome, including finalization errors.
@@ -2388,12 +2795,41 @@ export class TaskletHost {
 			settlementFailures.push(error)
 		}
 		if (settlementFailures.length) {
-			const error = settlementFailures.length === 1
-				? settlementFailures[0]
-				: new AggregateError(settlementFailures, "Tasklet persistence settlement failed")
+			const error =
+				settlementFailures.length === 1
+					? settlementFailures[0]
+					: new AggregateError(settlementFailures, "Tasklet persistence settlement failed")
 			child.settlementError = serializeTaskError(error)
 			throw error
 		}
+	}
+
+	private async persistOutcomeEvent(child: OwnedTasklet, outcome: TaskRunOutcome): Promise<void> {
+		const createdAt =
+			outcome.kind === "completed"
+				? outcome.completedAt
+				: outcome.kind === "failed"
+					? outcome.failedAt
+					: outcome.kind === "interrupted"
+						? outcome.interruptedAt
+						: outcome.cancelledAt
+		const id = `outcome:${child.record.id}:${outcome.kind}:${createdAt}`
+		const existing = child.events.find(
+			(event) =>
+				event.communication.type === "outcome" &&
+				(event.id === id || JSON.stringify(event.communication.outcome) === JSON.stringify(outcome)),
+		)
+		if (existing) {
+			await this.persistEvents(child)
+			return
+		}
+		child.events.push({
+			id,
+			taskletId: child.record.id,
+			createdAt,
+			communication: { type: "outcome", outcome: structuredClone(outcome) },
+		})
+		await this.persistEvents(child)
 	}
 
 	private async persistOutcome(child: OwnedTasklet, outcome: TaskRunOutcome): Promise<void> {
@@ -2402,17 +2838,11 @@ export class TaskletHost {
 		try {
 			await this.persistRecord(child)
 			if (child.usageProjectionError) throw child.usageProjectionError
-			child.outcomePersisted = true
-			// Termination may have no agent response (provider failure/deadline).
-			// Publish a host notification through the same durable channel, not a
-			// fabricated response or a second Goal event supervisor.
-			child.events.push({
-				id: ulid(), taskletId: child.record.id, createdAt: Date.now(),
-				communication: { type: "outcome", outcome: structuredClone(outcome) },
-			})
-			this.sleepWaiter?.check()
-			await this.persistEvents(child)
+			await this.persistOutcomeEvent(child, outcome)
 			await this.projectChild(child)
+			// Publish resumable settlement and release the execution together, without an
+			// asynchronous gap between a successful inspection and an explicit resume.
+			child.outcomePersisted = true
 		} catch (error) {
 			child.settlementError = serializeTaskError(error)
 			throw error
@@ -2420,18 +2850,34 @@ export class TaskletHost {
 			child.task = undefined
 			child.backgroundCommandRunning = false
 		}
+		this.sleepWaiter?.check()
 	}
 
-	private waitForInteraction(child: OwnedTasklet, request: TaskInteractionRequest, signal: AbortSignal): Promise<TaskletInteractionResult> {
+	private waitForInteraction(
+		child: OwnedTasklet,
+		request: TaskInteractionRequest,
+		signal: AbortSignal,
+	): Promise<TaskletInteractionResult> {
 		signal.throwIfAborted()
 		if (this.closing || child.interactionsClosed || child.record.outcome) throw new Error("Tasklet counterparty is closed")
 		if ([...child.interactions.values()].some(({ record }) => record.card.id === request.card.id)) {
 			throw new Error(`Tasklet interaction for card ${request.card.id} already exists`)
 		}
 		const id = ulid()
-		const record: TaskletInteraction = { ...structuredClone(request), id, status: "pending", createdAt: Date.now() }
+		const kind =
+			request.permissionOperation || request.permissionRequestKind
+				? "permission"
+				: request.card.rawInput?.operation === "question"
+					? "question"
+					: "operational"
+		const record: TaskletInteraction = { ...structuredClone(request), id, kind, status: "pending", createdAt: Date.now() }
 		const cancellation = new AbortController()
-		child.events.push({ id, taskletId: child.record.id, createdAt: record.createdAt, communication: { type: "interaction", request: record } })
+		child.events.push({
+			id,
+			taskletId: child.record.id,
+			createdAt: record.createdAt,
+			communication: { type: "interaction", request: record },
+		})
 		this.sleepWaiter?.check()
 		const waiting = new Promise<TaskletInteractionResult>((resolve, reject) => {
 			const retire = () => {
@@ -2445,7 +2891,10 @@ export class TaskletHost {
 				void this.persistEvents(child)
 			}
 			child.interactions.set(id, {
-				record, cancellation, resolving: false, retire,
+				record,
+				cancellation,
+				resolving: false,
+				retire,
 				resolve: (result) => {
 					cancellation.signal.throwIfAborted()
 					if (record.status !== "pending") throw new Error(`Tasklet interaction ${id} is not pending`)
@@ -2561,24 +3010,38 @@ export async function resolveTaskletConfiguration(
 	return resolved
 }
 
-/** Reapply durable choices with current parent credentials, permissions and mode. */
+/** Reapply durable choices with current parent credentials and authority, always in Act. */
 export function taskletWorkingConfiguration(
 	current: TaskWorkingConfiguration,
 	resolved: TaskletConfiguration,
 ): TaskWorkingConfiguration {
 	taskletTimeoutSeconds(resolved.timeoutSeconds)
 	const selection = resolved.modelSelection
-	if (!selection) return current
+	if (!selection && current.settings.mode === "act") return current
+	// Mode is an execution invariant, not a model choice. Copy the parent's
+	// active Plan configuration before forcing Act, including provider tuning.
+	const activeModel: Record<string, unknown> = {}
+	if (!selection && current.settings.mode === "plan") {
+		for (const key of Object.keys(current.apiConfiguration)) {
+			if (!key.startsWith("planMode") && !key.startsWith("actMode")) continue
+			const suffix = key.replace(/^(planMode|actMode)/, "")
+			activeModel[`actMode${suffix}`] = (current.apiConfiguration as Record<string, unknown>)[`planMode${suffix}`]
+		}
+		activeModel.actModeApiProvider = current.apiConfiguration.planModeApiProvider ?? current.apiConfiguration.apiProvider
+	}
 	const candidate = buildTaskWorkingConfigurationUpdate(current, {
-		apiConfiguration: {
-			...modelProviderSelectionUpdates("plan", selection, current.apiConfiguration.planModeInferenceSpeed),
-			...modelProviderSelectionUpdates("act", selection, current.apiConfiguration.actModeInferenceSpeed),
-		},
+		settings: { mode: "act" },
+		apiConfiguration: selection
+			? {
+				...modelProviderSelectionUpdates("plan", selection, current.apiConfiguration.planModeInferenceSpeed),
+				...modelProviderSelectionUpdates("act", selection, current.apiConfiguration.actModeInferenceSpeed),
+			}
+			: activeModel,
 	})
-	const mode = candidate.settings.mode
+	if (!selection) return candidate
 	const configuration = candidate.apiConfiguration as ApiConfiguration
-	validateApiConfiguration(configuration, mode)
-	const modelId = buildApiHandler(configuration, mode).getModel().id
+	validateApiConfiguration(configuration, "act")
+	const modelId = buildApiHandler(configuration, "act").getModel().id
 	if (modelId !== selection.modelId) {
 		throw new Error(
 			`Tasklet model ${selection.modelId} is unavailable for provider ${selection.provider} (resolved ${modelId}).`,

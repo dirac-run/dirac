@@ -14,11 +14,11 @@ export class TabManager {
 	readonly ownerId = randomUUID()
 	readonly reviewTitle = `Review Dirac Edits (${this.ownerId})`
 
-	originalUri(absolutePath: string, content: string): vscode.Uri {
+	originalUri(absolutePath: string, content: string, requestId?: string): vscode.Uri {
 		return vscode.Uri.file(absolutePath).with({
 			scheme: DIFF_VIEW_URI_SCHEME,
 			query: Buffer.from(content).toString("base64"),
-			fragment: this.ownerId,
+			fragment: requestId ? `${this.ownerId}/${requestId}` : this.ownerId,
 		})
 	}
 
@@ -52,9 +52,13 @@ export class TabManager {
 			const findEditor = () => {
 				const editor = vscode.window.visibleTextEditors.find((editor) => {
 					if (editor.document.uri.toString() !== uri.toString()) return false
-					const input = vscode.window.tabGroups.all.find((group) => group.viewColumn === editor.viewColumn)?.activeTab?.input
-					return input instanceof vscode.TabInputTextDiff &&
-						input.original.toString() === original.toString() && input.modified.toString() === uri.toString()
+					const input = vscode.window.tabGroups.all.find((group) => group.viewColumn === editor.viewColumn)?.activeTab
+						?.input
+					return (
+						input instanceof vscode.TabInputTextDiff &&
+						input.original.toString() === original.toString() &&
+						input.modified.toString() === uri.toString()
+					)
 				})
 				if (!editor) return
 				dispose()
@@ -68,16 +72,18 @@ export class TabManager {
 				vscode.window.onDidChangeVisibleTextEditors(findEditor),
 				vscode.window.onDidChangeActiveTextEditor(findEditor),
 			)
-			void vscode.commands.executeCommand(
-				"vscode.diff",
-				original,
-				uri,
-				`${path.basename(uri.fsPath)}: ${fileExists ? "Original ↔ Dirac's Changes" : "New File"} (Editable)`,
-				{ preserveFocus, preview: false },
-			).then(findEditor, (error) => {
-				dispose()
-				reject(error)
-			})
+			void vscode.commands
+				.executeCommand(
+					"vscode.diff",
+					original,
+					uri,
+					`${path.basename(uri.fsPath)}: ${fileExists ? "Original ↔ Dirac's Changes" : "New File"} (Editable)`,
+					{ preserveFocus, preview: false },
+				)
+				.then(findEditor, (error) => {
+					dispose()
+					reject(error)
+				})
 			findEditor()
 		})
 	}

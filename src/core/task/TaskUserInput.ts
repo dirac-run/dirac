@@ -62,6 +62,10 @@ export async function submitCardResponse(
 	},
 ): Promise<void> {
 	const { cardId, response, text, images, files, value } = params
+	if (!cardId && response !== DiracAskResponse.MESSAGE) {
+		Logger.warn(`[Task] Received unaddressed card action ${response}`)
+		return
+	}
 	if (cardId && ctx.taskState.lastWaitingCardId !== cardId) {
 		Logger.warn(`[Task] Received response for card ${cardId}, but waiting for ${ctx.taskState.lastWaitingCardId}`)
 		return

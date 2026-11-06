@@ -158,6 +158,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		const toolId = this.spec().id
 		const { modelId, providerId } = getModelInfo(env.config)
 		let reviewShown = false
+		let reviewRequested = false
 		let approvedContent = content
 
 		try {
@@ -165,7 +166,10 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 				await card.update({ status: CardStatus.RUNNING })
 			}
 
-			if (permissionDisposition !== "auto_approve") {
+			if (permissionDisposition === "auto_approve" && card) {
+				await card.update({ body: `${fileExists ? "Updating" : "Creating"} file...` })
+			}
+			while (permissionDisposition !== "auto_approve") {
 				const permissionCard = await env.ui.createCard({
 					header: "Permission Request",
 					body: `Dirac wants to ${fileExists ? "edit" : "create"} ${displayPath}`,
@@ -180,14 +184,30 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					rawInput: { path: displayPath, content },
 				})
 
-				// Resolve automatic approval before opening the manual review.
-				if (permissionCard.requiresUserInteraction !== false) {
+				// Approval remains required in background mode; editor focus requires an explicit request.
+				if (permissionCard.requiresUserInteraction !== false && env.config.backgroundEditEnabled && !reviewRequested) {
+					await permissionCard.update({
+						actions: [
+							{ label: "Approve", value: DiracAskResponse.APPROVE, primary: true },
+							{ label: "Reject", value: DiracAskResponse.REJECT, style: "danger" },
+							{ label: "View diff", value: DiracAskResponse.VIEW, style: "secondary" },
+						]
+					})
+				}
+				if (permissionCard.requiresUserInteraction !== false && (!env.config.backgroundEditEnabled || reviewRequested)) {
 					reviewShown = true
-					await env.editor.showReview([{ absolutePath, displayPath, content, originalContent }])
+					await env.editor.showReview([{ absolutePath, displayPath, content, originalContent }], permissionCard)
 					await env.editor.scrollToFirstDiff()
 				}
 
 				const result = await permissionCard.waitForInteraction()
+				if (result.action === DiracAskResponse.VIEW || result.action === DiracAskResponse.EDIT) {
+					await permissionCard.finalize(CardStatus.CANCELLED)
+					if (reviewShown) await env.editor.hideReview()
+					reviewShown = false
+					reviewRequested = true
+					continue
+				}
 				const approved = result.action === DiracAskResponse.APPROVE
 				const reason = result.value
 
@@ -220,8 +240,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 					return reason ? formatResponse.toolDeniedWithFeedback(reason) : formatResponse.toolDenied()
 				}
 				approvedContent = result.userEdits?.[displayPath] ?? result.userEdits?.[absolutePath] ?? content
-			} else if (card) {
-				await card.update({ body: `${fileExists ? "Updating" : "Creating"} file...` })
+				break
 			}
 
 			env.config.callbacks.assertMutationAuthorized(toolId)

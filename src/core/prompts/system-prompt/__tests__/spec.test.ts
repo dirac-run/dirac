@@ -133,9 +133,20 @@ describe("respond provider schemas", () => {
 })
 
 describe("tasklets provider schemas", () => {
-	const names = ["operation", "tasklet_id", "message", "request_id", "resolution", "answer", "action", "tasklet_ids", "timeout_ms"]
-	const operations = ["list", "inspect", "transcript", "steer", "interrupt", "resume", "resolve", "sleep"]
-	const resolutions = ["answer", "approve", "reject", "escalate"]
+	const names = [
+		"operation",
+		"tasklet_id",
+		"view",
+		"cursor",
+		"limit",
+		"call_id",
+		"message_type",
+		"messages",
+		"message",
+		"tasklet_ids",
+		"timeout_ms",
+	]
+	const operations = ["list", "inspect", "message", "interrupt", "resume", "sleep"]
 
 	for (const provider of ["Anthropic", "Gemini", "OpenAI non-strict", "OpenAI strict"] as const) {
 		it(`${provider}: preserves control fields, constraints and answer/action semantics`, () => {
@@ -156,22 +167,26 @@ describe("tasklets provider schemas", () => {
 			expect(schema.type).to.equal(type("object"))
 			expect(properties.operation.type).to.equal(type("string"))
 			expect(properties.operation.enum).to.deep.equal(operations)
-			expect(properties.resolution.enum).to.deep.equal(strict ? [...resolutions, null] : resolutions)
-			expect(properties.resolution.type).to.deep.equal(type("string", true))
-			for (const name of ["tasklet_id", "message", "request_id", "answer", "action"]) {
+			expect(properties.messages.type).to.deep.equal(type("array", true))
+			expect(properties.messages.minItems).to.equal(1)
+			expect(properties.messages.maxItems).to.equal(20)
+			const item = properties.messages.items
+			expect(item.properties.type.enum).to.deep.equal(["guidance", "question", "reply", "permission_decision"])
+			expect(item.properties.action.description).to.include("not a permission grant")
+			for (const name of ["tasklet_id", "message", "cursor", "call_id", "message_type"]) {
 				expect(properties[name].type).to.deep.equal(type("string", true))
 				expect(properties[name].minLength).to.equal(1)
 			}
+			expect(properties.limit.type).to.deep.equal(type("integer", true))
+			expect(properties.limit.minimum).to.equal(1)
+
 			expect(properties.tasklet_ids.type).to.deep.equal(type("array", true))
 			expect(properties.tasklet_ids.items).to.deep.equal({ type: type("string"), minLength: 1 })
 			expect(properties.tasklet_ids).not.to.have.property("minItems")
 			expect(properties.timeout_ms.type).to.deep.equal(type("integer", true))
 			expect(properties.timeout_ms.minimum).to.equal(0)
 			expect(properties.timeout_ms.maximum).to.equal(2147483647)
-			expect(properties.answer.description).to.include("Supply answer, action or both")
-			expect(properties.action.description).to.include("Displayed choice value")
-			expect(properties.action.description).to.include("approve for operational Retry; not a permission grant")
-			expect(properties.action).not.to.have.property("enum")
+
 			if (provider.startsWith("OpenAI")) {
 				expect(openAI.function.strict).to.equal(strict)
 				expect(schema.additionalProperties).to.equal(false)

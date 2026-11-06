@@ -14,7 +14,7 @@ interface CardHeaderProps {
 	isCollapsed?: boolean
 	compact?: boolean
 	statusLabel?: string
-	tasklet?: Pick<TaskletPresentationData, "title" | "taskletId" | "status"> & { width: number }
+	tasklet?: Pick<TaskletPresentationData, "title" | "status"> & { width: number }
 }
 
 function getHeaderPresentation(status: CardStatus) {
@@ -32,21 +32,18 @@ function getHeaderPresentation(status: CardStatus) {
 	}
 }
 
-function taskletHeaderText({ title, taskletId, status, width }: NonNullable<CardHeaderProps["tasklet"]>): string {
-	const identity = `Tasklet ${taskletId} · ${status}`
-	const candidates = [`${title.replace(/\s+/g, " ")} · ${identity}`, identity, `${taskletId} · ${status}`]
-	const fitting = candidates.find((text) => stringWidth(text) <= width)
-	if (fitting) return fitting
-
-	// Reserve status first, then retain the stable ID's distinguishing suffix.
-	const suffixWidth = width - stringWidth(status) - 2
-	if (suffixWidth < 1) return status.slice(0, width)
-	let suffix = ""
-	for (const character of Array.from(taskletId).reverse()) {
-		if (stringWidth(character + suffix) > suffixWidth) break
-		suffix = character + suffix
+function taskletHeaderText({ title, status, width }: NonNullable<CardHeaderProps["tasklet"]>): string {
+	const normalized = title.replace(/\s+/g, " ").trim()
+	const full = `${normalized} · ${status}`
+	if (stringWidth(full) <= width) return full
+	const titleWidth = width - stringWidth(status) - 3
+	if (titleWidth < 1) return status.slice(0, Math.max(0, width))
+	let clipped = ""
+	for (const character of normalized) {
+		if (stringWidth(`${clipped}${character}…`) > titleWidth) break
+		clipped += character
 	}
-	return `…${suffix} ${status}`
+	return `${clipped}… · ${status}`
 }
 
 export const CardHeader: React.FC<CardHeaderProps> = ({ header, status, icon, compact, statusLabel, tasklet }) => {

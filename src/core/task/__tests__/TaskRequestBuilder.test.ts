@@ -157,20 +157,22 @@ describe("TaskRequestBuilder", () => {
 					{},
 					{
 						get: (_target, key) =>
-							({
-								mode: requestMode,
-								utilityModelSelection,
-								subagentsEnabled: true,
-								browserSettings: overrides.browserSettings ?? {},
-								preferredLanguage: overrides.preferredLanguage ?? "English",
-								globalSkillsToggles: {},
-								utilityModelEnabled: false,
-								utilityModelUseCondense: true,
-								yoloModeToggled: false,
-								diracWebToolsEnabled: false,
-								enableParallelToolCalling: false,
-								useAutoCondense: false,
-							} as any)[key as any],
+							(
+								({
+									mode: requestMode,
+									utilityModelSelection,
+									subagentsEnabled: true,
+									browserSettings: overrides.browserSettings ?? {},
+									preferredLanguage: overrides.preferredLanguage ?? "English",
+									globalSkillsToggles: {},
+									utilityModelEnabled: false,
+									utilityModelUseCondense: true,
+									yoloModeToggled: false,
+									diracWebToolsEnabled: false,
+									enableParallelToolCalling: false,
+									useAutoCondense: false,
+								}) as any
+							)[key as any],
 					},
 				),
 				apiConfiguration: {
@@ -197,11 +199,33 @@ describe("TaskRequestBuilder", () => {
 	for (const contained of [false, true]) {
 		it(`forwards ${contained ? "contained" : "legacy"} storage to context assembly`, async () => {
 			const { context, requestRuntime } = createContext(undefined)
-			if (contained) context.storageAddress = { kind: "tasklet", rootTaskId: "root", taskletId: "tasklet_00000000-0000-4000-8000-000000000001" }
+			if (contained)
+				context.storageAddress = {
+					kind: "tasklet",
+					rootTaskId: "root",
+					taskletId: "tasklet_00000000-0000-4000-8000-000000000001",
+				}
 			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-			sinon.assert.calledOnceWithExactly(disk.ensureTaskDirectoryExists as sinon.SinonStub, context.storageAddress ?? context.taskId)
+			sinon.assert.calledOnceWithExactly(
+				disk.ensureTaskDirectoryExists as sinon.SinonStub,
+				context.storageAddress ?? context.taskId,
+			)
 		})
 	}
+
+	it("rebuilds current structured supervision after compaction rather than relying on narrative history", async () => {
+		const { context, requestRuntime } = createContext(undefined)
+		let current = JSON.stringify({ pending: [{ taskletId: "child", requestId: "exact-current-request" }] })
+		const supervision = sandbox.stub().callsFake(() => current)
+		context.getTaskletSupervisionContext = supervision
+		const compacted = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0, shouldCompact: true })
+		assert.match(compacted.systemPrompt, /exact-current-request/)
+		current = JSON.stringify({ pending: [], outcome: "committed" })
+		const next = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+		assert.doesNotMatch(next.systemPrompt, /exact-current-request/)
+		assert.match(next.systemPrompt, /committed/)
+		sinon.assert.calledTwice(supervision)
+	})
 
 	it("exposes Utility routing in generic and dynamic subagent schemas for a valid selection", async () => {
 		const { context, requestRuntime, getCapturedPromptContext, writePromptMetadataArtifacts } = createContext({
@@ -227,7 +251,10 @@ describe("TaskRequestBuilder", () => {
 			},
 		]
 		const [dynamicSpec] = DiracToolSet.getDynamicSubagentToolSpecs(promptContext)
-		assert.equal(dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"), true)
+		assert.equal(
+			dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"),
+			true,
+		)
 		sinon.assert.calledOnce(writePromptMetadataArtifacts)
 		assert.deepEqual(writePromptMetadataArtifacts.firstCall.args[0], {
 			systemPrompt: "built system prompt",
@@ -265,7 +292,10 @@ describe("TaskRequestBuilder", () => {
 				},
 			]
 			const [dynamicSpec] = DiracToolSet.getDynamicSubagentToolSpecs(promptContext)
-			assert.equal(dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"), false)
+			assert.equal(
+				dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"),
+				false,
+			)
 			configuredAgents = []
 			sinon.assert.calledOnce(writePromptMetadataArtifacts)
 		}
@@ -273,23 +303,42 @@ describe("TaskRequestBuilder", () => {
 
 	it("does not advertise the board skill in a headless request even with cached discovery metadata", async () => {
 		setHostCapabilities({})
-			; (skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
+		;(skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
 		const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined)
 		await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-		assert.equal(getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"), false)
-		assert.equal(context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"), false)
+		assert.equal(
+			getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"),
+			false,
+		)
+		assert.equal(
+			context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"),
+			false,
+		)
 	})
 
 	for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
 		it(`advertises foreground-only skills correctly in ${executionProfile} request assembly`, async () => {
-			setHostCapabilities({ architectureViewer: { prepare: async () => { }, createPanel: async () => { throw new Error("not used") } } })
-				; (skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
+			setHostCapabilities({
+				architectureViewer: {
+					prepare: async () => {},
+					createPanel: async () => {
+						throw new Error("not used")
+					},
+				},
+			})
+			;(skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
 			const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined)
 			context.executionProfile = executionProfile
 			context.getPinnedContext = async () => undefined
 			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-			assert.equal(getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"), executionProfile !== "tasklet")
-			assert.equal(context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"), executionProfile !== "tasklet")
+			assert.equal(
+				getCapturedPromptContext()?.skills?.some((skill) => skill.name === "architecture-board"),
+				executionProfile !== "tasklet",
+			)
+			assert.equal(
+				context.taskState.availableSkills.some((skill) => skill.name === "architecture-board"),
+				executionProfile !== "tasklet",
+			)
 		})
 	}
 
@@ -316,7 +365,11 @@ describe("TaskRequestBuilder", () => {
 		assert.match(promptContext.preferredLanguageInstructions ?? "", /fr/)
 		assert.equal(result.toolSnapshot.requestId, "bound-request")
 		assert.equal(result.toolSnapshot.configurationRevision, 7)
-		sinon.assert.calledWithExactly(context.toolExecutor.getSnapshotForRequest as sinon.SinonStub, promptContext, requestRuntime)
+		sinon.assert.calledWithExactly(
+			context.toolExecutor.getSnapshotForRequest as sinon.SinonStub,
+			promptContext,
+			requestRuntime,
+		)
 
 		const activatedRuntime = (context.toolExecutor.activateSnapshot as sinon.SinonStub).firstCall.args[1]
 		assert.equal(activatedRuntime.requestId, "bound-request")

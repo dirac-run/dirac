@@ -15,7 +15,7 @@ export function cardDisplayBody(card: Card): string {
 
 	return [
 		`Prompt\n${tasklet.prompt}`,
-		tasklet.status === "waiting" ? "Waiting for the parent; use tasklets to inspect and resolve or escalate." : undefined,
+		tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
 		tasklet.result === undefined ? undefined : `Result\n${tasklet.result}`,
 		tasklet.communications.length > 0
 			? `Communications (parent-directed)\n${tasklet.communications.join("\n\n")}`

@@ -20,11 +20,15 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 	const currentCwd = cwd || process.cwd()
 
 	const taskletParentGuidance =
-		(context.executionProfile === "standalone" || context.executionProfile === "goal_coordinator" || context.executionProfile === "goal_followup") && context.subagentsEnabled === true
+		(context.executionProfile === "standalone" ||
+			context.executionProfile === "goal_coordinator" ||
+			context.executionProfile === "goal_followup") &&
+		context.subagentsEnabled === true
 			? `\nTASKLET DELEGATION
 
 - Generic and configured named-agent spawn tools start tasklets asynchronously. A returned stable tasklet ID confirms startup acceptance, not assignment success or completion; startup failures are reported separately.
-- Continue useful work after spawning. Later results, progress, and requests arrive through parent communication; use \`tasklets\` with \`inspect\` and the stable ID for retained status, results, and pending requests. Answer or resolve requests within your current authority; escalate to the user when needed.
+- Continue useful work after spawning. Later results, progress, and requests arrive through parent communication. Use \`tasklets\` \`list\` for compact inventory and \`inspect\` views for passive status, pending requests, messages, trajectory (calls without results), selected calls/results, child-only transcript excerpts, or committed assignment results. Retrieve exact evidence in bounded pages rather than full contexts.
+- Use \`tasklets\` \`message\` for all direct communication: addressed guidance/questions, replies to exact request IDs, and permission decisions. Batch explicitly addressed requests when useful; inspect per-item outcomes and escalate only when needed. Queued guidance is not a consumed message or a permission decision. Child Act execution never expands current parent authority.
 - When no useful work remains while tasklets are active, use \`tasklets\` with \`sleep\` to wait for events rather than repeatedly polling. Before completing the root task, let active tasklets finish or explicitly interrupt them.
 - The configured timeout applies to each execution, including explicit resumption. A deadline interrupts the tasklet while preserving its ID and conversation; continue only with explicit \`tasklets\` \`resume\`. There is no 90-second wrap-up grace, automatic continuation, or timeout-as-success.
 `

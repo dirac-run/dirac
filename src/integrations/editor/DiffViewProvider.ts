@@ -11,6 +11,7 @@ import { DiffContentManager } from "./DiffContentManager"
 import { FileOperationManager } from "./FileOperationManager"
 import { NodeTextFileAccess } from "./NodeTextFileAccess"
 import type { TextFileAccess } from "./TextFileAccess"
+import type { EditorReviewRequest } from "@shared/editorReview"
 
 export abstract class DiffViewProvider {
 	editType?: "create" | "modify" | "delete"
@@ -51,8 +52,13 @@ export abstract class DiffViewProvider {
 
 		try {
 			const cwd = await getCwd()
-			const absolutePathResolved = workspaceResolver.resolveWorkspacePath(cwd, relPath, "DiffViewProvider.open.absolutePath")
-			this.absolutePath = typeof absolutePathResolved === "string" ? absolutePathResolved : absolutePathResolved.absolutePath
+			const absolutePathResolved = workspaceResolver.resolveWorkspacePath(
+				cwd,
+				relPath,
+				"DiffViewProvider.open.absolutePath",
+			)
+			this.absolutePath =
+				typeof absolutePathResolved === "string" ? absolutePathResolved : absolutePathResolved.absolutePath
 			this.relPath = options?.displayPath ?? relPath
 			this.editType = editType
 			this.isEditing = true
@@ -335,6 +341,7 @@ export abstract class DiffViewProvider {
 
 	async showReview(
 		_files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
+		_request?: EditorReviewRequest,
 	): Promise<void> {}
 	async undoUserEdits() {
 		if (this.newContent !== undefined) {

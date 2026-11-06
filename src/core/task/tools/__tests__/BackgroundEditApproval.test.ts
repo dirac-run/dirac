@@ -120,8 +120,13 @@ for (const flow of flows) {
 						return card
 					})
 					card.waitForInteraction.callsFake(async () => {
-						assert.equal(editor.showReview.callCount, scenario.requiresUserInteraction ? 1 : 0)
-						assert.equal(editor.scrollToFirstDiff.callCount, scenario.requiresUserInteraction ? 1 : 0)
+						const opensAutomatically = scenario.requiresUserInteraction && !backgroundEditEnabled
+						assert.equal(editor.showReview.callCount, opensAutomatically ? 1 : 0)
+						assert.equal(editor.scrollToFirstDiff.callCount, opensAutomatically ? 1 : 0)
+						if (backgroundEditEnabled && scenario.requiresUserInteraction) {
+							assert.deepEqual(card.update.firstCall.args[0].actions.map((action: { value: string }) => action.value),
+								[DiracAskResponse.APPROVE, DiracAskResponse.REJECT, DiracAskResponse.VIEW])
+						}
 						return { action: DiracAskResponse.APPROVE }
 					})
 
@@ -159,9 +164,13 @@ for (const flow of flows) {
 					assert.equal(result.approved, true)
 					assert.deepEqual(result.userEdits, userEdits)
 					sinon.assert.calledTwice(card.waitForInteraction)
-					sinon.assert.calledTwice(editor.showReview)
-					sinon.assert.calledWithExactly(editor.showReview, [{ absolutePath, displayPath, content, originalContent }])
-					sinon.assert.calledTwice(editor.scrollToFirstDiff)
+					sinon.assert.calledOnce(editor.showReview)
+					sinon.assert.calledWithExactly(
+						editor.showReview,
+						[{ absolutePath, displayPath, content, originalContent }],
+						card,
+					)
+					sinon.assert.calledOnce(editor.scrollToFirstDiff)
 				})
 			}
 
@@ -173,10 +182,35 @@ for (const flow of flows) {
 
 				assert.equal(result.approved, false)
 				sinon.assert.calledOnce(card.waitForInteraction)
-				sinon.assert.calledOnce(editor.showReview)
+				sinon.assert.notCalled(editor.showReview)
 				sinon.assert.calledOnce(editor.hideReview)
 			})
 		}
+
+		it("rebinds reopened review to the new request instead of the retired card", async () => {
+			const { env, card, editor, createCard } = makeEnvironment(false, "manual_only", true)
+			card.waitForInteraction.resolves({ action: DiracAskResponse.VIEW })
+			const nextCard = {
+				...card,
+				waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
+			}
+			createCard.onSecondCall().resolves(nextCard)
+
+			assert.equal((await flow.request(env)).approved, true)
+			assert.equal(editor.showReview.firstCall.args[1], card)
+			assert.equal(editor.showReview.secondCall.args[1], nextCard)
+			sinon.assert.calledOnce(editor.hideReview)
+		})
+
+		it("keeps an owner-routed permission private while waiting for the parent", async () => {
+			const { env, card, editor } = makeEnvironment(false, "manual_only", false)
+			card.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+
+			assert.equal((await flow.request(env)).approved, false)
+			sinon.assert.calledOnce(card.waitForInteraction)
+			sinon.assert.notCalled(editor.showReview)
+			sinon.assert.notCalled(editor.scrollToFirstDiff)
+		})
 
 		it("keeps directly auto-approved edits silent without requesting approval", async () => {
 			const { env, editor, createCard } = makeEnvironment(true, "auto_approve", false)

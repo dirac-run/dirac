@@ -8,18 +8,18 @@ import { Position, Range } from "@/test/vscode-mock"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 
 class TabInputText {
-	constructor(readonly uri: URI) { }
+	constructor(readonly uri: URI) {}
 }
 class TabInputTextDiff {
 	constructor(
 		readonly original: URI,
 		readonly modified: URI,
-	) { }
+	) {}
 }
 class TabInputNotebook {
-	constructor(readonly uri: URI) { }
+	constructor(readonly uri: URI) {}
 }
-class TabInputNotebookDiff extends TabInputTextDiff { }
+class TabInputNotebookDiff extends TabInputTextDiff {}
 
 function event<T>() {
 	const listeners = new Set<(value: T) => void>()
@@ -66,10 +66,10 @@ function createHost() {
 			}),
 		},
 	}
-	function addEditor(path: string, text: string) {
+	function addEditor(path: string, text: string, uri = URI.file(path)) {
 		let content = text
 		const document = {
-			uri: URI.file(path),
+			uri,
 			isDirty: true,
 			get lineCount() {
 				return content.split("\n").length
@@ -115,7 +115,7 @@ function createHost() {
 			constructor(
 				readonly base: string,
 				readonly pattern: string,
-			) { }
+			) {}
 		},
 		window,
 		extensions: { getExtension: () => ({ isActive: true }) },
@@ -182,6 +182,11 @@ function createHost() {
 			contents.set(path, file)
 			return file
 		},
+		preview(index: number) {
+			const call = host.commands.executeCommand.getCalls().filter((call) => call.args[0] === "vscode.changes")[index]
+			const uri = call.args[2][0][2] as URI
+			return addEditor(uri.fsPath, Buffer.from(uri.query, "base64").toString("utf8"), uri)
+		},
 		focus(editor: vscode.TextEditor) {
 			window.activeTextEditor = editor
 			active.fire(editor)
@@ -216,7 +221,7 @@ function loadProvider(host: ReturnType<typeof createHost>["host"]) {
 			this.editType = "modify"
 			this.isEditing = true
 			// Exercise the real reset implementation without filesystem setup.
-			this.fileOpManager = { originalContent: original, reset() { } } as typeof this.fileOpManager
+			this.fileOpManager = { originalContent: original, reset() {} } as typeof this.fileOpManager
 			await this.openDiffEditor()
 		}
 		text() {
@@ -298,8 +303,12 @@ describe("VscodeDiffViewProvider owned resources", function () {
 			const original = manager.originalUri("/shared.ts", "original") as URI
 			const owned = { input: new TabInputTextDiff(original, uri), label: "owned", isDirty: false }
 			const active = {
-				input: activeKind === "ordinary" ? new TabInputText(uri) : new TabInputTextDiff(sibling.originalUri("/shared.ts", "original") as URI, uri),
-				label: activeKind, isDirty: false,
+				input:
+					activeKind === "ordinary"
+						? new TabInputText(uri)
+						: new TabInputTextDiff(sibling.originalUri("/shared.ts", "original") as URI, uri),
+				label: activeKind,
+				isDirty: false,
 			}
 			host.tabs.push(owned, active)
 			host.host.window.tabGroups.all[0].activeTab = active
@@ -309,7 +318,9 @@ describe("VscodeDiffViewProvider owned resources", function () {
 			host.host.window.visibleTextEditors = [file.editor]
 			let show!: () => void
 			host.host.commands.executeCommand = sinon.spy(async (_command: string, ..._args: any[]) => {
-				await new Promise<void>((resolve) => { show = resolve })
+				await new Promise<void>((resolve) => {
+					show = resolve
+				})
 				secondGroup.activeTab = secondGroup.tabs[0]
 				host.host.window.visibleTextEditors = [file.editor, secondEditor]
 				host.visible.fire(host.host.window.visibleTextEditors)
@@ -362,24 +373,28 @@ describe("VscodeDiffViewProvider owned resources", function () {
 		const files = ["/a.ts", "/b.ts", "/c.ts"].map((path) => host.addFile(path, path))
 		await Promise.all(
 			providers.map((provider, index) =>
-				provider.showReview([
-					{
-						absolutePath: files[index].editor.document.uri.fsPath,
-						displayPath: "file",
-						content: files[index].editor.document.getText(),
-					},
-				]),
+				provider.showReview(
+					[
+						{
+							absolutePath: files[index].editor.document.uri.fsPath,
+							displayPath: "file",
+							content: files[index].editor.document.getText(),
+						},
+					],
+					{ taskId: "root", cardId: `review-${index}` },
+				),
 			),
 		)
 		const reviews = [...host.tabs]
 		assert.strictEqual(new Set(reviews.map((tab) => tab.label)).size, 3)
-		host.focus(files[2].editor)
+		const preview = host.preview(2)
+		host.focus(preview.editor)
 		await providers[0].hideReview()
 		assert.deepStrictEqual(host.tabs, reviews.slice(1))
 		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), true)
 		assert.strictEqual(host.contexts.get("dirac.isFileModified"), false)
-		files[2].setText("user edit")
-		host.changed.fire({ document: files[2].editor.document })
+		preview.setText("user edit")
+		host.changed.fire({ document: preview.editor.document })
 		assert.strictEqual(host.contexts.get("dirac.isFileModified"), true)
 		host.focus(files[0].editor)
 		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), false)
@@ -393,11 +408,14 @@ describe("VscodeDiffViewProvider owned resources", function () {
 	it("retains sibling review registration for the same file", async () => {
 		const file = host.addFile("/shared.ts", "proposal")
 		await Promise.all(
-			providers.map((provider) =>
-				provider.showReview([{ absolutePath: "/shared.ts", displayPath: "shared.ts", content: "proposal" }]),
+			providers.map((provider, index) =>
+				provider.showReview([{ absolutePath: "/shared.ts", displayPath: "shared.ts", content: "proposal" }], {
+					taskId: "root",
+					cardId: `review-${index}`,
+				}),
 			),
 		)
-		host.focus(file.editor)
+		host.focus(host.preview(2).editor)
 		await providers[1].reset()
 		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), true)
 		assert.strictEqual(host.tabs.length, 2)
@@ -498,7 +516,9 @@ describe("VscodeDiffViewProvider owned resources", function () {
 		await providers[0].initialize("/a.ts")
 		const close = host.host.window.tabGroups.close
 		let release!: () => void
-		const gate = new Promise<void>((resolve) => { release = resolve })
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
 		host.host.window.tabGroups.close = sinon.spy(async (tab: (typeof host.tabs)[number]) => {
 			await gate
 			return close(tab)
@@ -518,7 +538,9 @@ describe("VscodeDiffViewProvider owned resources", function () {
 		const uri = (notebookTab.input as TabInputNotebookDiff).modified.toString()
 		const close = host.host.window.tabGroups.close
 		let release!: () => void
-		const gate = new Promise<void>((resolve) => { release = resolve })
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
 		host.host.window.tabGroups.close = sinon.spy(async (tab: (typeof host.tabs)[number]) => {
 			if (tab === notebookTab) await gate
 			return close(tab)
@@ -541,7 +563,9 @@ describe("VscodeDiffViewProvider owned resources", function () {
 		const uri = (notebookTab.input as TabInputNotebookDiff).modified
 		const close = host.host.window.tabGroups.close
 		let release!: () => void
-		const gate = new Promise<void>((resolve) => { release = resolve })
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
 		host.host.window.tabGroups.close = sinon.spy(async (tab: (typeof host.tabs)[number]) => {
 			if (tab === notebookTab) await gate
 			return close(tab)
@@ -561,7 +585,9 @@ describe("VscodeDiffViewProvider owned resources", function () {
 		host.addFile("/a.ts", "a")
 		const executeCommand = host.host.commands.executeCommand
 		let release!: () => void
-		const gate = new Promise<void>((resolve) => { release = resolve })
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
 		host.host.commands.executeCommand = sinon.spy(async (command: string, ...args: any[]) => {
 			if (command === "vscode.diff") await gate
 			await executeCommand(command, ...args)
@@ -595,11 +621,17 @@ describe("VscodeDiffViewProvider owned resources", function () {
 			displayPath: absolutePath,
 			content: "proposal",
 		}))
-		await Promise.all(providers.map((provider, index) => provider.showReview([files[index]])))
+		await Promise.all(
+			providers.map((provider, index) =>
+				provider.showReview([files[index]], { taskId: `task-${index}`, cardId: `review-${index}` }),
+			),
+		)
 		const siblings = host.tabs.slice(1)
 		await providers[0].reset()
 		assert.deepStrictEqual(host.tabs, siblings)
 		host.focus(host.addFile("/b.ts", "proposal").editor)
+		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), false, "Ordinary files never select an approval")
+		host.focus(host.preview(1).editor)
 		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), true)
 		host.focus(host.addFile("/a.ts", "proposal").editor)
 		assert.strictEqual(host.contexts.get("dirac.isFileUnderReview"), false)

@@ -192,3 +192,5 @@ npm run package:brew
 ```
 
 Publishing a package or formula is a release operation and is separate from the normal build and verification workflow.
+
+Tasklet supervision uses one addressed `tasklets message` operation (up to 20 explicit recipients/requests); `list` and selected `inspect` views are passive and paged. Normal transcript/Agents rows show assignment titles and status, not routing IDs. Displaced running/waiting snapshots can enter scrollback; only meaningful status/result changes create revisions. Accounting-only cards remain in stored usage totals but are not transcript rows. See `tests/e2e/cli/README.md` for the isolated standalone/Goal regression fixture.

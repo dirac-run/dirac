@@ -8,14 +8,14 @@ import { formatResponse } from "@core/formatResponse"
 
 export async function requestQuestionResponse(question: string, options: string[], env: IToolEnvironment): Promise<any> {
 	// Show notification if enabled
-	if (env.config.autoApprovalSettings.enableNotifications) {
+	if (env.config.executionProfile !== "tasklet" && env.config.autoApprovalSettings.enableNotifications) {
 		env.system.showNotification({
 			subtitle: "Dirac has a question...",
 			message: question.replace(/\n/g, " "),
 		})
 	}
 
-	if (env.config.yoloModeToggled) {
+	if (env.config.executionProfile !== "tasklet" && env.config.yoloModeToggled) {
 		env.telemetry.captureCustomMetadata({ answerType: "unavailable" })
 		await env.ui.upsertText(
 			`[YOLO MODE] Auto-responding to question: "${question.substring(0, 100)}${question.length > 100 ? "..." : ""}"`,

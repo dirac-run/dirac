@@ -14,15 +14,17 @@ import { createMockTaskConfig } from "./helpers/mockTaskConfig"
 function fixture(strict = true) {
 	const { config, context } = createMockTaskConfig()
 	const controls = {
-		list: sinon.stub().returns([]),
+		list: sinon.stub().returns({ items: [], totalItems: 0 }),
 		sleep: sinon.stub().resolves({ reason: "timeout" }),
-		resolveInteraction: sinon.stub().resolves({ status: "resolved" }),
+		message: sinon.stub().resolves([{ taskletId: "child-1", replyTo: "request-1", status: "resolved" }]),
 	}
 	const card = {
 		id: "tasklets-card",
 		status: CardStatus.RUNNING,
 		update: sinon.stub().resolves(),
-		finalize: sinon.stub().callsFake(async (status: CardStatus) => { card.status = status }),
+		finalize: sinon.stub().callsFake(async (status: CardStatus) => {
+			card.status = status
+		}),
 	}
 	const createCard = sinon.stub().resolves(card)
 	const save = sinon.stub().resolves()
@@ -31,7 +33,7 @@ function fixture(strict = true) {
 		ui: { createCard },
 		context: { ...context, save },
 		telemetry: { captureCustomMetadata: sinon.stub() },
-		getCreatedCards: () => createCard.called ? [card] : [],
+		getCreatedCards: () => (createCard.called ? [card] : []),
 		getCustomMetadata: () => ({}),
 	} as unknown as ToolExecutionEnvironment
 	const create = sinon.stub().returns(environment)
@@ -48,15 +50,21 @@ function fixture(strict = true) {
 		executableToolNames: new Set(["tasklets"]),
 		dynamicSubagentToolNames: new Set(),
 	}
-	const execute = (parameters: Record<string, unknown>) => coordinator.execute(config, {
-		type: "tool_use", name: "tasklets", params: parameters, isNativeToolCall: true,
-	})
+	const execute = (parameters: Record<string, unknown>) =>
+		coordinator.execute(config, {
+			type: "tool_use",
+			name: "tasklets",
+			params: parameters,
+			isNativeToolCall: true,
+		})
 	return { controls, card, createCard, save, create, config, execute }
 }
 
 function strictArguments(operation: string, overrides: Record<string, unknown> = {}) {
 	return {
-		...Object.fromEntries(tasklets_spec.parameters!.filter((parameter) => !parameter.required).map((parameter) => [parameter.name, null])),
+		...Object.fromEntries(
+			tasklets_spec.parameters!.filter((parameter) => !parameter.required).map((parameter) => [parameter.name, null]),
+		),
 		operation,
 		...overrides,
 	}
@@ -65,7 +73,7 @@ function strictArguments(operation: string, overrides: Record<string, unknown> =
 describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
 	it("executes list with every optional field null through injected parent controls", async () => {
 		const { controls, card, createCard, save, create, config, execute } = fixture()
-		assert.deepEqual(JSON.parse(await execute(strictArguments("list")) as string), [])
+		assert.deepEqual(JSON.parse((await execute(strictArguments("list"))) as string), { items: [], totalItems: 0 })
 		sinon.assert.calledOnceWithExactly(controls.list)
 		sinon.assert.notCalled(controls.sleep)
 		assert.deepEqual(create.firstCall.args[0].toolUse, { name: "tasklets", params: { operation: "list" } })
@@ -76,15 +84,10 @@ describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
 		assert.equal(config.taskState.consecutiveMistakeCount, 0)
 	})
 
-	for (const parameters of [
-		{},
-		{ timeout_ms: 0 },
-		{ tasklet_ids: [], timeout_ms: 0 },
-		{ tasklet_ids: ["child-1"] },
-	]) {
+	for (const parameters of [{}, { timeout_ms: 0 }, { tasklet_ids: [], timeout_ms: 0 }, { tasklet_ids: ["child-1"] }]) {
 		it(`executes sleep with null optional fields and preserves ${JSON.stringify(parameters)}`, async () => {
 			const { controls, card, save, execute } = fixture()
-			assert.deepEqual(JSON.parse(await execute(strictArguments("sleep", parameters)) as string), { reason: "timeout" })
+			assert.deepEqual(JSON.parse((await execute(strictArguments("sleep", parameters))) as string), { reason: "timeout" })
 			sinon.assert.calledOnceWithExactly(controls.sleep, {
 				taskletIds: parameters.tasklet_ids,
 				timeoutMs: parameters.timeout_ms,
@@ -97,21 +100,21 @@ describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
 
 	it("does not normalize nulls for non-strict calls", async () => {
 		const { controls, createCard, save, execute } = fixture(false)
-		assert.match(await execute(strictArguments("list")) as string, /Parameter 'tasklet_id' is not valid for list/)
+		assert.match((await execute(strictArguments("list"))) as string, /Parameter 'tasklet_id' is not valid for list/)
 		sinon.assert.notCalled(controls.list)
 		sinon.assert.notCalled(createCard)
 		sinon.assert.notCalled(save)
 	})
 
-	for (const { name, input, response } of [
+	for (const { name, input } of [
 		{
 			name: "free-text answer",
-			input: { answer: "Continue with option two" },
+			input: { text: "Continue with option two" },
 			response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "Continue with option two" },
 		},
 		{
 			name: "displayed choice value with answer",
-			input: { action: "choice-2", answer: "Use option two" },
+			input: { action: "choice-2", text: "Use option two" },
 			response: { action: "choice-2", response: DiracAskResponse.MESSAGE, value: "choice-2", text: "Use option two" },
 		},
 		{
@@ -122,11 +125,27 @@ describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
 	]) {
 		it(`preserves ${name} after strict normalization`, async () => {
 			const { controls, execute } = fixture()
-			const result = await execute(strictArguments("resolve", {
-				tasklet_id: "child-1", request_id: "request-1", resolution: "answer", ...input,
-			}))
-			assert.deepEqual(JSON.parse(result as string), { status: "resolved" })
-			sinon.assert.calledOnceWithExactly(controls.resolveInteraction, "child-1", "request-1", { operation: "answer", response })
+			const result = await execute(
+				strictArguments("message", {
+					messages: [
+						Object.assign(
+							{
+								tasklet_id: "child-1",
+								type: "reply",
+								reply_to: "request-1",
+								text: null,
+								action: null,
+								decision: null,
+							},
+							input,
+						),
+					],
+				}),
+			)
+			assert.equal(JSON.parse(result as string)[0].status, "resolved")
+			sinon.assert.calledOnceWithExactly(controls.message, [
+				{ taskletId: "child-1", type: "reply", replyTo: "request-1", ...input },
+			])
 		})
 	}
 })

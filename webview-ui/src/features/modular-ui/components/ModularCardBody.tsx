@@ -30,7 +30,7 @@ export function resolveCardBodyPresentation(card: Card): { body?: string; maxHei
 						tasklet.activity.length
 							? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}`
 							: undefined,
-						"Display preview only; the parent can inspect full results and transcript with tasklets.",
+						"Display preview only; the parent can inspect selected calls, results, messages, and child-only excerpts with tasklets.",
 					]
 						.filter(Boolean)
 						.join("\n\n")

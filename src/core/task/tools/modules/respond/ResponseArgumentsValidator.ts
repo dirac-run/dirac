@@ -1,9 +1,4 @@
-import {
-	type ResponseArguments,
-	ResponseOperation,
-	ResponseShapeError,
-	validateResponseShape,
-} from "@shared/responseTool"
+import { type ResponseArguments, ResponseOperation, ResponseShapeError, validateResponseShape } from "@shared/responseTool"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 
 export class ResponseArgumentsError extends Error {
@@ -22,12 +17,21 @@ export function validateResponseArguments(args: unknown, env: IToolEnvironment):
 		throw error
 	}
 	validateMode(request.operation, env)
+	if (request.reply_to && env.config.executionProfile !== "tasklet") {
+		throw new ResponseArgumentsError("Only tasklets may reply to an addressed parent question.", env)
+	}
 
 	if (request.operation !== ResponseOperation.PROGRESS) env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 	return request
 }
 
 function validateMode(operation: ResponseOperation, env: IToolEnvironment): void {
+	if (operation === ResponseOperation.PLAN && env.config.executionProfile === "tasklet") {
+		throw new ResponseArgumentsError(
+			"Tasklets cannot use the 'plan' response operation; report progress or complete the assignment.",
+			env,
+		)
+	}
 	if (operation === ResponseOperation.PLAN && env.config.mode !== "plan") {
 		throw new ResponseArgumentsError("The 'plan' response operation is available only in Plan Mode.", env)
 	}

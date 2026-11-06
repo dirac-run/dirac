@@ -31,6 +31,9 @@ function createSteerableTask() {
 	task.messageStateHandler.recordDeliveredSteeringMessageIds = sinon.stub().resolves()
 	task.messageStateHandler.saveDiracMessagesAndUpdateHistory = sinon.stub().resolves()
 	task.messageStateHandler.flushPendingWrites = sinon.stub().resolves()
+	task.messageStateHandler.addToApiConversationHistory = sinon.stub().callsFake(async (message: any) => {
+		task.apiConversationHistory.push(structuredClone(message))
+	})
 
 	task.messageStateHandler.appendToLastApiConversationUserMessage = sinon.stub().callsFake(async (contentBlock: any) => {
 		const lastMessage = task.apiConversationHistory.at(-1)
@@ -340,10 +343,70 @@ describe("Task steering inbox", () => {
 		task.apiConversationHistory.push({ role: "user", content: [{ type: "text", text: "Tool response" }] })
 		task.messageStateHandler.flushPendingWrites.rejects(new Error("disk full"))
 		await assert.rejects(task.appendQueuedSteeringToNextApiRequest(task.apiConversationHistory), /disk full/)
+		assert.equal(task.taskState.steeringMessages[0].deliveryState, SteeringDeliveryState.QUEUED)
+		sinon.assert.notCalled(task.messageStateHandler.recordDeliveredSteeringMessageIds)
 		task.messageStateHandler.flushPendingWrites.resolves()
 		await task.appendQueuedSteeringToNextApiRequest(task.apiConversationHistory)
 		assert.equal(task.apiConversationHistory[0].content.length, 2)
 		assert.equal(task.messageStateHandler.appendToLastApiConversationUserMessage.callCount, 1)
+		assert.equal(task.taskState.steeringMessages[0].deliveryState, SteeringDeliveryState.SENT)
+		sinon.assert.calledTwice(task.messageStateHandler.flushPendingWrites)
+		sinon.assert.calledOnce(task.messageStateHandler.recordDeliveredSteeringMessageIds)
+	})
+
+	for (const sharedHistory of [true, false]) {
+		it(`materializes retry steering after the checkpoint before marking it sent (${sharedHistory ? "shared" : "copied"} history)`, async () => {
+			const { task, messages } = createSteerableTask()
+			task.apiConversationHistory.push({ role: "user", content: "covered assignment" })
+			const checkpoint = {
+				providerId: "provider",
+				modelId: "model",
+				compactedThroughHistoryIndex: 0,
+				input: [{ type: "opaque-reasoning", encrypted: "preserve-me" }],
+			}
+			task.messageStateHandler.getApiConversationProviderState.returns({ checkpoint })
+			const outbound = sharedHistory ? task.apiConversationHistory : structuredClone(task.apiConversationHistory)
+			await task.enqueueSteeringMessage("Guidance received during retry")
+
+			await task.appendQueuedSteeringToNextApiRequest(outbound)
+
+			assert.deepEqual(task.apiConversationHistory[0], { role: "user", content: "covered assignment" })
+			assert.deepEqual(outbound[0], { role: "user", content: "covered assignment" })
+			assert.equal(task.apiConversationHistory.length, 2)
+			assert.equal(outbound.length, 2)
+			assert.match(JSON.stringify(task.apiConversationHistory[1]), /Guidance received during retry/)
+			assert.deepEqual(task.apiConversationHistory[1].content[0].steeringMessageIds, ["transcript-1"])
+			assert.deepEqual(messages[0].content.steering, { status: SteeringTranscriptStatus.SENT })
+			sinon.assert.notCalled(task.messageStateHandler.appendToLastApiConversationUserMessage)
+			sinon.assert.callOrder(
+				task.messageStateHandler.addToApiConversationHistory,
+				task.messageStateHandler.flushPendingWrites,
+				task.messageStateHandler.recordDeliveredSteeringMessageIds,
+				task.messageStateHandler.patchMarkdownById,
+			)
+		})
+	}
+
+	it("does not restore checkpointed steering after a durable conversation write but a failed receipt and transcript write", async () => {
+		const { task, messages } = createSteerableTask()
+		task.apiConversationHistory.push({ role: "user", content: "covered assignment" })
+		task.messageStateHandler.getApiConversationProviderState.returns({
+			checkpoint: { providerId: "provider", modelId: "model", compactedThroughHistoryIndex: 0, input: [] },
+		})
+		await task.enqueueSteeringMessage("Deliver only once")
+		task.messageStateHandler.recordDeliveredSteeringMessageIds.rejects(new Error("receipt unavailable"))
+		task.messageStateHandler.patchMarkdownById.rejects(new Error("transcript unavailable"))
+
+		await assert.rejects(task.appendQueuedSteeringToNextApiRequest(task.apiConversationHistory), AggregateError)
+
+		assert.deepEqual(messages[0].content.steering, { status: SteeringTranscriptStatus.QUEUED })
+		assert.equal(task.apiConversationHistory.length, 2)
+		task.restoreQueuedSteeringFromTranscript()
+		assert.deepEqual(task.taskState.steeringMessages, [])
+		task.messageStateHandler.recordDeliveredSteeringMessageIds.resolves()
+		task.messageStateHandler.patchMarkdownById.resolves()
+		await task.appendQueuedSteeringToNextApiRequest(task.apiConversationHistory)
+		sinon.assert.calledOnce(task.messageStateHandler.addToApiConversationHistory)
 	})
 
 	it("keeps a consumed claim sent when durable receipt persistence fails", async () => {

@@ -12,7 +12,6 @@ export const BETA_RESULT = "BETA_RESULT_PRIVATE"
 
 const respond = (operation, text) => ({ name: "respond", args: { operation, text } })
 const control = (operation, args = {}) => ({ name: "tasklets", args: { operation, ...args } })
-const pendingQuestion = (record) => record.interactions.find((interaction) => interaction.status === "pending")
 
 function parseResult(completion) {
 	const message = completion.messages.findLast((message) => message.role === "tool")
@@ -24,7 +23,8 @@ function parseResult(completion) {
 /** Inspect after communication wakes; never treat acceptance or a wake as completion. */
 function* inspectUntil(id, predicate) {
 	for (let attempt = 0; attempt < 20; attempt++) {
-		const record = yield control("inspect", { tasklet_id: id })
+		const page = yield control("inspect", { tasklet_id: id })
+		const record = page.items[0]
 		assert.equal(record.id, id)
 		if (predicate(record)) return record
 		const wake = yield control("sleep", { tasklet_ids: [id], timeout_ms: 10000 })
@@ -33,6 +33,18 @@ function* inspectUntil(id, predicate) {
 		assert.ok(["event", "timeout"].includes(wake.reason), JSON.stringify(wake))
 	}
 	throw new Error(`Tasklet ${id} never reached the expected state`)
+}
+
+function* pendingQuestion(id) {
+	yield* inspectUntil(id, (record) => record.pendingRequestCount > 0)
+	const page = yield control("inspect", { tasklet_id: id, view: "pending" })
+	assert.equal(page.items.length, 1)
+	return page.items[0]
+}
+
+function* answer(id, request, text) {
+	const results = yield control("message", { messages: [{ tasklet_id: id, type: "reply", reply_to: request.id, text }] })
+	assert.equal(results[0].status, "resolved")
 }
 
 function* parentScenario() {
@@ -56,25 +68,21 @@ function* parentScenario() {
 	const [alpha, beta] = spawned.subagents.map((child) => child.id)
 	assert.notEqual(alpha, beta)
 	const listed = yield control("list")
-	assert.deepEqual(new Set(listed.map((record) => record.id)), new Set([alpha, beta]))
-	const alphaWaiting = yield* inspectUntil(alpha, pendingQuestion)
-	const betaWaiting = yield* inspectUntil(beta, pendingQuestion)
+	assert.deepEqual(new Set(listed.items.map((record) => record.id)), new Set([alpha, beta]))
+	const alphaWaiting = yield* pendingQuestion(alpha)
+	const betaWaiting = yield* pendingQuestion(beta)
 	yield respond("progress", TASKLET_READY)
 	const firstWake = yield control("sleep", { tasklet_ids: [], timeout_ms: 120000 })
 	assert.equal(firstWake.reason, "user_message", "Only explicit PTY user input releases this parent sleep")
-	yield control("resolve", {
-		tasklet_id: alpha,
-		request_id: pendingQuestion(alphaWaiting).id,
-		resolution: "answer",
-		answer: "ALPHA_PARENT_ANSWER",
-	})
+	yield* answer(alpha, alphaWaiting, "ALPHA_PARENT_ANSWER")
 	const firstResult = yield* inspectUntil(alpha, (record) => record.outcomePersisted)
 	assert.equal(firstResult.outcome.kind, "completed")
 	assert.ok(JSON.stringify(firstResult).includes(ALPHA_RESULT))
-	const stillWaiting = yield control("inspect", { tasklet_id: beta })
+	const stillWaiting = (yield control("inspect", { tasklet_id: beta })).items[0]
 	assert.equal(stillWaiting.outcome, undefined, "Completing Alpha must not join or cancel its sibling")
-	assert.equal(pendingQuestion(stillWaiting).id, pendingQuestion(betaWaiting).id)
-	const transcript = yield control("transcript", { tasklet_id: alpha })
+	assert.equal(stillWaiting.pendingRequestCount, 1)
+	assert.equal((yield* pendingQuestion(beta)).id, betaWaiting.id)
+	const transcript = yield control("inspect", { tasklet_id: alpha, view: "assignment" })
 	assert.ok(JSON.stringify(transcript).includes(ALPHA_RESULT))
 	yield respond("progress", TASKLET_MIXED)
 	const secondWake = yield control("sleep", { tasklet_ids: [], timeout_ms: 120000 })
@@ -84,19 +92,14 @@ function* parentScenario() {
 	const reopenedResult = yield* inspectUntil(alpha, (record) => record.outcomePersisted)
 	assert.equal(reopenedResult.outcome.kind, "completed")
 	assert.ok(JSON.stringify(reopenedResult).includes(ALPHA_REOPENED))
-	yield control("resolve", {
-		tasklet_id: beta,
-		request_id: pendingQuestion(betaWaiting).id,
-		resolution: "answer",
-		answer: "BETA_PARENT_ANSWER",
-	})
+	yield* answer(beta, betaWaiting, "BETA_PARENT_ANSWER")
 	const betaResult = yield* inspectUntil(beta, (record) => record.outcomePersisted)
 	assert.equal(betaResult.outcome.kind, "completed")
 	assert.ok(JSON.stringify(betaResult).includes(BETA_RESULT))
-	const retained = yield control("inspect", { tasklet_id: alpha })
+	const retained = (yield control("inspect", { tasklet_id: alpha })).items[0]
 	assert.equal(retained.id, alpha)
 	assert.ok(JSON.stringify(retained).includes(ALPHA_REOPENED))
-	const betaTranscript = yield control("transcript", { tasklet_id: beta })
+	const betaTranscript = yield control("inspect", { tasklet_id: beta, view: "transcript" })
 	assert.ok(JSON.stringify(betaTranscript).includes(BETA_RESULT))
 	yield respond("complete", TASKLET_DONE)
 	throw new Error("The tasklet fixture must not request another root completion")

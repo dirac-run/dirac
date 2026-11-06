@@ -1,5 +1,13 @@
 import type { TaskletRecord } from "@core/storage/taskStorage"
-import type { TaskInteractionRequest } from "../../types/task-messenger"
+import type {
+	TaskletMessage,
+	TaskletMessageResult,
+	TaskletSleepOptions,
+	TaskletWakeResult,
+	TaskletInspectionQuery,
+	TaskletInspectionPage,
+	TaskletSummary,
+} from "../../types/tasklet"
 import type { CardParams, ICardHandle } from "./ICardHandle"
 import type { IArchitectureTrait } from "./IArchitectureTrait"
 import type { TextCondensationTemplateId } from "@core/text-condensation/TextCondenser"
@@ -207,8 +215,11 @@ export interface SaveResult {
 export interface IEditorTrait {
 	/** Reads authoritative text through the editor's configured transport. */
 	readText(path: string): Promise<string>
-	/** Opens the diff/review UI for one or more files */
-	showReview(files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[]): Promise<void>
+	/** Opens a preview bound to the exact interaction card; private owner-routed requests remain non-actionable. */
+	showReview(
+		files: { absolutePath: string; displayPath: string; content: string; originalContent?: string }[],
+		card: ICardHandle,
+	): Promise<void>
 	/** Hides the review UI */
 	hideReview(): Promise<void>
 	/** Opens a specific file in the editor */
@@ -242,50 +253,21 @@ export interface ISourceAstTrait {
 	getAnchorFingerprint(path: string): string | null
 }
 
-export type TaskletInteractionResult = Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
-
-export interface TaskletInteraction extends TaskInteractionRequest {
-	id: string
-	status: "pending" | "resolved" | "retired"
-	createdAt: number
-	retiredAt?: number
-	resolvedAt?: number
-	resolution?: TaskletInteractionResult
-}
-
-export interface TaskletInspection extends TaskletRecord {
-	responses: ResponseArguments[]
-	interactions: TaskletInteraction[]
-	/** Live engine status is informational, never evidence of a committed outcome. */
-	executionStatus?: import("@shared/ExtensionMessage").TaskStatus
-	backgroundCommandRunning: boolean
-	outcomePersisted: boolean
-	settlementError?: import("../../TaskRunOutcome").SerializedTaskError
-	/** Informational projection failure; does not change child outcome or resumption authority. */
-	presentationError?: import("../../TaskRunOutcome").SerializedTaskError
-}
-
-export interface TaskletTranscript {
-	conversation: import("@shared/messages/content").DiracStorageMessage[]
-	presentation: DiracMessage[]
-}
-
-export type TaskletInteractionDecision =
-	| { operation: "approve" | "reject" | "escalate" }
-	| { operation: "answer"; response: TaskletInteractionResult }
-
-export type TaskletResolution = { status: "resolved" | "requires_user_approval" }
-
-export interface TaskletSleepOptions {
-	/** Omit to wake for any child communication; [] selects time/user-input only. */
-	taskletIds?: string[]
-	/** Optional relative deadline in milliseconds (integer, 0..2147483647). */
-	timeoutMs?: number
-}
-
-export type TaskletWakeResult =
-	| { reason: "event"; taskletId: string; eventId: string }
-	| { reason: "timeout" | "user_message" | "cancelled" }
+export type {
+	TaskletInteractionResult,
+	TaskletInteraction,
+	TaskletInspection,
+	TaskletTranscript,
+	TaskletInteractionDecision,
+	TaskletResolution,
+	TaskletMessage,
+	TaskletMessageResult,
+	TaskletSleepOptions,
+	TaskletWakeResult,
+	TaskletInspectionQuery,
+	TaskletInspectionPage,
+	TaskletSummary,
+} from "../../types/tasklet"
 
 /** Parent-only controls. Implementations expose data and operations, never the live Task/host. */
 export interface TaskletControls {
@@ -293,13 +275,11 @@ export interface TaskletControls {
 	start(input: { title: string; prompt: string } & import("../../TaskletConfiguration").TaskletStartOptions): Promise<TaskletRecord>
 	/** Explicit follow-up under the same handle/conversation; returns acceptance, not a result. */
 	resume(id: string, message?: string): Promise<TaskletRecord>
-	list(): TaskletInspection[]
-	inspect(id: string): TaskletInspection
-	readTranscript(id: string): Promise<TaskletTranscript>
-	/** Queued guidance is not an answer to a pending interaction or proof of consumption. */
-	steer(id: string, message: string): Promise<{ id: string; messageId: string; accepted: true }>
-	interrupt(id: string, reason?: string): Promise<TaskletInspection>
-	resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision): Promise<TaskletResolution>
+	list(query?: TaskletInspectionQuery): TaskletInspectionPage<TaskletSummary>
+	inspect(id: string, query?: TaskletInspectionQuery): Promise<TaskletInspectionPage>
+	/** All direct guidance, questions, replies and permission decisions use this path. */
+	message(items: TaskletMessage[]): Promise<TaskletMessageResult[]>
+	interrupt(id: string, reason?: string): Promise<TaskletSummary>
 	/** Voluntary wait only; does not consume events/input, join children or start another model loop. */
 	sleep(options?: TaskletSleepOptions): Promise<TaskletWakeResult>
 }
