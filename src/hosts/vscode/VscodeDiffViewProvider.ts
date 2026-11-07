@@ -1,4 +1,5 @@
 import { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
+import { arePathsEqual } from "@utils/path"
 import * as vscode from "vscode"
 import { DecorationControllerManager } from "@/hosts/vscode/DecorationControllerManager"
 import { DocumentOperationManager } from "@/hosts/vscode/DocumentOperationManager"
@@ -18,6 +19,13 @@ export class VscodeDiffViewProvider extends DiffViewProvider {
 	private readonly tabManager = new TabManager()
 	private readonly reviewManager = new ReviewContextManager(this.tabManager)
 	private diffEditor?: vscode.TextEditor
+
+	override async readText(path: string): Promise<string> {
+		const document = vscode.workspace.textDocuments.find(
+			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, path),
+		)
+		return document ? document.getText() : super.readText(path)
+	}
 
 	override async openDiffEditor(): Promise<void> {
 		if (!this.absolutePath) {

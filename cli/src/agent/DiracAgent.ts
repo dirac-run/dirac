@@ -18,6 +18,8 @@ import { PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk"
 import { modelSupportsInferenceSpeed, providerSupportsInferenceSpeed, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { getSubagentUsage } from "@shared/subagentUsage"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import { isGoalHistoryItem } from "@shared/HistoryItem"
 import { isPlanResponseCard } from "@shared/responseTool"
 import { CLI_ONLY_COMMANDS, VSCODE_ONLY_COMMANDS } from "@shared/slashCommands"
@@ -2314,9 +2316,17 @@ export class DiracAgent implements acp.Agent {
 		const bridge = this.bridgeForSession(sessionId)
 		const persistedUpdates = getSessionUpdates(sessionId)
 		if (persistedUpdates.length > 0) {
+			const accountingCardIds = new Set(uiMessages.flatMap((message) =>
+				message.content.type === DiracMessageType.CARD &&
+					(getTaskletUsage(message.content.card) || getSubagentUsage(message.content.card))
+					? [message.content.card.id] : [],
+			))
 			const emitter = this.emitterForSession(sessionId)
 			for (const persistedUpdate of persistedUpdates) {
 				if (persistedUpdate.kind === "session_update") {
+					const update = persistedUpdate.update
+					// Older ACP journals exposed accounting cards as tool activity.
+					if ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && accountingCardIds.has(update.toolCallId)) continue
 					emitter.emit(persistedUpdate.update.sessionUpdate, persistedUpdate.update)
 				} else if (persistedUpdate.kind === "client_annotation") {
 					emitter.emit("client_annotation", persistedUpdate.annotation)
@@ -2327,7 +2337,7 @@ export class DiracAgent implements acp.Agent {
 				(persistedUpdate) =>
 					persistedUpdate.kind === "session_update" && persistedUpdate.update.sessionUpdate === "usage_update",
 			)
-			await bridge.restoreUsage(sessionId, uiMessages, !hasPersistedUsageUpdate)
+			await bridge.restoreUsage(sessionId, uiMessages, accountingCardIds.size > 0 || !hasPersistedUsageUpdate)
 			await this.emitPinnedMessagesUpdate(sessionId, "compacted")
 			return
 		}

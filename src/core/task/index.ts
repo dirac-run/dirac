@@ -1897,6 +1897,7 @@ export class TaskletHost {
 	private reconstruction?: Promise<void>
 	private usageProjectionReady = true
 	private readonly resolutions = new Set<Promise<TaskletResolution>>()
+	private readonly messages = new Set<Promise<TaskletMessageResult[]>>()
 	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
 	private sleepWaiter?: { check: () => void; finish: (result: TaskletWakeResult) => void }
 
@@ -1938,22 +1939,27 @@ export class TaskletHost {
 		for (const id of ids ?? []) this.requireChild(id)
 		if (this.sleepWaiter) throw new Error("Parent is already sleeping")
 		if (this.closing || signal?.aborted) return { reason: "cancelled" }
-		return new Promise<TaskletWakeResult>((resolve) => {
+		return new Promise<TaskletWakeResult>((resolve, reject) => {
 			let settled = false
 			let timer: ReturnType<typeof setTimeout> | undefined
-			const finish = (result: TaskletWakeResult) => {
+			const finish = (result: TaskletWakeResult | Error) => {
 				if (settled) return
 				settled = true
 				if (timer !== undefined) clearTimeout(timer)
 				signal?.removeEventListener("abort", cancel)
 				this.sleepWaiter = undefined
-				resolve(result)
+				if (result instanceof Error) reject(result)
+				else resolve(result)
 			}
 			const cancel = () => finish({ reason: "cancelled" })
 			const check = () => {
 				if (settled) return
 				if (this.closing || signal?.aborted) return cancel()
 				if (this.owner.hasPendingUserInput()) return finish({ reason: "user_message" })
+				const failed = [...this.children.values()].find(
+					(child) => (!ids || ids.has(child.record.id)) && child.settlementError,
+				)
+				if (failed) return finish(new Error(`Tasklet ${failed.record.id} settlement failed: ${failed.settlementError!.message}`))
 				const event = [...this.children.values()]
 					.filter((child) => !ids || ids.has(child.record.id))
 					.flatMap((child) => child.events)
@@ -2189,6 +2195,17 @@ export class TaskletHost {
 		const initialHistory = record.configuration.includeHistory
 			? structuredClone(this.options.getParentHistory?.())
 			: undefined
+		// The executing spawn call is already recorded, but its tool results are not.
+		// Inherit completed exchanges only; never send an unanswered tool call to the child provider.
+		const lastMessage = initialHistory?.messages.at(-1)
+		if (
+			initialHistory &&
+			lastMessage?.role === "assistant" &&
+			Array.isArray(lastMessage.content) &&
+			lastMessage.content.some((block) => block.type === "tool_use")
+		) {
+			initialHistory.messages.pop()
+		}
 		record.inheritedMessageCount = initialHistory?.messages.length ?? 0
 		// No Task or live handle exists if this initial write fails.
 		await saveTaskletRecord(record)
@@ -2423,6 +2440,7 @@ export class TaskletHost {
 			...[...this.starting.values()].map(({ acceptance }) => acceptance),
 			...[...this.children.keys()].map((id) => this.interrupt(id, "Root Task closed")),
 		])
+		await Promise.allSettled([...this.messages])
 		// Cancellation/decision errors belong to callers. Incomplete escalation cleanup also retains root ownership.
 		await Promise.allSettled([...this.resolutions])
 		const eventResults = await Promise.allSettled(
@@ -2505,6 +2523,7 @@ export class TaskletHost {
 
 	/** Validate the entire fixed batch before applying independent addressed messages. */
 	async message(items: TaskletMessage[]): Promise<TaskletMessageResult[]> {
+		if (this.closing) throw new Error("Tasklet host is shutting down")
 		if (!Array.isArray(items) || items.length === 0 || items.length > 20)
 			throw new Error("messages must contain between 1 and 20 addressed items")
 		const targets = new Set<string>()
@@ -2542,7 +2561,13 @@ export class TaskletHost {
 			if (targets.has(target)) throw new Error("Duplicate or conflicting message targets in batch")
 			targets.add(target)
 		}
-		return Promise.all(items.map((item) => this.applyMessage(item)))
+		const delivery = Promise.all(items.map((item) => this.applyMessage(item)))
+		this.messages.add(delivery)
+		try {
+			return await delivery
+		} finally {
+			this.messages.delete(delivery)
+		}
 	}
 
 	private async applyMessage(item: TaskletMessage): Promise<TaskletMessageResult> {
@@ -2862,8 +2887,8 @@ export class TaskletHost {
 		} finally {
 			child.task = undefined
 			child.backgroundCommandRunning = false
+			this.sleepWaiter?.check()
 		}
-		this.sleepWaiter?.check()
 	}
 
 	private waitForInteraction(

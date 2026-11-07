@@ -160,7 +160,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 	}
 })
 vi.mock("@/core/controller", () => ({ Controller: mocks.MockController }))
-vi.mock("@/core/storage/disk", () => ({ setRuntimeHooksDir: vi.fn() }))
+vi.mock("@/core/storage/disk", () => ({ setRuntimeHooksDir: vi.fn(), getSavedDiracMessages: vi.fn(async () => []) }))
 vi.mock("@/hosts/host-provider", () => ({
 	HostProvider: { get: () => ({ globalStorageFsPath: taskStorageDirectory }) },
 }))
@@ -237,6 +237,47 @@ describe("DiracAgent ACP conversation continuity", () => {
 	afterEach(() => {
 		mocks.reset()
 		vi.clearAllMocks()
+	})
+
+	it("filters old accounting tool calls and refreshes usage when replaying a cached ACP journal", async () => {
+		const { CardStatus, DiracMessageType } = await import("@shared/ExtensionMessage")
+		const { getSavedDiracMessages } = await import("@/core/storage/disk")
+		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
+			; (agent as any).ctx = { extensionContext: {}, DATA_DIR: "/tmp/dirac-test-data" }
+			; (agent as any).sessionConfig.getSessionConfigOptions = vi.fn(async () => [])
+			; (agent as any).sessionConfig.getSessionModeState = vi.fn(() => ({ currentModeId: "act", availableModes: [] }))
+		const { sessionId } = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] } as any)
+			; (agent as any).sessions.get(sessionId).loadedTaskId = "saved-task"
+		const restoreUsage = vi.fn(async () => undefined)
+			; (agent as any).bridgeForSession = () => ({ restoreUsage })
+			; (agent as any).emitPinnedMessagesUpdate = vi.fn(async () => undefined)
+		const emit = vi.spyOn(agent.emitterForSession(sessionId), "emit")
+		const messages: import("@shared/ExtensionMessage").DiracMessage[] = [{
+			id: "child-usage", ts: 1,
+			content: {
+				type: DiracMessageType.CARD, card: {
+					id: "child-usage", header: "Tasklet usage", status: CardStatus.SUCCESS, renderType: "text",
+					rawOutput: { source: "tasklet", taskletId: "child", tokensIn: 10, tokensOut: 2, reasoningTokens: 1, cost: 0.1 },
+				}
+			},
+		}]
+		vi.mocked(getSavedDiracMessages).mockResolvedValueOnce(messages)
+		try {
+			deleteSessionUpdates(sessionId)
+			recordSessionUpdate(sessionId, { sessionUpdate: "tool_call", toolCallId: "child-usage", title: "Tasklet usage", status: "completed" })
+			recordSessionUpdate(sessionId, { sessionUpdate: "tool_call_update", toolCallId: "child-usage", status: "completed" })
+			recordSessionUpdate(sessionId, { sessionUpdate: "usage_update", used: 100, size: 200_000, cost: { amount: 0.2, currency: "USD" } })
+			recordSessionUpdate(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Retained response" } })
+
+			await agent.replayLoadedSessionHistory(sessionId)
+
+			expect(emit).toHaveBeenCalledTimes(2)
+			expect(emit).toHaveBeenCalledWith("usage_update", expect.objectContaining({ used: 100, size: 200_000 }))
+			expect(emit).toHaveBeenCalledWith("agent_message_chunk", expect.objectContaining({ content: { type: "text", text: "Retained response" } }))
+			expect(restoreUsage).toHaveBeenCalledWith(sessionId, messages, true)
+		} finally {
+			deleteSessionUpdates(sessionId)
+		}
 	})
 
 	it("continues a completed turn on the existing task for the same session", async () => {

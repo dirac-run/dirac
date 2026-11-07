@@ -65,6 +65,7 @@ function createConfig(opts: { diracIgnore?: any } = {}) {
 
 	const callbacks = {
 		assertMutationAuthorized: sinon.stub(),
+		withMutationAuthorization: async <T>(_toolName: unknown, mutation: () => Promise<T>) => await mutation(),
 		say: sinon.stub().resolves(undefined),
 		ask: sinon.stub().resolves({ response: DiracAskResponse.APPROVE }),
 		saveCheckpoint: sinon.stub().resolves(),
@@ -194,16 +195,14 @@ describe("EditFileTool – characterization edge cases", () => {
 		sinon.assert.notCalled(diffViewProvider.applyAndSaveBatchSilently)
 	})
 
-	it("counts the saved editor buffer before rejecting an oversized disk file", async () => {
+	it("does not save a dirty buffer to bypass oversized disk preflight", async () => {
 		const { config, validator } = createConfig()
 		const handler = new EditFileToolHandler(validator, false)
 		const fileName = "dirty-buffer.txt"
 		const filePath = path.join(tmpDir, fileName)
 		const editorContent = "current line 1\ncurrent line 2"
-		await fs.writeFile(
-			filePath,
-			Array.from({ length: MAX_ANCHORED_FILE_LINES + 1 }, (_, index) => `stale ${index}`).join("\n"),
-		)
+		const diskContent = Array.from({ length: MAX_ANCHORED_FILE_LINES + 1 }, (_, index) => `stale ${index}`).join("\n")
+		await fs.writeFile(filePath, diskContent)
 		const saveDirtyDocument = sandbox.stub().callsFake(async () => {
 			await fs.writeFile(filePath, editorContent)
 			return { wasSaved: true }
@@ -228,9 +227,75 @@ describe("EditFileTool – characterization edge cases", () => {
 			}],
 		})
 
-		sinon.assert.called(saveDirtyDocument)
-		assert.equal(await fs.readFile(filePath, "utf8"), "current line 1\nupdated line 2")
-		assert.ok(typeof result === "string" && result.includes("Applied 1 edit(s) successfully"))
+		sinon.assert.notCalled(saveDirtyDocument)
+		assert.equal(await fs.readFile(filePath, "utf8"), diskContent)
+		assert.ok(typeof result === "string" && result.includes(`${MAX_ANCHORED_FILE_LINES + 1} lines`))
+	})
+
+	for (const action of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
+		it(`prepares unsaved buffer edits without saving before ${action}`, async () => {
+			const { config, callbacks, diffViewProvider, taskMessenger } = createConfig()
+			const fileName = "dirty-approval.txt"
+			const filePath = path.join(tmpDir, fileName)
+			const diskContent = "saved line 1\nsaved line 2"
+			const editorContent = "unsaved line 1\nunsaved line 2"
+			await fs.writeFile(filePath, diskContent)
+			diffViewProvider.readText.resolves(editorContent)
+				; (config.autoApprover.isUnrestrictedAutoApprove as sinon.SinonStub).returns(false)
+			callbacks.shouldAutoApproveToolWithPath.resolves(false)
+			const env = new SurfaceAdapter(config)
+			const saveDirtyDocument = sandbox.spy(env.workspace, "saveOpenDocumentIfDirty")
+			const makeCard = createMockTaskMessenger().createCard
+			const waitForApproval = sandbox.stub().callsFake(async () => {
+				assert.equal(await fs.readFile(filePath, "utf8"), diskContent)
+				sinon.assert.notCalled(saveDirtyDocument)
+				sinon.assert.notCalled(diffViewProvider.applyAndSaveBatchSilently)
+				return { action }
+			})
+			taskMessenger.createCard.callsFake(async (params) => {
+				const card = await makeCard(params)
+				if (params.requireApproval) card.waitForInteraction = waitForApproval
+				return card
+			})
+			const anchors = makeAnchors(filePath, editorContent, config.ulid)
+
+			await new EditFileTool().processCall({
+				files: [{
+					path: fileName,
+					edits: [{ edit_type: "replace", anchor: anchors[1], end_anchor: anchors[1], text: "approved line 2" }],
+				}]
+			}, env)
+
+			sinon.assert.calledOnce(waitForApproval)
+			sinon.assert.notCalled(saveDirtyDocument)
+			assert.equal(
+				await fs.readFile(filePath, "utf8"),
+				action === DiracAskResponse.APPROVE ? "unsaved line 1\napproved line 2" : diskContent,
+			)
+		})
+	}
+
+	it("rejects stale disk anchors against the unsaved buffer without saving", async () => {
+		const { config, diffViewProvider } = createConfig()
+		const fileName = "dirty-stale-anchor.txt"
+		const filePath = path.join(tmpDir, fileName)
+		const diskContent = "saved line"
+		await fs.writeFile(filePath, diskContent)
+		const anchors = makeAnchors(filePath, diskContent, config.ulid)
+		diffViewProvider.readText.resolves("unsaved line")
+		const env = new SurfaceAdapter(config)
+		const saveDirtyDocument = sandbox.spy(env.workspace, "saveOpenDocumentIfDirty")
+
+		await new EditFileTool().processCall({
+			files: [{
+				path: fileName,
+				edits: [{ edit_type: "replace", anchor: anchors[0], end_anchor: anchors[0], text: "replacement" }],
+			}]
+		}, env)
+
+		sinon.assert.notCalled(saveDirtyDocument)
+		sinon.assert.notCalled(diffViewProvider.applyAndSaveBatchSilently)
+		assert.equal(await fs.readFile(filePath, "utf8"), diskContent)
 	})
 
 	it("rejects oversized approval-time content before writing", async () => {

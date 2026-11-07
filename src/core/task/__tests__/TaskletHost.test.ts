@@ -264,6 +264,32 @@ describe("TaskletHost asynchronous ownership", () => {
 		})
 	}
 
+	for (const pendingSpawn of [false, true]) {
+		it(`inherits completed tool exchanges ${pendingSpawn ? "without the executing spawn turn" : "unchanged"}`, async () => {
+			const messages: import("@shared/messages/content").DiracStorageMessage[] = [
+				{ role: "user", content: "Root context" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "read", name: "read_file", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "read", content: "File contents" }] },
+			]
+			const completedHistory = structuredClone(messages)
+			if (pendingSpawn) messages.push({
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Delegate now" },
+					{ type: "tool_use", id: "spawn", name: "use_subagents", input: {} },
+					{ type: "tool_use", id: "sibling-call", name: "read_file", input: {} },
+				],
+			})
+			const parentHistory = structuredClone(messages)
+			host = new TaskletHost(owner, { ...taskOptions(), getParentHistory: () => ({ messages }) }, constructed as unknown as typeof taskModule.Task)
+			const child = await host.start({ title: "History child", prompt: "Work", includeHistory: true })
+			const params = constructed.firstCall.args[0] as taskModule.TaskParams
+			assert.deepEqual(params.tasklet!.initialHistory!.messages, completedHistory)
+			assert.equal(child.inheritedMessageCount, completedHistory.length)
+			assert.deepEqual(messages, parentHistory, "Delegation must not modify the parent's pending tool turn")
+		})
+	}
+
 	it("cancels an unfinished Task at its configured positive timeout", async () => {
 		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
 		const record = await host.start({ title: "Timed child", prompt: "Work", timeoutSeconds: 2 })
@@ -1657,6 +1683,65 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(host.inspect(child.id).responses[0].text, "retained")
 		assert.equal(host.inspect(sibling.id).outcomePersisted, false)
 		assert.match(host.inspect(sibling.id).settlementError!.message, /communication disk failure/)
+	})
+
+	for (const failure of ["record", "usage projection"] as const) {
+		it(`rejects a sleeping parent when ${failure} settlement fails`, async () => {
+			expectLoggerErrors()
+			const child = await host.start({ title: "Failure worker", prompt: "Work" })
+			if (failure === "record") sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("outcome disk failure"))
+			else host["children"].get(child.id)!.usageProjectionError = new Error("usage projection failure")
+			const cancellation = new AbortController()
+			const removeListener = sandbox.spy(cancellation.signal, "removeEventListener")
+			const sleeping = assert.rejects(host.sleep({ taskletIds: [child.id] }, cancellation.signal), /settlement failed/)
+			assert.equal(host.isSleeping, true)
+			children[0].outcome.resolve(completed)
+			await assert.rejects(host["children"].get(child.id)!.settlement!, /failure/)
+			await sleeping
+			assert.equal(host.isSleeping, false)
+			sinon.assert.calledOnce(removeListener)
+			assert.equal(host.inspect(child.id).outcomePersisted, false)
+			assert.equal((await savedCommunications(child.id)).length, 0, "No committed outcome notification may be fabricated")
+			await assert.rejects(host.sleep({ taskletIds: [child.id] }), /settlement failed/)
+		})
+	}
+
+	it("rejects late message batches without recreating deleted tasklet storage", async () => {
+		const entry = await registerInteraction()
+		const decision = { taskletId: entry.child.id, type: "permission_decision" as const, replyTo: entry.requestId, decision: "reject" as const }
+		await host.message([decision])
+		await entry.waiting
+		await host.shutdown()
+		const rootDirectory = getTaskDirectoryPath("root")
+		await fs.rm(rootDirectory, { recursive: true, force: true })
+		const write = sandbox.spy(storage, "saveTaskletEvents")
+		await assert.rejects(host.message([{ taskletId: entry.child.id, type: "guidance", text: "Too late" }]), /shutting down/)
+		await assert.rejects(host.message([decision]), /shutting down/)
+		sinon.assert.notCalled(write)
+		await assert.rejects(fs.stat(rootDirectory), { code: "ENOENT" })
+	})
+
+	it("joins admitted message delivery before shutdown settles", async () => {
+		const child = await host.start({ title: "Delivery worker", prompt: "Work" })
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		children[0].task.enqueueSteeringMessage.callsFake(async () => {
+			entered.resolve()
+			await release.promise
+			return "steering-id"
+		})
+		const delivery = host.message([{ taskletId: child.id, type: "guidance", text: "Already admitted" }])
+		await entered.promise
+		let settled = false
+		const shutdown = host.shutdown().then(() => { settled = true })
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+		} finally {
+			release.resolve()
+			await Promise.all([delivery, shutdown])
+		}
+		assert.equal(settled, true)
 	})
 
 	it("rejects recursive ownership, invalid roots and empty assignments", async () => {

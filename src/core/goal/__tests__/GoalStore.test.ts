@@ -5,6 +5,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { GoalStore } from "../GoalStore"
+import { goalWallDurationAt } from "../GoalLifecycle"
 
 describe("GoalStore discovery", () => {
 	let storagePath: string
@@ -60,6 +61,32 @@ describe("GoalStore discovery", () => {
 		}
 		assert.deepEqual(await store.read("goal"), record)
 	})
+
+	for (const hasSettlementTime of [true, false]) {
+		it(`preserves the settled endpoint through accounting updates (${hasSettlementTime ? "current" : "older"} record)`, async () => {
+			let now = 100
+			const store = new GoalStore(() => now)
+			await store.create("goal", "conversation", "New objective")
+			await store.transition("goal", { status: "working" })
+			now = 180
+			const settled = await store.transition("goal", { status: "achieved" })
+			if (!hasSettlementTime) {
+				delete settled.settledAt
+				await fs.writeFile(path.join(storagePath, "tasks", "goal", "goal.json"), JSON.stringify(settled))
+			}
+			now = 300
+			const updated = await store.update("goal", (goal) => {
+				goal.accountingSources = { followup: { cost: 1 } }
+				goal.accounting = { cost: 1 }
+			})
+			assert.equal(updated.updatedAt, 300)
+			assert.equal(updated.settledAt, 180)
+			assert.equal(goalWallDurationAt(updated, now), 80)
+			assert.equal(updated.activeDurationMs, 80)
+			assert.equal(updated.accounting.cost, 1)
+			await assert.rejects(store.update("goal", (goal) => { goal.settledAt = 250 }), /lifecycle fields/)
+		})
+	}
 
 	it("recovers only Goal lifecycle without changing contained tasklet artifacts", async () => {
 		const store = new GoalStore(() => 100)

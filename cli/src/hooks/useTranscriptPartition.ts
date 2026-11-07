@@ -42,14 +42,19 @@ export function useTranscriptPartition<T>(
 	}
 	const state = stateRef.current
 	const current = new Map(messages.map((message, index) => [revisions?.key(message) ?? index, message]))
+	state.tailKeys = state.tailKeys.filter((key) => current.has(key))
 	const pendingKeys = new Set(state.tailKeys)
 	for (const [key, message] of current) {
 		if (pendingKeys.has(key)) continue
 		if (state.committed.has(key) && Object.is(state.committed.get(key), revisions?.revision(message))) continue
-		state.tailKeys.push(key)
+		// Revisions must not displace active output/input behind an archival barrier.
+		const mutableIndex = state.committed.has(key)
+			? state.tailKeys.findIndex((tailKey) => isMutable(current.get(tailKey)!))
+			: -1
+		if (mutableIndex === -1) state.tailKeys.push(key)
+		else state.tailKeys.splice(mutableIndex, 0, key)
 		pendingKeys.add(key)
 	}
-	state.tailKeys = state.tailKeys.filter((key) => current.has(key))
 	const tail = state.tailKeys.map((key) => current.get(key)!)
 	const target = calculateTargetWatermark(tail, isMutable, retention)
 	if (target > 0) {

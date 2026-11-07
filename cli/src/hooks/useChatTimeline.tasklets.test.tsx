@@ -33,7 +33,8 @@ function tasklet(status: TaskletPresentationStatus, result?: string): DiracMessa
 function text(id: string, lines = 1): DiracMessage {
 	return { id, ts: 1, content: { type: DiracMessageType.MARKDOWN, role: "assistant", content: `${id}\n`.repeat(lines) } }
 }
-const messageItems = (items: ChatTimelineResult["staticItems"]) => items.filter((item) => item.type === "message")
+const messageItems = (items: ChatTimelineResult["staticItems"] | ChatTimelineResult["dynamicItems"]) =>
+	items.filter((item) => item.type === "message")
 const statuses = (items: ReturnType<typeof messageItems>) =>
 	items.flatMap(({ message }) => (message.content.type === DiracMessageType.CARD ? [message.content.card.status] : []))
 
@@ -113,6 +114,55 @@ describe("tasklet scrollback revisions", () => {
 		await update("completed", "new result", [JSON.parse(JSON.stringify(next))])
 		expect(timeline.staticItems).toBe(snapshots)
 		expect(messageItems(timeline.staticItems)[1].message).toBe(completed)
+		view.unmount()
+	})
+
+	it.each(["stream", "interaction"] as const)("keeps active parent %s visible across child revisions", async (kind) => {
+		let timeline!: ChatTimelineResult
+		const parent: DiracMessage =
+			kind === "stream"
+				? text("parent stream", 20)
+				: {
+					id: "parent approval",
+					ts: 3,
+					content: {
+						type: DiracMessageType.CARD,
+						card: {
+							id: "parent approval",
+							header: "Approve the parent operation",
+							body: "Approval details\n".repeat(20),
+							renderType: "text",
+							status: CardStatus.WAITING_FOR_INPUT,
+						},
+					},
+				}
+		function Probe({ messages, columns = 80 }: { messages: DiracMessage[]; columns?: number }) {
+			timeline = useChatTimeline({
+				messages,
+				activeVoiceStreamId: kind === "stream" ? parent.id : undefined,
+				showHeader: false,
+				terminalColumns: columns,
+				layoutRows: { liveViewportRows: 8, activeContentRows: 6, compactHistoryRows: 2 },
+				shouldSuppressCardBody: () => false,
+			})
+			return <Text>probe</Text>
+		}
+		const first = text("root")
+		const view = render(<Probe messages={[first, tasklet("running"), parent]} />)
+		expect(statuses(messageItems(timeline.staticItems))).toEqual(["running"])
+		for (const status of ["waiting", "completed"] as const) {
+			view.rerender(<Probe messages={[first, tasklet(status, "Private result\n".repeat(20)), parent]} />)
+			await new Promise((resolve) => setTimeout(resolve, 30))
+			expect(messageItems(timeline.dynamicItems).map(({ message }) => message.id)).toEqual([parent.id])
+			expect(messageItems(timeline.staticItems).map(({ message }) => message.id)).not.toContain(parent.id)
+		}
+		expect(statuses(messageItems(timeline.staticItems))).toEqual(["running", "waiting_for_input", "success"])
+		const snapshots = timeline.staticItems
+		const messages = [first, tasklet("completed", "Private result\n".repeat(20)), parent]
+		view.rerender(<Probe columns={60} messages={JSON.parse(JSON.stringify(messages))} />)
+		await new Promise((resolve) => setTimeout(resolve, 30))
+		expect(messageItems(timeline.dynamicItems).map(({ message }) => message.id)).toEqual([parent.id])
+		expect(timeline.staticItems).toBe(snapshots)
 		view.unmount()
 	})
 

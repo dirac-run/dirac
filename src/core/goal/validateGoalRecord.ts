@@ -1,5 +1,5 @@
 import type { GoalAccounting, GoalRecord } from "@shared/goal"
-import { isActiveGoalStatus } from "@shared/goal"
+import { isActiveGoalStatus, isSettledGoalStatus } from "@shared/goal"
 import { calculateGoalAccounting } from "./GoalAccounting"
 
 type JsonRecord = Record<string, unknown>
@@ -98,6 +98,7 @@ export function assertGoalRecord(value: unknown, expectedGoalId: string): assert
 			"objective",
 			"createdAt",
 			"updatedAt",
+			"settledAt",
 			"lastActivatedAt",
 			"lastPausedAt",
 			"activeDurationMs",
@@ -124,6 +125,7 @@ export function assertGoalRecord(value: unknown, expectedGoalId: string): assert
 	const objectiveUpdatedAt = nonnegativeNumberAt(objective.updatedAt, `Goal(${expectedGoalId}).objective.updatedAt`)
 	const createdAt = nonnegativeNumberAt(record.createdAt, `Goal(${expectedGoalId}).createdAt`)
 	const updatedAt = nonnegativeNumberAt(record.updatedAt, `Goal(${expectedGoalId}).updatedAt`)
+	const settledAt = optionalTimestampAt(record.settledAt, `Goal(${expectedGoalId}).settledAt`)
 	const lastActivatedAt = optionalTimestampAt(record.lastActivatedAt, `Goal(${expectedGoalId}).lastActivatedAt`)
 	const lastPausedAt = optionalTimestampAt(record.lastPausedAt, `Goal(${expectedGoalId}).lastPausedAt`)
 	nonnegativeNumberAt(record.activeDurationMs, `Goal(${expectedGoalId}).activeDurationMs`)
@@ -150,6 +152,12 @@ export function assertGoalRecord(value: unknown, expectedGoalId: string): assert
 	if (updatedAt < createdAt) invalid(`Goal(${expectedGoalId}).updatedAt`, "predates creation")
 	if (objectiveUpdatedAt < createdAt || objectiveUpdatedAt > updatedAt) {
 		invalid(`Goal(${expectedGoalId}).objective.updatedAt`, "outside Goal lifetime")
+	}
+	if (
+		settledAt !== undefined &&
+		(!isSettledGoalStatus(record.status as GoalRecord["status"]) || settledAt < createdAt || settledAt > updatedAt)
+	) {
+		invalid(`Goal(${expectedGoalId}).settledAt`, "must be within a settled Goal's lifetime")
 	}
 	if (isActiveGoalStatus(record.status as GoalRecord["status"]) !== (lastActivatedAt !== undefined)) {
 		invalid(`Goal(${expectedGoalId}).lastActivatedAt`, "must exist exactly while Goal execution is active")

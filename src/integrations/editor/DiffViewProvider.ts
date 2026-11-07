@@ -34,7 +34,6 @@ export abstract class DiffViewProvider {
 	}
 
 	public async readText(path: string): Promise<string> {
-		await this.saveOpenDocumentBeforeTextRead(path)
 		return (await this.textFileAccess.readText(path)).content
 	}
 

@@ -12,6 +12,8 @@ import type * as acp from "@agentclientprotocol/sdk"
 import { isSuccessfulTaskCompletionCard } from "@shared/cardIdentity"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { CardStatus, DiracMessageType, isFinalStatus } from "@shared/ExtensionMessage"
+import { getSubagentUsage } from "@shared/subagentUsage"
+import { getTaskletUsage } from "@shared/taskletUsage"
 import { getBrowserActionKind } from "./browserActionTranslator.js"
 import type { AcpSessionState, TranslatedMessage } from "./types.js"
 import { AcpSessionStatus } from "./types.js"
@@ -280,6 +282,8 @@ function translateCardMessage(
 		return { updates: [], requiresPermission: false }
 	}
 	const card = message.content.card
+	// Accounting cards contribute usage separately; they are not tool activity.
+	if (getTaskletUsage(card) || getSubagentUsage(card)) return { updates: [], requiresPermission: false }
 	const toolCallId = card.id
 	const updates: acp.SessionUpdate[] = []
 	let requiresPermission = false
@@ -379,9 +383,9 @@ function translateCardMessage(
 			toolCall: existingToolCall as acp.ToolCall,
 			options: [
 				{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
-				{ kind: "allow_always", optionId: "allow_always", name: "Always approve" },
+				...(card.approvalScope === "once" ? [] : [{ kind: "allow_always" as const, optionId: "allow_always", name: "Always approve" }]),
 				{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
-				{ kind: "reject_always", optionId: "reject_always", name: "Always reject" },
+				...(card.approvalScope === "once" ? [] : [{ kind: "reject_always" as const, optionId: "reject_always", name: "Always reject" }]),
 			]
 		}
 	}

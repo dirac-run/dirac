@@ -40,6 +40,8 @@ export interface GoalRecord {
 	objective: GoalObjectiveRevision
 	createdAt: number
 	updatedAt: number
+	/** Terminal lifecycle time, independent of later follow-up accounting updates. */
+	settledAt?: number
 	lastActivatedAt?: number
 	lastPausedAt?: number
 	activeDurationMs: number

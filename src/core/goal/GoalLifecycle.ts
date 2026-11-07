@@ -31,7 +31,7 @@ export function goalActiveDurationAt(record: GoalRecord, now: number): number {
 
 export function goalWallDurationAt(record: GoalRecord, now: number): number {
 	assertTransitionTime(record, now)
-	const end = isSettledGoalStatus(record.status) ? record.updatedAt : now
+	const end = isSettledGoalStatus(record.status) ? (record.settledAt ?? record.updatedAt) : now
 	return end - record.createdAt
 }
 
@@ -57,6 +57,7 @@ export function applyGoalStatusTransition(record: GoalRecord, transition: GoalSt
 
 	if (transition.status === "paused") record.lastPausedAt = now
 	record.status = transition.status
+	record.settledAt = isSettledGoalStatus(transition.status) ? now : undefined
 	record.statusReason = transition.statusReason?.trim() || undefined
 	record.updatedAt = now
 	return true

@@ -198,6 +198,75 @@ describe("bounded passive tasklet inspection", () => {
 		assert.deepEqual(source.inspection, before)
 	})
 
+	it("retains an empty or exhausted messages position without keeping finite pagination open", async () => {
+		const source = fixture()
+		const empty = await inspectTasklet(source, { view: "messages" })
+		assert.equal(empty.nextCursor, undefined)
+		assert.ok(empty.tailCursor)
+		assert.deepEqual(await inspectTasklet(source, { view: "messages", cursor: empty.tailCursor }), empty)
+		source.events.push(
+			{ id: "first", taskletId: "child", createdAt: 1, communication: { type: "lifecycle", state: "accepted" } },
+			{ id: "second", taskletId: "child", createdAt: 2, communication: { type: "lifecycle", state: "resumed" } },
+		)
+		const first = await inspectTasklet(source, { view: "messages", cursor: empty.tailCursor, limit: 1 })
+		assert.deepEqual(first.items.map((item: any) => item.id), ["first"])
+		assert.ok(first.nextCursor)
+		assert.equal(first.tailCursor, undefined)
+		const second = await inspectTasklet(source, { view: "messages", cursor: first.nextCursor, limit: 1 })
+		assert.deepEqual(second.items.map((item: any) => item.id), ["second"])
+		assert.equal(second.nextCursor, undefined)
+		assert.ok(second.tailCursor)
+		assert.deepEqual((await inspectTasklet(source, { view: "messages", cursor: second.tailCursor })).items, [])
+		source.events.push({ id: "third", taskletId: "child", createdAt: 3, communication: { type: "lifecycle", state: "resumed" } })
+		const appended = await inspectTasklet(source, { view: "messages", cursor: second.tailCursor })
+		assert.deepEqual(appended.items.map((item: any) => item.id), ["third"])
+		assert.ok(source.events.every((event) => event.deliveredAt === undefined))
+		assert.equal((await inspectTasklet(source, { view: "status" })).tailCursor, undefined)
+	})
+
+	it("scopes a messages tail position to its child and filter", async () => {
+		const source = fixture()
+		const query = { view: "messages" as const, messageType: "reply" }
+		const empty = await inspectTasklet(source, query)
+		assert.ok(empty.tailCursor)
+		source.events.push({ id: "accepted", taskletId: "child", createdAt: 1, communication: { type: "lifecycle", state: "accepted" } })
+		assert.deepEqual(await inspectTasklet(source, { ...query, cursor: empty.tailCursor }), empty)
+		source.events.push({
+			id: "reply",
+			taskletId: "child",
+			createdAt: 2,
+			communication: {
+				type: "response",
+				response: { operation: ResponseOperation.PROGRESS, text: "Answer", reply_to: "question" },
+			},
+		})
+		const reply = await inspectTasklet(source, { ...query, cursor: empty.tailCursor })
+		assert.deepEqual(reply.items.map((item: any) => item.id), ["reply"])
+		await assert.rejects(inspectTasklet(source, { view: "messages", cursor: empty.tailCursor }), /cursor/)
+		await assert.rejects(inspectTasklet(source, { ...query, view: "pending", cursor: empty.tailCursor }), /cursor/)
+		source.inspection.id = "another-child"
+		await assert.rejects(inspectTasklet(source, { ...query, cursor: empty.tailCursor }), /cursor/)
+	})
+
+	it("includes the messages tail position in the byte bound of a final oversized fragment", () => {
+		const items = [{ text: "界😀".repeat(20_000) }]
+		let cursor: string | undefined
+		let tailCursor: string | undefined
+		let json = ""
+		do {
+			const page = pageInspectionItems(items, { view: "messages", cursor })
+			assert.ok(bytes(page) <= MAX_TASKLET_INSPECTION_BYTES)
+			assert.ok(page.fragment)
+			json += page.fragment.json
+			cursor = page.nextCursor
+			tailCursor = page.tailCursor
+		} while (cursor)
+		assert.deepEqual(JSON.parse(json), items[0])
+		assert.ok(tailCursor)
+		items.push({ text: "Appended" })
+		assert.deepEqual(pageInspectionItems(items, { view: "messages", cursor: tailCursor }).items, [items[1]])
+	})
+
 	it("keeps status compact and omits uncommitted terminal results", async () => {
 		const source = fixture()
 		source.inspection.prompt = "PRIVATE_ASSIGNMENT".repeat(10_000)

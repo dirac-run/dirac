@@ -32,14 +32,19 @@ class FakeTextFileAccess implements TextFileAccess {
 
 describe("injected TextFileAccess editing lifecycle", () => {
 	let directory: string
+	let saveRequests: string[]
 
 	beforeEach(async () => {
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "injected-text-access-"))
+		saveRequests = []
 		setVscodeHostProviderMock({
 			hostBridgeClient: {
 				workspaceClient: {
 					getWorkspacePaths: async () => ({ paths: [directory] }),
-					saveOpenDocumentIfDirty: async () => ({}),
+					saveOpenDocumentIfDirty: async ({ filePath }: { filePath: string }) => {
+						saveRequests.push(filePath)
+						return {}
+					},
 					getDiagnostics: async () => ({ fileDiagnostics: [] }),
 				},
 			} as any,
@@ -48,6 +53,17 @@ describe("injected TextFileAccess editing lifecycle", () => {
 
 	afterEach(async () => {
 		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("reads through the configured transport without saving open documents", async () => {
+		const access = new FakeTextFileAccess()
+		const filePath = path.join(directory, "read-only.txt")
+		const provider = new FileEditProvider(access)
+
+		assert.strictEqual(await provider.readText(filePath), "original")
+		assert.deepStrictEqual(access.reads, [filePath])
+		assert.deepStrictEqual(access.writes, [])
+		assert.deepStrictEqual(saveRequests, [])
 	})
 
 	it("gets modified-file content and encoding from the injected access", async () => {
@@ -111,6 +127,17 @@ describe("injected TextFileAccess editing lifecycle", () => {
 
 		assert.deepStrictEqual(access.reads, [filePath])
 		assert.deepStrictEqual(access.writes, [{ path: filePath, content: "updated" }])
+	})
+
+	it("retains configured dirty-document saves when initializing an approved write", async () => {
+		const access = new FakeTextFileAccess()
+		const filePath = path.join(directory, "approved-modify.txt")
+		const provider = new FileEditProvider(access, true, false)
+
+		await provider.applyAndSaveSilently(filePath, "approved change", "modify")
+
+		assert.deepStrictEqual(saveRequests, [filePath])
+		assert.deepStrictEqual(access.writes, [{ path: filePath, content: "approved change" }])
 	})
 
 	it("materializes an empty file only for explicit background creation", async () => {

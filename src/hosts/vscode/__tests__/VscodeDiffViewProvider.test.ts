@@ -120,6 +120,9 @@ function createHost() {
 		window,
 		extensions: { getExtension: () => ({ isActive: true }) },
 		workspace: {
+			get textDocuments() {
+				return [...editors.values()].map((editor) => editor.document)
+			},
 			onDidChangeTextDocument: changed.subscribe,
 			applyEdit: async (edit: WorkspaceEdit) => {
 				for (const change of edit.changes) {
@@ -253,6 +256,28 @@ describe("VscodeDiffViewProvider owned resources", function () {
 	afterEach(async () => {
 		await Promise.all(providers.map((provider) => provider.reset()))
 		sinon.restore()
+	})
+
+	it("reads the current unsaved buffer without saving or focusing it", async () => {
+		const target = host.addFile("/dirty.ts", "unsaved changes")
+		const other = host.addFile("/other.ts", "other content")
+		host.focus(other.editor)
+
+		assert.strictEqual(await providers[0].readText("/dirty.ts"), "unsaved changes")
+		target.setText("")
+		assert.strictEqual(await providers[0].readText("/dirty.ts"), "")
+		sinon.assert.notCalled(target.save)
+		sinon.assert.notCalled(other.save)
+		assert.strictEqual(host.host.window.activeTextEditor, other.editor)
+	})
+
+	it("uses the configured text transport when the document is not open", async () => {
+		const readText = sinon.stub().resolves({ content: "disk content", encoding: "utf8" })
+		const provider = new Provider({ readText, writeText: sinon.stub() })
+		providers.push(provider)
+
+		assert.strictEqual(await provider.readText("/closed.ts"), "disk content")
+		sinon.assert.calledOnceWithExactly(readText, "/closed.ts")
 	})
 
 	it("reads and saves the owning editor while another provider or no editor has focus", async () => {

@@ -1796,6 +1796,7 @@ describe("Tasklet real Task execution", function () {
 									{
 										task_title: "Public question worker",
 										prompt: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully",
+										include_history: true,
 									},
 								],
 							}
@@ -1863,6 +1864,11 @@ describe("Tasklet real Task execution", function () {
 						assert.ok(turn <= 3, "Unexpected child request")
 						assert.ok(!advertised.includes("use_subagents") && !advertised.includes("tasklets"))
 						if (turn === 1) {
+							assert.match(serialized, /Supervise a worker through public tools/)
+							assert.ok(
+								!history.some((message) => Array.isArray(message.content) && message.content.some((block) => block.type === "tool_use")),
+								"The executing parent's unanswered spawn call must not enter the child's first provider request",
+							)
 							await childGate
 							name = "read_file"
 							args = { paths: ["assignment.txt"] }

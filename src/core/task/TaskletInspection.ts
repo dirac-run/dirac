@@ -116,6 +116,11 @@ export function pageInspectionItems<T>(
 	const limit = validateQuery(query)
 	const scope = fingerprint(JSON.stringify([identity.taskletId, query.view, query.callId, query.messageType]))
 	const cursorFor = (index: number, offset = 0, hash = "-") => `1:${index}:${offset}:${scope}:${hash}`
+	const continuationAt = (index: number, offset = 0, hash = "-"): Pick<TaskletInspectionPage, "nextCursor" | "tailCursor"> => {
+		const cursor = cursorFor(index, offset, hash)
+		if (index < items.length) return { nextCursor: cursor }
+		return query.view === "messages" ? { tailCursor: cursor } : {}
+	}
 	let index = 0
 	let offset = 0
 	let itemHash = "-"
@@ -145,8 +150,7 @@ export function pageInspectionItems<T>(
 		const json = JSON.stringify(items[index])
 		if (offset > 0 && (offset >= json.length || itemHash !== fingerprint(json)))
 			throw new Error("Inspection fragment changed; restart this view")
-		const nextCursor = index + 1 < items.length ? cursorFor(index + 1) : undefined
-		const candidate = { ...page, items: [...page.items, items[index]], ...(nextCursor ? { nextCursor } : {}) }
+		const candidate = { ...page, items: [...page.items, items[index]], ...continuationAt(index + 1) }
 		if (offset === 0 && jsonBytes(candidate) <= MAX_TASKLET_INSPECTION_BYTES) {
 			page.items.push(items[index++])
 			continue
@@ -157,7 +161,7 @@ export function pageInspectionItems<T>(
 		const fragmentPage = (end: number): TaskletInspectionPage<T> => ({
 			...page,
 			fragment: { itemIndex: index, offset, totalCharacters: json.length, totalBytes, json: json.slice(offset, end) },
-			...(end < json.length ? { nextCursor: cursorFor(index, end, hash) } : nextCursor ? { nextCursor } : {}),
+			...(end < json.length ? continuationAt(index, end, hash) : continuationAt(index + 1)),
 		})
 		let low = offset + 1
 		let high = json.length
@@ -177,7 +181,7 @@ export function pageInspectionItems<T>(
 		if (end === offset) throw new Error("Inspection fragment metadata exceeds the page byte bound")
 		return fragmentPage(end)
 	}
-	return { ...page, ...(index < items.length ? { nextCursor: cursorFor(index) } : {}) }
+	return { ...page, ...continuationAt(index) }
 }
 
 function requestType(request: TaskletInteraction): string {

@@ -126,8 +126,10 @@ export interface TaskletInspectionPage<T = unknown> {
 	totalItems: number
 	/** Concatenate consecutive JSON fragments, then parse once. Offsets count UTF-16 code units. */
 	fragment?: { itemIndex: number; offset: number; totalCharacters: number; totalBytes: number; json: string }
-	/** A read position only, never a delivery receipt. Reuse with the same view/filter/call. */
+	/** More recorded data is available. Reuse with the same view/filter/call; never a delivery receipt. */
 	nextCursor?: string
+	/** Messages-only EOF position. Pass as cursor on a later read to receive newly appended messages. */
+	tailCursor?: string
 }
 
 export interface TaskletSummary {

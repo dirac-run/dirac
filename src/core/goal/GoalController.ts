@@ -131,15 +131,19 @@ export class GoalController {
 	}
 
 	async sendMessage(goalId: string, message: string): Promise<void> {
-		await this.ready
-		this.requireSelectedLoop(goalId)
-		await this.selectedLoop!.sendMessage(message)
+		await this.goalActivationMutex.withLock(async () => {
+			await this.ready
+			this.requireSelectedLoop(goalId)
+			await this.selectedLoop!.sendMessage(message)
+		})
 	}
 
 	async cancelCurrentExecution(reason?: string): Promise<void> {
-		await this.ready
-		if (!this.selectedLoop) return
-		await this.selectedLoop.cancelCurrentExecution(reason)
+		await this.goalActivationMutex.withLock(async () => {
+			await this.ready
+			if (!this.selectedLoop) return
+			await this.selectedLoop.cancelCurrentExecution(reason)
+		})
 	}
 
 	async pause(goalId: string, reason?: string): Promise<GoalViewState> {

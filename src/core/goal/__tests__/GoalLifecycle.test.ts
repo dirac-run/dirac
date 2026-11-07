@@ -63,18 +63,22 @@ describe("Goal lifecycle", () => {
 	})
 
 	it("allows an explicitly stopped Goal to resume", () => {
-		const goal = record({ status: "stopped", lastActivatedAt: undefined, updatedAt: 180 })
+		const goal = record({ status: "stopped", lastActivatedAt: undefined, updatedAt: 180, settledAt: 180 })
 
 		assert.equal(applyGoalStatusTransition(goal, { status: "working", statusReason: "Resumed by user" }, 220), true)
 		assert.equal(goal.status, "working")
 		assert.equal(goal.lastActivatedAt, 220)
+		assert.equal(goal.settledAt, undefined)
+		assert.equal(goalWallDurationAt(goal, 300), 200)
 		assert.equal(goal.statusReason, "Resumed by user")
 	})
 
 
-	it("freezes wall duration at a terminal transition", () => {
+	it("freezes wall duration at a terminal transition despite later metadata updates", () => {
 		const goal = record()
 		applyGoalStatusTransition(goal, { status: "achieved" }, 180)
+		assert.equal(goal.settledAt, 180)
+		goal.updatedAt = 250
 		assert.equal(goalWallDurationAt(goal, 300), 80)
 	})
 })

@@ -104,7 +104,6 @@ export class EditFileBatchPreparer {
 		env: IToolEnvironment,
 	): Promise<PreparedEdits | { error: string }> {
 		try {
-			await env.workspace.saveOpenDocumentIfDirty({ filePath: absolutePath })
 			const fileInfo = await env.workspace.getFileInfo(absolutePath)
 			if (fileInfo.size > MAX_ANCHORED_FILE_BYTES) {
 				return { error: `Cannot edit ${displayPath}: ${anchorByteLimitMessage()}` }
@@ -114,6 +113,9 @@ export class EditFileBatchPreparer {
 				return { error: `Cannot edit ${displayPath}: ${anchorLimitMessage(diskLineCount)}` }
 			}
 			const content = await env.editor.readText(absolutePath)
+			if (Buffer.byteLength(content, "utf8") > MAX_ANCHORED_FILE_BYTES) {
+				return { error: `Cannot edit ${displayPath}: ${anchorByteLimitMessage()}` }
+			}
 			const lines = content.split(/\r?\n/)
 			if (lines.length > MAX_ANCHORED_FILE_LINES) {
 				return { error: `Cannot edit ${displayPath}: ${anchorLimitMessage(lines.length)}` }

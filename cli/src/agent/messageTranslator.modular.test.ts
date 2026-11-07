@@ -129,6 +129,17 @@ describe("messageTranslator (Modular Architecture)", () => {
 			expect(sessionState.pendingToolCalls.has("tool-1")).toBe(true)
 		})
 
+		it.each([
+			{ header: "Tasklet usage", rawOutput: { source: "tasklet", taskletId: "child", tokensIn: 10, tokensOut: 2, cost: 0.1, reasoningTokens: 1 } },
+			{ header: "Renamed accounting", rawOutput: { source: "subagents", tokensIn: 10, tokensOut: 2, cost: 0.1 } },
+			{ header: "Subagent Usage", body: JSON.stringify({ tokensIn: 10, tokensOut: 2, cost: 0.1 }) },
+		])("does not translate accounting cards into tool activity: $header", (accounting) => {
+			const message = createCardMessage({ id: "usage", status: CardStatus.SUCCESS, ...accounting })
+			expect(translateMessage(message, sessionState)).toEqual({ updates: [], requiresPermission: false })
+			expect(translateMessage(message, sessionState)).toEqual({ updates: [], requiresPermission: false })
+			expect(sessionState.pendingToolCalls.size).toBe(0)
+		})
+
 		it("emits permission-agent approvals as completed audit tool calls", () => {
 			const result = translateMessage(
 				createCardMessage({
@@ -399,6 +410,24 @@ describe("messageTranslator (Modular Architecture)", () => {
 					{ type: "diff", path: "src/file.ts", oldText: "const before = true\n", newText: "const after = true\n" },
 				],
 			})
+		})
+
+		it("offers only one-operation choices for escalated tasklet approvals", () => {
+			const result = translateMessage(createCardMessage({
+				id: "tasklet-approval",
+				header: "Worker — Write file",
+				toolName: "write_to_file",
+				status: CardStatus.WAITING_FOR_INPUT,
+				requireApproval: true,
+				approvalScope: "once",
+				rawInput: { path: "file.ts", content: "approved operation" },
+			}), sessionState)
+
+			expect(result.permissionRequest?.options).toEqual([
+				{ kind: "allow_once", optionId: "allow_once", name: "Approve once" },
+				{ kind: "reject_once", optionId: "reject_once", name: "Reject once" },
+			])
+			expect(result.permissionRequest?.toolCall.rawInput).toEqual({ path: "file.ts", content: "approved operation" })
 		})
 
 		it("attaches a write preview diff to the permission request tool call", () => {

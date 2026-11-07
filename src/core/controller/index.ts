@@ -275,7 +275,7 @@ export class Controller implements ITaskHost {
 	}
 
 	async cancelTask(): Promise<void> {
-		if (this.goalController.hasRunningCoordinator) {
+		if (this.goalController.selectedGoalId) {
 			await this.goalController.cancelCurrentExecution("Cancelled by user")
 			return
 		}

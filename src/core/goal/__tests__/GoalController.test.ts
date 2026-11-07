@@ -2,9 +2,10 @@ import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import type { Controller } from "@core/controller"
+import { Controller } from "@core/controller"
 import type { StateManager } from "@core/storage/StateManager"
 import type { Task } from "@core/task"
+import type { TaskRunOutcome } from "@core/task/TaskRunOutcome"
 import type { TaskWorkingConfiguration } from "@core/task/runtime/TaskWorkingConfiguration"
 import type { HistoryItem } from "@shared/HistoryItem"
 import { afterEach, beforeEach, describe, it } from "mocha"
@@ -16,6 +17,12 @@ import { createGoalHistoryItem } from "../GoalHistory"
 import { GoalLoop } from "../GoalLoop"
 import { GoalStore } from "../GoalStore"
 import { GoalTaskFactory } from "../GoalTaskFactory"
+
+function deferred<T>() {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>((settle) => { resolve = settle })
+	return { promise, resolve }
+}
 
 describe("GoalController startup transaction", () => {
 	let storagePath: string
@@ -212,6 +219,82 @@ describe("GoalController startup transaction", () => {
 		assert.equal(capturedConfigurations[1].apiConfiguration.actModeApiModelId, "gpt-6.1-sol")
 		assert.equal(capturedConfigurations[0].settings.utilityModelUseCondense, true)
 	})
+
+	for (const control of ["select", "dispose", "cancel"] as const) {
+		it(`joins pending follow-up construction before ${control}`, async () => {
+			const store = new GoalStore()
+			const records = await Promise.all([
+				store.create("pending-followup", "conversation-first", "First Goal"),
+				store.create("next-goal", "conversation-second", "Second Goal"),
+			])
+			const history: HistoryItem[] = records.map((record) => createGoalHistoryItem(record, record.objective.markdown))
+			const constructing = deferred<void>()
+			const finishConstruction = deferred<void>()
+			const outcome = deferred<TaskRunOutcome>()
+			const resume = sinon.stub().returns(outcome.promise)
+			const abort = sinon.stub().callsFake(async () => {
+				outcome.resolve({ kind: "cancelled", cancelledAt: Date.now() })
+			})
+			const retire = sinon.stub().resolves()
+			sinon.stub(GoalTaskFactory.prototype, "create").callsFake(async () => {
+				constructing.resolve()
+				await finishConstruction.promise
+				return {
+					resumeTaskFromHistory: resume,
+					abortTask: abort,
+					retirePersistence: retire,
+				} as unknown as Task
+			})
+			const goalController = new GoalController({
+				controller: {
+					ensureWorkspaceManager: async () => ({ getPrimaryRoot: () => ({ path: "/workspace/dirac" }) }),
+				} as unknown as Controller,
+				stateManager: {
+					getGlobalStateKey: () => history,
+					captureEffectiveTaskConfiguration: () => ({}),
+				} as unknown as StateManager,
+				getStandaloneTask: () => undefined,
+				clearStandaloneTask: async () => { },
+				updateGoalHistory: async (item) => {
+					history[history.findIndex((entry) => entry.id === item.id)] = item
+					return history
+				},
+				postState: async () => { },
+			})
+			await goalController.select("pending-followup")
+			// Keep selection's metadata reads in-memory so the blocked operation
+			// is waiting for startup ownership, not unrelated filesystem latency.
+			sinon.stub(goalController["store"], "read").callsFake(async (id) => structuredClone(records.find((record) => record.id === id)!))
+			const sending = goalController.sendMessage("pending-followup", "Explain the result")
+			await constructing.promise
+			const cancelStandalone = sinon.stub().resolves()
+			const surface = { goalController, taskController: { cancelTask: cancelStandalone } } as unknown as Controller
+			let controlFinished = false
+			const controlling = (control === "select"
+				? goalController.select("next-goal")
+				: control === "dispose"
+					? goalController.dispose()
+					: Controller.prototype.cancelTask.call(surface)).then(() => { controlFinished = true })
+			try {
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				assert.equal(controlFinished, false, "control must join pending startup")
+				assert.equal(goalController.selectedGoalId, "pending-followup")
+				finishConstruction.resolve()
+				await Promise.all([sending, controlling])
+				sinon.assert.calledOnce(resume)
+				sinon.assert.calledOnce(abort)
+				sinon.assert.calledOnce(retire)
+				sinon.assert.notCalled(cancelStandalone)
+				assert.equal(goalController.hasRunningCoordinator, false)
+				assert.equal(goalController.selectedGoalId, control === "select" ? "next-goal" : control === "dispose" ? undefined : "pending-followup")
+			} finally {
+				finishConstruction.resolve()
+				outcome.resolve({ kind: "cancelled", cancelledAt: Date.now() })
+				await Promise.allSettled([sending, controlling])
+				await goalController.dispose()
+			}
+		})
+	}
 
 	it("loads with the existing task history when a persisted Goal has no matching entry", async () => {
 		const store = new GoalStore()

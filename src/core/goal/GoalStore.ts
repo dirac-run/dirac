@@ -2,7 +2,7 @@ import { atomicWriteFile } from "@core/storage/atomicWrite"
 import { ensureTaskDirectoryExists } from "@core/storage/directoryEnsurers"
 import { getTaskDirectoryPath, listTaskDirectoryIds } from "@core/storage/taskDirectory"
 import { acquireTaskLock } from "@core/task/TaskLockUtils"
-import { type GoalRecord, type GoalStatusTransition, isActiveGoalStatus } from "@shared/goal"
+import { type GoalRecord, type GoalStatusTransition, isActiveGoalStatus, isSettledGoalStatus } from "@shared/goal"
 import { fileExistsAtPath } from "@utils/fs"
 import fs from "fs/promises"
 import Mutex from "p-mutex"
@@ -31,6 +31,7 @@ export interface GoalStartupReconciliationReport {
 interface GoalLifecycleSnapshot {
 	status: GoalRecord["status"]
 	statusReason?: string
+	settledAt?: number
 	activeDurationMs: number
 	lastActivatedAt?: number
 	lastPausedAt?: number
@@ -62,6 +63,7 @@ function lifecycleSnapshot(record: GoalRecord): GoalLifecycleSnapshot {
 	return {
 		status: record.status,
 		statusReason: record.statusReason,
+		settledAt: record.settledAt,
 		activeDurationMs: record.activeDurationMs,
 		lastActivatedAt: record.lastActivatedAt,
 		lastPausedAt: record.lastPausedAt,
@@ -73,6 +75,7 @@ function assertLifecycleUnchanged(record: GoalRecord, before: GoalLifecycleSnaps
 	if (
 		after.status !== before.status ||
 		after.statusReason !== before.statusReason ||
+		after.settledAt !== before.settledAt ||
 		after.activeDurationMs !== before.activeDurationMs ||
 		after.lastActivatedAt !== before.lastActivatedAt ||
 		after.lastPausedAt !== before.lastPausedAt
@@ -191,6 +194,8 @@ export class GoalStore {
 			const before = lifecycleSnapshot(record)
 			await update(record, now)
 			assertLifecycleUnchanged(record, before)
+			// Older records have no dedicated endpoint; preserve it before advancing updatedAt.
+			if (isSettledGoalStatus(record.status)) record.settledAt ??= record.updatedAt
 			record.updatedAt = now
 			await writeGoalRecord(record)
 			return structuredClone(record)

@@ -58,11 +58,17 @@ describe("Goal lifecycle-only record validation", () => {
 			{ updatedAt: 99 },
 			{ activeDurationMs: -1 },
 			{ lastPausedAt: 101 },
+			{ settledAt: 100 },
+			{ status: "achieved", settledAt: -1 },
+			{ status: "achieved", settledAt: 99 },
+			{ status: "achieved", settledAt: 101 },
 			{ status: "working" },
 			{ status: "waiting", lastActivatedAt: 99 },
 			{ status: "paused", lastActivatedAt: 100 },
 		]) assert.throws(() => assertGoalRecord({ ...record(), ...invalid }, "goal"), /Invalid Goal state/)
 		assert.doesNotThrow(() => assertGoalRecord({ ...record(), status: "working", lastActivatedAt: 100 }, "goal"))
+		assert.doesNotThrow(() => assertGoalRecord({ ...record(), status: "achieved", settledAt: 100 }, "goal"))
+		assert.doesNotThrow(() => assertGoalRecord({ ...record(), status: "achieved" }, "goal"))
 	})
 
 	it("requires exact replaceable accounting projections and valid source snapshots", () => {

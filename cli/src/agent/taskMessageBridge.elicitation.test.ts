@@ -80,6 +80,7 @@ function apiStatusMessage(): DiracMessage {
 describe("TaskMessageBridge form elicitation", () => {
 	let submitCardResponse: ReturnType<typeof vi.fn>;
 	let requestPermission: ReturnType<typeof vi.fn>;
+	let persistPermissionRule: ReturnType<typeof vi.fn>;
 	let requestElicitation: ReturnType<typeof vi.fn>;
 	let emitSessionUpdate: ReturnType<typeof vi.fn>;
 	let bridge: TaskMessageBridge;
@@ -89,6 +90,7 @@ describe("TaskMessageBridge form elicitation", () => {
 	beforeEach(() => {
 		submitCardResponse = vi.fn().mockResolvedValue(undefined);
 		requestPermission = vi.fn();
+		persistPermissionRule = vi.fn().mockResolvedValue(undefined);
 		requestElicitation = vi.fn().mockResolvedValue({
 			action: "accept",
 			content: { optionId: "option-a" },
@@ -106,7 +108,7 @@ describe("TaskMessageBridge form elicitation", () => {
 			requestElicitation,
 			getWhispers: () => [],
 			clearWhispers: vi.fn(),
-			persistPermissionRule: vi.fn(),
+			persistPermissionRule,
 		} as any);
 	});
 
@@ -385,6 +387,47 @@ describe("TaskMessageBridge form elicitation", () => {
 		expect(promptResolved.value).toBe(false);
 	});
 
+	it.each(["allow_always", "reject_always"])("rejects an unoffered %s response to a one-operation approval without persisting", async (optionId) => {
+		const message = approvalCard();
+		if (message.content.type !== DiracMessageType.CARD) throw new Error("Expected approval card");
+		message.content.card.approvalScope = "once";
+		getMessageById.mockReturnValue(message);
+		taskState.lastWaitingCardId = message.id;
+		requestPermission.mockResolvedValue({ outcome: { outcome: "selected", optionId } });
+
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+		expect(requestPermission.mock.calls[0][2].map((option: { optionId: string }) => option.optionId)).toEqual(["allow_once", "reject_once"]);
+		expect(persistPermissionRule).not.toHaveBeenCalled();
+		expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.REJECT);
+	});
+
+	it.each(["allow_once", "reject_once"])("accepts %s for a one-operation approval without persisting", async (optionId) => {
+		const message = approvalCard();
+		if (message.content.type !== DiracMessageType.CARD) throw new Error("Expected approval card");
+		message.content.card.approvalScope = "once";
+		getMessageById.mockReturnValue(message);
+		taskState.lastWaitingCardId = message.id;
+		requestPermission.mockResolvedValue({ outcome: { outcome: "selected", optionId } });
+
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+		expect(persistPermissionRule).not.toHaveBeenCalled();
+		expect(submitCardResponse).toHaveBeenCalledWith(message.id, optionId === "allow_once" ? DiracAskResponse.APPROVE : DiracAskResponse.REJECT, undefined);
+	});
+
+	it("retains persistent approval for ordinary foreground requests", async () => {
+		const message = approvalCard();
+		getMessageById.mockReturnValue(message);
+		taskState.lastWaitingCardId = message.id;
+		requestPermission.mockResolvedValue({ outcome: { outcome: "selected", optionId: "allow_always" } });
+
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+		expect(persistPermissionRule).toHaveBeenCalledWith("session-1", expect.objectContaining({ toolCallId: message.id }), "allow");
+		expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.APPROVE, undefined);
+	});
+
 	for (const createCard of [approvalCard, questionCard]) {
 		it(`defers ${createCard.name} client input until the card reaches the FIFO head`, async () => {
 			const message = createCard();
@@ -657,6 +700,75 @@ describe("TaskMessageBridge form elicitation", () => {
 			inputTokens: 80,
 			outputTokens: 20,
 		});
+	});
+
+	it("replaces cumulative tasklet usage by child identity without changing root context occupancy", async () => {
+		const root: DiracMessage = {
+			id: "root-usage", ts: 20,
+			content: {
+				type: DiracMessageType.API_STATUS, status: {
+					tokensIn: 100, tokensOut: 25, cacheReads: 10, cacheWrites: 5,
+					reasoningTokens: 4, cost: 0.25, contextWindow: 200_000,
+				}
+			},
+		};
+		const initial: DiracMessage = {
+			id: "child-usage", ts: 21,
+			content: {
+				type: DiracMessageType.CARD, card: {
+					id: "child-usage", header: "Tasklet usage", status: CardStatus.SUCCESS, renderType: "text",
+					rawOutput: {
+						source: "tasklet", taskletId: "child", tokensIn: 20, tokensOut: 5,
+						cacheReads: 2, cacheWrites: 1, reasoningTokens: 3, cost: 0.1,
+						usageAvailability: { inputTokens: true, outputTokens: true, cacheReads: true, cacheWrites: true, reasoningTokens: true, cost: true },
+					},
+				}
+			},
+		};
+		const updated = structuredClone(initial);
+		if (updated.content.type !== DiracMessageType.CARD) throw new Error("Expected accounting card");
+		updated.id = "reprojected-child-usage";
+		updated.content.card.id = updated.id;
+		Object.assign(updated.content.card.rawOutput!, { tokensIn: 30, tokensOut: 7, reasoningTokens: 6, cost: 0.25 });
+
+		for (const message of [root, initial, initial, updated]) {
+			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+		}
+		const expectedUsage = {
+			totalTokens: 180, inputTokens: 130, outputTokens: 32,
+			cachedReadTokens: 12, cachedWriteTokens: 6, thoughtTokens: 10,
+		};
+		expect(bridge.promptResponse("end_turn").usage).toEqual(expectedUsage);
+		expect(emitSessionUpdate).toHaveBeenLastCalledWith("session-1", {
+			sessionUpdate: "usage_update", used: 140, size: 200_000, cost: { amount: 0.5, currency: "USD" },
+		});
+		expect(emitSessionUpdate.mock.calls.every(([, update]) => update.sessionUpdate === "usage_update")).toBe(true);
+
+		await bridge.restoreUsage("session-1", [root, initial, updated], true);
+		expect(bridge.promptResponse("end_turn").usage).toEqual(expectedUsage);
+		await bridge.restoreUsage("session-1", [root], true);
+		expect(bridge.promptResponse("end_turn").usage?.totalTokens).toBe(140);
+	});
+
+	it.each(["structured", "legacy"])("includes %s subagent accounting without emitting activity", async (format) => {
+		const usage = { source: "subagents", tokensIn: 10, tokensOut: 2, cacheReads: 3, cacheWrites: 4, cost: 0.1 };
+		const message: DiracMessage = {
+			id: "old-usage", ts: 22,
+			content: {
+				type: DiracMessageType.CARD, card: {
+					id: "old-usage", header: format === "legacy" ? "Subagent Usage" : "Renamed accounting",
+					status: CardStatus.SUCCESS, renderType: "text",
+					...(format === "legacy" ? { body: JSON.stringify(usage) } : { rawOutput: usage }),
+				}
+			},
+		};
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+		await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
+
+		expect(bridge.promptResponse("end_turn").usage).toEqual({
+			totalTokens: 19, inputTokens: 10, outputTokens: 2, cachedReadTokens: 3, cachedWriteTokens: 4,
+		});
+		expect(emitSessionUpdate).not.toHaveBeenCalled();
 	});
 
 	it("ignores malformed subagent usage cards", async () => {

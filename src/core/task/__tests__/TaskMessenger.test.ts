@@ -136,6 +136,8 @@ describe("TaskMessenger tasklet escalation", () => {
 		assert.match(card.header, /Private worker.*Execute/)
 		assert.deepEqual(card.rawInput, input.card.rawInput)
 		assert.deepEqual(card.actions, input.card.actions)
+		assert.equal(card.approvalScope, "once")
+		assert.equal(input.card.approvalScope, undefined)
 		assert.equal(card.status, CardStatus.SUCCESS)
 		assert.equal(input.card.status, CardStatus.WAITING_FOR_INPUT)
 		assert.deepEqual(taskState.waitingCardIds, [])

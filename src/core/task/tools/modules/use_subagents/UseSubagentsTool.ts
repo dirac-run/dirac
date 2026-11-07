@@ -216,7 +216,12 @@ export const tasklets_spec: DiracToolSpec = {
 			instruction: "Inspect view; defaults to status. List supports status only.",
 			enum: inspectionViews,
 		},
-		{ name: "cursor", required: false, instruction: "Opaque continuation from a previous passive read.", minLength: 1 },
+		{
+			name: "cursor",
+			required: false,
+			instruction: "Use nextCursor for more recorded data, or a messages tailCursor on a later read for newly appended messages. Keep the same view and filters; cursors never acknowledge delivery.",
+			minLength: 1,
+		},
 		{
 			name: "limit",
 			type: "integer",

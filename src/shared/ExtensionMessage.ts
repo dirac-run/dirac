@@ -493,6 +493,8 @@ export interface Card {
 	diffs?: CardDiff[]
 	locations?: CardLocation[]
 	requireApproval?: boolean
+	/** Restricts approval to this operation; clients must not offer or persist broader permission rules. */
+	approvalScope?: "once"
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string
 	actions?: ActionButton[]
@@ -550,6 +552,7 @@ export interface CardParams {
 	diffs?: CardDiff[]
 	locations?: CardLocation[]
 	requireApproval?: boolean
+	approvalScope?: Card["approvalScope"]
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string
 	actions?: ActionButton[]
