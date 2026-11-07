@@ -127,6 +127,10 @@ Scrollable Markdown and live thinking tails must parse the complete document bef
 
 File-edit permission diffs also parse the complete patch before clipping. Use `createDiffLayout` for both diff rendering and permission scroll bounds, accounting for collapsed context, split-row pairing, hunk separators and unified-line wrapping. Never clip raw patch source before parsing: losing a hunk header changes line numbers and can cut off rows without moving the viewport.
 
+### Tasklet observation
+
+Interactive `/agents` is a display-only inventory snapshot; it never enters model history, steering, or approval input. `/agent` opens a passive, paged transcript browser (`r` refresh, `n`/`p` pages). Both use the existing TaskService observation handlers, qualified by selected root and source identity. Saved reads cannot construct a runtime or repair stored history. The count comes from admitted/unsettled TaskletHost ownership, not card status. Keep local snapshots separate from authoritative presentation replay, and do not restore continuously updated child-preview cards or a second Goal-specific inventory.
+
 ## Standalone output contract
 
 Standalone execution is designed for shell composition:

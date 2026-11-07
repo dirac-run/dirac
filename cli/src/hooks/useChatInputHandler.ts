@@ -52,6 +52,7 @@ interface UseChatInputHandlerProps {
 	toggleAutoApproveAll: () => void
 	enableFastMode: () => void
 	toggleQuietMode: () => void
+	showAgentSnapshot: () => void
 	handleSubmit: (text: string, images: string[]) => void
 	handleExit: () => void
 	clearViewAndResetTask: () => void
@@ -125,6 +126,7 @@ export function useChatInputHandler({
 	toggleAutoApproveAll,
 	enableFastMode,
 	toggleQuietMode,
+	showAgentSnapshot,
 	handleSubmit,
 	handleExit,
 	clearViewAndResetTask,
@@ -190,6 +192,7 @@ export function useChatInputHandler({
 			handleExit,
 			enableFastMode,
 			toggleQuietMode,
+			showAgentSnapshot,
 		}
 
 		const goalShortcut = getGoalKeyboardShortcut(input, key, goalStatus)
@@ -253,7 +256,10 @@ export function useChatInputHandler({
 			if (key.tab || key.return) {
 				const cmd = filteredCommands[selectedSlashIndex]
 				if (cmd) {
-					const wasLocalCommand = executeLocalSlashCommand(cmd.name, localSlashCommandContext)
+					const isObservation = cmd.name === "agents" || cmd.name === "agent"
+					const standalone = /^\s*\/[a-zA-Z0-9_.-]*\s*$/.test(currentTextInput)
+					const wasLocalCommand =
+						(!isObservation || standalone) && executeLocalSlashCommand(cmd.name, localSlashCommandContext)
 
 					if (wasLocalCommand) {
 						setSelectedSlashIndex(0)
@@ -461,8 +467,8 @@ export function useChatInputHandler({
 		if (key.return && !key.shift && !key.meta && input !== "\n" && !inMentionMode) {
 			// Runtime eligibility belongs to handleSubmit, which can accept input while a root sleeps.
 			if (
-				(!isSpinnerActive || goalStatus !== undefined) &&
-				!isProcessing &&
+				(/^\s*\/agents?\s*$/.test(currentTextInput) ||
+					((!isSpinnerActive || goalStatus !== undefined) && !isProcessing)) &&
 				executeStandaloneLocalSlashCommand(currentTextInput, localSlashCommandContext)
 			) {
 				setSelectedSlashIndex(0)

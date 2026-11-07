@@ -47,7 +47,10 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 				}),
 				retirePersistence: sandbox.stub().resolves(),
 				enqueueSteeringMessage: sandbox.stub().resolves("steer"),
-				messageStateHandler: { getApiConversationHistory: () => [], getDiracMessages: () => [] },
+				messageStateHandler: {
+					getApiConversationHistory: () => [], getDiracMessages: () => [],
+					getPresentationOffset: () => -1, getPresentationStateGeneration: () => 0,
+				},
 			},
 		}
 	}
@@ -114,9 +117,9 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 					toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
 					...(status === "resolved"
 						? {
-								resolvedAt: 105,
-								resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
-							}
+							resolvedAt: 105,
+							resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE },
+						}
 						: status === "retired"
 							? { retiredAt: 106 }
 							: {}),
@@ -144,7 +147,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			escalateInteraction: sandbox.stub(),
 			hasPendingUserInput: () => false,
 			withMutationAuthorization: (_toolName, mutation) => mutation(),
-			retainMutationUntil: () => {},
+			retainMutationUntil: () => { },
 		}
 	})
 

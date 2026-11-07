@@ -1,8 +1,15 @@
 import { formatResponse } from "@core/formatResponse"
 import { CardStatus } from "@shared/ExtensionMessage"
+import {
+	formatTaskletReceipt,
+	TASKLET_RECEIPT_OPERATIONS,
+	taskletReceiptTitle,
+	type TaskletReceipt,
+	type TaskletReceiptOutcome,
+	type TaskletReceiptRow,
+} from "@shared/taskletReceipt"
 import { SUBAGENT_TASK_TITLE_MAX_CHARS, SUBAGENT_TASK_TITLE_MAX_WORDS } from "@shared/subagents"
 import { toError } from "@/shared/errors"
-import { DiracIcon } from "@/shared/icons"
 import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import type {
@@ -110,14 +117,18 @@ export class UseSubagentsTool implements IDiracTool {
 		if (card) {
 			const accepted = results.filter((result) => result.accepted).length
 			const status = accepted === results.length ? CardStatus.SUCCESS : CardStatus.ERROR
-			await this.present(
-				card.update({
-					header: "Subagent startup",
-					body: `${accepted} accepted; ${results.length - accepted} startup errors. Acceptance is not assignment completion. Use tasklets to inspect or sleep for later communication.`,
-					status,
-				}),
-				env,
-			)
+			const receipt: TaskletReceipt = {
+				operation: "spawn",
+				outcome: accepted === results.length ? "accepted" : accepted > 0 ? "partial_failure" : "failed",
+				rows: results.map((result) => ({
+					operation: "spawn",
+					taskletId: "id" in result ? result.id : undefined,
+					title: result.title ?? `Agent ${result.index + 1}`,
+					outcome: result.accepted ? "accepted" : "failed",
+					error: result.error,
+				})),
+			}
+			await this.present(card.update(receiptCard(receipt, status)), env)
 			await this.present(card.finalize(status), env)
 		}
 		return JSON.stringify({ subagents: results }, null, 2)
@@ -156,7 +167,10 @@ export class UseSubagentsTool implements IDiracTool {
 	}
 
 	private async createSpawnCard(env: IToolEnvironment): Promise<ICardHandle | undefined> {
-		const creation = env.ui.createCard({ header: "Start Subagents", icon: DiracIcon.SUBAGENTS, collapsed: true })
+		const creation = env.ui.createCard({
+			...receiptCard({ operation: "spawn", outcome: "requested", rows: [] }, CardStatus.RUNNING),
+			collapsed: true,
+		})
 		try {
 			const result = await waitForPresentationOperation(creation)
 			if (!result.timedOut) return result.value
@@ -219,7 +233,8 @@ export const tasklets_spec: DiracToolSpec = {
 		{
 			name: "cursor",
 			required: false,
-			instruction: "Use nextCursor for more recorded data, or a messages tailCursor on a later read for newly appended messages. Keep the same view and filters; cursors never acknowledge delivery.",
+			instruction:
+				"Use nextCursor for more recorded data, or a messages tailCursor on a later read for newly appended messages. Keep the same view and filters; cursors never acknowledge delivery.",
 			minLength: 1,
 		},
 		{
@@ -310,21 +325,37 @@ export class TaskletsTool implements IDiracTool {
 		if (!controls) throw new Error("Tasklet controls are available only to an owning root")
 		const args = requireArguments(input)
 		const request = parseControlRequest(args)
-		const card = await env.ui.createCard({ header: controlCardHeader(request), collapsed: true, rawInput: args })
+		const initialReceipt = controlReceipt(request)
+		const card = await env.ui.createCard({
+			...receiptCard(initialReceipt, CardStatus.RUNNING),
+			collapsed: true,
+			rawInput: args,
+		})
 		try {
 			const result = await executeOperation(controls, request)
 			const output = JSON.stringify(result)
 			if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
 				throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
-			const presentation = controlCardResult(request, result)
-			await card.update({ ...presentation, body: redactRoutingIds(presentation.body, request) })
-			await card.finalize(presentation.status)
+			const receipt = controlReceiptResult(request, result)
+			const status =
+				receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
+					? CardStatus.ERROR
+					: CardStatus.SUCCESS
+			await card.update(receiptCard(receipt, status))
+			await card.finalize(status)
 			return output
 		} catch (error) {
-			await card.update({
-				body: redactRoutingIds(clipText(toError(error).message, 2000), request),
-				status: CardStatus.ERROR,
-			})
+			await card.update(
+				receiptCard(
+					{
+						...initialReceipt,
+						outcome: "failed",
+						rows: initialReceipt.rows.map((row) => ({ ...row, outcome: "failed" })),
+						error: redactRoutingIds(clipText(toError(error).message, 2000), request),
+					},
+					CardStatus.ERROR,
+				),
+			)
 			await card.finalize(CardStatus.ERROR)
 			throw error
 		}
@@ -540,16 +571,61 @@ function clipText(value: string, maximumBytes: number): string {
 	return `${value.slice(0, lower)}…`
 }
 
-function controlCardHeader(request: ControlRequest): string {
-	if (request.operation === "message")
-		return request.items.length === 1 ? "Message tasklet" : `Message ${request.items.length} tasklet requests`
+function controlReceipt(request: ControlRequest): TaskletReceipt {
+	if (request.operation === "message") {
+		return {
+			operation: request.items.length === 1 ? request.items[0].type : "message",
+			outcome: "requested",
+			rows: request.items.map((item) => ({
+				operation: item.type,
+				taskletId: item.taskletId,
+				title: "Agent",
+				outcome: "requested",
+				message: "text" in item ? item.text : undefined,
+				choice: item.type === "reply" ? item.action : undefined,
+				requestId: "replyTo" in item ? item.replyTo : undefined,
+				decision: item.type === "permission_decision" ? item.decision : undefined,
+			})),
+		}
+	}
 	return {
-		list: "Tasklet inventory",
-		inspect: "Inspect tasklet",
-		interrupt: "Stop tasklet",
-		resume: "Resume tasklet",
-		sleep: "Wait for tasklet communication",
-	}[request.operation]
+		operation: request.operation,
+		outcome: "requested",
+		view: request.operation === "inspect" ? (request.query?.view ?? "status") : undefined,
+		rows:
+			"taskletId" in request
+				? [
+						{
+							operation: request.operation,
+							taskletId: request.taskletId,
+							title: "Agent",
+							outcome: "requested",
+							message: "message" in request ? request.message : undefined,
+						},
+					]
+				: [],
+		...(request.operation === "sleep"
+			? {
+					waitScope:
+						request.options.taskletIds === undefined
+							? "any_tasklet"
+							: request.options.taskletIds.length
+								? "selected_tasklets"
+								: "time_or_user",
+					waitSourceCount: request.options.taskletIds?.length,
+				}
+			: {}),
+	}
+}
+
+function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus) {
+	return {
+		header: taskletReceiptTitle(taskletReceipt),
+		icon: TASKLET_RECEIPT_OPERATIONS[taskletReceipt.operation].icon,
+		body: formatTaskletReceipt(taskletReceipt),
+		taskletReceipt,
+		status,
+	}
 }
 
 function resultObject(result: unknown): Record<string, unknown> {
@@ -560,75 +636,127 @@ function resultTitle(result: Record<string, unknown>): string {
 	return typeof result.title === "string" && result.title !== result.id ? clipText(result.title, 256) : "Tasklet"
 }
 
-function controlCardResult(request: ControlRequest, value: unknown): { header: string; body: string; status: CardStatus } {
-	if (request.operation === "message") return messageCardResult(request.items, value as TaskletMessageResult[])
+function controlReceiptResult(request: ControlRequest, value: unknown): TaskletReceipt {
+	if (request.operation === "message") return messageReceiptResult(request.items, value as TaskletMessageResult[])
 	const result = resultObject(value)
+	const receipt = controlReceipt(request)
 	const title = resultTitle(result)
-	if (request.operation === "resume")
+	if (request.operation === "resume") {
+		const outcome = result.accepted ? "accepted" : "failed"
 		return {
-			header: `Resume · ${title}`,
-			body: `${request.message ?? "Continue the existing assignment."}\n\n${result.accepted ? "Accepted for resumption; this is not assignment completion." : `Resumption did not start: ${String(result.startupOutcome)}.`}`,
-			status: result.accepted ? CardStatus.SUCCESS : CardStatus.ERROR,
-		}
-	if (request.operation === "interrupt") {
-		const outcome = resultObject(result.outcome)
-		const failed = Boolean(result.settlementError) || !result.outcomePersisted
-		return {
-			header: `Stop · ${title}`,
-			body: `${request.message ?? "Interruption requested."}\n\n${failed ? "Settlement failed." : `Settled outcome: ${String(outcome.kind)}.`}`,
-			status: failed ? CardStatus.ERROR : CardStatus.SUCCESS,
+			...receipt,
+			outcome,
+			rows: [
+				{
+					...receipt.rows[0],
+					title,
+					outcome,
+					error: result.accepted ? undefined : `Resumption did not start: ${String(result.startupOutcome)}`,
+				},
+			],
 		}
 	}
-	if (request.operation === "inspect")
+	if (request.operation === "interrupt") {
+		const failed = Boolean(result.settlementError) || !result.outcomePersisted
+		const outcome = failed ? "failed" : "settled"
 		return {
-			header: `Inspect · ${title} · ${request.query?.view ?? "status"}`,
-			body: "Recorded evidence returned passively with output bounds and continuation where needed. No message was sent and the tasklet was not woken.",
-			status: CardStatus.SUCCESS,
+			...receipt,
+			outcome,
+			rows: [
+				{
+					...receipt.rows[0],
+					title,
+					outcome,
+					observedState: observedReceiptState(result),
+					error: failed
+						? String(resultObject(result.settlementError).message ?? "Settlement did not complete")
+						: undefined,
+				},
+			],
 		}
-	if (request.operation === "sleep")
-		return {
-			header: "Tasklet wait ended",
-			body: `Wake reason: ${String(result.reason)}. A wake is not assignment completion.`,
-			status: CardStatus.SUCCESS,
-		}
+	}
+	if (request.operation === "sleep") {
+		const wakeReason = result.reason as TaskletReceipt["wakeReason"]
+		return { ...receipt, outcome: wakeReason === "cancelled" ? "cancelled" : "woke", wakeReason }
+	}
 	const items = Array.isArray(result.items) ? result.items : []
-	const lines = items.map((item) => {
-		const summary = resultObject(item)
-		return `${resultTitle(summary)} — ${String(resultObject(summary.outcome).kind ?? summary.executionStatus ?? "accepted")}`
-	})
 	return {
-		header: "Tasklet inventory",
-		body: lines.length ? lines.join("\n") : "No tasklets in this inventory page.",
-		status: CardStatus.SUCCESS,
+		...receipt,
+		outcome: "retrieved",
+		returnedCount: items.length,
+		totalCount: typeof result.totalItems === "number" ? result.totalItems : items.length,
+		hasMore: typeof result.nextCursor === "string",
+		fragment: result.fragment !== undefined,
+		rows:
+			request.operation === "inspect"
+				? [
+						{
+							...receipt.rows[0],
+							title,
+							outcome: "retrieved",
+							observedState:
+								(request.query?.view ?? "status") === "status" && items.length === 1
+									? observedReceiptState(resultObject(items[0]))
+									: undefined,
+						},
+					]
+				: items.map((item) => {
+						const summary = resultObject(item)
+						return {
+							operation: "list",
+							taskletId: typeof summary.id === "string" ? summary.id : undefined,
+							title: resultTitle(summary),
+							outcome: "retrieved",
+							observedState: observedReceiptState(summary),
+						}
+					}),
 	}
 }
 
-function messageCardResult(
-	items: TaskletMessage[],
-	results: TaskletMessageResult[],
-): { header: string; body: string; status: CardStatus } {
-	const labels = { guidance: "Guidance", question: "Question", reply: "Reply", permission_decision: "Decision" }
-	const entries = items.map((item, index) => {
-		const result = results[index]
-		const label =
-			item.type === "permission_decision" ? item.decision[0].toUpperCase() + item.decision.slice(1) : labels[item.type]
-		const title = result.title ?? "Tasklet"
-		const content =
-			item.type === "permission_decision"
-				? `Request: ${result.request ?? "Permission request"}\nDecision: ${item.decision}`
-				: `${clipText(item.text ?? "", 1000)}${item.type === "reply" && item.action ? `\nChoice: ${clipText(item.action, 256)}` : ""}${result.request ? `\nRequest: ${result.request}` : ""}`
-		return {
-			heading: `${label} · ${title}`,
-			body: `${content}\nOutcome: ${result.status}${result.status === "queued" ? " (accepted, not confirmation of consumption)" : ""}${result.error ? `\n${result.error}` : ""}`,
-		}
-	})
-	const failed = results.some((result) => result.status === "failed" || result.status === "stale")
-	return {
-		header:
-			entries.length === 1 ? entries[0].heading : `Message ${entries.length} requests${failed ? " · partial failure" : ""}`,
-		body: entries.map((entry) => `${entries.length > 1 ? `${entry.heading}\n` : ""}${entry.body}`).join("\n\n"),
-		status: failed ? CardStatus.ERROR : CardStatus.SUCCESS,
+function observedReceiptState(summary: Record<string, unknown>): TaskletReceiptRow["observedState"] {
+	if (summary.settlementError) return "settlement_failed"
+	if (summary.outcomePersisted === true) {
+		const kind = resultObject(summary.outcome).kind
+		if (kind === "completed" || kind === "failed" || kind === "interrupted") return kind
+		if (kind === "cancelled") return "interrupted"
 	}
+	if (summary.outcome && summary.outcomePersisted === false) return "settling"
+	if (typeof summary.pendingRequestCount === "number" && summary.pendingRequestCount > 0) return "waiting_for_parent"
+	switch (summary.executionStatus) {
+		case "preparing":
+			return "starting"
+		case "completed":
+		case "cancelling":
+			return summary.outcomePersisted === false ? "settling" : undefined
+		case "waiting_for_api":
+		case "thinking":
+		case "streaming_text":
+		case "building_tool_call":
+		case "executing_tool":
+			return "running"
+		default:
+			return undefined
+	}
+}
+
+function messageReceiptResult(items: TaskletMessage[], results: TaskletMessageResult[]): TaskletReceipt {
+	const receipt = controlReceipt({ operation: "message", items })
+	const rows = receipt.rows.map((row, index) => ({
+		...row,
+		title: results[index].title ?? "Agent",
+		outcome: results[index].status,
+		request: results[index].request,
+		error: results[index].error,
+	}))
+	return { ...receipt, outcome: batchReceiptOutcome(rows), rows }
+}
+
+function batchReceiptOutcome(rows: TaskletReceiptRow[]): TaskletReceiptOutcome {
+	const failures = rows.filter((row) => row.outcome === "failed" || row.outcome === "stale").length
+	if (failures) return failures === rows.length ? "failed" : "partial_failure"
+	if (rows.every((row) => row.outcome === rows[0].outcome)) return rows[0].outcome
+	if (rows.some((row) => row.outcome === "requires_user_approval")) return "requires_user_approval"
+	return "recorded"
 }
 
 function redactRoutingIds(body: string, request: ControlRequest): string {

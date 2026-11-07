@@ -52,6 +52,15 @@ function presentationData(taskletId: string, status: TaskletPresentationData["st
 	}
 }
 
+async function seedHistoricalPresentation(messages: MessageStateHandler, data: TaskletPresentationData): Promise<void> {
+	const card = createTaskletPresentationCard(data)
+	if (messages.findMessageIndexById(card.id) === -1) {
+		await messages.addToDiracMessages({ id: card.id, ts: data.createdAt, content: { type: DiracMessageType.CARD, card } })
+		return
+	}
+	await messages.patchCardById(card.id, card)
+}
+
 function apiMessage(id: string, cost: number): DiracMessage {
 	return { id, ts: 1, content: { type: DiracMessageType.API_STATUS, status: { cost, tokensIn: cost * 10, tokensOut: cost } } }
 }
@@ -121,7 +130,7 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 		})
 		await messages.addToDiracMessages(apiMessage("before", 2))
 		await messages.addToDiracMessages(usageMessage("first", 1))
-		await messages.upsertTaskletPresentation(presentationData("first", "running"))
+		await seedHistoricalPresentation(messages, presentationData("first", "running"))
 		await messages.addToDiracMessages({
 			id: "checkpoint",
 			ts: 1,
@@ -134,8 +143,8 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 		if (latest.content.type === "card") await messages.patchCardById("usage-first", latest.content.card)
 		await messages.addToDiracMessages(usageMessage("second", 11))
 		await messages.addToDiracMessages(apiMessage("after", 3))
-		await messages.upsertTaskletPresentation(presentationData("first", "completed"))
-		await messages.upsertTaskletPresentation(presentationData("second", "waiting"))
+		await seedHistoricalPresentation(messages, presentationData("first", "completed"))
+		await seedHistoricalPresentation(messages, presentationData("second", "waiting"))
 		await messages.flushPendingWrites()
 	}
 
@@ -248,7 +257,7 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 			for (let attempt = 0; attempt < 2; attempt++) {
 				// After cutover, a fresh projection must replace the retained alternate identity too.
 				const expectedFirst = attempt === 0 ? latest : presentationData("first", "interrupted")
-				if (attempt === 1) await messages.upsertTaskletPresentation(expectedFirst)
+				if (attempt === 1) await seedHistoricalPresentation(messages, expectedFirst)
 				assert.deepEqual(await restore.restoreCheckpoint("checkpoint", restoreType), {})
 				const saved = (await getSavedPresentationHistory("root")).messages
 				const presentations = saved.flatMap((message) => {

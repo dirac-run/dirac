@@ -187,13 +187,16 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 	}, [context, modeSwitchingDisabled, modeTrait])
 	useShortcut(platform.togglePlanActKeys, handleModeToggleWithInput, { disableTextInputs: false })
 
+	// Passive local reads remain available while a model turn or approval is outstanding.
+	const canSend = !sendingDisabled || context.inputValue.trim() === "/agents"
+
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key === "Enter" && !e.shiftKey) {
 			// Check if any trait handled it first (e.g. menu selection)
 			if (handleKeyDown(e)) return
 
 			e.preventDefault()
-			if (!sendingDisabled) {
+			if (canSend) {
 				onSend?.()
 			}
 			return
@@ -245,10 +248,10 @@ export const ModularChatTextArea: React.FC<ModularChatTextAreaProps> = ({
 				<div className="absolute flex items-end bottom-4.5 right-5 z-10 h-8">
 					<div className="flex flex-row items-center">
 						<motion.div
-							className={cn("input-icon-button", { disabled: sendingDisabled }, "codicon codicon-send text-sm")}
+							className={cn("input-icon-button", { disabled: !canSend }, "codicon codicon-send text-sm")}
 							data-testid="send-button"
 							onClick={() => {
-								if (!sendingDisabled) {
+								if (canSend) {
 									context.setIsFocused(false)
 									onSend?.()
 								}

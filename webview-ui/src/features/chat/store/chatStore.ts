@@ -11,14 +11,36 @@ import { type ApiMetrics, getApiMetrics, getLastApiReqInfo } from "@shared/getAp
 import type { PresentationBatch, PresentationOperation } from "@shared/PresentationOperation"
 import { getSubagentUsage } from "@shared/subagentUsage"
 import { getTaskletUsage } from "@shared/taskletUsage"
+import type { TaskletActivitySummary } from "@shared/taskletObservation"
 import { create } from "zustand"
 
 export type PresentationApplyResult = "applied" | "gap" | "wrong_surface"
+
+export interface LocalObservationMessage {
+	id: string
+	text: string
+	afterMessageId?: string
+	position: number
+}
+
+function insertLocalMessageIds(ids: string[], localMessages: ReadonlyMap<string, LocalObservationMessage>): string[] {
+	if (localMessages.size === 0) return ids
+	const result = [...ids]
+	for (const message of localMessages.values()) {
+		const afterIndex = message.afterMessageId ? result.indexOf(message.afterMessageId) : -1
+		result.splice(afterIndex === -1 ? Math.min(message.position, result.length) : afterIndex + 1, 0, message.id)
+	}
+	return result
+}
 
 interface ChatState {
 	diracMessages: DiracMessage[]
 	messageIndexById: Map<string, number>
 	presentationSurfaceId?: string
+	/** Local display history never enters the backend transcript or model context. */
+	localObservationMessages: Map<string, LocalObservationMessage>
+	observationGeneration: number
+	taskletActivity?: TaskletActivitySummary
 	presentationOffset: number
 	presentationRevision: number
 	presentationAppends: Map<string, { revision: number; chunks: string[] }>
@@ -41,12 +63,16 @@ interface ChatState {
 	applyExtensionState: (state: Partial<ExtensionState>) => void
 	applyPresentationBatch: (batch: PresentationBatch) => PresentationApplyResult
 	setDiracMessages: (messages: DiracMessage[]) => void
+	appendLocalObservation: (generation: number, text: string) => boolean
 	setCardCollapsedState: (cardId: string, collapsed: boolean, userToggled?: boolean) => void
 	clearCardCollapsedStates: () => void
 }
 
 function isVisibleMessage(message: DiracMessage, latestRequestStatusId?: string): boolean {
-	if (message.content.type === DiracMessageType.CARD && (getSubagentUsage(message.content.card) || getTaskletUsage(message.content.card))) return false
+	if (
+		message.content.type === DiracMessageType.CARD &&
+		(message.content.card.rawInput?.isTasklet === true || getSubagentUsage(message.content.card) || getTaskletUsage(message.content.card))
+	) return false
 	if (message.content.type === DiracMessageType.MARKDOWN) {
 		return message.content.content !== "" || (message.content.images?.length ?? 0) > 0
 	}
@@ -62,6 +88,7 @@ function isVisibleMessage(message: DiracMessage, latestRequestStatusId?: string)
 
 function rebuildDerivedPresentation(
 	messages: DiracMessage[],
+	localMessages: ReadonlyMap<string, LocalObservationMessage>,
 ): Pick<
 	ChatState,
 	| "visibleMessageIds"
@@ -86,7 +113,7 @@ function rebuildDerivedPresentation(
 		if (isVisibleMessage(messages[index], latestRequestStatusId)) visibleMessageIds.push(messages[index].id)
 	}
 	return {
-		visibleMessageIds,
+		visibleMessageIds: insertLocalMessageIds(visibleMessageIds, localMessages),
 		visibleMessageIdSet: new Set(visibleMessageIds),
 		apiMetrics: getApiMetrics(messages),
 		lastApiReqInfo: getLastApiReqInfo(messages),
@@ -276,7 +303,7 @@ function updateDerivedPresentation(
 	index: number | undefined,
 ): void {
 	if (operation.type === "reset" || operation.type === "delete") {
-		Object.assign(state, rebuildDerivedPresentation(state.diracMessages))
+		Object.assign(state, rebuildDerivedPresentation(state.diracMessages, state.localObservationMessages))
 		return
 	}
 
@@ -386,6 +413,9 @@ export const useChatStore = create<ChatState>((set) => ({
 	diracMessages: [],
 	messageIndexById: new Map(),
 	presentationSurfaceId: undefined,
+	localObservationMessages: new Map(),
+	observationGeneration: 0,
+	taskletActivity: undefined,
 	presentationOffset: -1,
 	presentationRevision: 0,
 	presentationAppends: new Map(),
@@ -410,9 +440,26 @@ export const useChatStore = create<ChatState>((set) => ({
 			...synchronizeResolvedCardCollapse(state, messages),
 			messageIndexById: indexMessages(messages),
 			presentationAppends: new Map(),
-			...rebuildDerivedPresentation(messages),
+			...rebuildDerivedPresentation(messages, state.localObservationMessages),
 			presentationRevision: state.presentationRevision + 1,
 		})),
+	appendLocalObservation: (generation, text) => {
+		let appended = false
+		set((state) => {
+			if (state.observationGeneration !== generation) return state
+			const id = `local-agents:${crypto.randomUUID()}`
+			const localObservationMessages = new Map(state.localObservationMessages)
+			localObservationMessages.set(id, {
+				id, text, afterMessageId: state.visibleMessageIds.at(-1), position: state.visibleMessageIds.length,
+			})
+			appended = true
+			return {
+				localObservationMessages,
+				visibleMessageIds: [...state.visibleMessageIds, id],
+			}
+		})
+		return appended
+	},
 	setCardCollapsedState: (cardId, collapsed, userToggled = false) =>
 		set((state) => ({
 			cardCollapsedStates: {
@@ -429,11 +476,22 @@ export const useChatStore = create<ChatState>((set) => ({
 	applyExtensionState: (extensionState) =>
 		set((state) => {
 			const update: Partial<ChatState> = {}
+			const surfaceChanged = extensionState.diracMessages !== undefined &&
+				extensionState.presentationSurfaceId !== state.presentationSurfaceId
+			const sourceChanged = "taskletActivity" in extensionState &&
+				extensionState.taskletActivity?.sourceId !== state.taskletActivity?.sourceId
+			const localMessages = surfaceChanged ? new Map<string, LocalObservationMessage>() : state.localObservationMessages
+			if (surfaceChanged) {
+				update.localObservationMessages = localMessages
+				update.taskletActivity = undefined
+			}
+			if (surfaceChanged || sourceChanged) update.observationGeneration = state.observationGeneration + 1
+			if ("taskletActivity" in extensionState) update.taskletActivity = extensionState.taskletActivity ?? undefined
 			if (extensionState.diracMessages !== undefined) {
 				Object.assign(update, synchronizeResolvedCardCollapse(state, extensionState.diracMessages))
 				update.messageIndexById = indexMessages(extensionState.diracMessages)
 				update.presentationAppends = new Map()
-				Object.assign(update, rebuildDerivedPresentation(extensionState.diracMessages))
+				Object.assign(update, rebuildDerivedPresentation(extensionState.diracMessages, localMessages))
 				update.presentationSurfaceId = extensionState.presentationSurfaceId
 				update.presentationOffset = extensionState.presentationOffset ?? -1
 				update.presentationRevision = state.presentationRevision + 1

@@ -51,6 +51,10 @@ import { Box, Static, Text, useStdout } from "ink"
 import Image from "ink-picture"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { StateManager } from "@/core/storage/StateManager"
+import { getTaskletInventory } from "@/core/controller/task/getTaskletInventory"
+import { TaskletInventoryRequest } from "@shared/proto/dirac/task"
+import type { TaskletInventoryPage } from "@shared/taskletObservation"
+import { formatAgentSnapshot } from "../utils/local-observation"
 import { getRandomQuote } from "@/shared/quotes"
 import { Logger } from "@/shared/services/Logger"
 import { useTaskContext, useTaskState } from "../context/TaskContext"
@@ -122,22 +126,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	const { stdout } = useStdout()
 	const { columns: terminalColumns, rows: terminalRows } = useTerminalSize()
 	const taskState = useTaskState()
-	const { controller: taskController, clearState, lastError, setLastError } = useTaskContext()
+	const {
+		controller: taskController,
+		clearState,
+		lastError,
+		setLastError,
+		displayMessages: localDisplayMessages,
+		observationEpoch,
+		appendLocalObservation,
+	} = useTaskContext()
 	const { isActive: isSpinnerActive, startTime: spinnerStartTime } = useIsSpinnerActive()
 	const ctrl = useMemo(() => controller || taskController, [controller, taskController])
 
 	const steeringSubmissionRef = useRef(false)
-	const resetComposerInputRef = useRef<() => void>(() => {})
+	const resetComposerInputRef = useRef<() => void>(() => { })
 	const composerActionsRef = useRef<ComposerActions>({
 		handleAskShortcuts: () => false,
-		handleSubmit: () => {},
-		handleExit: () => {},
-		clearViewAndResetTask: () => {},
-		handleButtonAction: () => {},
-		toggleMode: () => {},
-		toggleAutoApproveAll: () => {},
-		enableFastMode: () => {},
-		toggleQuietMode: () => {},
+		handleSubmit: () => { },
+		handleExit: () => { },
+		clearViewAndResetTask: () => { },
+		handleButtonAction: () => { },
+		toggleMode: () => { },
+		toggleAutoApproveAll: () => { },
+		enableFastMode: () => { },
+		toggleQuietMode: () => { },
+		showAgentSnapshot: () => { },
 	})
 
 	const [respondedToAsk, setRespondedToAsk] = useState<string | null>(null)
@@ -166,15 +179,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	const goalSummaryRows = selectedGoal ? calculateGoalSummaryRows(terminalRows, goalDetailsExpanded) : 0
 	const goalFooterVisible = !selectedGoal || shouldShowGoalFooter(terminalRows)
 
-	const layoutRows = calculateChatLayoutRows({
-		terminalRows,
-		hasConversationContent: true,
-		hasComposer: activePanel === null,
-		hasFooter: activePanel === null && goalFooterVisible,
-		hasPanel: activePanel !== null,
-		footerRows: selectedGoal ? 2 : undefined,
-		goalSummaryRows: activePanel === null ? goalSummaryRows : 0,
-	})
+	const hasSelectedGoal = !!selectedGoal
+	const layoutRows = useMemo(
+		() =>
+			calculateChatLayoutRows({
+				terminalRows,
+				hasConversationContent: true,
+				hasComposer: activePanel === null,
+				hasFooter: activePanel === null && goalFooterVisible,
+				hasPanel: activePanel !== null,
+				footerRows: hasSelectedGoal ? 2 : undefined,
+				goalSummaryRows: activePanel === null ? goalSummaryRows : 0,
+			}),
+		[terminalRows, activePanel, goalFooterVisible, hasSelectedGoal, goalSummaryRows],
+	)
 
 	const {
 		displayMessages,
@@ -185,13 +203,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		taskSwitchKey,
 		setTaskSwitchKey,
 	} = useChatTimeline({
-		messages: taskState.diracMessages || [],
+		messages: localDisplayMessages,
 		activeVoiceStreamId: taskState.activeVoiceStreamId,
 		isApiRequestActive: taskState.isApiRequestActive,
 		taskStatus: taskState.taskStatus,
-		showHeader:
-			(taskState.diracMessages || []).some((message) => message.content?.type !== DiracMessageType.API_STATUS) ||
-			userScrolled,
+		showHeader: localDisplayMessages.some((message) => message.content?.type !== DiracMessageType.API_STATUS) || userScrolled,
 		layoutRows,
 		terminalColumns,
 		scrollFromTop: timelineScrollFromTop,
@@ -417,10 +433,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
 	const permissionCard =
 		pendingAsk?.content.type === DiracMessageType.CARD &&
-		!isYoloSuppressed(yolo, pendingAsk) &&
-		!isSpinnerActive &&
-		!isFinalStatus(pendingAsk.content.card.status) &&
-		(pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
+			!isYoloSuppressed(yolo, pendingAsk) &&
+			!isSpinnerActive &&
+			!isFinalStatus(pendingAsk.content.card.status) &&
+			(pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
 			? pendingAsk.content.card
 			: null
 	const permissionModalLayout = calculatePermissionModalLayout(terminalColumns, terminalRows)
@@ -730,8 +746,49 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		[pendingAsk, isProcessing, handleButtonAction, handleExit, isCompletionChoiceActive],
 	)
 
+	const showAgentSnapshot = useCallback(async () => {
+		const scope = taskState.taskletActivity
+		if (!scope) {
+			appendLocalObservation("Agents · no task selected; no active agents.", observationEpoch)
+			return
+		}
+		try {
+			const result = await getTaskletInventory(
+				ctrl,
+				TaskletInventoryRequest.create({
+					rootTaskId: scope.rootTaskId,
+					sourceId: scope.sourceId,
+					filter: "active",
+					limit: 50,
+				}),
+			)
+			const page = JSON.parse(result.value) as TaskletInventoryPage
+			if (page.rootTaskId !== scope.rootTaskId || page.sourceId !== scope.sourceId)
+				throw new Error("Agent observation source changed. Run /agents again.")
+			appendLocalObservation(formatAgentSnapshot(page), observationEpoch)
+		} catch (error) {
+			appendLocalObservation(
+				`Agents · snapshot unavailable: ${error instanceof Error ? error.message : String(error)}`,
+				observationEpoch,
+			)
+		}
+	}, [ctrl, taskState.taskletActivity, appendLocalObservation, observationEpoch])
+
 	const handleSubmit = useCallback(
 		async (text: string, images: string[]) => {
+			const localCommand = text.trim()
+			if (localCommand === "/agent" || localCommand === "/agents") {
+				if (images.length > 0) {
+					setLastError(
+						`${localCommand} is a local command and does not accept attachments. Remove the attachments to continue.`,
+					)
+					return
+				}
+				if (localCommand === "/agent") setActivePanel({ type: CliPanelType.AGENTS })
+				else void showAgentSnapshot()
+				resetInput()
+				return
+			}
 			if (!ctrl || (!text.trim() && images.length === 0) || steeringSubmissionRef.current) return
 			const activeTask = ctrl.task
 			if (!taskState.goal && !pendingAsk && activeTask?.canAcceptSteeringMessage()) {
@@ -850,6 +907,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			reportInteractionError,
 			footerStatus.workspacePath,
 			taskState.goal,
+			showAgentSnapshot,
 		],
 	)
 
@@ -865,6 +923,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		enableFastMode,
 		toggleAutoApproveAll,
 		toggleQuietMode,
+		showAgentSnapshot,
 	}
 
 	const shouldShowActionButtons = uiActionState && !permissionCard && !activePanel && !isExiting
@@ -985,7 +1044,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					height={goalSummaryRows}
 					isProcessing={isProcessing}
 					isStopConfirmationPending={pendingGoalStopId === selectedGoal.id}
-					onPageNavigation={disarmGoalStopConfirmation}
 				/>
 			)}
 			{lastError && !activePanel && (
@@ -1036,10 +1094,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
 			{activePanel?.type === CliPanelType.AGENTS && (
 				<AgentPanelContent
+					key={taskState.taskletActivity?.sourceId ?? "no-agent-source"}
 					availableRows={Math.max(1, terminalRows - layoutRows.liveViewportRows)}
-					messages={taskState.diracMessages ?? []}
+					controller={ctrl}
+					scope={taskState.taskletActivity}
 					onClose={() => setActivePanel(null)}
-					taskStatus={taskState.taskStatus}
 				/>
 			)}
 
@@ -1096,6 +1155,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					provider={footerStatus.provider}
 					quietMode={quietMode}
 					taskStatus={footerStatus.taskStatus}
+					taskletActivity={taskState.taskletActivity}
 					totalCost={footerStatus.totalCost}
 					vimMode={vimMode}
 					workspacePath={footerStatus.workspacePath}

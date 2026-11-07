@@ -32,10 +32,10 @@ import type { GoalLifecycleAction } from "../utils/goals"
 
 export type ActivePanel =
 	| {
-		type: CliPanelType.SETTINGS
-		initialMode?: "model-picker" | "featured-models" | "provider-picker"
-		initialModelKey?: "actModelId" | "planModelId"
-	}
+			type: CliPanelType.SETTINGS
+			initialMode?: "model-picker" | "featured-models" | "provider-picker"
+			initialModelKey?: "actModelId" | "planModelId"
+	  }
 	| { type: CliPanelType.HISTORY }
 	| { type: CliPanelType.HELP }
 	| { type: CliPanelType.SKILLS }
@@ -75,6 +75,7 @@ export interface ComposerActions {
 	toggleAutoApproveAll: () => void
 	enableFastMode: () => void
 	toggleQuietMode: () => void
+	showAgentSnapshot: () => void
 }
 
 interface UseComposerProps {
@@ -368,8 +369,8 @@ export function useComposer({
 			.filter((item) =>
 				Boolean(
 					(item.cwdOnTaskInitialization && arePathsEqual(item.cwdOnTaskInitialization, workspacePath)) ||
-					(item.workspaceRootPath && arePathsEqual(item.workspaceRootPath, workspacePath)) ||
-					(item.shadowGitConfigWorkTree && arePathsEqual(item.shadowGitConfigWorkTree, workspacePath)),
+						(item.workspaceRootPath && arePathsEqual(item.workspaceRootPath, workspacePath)) ||
+						(item.shadowGitConfigWorkTree && arePathsEqual(item.shadowGitConfigWorkTree, workspacePath)),
 				),
 			)
 			.reverse()
@@ -471,6 +472,7 @@ export function useComposer({
 		activePanel,
 		setActivePanel,
 		handleAskShortcuts: (input, key, currentTextInput) => actionsRef.current.handleAskShortcuts(input, key, currentTextInput),
+		showAgentSnapshot: () => actionsRef.current.showAgentSnapshot(),
 		handleKeyboardSequence,
 		handleCtrlShortcut,
 		handleVimInput,

@@ -32,6 +32,18 @@ export const MessageRenderer = memo(
 			const index = state.messageIndexById.get(messageId)
 			return index === undefined ? undefined : state.diracMessages[index]
 		})
+		const localMessage = useChatStore((state) => state.localObservationMessages.get(messageId))
+		if (localMessage) {
+			return (
+				<section
+					aria-label="Local agent snapshot"
+					className="my-2 rounded-md border border-foreground/10 px-3 py-2 text-sm text-description"
+					data-message-id={localMessage.id}>
+					<div className="mb-1 text-xs opacity-70">Local · /agents · not sent to the model</div>
+					<div className="whitespace-pre-wrap break-words">{localMessage.text}</div>
+				</section>
+			)
+		}
 		if (!message) return null
 		return (
 			<div

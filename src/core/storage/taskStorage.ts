@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import type { TaskletRecord, TaskletEvent } from "@core/task/types/tasklet"
 import { isTaskletUsageSnapshot } from "@shared/taskletUsage"
@@ -36,32 +37,28 @@ async function readTaskletRecords(rootTaskId: string, recordRootTaskId: string):
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
 		throw error
 	}
-	return Promise.all(
-		entries
-			.filter((entry) => entry.isDirectory())
-			.map(async (entry) => {
-				const address = { kind: "tasklet" as const, rootTaskId, taskletId: entry.name }
-				const record: TaskletRecord = JSON.parse(
-					await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"),
-				)
-				if (
-					!record ||
-					record.id !== entry.name ||
-					record.rootTaskId !== recordRootTaskId ||
-					typeof record.conversationUlid !== "string" ||
-					!record.conversationUlid ||
-					typeof record.title !== "string" ||
-					typeof record.prompt !== "string" ||
-					!Number.isFinite(record.createdAt) ||
-					(record.inheritedMessageCount !== undefined &&
-						(!Number.isSafeInteger(record.inheritedMessageCount) || record.inheritedMessageCount < 0)) ||
-					(record.purpose !== undefined && record.purpose !== "goal_verification") ||
-					(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
-				)
-					throw new Error(`Invalid tasklet record for ${entry.name} under root ${rootTaskId}`)
-				return record
-			}),
+	return Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) =>
+		loadTaskletRecord({ kind: "tasklet", rootTaskId, taskletId: entry.name }, recordRootTaskId),
+	))
+}
+
+/** Read one root-qualified child without loading its siblings or creating directories. */
+export async function loadTaskletRecord(
+	address: Extract<TaskStorageAddress, { kind: "tasklet" }>,
+	recordRootTaskId = address.rootTaskId,
+): Promise<TaskletRecord> {
+	const record: TaskletRecord = JSON.parse(
+		await fs.readFile(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord), "utf8"),
 	)
+	if (
+		!record || record.id !== address.taskletId || record.rootTaskId !== recordRootTaskId ||
+		typeof record.conversationUlid !== "string" || !record.conversationUlid ||
+		typeof record.title !== "string" || typeof record.prompt !== "string" || !Number.isFinite(record.createdAt) ||
+		(record.inheritedMessageCount !== undefined && (!Number.isSafeInteger(record.inheritedMessageCount) || record.inheritedMessageCount < 0)) ||
+		(record.purpose !== undefined && record.purpose !== "goal_verification") ||
+		(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
+	) throw new Error(`Invalid tasklet record for ${address.taskletId} under root ${address.rootTaskId}`)
+	return record
 }
 
 /** Retain full communication and delivery state; missing pre-communication snapshots are empty. */
@@ -88,26 +85,38 @@ export async function loadTaskletEvents(address: Extract<TaskStorageAddress, { k
 				!event.communication ||
 				(event.communication.type === "message"
 					? !event.communication.message ||
-						event.communication.message.taskletId !== address.taskletId ||
-						!["guidance", "question", "reply", "permission_decision"].includes(event.communication.message.type)
+					event.communication.message.taskletId !== address.taskletId ||
+					!["guidance", "question", "reply", "permission_decision"].includes(event.communication.message.type)
 					: false) ||
 				(event.communication.type === "response"
 					? !event.communication.response || typeof event.communication.response !== "object"
 					: event.communication.type === "outcome"
 						? !event.communication.outcome ||
-							!["completed", "failed", "cancelled", "interrupted"].includes(event.communication.outcome.kind)
+						!["completed", "failed", "cancelled", "interrupted"].includes(event.communication.outcome.kind)
 						: event.communication.type === "message"
 							? false
 							: event.communication.type === "lifecycle"
 								? !["accepted", "resumed"].includes(event.communication.state)
 								: event.communication.type !== "interaction" ||
-									!event.communication.request ||
-									typeof event.communication.request.id !== "string" ||
-									!["pending", "resolved", "retired"].includes(event.communication.request.status)),
+								!event.communication.request ||
+								typeof event.communication.request.id !== "string" ||
+								!["pending", "resolved", "retired"].includes(event.communication.request.status)),
 		)
 	)
 		throw new Error(`Invalid tasklet events for ${address.taskletId} under root ${address.rootTaskId}`)
 	return events
+}
+
+/** Passive settlement evidence: a record is written before its durable outcome event. */
+export async function savedSettledRecord(record: TaskletRecord): Promise<TaskletRecord> {
+	if (!record.outcome) return record
+	const events = await loadTaskletEvents({ kind: "tasklet", rootTaskId: record.rootTaskId, taskletId: record.id })
+	for (let index = events.length - 1; index >= 0; index--) {
+		const communication = events[index].communication
+		if (communication.type !== "outcome") continue
+		return isDeepStrictEqual(communication.outcome, record.outcome) ? record : { ...record, outcome: undefined }
+	}
+	return { ...record, outcome: undefined }
 }
 
 /** TaskletHost is the sole writer; it serializes acceptance before outcome publication. */

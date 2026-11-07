@@ -1,233 +1,247 @@
-import { DiracMessage, DiracMessageType, SubagentExecutionStatus, TaskStatus } from "@shared/ExtensionMessage"
-import { formatSubagentTrajectory, readSubagentCardData, type SubagentCardData } from "@shared/subagents"
-import { getSubagentUsage } from "@shared/subagentUsage"
-import { getTaskletUsage } from "@shared/taskletUsage"
+import type { Controller } from "@/core/controller"
+import { getTaskletInventory } from "@/core/controller/task/getTaskletInventory"
+import { getTaskletTranscript } from "@/core/controller/task/getTaskletTranscript"
+import { TaskletInventoryRequest, TaskletTranscriptRequest } from "@shared/proto/dirac/task"
 import {
-	readTaskletPresentation,
-	type TaskletPresentationData,
-	type TaskletPresentationStatus,
-} from "@shared/taskletPresentation"
+	TASKLET_STATE_LABELS,
+	type TaskletActivitySummary,
+	type TaskletInventoryPage,
+	type TaskletTranscriptPage,
+} from "@shared/taskletObservation"
 import { Box, Text, useInput } from "ink"
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import stringWidth from "string-width"
 import { theme } from "../constants/theme"
 import { useStdinContext } from "../context/StdinContext"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { shouldIgnoreTerminalInput } from "../utils/input"
+import { formatAgentTranscript } from "../utils/local-observation"
 import { getVisibleWindow } from "../utils/slash-commands"
 import { clipTextToWindow, estimateVisualLineCount } from "../utils/text-clipping"
 import { Panel } from "./Panel"
 
 interface AgentPanelContentProps {
-	messages: DiracMessage[]
+	controller: Controller
+	scope?: TaskletActivitySummary | null
 	availableRows?: number
-	taskStatus?: TaskStatus
 	onClose: () => void
 }
 
-interface AgentListItem {
-	id: number | string
-	name: string
-	taskTitle?: string
-	status: SubagentExecutionStatus | TaskStatus.IDLE | TaskletPresentationStatus
-	prompt: string
-	transcript: string
-}
-
-export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ messages, availableRows, taskStatus, onClose }) => {
+/** Passive, bounded reads only. There are deliberately no card controls or child input handlers. */
+export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller, scope, availableRows, onClose }) => {
 	const { isRawModeSupported } = useStdinContext()
 	const { columns, rows } = useTerminalSize()
-	const panelRows = availableRows ?? rows
+	const rootTaskId = scope?.rootTaskId
+	const sourceId = scope?.sourceId
+	const [inventory, setInventory] = useState<TaskletInventoryPage>()
+	const [transcript, setTranscript] = useState<TaskletTranscriptPage>()
 	const [selectedIndex, setSelectedIndex] = useState(0)
-	const [openAgentId, setOpenAgentId] = useState<number | string>()
-	const [scrollOffset, setScrollOffset] = useState(0)
-	const agents = useMemo(() => buildAgentList(messages, taskStatus), [messages, taskStatus])
-	const openAgent = agents.find((agent) => agent.id === openAgentId)
+	const [openAgentId, setOpenAgentId] = useState<string>()
+	const [scrollFromTop, setScrollFromTop] = useState(0)
+	const [error, setError] = useState<string>()
+	const [loading, setLoading] = useState(false)
+	const [inventoryCursor, setInventoryCursor] = useState<string>()
+	const [transcriptCursor, setTranscriptCursor] = useState<string>()
+	const [inventoryPrevious, setInventoryPrevious] = useState<Array<string | undefined>>([])
+	const [transcriptPrevious, setTranscriptPrevious] = useState<Array<string | undefined>>([])
+	const requestSequence = useRef(0)
+	const selectedSource = useRef({ rootTaskId, sourceId })
+	selectedSource.current = { rootTaskId, sourceId }
+
+	const readPage = useCallback(
+		async (taskletId?: string, cursor?: string) => {
+			const request = ++requestSequence.current
+			if (!rootTaskId || !sourceId) return
+			setLoading(true)
+			setError(undefined)
+			try {
+				const response = taskletId
+					? await getTaskletTranscript(
+						controller,
+						TaskletTranscriptRequest.create({ rootTaskId, sourceId, taskletId, cursor, limit: 20 }),
+					)
+					: await getTaskletInventory(
+						controller,
+						TaskletInventoryRequest.create({ rootTaskId, sourceId, filter: "all", cursor, limit: 50 }),
+					)
+				if (
+					request !== requestSequence.current ||
+					selectedSource.current.rootTaskId !== rootTaskId ||
+					selectedSource.current.sourceId !== sourceId
+				)
+					return
+				const page = JSON.parse(response.value) as TaskletInventoryPage | TaskletTranscriptPage
+				if (page.rootTaskId !== rootTaskId || page.sourceId !== sourceId)
+					throw new Error("Agent observation source changed. Refresh the panel.")
+				if (taskletId) {
+					setTranscript(page as TaskletTranscriptPage)
+					setTranscriptCursor(cursor)
+					setScrollFromTop(0)
+				} else {
+					setInventory(page as TaskletInventoryPage)
+					setInventoryCursor(cursor)
+					setSelectedIndex(0)
+				}
+			} catch (cause) {
+				if (
+					request === requestSequence.current &&
+					selectedSource.current.rootTaskId === rootTaskId &&
+					selectedSource.current.sourceId === sourceId
+				)
+					setError(cause instanceof Error ? cause.message : String(cause))
+			} finally {
+				if (request === requestSequence.current) setLoading(false)
+			}
+		},
+		[controller, rootTaskId, sourceId],
+	)
+
+	useEffect(() => {
+		setInventory(undefined)
+		setTranscript(undefined)
+		setOpenAgentId(undefined)
+		setInventoryCursor(undefined)
+		setInventoryPrevious([])
+		setTranscriptPrevious([])
+		setError(undefined)
+		setLoading(false)
+		void readPage()
+		return () => {
+			requestSequence.current++
+		}
+	}, [readPage])
+
+	const panelRows = availableRows ?? rows
 	const contentColumns = Math.max(1, columns - 6)
-	const contentRows = Math.max(1, panelRows - 5)
-	const maxScrollOffset = openAgent
-		? Math.max(0, estimateVisualLineCount(openAgent.transcript, contentColumns) - contentRows)
-		: 0
+	const contentRows = Math.max(1, panelRows - 6)
+	const transcriptText = useMemo(() => (transcript ? formatAgentTranscript(transcript) : ""), [transcript])
+	const maxScrollOffset = Math.max(0, estimateVisualLineCount(transcriptText, contentColumns) - contentRows)
+	const agents = inventory?.items ?? []
 	const { items: visibleAgents, startIndex } = getVisibleWindow(agents, selectedIndex, getAgentListRowLimit(panelRows))
-	const hasMoreAbove = startIndex > 0
-	const hasMoreBelow = startIndex + visibleAgents.length < agents.length
-
-	useEffect(() => {
-		setSelectedIndex((current) => Math.max(0, Math.min(current, agents.length - 1)))
-	}, [agents.length])
-
-	useEffect(() => {
-		setScrollOffset(0)
-	}, [openAgentId])
+	const page = openAgentId ? transcript : inventory
+	const previous = openAgentId ? transcriptPrevious : inventoryPrevious
 
 	useInput(
 		(input, key) => {
 			if (shouldIgnoreTerminalInput(input, key)) return
 			if (key.escape) {
-				if (openAgentId !== undefined) setOpenAgentId(undefined)
-				else onClose()
+				requestSequence.current++
+				setLoading(false)
+				setError(undefined)
+				if (openAgentId) {
+					setOpenAgentId(undefined)
+					setTranscript(undefined)
+					setTranscriptPrevious([])
+				} else onClose()
 				return
 			}
-			if (openAgent) {
-				if (key.upArrow) setScrollOffset((current) => Math.min(maxScrollOffset, current + 1))
-				if (key.downArrow) setScrollOffset((current) => Math.max(0, current - 1))
-				if (key.pageUp) setScrollOffset((current) => Math.min(maxScrollOffset, current + contentRows))
-				if (key.pageDown) setScrollOffset((current) => Math.max(0, current - contentRows))
+			if (loading) return
+			if (input === "r") {
+				if (openAgentId) setTranscriptPrevious([])
+				else setInventoryPrevious([])
+				void readPage(openAgentId)
+				return
+			}
+			if (input === "n" && page?.nextCursor) {
+				if (openAgentId) setTranscriptPrevious((entries) => [...entries, transcriptCursor])
+				else setInventoryPrevious((entries) => [...entries, inventoryCursor])
+				void readPage(openAgentId, page.nextCursor)
+				return
+			}
+			if (input === "p" && previous.length) {
+				if (openAgentId) setTranscriptPrevious((entries) => entries.slice(0, -1))
+				else setInventoryPrevious((entries) => entries.slice(0, -1))
+				void readPage(openAgentId, previous.at(-1))
+				return
+			}
+			if (openAgentId) {
+				if (key.upArrow) setScrollFromTop((current) => Math.max(0, current - 1))
+				if (key.downArrow) setScrollFromTop((current) => Math.min(maxScrollOffset, current + 1))
+				if (key.pageUp) setScrollFromTop((current) => Math.max(0, current - contentRows))
+				if (key.pageDown) setScrollFromTop((current) => Math.min(maxScrollOffset, current + contentRows))
 				return
 			}
 			if (key.upArrow) setSelectedIndex((current) => Math.max(0, current - 1))
 			if (key.downArrow) setSelectedIndex((current) => Math.min(agents.length - 1, current + 1))
-			if ((key.return || key.tab) && agents[selectedIndex]) setOpenAgentId(agents[selectedIndex].id)
+			if ((key.return || key.tab) && agents[selectedIndex]) {
+				const id = agents[selectedIndex].taskletId
+				setOpenAgentId(id)
+				setTranscript(undefined)
+				setTranscriptCursor(undefined)
+				setTranscriptPrevious([])
+				void readPage(id)
+			}
 		},
 		{ isActive: isRawModeSupported },
 	)
 
-	if (openAgent) {
-		return (
-			<Panel isSubpage label={formatAgentLabel(openAgent, Math.max(1, columns - 21))}>
-				<Text color={theme.muted}>{openAgent.status} · ↑/↓ scroll · Esc back</Text>
-				<Text>{clipTextToWindow(openAgent.transcript, contentRows, contentColumns, scrollOffset).visibleText}</Text>
-			</Panel>
-		)
-	}
-
 	return (
-		<Panel label="Agents">
-			<Box flexDirection="column">
-				{hasMoreAbove && <Text color={theme.muted}> ▲ earlier agents</Text>}
-				{visibleAgents.map((agent, index) => {
-					const globalIndex = startIndex + index
-					const statusLabel = String(agent.status)
-					const labelColumns = Math.max(1, contentColumns - statusLabel.length - 3)
-					return (
-						<Box flexDirection="column" key={agent.id}>
-							<Text
-								bold={selectedIndex === globalIndex}
-								color={selectedIndex === globalIndex ? theme.primary : theme.text}
-								wrap="truncate">
-								{selectedIndex === globalIndex ? "❯ " : "  "}
-								{formatAgentLabel(agent, labelColumns)} · {statusLabel}
-							</Text>
-							<Text color={theme.muted} wrap="truncate">
-								{" "}
-								{oneLinePreview(agent.prompt, columns)}
-							</Text>
-						</Box>
-					)
-				})}
-				{hasMoreBelow && <Text color={theme.muted}> ▼ later agents</Text>}
-				<Text color={theme.muted}>
-					{visibleAgents.length} visible · {agents.length} total · Enter inspect · Esc close
+		<Panel
+			isSubpage={!!openAgentId}
+			label={
+				openAgentId
+					? clipAgentTitle(transcript?.title ?? "Agent transcript", columns - 4 - stringWidth(" (Esc to go back)"))
+					: "Agents · read only"
+			}>
+			<Text color={theme.muted} wrap="truncate">
+				{page?.availability === "saved" ? "Saved history" : "Recorded snapshot"}
+				{page ? ` · ${new Date(page.observedAt).toLocaleTimeString()}` : ""}
+				{transcript && openAgentId ? ` · ${TASKLET_STATE_LABELS[transcript.state]}` : ""}
+			</Text>
+			{!rootTaskId && <Text>No task selected.</Text>}
+			{loading && <Text color={theme.muted}>Reading…</Text>}
+			{error && <Text color={theme.error}>{error} · r refresh</Text>}
+			{!loading && !error && openAgentId && transcript && (
+				<Text>
+					{
+						clipTextToWindow(
+							transcriptText,
+							contentRows,
+							contentColumns,
+							Math.max(0, maxScrollOffset - scrollFromTop),
+						).visibleText
+					}
 				</Text>
-			</Box>
+			)}
+			{!loading && !error && !openAgentId && inventory && (
+				<Box flexDirection="column">
+					{agents.length === 0 && <Text>No recorded agents.</Text>}
+					{visibleAgents.map((agent, index) => (
+						<Text
+							key={agent.taskletId}
+							color={selectedIndex === startIndex + index ? theme.primary : theme.text}
+							wrap="truncate">
+							{selectedIndex === startIndex + index ? "❯ " : "  "}
+							{clipAgentTitle(agent.title, contentColumns - 3 - stringWidth(TASKLET_STATE_LABELS[agent.state]))} ·{" "}
+							{TASKLET_STATE_LABELS[agent.state]}
+						</Text>
+					))}
+					<Text color={theme.muted}>
+						{inventory.totalItems} total
+						{visibleAgents.length > 0 ? ` · ${startIndex + 1}–${startIndex + visibleAgents.length} on this page` : ""}
+					</Text>
+				</Box>
+			)}
+			<Text color={theme.muted} wrap="truncate">
+				{openAgentId ? "↑/↓ scroll" : "↑/↓ select · Enter inspect"} · r refresh{page?.nextCursor ? " · n next" : ""}
+				{previous.length ? " · p previous" : ""} · Esc {openAgentId ? "back" : "close"}
+			</Text>
 		</Panel>
 	)
 }
 
-export function buildAgentList(messages: DiracMessage[], taskStatus?: TaskStatus): AgentListItem[] {
-	const userRole: NonNullable<Extract<DiracMessage["content"], { type: DiracMessageType.MARKDOWN }>["role"]> = "user"
-	const mainPrompt = messages.find(
-		(message) => message.content.type === DiracMessageType.MARKDOWN && message.content.role === userRole,
-	)
-	const subagents = messages
-		.filter((message) => message.content.type === DiracMessageType.CARD)
-		.map((message) => readSubagentCardData(message.content.type === DiracMessageType.CARD ? message.content.card : undefined))
-		.filter((agent): agent is SubagentCardData => agent !== undefined)
-		.sort((left, right) => left.id - right.id)
-	const tasklets = messages
-		.flatMap((message) => {
-			if (message.content.type !== DiracMessageType.CARD) return []
-			const tasklet = readTaskletPresentation(message.content.card)
-			return tasklet ? [tasklet] : []
-		})
-		.sort((left, right) => left.createdAt - right.createdAt)
-
-	return [
-		{
-			id: 1,
-			name: "Dirac",
-			status: mainAgentStatus(taskStatus),
-			prompt: mainPrompt?.content.type === DiracMessageType.MARKDOWN ? mainPrompt.content.content : "Main agent",
-			transcript: formatMainTranscript(messages),
-		},
-		...subagents.map((agent) => ({
-			id: agent.id,
-			name: agent.name,
-			taskTitle: agent.taskTitle,
-			status: agent.status,
-			prompt: agent.prompt,
-			transcript: formatSubagentTrajectory(agent),
-		})),
-		...tasklets.map((tasklet) => ({
-			id: tasklet.taskletId,
-			name: tasklet.title,
-			status: tasklet.status,
-			prompt: tasklet.prompt,
-			transcript: formatTaskletPreview(tasklet),
-		})),
-	]
-}
-
-export function formatAgentLabel(agent: Pick<AgentListItem, "name" | "taskTitle">, maxLength?: number): string {
-	const label = agent.taskTitle ? `${agent.name}: ${agent.taskTitle}` : agent.name
-	if (maxLength === undefined || label.length <= maxLength) return label
-	if (maxLength === 1) return "…"
-	return `${label.slice(0, maxLength - 1)}…`
+function clipAgentTitle(title: string, width: number): string {
+	const normalized = title.replace(/\s+/g, " ").trim()
+	if (width <= 0) return ""
+	if (stringWidth(normalized) <= width) return normalized
+	let clipped = ""
+	for (const character of normalized) {
+		if (stringWidth(`${clipped}${character}…`) > width) break
+		clipped += character
+	}
+	return `${clipped}…`
 }
 
 export function getAgentListRowLimit(rows: number): number {
-	return Math.max(1, Math.floor((rows - 8) / 2))
-}
-
-function formatMainTranscript(messages: DiracMessage[]): string {
-	const userRole: NonNullable<Extract<DiracMessage["content"], { type: DiracMessageType.MARKDOWN }>["role"]> = "user"
-	return (
-		messages
-			.flatMap((message) => {
-				if (message.content.type === DiracMessageType.MARKDOWN) {
-					if (message.content.agentId !== undefined) return []
-					const speaker = message.content.role === userRole ? "User" : "Dirac"
-					return [`${speaker}: ${message.content.content}`]
-				}
-				if (
-					message.content.type === DiracMessageType.CARD &&
-					!readSubagentCardData(message.content.card) &&
-					!readTaskletPresentation(message.content.card) &&
-					!getTaskletUsage(message.content.card) &&
-					!getSubagentUsage(message.content.card)
-				) {
-					return [
-						`Tool: ${message.content.card.header}${message.content.card.body ? `\n${message.content.card.body}` : ""}`,
-					]
-				}
-				return []
-			})
-			.join("\n\n") || "No activity yet."
-	)
-}
-
-function formatTaskletPreview(tasklet: TaskletPresentationData): string {
-	return [
-		`${tasklet.title} · ${tasklet.status}`,
-		`Assignment\n${tasklet.prompt}`,
-		tasklet.result === undefined ? undefined : `Result preview\n${tasklet.result}`,
-		tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
-		tasklet.communications.length ? `Parent-directed communication\n${tasklet.communications.join("\n\n")}` : undefined,
-		tasklet.activity.length ? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}` : undefined,
-		"Display preview only; the parent can inspect selected calls, results, messages, and child-only excerpts with tasklets.",
-	]
-		.filter(Boolean)
-		.join("\n\n")
-}
-
-function mainAgentStatus(status?: TaskStatus): SubagentExecutionStatus | TaskStatus.IDLE {
-	if (status === TaskStatus.COMPLETED) return SubagentExecutionStatus.COMPLETED
-	if (status === TaskStatus.CANCELLED) return SubagentExecutionStatus.CANCELLED
-	if (!status || status === TaskStatus.IDLE) return TaskStatus.IDLE
-	return SubagentExecutionStatus.RUNNING
-}
-
-function oneLinePreview(prompt: string, columns: number): string {
-	const normalized = prompt.replace(/\s+/g, " ").trim()
-	const maxLength = Math.max(10, columns - 12)
-	return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized
+	return Math.max(1, rows - 7)
 }

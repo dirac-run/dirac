@@ -5,7 +5,6 @@ import getFolderSize from "get-folder-size"
 import Mutex from "p-mutex"
 import { Card, CardStatus, DiracApiReqInfo, DiracMessage, DiracMessageType } from "@/shared/ExtensionMessage"
 import { getApiMetrics } from "@/shared/getApiMetrics"
-import { createTaskletPresentationCard } from "@shared/taskletPresentation"
 import { HistoryItem } from "@/shared/HistoryItem"
 import {
 	DiracStorageMessage,
@@ -573,16 +572,6 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		await this.saveDiracMessagesAndUpdateHistory()
 	}
 
-	/** Stable informational child card, independent of the spawn invocation and accounting. */
-	async upsertTaskletPresentation(data: import("@shared/taskletPresentation").TaskletPresentationData): Promise<void> {
-		if (this.persistenceRetired) throw new Error("Cannot project tasklet presentation after root persistence retirement")
-		const card = createTaskletPresentationCard(data)
-		if (this.findMessageIndexById(card.id) === -1) {
-			await this.addToDiracMessages({ id: card.id, ts: data.createdAt, content: { type: DiracMessageType.CARD, card } })
-		} else {
-			await this.patchCardById(card.id, card)
-		}
-	}
 
 	/**
 	 * Update task history with current state.

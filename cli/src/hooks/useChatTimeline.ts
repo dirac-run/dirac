@@ -1,7 +1,6 @@
 import { combineCardSequences } from "@shared/combineCardSequences"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import { DiracMessageType, isFinalStatus, type TaskStatus } from "@shared/ExtensionMessage"
-import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { getSubagentUsage } from "@shared/subagentUsage"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import type { Dispatch, SetStateAction } from "react"
@@ -110,11 +109,7 @@ export function useChatTimeline({
 		},
 		{
 			key: (message) => (message.content.type === DiracMessageType.CARD ? message.content.card.id : message.id),
-			revision: (message) => {
-				if (message.content.type !== DiracMessageType.CARD) return undefined
-				const tasklet = readTaskletPresentation(message.content.card)
-				return tasklet ? JSON.stringify([tasklet.title, tasklet.prompt, tasklet.status, tasklet.result]) : undefined
-			},
+			revision: () => undefined,
 		},
 	)
 
@@ -149,7 +144,9 @@ export function prepareTranscriptMessages(messages: DiracMessage[]): DiracMessag
 		(message) =>
 			message.content.type !== DiracMessageType.API_STATUS &&
 			(message.content.type !== DiracMessageType.CARD ||
-				(!getTaskletUsage(message.content.card) && !getSubagentUsage(message.content.card))),
+				(message.content.card.rawInput?.isTasklet !== true &&
+					!getTaskletUsage(message.content.card) &&
+					!getSubagentUsage(message.content.card))),
 	)
 	return combineCardSequences(transcriptMessages)
 }
@@ -266,8 +263,6 @@ function estimateMessageRows(
 
 function isMutableTimelineMessage(message: DiracMessage, activeVoiceStreamId: string | undefined): boolean {
 	if (message.id === activeVoiceStreamId) return true
-	// Current child detail stays live in Agents; displaced snapshots must not block later parent output.
-	if (message.content.type === DiracMessageType.CARD && readTaskletPresentation(message.content.card)) return false
 	return message.content.type === DiracMessageType.CARD && !isFinalStatus(message.content.card.status)
 }
 

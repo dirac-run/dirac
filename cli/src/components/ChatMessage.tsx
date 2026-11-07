@@ -264,7 +264,7 @@ function renderTimelineTail(message: DiracMessage, maxLines: number, columns: nu
 	}
 
 	if (message.content.type === DiracMessageType.CARD) {
-		if (readTaskletPresentation(message.content.card)) {
+		if (message.content.card.taskletReceipt || readTaskletPresentation(message.content.card)) {
 			return (
 				<ModularCard
 					card={message.content.card}

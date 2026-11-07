@@ -5,6 +5,7 @@ import React, { useMemo } from "react"
 import { CARD_DECORATORS } from "../decorators"
 import { CardActions } from "./CardActions"
 import { CardContent } from "./CardContent"
+import { TaskletReceiptBody } from "./TaskletReceiptBody"
 
 interface ModularCardBodyProps {
 	card: Card
@@ -50,10 +51,17 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 	const { renderType } = card
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const decorators = useMemo(
-		() => (isTaskletCard ? [] : CARD_DECORATORS.filter((d) => d.shouldApply(card))),
+		() => (isTaskletCard || card.taskletReceipt ? [] : CARD_DECORATORS.filter((d) => d.shouldApply(card))),
 		[card, isTaskletCard],
 	)
 	const presentation = useMemo(() => resolveCardBodyPresentation(card), [card])
+	if (card.taskletReceipt) {
+		return (
+			<div className="overflow-y-auto border-t border-foreground/10 p-2.5" ref={scrollRef} style={{ maxHeight: 320 }}>
+				<TaskletReceiptBody receipt={card.taskletReceipt} />
+			</div>
+		)
+	}
 
 	// Find the first decorator that provides a body wrapper
 	const bodyWrapper = decorators.find((d) => d.renderBodyWrapper)

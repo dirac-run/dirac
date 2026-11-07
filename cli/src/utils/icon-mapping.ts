@@ -69,6 +69,7 @@ export const ICON_MAP: Record<string, { emoji: string; unicode: string; ascii: s
 	eye: { emoji: "👁", unicode: "◉", ascii: "VIEW" },
 	play: { emoji: "▶", unicode: "▶", ascii: "RUN" },
 	"stop-circle": { emoji: "🛑", unicode: "■", ascii: "STOP" },
+	clock: { emoji: "◷", unicode: "◷", ascii: "WAIT" },
 	"refresh-cw": { emoji: "🔄", unicode: "↻", ascii: "RELOAD" },
 	"trash-2": { emoji: "🗑", unicode: "⌫", ascii: "DEL" },
 	plus: { emoji: "+", unicode: "+", ascii: "ADD" },

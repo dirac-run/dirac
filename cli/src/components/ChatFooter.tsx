@@ -4,6 +4,7 @@ import { Box, Text } from "ink"
 import { createContextBar } from "../utils/display"
 import type { GitDiffStats } from "../utils/git"
 import type { TaskStatus } from "@shared/ExtensionMessage"
+import type { TaskletActivitySummary } from "@shared/taskletObservation"
 import { TaskStatusIndicator } from "./modular-ui/TaskStatusIndicator"
 import path from "node:path"
 import { useTerminalSize } from "../hooks/useTerminalSize"
@@ -25,6 +26,7 @@ interface ChatFooterProps {
 	yoloMode: boolean
 	quietMode: boolean
 	taskStatus?: TaskStatus
+	taskletActivity?: TaskletActivitySummary | null
 	show?: boolean
 	isGoalActive?: boolean
 	vimMode?: VimMode
@@ -46,6 +48,7 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
 	yoloMode,
 	quietMode,
 	taskStatus,
+	taskletActivity,
 	show = true,
 	isGoalActive = false,
 	vimMode,
@@ -63,9 +66,12 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
 				<Box paddingLeft={1} paddingRight={1} width="100%">
 					<Text color={theme.muted} wrap="truncate-end">
 						<Text bold color={mode === "plan" ? theme.plan : theme.primary}>
-							{theme.symbols.active} {mode === "plan" ? "Plan" : "Act"}{compact ? "" : " (Goal)"}
+							{theme.symbols.active} {mode === "plan" ? "Plan" : "Act"}
+							{compact ? "" : " (Goal)"}
 						</Text>
 						{vimMode && ` · ${vimMode.toUpperCase()}`}
+						{taskletActivity && " · "}
+						<AgentActivity activity={taskletActivity} />
 						{compact
 							? ` · ${historyHint} · @ files · / commands · Ctrl+G details`
 							: ` · ${historyHint} · / commands · @ files · Ctrl+G details · Shift+Enter/↓ newline`}
@@ -133,6 +139,8 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
 			{/* Row 2: Model/context/tokens/cost/status */}
 			<Box paddingLeft={1} paddingRight={1}>
 				<Text wrap="truncate-end">
+					<AgentActivity activity={taskletActivity} />
+					{taskletActivity && " · "}
 					{provider}: {modelId}
 					{fastModeEnabled ? " fast" : ""} {(() => {
 						const ratio = contextWindowSize > 0 ? lastApiReqTotalTokens / contextWindowSize : 0
@@ -224,3 +232,16 @@ export const ChatFooter: React.FC<ChatFooterProps> = ({
 		</Box>
 	)
 }
+
+const AgentActivity = React.memo(
+	({ activity }: { activity?: TaskletActivitySummary | null }) => {
+		if (!activity) return null
+		return (
+			<Text color={theme.muted}>
+				{activity.availability === "live" ? `Agents · ${activity.activeCount} active` : "Agents · saved"}
+			</Text>
+		)
+	},
+	(previous, next) =>
+		previous.activity?.sourceId === next.activity?.sourceId && previous.activity?.activeCount === next.activity?.activeCount,
+)

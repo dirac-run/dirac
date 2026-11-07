@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import { TaskStatusIndicator } from "../components/TaskStatusIndicator"
+import { TaskletActivityIndicator } from "../components/TaskletActivityIndicator"
 import { InputDecorator, ModularInputContext } from "../types"
 
 interface ActionDecoratorProps {
@@ -199,6 +200,7 @@ export const createActionDecorator = (props: ActionDecoratorProps): InputDecorat
 							</Popover>
 						)}
 					</div>
+					<TaskletActivityIndicator />
 					<TaskStatusIndicator className="ml-auto hidden min-[360px]:flex" status={props.taskStatus} />
 				</div>
 			</div>

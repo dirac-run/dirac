@@ -3,6 +3,7 @@ import { StringRequest } from "@shared/proto/dirac/common"
 import { extractFirstPath } from "@shared/string"
 import { readSubagentCardData } from "@shared/subagents"
 import { readTaskletPresentation, type TaskletPresentationStatus } from "@shared/taskletPresentation"
+import { TASKLET_RECEIPT_OUTCOMES, taskletReceiptTitle } from "@shared/taskletReceipt"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { DynamicIcon } from "lucide-react/dynamic"
 import React, { useEffect, useMemo, useState } from "react"
@@ -14,6 +15,7 @@ import { getStatusTextColorClass } from "../utils/cardUtils"
 import { ArchitectureNavigation } from "./ArchitectureNavigation"
 import { CardStatusIcon } from "./CardStatusIcon"
 import { SubagentAvatar } from "./SubagentAvatar"
+import { RECEIPT_TONE_CLASSES, TaskletReceiptBadge } from "./TaskletReceiptBody"
 
 interface ModularCardHeaderProps {
 	card: Card
@@ -41,7 +43,8 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const tasklet = readTaskletPresentation(card)
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const taskletStatus = tasklet ? TASKLET_STATUS_PRESENTATION[tasklet.status] : undefined
-	const header = tasklet?.title ?? card.header
+	const receipt = card.taskletReceipt
+	const header = receipt ? taskletReceiptTitle(receipt) : (tasklet?.title ?? card.header)
 	const status = taskletStatus?.status ?? (isTaskletCard ? CardStatus.PENDING : card.status)
 	const isTerminal = isFinalStatus(status)
 	const subagentData = isTaskletCard ? undefined : readSubagentCardData(card)
@@ -50,8 +53,8 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const [currentTime, setCurrentTime] = useState(() => Date.now())
 	const filePath = getCardFilePath(card)
 	const decorators = useMemo(
-		() => (isTaskletCard ? [] : CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card))),
-		[card, isTaskletCard],
+		() => (isTaskletCard || receipt ? [] : CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card))),
+		[card, isTaskletCard, receipt],
 	)
 	const iconSizeClass = "size-3.5"
 	const elapsedTime = getSubagentCardElapsedTime(card, currentTime)
@@ -85,7 +88,12 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				<span aria-hidden="true" className="shrink-0 leading-none">
 					{!isTaskletCard && card.icon ? (
 						<DynamicIcon
-							className={cn(iconSizeClass, getStatusTextColorClass(status))}
+							className={cn(
+								iconSizeClass,
+								receipt
+									? RECEIPT_TONE_CLASSES[TASKLET_RECEIPT_OUTCOMES[receipt.outcome].tone]
+									: getStatusTextColorClass(status),
+							)}
 							name={card.icon as React.ComponentProps<typeof DynamicIcon>["name"]}
 						/>
 					) : (
@@ -106,7 +114,9 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 					</span>
 				)}
 
-				{taskletStatus ? (
+				{receipt ? (
+					<TaskletReceiptBadge outcome={receipt.outcome} />
+				) : taskletStatus ? (
 					<Badge
 						className="shrink-0 px-1.5 py-0 text-xs leading-4"
 						variant={tasklet?.status === "waiting" ? "warning" : "outline"}>
@@ -142,7 +152,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	)
 }
 export function getCardFilePath(card: Card): string | undefined {
-	if (card.rawInput?.isTasklet === true) return undefined
+	if (card.rawInput?.isTasklet === true || card.taskletReceipt) return undefined
 	return card.locations?.[0]?.path ?? extractFirstPath(card.header) ?? undefined
 }
 

@@ -33,6 +33,7 @@ import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
 import { createTaskletId } from "@/shared/taskletId"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { Task, TaskletHost, type TaskParams, type TaskletTaskOptions } from "../index"
+import type { TaskRunOutcome } from "../TaskRunOutcome"
 import * as taskLocks from "../TaskLockUtils"
 import { SqliteLockManager } from "@core/locks/SqliteLockManager"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
@@ -533,10 +534,10 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(inspection.items[0].outcome.kind, "completed")
 				assert.equal(inspection.items[0].outcome.summary, "GOAL_PRIVATE_WORK_COMPLETE")
 				const view = await h.loop.inspect()
-				assert.equal(view.children.length, 3)
+				assert.equal("children" in view, false)
 				assert.equal(view.latestVerification?.id, verificationId)
 				assert.equal(view.latestVerification?.status, "completed")
-				assert.equal(view.pendingInteractionCount, 0)
+				assert.equal("pendingInteractionCount" in view, false)
 				return { name: "respond", args: { operation: "complete", text: "GOAL_PUBLIC_SUPERVISION_COMPLETE" } }
 			}
 			try {
@@ -549,7 +550,7 @@ describe("Tasklet real Task execution", function () {
 				assert.equal((await h.store.read("root")).status, execution === "paused follow-up" ? "paused" : "achieved")
 				const saved = await h.loop.inspect()
 				assert.equal(saved.latestVerification?.id, verificationId, "Verification purpose survives disk-only inspection")
-				assert.deepEqual(saved.children.map((child) => child.id).sort(), [genericId, namedId, verificationId].sort())
+				assert.equal("children" in saved, false)
 			} finally {
 				await h.loop.cancelCurrentExecution()
 			}
@@ -3476,6 +3477,74 @@ describe("Tasklet real Task execution", function () {
 	})
 
 	describe("durable tasklet usage attribution", () => {
+		it("publishes child accounting while the parent sleeps and the active count stays unchanged", async () => {
+			const root = createResolutionRoot()
+			const host = root.taskletHost!
+			const publish = sandbox.stub(root as any, "postPresentationToWebview").resolves()
+			const completion = deferred<TaskRunOutcome>()
+			const start = sandbox.stub(Task.prototype, "startTask").returns(completion.promise)
+			const child = await host.start({ title: "Active usage", prompt: "Keep working" })
+			const childTask = start.firstCall.thisValue as Task
+			const cancellation = new AbortController()
+			const sleeping = host.sleep({ taskletIds: [child.id] }, cancellation.signal)
+			publish.resetHistory()
+			try {
+				await childTask.messageStateHandler.addToDiracMessages({
+					id: "active-usage", ts: 1,
+					content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 100, tokensOut: 20, cost: 0.5 } },
+				})
+				await host["children"].get(child.id)!.recordWrites
+				sinon.assert.calledOnce(publish)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
+				assert.equal(host.observationSummary().activeCount, 1)
+				assert.equal(host.inspect(child.id).outcome, undefined)
+				assert.equal(host.isSleeping, true, "Accounting publication does not create child communication")
+
+				await childTask.messageStateHandler.patchApiStatusById("active-usage", { tokensIn: 200, cost: 1 })
+				await host["children"].get(child.id)!.recordWrites
+				sinon.assert.calledTwice(publish)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 1)
+				assert.equal(host.observationSummary().activeCount, 1)
+				assert.equal(host.isSleeping, true)
+			} finally {
+				cancellation.abort()
+				await sleeping
+				completion.resolve({ kind: "completed", response: "Done", completedAt: 123 })
+				await waitForOutcome(host, child.id)
+			}
+		})
+
+		it("keeps accounting publication failures informational through child settlement", async () => {
+			expectLoggerErrors()
+			const root = createResolutionRoot()
+			const host = root.taskletHost!
+			const publish = sandbox.stub(root as any, "postPresentationToWebview").resolves()
+			const completion = deferred<TaskRunOutcome>()
+			const start = sandbox.stub(Task.prototype, "startTask").returns(completion.promise)
+			const child = await host.start({ title: "Usage publication failure", prompt: "Work" })
+			const childTask = start.firstCall.thisValue as Task
+			publish.resetHistory()
+			publish.rejects(new Error("Controlled accounting publication failure"))
+			try {
+				await childTask.messageStateHandler.addToDiracMessages({
+					id: "failed-publication-usage", ts: 1,
+					content: { type: DiracMessageType.API_STATUS, status: { tokensIn: 100, tokensOut: 20, cost: 0.5 } },
+				})
+				await host["children"].get(child.id)!.recordWrites
+				sinon.assert.calledOnce(publish)
+				assert.equal(getApiMetrics(root.messageStateHandler.getDiracMessages()).totalCost, 0.5)
+				assert.equal(host.inspect(child.id).settlementError, undefined)
+			} finally {
+				completion.resolve({ kind: "completed", response: "Done", completedAt: 123 })
+			}
+			const settled = await waitForOutcome(host, child.id)
+			assert.equal(settled.outcome?.kind, "completed")
+			assert.equal(settled.settlementError, undefined)
+			assert.equal(host.observationSummary().activeCount, 0)
+			const saved = (await getSavedPresentationHistory("root")).messages
+			assert.equal(getApiMetrics(saved).totalCost, 0.5)
+		})
+
 		it("counts two real children and the executing root once each in persisted root accounting", async () => {
 			const root = createResolutionRoot()
 			sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)

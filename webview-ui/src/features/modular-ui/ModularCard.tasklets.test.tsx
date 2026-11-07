@@ -1,7 +1,7 @@
 import { type Card, CardStatus, type DiracMessage, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import { createTaskletPresentationCard, type TaskletPresentationStatus } from "@shared/taskletPresentation"
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStore } from "@/features/chat/store/chatStore"
 import { MessageRenderer } from "./chat/components/VirtuosoItemRenderer"
@@ -228,63 +228,47 @@ describe("webview tasklet store/render integration", () => {
 		"completed",
 		"failed",
 		"interrupted",
-	])("renders running → waiting → %s updates on the actual stable row", (status) => {
+	])("keeps historical running → waiting → %s projections hidden", (status) => {
 		hydrate([tasklet("running")])
 		render(<StoreCards />)
 		act(() => patch(tasklet("waiting"), 0))
-		expect(screen.getByText("Waiting for parent")).toBeInTheDocument()
 		act(() => patch(tasklet(status), 1))
-		expect(screen.getByText(status[0].toUpperCase() + status.slice(1))).toBeInTheDocument()
+		expect(screen.queryByText("Waiting for parent")).not.toBeInTheDocument()
+		expect(screen.queryByText(/child-alpha/)).not.toBeInTheDocument()
 		expect(useChatStore.getState().taskStatus).toBe(TaskStatus.STREAMING_TEXT)
-		expect(useChatStore.getState().visibleMessageIds.filter((id) => id === "tasklet:child-alpha")).toHaveLength(1)
+		expect(useChatStore.getState().visibleMessageIds).toEqual([spawn.id])
+		expect(useChatStore.getState().diracMessages.find((message) => message.id === "tasklet:child-alpha"))
+			.toEqual(cardMessage(tasklet(status)))
 	})
 
-	it("updates ongoing tasklets after spawn completion, settles siblings independently and reopens the same ID", () => {
-		hydrate([tasklet("running"), tasklet("waiting", "child-beta")])
+	it("keeps sixteen legacy projections hidden without deriving activity from card state", () => {
+		hydrate(Array.from({ length: 16 }, (_, index) => tasklet(index % 2 ? "completed" : "waiting", `child-${index}`)))
 		render(<StoreCards />)
-		const original = screen.getByText(/child-alpha/).closest("button")
-		expect(original).not.toBeNull()
-		act(() => patch(tasklet("completed"), 0))
-		expect(screen.getByText(/child-alpha/)).toBeInTheDocument()
-		expect(screen.getByText(/child-beta/)).toBeInTheDocument()
-		expect(useChatStore.getState().taskStatus).toBe(TaskStatus.STREAMING_TEXT)
-		expect(projectInteractionState({ hasTask: true, taskStatus: useChatStore.getState().taskStatus })).toBe(
-			InteractionState.RUNNING,
-		)
-		expect(useChatStore.getState().visibleMessageIds).toEqual([spawn.id, "tasklet:child-alpha", "tasklet:child-beta"])
-		act(() => patch(tasklet("running"), 1))
-		expect(screen.getAllByText(/child-alpha/)).toHaveLength(1)
-		expect(useChatStore.getState().diracMessages.filter((message) => message.id === "tasklet:child-alpha")).toHaveLength(1)
-		expect(screen.getByText(/child-alpha/).closest("button")).toBe(original)
+		act(() => patch(tasklet("completed", "child-0"), 0))
+		act(() => patch(tasklet("running", "child-0"), 1))
+		expect(useChatStore.getState().visibleMessageIds).toEqual([spawn.id])
+		expect(useChatStore.getState().taskletActivity).toBeUndefined()
+		expect(screen.queryByText(/child-0/)).not.toBeInTheDocument()
+		expect(projectInteractionState({ hasTask: true, taskStatus: useChatStore.getState().taskStatus }))
+			.toBe(InteractionState.RUNNING)
 	})
 
-	it("restores previews in a fresh mount and retains the user's expansion through terminal/reopen updates", () => {
+	it("retains historical projections in storage but does not revive their rows after hydration", () => {
 		hydrate([tasklet("waiting")])
-		const first = render(<StoreCards />)
-		expand()
 		act(() => patch(tasklet("completed"), 0))
-		expect(screen.getByText(/Complete retained result/)).toBeInTheDocument()
 		const saved = structuredClone(useChatStore.getState().diracMessages)
-		first.unmount()
-		act(() => {
-			useChatStore.getState().clearCardCollapsedStates()
-			useChatStore
-				.getState()
-				.applyExtensionState({ diracMessages: saved, presentationSurfaceId: "restored", presentationOffset: -1 })
+		useChatStore.getState().applyExtensionState({
+			diracMessages: saved, presentationSurfaceId: "restored", presentationOffset: -1,
 		})
 		render(<StoreCards />)
-		expand()
-		expect(screen.getByText(/Complete retained result/)).toBeInTheDocument()
 		act(() => {
-			expect(
-				useChatStore.getState().applyPresentationBatch({
-					surfaceId: "restored",
-					operations: [{ type: "patch_card", id: "tasklet:child-alpha", offset: 0, patch: tasklet("running") }],
-				}),
-			).toBe("applied")
+			expect(useChatStore.getState().applyPresentationBatch({
+				surfaceId: "restored",
+				operations: [{ type: "patch_card", id: "tasklet:child-alpha", offset: 0, patch: tasklet("running") }],
+			})).toBe("applied")
 		})
-		expect(screen.getByTitle(/^Collapse .*Review implementation$/)).toBeInTheDocument()
-		expect(screen.getByText(/Inspect the public interface/)).toBeInTheDocument()
+		expect(useChatStore.getState().visibleMessageIds).toEqual([spawn.id])
+		expect(screen.queryByText(/Complete retained result|Inspect the public interface/)).not.toBeInTheDocument()
 	})
 
 	it("counts only hidden accounting snapshots once across updates, replay and restoration, never display usage", () => {
@@ -335,6 +319,7 @@ describe("webview tasklet store/render integration", () => {
 		expect(useChatStore.getState().apiMetrics.totalCost).toBe(0.75)
 		act(() => useChatStore.getState().setDiracMessages(structuredClone(useChatStore.getState().diracMessages)))
 		expect(useChatStore.getState().apiMetrics).toMatchObject({ totalCost: 0.75, totalTokensIn: 150, totalReasoningTokens: 4 })
-		expect(within(screen.getByTitle(/^Expand .*Review implementation$/)).queryByText("Usage")).not.toBeInTheDocument()
+		expect(useChatStore.getState().visibleMessageIds).toEqual([spawn.id])
+		expect(screen.queryByText("Usage")).not.toBeInTheDocument()
 	})
 })

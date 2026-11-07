@@ -3,8 +3,9 @@
  * Provides access to ExtensionState and task controller
  */
 
-import type { ExtensionState } from "@shared/ExtensionMessage"
-import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react"
+import { DiracMessageType, type DiracMessage, type ExtensionState } from "@shared/ExtensionMessage"
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { mergeLocalObservations, type LocalObservationMessage } from "../utils/local-observation"
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import { subscribeToState } from "@/core/controller/state/subscribeToState"
 import { getRequestRegistry } from "@/core/controller/grpc-handler"
@@ -15,6 +16,9 @@ let taskContextSubscriptionCounter = 0
 
 interface TaskContextType {
 	state: Partial<ExtensionState>
+	displayMessages: DiracMessage[]
+	observationEpoch: number
+	appendLocalObservation: (text: string, epoch: number) => void
 	controller: any
 	isComplete: boolean
 	setIsComplete: (complete: boolean) => void
@@ -45,18 +49,32 @@ export const TaskContextProvider: React.FC<TaskContextProviderProps> = ({ contro
 	const stateRef = useRef(state)
 	stateRef.current = state
 	const presentationRef = useRef(createPresentationState())
+	const [localObservations, setLocalObservations] = useState<LocalObservationMessage[]>([])
+	const observationEpochRef = useRef(0)
+	const localMessageSequence = useRef(0)
+	const displayMessages = useMemo(
+		() => mergeLocalObservations(state.diracMessages ?? [], localObservations),
+		[state.diracMessages, localObservations],
+	)
+	const appendLocalObservation = useCallback((text: string, epoch: number) => {
+		if (epoch !== observationEpochRef.current) return
+		const messages = presentationRef.current.messages
+		const message: DiracMessage = {
+			id: `local-observation:${++localMessageSequence.current}`,
+			ts: Date.now(),
+			content: { type: DiracMessageType.MARKDOWN, content: text },
+		}
+		setLocalObservations((entries) => [
+			...entries,
+			{ afterMessageId: messages.at(-1)?.id, position: messages.length, message },
+		])
+	}, [])
 
 	// Subscribe to controller state updates
 	useEffect(() => {
 		let disposed = false
 		const requestId = `cli-task-context-${++taskContextSubscriptionCounter}`
-		const receiveStateUpdate = async ({
-			stateJson,
-			presentationJson,
-		}: {
-			stateJson: string
-			presentationJson?: string
-		}) => {
+		const receiveStateUpdate = async ({ stateJson, presentationJson }: { stateJson: string; presentationJson?: string }) => {
 			try {
 				const update = JSON.parse(stateJson) as Partial<ExtensionState>
 				let presentationChanged = update.diracMessages !== undefined
@@ -85,6 +103,11 @@ export const TaskContextProvider: React.FC<TaskContextProviderProps> = ({ contro
 						presentationChanged = true
 					}
 				}
+				const surfaceChanged = presentationRef.current.surfaceId !== stateRef.current.presentationSurfaceId
+				const sourceChanged =
+					"taskletActivity" in update && update.taskletActivity?.sourceId !== stateRef.current.taskletActivity?.sourceId
+				if (surfaceChanged || sourceChanged) observationEpochRef.current++
+				if (surfaceChanged) setLocalObservations([])
 				const nextState: Partial<ExtensionState> = {
 					...stateRef.current,
 					...update,
@@ -119,6 +142,8 @@ export const TaskContextProvider: React.FC<TaskContextProviderProps> = ({ contro
 
 	// Force clear state (bypasses the empty messages check for intentional clears like /clear)
 	const clearState = () => {
+		observationEpochRef.current++
+		setLocalObservations([])
 		const clearedState = {
 			diracMessages: [],
 			currentTaskItem: null,
@@ -130,6 +155,9 @@ export const TaskContextProvider: React.FC<TaskContextProviderProps> = ({ contro
 
 	const value: TaskContextType = {
 		state,
+		displayMessages,
+		observationEpoch: observationEpochRef.current,
+		appendLocalObservation,
 		controller,
 		isComplete,
 		setIsComplete,

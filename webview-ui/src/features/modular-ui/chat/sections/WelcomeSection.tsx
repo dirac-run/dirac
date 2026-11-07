@@ -3,7 +3,7 @@ import { ChatSection, ChatViewContext } from "../types"
 
 export const WelcomeSection: ChatSection = {
 	id: "welcome",
-	shouldRender: (context) => !context.task && !context.goal,
+	shouldRender: (context) => !context.task && !context.goal && context.renderedMessageIds.length === 0,
 	render: (context: ChatViewContext) => (
 		<ModularWelcomeSection
 			shouldShowQuickWins={context.shouldShowQuickWins}

@@ -27,7 +27,8 @@ export function filterVisibleMessages(messages: DiracMessage[]): DiracMessage[] 
 
 	return messages.filter((message, index) => {
 		const content = message.content
-		if (content.type === DiracMessageType.CARD && (getSubagentUsage(content.card) || getTaskletUsage(content.card))) return false
+		if (content.type === DiracMessageType.CARD &&
+			(content.card.rawInput?.isTasklet === true || getSubagentUsage(content.card) || getTaskletUsage(content.card))) return false
 		if (content.type === DiracMessageType.CHECKPOINT) {
 			return true
 		}

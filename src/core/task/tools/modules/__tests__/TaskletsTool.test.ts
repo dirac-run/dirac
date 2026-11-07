@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
 import { CardStatus } from "@shared/ExtensionMessage"
+import type { TaskletReceipt } from "@shared/taskletReceipt"
 import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
 import { normalizeOptionalToolParameters } from "../../runtime/normalizeOptionalToolParameters"
 import { TaskletsTool, tasklets_spec } from "../use_subagents/UseSubagentsTool"
@@ -126,7 +127,8 @@ describe("TaskletsTool input and result contracts", () => {
 			),
 			page,
 		)
-		assert.match(String(updates[0].header), /Review storage.*result/)
+		assert.equal(updates[0].header, "Inspect tool result · Review storage")
+		assert.equal((updates[0].taskletReceipt as TaskletReceipt).outcome, "retrieved")
 	})
 
 	it("maps an addressed reply without inferring permission and presents actual partial failure", async () => {
@@ -166,7 +168,16 @@ describe("TaskletsTool input and result contracts", () => {
 			["resolved", "failed"],
 		)
 		assert.deepEqual(finalized, [CardStatus.ERROR])
-		assert.match(String(updates[0].header), /partial failure/)
+		const receipt = updates[0].taskletReceipt as TaskletReceipt
+		assert.equal(receipt.outcome, "partial_failure")
+		assert.deepEqual(
+			receipt.rows.map((row) => row.outcome),
+			["resolved", "failed"],
+		)
+		assert.equal(receipt.rows[0].choice, "choice-2")
+		assert.equal(receipt.rows[1].decision, "approve")
+		assert.equal(receipt.rows[1].requestId, "s")
+		assert.match(String(updates[0].body), /this request only, within parent authority/)
 		assert.match(String(updates[0].body), /Use option two/)
 		assert.match(String(updates[0].body), /Authority changed/)
 	})
@@ -189,6 +200,61 @@ describe("TaskletsTool input and result contracts", () => {
 		const output = await new TaskletsTool().processCall({ operation: "message", messages }, environment)
 		assert.ok(Buffer.byteLength(output) <= 16 * 1024)
 		assert.equal(JSON.parse(output).length, 20)
+	})
+
+	it("distinguishes a retrieved pending-request view from a child's state", async () => {
+		const { environment, finalized, updates } = fixture({
+			inspect: async () => ({ taskletId: "child", title: "Audit protocol", view: "pending", items: [], totalItems: 0 }),
+		})
+		await new TaskletsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
+		const receipt = updates[0].taskletReceipt as TaskletReceipt
+		assert.equal(updates[0].header, "Inspect pending requests · Audit protocol")
+		assert.equal(receipt.outcome, "retrieved")
+		assert.equal(receipt.returnedCount, 0)
+		assert.equal(receipt.rows[0].observedState, undefined)
+		assert.deepEqual(finalized, [CardStatus.SUCCESS])
+	})
+
+	it("does not infer running or completion from acceptance or a successful status read", async () => {
+		const summaries = [
+			{ title: "Accepted", outcomePersisted: false },
+			{ title: "Starting", outcomePersisted: false, executionStatus: "preparing" },
+			{ title: "Settling", outcomePersisted: false, outcome: { kind: "completed" } },
+			{ title: "Waiting", outcomePersisted: false, pendingRequestCount: 1 },
+			{ title: "Failed settlement", outcomePersisted: false, settlementError: { message: "write failed" } },
+			{ title: "Done", outcomePersisted: true, outcome: { kind: "completed" } },
+		]
+		const { environment, updates } = fixture({
+			list: () => ({ items: summaries, totalItems: summaries.length }) as ReturnType<TaskletControls["list"]>,
+		})
+		await new TaskletsTool().processCall({ operation: "list" }, environment)
+		const receipt = updates[0].taskletReceipt as TaskletReceipt
+		assert.equal(receipt.outcome, "retrieved")
+		assert.deepEqual(
+			receipt.rows.map((row) => row.observedState),
+			[undefined, "starting", "settling", "waiting_for_parent", "settlement_failed", "completed"],
+		)
+	})
+
+	it("keeps queued guidance and wake receipts distinct from completion", async () => {
+		const { environment, updates } = fixture({
+			message: async () => [{ taskletId: "child", title: "Audit", status: "queued" }],
+			sleep: async () => ({ reason: "event", taskletId: "child", eventId: "event" }),
+		})
+		await new TaskletsTool().processCall(
+			{ operation: "message", messages: [{ tasklet_id: "child", type: "guidance", text: "Check persistence first" }] },
+			environment,
+		)
+		const guidance = updates[0].taskletReceipt as TaskletReceipt
+		assert.equal(guidance.operation, "guidance")
+		assert.equal(guidance.outcome, "queued")
+		assert.equal(guidance.rows[0].message, "Check persistence first")
+		assert.match(String(updates[0].body), /consumption is not confirmed/)
+		await new TaskletsTool().processCall({ operation: "sleep" }, environment)
+		const wake = updates[1].taskletReceipt as TaskletReceipt
+		assert.equal(wake.outcome, "woke")
+		assert.equal(wake.wakeReason, "event")
+		assert.match(String(updates[1].body), /wake is not assignment completion/)
 	})
 
 	it("fails rather than returning an accidentally unbounded control result", async () => {

@@ -21,10 +21,10 @@ export interface VisibleWindow<T> {
 
 export type LocalSlashCommandPanel =
 	| {
-		type: CliPanelType.SETTINGS
-		initialMode?: "model-picker" | "featured-models" | "provider-picker"
-		initialModelKey?: "actModelId" | "planModelId"
-	}
+			type: CliPanelType.SETTINGS
+			initialMode?: "model-picker" | "featured-models" | "provider-picker"
+			initialModelKey?: "actModelId" | "planModelId"
+	  }
 	| { type: CliPanelType.HISTORY }
 	| { type: CliPanelType.HELP }
 	| { type: CliPanelType.SKILLS }
@@ -39,6 +39,7 @@ export interface LocalSlashCommandContext {
 	handleExit: () => void
 	enableFastMode: () => void
 	toggleQuietMode: () => void
+	showAgentSnapshot: () => void
 }
 
 type LocalSlashCommandHandler = (context: LocalSlashCommandContext) => void
@@ -68,6 +69,10 @@ const LOCAL_SLASH_COMMANDS: Record<string, LocalSlashCommandHandler> = {
 	models: openModelsPanel,
 	history: openPanel({ type: CliPanelType.HISTORY }),
 	agent: openPanel({ type: CliPanelType.AGENTS }),
+	agents: ({ showAgentSnapshot, resetInputLine }) => {
+		showAgentSnapshot()
+		resetInputLine()
+	},
 	skills: openPanel({ type: CliPanelType.SKILLS }),
 	usage: openPanel({ type: CliPanelType.USAGE }),
 	clear: ({ clearViewAndResetTask }) => clearViewAndResetTask(),

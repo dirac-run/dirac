@@ -16,10 +16,18 @@ function localCommandContext(): LocalSlashCommandContext {
 		handleExit: vi.fn(),
 		enableFastMode: vi.fn(),
 		toggleQuietMode: vi.fn(),
+		showAgentSnapshot: vi.fn(),
 	}
 }
 
 describe("executeLocalSlashCommand", () => {
+	it("prints a local snapshot without opening the inspector for /agents", () => {
+		const context = localCommandContext()
+		expect(executeStandaloneLocalSlashCommand(" /agents ", context)).toBe(true)
+		expect(context.showAgentSnapshot).toHaveBeenCalledOnce()
+		expect(context.setActivePanel).not.toHaveBeenCalled()
+		expect(context.resetInputLine).toHaveBeenCalledOnce()
+	})
 	it("toggles quiet mode and clears the input for /quiet", () => {
 		const context = localCommandContext()
 
@@ -64,6 +72,8 @@ describe("executeLocalSlashCommand", () => {
 
 		expect(executeStandaloneLocalSlashCommand("Please inspect /agent", context)).toBe(false)
 		expect(context.setActivePanel).not.toHaveBeenCalled()
+		expect(executeStandaloneLocalSlashCommand('/agents "image.png"', context)).toBe(false)
+		expect(context.showAgentSnapshot).not.toHaveBeenCalled()
 	})
 
 	it("reserves local command names when backend workflows are merged", () => {

@@ -1,18 +1,7 @@
+import type { TaskletObservedState } from "./taskletObservation"
+
 export type GoalStatus = "working" | "waiting" | "paused" | "blocked" | "achieved" | "stopped"
 
-export type GoalChildRole = "task" | "verification"
-
-/** Accepted does not claim that a local execution exists or has settled. */
-export type GoalChildStatus = "accepted" | "starting" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted"
-
-export type GoalInteractionKind = "approval" | "feedback" | "action"
-
-/** Read-only presentation of one shared request, never an authorization handle. */
-export interface GoalPendingInteraction {
-	id: string
-	kind: GoalInteractionKind
-	createdAt: number
-}
 
 export interface GoalAccounting {
 	totalTokens?: number
@@ -54,21 +43,14 @@ export interface GoalStatusTransition {
 	statusReason?: string
 }
 
-/** Derived display data, not a second durable child registry. */
-export interface GoalTaskSummary {
+/** Goal-specific verification metadata; general tasklet inventory uses the common observation protocol. */
+export interface GoalVerificationSummary {
 	id: string
 	title: string
-	role: GoalChildRole
-	status: GoalChildStatus
+	status: TaskletObservedState
 	createdAt: number
 	endedAt?: number
 	terminalSummary?: string
-	/** Persisted requests may be stale when no local execution owns the Goal. */
-	pendingInteraction?: GoalPendingInteraction
-	pendingInteractionCount: number
-	/** Omitted when shared tasklet data cannot establish this duration. */
-	runningDurationMs?: number
-	idleDurationMs?: number
 }
 
 export interface GoalViewState {
@@ -83,9 +65,7 @@ export interface GoalViewState {
 	updatedAt: number
 	wallDurationMs: number
 	activeDurationMs: number
-	children: GoalTaskSummary[]
-	pendingInteractionCount: number
-	latestVerification?: GoalTaskSummary
+	latestVerification?: GoalVerificationSummary
 	accounting: GoalAccounting
 	mode: "act"
 	modeSwitchingDisabled: true

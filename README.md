@@ -163,6 +163,8 @@ You can also mention Git changes, workspace diagnostics, terminal output, URLs, 
 
 Subagents can research, edit, run commands, and validate work concurrently. Each can receive its own prompt, tools, timeout, and optional parent context. Dirac tracks source freshness and rejects stale edits at write time, allowing independent agents to work safely in the same codebase.
 
+Agents run in the background without streaming separate cards into the main chat. The status area shows the active count; `/agents` prints a frozen local snapshot without sending anything to the model. In the CLI, `/agent` opens a read-only transcript browser with explicit refresh and paging. Ask the main agent to guide, stop, or resume a child—there is no direct child chat or approval surface.
+
 ![Multiple subagents working concurrently](assets/media/subagents.png)
 
 </details>

@@ -1,111 +1,176 @@
-import { CardStatus, type DiracMessage, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
-import { createTaskletPresentationCard, type TaskletPresentationData } from "@shared/taskletPresentation"
-import { render } from "ink-testing-library"
+import type { Controller } from "@/core/controller"
+import { CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import type { TaskletActivitySummary, TaskletInventoryPage, TaskletTranscriptPage } from "@shared/taskletObservation"
+import { Box } from "ink"
+import { cleanup, render } from "ink-testing-library"
 // biome-ignore lint/correctness/noUnusedImports: Classic JSX runtime requires React in scope.
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
-import { AgentPanelContent, buildAgentList } from "./AgentPanelContent"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AgentPanelContent } from "./AgentPanelContent"
 
-const input = vi.hoisted(() => ({ handler: undefined as ((input: string, key: import("ink").Key) => void) | undefined }))
+const mocks = vi.hoisted(() => ({
+	input: undefined as ((input: string, key: import("ink").Key) => void) | undefined,
+	inventory: vi.fn(),
+	transcript: vi.fn(),
+	terminalSize: { columns: 120, rows: 50 },
+}))
 vi.mock("ink", async (original) => ({
 	...(await original<typeof import("ink")>()),
-	useInput: (handler: typeof input.handler) => {
-		input.handler = handler
+	useInput: (handler: typeof mocks.input) => {
+		mocks.input = handler
 	},
 }))
-vi.mock("../hooks/useTerminalSize", () => ({ useTerminalSize: () => ({ columns: 120, rows: 50 }) }))
-
-const delay = () => new Promise((resolve) => setTimeout(resolve, 60))
-const data: TaskletPresentationData = {
-	taskletId: "tl-stable",
+vi.mock("../hooks/useTerminalSize", () => ({ useTerminalSize: () => mocks.terminalSize }))
+vi.mock("@/core/controller/task/getTaskletInventory", () => ({ getTaskletInventory: mocks.inventory }))
+vi.mock("@/core/controller/task/getTaskletTranscript", () => ({ getTaskletTranscript: mocks.transcript }))
+const scope: TaskletActivitySummary = { rootTaskId: "root", sourceId: "live", availability: "live", activeCount: 1 }
+const inventory: TaskletInventoryPage = {
+	...scope,
+	observedAt: 1,
+	filter: "all",
+	totalItems: 2,
+	items: [
+		{ taskletId: "child", title: "Trace events", state: "waiting_for_parent" },
+		{ taskletId: "done", title: "Finished audit", state: "completed" },
+	],
+}
+const transcript: TaskletTranscriptPage = {
+	...scope,
+	observedAt: 1,
+	taskletId: "child",
 	title: "Trace events",
-	createdAt: 2,
-	prompt: "Trace event delivery",
-	status: "running",
-	communications: ["Parent: a decision is needed"],
-	activity: ["Read diagnostic.ts"],
-}
-function messages(tasklet: TaskletPresentationData): DiracMessage[] {
-	return [
+	state: "waiting_for_parent",
+	messages: [
 		{
-			id: "root-prompt",
+			id: "question",
 			ts: 1,
-			content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Delegate and continue" },
-		},
-		{
-			id: "spawn",
-			ts: 2,
 			content: {
 				type: DiracMessageType.CARD,
-				card: { id: "spawn", header: "Delegation accepted", renderType: "text", status: CardStatus.SUCCESS },
+				card: {
+					id: "question",
+					header: "Choose direction",
+					status: CardStatus.WAITING_FOR_INPUT,
+					body: "Read-only question text",
+				},
 			},
 		},
-		{
-			id: "tasklet:tl-stable",
-			ts: 3,
-			content: { type: DiracMessageType.CARD, card: createTaskletPresentationCard(tasklet) },
-		},
-		{
-			id: "tasklet:tl-sibling",
-			ts: 4,
-			content: {
-				type: DiracMessageType.CARD,
-				card: createTaskletPresentationCard({ ...data, taskletId: "tl-sibling", title: "Sibling", createdAt: 3 }),
-			},
-		},
-	]
+	],
+	truncatedMessageIds: [],
+	outcome: { kind: "completed", summary: "Separate durable result", at: 2, truncated: false },
 }
-function key(overrides: Partial<import("ink").Key>) {
-	if (!input.handler) throw new Error("Agent panel input was not registered")
-	input.handler("", { ...overrides } as import("ink").Key)
-}
+const controller = {} as Controller
+const key = (value: Partial<import("ink").Key>, text = "") => mocks.input?.(text, value as import("ink").Key)
 
-describe("CLI tasklet agent view", () => {
-	it.each([
-		"running",
-		"waiting",
-		"completed",
-		"failed",
-		"interrupted",
-	] as const)("restores %s independently of spawn and root", (status) => {
-		const restored = JSON.parse(JSON.stringify(messages({ ...data, status, result: "Retained result" })))
-		const agents = buildAgentList(restored, TaskStatus.THINKING)
-		expect(agents).toHaveLength(3)
-		expect(agents[0].status).toBe("running")
-		expect(agents[0].transcript).toContain("Delegation accepted")
-		expect(agents[0].transcript).not.toContain("Tasklet tl-stable")
-		expect(agents[1]).toMatchObject({ id: "tl-stable", status, prompt: data.prompt })
-		expect(agents[1].transcript).toContain("Retained result")
-		expect(agents[1].transcript).toContain("Parent-directed communication")
-		expect(agents[1].transcript).toContain("Diagnostic activity (not parent requests)")
-		expect(agents[2].status).toBe("running")
+describe("passive CLI tasklet view", () => {
+	afterEach(cleanup)
+
+	beforeEach(() => {
+		mocks.terminalSize.columns = 120
+		mocks.terminalSize.rows = 50
+		mocks.inventory.mockReset().mockResolvedValue({ value: JSON.stringify(inventory) })
+		mocks.transcript.mockReset().mockResolvedValue({ value: JSON.stringify(transcript) })
+	})
+	it.each([80, 60])("keeps long-title inventory states visible at %s columns", async (columns) => {
+		mocks.terminalSize.columns = columns
+		mocks.inventory.mockResolvedValue({
+			value: JSON.stringify({
+				...inventory,
+				items: inventory.items.map((agent) => ({ ...agent, title: "長い調査名".repeat(16) })),
+			}),
+		})
+		const view = render(
+			<Box width={columns}>
+				<AgentPanelContent controller={controller} scope={scope} availableRows={24} onClose={() => { }} />
+			</Box>,
+		)
+		try {
+			await vi.waitFor(() => expect(view.lastFrame()).toContain("2 total"))
+			const lines = view.lastFrame()!.split("\n")
+			expect(lines.some((line) => line.includes("長い") && line.includes("Waiting for parent"))).toBe(true)
+			expect(lines.some((line) => line.includes("長い") && line.includes("Completed"))).toBe(true)
+		} finally {
+			view.unmount()
+		}
 	})
 
-	it("keeps the selected stable ID current through waiting, completion and reopening", async () => {
-		const view = render(<AgentPanelContent messages={messages(data)} onClose={() => {}} taskStatus={TaskStatus.THINKING} />)
-		await delay()
-		expect(view.lastFrame()).toContain("Trace events · running")
-		expect(view.lastFrame()).not.toContain("tl-stable")
-		key({ downArrow: true })
-		await delay()
-		key({ return: true })
-		await delay()
-		expect(view.lastFrame()).toContain("Assignment")
-		for (const status of ["waiting", "completed", "running", "interrupted"] as const) {
-			view.rerender(
-				<AgentPanelContent
-					messages={messages({ ...data, status, result: `Result ${status}` })}
-					onClose={() => {}}
-					taskStatus={TaskStatus.THINKING}
-				/>,
-			)
-			await delay()
-			expect(view.lastFrame()).toContain(`Trace events · ${status}`)
-			expect(view.lastFrame()).toContain(`Result ${status}`)
-			expect(view.lastFrame()).toContain("Parent-directed communication")
-			expect(view.lastFrame()).toContain("Diagnostic activity (not parent requests)")
-			if (status === "waiting") expect(view.lastFrame()).toContain("no user approval is requested here")
+	it.each([80, 60])("keeps long transcript titles and the back hint on one row at %s columns", async (columns) => {
+		mocks.terminalSize.columns = columns
+		mocks.transcript.mockResolvedValue({
+			value: JSON.stringify({
+				...transcript,
+				title: "ExtremelyLongAssignmentTitleForTerminalWidthRegressionWithoutSpacesAcrossTheScreen",
+				outcome: { ...transcript.outcome, summary: "Transcript line\n".repeat(40) },
+			}),
+		})
+		const view = render(
+			<Box width={columns}>
+				<AgentPanelContent controller={controller} scope={scope} availableRows={24} onClose={() => { }} />
+			</Box>,
+		)
+		try {
+			await vi.waitFor(() => expect(view.lastFrame()).toContain("Waiting for parent"))
+			key({ return: true })
+			await vi.waitFor(() => expect(view.lastFrame()).toContain("Transcript line"))
+			const lines = view.lastFrame()!.split("\n")
+			expect(lines.some((line) => line.includes("ExtremelyLong") && line.includes("(Esc to go back)"))).toBe(true)
+			expect(lines).toHaveLength(24)
+		} finally {
+			view.unmount()
 		}
+	})
+
+	it("reads all inventory then only the selected transcript; status updates do not refresh it", async () => {
+		const view = render(<AgentPanelContent controller={controller} scope={scope} onClose={() => { }} />)
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("Waiting for parent"))
+		expect(mocks.inventory).toHaveBeenCalledWith(
+			controller,
+			expect.objectContaining({ filter: "all", rootTaskId: "root", sourceId: "live" }),
+		)
+		expect(mocks.transcript).not.toHaveBeenCalled()
+		key({ return: true })
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("Read-only question text"))
+		expect(view.lastFrame()).toContain("Separate durable result")
+		expect(mocks.transcript).toHaveBeenCalledWith(controller, expect.objectContaining({ taskletId: "child" }))
+		view.rerender(<AgentPanelContent controller={controller} scope={{ ...scope, activeCount: 0 }} onClose={() => { }} />)
+		await new Promise((resolve) => setTimeout(resolve, 20))
+		expect(mocks.transcript).toHaveBeenCalledTimes(1)
+		key({}, "yes")
+		expect(mocks.transcript).toHaveBeenCalledTimes(1)
+		key({}, "r")
+		await vi.waitFor(() => expect(mocks.transcript).toHaveBeenCalledTimes(2))
+		view.unmount()
+	})
+	it("reads the next bounded page explicitly and reports stale-cursor errors", async () => {
+		mocks.inventory
+			.mockResolvedValueOnce({ value: JSON.stringify({ ...inventory, nextCursor: "next" }) })
+			.mockRejectedValueOnce(new Error("Stale cursor; refresh"))
+		const view = render(<AgentPanelContent controller={controller} scope={scope} onClose={() => { }} />)
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("n next"))
+		key({}, "n")
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("Stale cursor"))
+		expect(mocks.inventory).toHaveBeenLastCalledWith(controller, expect.objectContaining({ cursor: "next" }))
+		key({}, "r")
+		await vi.waitFor(() => expect(mocks.inventory).toHaveBeenCalledTimes(3))
+		expect(mocks.inventory).toHaveBeenLastCalledWith(controller, expect.objectContaining({ cursor: undefined }))
+		view.unmount()
+	})
+	it("discards an old source response after selection changes", async () => {
+		let resolveOld!: (value: { value: string }) => void
+		mocks.inventory.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveOld = resolve
+				}),
+		)
+		const view = render(<AgentPanelContent controller={controller} scope={scope} onClose={() => { }} />)
+		await vi.waitFor(() => expect(mocks.inventory).toHaveBeenCalledOnce())
+		const nextScope = { ...scope, rootTaskId: "next", sourceId: "next-live" }
+		mocks.inventory.mockResolvedValueOnce({ value: JSON.stringify({ ...inventory, ...nextScope, items: [], totalItems: 0 }) })
+		view.rerender(<AgentPanelContent controller={controller} scope={nextScope} onClose={() => { }} />)
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("No recorded agents"))
+		resolveOld({ value: JSON.stringify(inventory) })
+		await new Promise((resolve) => setTimeout(resolve, 20))
+		expect(view.lastFrame()).not.toContain("Trace events")
 		view.unmount()
 	})
 })

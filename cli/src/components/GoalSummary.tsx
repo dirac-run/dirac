@@ -1,11 +1,8 @@
-import type { GoalChildStatus, GoalViewState } from "@shared/goal"
-import { Box, Text, useInput } from "ink"
-import React, { useEffect, useMemo, useState } from "react"
+import type { GoalViewState } from "@shared/goal"
+import type { TaskletObservedState } from "@shared/taskletObservation"
+import { Box, Text } from "ink"
+import React from "react"
 import { theme } from "../constants/theme"
-import { useStdinContext } from "../context/StdinContext"
-
-const NONTERMINAL_CHILD_STATUSES: readonly GoalChildStatus[] = ["accepted", "starting", "running", "waiting"]
-const CHILD_PAGE_SIZE = 5
 
 function formatDuration(durationMs: number | undefined): string {
 	if (durationMs === undefined) return "unavailable"
@@ -17,20 +14,21 @@ function formatDuration(durationMs: number | undefined): string {
 	return `${totalHours}h ${totalMinutes % 60}m`
 }
 
-function statusColor(status: GoalViewState["status"] | GoalChildStatus): string {
+function statusColor(status: GoalViewState["status"] | TaskletObservedState): string {
 	if (status === "achieved" || status === "completed") return theme.success
-	if (status === "blocked" || status === "failed") return theme.error
-	if (status === "waiting" || status === "paused" || status === "interrupted") return theme.warning
-	if (status === "stopped" || status === "cancelled") return theme.muted
+	if (status === "blocked" || status === "failed" || status === "settlement_failed") return theme.error
+	if (status === "waiting" || status === "waiting_for_parent" || status === "paused" || status === "interrupted")
+		return theme.warning
+	if (status === "stopped" || status === "unsettled") return theme.muted
 	return theme.link
 }
 
-function statusSymbol(status: GoalViewState["status"] | GoalChildStatus): string {
+function statusSymbol(status: GoalViewState["status"] | TaskletObservedState): string {
 	if (status === "achieved" || status === "completed") return theme.symbols.success
-	if (status === "blocked" || status === "failed") return theme.symbols.failure
-	if (status === "waiting" || status === "paused" || status === "interrupted") return theme.symbols.warning
-	if (status === "stopped" || status === "cancelled") return theme.symbols.inactive
-	if (status === "accepted") return theme.symbols.inactive
+	if (status === "blocked" || status === "failed" || status === "settlement_failed") return theme.symbols.failure
+	if (status === "waiting" || status === "waiting_for_parent" || status === "paused" || status === "interrupted")
+		return theme.symbols.warning
+	if (status === "stopped" || status === "unsettled") return theme.symbols.inactive
 	return theme.symbols.active
 }
 
@@ -81,53 +79,13 @@ export const GoalSummary: React.FC<{
 	height: number
 	isProcessing: boolean
 	isStopConfirmationPending: boolean
-	onPageNavigation: () => void
-}> = ({ goal, detailsExpanded, height, isProcessing, isStopConfirmationPending, onPageNavigation }) => {
-	const { isRawModeSupported } = useStdinContext()
-	const [childPageIndex, setChildPageIndex] = useState(0)
-	const childCounts = useMemo(() => {
-		const counts = new Map<GoalChildStatus, number>()
-		for (const child of goal.children) counts.set(child.status, (counts.get(child.status) ?? 0) + 1)
-		return [...counts.entries()].map(([status, count]) => `${count} ${status}`).join(` ${theme.symbols.separator} `)
-	}, [goal.children])
-	const orderedChildren = useMemo(() => {
-		const nonterminalChildren = goal.children.filter((child) => NONTERMINAL_CHILD_STATUSES.includes(child.status))
-		const terminalChildren = goal.children.filter((child) => !NONTERMINAL_CHILD_STATUSES.includes(child.status)).reverse()
-		return [...nonterminalChildren, ...terminalChildren]
-	}, [goal.children])
-	const childPageCount = Math.max(1, Math.ceil(orderedChildren.length / CHILD_PAGE_SIZE))
-	const visibleChildren = orderedChildren.slice(childPageIndex * CHILD_PAGE_SIZE, (childPageIndex + 1) * CHILD_PAGE_SIZE)
-
-	useEffect(() => setChildPageIndex(0), [goal.id])
-	useEffect(() => {
-		setChildPageIndex((current) => Math.min(current, childPageCount - 1))
-	}, [childPageCount])
-
-	useInput(
-		(_input, key) => {
-			if (key.pageUp) {
-				onPageNavigation()
-				setChildPageIndex((current) => Math.max(0, current - 1))
-			}
-			if (key.pageDown) {
-				onPageNavigation()
-				setChildPageIndex((current) => Math.min(childPageCount - 1, current + 1))
-			}
-		},
-		{ isActive: isRawModeSupported && detailsExpanded && childPageCount > 1 },
-	)
-
+}> = ({ goal, detailsExpanded, height, isProcessing, isStopConfirmationPending }) => {
 	const controls = isProcessing
 		? "Applying Goal control…"
 		: isStopConfirmationPending
 			? "Ctrl+X again within 5s to permanently Stop this Goal (cannot resume) · Esc cancel"
 			: goalControls(goal)
 	const detailsControl = `Ctrl+G ${detailsExpanded ? "Hide details" : "Details"}`
-	const summary = goal.children.length === 0 ? "no children" : childCounts
-	const pending =
-		goal.pendingInteractionCount > 0
-			? ` ${theme.symbols.separator} ${goal.pendingInteractionCount} pending interaction${goal.pendingInteractionCount === 1 ? "" : "s"}`
-			: ""
 
 	return (
 		<Box
@@ -152,7 +110,7 @@ export const GoalSummary: React.FC<{
 
 			{!detailsExpanded ? (
 				<Text color={theme.text} wrap="truncate-end">
-					{`${plainTextObjective(goal.objective.markdown)} ${theme.symbols.separator} ${summary}${pending} ${theme.symbols.separator} age ${formatDuration(goal.wallDurationMs)}`}
+					{`${plainTextObjective(goal.objective.markdown)} ${theme.symbols.separator} age ${formatDuration(goal.wallDurationMs)}`}
 				</Text>
 			) : (
 				<React.Fragment>
@@ -167,33 +125,6 @@ export const GoalSummary: React.FC<{
 						</Text>
 						{` ${theme.symbols.separator} ${plainTextObjective(goal.objective.markdown)}`}
 					</Text>
-					<Text bold color={theme.strongText}>
-						Children{" "}
-						<Text color={theme.muted}>
-							({summary}
-							{pending})
-						</Text>
-					</Text>
-					{visibleChildren.map((child) => (
-						<Text key={child.id} wrap="truncate-end">
-							<Text color={statusColor(child.status)}>
-								{statusSymbol(child.status)} {child.status}
-							</Text>
-							<Text color={theme.muted}>{` ${theme.symbols.separator} ${child.role}`}</Text>
-							{` ${theme.symbols.separator} ${child.title}`}
-							{child.runningDurationMs !== undefined && (
-								<Text color={theme.muted}>{` ${theme.symbols.separator} run ${formatDuration(child.runningDurationMs)}`}</Text>
-							)}
-							{child.idleDurationMs !== undefined && (
-								<Text color={theme.muted}>{` ${theme.symbols.separator} idle ${formatDuration(child.idleDurationMs)}`}</Text>
-							)}
-						</Text>
-					))}
-					{childPageCount > 1 && (
-						<Text color={theme.muted}>
-							{`PgUp/PgDn children ${theme.symbols.separator} page ${childPageIndex + 1}/${childPageCount}`}
-						</Text>
-					)}
 					{goal.latestVerification && (
 						<Text color={statusColor(goal.latestVerification.status)} wrap="truncate-end">
 							Verification {theme.symbols.separator} {statusSymbol(goal.latestVerification.status)}{" "}

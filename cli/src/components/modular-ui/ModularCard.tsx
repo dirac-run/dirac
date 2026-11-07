@@ -20,7 +20,7 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 	const { columns } = useTerminalSize()
 	const { header, status, renderType, icon, requireFeedback, actions } = card
 	const tasklet = readTaskletPresentation(card)
-	const body = tasklet ? cardDisplayBody(card) : card.body
+	const body = tasklet || card.taskletReceipt ? cardDisplayBody(card) : card.body
 	const categoryColor = getIconCategoryColor(icon)
 
 	return (
@@ -38,12 +38,15 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 				icon={icon}
 				isCollapsed={false}
 				status={status}
+				receipt={card.taskletReceipt}
+				renderWidth={Math.max(1, columns - 2)}
 				tasklet={tasklet ? { ...tasklet, width: Math.max(1, columns - 2) } : undefined}
 			/>
 			{body && !suppressBody && (
 				<Box flexDirection="column" paddingLeft={4}>
 					<CardBody
 						body={body}
+						receipt={card.taskletReceipt}
 						maxLines={maxBodyLines}
 						renderType={renderType}
 						scrollOffset={scrollOffset}
@@ -51,7 +54,7 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 					/>
 				</Box>
 			)}
-			{!tasklet && !isFinalStatus(status) && (
+			{!tasklet && !card.taskletReceipt && !isFinalStatus(status) && (
 				<CardInteractions
 					actions={actions}
 					feedbackPlaceholder={card.feedbackPlaceholder}

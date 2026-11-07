@@ -1,5 +1,6 @@
 import type { Card, RenderType } from "@shared/ExtensionMessage"
 import { readTaskletPresentation } from "@shared/taskletPresentation"
+import { formatTaskletReceipt } from "@shared/taskletReceipt"
 import { stripHashes, stripHashesFromDiff } from "@shared/utils/line-hashing"
 
 /** Removes model-facing line anchors from a card body before displaying it. */
@@ -10,6 +11,7 @@ export function cardBodyForDisplay(body: string | undefined, renderType: RenderT
 
 /** Display the shared tasklet projection; retain legacy body readers for other cards. */
 export function cardDisplayBody(card: Card): string {
+	if (card.taskletReceipt) return formatTaskletReceipt(card.taskletReceipt)
 	const tasklet = readTaskletPresentation(card)
 	if (!tasklet) return cardBodyForDisplay(card.body, card.renderType)
 

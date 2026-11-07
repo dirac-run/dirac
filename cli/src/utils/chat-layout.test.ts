@@ -45,8 +45,8 @@ describe("Goal summary allocation", () => {
 	})
 
 	it("bounds expanded details to leave transcript and composer space", () => {
-		expect(calculateGoalSummaryRows(24, true)).toBe(15)
-		expect(calculateGoalSummaryRows(40, true)).toBe(16)
+		expect(calculateGoalSummaryRows(24, true)).toBe(9)
+		expect(calculateGoalSummaryRows(40, true)).toBe(9)
 	})
 })
 

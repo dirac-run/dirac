@@ -82,6 +82,8 @@ describe("TaskletHost asynchronous ownership", () => {
 			messageStateHandler: {
 				getApiConversationHistory: () => [{ role: "assistant", content: [{ type: "text", text: "live detail" }] }],
 				getDiracMessages: () => [],
+				getPresentationOffset: () => -1,
+				getPresentationStateGeneration: () => 0,
 			},
 		}
 		return { task, outcome }
@@ -100,12 +102,12 @@ describe("TaskletHost asynchronous ownership", () => {
 		owner = {
 			taskId: "root",
 			executionProfile: "standalone",
-			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => {} }),
+			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub().resolves(rejected),
 			hasPendingUserInput: sandbox.stub().returns(false),
 			withMutationAuthorization: (_toolName, mutation) => mutation(),
-			retainMutationUntil: () => {},
+			retainMutationUntil: () => { },
 		}
 		host = new TaskletHost(owner, taskOptions(), constructed as unknown as typeof taskModule.Task)
 	})
@@ -158,7 +160,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const cancellation = new AbortController()
 		const waiting = counterparty.requestInteraction(input, cancellation.signal)
 		// The original promise remains rejecting; individual assertions own cancellation failures.
-		void waiting.catch(() => {})
+		void waiting.catch(() => { })
 		const interaction = host.inspect(child.id).interactions[0]
 		return { child, counterparty, cancellation, waiting, requestId: interaction.id }
 	}
@@ -206,7 +208,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			modelId: "claude-sonnet-5",
 		}
 		const getCachedConfig = sandbox.stub().withArgs("reviewer").returns(profile)
-		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => {}, getCachedConfig } as any)
+		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => { }, getCachedConfig } as any)
 		const record = await host.start({
 			title: "Review",
 			prompt: "Review this change",
@@ -473,7 +475,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			await host.interrupt(first.child.id)
 			assert.equal(signal.aborted, true)
 			await assert.rejects(first.waiting, /retired/)
-			decision.resolve(operation === "approve" ? { approved: true, assertCurrent: () => {} } : approved)
+			decision.resolve(operation === "approve" ? { approved: true, assertCurrent: () => { } } : approved)
 			await resolutionRejected
 			assert.equal(host.inspect(first.child.id).interactions[0].status, "retired")
 			assert.equal(host.inspect(sibling.child.id).interactions[0].status, "pending")
@@ -752,6 +754,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(result.outcomePersisted, false)
 		assert.match(result.settlementError!.message, /outcome disk failure/)
 		assert.equal((await saved(record.id)).outcome, undefined)
+		assert.equal(host.observationSummary().activeCount, 1)
+		assert.deepEqual(host.observationInventory("active"), [{ taskletId: record.id, title: "work", state: "settlement_failed" }])
+		assert.equal((await host.readObservationTranscript(record.id)).outcome, undefined)
 	})
 
 	it("joins settlement even when cancellation rejects, without losing the committed outcome", async () => {
@@ -1113,7 +1118,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			const cancellation = new AbortController()
 			const sleeping = host.sleep()
 			const waiting = counterparty.requestInteraction(request("sleep-request"), cancellation.signal)
-			void waiting.catch(() => {})
+			void waiting.catch(() => { })
 			assert.equal(host.isSleeping, false)
 			const interaction = host.inspect(child.id).interactions[0]
 			assert.deepEqual(await sleeping, { reason: "event", taskletId: child.id, eventId: interaction.id })

@@ -67,6 +67,37 @@ it.each([
 	app.unmount()
 })
 
+it.each([true, false])("keeps /agents local while running and waiting for approval (menu: %s)", (menu) => {
+	const props = createInputProps({
+		textInputRef: { current: "/agents" },
+		cursorPosRef: { current: 7 },
+		filteredCommands: menu ? [{ name: "agents" }] : [],
+		isSpinnerActive: true,
+		isProcessing: true,
+		pendingAsk: { content: { type: "card", card: { requireApproval: true } } },
+	})
+	const app = render(<InputHarness {...props} />)
+	pressKey({ return: true }, "\r")
+	expect(props.showAgentSnapshot).toHaveBeenCalledOnce()
+	expect(props.handleSubmit).not.toHaveBeenCalled()
+	expect(props.handleButtonAction).not.toHaveBeenCalled()
+	expect(props.resetInput).toHaveBeenCalledOnce()
+	app.unmount()
+})
+
+it("does not execute the observation menu command inside a prompt or attachment draft", () => {
+	const props = createInputProps({
+		textInputRef: { current: '"image.png" /agents' },
+		cursorPosRef: { current: 19 },
+		filteredCommands: [{ name: "agents" }],
+	})
+	const app = render(<InputHarness {...props} />)
+	pressKey({ return: true }, "\r")
+	expect(props.showAgentSnapshot).not.toHaveBeenCalled()
+	expect(props.resetInput).not.toHaveBeenCalled()
+	app.unmount()
+})
+
 function createInputProps(overrides: Partial<ChatInputProps> = {}): ChatInputProps {
 	const textInputRef = overrides.textInputRef ?? { current: draft }
 	const cursorPosRef = overrides.cursorPosRef ?? { current: 8 }
@@ -90,6 +121,7 @@ function createInputProps(overrides: Partial<ChatInputProps> = {}): ChatInputPro
 		toggleAutoApproveAll: vi.fn(),
 		enableFastMode: vi.fn(),
 		toggleQuietMode: vi.fn(),
+		showAgentSnapshot: vi.fn(),
 		handleSubmit: vi.fn(),
 		handleExit: vi.fn(),
 		clearViewAndResetTask: vi.fn(),

@@ -167,6 +167,11 @@ export async function getSavedPresentationHistory(address: string | TaskStorageA
 	return readPresentationHistory(await ensureTaskDirectoryExists(address), true)
 }
 
+/** Passive observation: no directory creation, migration, repair, or unreadable-message backup. */
+export async function readSavedPresentationHistory(address: string | TaskStorageAddress): Promise<SavedPresentationHistory> {
+	return readPresentationHistory(getTaskDirectoryPath(address))
+}
+
 /** Explicit history access without creating storage; only normal startup opts into legacy migration. */
 export async function readPresentationHistory(taskDirectory: string, migrateLegacy = false): Promise<SavedPresentationHistory> {
 	const filePath = path.join(taskDirectory, GlobalFileNames.uiMessages)
@@ -258,14 +263,14 @@ async function readPresentationBaseline(
 	if (!(await fileExistsAtPath(baselinePath))) {
 		if (await fileExistsAtPath(legacyPath)) {
 			return {
-				messages: await parseSavedDiracMessages(await fs.readFile(legacyPath, "utf8"), legacyPath),
+				messages: await parseSavedDiracMessages(await fs.readFile(legacyPath, "utf8"), legacyPath, migrateLegacy),
 				lastOffset: -1,
 			}
 		}
 		const oldPath = path.join(taskDirectory, "claude_messages.json")
 		if (!(await fileExistsAtPath(oldPath))) return { messages: [], lastOffset: -1 }
 		const contents = await fs.readFile(oldPath, "utf8")
-		const messages = await parseSavedDiracMessages(contents, oldPath)
+		const messages = await parseSavedDiracMessages(contents, oldPath, migrateLegacy)
 		if (migrateLegacy) {
 			await atomicWriteFile(legacyPath, JSON.stringify(messages))
 			await fs.unlink(oldPath)
@@ -556,7 +561,7 @@ function assertNextOffset(offset: number, previousOffset: number, filePath: stri
 	}
 }
 
-async function parseSavedDiracMessages(contents: string, filePath: string): Promise<DiracMessage[]> {
+async function parseSavedDiracMessages(contents: string, filePath: string, recoverUnreadable = true): Promise<DiracMessage[]> {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(contents)
@@ -575,6 +580,7 @@ async function parseSavedDiracMessages(contents: string, filePath: string): Prom
 		throw new Error(`Saved task transcript uses an unsupported or unreadable format: ${filePath}`)
 	}
 	if (skippedMessages > 0) {
+		if (!recoverUnreadable) throw new Error(`Saved task transcript contains ${skippedMessages} unreadable messages: ${filePath}`)
 		await backupTranscriptBeforeSkippingMessages(filePath, contents)
 		Logger.warn(
 			`[Task History] Skipped ${skippedMessages} unreadable message${skippedMessages === 1 ? "" : "s"} in ${filePath}`,

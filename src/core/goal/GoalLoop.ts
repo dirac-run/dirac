@@ -1,15 +1,14 @@
 import type { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
-import type { Task } from "@core/task"
-import { loadTaskletEvents, loadTaskletRecords, type TaskletRecord } from "@core/storage/taskStorage"
+import type { Task, TaskletHost } from "@core/task"
+import { loadTaskletRecords, savedSettledRecord } from "@core/storage/taskStorage"
 import { acquireTaskLock } from "@core/task/TaskLockUtils"
 import { serializeTaskError, type TaskRunOutcome } from "@core/task/TaskRunOutcome"
 import { SurfaceAdapter } from "@core/task/tools/adapters/SurfaceAdapter"
-import type { CompletionCommitResult, IGoalTrait, TaskletInspection, TaskletInteraction } from "@core/task/tools/interfaces/IToolEnvironment"
-import { TaskStatus } from "@shared/ExtensionMessage"
+import type { CompletionCommitResult, IGoalTrait } from "@core/task/tools/interfaces/IToolEnvironment"
 import { combineCardSequences } from "@shared/combineCardSequences"
 import { getApiUsageKnowledge, getApiMetrics } from "@shared/getApiMetrics"
-import type { GoalAccounting, GoalRecord, GoalChildStatus, GoalTaskSummary, GoalViewState } from "@shared/goal"
+import type { GoalAccounting, GoalRecord, GoalVerificationSummary, GoalViewState } from "@shared/goal"
 import { GOAL_MODE_SWITCHING_EXPLANATION, isActiveGoalStatus, isResumableGoalStatus } from "@shared/goal"
 import { type GoalHistoryItem, type HistoryItem, isGoalHistoryItem } from "@shared/HistoryItem"
 import { Logger } from "@shared/services/Logger"
@@ -53,7 +52,7 @@ export class GoalLoop {
 	private followUpEndReason?: string
 	private coordinatorInteractionCount = 0
 
-	constructor(private readonly dependencies: GoalLoopDependencies) {}
+	constructor(private readonly dependencies: GoalLoopDependencies) { }
 
 	get goalId(): string {
 		return this.dependencies.goalId
@@ -152,7 +151,7 @@ export class GoalLoop {
 	}
 
 	async inspect(): Promise<GoalViewState> {
-		return goalViewState(await this.dependencies.store.read(this.goalId), await loadGoalTaskSummaries(this.goalId, this.coordinator?.taskletHost?.list()), this.isFollowUpActive, this.hasRunningCoordinator)
+		return goalViewState(await this.dependencies.store.read(this.goalId), await loadGoalVerification(this.goalId, this.coordinator?.taskletHost), this.isFollowUpActive, this.hasRunningCoordinator)
 	}
 
 	async publishHistory(): Promise<void> {
@@ -482,9 +481,9 @@ export class GoalLoop {
 			"<goal_active_tasks>",
 			...(active.length
 				? active.map(
-						(child) =>
-							`- ${child.id} | ${child.title}`,
-					)
+					(child) =>
+						`- ${child.id} | ${child.title}`,
+				)
 				: ["- none"]),
 			"</goal_active_tasks>",
 		].join("\n")
@@ -560,9 +559,8 @@ function transitionForOutcome(outcome: TaskRunOutcome): { status: RequestedEnd; 
 	}
 }
 
-function goalViewState(record: GoalRecord, children: GoalTaskSummary[], followUpActive: boolean, hasLocalExecution: boolean): GoalViewState {
+function goalViewState(record: GoalRecord, latestVerification: GoalVerificationSummary | undefined, followUpActive: boolean, hasLocalExecution: boolean): GoalViewState {
 	const now = Date.now()
-	const latestVerification = latestGoalVerification(children)
 	return {
 		id: record.id,
 		status: record.status,
@@ -574,8 +572,6 @@ function goalViewState(record: GoalRecord, children: GoalTaskSummary[], followUp
 		updatedAt: record.updatedAt,
 		wallDurationMs: goalWallDurationAt(record, now),
 		activeDurationMs: goalActiveDurationAt(record, now),
-		children,
-		pendingInteractionCount: children.reduce((total, child) => total + child.pendingInteractionCount, 0),
 		...(latestVerification ? { latestVerification } : {}),
 		accounting: record.accounting,
 		mode: "act",
@@ -596,75 +592,34 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
 }
 
-/** Read-only inspection never constructs a host or revives its historical requests. */
-export async function loadGoalTaskSummaries(goalId: string, liveTasklets?: readonly TaskletInspection[]): Promise<GoalTaskSummary[]> {
-	if (liveTasklets) return goalTaskSummaries(liveTasklets)
-	const tasklets = await Promise.all((await loadTaskletRecords(goalId)).map(async (record) => {
-		const events = await loadTaskletEvents({ kind: "tasklet", rootTaskId: goalId, taskletId: record.id })
+/** Observe only the newest verification; no general child summaries or pending-request projection. */
+export async function loadGoalVerification(goalId: string, host?: TaskletHost): Promise<GoalVerificationSummary | undefined> {
+	if (host) {
+		const verification = host.latestObservationForPurpose("goal_verification")
+		if (!verification) return undefined
 		return {
-			...record,
-			interactions: events.flatMap((event) => event.communication.type === "interaction" ? [event.communication.request] : []),
+			id: verification.taskletId,
+			title: verification.title,
+			status: verification.state,
+			createdAt: verification.createdAt,
+			...(verification.outcome ? terminalSummary(verification.outcome) : {}),
 		}
-	}))
-	return goalTaskSummaries(tasklets)
-}
-
-/** Pure display projection; storage reads and runtime ownership remain with GoalLoop. */
-export function goalTaskSummaries(tasklets: readonly (TaskletRecord & {
-	interactions: readonly TaskletInteraction[]
-	executionStatus?: TaskStatus
-	outcomePersisted?: boolean
-})[]): GoalTaskSummary[] {
-	return tasklets.map((tasklet) => taskletSummary(
-		tasklet.outcomePersisted === false ? { ...tasklet, outcome: undefined } : tasklet,
-		tasklet.interactions,
-		tasklet.executionStatus,
-	)).sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
-}
-
-/** Creation order is deterministic even when disk enumeration or timestamps tie. */
-export function latestGoalVerification(children: readonly GoalTaskSummary[]): GoalTaskSummary | undefined {
-	return children.filter((child) => child.role === "verification")
+	}
+	const record = (await loadTaskletRecords(goalId))
+		.filter((child) => child.purpose === "goal_verification")
 		.sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))[0]
-}
-
-function taskletSummary(
-	record: TaskletRecord,
-	interactions: readonly TaskletInteraction[],
-	executionStatus?: TaskStatus,
-): GoalTaskSummary {
-	const pending = record.outcome ? [] : interactions.filter((interaction) => interaction.status === "pending")
-	const firstPending = pending[0]
-	const terminal = record.outcome ? terminalSummary(record.outcome) : undefined
+	if (!record) return undefined
+	const { outcome } = await savedSettledRecord(record)
 	return {
 		id: record.id,
 		title: record.title,
-		role: record.purpose === "goal_verification" ? "verification" : "task",
-		status: record.outcome?.kind ?? liveChildStatus(executionStatus, pending.length),
 		createdAt: record.createdAt,
-		...terminal,
-		pendingInteractionCount: pending.length,
-		...(firstPending ? {
-			pendingInteraction: {
-				id: firstPending.id,
-				kind: firstPending.card.requireApproval ? "approval" : firstPending.card.requireFeedback ? "feedback" : "action",
-				createdAt: firstPending.createdAt,
-			},
-		} : {}),
+		status: outcome ? (outcome.kind === "cancelled" ? "interrupted" : outcome.kind) : "unsettled",
+		...(outcome ? terminalSummary(outcome) : {}),
 	}
 }
 
-function liveChildStatus(executionStatus: TaskStatus | undefined, pendingInteractionCount: number): GoalChildStatus {
-	// Without a committed outcome, a saved record proves acceptance only. Engine
-	// completion/cancellation flags do not prove the final persistence boundary.
-	if (!executionStatus || executionStatus === TaskStatus.IDLE || executionStatus === TaskStatus.COMPLETED || executionStatus === TaskStatus.CANCELLED) {
-		return "accepted"
-	}
-	if (pendingInteractionCount) return "waiting"
-	return executionStatus === TaskStatus.PREPARING ? "starting" : "running"
-}
-
-function terminalSummary(outcome: TaskRunOutcome): Pick<GoalTaskSummary, "endedAt" | "terminalSummary"> {
+function terminalSummary(outcome: TaskRunOutcome): Pick<GoalVerificationSummary, "endedAt" | "terminalSummary"> {
 	switch (outcome.kind) {
 		case "completed": return { endedAt: outcome.completedAt, terminalSummary: outcome.response }
 		case "failed": return { endedAt: outcome.failedAt, terminalSummary: `${outcome.error.name}: ${outcome.error.message}` }

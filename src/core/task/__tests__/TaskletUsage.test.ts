@@ -74,7 +74,10 @@ describe("TaskletHost durable usage attribution", () => {
 					outcome.resolve({ kind: "interrupted", reason: "Owner interrupted", interruptedAt: 124 })
 				}),
 				retirePersistence: sandbox.stub().resolves(),
-				messageStateHandler: { getApiConversationHistory: () => [], getDiracMessages: () => [] },
+				messageStateHandler: {
+					getApiConversationHistory: () => [], getDiracMessages: () => [],
+					getPresentationOffset: () => -1, getPresentationStateGeneration: () => 0,
+				},
 			},
 		}
 	}
@@ -145,7 +148,7 @@ describe("TaskletHost durable usage attribution", () => {
 			escalateInteraction: sandbox.stub(),
 			hasPendingUserInput: () => false,
 			withMutationAuthorization: (_toolName, mutation) => mutation(),
-			retainMutationUntil: () => {},
+			retainMutationUntil: () => { },
 			recordTaskletUsage: (id, snapshot) => rootMessages.upsertTaskletUsage(id, taskletUsageTotal(snapshot)),
 		}
 	})

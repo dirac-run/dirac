@@ -78,6 +78,8 @@ export interface ExtensionState {
 	/** Selected presentation surface and the last operation included in a full hydration. */
 	presentationSurfaceId?: string
 	presentationOffset?: number
+	/** Cheap lifecycle aggregate; null clears the previous root's observation. */
+	taskletActivity?: import("./taskletObservation").TaskletActivitySummary | null
 	/** Explicit null clears a previously selected Goal in partial state consumers. */
 	goal?: GoalViewState | null
 	isNewUser: boolean
@@ -488,6 +490,8 @@ export interface Card {
 
 	rawInput?: CardRawInput
 	rawOutput?: CardRawOutput
+	/** Frozen operation result; not a live child execution projection. */
+	taskletReceipt?: import("./taskletReceipt").TaskletReceipt
 	/** Navigation only; never an interaction action or approval. */
 	architectureReference?: import("./architecture").ArchitectureSelection
 	diffs?: CardDiff[]
@@ -548,6 +552,7 @@ export interface CardParams {
 
 	rawInput?: CardRawInput
 	rawOutput?: CardRawOutput
+	taskletReceipt?: import("./taskletReceipt").TaskletReceipt
 	architectureReference?: import("./architecture").ArchitectureSelection
 	diffs?: CardDiff[]
 	locations?: CardLocation[]

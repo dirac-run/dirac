@@ -12,6 +12,7 @@ import { GoalServiceClient, SlashServiceClient, TaskServiceClient } from "@/shar
 import { InteractionState, useInteractionState } from "../context/InteractionStateContext"
 import type { ButtonActionType } from "../utils/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
+import { showAgentsSnapshot } from "../utils/showAgentsSnapshot"
 export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 	const { state: interactionState } = useInteractionState()
 	const backgroundCommandRunning = useSettingsStore((state) => state.backgroundCommandRunning)
@@ -42,6 +43,17 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 	const handleSendMessage = useCallback(
 		async (text: string, images: string[], files: string[]) => {
 			const messageToSend = text.trim()
+			if (messageToSend === "/agents") {
+				if (images.length > 0 || files.length > 0 || activeQuote) {
+					const state = useChatStore.getState()
+					state.appendLocalObservation(state.observationGeneration,
+						"/agents is a local read. Remove attachments and the quote before running it; your draft has been kept.")
+					return
+				}
+				setInputValue("")
+				await showAgentsSnapshot()
+				return
+			}
 			const hasContent = messageToSend || images.length > 0 || files.length > 0
 
 			if (!hasContent) return
@@ -178,6 +190,12 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 		) => {
 			const trimmedInput = text?.trim()
 			const hasContent = trimmedInput || (images && images.length > 0) || (files && files.length > 0)
+			if (trimmedInput === "/agents" &&
+				(actionType === DiracAskResponse.APPROVE || actionType === DiracAskResponse.REJECT ||
+					actionType === "proceed" || actionType === "retry" || actionType === "utility")) {
+				await handleSendMessage(trimmedInput, images ?? [], files ?? [])
+				return
+			}
 
 			const finalCardId = cardId || uiActionState?.activeCardId || ""
 
@@ -344,7 +362,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 					break
 			}
 		},
-		[uiActionState, taskStatus, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled],
+		[uiActionState, taskStatus, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled, handleSendMessage],
 	)
 
 	// Handle task close button click

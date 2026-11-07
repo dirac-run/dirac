@@ -1,4 +1,5 @@
-import type { GoalAccounting, GoalStatus, GoalTaskSummary, GoalViewState } from "@shared/goal"
+import type { GoalAccounting, GoalStatus, GoalViewState } from "@shared/goal"
+import { TASKLET_STATE_LABELS } from "@shared/taskletObservation"
 import { GoalControlRequest } from "@shared/proto/dirac/goal"
 import {
 	AlertTriangleIcon,
@@ -94,26 +95,16 @@ function AccountingMetrics({ accounting }: { accounting: GoalAccounting }) {
 	)
 }
 
-function ChildSummary({ child }: { child: GoalTaskSummary }) {
+function VerificationSummary({ verification }: { verification: NonNullable<GoalViewState["latestVerification"]> }) {
 	return (
 		<li className="rounded-sm border border-foreground/5 bg-foreground/5 px-2 py-1.5">
 			<div className="flex min-w-0 flex-wrap items-center gap-1.5">
-				<span className="min-w-0 flex-1 truncate text-xs font-medium">{child.title}</span>
+				<span className="min-w-0 flex-1 truncate text-xs font-medium">{verification.title}</span>
 				<Badge className="shrink-0 capitalize" type="default" variant="outline">
-					{child.status}
+					{TASKLET_STATE_LABELS[verification.status]}
 				</Badge>
 			</div>
-			<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-description">
-				{child.runningDurationMs !== undefined && <span>Running {formatDuration(child.runningDurationMs)}</span>}
-				{child.idleDurationMs !== undefined && <span>Idle {formatDuration(child.idleDurationMs)}</span>}
-				{child.pendingInteractionCount > 0 && (
-					<span className="text-warning">
-						{child.pendingInteractionCount} pending request{child.pendingInteractionCount === 1 ? "" : "s"}
-						{child.pendingInteraction ? ` · ${child.pendingInteraction.kind}` : ""}
-					</span>
-				)}
-			</div>
-			{child.terminalSummary && <p className="mb-0 mt-1 line-clamp-2 text-xs text-description">{child.terminalSummary}</p>}
+			{verification.terminalSummary && <p className="mb-0 mt-1 line-clamp-2 text-xs text-description">{verification.terminalSummary}</p>}
 		</li>
 	)
 }
@@ -133,8 +124,6 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 	const stopMenuItemRef = useRef<HTMLButtonElement>(null)
 	const cancelStopRef = useRef<HTMLButtonElement>(null)
 	const objectivePreview = useMemo(() => plainTextObjective(goal.objective.markdown), [goal.objective.markdown])
-	const taskChildren = useMemo(() => goal.children.filter((child) => child.role === "task"), [goal.children])
-	const pendingChildren = useMemo(() => goal.children.filter((child) => child.pendingInteractionCount > 0), [goal.children])
 	const activeStatus = goal.status === "working" || goal.status === "waiting"
 	const canResume = goal.status === "paused" || goal.status === "blocked" || (activeStatus && goal.hasLocalExecution === false)
 	const canPause = activeStatus && goal.hasLocalExecution !== false
@@ -293,29 +282,13 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 						id={detailsId}>
 						<section aria-labelledby={`${detailsId}-status`}>
 							<h3 className="mb-1 mt-0 text-xs font-medium" id={`${detailsId}-status`}>
-								Status and pending work
+								Status
 							</h3>
 							<div className="rounded-sm border border-foreground/5 bg-foreground/5 p-2 text-xs">
 								<p className="m-0 text-description">
 									<span className="font-medium text-foreground">Reason: </span>
 									{goal.statusReason ?? `Goal is ${goal.status}.`}
 								</p>
-								<p className="mb-0 mt-1 text-description">
-									<span className="font-medium text-foreground">Pending: </span>
-									{goal.pendingInteractionCount === 0
-										? "No pending tasklet requests."
-										: `${goal.pendingInteractionCount} pending tasklet request${goal.pendingInteractionCount === 1 ? "" : "s"}.`}
-								</p>
-								{pendingChildren.length > 0 && (
-									<ul className="mb-0 mt-1 list-none space-y-0.5 p-0 text-description">
-										{pendingChildren.map((child) => (
-											<li key={child.id}>
-												{child.title} · {child.pendingInteractionCount} pending request{child.pendingInteractionCount === 1 ? "" : "s"}
-												{child.pendingInteraction ? ` · ${child.pendingInteraction.kind}` : ""}
-											</li>
-										))}
-									</ul>
-								)}
 							</div>
 						</section>
 
@@ -328,23 +301,6 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 							</div>
 						</section>
 
-						<section aria-labelledby={`${detailsId}-tasks`}>
-							<div className="mb-1 flex items-center justify-between gap-2">
-								<h3 className="m-0 text-xs font-medium" id={`${detailsId}-tasks`}>
-									Contained Tasks
-								</h3>
-								<span className="text-[10px] text-description">{taskChildren.length} total</span>
-							</div>
-							{taskChildren.length > 0 ? (
-								<ul className="m-0 flex list-none flex-col gap-1 p-0">
-									{taskChildren.map((child) => (
-										<ChildSummary child={child} key={child.id} />
-									))}
-								</ul>
-							) : (
-								<p className="mb-0 mt-0 text-xs text-description">No contained Tasks yet.</p>
-							)}
-						</section>
 
 						<section aria-labelledby={`${detailsId}-verification`}>
 							<h3 className="mb-1 mt-0 text-xs font-medium" id={`${detailsId}-verification`}>
@@ -352,7 +308,7 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 							</h3>
 							{goal.latestVerification ? (
 								<ul className="m-0 list-none p-0">
-									<ChildSummary child={goal.latestVerification} />
+									<VerificationSummary verification={goal.latestVerification} />
 								</ul>
 							) : (
 								<p className="mb-0 mt-0 text-xs text-description">No verification result recorded.</p>

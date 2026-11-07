@@ -381,6 +381,12 @@ export class TaskServiceClient extends ProtoBusClient {
 	static async getTaskHistory(request: proto.dirac.GetTaskHistoryRequest): Promise<proto.dirac.TaskHistoryArray> {
 		return this.makeUnaryRequest("getTaskHistory", request, proto.dirac.GetTaskHistoryRequest.toJSON, proto.dirac.TaskHistoryArray.fromJSON)
 	}
+	static async getTaskletInventory(request: proto.dirac.TaskletInventoryRequest): Promise<proto.dirac.String> {
+		return this.makeUnaryRequest("getTaskletInventory", request, proto.dirac.TaskletInventoryRequest.toJSON, proto.dirac.String.fromJSON)
+	}
+	static async getTaskletTranscript(request: proto.dirac.TaskletTranscriptRequest): Promise<proto.dirac.String> {
+		return this.makeUnaryRequest("getTaskletTranscript", request, proto.dirac.TaskletTranscriptRequest.toJSON, proto.dirac.String.fromJSON)
+	}
 	static async askResponse(request: proto.dirac.AskResponseRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("askResponse", request, proto.dirac.AskResponseRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}

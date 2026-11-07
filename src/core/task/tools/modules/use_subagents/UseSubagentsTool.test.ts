@@ -113,6 +113,12 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(createCard.firstCall.args[0].collapsed, true)
 		assert.deepEqual(finalized, [CardStatus.SUCCESS])
 		assert.match(updates[0].body, /Acceptance is not assignment completion/)
+		assert.equal(updates[0].taskletReceipt.operation, "spawn")
+		assert.equal(updates[0].taskletReceipt.outcome, "accepted")
+		assert.deepEqual(
+			updates[0].taskletReceipt.rows.map((row: { title: string; outcome: string }) => [row.title, row.outcome]),
+			[["Inspect code", "accepted"]],
+		)
 		assert.deepEqual(start.firstCall.args[0], {
 			title: "Inspect code",
 			prompt: "Inspect",
@@ -234,7 +240,10 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 		assert.match(results[6].error, /timeout/)
 		assert.equal(start.callCount, 3)
 		assert.deepEqual(finalized, [CardStatus.ERROR])
-		assert.match(updates[0].body, /2 accepted; 6 startup errors/)
+		assert.equal(updates[0].taskletReceipt.outcome, "partial_failure")
+		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "accepted").length, 2)
+		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "failed").length, 6)
+		assert.match(updates[0].body, /Utility model is unavailable/)
 	})
 
 	for (const outcome of [

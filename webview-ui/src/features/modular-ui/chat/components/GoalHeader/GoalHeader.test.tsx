@@ -38,8 +38,6 @@ function createGoal(status: GoalStatus, overrides: Partial<GoalViewState> = {}):
 		updatedAt: 1_700_000_010_000,
 		wallDurationMs: 120_000,
 		activeDurationMs: 90_000,
-		children: [],
-		pendingInteractionCount: 0,
 		accounting: { totalTokens: 1_200, cost: 0.125 },
 		mode: "act",
 		modeSwitchingDisabled: true,
@@ -72,12 +70,9 @@ describe("GoalHeader", () => {
 					latestVerification: {
 						id: "verification-1",
 						title: "Review Goal UI",
-						role: "verification",
 						status: "completed",
 						createdAt: 1_700_000_001_000,
 						endedAt: 1_700_000_002_000,
-						pendingInteractionCount: 0,
-						idleDurationMs: 0,
 						terminalSummary: "All checks passed.",
 					},
 				})}
@@ -99,34 +94,20 @@ describe("GoalHeader", () => {
 			within(details)
 				.getAllByRole("heading", { level: 3 })
 				.map((heading) => heading.textContent),
-		).toEqual(["Status and pending work", "Objective", "Contained Tasks", "Latest verification", "Timing and accounting"])
+		).toEqual(["Status", "Objective", "Latest verification", "Timing and accounting"])
 		expect(within(details).getByText("All checks passed.")).toBeInTheDocument()
 		expect(within(details).queryByText("Revision 3")).not.toBeInTheDocument()
 	})
 
-	it("renders saved acceptance and every pending tasklet request without fabricated activity", async () => {
+	it("leaves generic agent observation to the common count and local snapshot surfaces", async () => {
 		const user = userEvent.setup()
-		render(<GoalHeader goal={createGoal("paused", {
-			pendingInteractionCount: 2,
-			children: [{
-				id: "saved-handle",
-				title: "Saved tasklet",
-				role: "task",
-				status: "accepted",
-				createdAt: 1_700_000_000_000,
-				pendingInteractionCount: 2,
-				pendingInteraction: { id: "request-1", kind: "approval", createdAt: 1_700_000_000_001 },
-			}],
-		})} />)
+		render(<GoalHeader goal={createGoal("paused", { hasLocalExecution: false })} />)
 		await user.click(screen.getByRole("button", { name: "Expand Goal details" }))
 		const details = screen.getByRole("region", { name: "Goal operational details" })
-		expect(within(details).getByText("accepted")).toBeInTheDocument()
-		expect(within(details).getByText("2 pending tasklet requests.")).toBeInTheDocument()
-		expect(within(details).getByText("Saved tasklet · 2 pending requests · approval")).toBeInTheDocument()
-		expect(within(details).getByText("2 pending requests · approval")).toBeInTheDocument()
-		expect(within(details).queryByText(/Running/)).not.toBeInTheDocument()
-		expect(within(details).queryByText(/Idle/)).not.toBeInTheDocument()
-		expect(within(details).queryByText(/user interactions/)).not.toBeInTheDocument()
+		expect(within(details).getByText("Goal is paused.")).toBeInTheDocument()
+		expect(within(details).queryByText("Contained Tasks")).not.toBeInTheDocument()
+		expect(within(details).queryByText(/pending tasklet|pending request/)).not.toBeInTheDocument()
+		expect(within(details).getByText("No verification result recorded.")).toBeInTheDocument()
 	})
 
 	it("shows only the contextual primary lifecycle action", () => {

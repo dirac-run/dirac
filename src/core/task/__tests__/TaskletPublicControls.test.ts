@@ -11,7 +11,6 @@ import { getSavedPresentationHistory, saveApiConversationHistory, saveDiracMessa
 import { loadTaskletEvents, loadTaskletRecords, saveTaskletEvents } from "@core/storage/taskStorage"
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { isTaskletId } from "@shared/taskletId"
-import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { getTaskletUsage, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { CardKind, CardStatus, DiracMessageType, TaskStatus, type DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
@@ -58,6 +57,7 @@ describe("TaskletsTool public controls", () => {
 		assertPermissionAllowed: sinon.SinonStub
 		escalateInteraction: sinon.SinonStub
 		hasPendingUserInput: sinon.SinonStub
+		postTaskletActivity: sinon.SinonStub
 	}
 	const approved = { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE }
 	const rejected = { action: DiracAskResponse.REJECT, response: DiracAskResponse.REJECT }
@@ -92,6 +92,8 @@ describe("TaskletsTool public controls", () => {
 			messageStateHandler: {
 				getApiConversationHistory: () => conversation,
 				getDiracMessages: () => presentation,
+				getPresentationOffset: () => 0,
+				getPresentationStateGeneration: () => 0,
 			},
 		}
 		return { task, outcome, params, conversation, presentation }
@@ -105,15 +107,15 @@ describe("TaskletsTool public controls", () => {
 		cards = []
 		rootMessages = undefined
 		sandbox.stub(AgentConfigLoader, "getInstance").returns({
-			ready: async () => {},
+			ready: async () => { },
 			getCachedConfig: (name: string) =>
 				name === "Research"
 					? {
-							name: "Research",
-							description: "Research assignment",
-							systemPrompt: "Investigate independently",
-							tools: ["read_file"],
-						}
+						name: "Research",
+						description: "Research assignment",
+						systemPrompt: "Investigate independently",
+						tools: ["read_file"],
+					}
 					: undefined,
 			resolveSubagentNameForTool: (name: string) => (name === "subagent_research" ? "Research" : undefined),
 			isDynamicSubagentTool: (name: string) => name === "subagent_research",
@@ -126,12 +128,13 @@ describe("TaskletsTool public controls", () => {
 		owner = {
 			taskId: "root",
 			executionProfile: "standalone",
-			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => {} }),
+			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub().resolves(rejected),
 			hasPendingUserInput: sandbox.stub().returns(false),
+			postTaskletActivity: sandbox.stub().resolves(),
 			withMutationAuthorization: (_toolName, mutation) => mutation(),
-			retainMutationUntil: () => {},
+			retainMutationUntil: () => { },
 		}
 		options = {
 			workingConfiguration: createTaskWorkingConfiguration({
@@ -241,10 +244,10 @@ describe("TaskletsTool public controls", () => {
 			},
 			...(permission
 				? {
-						permissionRequestKind: "manual_tool" as const,
-						permissionOperation: { kind: "commands" as const, commands: ["echo private"] },
-						toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
-					}
+					permissionRequestKind: "manual_tool" as const,
+					permissionOperation: { kind: "commands" as const, commands: ["echo private"] },
+					toolCall: { name: "execute_command", arguments: { commands: ["echo private"] } },
+				}
 				: {}),
 		}
 	}
@@ -252,7 +255,7 @@ describe("TaskletsTool public controls", () => {
 	function registerInteraction(child: ReturnType<typeof controlledTask>, cardId: string, permission = false) {
 		const cancellation = new AbortController()
 		const waiting = child.params.tasklet!.counterparty.requestInteraction(request(cardId, permission), cancellation.signal)
-		void waiting.catch(() => {}) // Retirement assertions own the original rejection.
+		void waiting.catch(() => { }) // Retirement assertions own the original rejection.
 		const requestId = host.inspect(child.params.taskId!).interactions.at(-1)!.id
 		return { waiting, cancellation, requestId }
 	}
@@ -307,20 +310,9 @@ describe("TaskletsTool public controls", () => {
 			ts: 1,
 			content: { type: DiracMessageType.MARKDOWN, role: "user", content: "Parent assignment" },
 		})
-		owner.projectTasklet = (data) => rootMessages!.upsertTaskletPresentation(data)
 		owner.recordTaskletUsage = (id, usage) => rootMessages!.upsertTaskletUsage(id, taskletUsageTotal(usage))
 	}
 
-	function presentation(id: string) {
-		const message = rootMessages!.getDiracMessages().find((message) => message.id === `tasklet:${id}`)
-		assert.ok(message)
-		assert.equal(message.content.type, DiracMessageType.CARD)
-		if (message.content.type !== DiracMessageType.CARD) assert.fail("Expected tasklet card")
-		assert.equal(message.content.card.id, message.id)
-		const data = readTaskletPresentation(message.content.card)
-		assert.ok(data)
-		return { card: message.content.card, data }
-	}
 
 	it("returns generic and named acceptance without joining, and always constructs Act children", async () => {
 		for (const toolName of ["use_subagents", "subagent_research"]) {
@@ -636,42 +628,58 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(lifecycle.length, 2)
 	})
 
-	it("projects non-actionable running/waiting/terminal state and restores it without restarting children", async () => {
+	it("observes sixteen independent tasklets without publishing trajectories into parent history", async () => {
 		await projectRoot()
-		const { id } = await host.start({ title: "Projected child", prompt: "Inspect projection" })
+		const { id } = await host.start({ title: "Child 0", prompt: "Work" })
+		await Promise.all(Array.from({ length: 15 }, (_, index) => host.start({ title: `Child ${index + 1}`, prompt: "Work" })))
+		const sourceId = host.observationSourceId
+		const readPresentation = sandbox.spy(children[0].task.messageStateHandler, "getDiracMessages")
+		const fullInspection = sandbox.spy(host, "inspect")
+		const publications = owner.postTaskletActivity.callCount
+		assert.equal(publications, 16)
+		assert.deepEqual(host.observationSummary(), { rootTaskId: "root", sourceId, availability: "live", activeCount: 16 })
+		assert.equal(host.observationInventory("active").length, 16)
+		sinon.assert.notCalled(readPresentation)
+		sinon.assert.notCalled(fullInspection)
 		await children[0].params.tasklet!.postStateToOwner()
-		assert.equal(presentation(id).data.status, "running")
+		await children[0].params.tasklet!.postPresentationToOwner!()
+		assert.equal(owner.postTaskletActivity.callCount, publications)
 		const pending = registerInteraction(children[0], "question")
-		await host.prepareEventDelivery()
-		assert.equal(presentation(id).data.status, "waiting")
-		assert.equal(presentation(id).card.requireApproval, undefined)
-		assert.equal(presentation(id).card.actions, undefined)
+		assert.equal(host.observationInventory().find((row) => row.taskletId === id)!.state, "waiting_for_parent")
+		assert.equal(host.observationSummary().activeCount, 16)
+		const transcript = await host.readObservationTranscript(id)
+		assert.strictEqual(transcript.messages, children[0].presentation, "Live reads borrow history for bounded paging")
+		assert.equal("conversation" in transcript, false)
+		assert.equal(transcript.outcome, undefined)
 		await message(id, { type: "reply", reply_to: pending.requestId, text: "Continue" })
 		await pending.waiting
+		assert.equal(host.observationInventory().find((row) => row.taskletId === id)!.state, "running")
 		children[0].outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })
-		await call({ operation: "interrupt", tasklet_id: id })
-		assert.equal(presentation(id).data.status, "completed")
-		assert.ok(presentation(id).data.result!.length < fullText.length)
-		assert.ok(!presentation(id).card.body!.includes(id))
+		await host["children"].get(id)!.settlement
+		assert.equal(host.observationInventory().find((row) => row.taskletId === id)!.state, "completed")
+		assert.equal(host.observationInventory("active").length, 15)
+		assert.equal(host.observationSummary().activeCount, 15)
+		assert.equal(owner.postTaskletActivity.callCount, publications + 1)
+		assert.deepEqual(rootMessages!.getDiracMessages().map((entry) => entry.id), ["root-user"])
 		await host.shutdown()
 		await rootMessages!.saveDiracMessagesAndUpdateHistory()
 		const saved = await getSavedPresentationHistory("root")
 		rootMessages!.setDiracMessages(saved.messages, saved.lastOffset)
 		host = new TaskletHost(owner, options, constructed as unknown as typeof Task)
+		assert.notEqual(host.observationSourceId, sourceId)
 		await host.reconstruct()
 		await host.reconcileRootProjection()
-		sinon.assert.calledOnce(constructed)
-		assert.equal(presentation(id).data.status, "completed")
-		assert.equal(rootMessages!.getDiracMessages().filter((entry) => entry.id === `tasklet:${id}`).length, 1)
+		assert.equal(constructed.callCount, 16)
+		assert.equal(host.observationSummary().activeCount, 0)
+		assert.equal(host.observationInventory("all").length, 16)
+		assert.deepEqual(rootMessages!.getDiracMessages().map((entry) => entry.id), ["root-user"])
 	})
 
-	it("keeps projection failure informational and persists resolutions/outcomes without unhandled rejections", async () => {
+	it("keeps activity-publication failure informational without losing resolution, settlement or resumption", async () => {
 		expectLoggerErrors()
 		await projectRoot()
+		owner.postTaskletActivity.rejects(new Error("Controlled display failure"))
 		const { id } = await host.start({ title: "Display failure", prompt: "Work" })
-		await children[0].params.tasklet!.postStateToOwner()
-		const project = owner.projectTasklet!
-		owner.projectTasklet = sandbox.stub().rejects(new Error("Controlled display failure"))
 		const answered = registerInteraction(children[0], "answered")
 		assert.equal((await message(id, { type: "reply", reply_to: answered.requestId, text: "Continue" })).status, "resolved")
 		await answered.waiting
@@ -682,17 +690,18 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(stopped.outcome?.kind, "completed")
 		assert.equal(stopped.outcomePersisted, true)
 		assert.equal(stopped.settlementError, undefined)
-		assert.equal(stopped.presentationError?.message, "Controlled display failure")
+		assert.equal(host.observationSummary().activeCount, 0)
 		const events = await loadTaskletEvents(address(id))
 		assert.deepEqual(
 			events.flatMap((event) => (event.communication.type === "interaction" ? [event.communication.request.status] : [])),
 			["resolved", "retired"],
 		)
 		assert.equal(events.filter((event) => event.communication.type === "outcome").length, 1)
-		owner.projectTasklet = project
+		owner.postTaskletActivity.resolves()
 		await call({ operation: "resume", tasklet_id: id })
-		await children[1].params.tasklet!.postStateToOwner()
-		assert.equal((await inspect(id)).presentationError, undefined)
+		assert.equal(host.observationSummary().activeCount, 1)
+		assert.equal(host.observationInventory()[0].state, "running")
+		assert.equal((await host.readObservationTranscript(id)).outcome, undefined)
 	})
 
 	it("replaces cumulative usage exactly once across repeated snapshots, reconstruction and explicit resume", async () => {

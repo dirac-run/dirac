@@ -25,6 +25,7 @@ import { getTaskDirectoryPath } from "../storage/taskDirectory"
 import { readPresentationHistory } from "../storage/conversationHistory"
 import { Task } from "../task"
 import type { PresentationSnapshot } from "../task/message-state"
+import type { TaskletActivitySummary } from "@shared/taskletObservation"
 import type { ITaskHost } from "../task/types/task-host"
 import { AuthController } from "./auth/AuthController"
 import { Initializer, type InitializerConfig } from "./index-initializer"
@@ -369,6 +370,27 @@ export class Controller implements ITaskHost {
 		await this.statePublicationQueue.requestPublication("presentation")
 	}
 
+	/** Resolve observation without reconstructing, resuming, or falling back across selected Goals. */
+	selectedTaskletObservation() {
+		const task = this.selectedGoalId ? this.goalController.coordinator : this.taskController.task
+		const rootTaskId = this.selectedGoalId ?? task?.taskId
+		if (!rootTaskId) return undefined
+		const host = task?.taskletHost
+		return {
+			rootTaskId,
+			sourceId: host?.observationSourceId ?? `saved:${rootTaskId}`,
+			availability: host ? "live" as const : "saved" as const,
+			host,
+		}
+	}
+
+	private taskletActivitySummary(): TaskletActivitySummary | null {
+		const source = this.selectedTaskletObservation()
+		if (!source) return null
+		if (source.host) return source.host.observationSummary()
+		return { rootTaskId: source.rootTaskId, sourceId: source.sourceId, availability: "saved", activeCount: null }
+	}
+
 	async waitForGoalStartupReconciliation(): Promise<void> {
 		await this.goalController.waitForStartupReconciliation()
 	}
@@ -436,6 +458,7 @@ export class Controller implements ITaskHost {
 		const state: Partial<ExtensionState> = controlState ?? {
 			presentationSurfaceId: surfaceId,
 			presentationOffset: task?.messageStateHandler.getPresentationOffset(),
+			taskletActivity: this.taskletActivitySummary(),
 			activeVoiceStreamId: task?.stateView.activeVoiceStreamId,
 			isApiRequestActive: task?.stateView.isApiRequestActive ?? false,
 			taskStatus: task?.stateView.status ?? TaskStatus.IDLE,
@@ -482,7 +505,7 @@ export class Controller implements ITaskHost {
 		}
 		this.availableToolsFingerprint = nextAvailableToolsFingerprint
 
-		return state
+		return { ...state, taskletActivity: this.taskletActivitySummary() }
 	}
 
 	async updateTaskHistory(item: HistoryItem): Promise<HistoryItem[]> {

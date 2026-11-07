@@ -251,6 +251,7 @@ export class TaskMessenger implements ITaskMessenger {
 			body: params.body || "",
 			rawInput: params.rawInput,
 			rawOutput: params.rawOutput,
+			taskletReceipt: params.taskletReceipt,
 			architectureReference: params.architectureReference,
 			diffs: params.diffs,
 			locations: params.locations,

@@ -24,13 +24,15 @@ vi.mock("@/core/controller/grpc-handler", () => ({
 import { TaskContextProvider, useTaskContext, useTaskState } from "./TaskContext"
 
 let clearTaskContext: (() => void) | undefined
+let observedContext: ReturnType<typeof useTaskContext>
 
 function Harness() {
 	const state = useTaskState()
+	observedContext = useTaskContext()
 	clearTaskContext = useTaskContext().clearState
-	const transcript = state.diracMessages?.map((message) =>
-		message.content.type === DiracMessageType.MARKDOWN ? message.content.content : message.id,
-	).join("|")
+	const transcript = state.diracMessages
+		?.map((message) => (message.content.type === DiracMessageType.MARKDOWN ? message.content.content : message.id))
+		.join("|")
 	return <Text>{`${transcript};${state.taskStatus ?? "no-status"};${state.activeVoiceStreamId ?? "closed"}`}</Text>
 }
 
@@ -62,11 +64,17 @@ describe("TaskContextProvider", () => {
 			stateJson: "{}",
 			presentationJson: JSON.stringify({
 				surfaceId: "task-1",
-				operations: [{
-					offset: 1,
-					type: "create",
-					message: { id: "assistant", ts: 2, content: { type: DiracMessageType.MARKDOWN, content: "a", role: "assistant" } },
-				}],
+				operations: [
+					{
+						offset: 1,
+						type: "create",
+						message: {
+							id: "assistant",
+							ts: 2,
+							content: { type: DiracMessageType.MARKDOWN, content: "a", role: "assistant" },
+						},
+					},
+				],
 			} satisfies PresentationBatch),
 		})
 		await mocks.stateSubscriber?.({
@@ -97,11 +105,13 @@ describe("TaskContextProvider", () => {
 		await vi.waitFor(() => expect(mocks.stateSubscriber).toBeDefined())
 		await mocks.stateSubscriber?.({
 			stateJson: JSON.stringify({
-				diracMessages: [{
-					id: "stream",
-					ts: 1,
-					content: { type: DiracMessageType.MARKDOWN, content: "streaming", role: "assistant" },
-				}],
+				diracMessages: [
+					{
+						id: "stream",
+						ts: 1,
+						content: { type: DiracMessageType.MARKDOWN, content: "streaming", role: "assistant" },
+					},
+				],
 				activeVoiceStreamId: "stream",
 			}),
 		})
@@ -110,6 +120,42 @@ describe("TaskContextProvider", () => {
 		await vi.waitFor(() => expect(app.lastFrame()).toContain("streaming;no-status;closed"))
 		clearTaskContext?.()
 		await vi.waitFor(() => expect(app.lastFrame()).toContain(";no-status;closed"))
+		app.unmount()
+	})
+	it("keeps frozen local snapshots out of authoritative messages and discards stale reads on selection change", async () => {
+		const app = render(
+			<TaskContextProvider controller={{}}>
+				<Harness />
+			</TaskContextProvider>,
+		)
+		await vi.waitFor(() => expect(mocks.stateSubscriber).toBeDefined())
+		const message = { id: "root", ts: 1, content: { type: DiracMessageType.MARKDOWN, content: "root", role: "user" } }
+		await mocks.stateSubscriber?.({
+			stateJson: JSON.stringify({ diracMessages: [message], presentationSurfaceId: "root", presentationOffset: 0 }),
+		})
+		await vi.waitFor(() => expect(observedContext.state.presentationSurfaceId).toBe("root"))
+		const epoch = observedContext.observationEpoch
+		observedContext.appendLocalObservation("Snapshot: 16 active", epoch)
+		await vi.waitFor(() => expect(observedContext.displayMessages).toHaveLength(2))
+		const snapshot = observedContext.displayMessages[1]
+		await mocks.stateSubscriber?.({
+			stateJson: "{}",
+			presentationJson: JSON.stringify({
+				surfaceId: "root",
+				operations: [{ type: "append_markdown", id: "root", text: " updated", offset: 1 }],
+			}),
+		})
+		await vi.waitFor(() => expect(observedContext.state.presentationOffset).toBe(1))
+		expect(observedContext.displayMessages[1]).toBe(snapshot)
+		expect(observedContext.state.diracMessages).toHaveLength(1)
+		observedContext.appendLocalObservation("Snapshot: 12 active", epoch)
+		await vi.waitFor(() => expect(observedContext.displayMessages).toHaveLength(3))
+		await mocks.stateSubscriber?.({
+			stateJson: JSON.stringify({ diracMessages: [], presentationSurfaceId: "other", presentationOffset: -1 }),
+		})
+		await vi.waitFor(() => expect(observedContext.displayMessages).toHaveLength(0))
+		observedContext.appendLocalObservation("Late old-root snapshot", epoch)
+		expect(observedContext.displayMessages).toHaveLength(0)
 		app.unmount()
 	})
 })

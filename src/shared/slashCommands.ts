@@ -7,6 +7,12 @@ export interface SlashCommand {
 
 export const BASE_SLASH_COMMANDS: SlashCommand[] = [
 	{
+		name: "agents",
+		description: "Show a frozen active-agent snapshot locally (not sent to the model)",
+		section: "default",
+		cliCompatible: true,
+	},
+	{
 		name: "smol",
 		description: "Condenses your current context window",
 		section: "default",
@@ -75,7 +81,7 @@ export const CLI_ONLY_COMMANDS: SlashCommand[] = [
 	},
 	{
 		name: "agent",
-		description: "Inspect Dirac and spawned subagent activity",
+		description: "Read agent transcripts in a separate, read-only view",
 		section: "default",
 		cliCompatible: true,
 	},

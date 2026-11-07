@@ -30,6 +30,9 @@ service TaskService {
   rpc toggleTaskFavorite(TaskFavoriteRequest) returns (Empty);
   // Gets filtered task history
   rpc getTaskHistory(GetTaskHistoryRequest) returns (TaskHistoryArray);
+  // Passive, selected-root observation. JSON payloads use shared/taskletObservation.ts.
+  rpc getTaskletInventory(TaskletInventoryRequest) returns (String);
+  rpc getTaskletTranscript(TaskletTranscriptRequest) returns (String);
   // Sends a response to a previous ask operation
   rpc askResponse(AskResponseRequest) returns (Empty);
   // Queues task-level guidance for the next uncommitted model turn
@@ -42,6 +45,26 @@ service TaskService {
   rpc executeQuickWin(ExecuteQuickWinRequest) returns (Empty);
   // Deletes all task history
   rpc deleteAllTaskHistory(EmptyRequest) returns (DeleteAllTaskHistoryCount);
+}
+
+// Read-only requests never construct a Task, supervise a child, or acknowledge events.
+// A source mismatch or incompatible cursor fails explicitly; refresh without a cursor.
+message TaskletInventoryRequest {
+  Metadata metadata = 1;
+  string root_task_id = 2;
+  optional string source_id = 3;
+  string filter = 4;
+  optional string cursor = 5;
+  optional int32 limit = 6;
+}
+
+message TaskletTranscriptRequest {
+  Metadata metadata = 1;
+  string root_task_id = 2;
+  optional string source_id = 3;
+  string tasklet_id = 4;
+  optional string cursor = 5;
+  optional int32 limit = 6;
 }
 
 // Request message for creating a new task
