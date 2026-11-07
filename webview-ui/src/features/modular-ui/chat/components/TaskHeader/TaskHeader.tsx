@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { getEnvironmentColor } from "@/shared/lib/environmentColors"
 import { formatLargeNumber as formatTokenNumber } from "@/shared/lib/format"
 import Thumbnails from "@/shared/ui/Thumbnails"
+import { TaskletActivityIndicator } from "../TaskletActivityIndicator"
 import CopyTaskButton from "./buttons/CopyTaskButton"
 import DeleteTaskButton from "./buttons/DeleteTaskButton"
 import OpenDiskConversationHistoryButton from "./buttons/OpenDiskConversationHistoryButton"
@@ -142,6 +143,8 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({ task, totalCost, cacheHitRate, 
 						</div>
 					</button>
 
+					<TaskletActivityIndicator />
+
 					{isTaskExpanded && (
 						<div className="flex shrink-0 items-center gap-0.5">
 							<CopyTaskButton className={BUTTON_CLASS} taskText={taskText} />
@@ -171,13 +174,13 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({ task, totalCost, cacheHitRate, 
 							(task.content.type === DiracMessageType.MARKDOWN &&
 								task.content.files &&
 								task.content.files.length > 0)) && (
-							<div className="px-1">
-								<Thumbnails
-									files={(task.content.type === DiracMessageType.MARKDOWN ? task.content.files : []) ?? []}
-									images={(task.content.type === DiracMessageType.MARKDOWN ? task.content.images : []) ?? []}
-								/>
-							</div>
-						)}
+								<div className="px-1">
+									<Thumbnails
+										files={(task.content.type === DiracMessageType.MARKDOWN ? task.content.files : []) ?? []}
+										images={(task.content.type === DiracMessageType.MARKDOWN ? task.content.images : []) ?? []}
+									/>
+								</div>
+							)}
 
 						<div className="border-t border-foreground/5 pt-2">
 							<ContextWindow lastApiReqInfo={lastApiReqInfo} onSendMessage={onSendMessage} />

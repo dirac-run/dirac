@@ -27,6 +27,7 @@ import {
 } from "@/shared/ui/dialog"
 import MarkdownBlock from "@/shared/ui/MarkdownBlock"
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover"
+import { TaskletActivityIndicator } from "../TaskletActivityIndicator"
 
 type GoalAction = "resume" | "pause" | "stop"
 
@@ -180,6 +181,8 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 							{objectivePreview || "Untitled Goal"}
 						</span>
 					</button>
+
+					<TaskletActivityIndicator />
 
 					<output
 						aria-atomic="true"
