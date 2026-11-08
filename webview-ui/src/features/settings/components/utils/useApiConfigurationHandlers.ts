@@ -1,8 +1,10 @@
 import { ApiConfiguration } from "@shared/api"
+import { isProviderSetupField } from "@shared/providerSetupFields"
 import { Mode } from "@shared/ExtensionMessage"
-import { UpdateApiConfigurationPartialRequest, UpdateApiConfigurationRequest } from "@shared/proto/dirac/models"
+import { UpdateApiConfigurationPartialRequest } from "@shared/proto/dirac/models"
 import { convertApiConfigurationToProto } from "@shared/proto-conversions/models/api-configuration-conversion"
-import { useCallback } from "react"
+import { useCallback, useContext } from "react"
+import { ProviderSetupContext } from "./ProviderSetupContext"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { ModelsServiceClient } from "@/shared/api/grpc-client"
 
@@ -14,10 +16,12 @@ const apiConfigurationFieldRevisions = new Map<keyof ApiConfiguration, number>()
 
 export const useApiConfigurationHandlers = () => {
 	const planActSeparateModelsSetting = useSettingsStore((state) => state.planActSeparateModelsSetting)
+	const contextProvider = useContext(ProviderSetupContext)
 
-	const handleFieldsChange = useCallback(async (updates: Partial<ApiConfiguration>): Promise<boolean> => {
+	const handleFieldsChange = useCallback(async (updates: Partial<ApiConfiguration>, setupProvider = contextProvider): Promise<boolean> => {
 		const fields = Object.keys(updates) as (keyof ApiConfiguration)[]
-		if (fields.length === 0) return true
+		if (fields.length === 0 && !setupProvider) return true
+		const setupOnly = fields.every(isProviderSetupField)
 
 		const store = useSettingsStore.getState()
 		const previousConfig = store.apiConfiguration as ApiConfiguration
@@ -45,20 +49,14 @@ export const useApiConfigurationHandlers = () => {
 			const configurationToPersist = { ...persistedBase, ...updates }
 
 			try {
-				if (fields.includes("openAiCompatibleProfiles")) {
-					await ModelsServiceClient.updateApiConfigurationProto(
-						UpdateApiConfigurationRequest.create({
-							apiConfiguration: convertApiConfigurationToProto(configurationToPersist),
-						}),
-					)
-				} else {
-					await ModelsServiceClient.updateApiConfigurationPartial(
-						UpdateApiConfigurationPartialRequest.create({
-							apiConfiguration: convertApiConfigurationToProto(configurationToPersist),
-							updateMask: fields as string[],
-						}),
-					)
-				}
+				await ModelsServiceClient.updateApiConfigurationPartial(
+					UpdateApiConfigurationPartialRequest.create({
+						apiConfiguration: convertApiConfigurationToProto(updates),
+						updateMask: fields as string[],
+						setupOnly,
+						setupProvider: setupOnly ? setupProvider : undefined,
+					}),
+				)
 
 				persistedApiConfiguration = configurationToPersist
 				const currentStore = useSettingsStore.getState()
@@ -78,7 +76,7 @@ export const useApiConfigurationHandlers = () => {
 						apiConfigurationFieldRevisions.get(field) === revision &&
 						Object.is(currentConfig[field], updates[field])
 					) {
-						;(rollback as Record<keyof ApiConfiguration, unknown>)[field] = previousConfig[field]
+						; (rollback as Record<keyof ApiConfiguration, unknown>)[field] = previousConfig[field]
 					}
 				}
 
@@ -101,7 +99,7 @@ export const useApiConfigurationHandlers = () => {
 
 		apiConfigurationPersistenceQueue = operation.then(() => undefined)
 		return operation
-	}, [])
+	}, [contextProvider])
 
 	const handleFieldChange = useCallback(
 		async <K extends keyof ApiConfiguration>(field: K, value: ApiConfiguration[K]): Promise<boolean> =>

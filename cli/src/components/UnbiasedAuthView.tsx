@@ -8,18 +8,19 @@ import { fetch } from "@/shared/net"
 import { openExternal } from "@/utils/env"
 import { theme } from "../constants/theme"
 import { useStdinContext } from "../context/StdinContext"
-import { applyProviderConfig } from "../utils/provider-config"
+import { applyProviderConfig, saveProviderSetup } from "../utils/provider-config"
 import { copyToClipboardNative } from "../utils/clipboard"
 import type { Controller } from "@/core/controller"
 import { StateManager } from "@/core/storage/StateManager"
 
 interface UnbiasedAuthViewProps {
 	controller?: Controller
+	setupOnly?: boolean
 	onComplete: () => void | Promise<void>
 	onCancel: () => void
 }
 
-export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, onComplete, onCancel }) => {
+export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, setupOnly = false, onComplete, onCancel }) => {
 	const { isRawModeSupported } = useStdinContext()
 	const [grant, setGrant] = useState<UnbiasedDeviceGrant>()
 	const [error, setError] = useState<string>()
@@ -55,7 +56,8 @@ export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, 
 				await stateManager.flushPendingState()
 				// A cancelled sign-in may still issue a key; save it, but do not switch providers.
 				if (abort.signal.aborted) return
-				await applyProviderConfig({ providerId: "unbiased", apiKey: token.accessToken, modelId: "pareto", controller })
+				if (setupOnly) await saveProviderSetup({ providerId: "unbiased", apiKey: token.accessToken, controller })
+				else await applyProviderConfig({ providerId: "unbiased", apiKey: token.accessToken, modelId: "pareto", controller })
 				await completeRef.current()
 			} catch (failure) {
 				if (!abort.signal.aborted || committingRef.current) {
@@ -67,7 +69,7 @@ export const UnbiasedAuthView: React.FC<UnbiasedAuthViewProps> = ({ controller, 
 			}
 		})()
 		return () => abort.abort()
-	}, [attempt, controller])
+	}, [attempt, controller, setupOnly])
 
 	useInput(
 		(input, key) => {

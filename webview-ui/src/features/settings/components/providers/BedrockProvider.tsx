@@ -393,7 +393,7 @@ export const BedrockProvider = ({ showModelOptions, isPopup, currentMode }: Bedr
 					</Tooltip>
 				)}
 
-				{selectedModelInfo.supportsPromptCache && (
+				{showModelOptions && selectedModelInfo.supportsPromptCache && (
 					<Tooltip>
 						<TooltipContent hidden={remoteConfigSettings?.awsBedrockUsePromptCache === undefined}>
 							This setting is managed by your organization's remote configuration

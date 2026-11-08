@@ -21,8 +21,6 @@ export interface TaskletInspectionSource {
 	inspection: TaskletInspection
 	events: TaskletEvent[]
 	readConversation: () => Promise<DiracStorageMessage[]>
-	/** The persisted inherited prefix, including on explicit resumption. */
-	inheritedMessageCount: number
 }
 
 function preview(text: string, length = 600): string {
@@ -48,31 +46,30 @@ export function summarizeTasklet(inspection: TaskletInspection): TaskletSummary 
 	return {
 		id: inspection.id,
 		title: preview(inspection.title, 300),
+		...(inspection.role === undefined ? {} : { role: inspection.role }),
 		createdAt: inspection.createdAt,
 		executionStatus: inspection.executionStatus,
 		pendingRequestCount: inspection.interactions.filter((request) => request.status === "pending").length,
 		...(progress ? { latestProgress: preview(progress.text) } : {}),
-		...(inspection.configuration ? { timeoutSeconds: inspection.configuration.timeoutSeconds } : {}),
 		lastActivityAt: inspection.lastActivityAt,
-		...(inspection.outcome ? {} : { deadlineAt: inspection.deadlineAt }),
 		backgroundCommandRunning: inspection.backgroundCommandRunning,
 		outcomePersisted: inspection.outcomePersisted,
 		...(inspection.outcomePersisted && inspection.outcome ? { outcome: summarizeOutcome(inspection.outcome) } : {}),
 		...(inspection.settlementError
 			? {
-					settlementError: {
-						name: preview(inspection.settlementError.name, 100),
-						message: preview(inspection.settlementError.message),
-					},
-				}
+				settlementError: {
+					name: preview(inspection.settlementError.name, 100),
+					message: preview(inspection.settlementError.message),
+				},
+			}
 			: {}),
 		...(inspection.presentationError
 			? {
-					presentationError: {
-						name: preview(inspection.presentationError.name, 100),
-						message: preview(inspection.presentationError.message),
-					},
-				}
+				presentationError: {
+					name: preview(inspection.presentationError.name, 100),
+					message: preview(inspection.presentationError.message),
+				},
+			}
 			: {}),
 		...(inspection.usage ? { usage: taskletUsageTotal(inspection.usage) } : {}),
 	}
@@ -111,7 +108,7 @@ function jsonBytes(value: unknown): number {
 export function pageInspectionItems<T>(
 	items: readonly T[],
 	query: TaskletInspectionQuery = {},
-	identity: Pick<TaskletInspectionPage, "title" | "taskletId"> = {},
+	identity: Pick<TaskletInspectionPage, "title" | "taskletId" | "role"> = {},
 ): TaskletInspectionPage<T> {
 	const limit = validateQuery(query)
 	const scope = fingerprint(JSON.stringify([identity.taskletId, query.view, query.callId, query.messageType]))
@@ -283,7 +280,7 @@ export async function inspectTasklet(
 	const pageQuery = { ...query, view }
 	const { inspection, events } = source
 	const page = <T>(items: readonly T[]) =>
-		pageInspectionItems(items, pageQuery, { taskletId: inspection.id, title: preview(inspection.title, 300) })
+		pageInspectionItems(items, pageQuery, { taskletId: inspection.id, title: preview(inspection.title, 300), ...(inspection.role === undefined ? {} : { role: inspection.role }) })
 	if (view === "status") {
 		const lastRecordedCommunicationAt = events.reduce(
 			(latest, event) => Math.max(latest, event.createdAt),
@@ -328,9 +325,7 @@ export async function inspectTasklet(
 	}
 	if ((view === "call" || view === "result") && !query.callId)
 		throw new Error("Inspection callId is required for the selected view")
-	if (!Number.isInteger(source.inheritedMessageCount) || source.inheritedMessageCount < 0)
-		throw new Error("Inherited message count must be a non-negative integer")
-	const conversation = (await source.readConversation()).slice(source.inheritedMessageCount)
+	const conversation = await source.readConversation()
 	if (view === "transcript") return page(conversation)
 	const { calls, results } = recordedTools(conversation)
 	if (view === "trajectory") {

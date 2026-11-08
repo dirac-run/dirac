@@ -10,11 +10,12 @@ import { GlobalFileNames } from "@core/storage/fileNames"
 import { DiracMessageType, type Card } from "@shared/ExtensionMessage"
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { createTaskletPresentationCard, readTaskletPresentation, type TaskletPresentationData } from "@shared/taskletPresentation"
+import { taskletReceiptRowTitle } from "@shared/taskletReceipt"
 import { MessageStateHandler } from "../message-state"
 import { TaskState } from "../TaskState"
 
 const data: TaskletPresentationData = {
-	taskletId: "stable-child", title: "Review changes", prompt: "Check correctness", createdAt: 123,
+	taskletId: "Planck 2", title: "Review changes", prompt: "Check correctness", createdAt: 123,
 	status: "completed", result: "Complete", activity: [], communications: [],
 	usage: { tokensIn: 100, tokensOut: 20, cacheWrites: 0, cacheReads: 0, cost: 0.5, reasoningTokens: 3 },
 }
@@ -40,6 +41,17 @@ describe("Historical tasklet presentation and passive saved reads", () => {
 		await fs.rm(directory, { recursive: true, force: true })
 	})
 
+	it("formats saved custom/default roles consistently without inventing a legacy role", () => {
+		for (const role of ["Reviewer", "default", undefined]) {
+			const identity = { taskletId: "Feynman", title: "Review changes", role }
+			const expected = `Feynman${role ? ` (${role})` : ""} — Review changes`
+			const card = createTaskletPresentationCard({ ...data, ...identity })
+			assert.equal(card.header, expected)
+			assert.equal(taskletReceiptRowTitle(identity), expected)
+			assert.equal(readTaskletPresentation(card)?.role, role)
+		}
+	})
+
 	it("reads legacy cards without restoring a live projector or double-counting their usage", async () => {
 		const root = handler()
 		const card = createTaskletPresentationCard(data)
@@ -52,6 +64,8 @@ describe("Historical tasklet presentation and passive saved reads", () => {
 		const historical = (restored.getDiracMessages()[0].content as { card: Card }).card
 		assert.equal(readTaskletPresentation(historical)?.result, "Complete")
 		assert.equal(historical.requireApproval, undefined)
+		assert.equal(historical.header, "Planck 2 — Review changes")
+		assert.match(historical.body!, /Planck 2 — Review changes/)
 		assert.equal(historical.requireFeedback, undefined)
 		assert.equal(historical.actions, undefined)
 		assert.equal("upsertTaskletPresentation" in restored, false)

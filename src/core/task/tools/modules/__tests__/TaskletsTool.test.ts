@@ -4,7 +4,7 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import type { TaskletReceipt } from "@shared/taskletReceipt"
 import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
 import { normalizeOptionalToolParameters } from "../../runtime/normalizeOptionalToolParameters"
-import { TaskletsTool, tasklets_spec } from "../use_subagents/UseSubagentsTool"
+import { TaskletsTool, tasklets_spec } from "../subagents/SubagentsTool"
 
 function fixture(controls: Partial<TaskletControls> = {}) {
 	const finalized: CardStatus[] = []
@@ -127,7 +127,7 @@ describe("TaskletsTool input and result contracts", () => {
 			),
 			page,
 		)
-		assert.equal(updates[0].header, "Inspect tool result · Review storage")
+		assert.equal(updates[0].header, "Inspect tool result · a — Review storage")
 		assert.equal((updates[0].taskletReceipt as TaskletReceipt).outcome, "retrieved")
 	})
 
@@ -208,7 +208,7 @@ describe("TaskletsTool input and result contracts", () => {
 		})
 		await new TaskletsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
 		const receipt = updates[0].taskletReceipt as TaskletReceipt
-		assert.equal(updates[0].header, "Inspect pending requests · Audit protocol")
+		assert.equal(updates[0].header, "Inspect pending requests · child — Audit protocol")
 		assert.equal(receipt.outcome, "retrieved")
 		assert.equal(receipt.returnedCount, 0)
 		assert.equal(receipt.rows[0].observedState, undefined)

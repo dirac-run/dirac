@@ -101,9 +101,9 @@ function buildCombinedWebviewPatches(
 		...(request.vscodeTerminalExecutionMode === undefined || request.vscodeTerminalExecutionMode === ""
 			? {}
 			: {
-					vscodeTerminalExecutionMode:
-						request.vscodeTerminalExecutionMode === "backgroundExec" ? "backgroundExec" : "vscodeTerminal",
-				}),
+				vscodeTerminalExecutionMode:
+					request.vscodeTerminalExecutionMode === "backgroundExec" ? "backgroundExec" : "vscodeTerminal",
+			}),
 	}
 	if (request.browserSettings !== undefined) {
 		persistedSettings.browserSettings = buildBrowserSettingsWebview(
@@ -115,6 +115,7 @@ function buildCombinedWebviewPatches(
 	if (normalizedToolToggles !== undefined) persistedSettings.toolToggles = normalizedToolToggles
 
 	const activeSettings: Partial<Settings> = { ...persistedSettings }
+	delete activeSettings.subagentRoles
 	if (request.browserSettings !== undefined && activeConfiguration) {
 		activeSettings.browserSettings = buildBrowserSettingsWebview(
 			activeConfiguration.settings.browserSettings as Settings["browserSettings"],
@@ -159,6 +160,7 @@ function requestAddressesActiveTask(
 	normalizedToolToggles: Record<string, boolean> | undefined,
 ): boolean {
 	const activeSettings = buildWebviewSettingsPatch(request)
+	delete activeSettings.subagentRoles
 	delete activeSettings.shellIntegrationTimeout
 	delete activeSettings.terminalOutputLineLimit
 	return (
@@ -186,10 +188,10 @@ async function commitWebviewSettings(
 	const activeTaskPatch =
 		controller.task && requestAddressesActiveTask(request, normalizedToolToggles)
 			? (current: TaskWorkingConfiguration) => {
-					previousActiveTerminalProfile = current.settings.defaultTerminalProfile
-					preparedUpdate = buildCombinedWebviewPatches(controller, request, current, normalizedToolToggles)
-					return preparedUpdate.activePatch
-				}
+				previousActiveTerminalProfile = current.settings.defaultTerminalProfile
+				preparedUpdate = buildCombinedWebviewPatches(controller, request, current, normalizedToolToggles)
+				return preparedUpdate.activePatch
+			}
 			: undefined
 	let terminalProfileChange: TerminalProfileChangeResult | undefined
 	const persist = async () => {

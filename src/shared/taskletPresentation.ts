@@ -1,5 +1,6 @@
 import { CardStatus, DiracMessageType, type Card, type DiracMessage } from "./ExtensionMessage"
 import type { TaskletUsage } from "./taskletUsage"
+import { formatTaskletLabel } from "./taskletLabel"
 
 export type TaskletPresentationStatus = "running" | "waiting" | "completed" | "failed" | "interrupted"
 
@@ -7,6 +8,7 @@ export type TaskletPresentationStatus = "running" | "waiting" | "completed" | "f
 export interface TaskletPresentationData {
 	taskletId: string
 	title: string
+	role?: string
 	prompt: string
 	createdAt: number
 	status: TaskletPresentationStatus
@@ -83,7 +85,7 @@ export function createTaskletPresentationCard(data: TaskletPresentationData): Ca
 	}[data.status]
 	return {
 		id: `tasklet:${data.taskletId}`,
-		header: data.title,
+		header: formatTaskletLabel(data),
 		status,
 		renderType: "text",
 		collapsed: true,
@@ -91,7 +93,7 @@ export function createTaskletPresentationCard(data: TaskletPresentationData): Ca
 		rawInput: { isTasklet: true, taskletId: data.taskletId },
 		rawOutput: { tasklet: bounded },
 		body: [
-			`${data.title} · ${data.status}`,
+			`${formatTaskletLabel(data)} · ${data.status}`,
 			bounded.result,
 			data.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
 		]

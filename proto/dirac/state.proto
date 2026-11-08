@@ -77,6 +77,21 @@ message ModelProviderSelection {
   optional LanguageModelChatSelector vs_code_lm_model_selector = 5;
   optional bool aws_bedrock_custom_selected = 6;
   optional string aws_bedrock_custom_model_base_id = 7;
+  optional string reasoning_effort = 8;
+  optional int64 thinking_budget_tokens = 9;
+  optional string gemini_thinking_level = 10;
+}
+
+message SubagentRole {
+  string name = 1;
+  string description = 2;
+  bool enabled = 3;
+  optional ModelProviderSelection model_selection = 4;
+}
+
+// Presence distinguishes an omitted catalog from an explicitly empty catalog.
+message SubagentRoles {
+  repeated SubagentRole roles = 1;
 }
 
 // NOTE: Add the new secret fields under SECRETS_KEYS in src/shared/storage/state-keys.ts
@@ -311,6 +326,7 @@ message Settings {
   optional string plan_mode_inference_speed = 214;
   optional string act_mode_inference_speed = 215;
   optional bool cli_vim_mode = 216;
+  optional SubagentRoles subagent_roles = 217;
 }
 
 message State {
@@ -458,6 +474,7 @@ message UpdateSettingsRequest {
   optional bool low_verbosity_enabled = 53;
   optional bool utility_model_use_permission_handling = 54;
   optional string utility_model_permission_policy = 55;
+  optional SubagentRoles subagent_roles = 56;
 }
 
 message UserApprovedCommandsUpdate {

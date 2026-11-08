@@ -22,7 +22,7 @@ function createSubagentCard(overrides: Partial<Card> = {}): Card {
 function createTaskletCard(status: TaskletPresentationStatus, overrides: Partial<Card> = {}): Card {
 	return {
 		...createTaskletPresentationCard({
-			taskletId: "tl-stable",
+			taskletId: "Planck 2",
 			title: "Review implementation",
 			prompt: "Inspect the interface",
 			createdAt: 1_000,
@@ -139,7 +139,7 @@ describe("tasklet header rendering", () => {
 			}),
 		)
 		expect(view.container.textContent).toContain("Review implementation")
-		expect(view.container.textContent).not.toContain("tl-stable")
+		expect(view.container.textContent).toContain("Planck 2 — Review implementation")
 		view.unmount()
 	})
 

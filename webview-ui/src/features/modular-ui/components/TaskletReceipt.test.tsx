@@ -19,7 +19,7 @@ const inspection: TaskletReceipt = {
 	operation: "inspect",
 	outcome: "retrieved",
 	view: "pending",
-	rows: [{ operation: "inspect", title: "Audit protocol", outcome: "retrieved" }],
+	rows: [{ operation: "inspect", taskletId: "Planck 2", title: "Audit protocol", role: "Reviewer", outcome: "retrieved" }],
 	returnedCount: 0,
 	totalCount: 0,
 }
@@ -27,7 +27,7 @@ const inspection: TaskletReceipt = {
 describe("tasklet operation receipts", () => {
 	it("labels the inspected subject independently from the operation outcome", () => {
 		render(<ModularCardHeader card={receiptCard(inspection)} contentId="body" isCollapsed onToggleCollapse={vi.fn()} />)
-		expect(screen.getByText("Inspect pending requests · Audit protocol")).toBeInTheDocument()
+		expect(screen.getByText("Inspect pending requests · Planck 2 (Reviewer) — Audit protocol")).toBeInTheDocument()
 		expect(screen.getByText("Retrieved")).toBeInTheDocument()
 		expect(screen.queryByText("Completed")).not.toBeInTheDocument()
 		expect(screen.queryByText("Pending")).not.toBeInTheDocument()
@@ -38,7 +38,7 @@ describe("tasklet operation receipts", () => {
 			operation: "message",
 			outcome: "partial_failure",
 			rows: [
-				{ operation: "guidance", title: "Audit", outcome: "queued", message: "Check persistence first" },
+				{ operation: "guidance", taskletId: "Gödel", title: "Audit", outcome: "queued", message: "Check persistence first" },
 				{
 					operation: "permission_decision",
 					title: "Build",
@@ -61,6 +61,7 @@ describe("tasklet operation receipts", () => {
 		expect(screen.getByText("Queued")).toBeInTheDocument()
 		expect(screen.getByText("Failed")).toBeInTheDocument()
 		expect(screen.getByText("Check persistence first")).toBeInTheDocument()
+		expect(screen.getByText("Gödel — Audit")).toBeInTheDocument()
 		expect(screen.getByText(/this request only, within parent authority/)).toBeInTheDocument()
 		expect(screen.getByText(/Authority changed/)).toBeInTheDocument()
 		expect(screen.getByText(/consumption is not confirmed/)).toBeInTheDocument()

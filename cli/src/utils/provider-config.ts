@@ -3,15 +3,16 @@
  * Used by both AuthView (onboarding) and SettingsPanelContent (settings)
  */
 
-import type { ApiProvider } from "@shared/api"
+import type { ApiConfiguration, ApiProvider } from "@shared/api"
 import {
 	getProviderModelIdKey,
 	isSecretKey,
 	ProviderToApiKeyMap,
 	ProviderToBaseUrlKeyMap,
 	type SecretKey,
+	type SettingsKey,
 } from "@shared/storage"
-import { applyApiConfigurationTransaction } from "@/core/controller/models/apiConfigurationTransaction"
+import { applyApiConfigurationTransaction, applyProviderSetupTransaction } from "@/core/controller/models/apiConfigurationTransaction"
 import type { Controller } from "@/core/controller"
 import { refreshOpenRouterModels } from "@/core/controller/models/refreshOpenRouterModels"
 import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
@@ -28,23 +29,28 @@ import { getDefaultModelId, getModelList } from "./model-metadata"
 async function persistProviderConfigurationWithRollback(
 	stateManager: StateManager,
 	config: Record<string, unknown>,
+	addedProvider?: ApiProvider,
 ): Promise<void> {
-	const previousApiConfiguration = structuredClone(stateManager.getApiConfiguration()) as Record<string, unknown>
 	const rollbackConfiguration = Object.fromEntries(
 		Object.keys(config).map((key) => [
 			key,
 			isSecretKey(key)
 				? stateManager.getSecretKey(key as SecretKey)
-				: previousApiConfiguration[key],
+				: structuredClone(stateManager.getSystemDefaultSettingsKey(key as SettingsKey)),
 		]),
 	)
 
-	stateManager.setApiConfiguration(config as Record<string, string>)
+	const previousAddedProviders = addedProvider ? [...stateManager.getSystemDefaultSettingsKey("addedApiProviders")] : undefined
 	try {
+		stateManager.setApiConfiguration(config as Record<string, string>)
+		if (addedProvider && previousAddedProviders) {
+			stateManager.setGlobalState("addedApiProviders", [...new Set([...previousAddedProviders, addedProvider])])
+		}
 		await stateManager.flushPendingState()
 	} catch (error) {
 		try {
 			stateManager.setApiConfiguration(rollbackConfiguration as Record<string, string>)
+			if (previousAddedProviders) stateManager.setGlobalState("addedApiProviders", previousAddedProviders)
 			await stateManager.flushPendingState()
 		} catch (rollbackError) {
 			throw new AggregateError([error, rollbackError], "Provider configuration persistence and rollback failed")
@@ -149,38 +155,7 @@ export async function applyProviderConfig(options: ApplyProviderConfigOptions): 
 		}
 	}
 
-	// Add API key if provided (maps to provider-specific field like anthropicApiKey, openAiApiKey, etc.)
-	if (apiKey) {
-		const keyField = ProviderToApiKeyMap[providerId as keyof typeof ProviderToApiKeyMap]
-		if (keyField) {
-			const fields = Array.isArray(keyField) ? keyField : [keyField]
-			config[fields[0]] = apiKey
-		}
-	}
-
-	// Add base URL if provided (for OpenAI-compatible providers)
-	if (baseUrl !== undefined) {
-		let normalizedBaseUrl = baseUrl.trim()
-		if (normalizedBaseUrl) {
-			// Normalize URL: strip trailing /chat/completions and trailing slashes
-			// The OpenAI SDK appends /chat/completions automatically.
-			normalizedBaseUrl = normalizedBaseUrl.replace(/\/chat\/completions\/?$/, "")
-			normalizedBaseUrl = normalizedBaseUrl.replace(/\/+$/, "")
-		}
-
-		const baseUrlKey = ProviderToBaseUrlKeyMap[providerId as ApiProvider]
-		if (baseUrlKey) {
-			config[baseUrlKey] = normalizedBaseUrl
-		} else {
-			// Fallback for generic OpenAI compatible
-			config.openAiBaseUrl = normalizedBaseUrl
-		}
-	}
-
-	// Add Azure API version if provided
-	if (azureApiVersion) {
-		config.azureApiVersion = azureApiVersion
-	}
+	Object.assign(config, buildProviderSetupPatch({ providerId, apiKey, baseUrl, azureApiVersion }))
 
 	const candidateConfiguration = { ...stateManager.getApiConfiguration(), ...config }
 	if (controller) {
@@ -193,8 +168,7 @@ export async function applyProviderConfig(options: ApplyProviderConfigOptions): 
 		)
 		await controller.postStateToWebview()
 	} else {
-		stateManager.setApiConfiguration(config as Record<string, string>)
-		await stateManager.flushPendingState()
+		await persistProviderConfigurationWithRollback(stateManager, config)
 	}
 }
 
@@ -258,9 +232,7 @@ export async function applyBedrockConfig(options: ApplyBedrockConfigOptions): Pr
 	const config: Record<string, unknown> = {
 		actModeApiProvider: "bedrock",
 		planModeApiProvider: "bedrock",
-		awsAuthentication: bedrockConfig.awsAuthentication,
-		awsRegion: bedrockConfig.awsRegion,
-		awsUseCrossRegionInference: bedrockConfig.awsUseCrossRegionInference,
+		...buildBedrockSetupPatch(bedrockConfig),
 	}
 
 	// Add model ID (use provided, existing from state, or fall back to default)
@@ -305,11 +277,6 @@ export async function applyBedrockConfig(options: ApplyBedrockConfigOptions): Pr
 		config.planModeAwsBedrockCustomSelected = false
 	}
 
-	// Add optional AWS credentials
-	if (bedrockConfig.awsProfile !== undefined) config.awsProfile = bedrockConfig.awsProfile
-	if (bedrockConfig.awsAccessKey) config.awsAccessKey = bedrockConfig.awsAccessKey
-	if (bedrockConfig.awsSecretKey) config.awsSecretKey = bedrockConfig.awsSecretKey
-	if (bedrockConfig.awsSessionToken) config.awsSessionToken = bedrockConfig.awsSessionToken
 
 	const candidateConfiguration = { ...stateManager.getApiConfiguration(), ...config }
 	if (controller) {
@@ -322,7 +289,67 @@ export async function applyBedrockConfig(options: ApplyBedrockConfigOptions): Pr
 		)
 		await controller.postStateToWebview()
 	} else {
-		stateManager.setApiConfiguration(config as Record<string, string>)
-		await stateManager.flushPendingState()
+		await persistProviderConfigurationWithRollback(stateManager, config)
 	}
+}
+
+export type SaveProviderSetupOptions = Omit<ApplyProviderConfigOptions, "modelId"> & {
+	headers?: Record<string, string>
+}
+
+/** Build access/setup fields only; saving access must not choose a model. */
+function buildProviderSetupPatch(options: SaveProviderSetupOptions): ApiConfiguration {
+	const { providerId, apiKey, baseUrl, azureApiVersion } = options
+	const config: Record<string, unknown> = {}
+	if (apiKey !== undefined) {
+		const keyField = ProviderToApiKeyMap[providerId as ApiProvider]
+		if (keyField) config[Array.isArray(keyField) ? keyField[0] : keyField] = apiKey
+	}
+	if (baseUrl !== undefined) {
+		const baseUrlKey = ProviderToBaseUrlKeyMap[providerId as ApiProvider]
+		if (!baseUrlKey && baseUrl.trim()) throw new Error("Base URL is not supported for this provider")
+		if (baseUrlKey) config[baseUrlKey] = baseUrl.trim().replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "")
+	}
+	if (azureApiVersion !== undefined) config.azureApiVersion = azureApiVersion
+	if (options.headers !== undefined) {
+		if (providerId !== "openai") throw new Error("Custom headers are not supported by this provider setup form")
+		config.openAiHeaders = options.headers
+	}
+	return config as ApiConfiguration
+}
+
+function buildBedrockSetupPatch(config: BedrockConfig): ApiConfiguration {
+	return {
+		awsAuthentication: config.awsAuthentication,
+		awsRegion: config.awsRegion,
+		awsUseCrossRegionInference: config.awsUseCrossRegionInference,
+		awsUseProfile: config.awsAuthentication === "profile",
+		...(config.awsBedrockEndpoint !== undefined ? { awsBedrockEndpoint: config.awsBedrockEndpoint.trim() } : {}),
+		...(config.awsProfile !== undefined ? { awsProfile: config.awsProfile } : {}),
+		...(config.awsAccessKey !== undefined ? { awsAccessKey: config.awsAccessKey } : {}),
+		...(config.awsSecretKey !== undefined ? { awsSecretKey: config.awsSecretKey } : {}),
+		...(config.awsSessionToken !== undefined ? { awsSessionToken: config.awsSessionToken } : {}),
+	}
+}
+
+async function persistProviderSetup(provider: ApiProvider, patch: ApiConfiguration, controller?: Controller): Promise<void> {
+	const stateManager = StateManager.get()
+	await applyProviderSetupTransaction(controller ?? { stateManager }, patch, () =>
+		persistProviderConfigurationWithRollback(stateManager, patch as Record<string, unknown>, provider),
+	)
+	await controller?.postStateToWebview()
+}
+
+/** Save API-key, keyless endpoint or completed OAuth setup without activating it. */
+export async function saveProviderSetup(options: SaveProviderSetupOptions): Promise<void> {
+	const patch = buildProviderSetupPatch(options)
+	if (options.providerId === "openai-codex" || options.providerId === "github-copilot") {
+		const credentialKey = `${options.providerId}-oauth-credentials` as const
+		patch[credentialKey] = StateManager.get().getSecretKey(credentialKey)
+	}
+	await persistProviderSetup(options.providerId as ApiProvider, patch, options.controller)
+}
+
+export async function saveBedrockSetup(options: Pick<ApplyBedrockConfigOptions, "bedrockConfig" | "controller">): Promise<void> {
+	await persistProviderSetup("bedrock", buildBedrockSetupPatch(options.bedrockConfig), options.controller)
 }

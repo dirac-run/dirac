@@ -19,6 +19,7 @@ import {
 	type ApiConfiguration,
 } from "@shared/api"
 import type { ModelProviderPreset, ModelProviderSelection } from "@shared/api"
+import { DEFAULT_SUBAGENT_ROLES, type SubagentRole } from "@shared/subagentRoles"
 import { fromProtobufModels } from "@shared/proto-conversions/models/typeConversion"
 import { fromProtobufOpenAiCodexUsage } from "@shared/proto-conversions/openai-codex-usage"
 import {
@@ -43,8 +44,11 @@ interface SettingsState {
 	apiConfigurationError?: string
 	pendingApiConfigurationUpdates: Partial<ApiConfiguration>
 	modelProviderPresets: ModelProviderPreset[]
+	configuredApiProviders: NonNullable<ExtensionState["configuredApiProviders"]>
+	addedApiProviders: NonNullable<ExtensionState["addedApiProviders"]>
 	utilityModelEnabled: boolean
 	utilityModelSelection?: ModelProviderSelection
+	subagentRoles: SubagentRole[]
 	utilityModelUseCondense: boolean
 	utilityModelUseGenerateCommitMessage: boolean
 	utilityModelUsePermissionHandling: boolean
@@ -72,7 +76,7 @@ interface SettingsState {
 	huggingFaceModels: any
 	requestyModels: any
 	openAiModels: any
-	refreshOpenAiModels: (baseUrl?: string, apiKey?: string) => Promise<void>
+	refreshOpenAiModels: (baseUrl?: string, apiKey?: string, headers?: Record<string, string>) => Promise<void>
 	githubCopilotModels: any
 	githubCopilotIsAuthenticated: boolean
 	githubCopilotEmail?: string
@@ -192,6 +196,7 @@ interface SettingsState {
 }
 
 let openAiCodexUsageRefreshGeneration = 0
+let openAiModelsRefreshGeneration = 0
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
 	autoApprovalSettings: DEFAULT_AUTO_APPROVAL_SETTINGS,
@@ -265,8 +270,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 	apiConfigurationError: undefined,
 	pendingApiConfigurationUpdates: {},
 	modelProviderPresets: [],
+	configuredApiProviders: [],
+	addedApiProviders: [],
 	utilityModelEnabled: false,
 	utilityModelSelection: undefined,
+	subagentRoles: structuredClone(DEFAULT_SUBAGENT_ROLES),
 	utilityModelUseCondense: true,
 	utilityModelUseGenerateCommitMessage: true,
 	utilityModelUsePermissionHandling: false,
@@ -349,13 +357,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 			set({ openRouterModelRankings: [] })
 		}
 	},
-	refreshOpenAiModels: async (baseUrl?: string, apiKey?: string) => {
+	refreshOpenAiModels: async (baseUrl?: string, apiKey?: string, headers?: Record<string, string>) => {
+		const generation = ++openAiModelsRefreshGeneration
+		set({ openAiModels: {} })
 		if (!baseUrl) return
 		try {
 			const response = await ModelsServiceClient.refreshOpenAiModels(
 				OpenAiModelsRequest.create({
 					baseUrl: baseUrl ?? "",
 					apiKey: apiKey ?? "",
+					headers: headers ?? {},
 				}),
 			)
 			if (response?.values) {
@@ -365,7 +376,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 						...openAiModelInfoSaneDefaults,
 					}
 				})
-				set({ openAiModels: models })
+				if (generation === openAiModelsRefreshGeneration) set({ openAiModels: models })
 			}
 		} catch (error) {
 			console.error("Failed to refresh OpenAI models:", error)

@@ -35,7 +35,8 @@ export async function materializeModelBoundInput(
 	}
 
 	const history = messageState.getApiConversationHistory()
-	const checkpoint = messageState.getApiConversationProviderState().checkpoint
+	const { checkpoint, submittedHistoryLength = 0 } = messageState.getApiConversationProviderState()
+	const lastTurnIsSealed = history.length <= submittedHistoryLength
 	const recordedIds = new Set(history.flatMap((message) => messageInputIds(message, identityField)))
 	const newContent = content.filter((block) => {
 		const ids = block[identityField]!
@@ -44,7 +45,7 @@ export async function materializeModelBoundInput(
 		return true
 	})
 
-	if (newContent.length && checkpoint && checkpoint.compactedThroughHistoryIndex >= history.length - 1) {
+	if (newContent.length && (lastTurnIsSealed || (checkpoint && checkpoint.compactedThroughHistoryIndex >= history.length - 1))) {
 		// An opaque checkpoint cannot see edits to its covered historical user turn.
 		await messageState.addToApiConversationHistory({ role: "user", content: newContent })
 	} else {
@@ -53,7 +54,7 @@ export async function materializeModelBoundInput(
 	}
 
 	const recordedIndices = new Map<string, number>()
-	for (const [index, message] of history.entries()) {
+	for (const [index, message] of messageState.getApiConversationHistory().entries()) {
 		for (const id of messageInputIds(message, identityField)) recordedIndices.set(id, index)
 	}
 	const outboundIds = new Set(outboundHistory.flatMap((message) => messageInputIds(message, identityField)))
@@ -65,7 +66,7 @@ export async function materializeModelBoundInput(
 		for (const id of ids) outboundIds.add(id)
 		return true
 	})
-	if (missingContent.length && checkpoint) {
+	if (missingContent.length && (checkpoint || lastTurnIsSealed)) {
 		// Copied projections may still end at a covered turn (including after a failed write).
 		// Never edit that snapshot; provider checkpoint dispatch uses the authoritative suffix.
 		outboundHistory.push({ role: "user", content: missingContent })

@@ -1,3 +1,4 @@
+import { validateSubagentRoles } from "@shared/subagentRoles"
 import type { ApiConfiguration, ModelProviderPreset } from "@shared/api"
 import {
 	getExplicitDiracSecretsFromEnv,
@@ -32,6 +33,7 @@ export interface StateManagerSettingsCaches {
 }
 
 export function normalizeLoadedSetting<K extends keyof Settings>(key: K, value: Settings[K]): Settings[K] {
+	if (key === "subagentRoles") return validateSubagentRoles(value) as Settings[K]
 	if (typeof value === "string" && (key.endsWith("ModelId") || key.endsWith("ModelBaseId"))) {
 		return normalizeLegacySynthetic1mModelId(value) as Settings[K]
 	}
@@ -61,6 +63,7 @@ export function getSettingWithOverride<K extends keyof Settings>(
 	key: K,
 	caches: Pick<StateManagerSettingsCaches, "sessionOverrideCache" | "taskStateCache" | "globalStateCache">,
 ): Settings[K] {
+	if (key === "subagentRoles" || key === "addedApiProviders") return caches.globalStateCache[key]
 	if (Object.hasOwn(caches.sessionOverrideCache, key)) return caches.sessionOverrideCache[key] as Settings[K]
 	const taskValue = caches.taskStateCache[key]
 	if (taskValue !== undefined) return taskValue
@@ -84,7 +87,7 @@ function resolutionCaches(caches: StateManagerSettingsCaches, explicitOverrides?
 	}
 }
 
-/** Resolve every Settings field through the existing session > task > global precedence. */
+/** Resolve execution settings through session > task > global; role catalogs are always global. */
 export function buildEffectiveSettingsFromCache(
 	caches: StateManagerSettingsCaches,
 	explicitOverrides?: Partial<Settings>,

@@ -1,3 +1,4 @@
+import { convertProtoToSubagentRoles } from "@shared/proto-conversions/subagent-roles"
 import { isValidAutoCondenseContextLimit } from "@shared/context-management"
 import { UpdateSettingsRequest } from "@shared/proto/dirac/state"
 import { convertProtoToModelProviderSelection } from "@shared/proto-conversions/models/api-configuration-conversion"
@@ -12,6 +13,7 @@ import { Controller } from ".."
  */
 export function buildWebviewSettingsPatch(request: UpdateSettingsRequest): Partial<Settings> {
 	const settings: Partial<Settings> = {}
+	if (request.subagentRoles !== undefined) settings.subagentRoles = convertProtoToSubagentRoles(request.subagentRoles)
 	if (request.planActSeparateModelsSetting !== undefined)
 		settings.planActSeparateModelsSetting = request.planActSeparateModelsSetting
 	if (request.enableCheckpointsSetting !== undefined) settings.enableCheckpointsSetting = request.enableCheckpointsSetting

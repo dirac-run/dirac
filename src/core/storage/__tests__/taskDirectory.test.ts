@@ -5,7 +5,8 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
-import { createTaskletId, isTaskletId } from "@/shared/taskletId"
+import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
+import { isTaskletId } from "@shared/taskletId"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { ensureTaskDirectoryExists } from "../directoryEnsurers"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "../taskDirectory"
@@ -124,8 +125,10 @@ describe("task storage addressing", () => {
 		"/absolute",
 		"C:\\escape",
 		"bad\0id",
-		"1710000000000",
-		"tasklet_bad",
+		"Planck ",
+		"Planck.",
+		"bad\nid",
+		"CON",
 	]) {
 		it(`rejects tasklet identity ${JSON.stringify(invalidId)} before creating any directory`, async () => {
 			const address: TaskStorageAddress = { kind: "tasklet", rootTaskId: "root", taskletId: invalidId }

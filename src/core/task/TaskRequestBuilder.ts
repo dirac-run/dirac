@@ -14,7 +14,6 @@ import {
 import { formatResponse } from "@core/formatResponse"
 import { ensureRulesDirectoryExists, ensureTaskDirectoryExists } from "@core/storage/disk"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
-import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
 import { HostProvider } from "@hosts/host-provider"
 import { featureFlagsService } from "@services/feature-flags"
 import { DiracClient } from "@shared/dirac"
@@ -160,7 +159,6 @@ export async function buildApiRequestParams(
 	const globalSkillsToggles = settings.globalSkillsToggles ?? {}
 	const localSkillsToggles = workspaceConfiguration.localSkillsToggles ?? {}
 	const availableSkills = providerSkills.filter(meetsHostCapabilityRequirement).filter((skill) => {
-		if (ctx.taskletConfiguration?.skills && !ctx.taskletConfiguration.skills.includes(skill.name)) return false
 		if (!isSkillAvailableToTaskProfile(ctx.executionProfile, skill)) return false
 		if (settings.yoloModeToggled && skill.interactiveOnly) return false
 		if (skill.source === "builtin") return true
@@ -186,7 +184,9 @@ export async function buildApiRequestParams(
 		providerInfo,
 		editorTabs,
 		supportsBrowserUse,
-		utilityModelConfigured: getConfiguredUtilityModelSelection(settings.utilityModelSelection) !== undefined,
+		subagentRoles: ctx.stateManager.getSystemDefaultSettingsKey("subagentRoles")
+			.filter((role) => role.enabled && role.modelSelection)
+			.map(({ name, description }) => ({ name, description })),
 		skills: availableSkills,
 		globalDiracRulesFileInstructions,
 		localDiracRulesFileInstructions,
@@ -226,21 +226,16 @@ export async function buildApiRequestParams(
 	const { systemPrompt: baseSystemPrompt } = await getSystemPrompt(promptContext, toolSnapshot)
 	const pinnedContext = await ctx.getPinnedContext()
 	const configuration = ctx.taskletConfiguration
-	const configuredPrompt = configuration?.systemPrompt
-		? `${configuration.systemPrompt}\n\n${taskProfileSystemInstructions(ctx.executionProfile) ?? ""}`
-		: baseSystemPrompt
 	const supervisionContext = ctx.getTaskletSupervisionContext?.()
-	const systemPrompt = [
-		configuredPrompt,
-		configuration?.name ? `# Agent Profile\nName: ${configuration.name}\n${configuration.description ?? ""}` : undefined,
-		configuration
-			? `# Execution Deadline\nComplete the assignment within ${configuration.timeoutSeconds} seconds.`
-			: undefined,
+	const instructions = [
+		baseSystemPrompt,
+		configuration?.name && configuration.name !== "default" ? `# Subagent Role\n${configuration.name}` : undefined,
+	].filter(Boolean).join("\n\n")
+	const runtimeContext = [
 		ctx.executionProfile !== "standalone" ? pinnedContext : undefined,
 		supervisionContext ? `# Current Tasklet Supervision\n${supervisionContext}` : undefined,
-	]
-		.filter(Boolean)
-		.join("\n\n")
+	].filter(Boolean).join("\n\n")
+	const systemPrompt = await ctx.apiConversationManager.prepareTranscriptInstructions(instructions, runtimeContext)
 	const boundRequestRuntime = bindToolSnapshotToRequestRuntime(requestRuntime, toolSnapshot)
 	ctx.toolExecutor.activateSnapshot(toolSnapshot, boundRequestRuntime)
 	ctx.taskState.useNativeToolCalls = toolSnapshot.nativeTools.length > 0
@@ -268,24 +263,6 @@ export async function buildApiRequestParams(
 		await ctx.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 	}
 
-	const useAutoCondense = settings.useAutoCondense
-	if (!useAutoCondense) {
-		const lastMessage =
-			contextManagementMetadata.truncatedConversationHistory[
-			contextManagementMetadata.truncatedConversationHistory.length - 1
-			]
-		if (lastMessage && lastMessage.role === "user") {
-			const notice = formatResponse.contextTruncationNotice()
-			if (typeof lastMessage.content === "string") {
-				lastMessage.content += `\n\n${notice}`
-			} else if (Array.isArray(lastMessage.content)) {
-				lastMessage.content.push({
-					type: "text",
-					text: notice,
-				})
-			}
-		}
-	}
 
 	await ctx.writePromptMetadataArtifacts({
 		systemPrompt,

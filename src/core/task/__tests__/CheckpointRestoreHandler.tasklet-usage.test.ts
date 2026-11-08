@@ -15,9 +15,12 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { CheckpointRestoreHandler } from "@integrations/checkpoints/CheckpointRestoreHandler"
 import type { CheckpointStorageManager } from "@integrations/checkpoints/CheckpointStorageManager"
 
+import { extendTranscriptPrefix, TranscriptIntegrityError } from "@core/api/TranscriptPrefix"
+import { GlobalFileNames } from "@core/storage/fileNames"
 function usageMessage(taskletId: string, cost: number): DiracMessage {
 	return {
 		id: `usage-${taskletId}`,
@@ -147,6 +150,40 @@ describe("Checkpoint restore preserves separately attributed tasklet usage", () 
 		await seedHistoricalPresentation(messages, presentationData("second", "waiting"))
 		await messages.flushPendingWrites()
 	}
+
+	it("branches submitted history rather than weakening generic overwrite", async () => {
+		await seedCheckpoint()
+		for (const content of ["retained user", "retained assistant", "discarded"]) {
+			await messages.addToApiConversationHistory({ role: "user", content })
+		}
+		const history = messages.getApiConversationHistory()
+		await messages.overwriteApiConversationProviderState({ submittedHistoryLength: history.length, historyPrefix: extendTranscriptPrefix(undefined, {}, history) })
+		await assert.rejects(messages.overwriteApiConversationHistory(history.slice(0, 2)), TranscriptIntegrityError)
+		await messages.patchMessageById("checkpoint", { conversationHistoryIndex: 0 })
+		assert.deepEqual(await restore.restoreCheckpoint("checkpoint", "taskAndWorkspace"), {})
+		assert.deepEqual(messages.getApiConversationHistory(), history.slice(0, 2))
+		assert.ok(messages.getApiConversationProviderState().historyBranchId)
+		sinon.assert.calledOnce(resetHead)
+	})
+
+	it("preflights unreadable presentation before resetting workspace files", async () => {
+		expectLoggerErrors()
+		await seedCheckpoint()
+		await fs.appendFile(path.join(directory, "tasks", "root", GlobalFileNames.uiMessageOperations), "invalid-json\n")
+		const result = await restore.restoreCheckpoint("checkpoint", "taskAndWorkspace")
+		assert.ok(result.checkpointManagerErrorMessage)
+		sinon.assert.notCalled(resetHead)
+		sinon.assert.notCalled(cancel)
+	})
+
+	it("preflights retained-history integrity before resetting workspace files", async () => {
+		expectLoggerErrors()
+		await seedCheckpoint()
+		sandbox.stub(messages, "validateApiConversationHistoryBranch").throws(new TranscriptIntegrityError("retained prefix"))
+		const result = await restore.restoreCheckpoint("checkpoint", "taskAndWorkspace")
+		assert.ok(result.checkpointManagerErrorMessage)
+		sinon.assert.notCalled(resetHead)
+	})
 
 	for (const restoreType of ["task", "taskAndWorkspace"] as const) {
 		it(`${restoreType}: retains current child snapshots instead of folding them into deleted root usage`, async () => {

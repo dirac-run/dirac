@@ -1,43 +1,47 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
+import { SUBAGENT_NAMES } from "./subagentNames"
 import { createTaskletId, isTaskletId } from "./taskletId"
 
-const TASKLET_ID = "tasklet_12345678-1234-4123-8123-123456789abc"
+describe("root-owned scientist identity", () => {
+	it("exhausts each deduplicated suffix round before advancing", () => {
+		const names = [...new Set(SUBAGENT_NAMES)]
+		assert.ok(names.length < SUBAGENT_NAMES.length, "fixture includes duplicate Faraday")
+		const used = new Set<string>()
+		for (let round = 1; round <= 3; round++) {
+			for (const name of names) {
+				const id = createTaskletId(used)
+				assert.equal(id, round === 1 ? name : `${name} ${round}`)
+				assert.equal(isTaskletId(id), true)
+				assert.equal(used.has(id), false)
+				used.add(id)
+			}
+		}
+		assert.equal(used.size, names.length * 3)
+	})
 
-describe("tasklet identity", () => {
-	it("generates distinct path-independent tasklet IDs instead of canonical timestamp Task IDs", () => {
-		const ids = Array.from({ length: 100 }, () => createTaskletId())
-		assert.equal(new Set(ids).size, ids.length)
-		for (const id of ids) {
+	it("uses the owning root's reservations, not process-global state or presentation history", () => {
+		const firstRoot = new Set<string>()
+		const id = createTaskletId(firstRoot)
+		firstRoot.add(id)
+		assert.equal(createTaskletId(new Set()), id)
+		assert.notEqual(createTaskletId(firstRoot), id)
+	})
+
+	it("fills unused earlier rounds even when later-round IDs are already recorded", () => {
+		assert.equal(createTaskletId(new Set(["Feynman", "Feynman 2", "Planck 2"])), "Planck")
+	})
+
+	it("validates safe opaque segments without parsing the allocation scheme", () => {
+		for (const id of ["Planck 2", "von Neumann", "Schrödinger", "Gödel", "future-id", "1710000000000",
+			"tasklet_12345678-1234-4123-8123-123456789abc"]) {
 			assert.equal(isTaskletId(id), true)
-			assert.equal(/^\d+$/.test(id), false)
-			assert.equal(/[\\/]/.test(id), false)
+			assert.equal(isTaskletId(JSON.parse(JSON.stringify(id))), true)
 		}
 	})
 
-	it("classifies the same serialized handle without runtime or ownership state", () => {
-		assert.equal(isTaskletId(TASKLET_ID), true)
-		assert.equal(isTaskletId(JSON.parse(JSON.stringify(TASKLET_ID))), true)
-	})
-
-	for (const id of [
-		"",
-		"1710000000000",
-		"legacy-task",
-		"tasklet_",
-		"tasklet_not-a-uuid",
-		TASKLET_ID.replace("-4123-", "-1123-"),
-		TASKLET_ID.replace("-8123-", "-7123-"),
-		TASKLET_ID.toUpperCase(),
-		` ${TASKLET_ID}`,
-		`${TASKLET_ID}\n`,
-		`${TASKLET_ID}\0`,
-		`../${TASKLET_ID}`,
-		`..\\${TASKLET_ID}`,
-		`${TASKLET_ID}/..`,
-	]) {
-		it(`rejects non-tasklet or malformed identity ${JSON.stringify(id)}`, () => {
-			assert.equal(isTaskletId(id), false)
-		})
+	for (const id of ["", ".", "..", "../Planck", "Planck/child", "Planck\\child", "C:\\escape",
+		"bad\0id", "bad\nid", " Planck", "Planck ", "Planck.", "CON", "nul.txt", "x".repeat(129)]) {
+		it(`rejects unsafe path segment ${JSON.stringify(id)}`, () => assert.equal(isTaskletId(id), false))
 	}
 })

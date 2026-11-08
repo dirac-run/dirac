@@ -22,14 +22,7 @@ export function requireNonEmptyString(argumentsValue: GoalToolArguments, name: s
 	return value
 }
 
-export function optionalNonEmptyString(argumentsValue: GoalToolArguments, name: string): string | undefined {
-	const value = argumentsValue[name]
-	if (value === undefined) return undefined
-	if (typeof value !== "string" || value.trim().length === 0) {
-		throw new Error(`Parameter '${name}' must be a non-empty string when provided.`)
-	}
-	return value
-}
+
 
 export function goalToolJson(value: unknown): string {
 	return JSON.stringify(value, null, 2)

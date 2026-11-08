@@ -1,3 +1,4 @@
+import { extendTranscriptPrefix, transcriptHash } from "@core/api/TranscriptPrefix"
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/hooks/precompact-executor"
@@ -23,6 +24,30 @@ export class ApiConversationManager {
 
 	private getOperationalApi(): ApiConversationManagerDependencies["api"] {
 		return this.dependencies.getRequestRuntime()?.api ?? this.dependencies.api
+	}
+
+	/** Effective instructions belong to the request generation; changing runtime context is appended. */
+	public async prepareTranscriptInstructions(instructions: string, runtimeContext: string): Promise<string> {
+		const messages = this.dependencies.messageStateHandler
+		const state = messages.getApiConversationProviderState()
+		const previous = state.transcriptInstructions
+		const isCondensing = this.dependencies.taskState.pendingApiConversationCompaction ?? state.pendingCompaction
+		if (runtimeContext && (runtimeContext !== previous?.runtimeContext || isCondensing)) {
+			const history = messages.getApiConversationHistory()
+			const content = { type: "text" as const, text: runtimeContext }
+			if (history.at(-1)?.role === "user" && history.length > (state.submittedHistoryLength ?? 0)) {
+				await messages.appendToLastApiConversationUserMessage(content)
+			} else {
+				await messages.addToApiConversationHistory({ role: "user", content: [content] })
+			}
+		}
+		if (previous?.systemPrompt !== instructions || previous.runtimeContext !== runtimeContext) {
+			await messages.overwriteApiConversationProviderState({
+				...state,
+				transcriptInstructions: { systemPrompt: instructions, latestInstructions: instructions, runtimeContext },
+			})
+		}
+		return instructions
 	}
 
 	public async scheduleProviderConversationCompaction(
@@ -182,8 +207,46 @@ export class ApiConversationManager {
 	}): Promise<{ messages: DiracStorageMessage[]; options: ApiConversationRequestOptions }> {
 		if (this.dependencies.taskState.abort) throw new Error("Task instance aborted")
 
+		const beforeDispatch = this.dependencies.messageStateHandler.getApiConversationProviderState()
+		if (this.dependencies.taskState.pendingApiConversationCompaction ?? beforeDispatch.pendingCompaction) {
+			const instructions = beforeDispatch.transcriptInstructions
+			const tail = this.dependencies.messageStateHandler.getApiConversationHistory().at(-1)
+			const runtimeContext = instructions?.runtimeContext
+			const tailHasContext = tail?.role === "user" && (typeof tail.content === "string"
+				? tail.content === runtimeContext
+				: tail.content.some((block) => block.type === "text" && block.text === runtimeContext))
+			// Automatic truncation can be scheduled after request instructions were
+			// prepared. Re-materialize current context in the retained tail in that case.
+			if (instructions && runtimeContext && !tailHasContext) {
+				await this.prepareTranscriptInstructions(params.systemPrompt, runtimeContext)
+			}
+		}
+
 		const fullHistory = this.dependencies.messageStateHandler.getApiConversationHistory()
 		let providerState = this.dependencies.messageStateHandler.getApiConversationProviderState()
+		// Validate archived input before compaction can send it or replace the active prefix.
+		const historyPrefix = extendTranscriptPrefix(providerState.historyPrefix, {}, fullHistory)
+		const enableNativeWebSearch =
+			this.getOperationalApi().supportsNativeWebSearch?.() === true &&
+			this.dependencies.taskState.activeSkillIds.includes(NATIVE_WEB_SEARCH_SKILL_NAME)
+		// An effective request change starts a linked generation, not a rewrite of
+		// the submitted prefix and not a paid condensation. Validate stored history first.
+		const changedRequest = providerState.transcript !== undefined && providerState.transcript.headerHash !== transcriptHash({
+			providerId: params.providerId, modelId: params.modelId, systemPrompt: params.systemPrompt,
+			tools: params.tools, checkpoint: providerState.checkpoint?.input, enableNativeWebSearch,
+		})
+		if (changedRequest || (providerState.historyBranchId && !providerState.transcript)) {
+			providerState = {
+				...providerState,
+				previousTranscriptId: providerState.transcript?.id ?? providerState.previousTranscriptId,
+				transcript: undefined,
+				checkpoint: undefined,
+				continuationReset: {
+					providerId: params.providerId, modelId: params.modelId,
+					compactedThroughHistoryIndex: fullHistory.length - 1,
+				},
+			}
+		}
 		let checkpoint = this.isCompatibleCheckpoint(
 			providerState.checkpoint,
 			params.providerId,
@@ -206,12 +269,9 @@ export class ApiConversationManager {
 				currentDeletedRange[1] !== targetDeletedRange[1]
 			) {
 				this.dependencies.taskState.conversationHistoryDeletedRange = targetDeletedRange
-				dispatchMessages = this.dependencies.contextManager.getTruncatedMessages(
-					fullHistory,
-					targetDeletedRange,
-				) as DiracStorageMessage[]
 				await this.dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory()
 			}
+			dispatchMessages = this.dependencies.contextManager.getTruncatedMessages(fullHistory, targetDeletedRange) as DiracStorageMessage[]
 			const boundary = fullHistory.length - 1
 			const api = this.getOperationalApi()
 			if (api.compactConversation) {
@@ -238,6 +298,8 @@ export class ApiConversationManager {
 					providerState = {
 						...providerState,
 						checkpoint,
+						transcript: undefined,
+						previousTranscriptId: providerState.transcript?.id ?? providerState.previousTranscriptId ?? providerState.condensedFromTranscriptId,
 						continuationReset: {
 							providerId: params.providerId,
 							modelId: params.modelId,
@@ -257,6 +319,8 @@ export class ApiConversationManager {
 					providerState = {
 						...providerState,
 						checkpoint: undefined,
+						transcript: undefined,
+						previousTranscriptId: providerState.transcript?.id ?? providerState.previousTranscriptId ?? providerState.condensedFromTranscriptId,
 						continuationReset: {
 							providerId: params.providerId,
 							modelId: params.modelId,
@@ -275,6 +339,8 @@ export class ApiConversationManager {
 				providerState = {
 					...providerState,
 					checkpoint: undefined,
+					transcript: undefined,
+					previousTranscriptId: providerState.transcript?.id ?? providerState.previousTranscriptId ?? providerState.condensedFromTranscriptId,
 					continuationReset: {
 						providerId: params.providerId,
 						modelId: params.modelId,
@@ -301,23 +367,32 @@ export class ApiConversationManager {
 			)
 		) {
 			providerState = { ...providerState, continuationReset: undefined }
-			await this.dependencies.messageStateHandler.overwriteApiConversationProviderState(providerState)
 			breakProviderContinuation = false
 		}
 
 		if (providerState.checkpoint && !checkpoint) {
 			providerState = { ...providerState, checkpoint: undefined }
-			await this.dependencies.messageStateHandler.overwriteApiConversationProviderState(providerState)
 		}
 
 		if (this.dependencies.taskState.abort) throw new Error("Task instance aborted")
 
-		const enableNativeWebSearch =
-			this.getOperationalApi().supportsNativeWebSearch?.() === true &&
-			this.dependencies.taskState.activeSkillIds.includes(NATIVE_WEB_SEARCH_SKILL_NAME)
 
+		const messages = structuredClone(checkpoint ? fullHistory.slice(checkpoint.compactedThroughHistoryIndex + 1) : dispatchMessages)
+		const transcript = extendTranscriptPrefix(
+			providerState.transcript,
+			{
+				providerId: params.providerId, modelId: params.modelId, systemPrompt: params.systemPrompt,
+				tools: params.tools, checkpoint: checkpoint?.input, enableNativeWebSearch,
+			},
+			messages.map(removeProviderBoundaryMetadataFromMessage),
+			providerState.previousTranscriptId ?? providerState.condensedFromTranscriptId,
+		)
+		await this.dependencies.messageStateHandler.overwriteApiConversationProviderState({
+			...providerState, transcript, submittedHistoryLength: fullHistory.length,
+			historyPrefix,
+		})
 		return {
-			messages: checkpoint ? fullHistory.slice(checkpoint.compactedThroughHistoryIndex + 1) : dispatchMessages,
+			messages,
 			options: { checkpoint, breakProviderContinuation, enableNativeWebSearch },
 		}
 	}

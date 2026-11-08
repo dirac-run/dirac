@@ -118,7 +118,7 @@ describe("Controller — Auth delegate", () => {
 		sandbox.restore()
 		try {
 			await require("fs/promises").rm(tempDir, { recursive: true, force: true })
-		} catch {}
+		} catch { }
 	})
 
 	it("completeOpenRouterAuth stores the key without selecting OpenRouter when models are not configured", async () => {
@@ -128,23 +128,18 @@ describe("Controller — Auth delegate", () => {
 			planModeApiProvider: "anthropic",
 			actModeApiProvider: "anthropic",
 		} as ApiConfiguration
-		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		sandbox.stub(axios, "post").resolves({ data: { key: "new-openrouter-key-123" } })
 
 		await controller.completeOpenRouterAuth("auth-code-xyz")
 
-		sandbox.assert.calledWith(
+		sandbox.assert.calledOnceWithExactly(
 			(controller as any).stateManager.setApiConfiguration,
-			sinon.match({
-				apiKey: "old-key",
-				openRouterApiKey: "new-openrouter-key-123",
-				planModeApiProvider: "anthropic",
-				actModeApiProvider: "anthropic",
-			}),
+			{ openRouterApiKey: "new-openrouter-key-123" },
 		)
 	})
 
-	it("completeOpenRouterAuth selects OpenRouter for modes with configured models", async () => {
+	it("completeOpenRouterAuth does not activate saved OpenRouter models", async () => {
 		expectLoggerErrors()
 		const currentConfig = {
 			apiKey: "old-key",
@@ -153,18 +148,14 @@ describe("Controller — Auth delegate", () => {
 			planModeOpenRouterModelId: "anthropic/claude-sonnet-4",
 			actModeOpenRouterModelId: "openai/gpt-5",
 		} as ApiConfiguration
-		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		sandbox.stub(axios, "post").resolves({ data: { key: "new-openrouter-key-123" } })
 
 		await controller.completeOpenRouterAuth("auth-code-xyz")
 
-		sandbox.assert.calledWith(
+		sandbox.assert.calledOnceWithExactly(
 			(controller as any).stateManager.setApiConfiguration,
-			sinon.match({
-				openRouterApiKey: "new-openrouter-key-123",
-				planModeApiProvider: "openrouter",
-				actModeApiProvider: "openrouter",
-			}),
+			{ openRouterApiKey: "new-openrouter-key-123" },
 		)
 	})
 
@@ -177,16 +168,11 @@ describe("Controller — Auth delegate", () => {
 	it("completeRequestyAuth sets requesty API key in configuration", async () => {
 		expectLoggerErrors()
 		const currentConfig = { apiKey: "old-key" } as ApiConfiguration
-		;(controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
+			; (controller as any).stateManager.getApiConfiguration = sandbox.stub().returns(currentConfig)
 		await controller.completeRequestyAuth("requesty-api-key-456")
-		sandbox.assert.calledWith(
+		sandbox.assert.calledOnceWithExactly(
 			(controller as any).stateManager.setApiConfiguration,
-			sinon.match({
-				apiKey: "old-key",
-				requestyApiKey: "requesty-api-key-456",
-				planModeApiProvider: "requesty",
-				actModeApiProvider: "requesty",
-			}),
+			{ requestyApiKey: "requesty-api-key-456" },
 		)
 	})
 

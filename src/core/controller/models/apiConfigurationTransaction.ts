@@ -1,9 +1,10 @@
 import { validateApiConfiguration } from "@core/api"
 import type { StateManager } from "@core/storage/StateManager"
 import type { TaskWorkingConfiguration, TaskWorkingConfigurationPatch } from "@core/task/runtime/TaskWorkingConfiguration"
-import type { ApiConfiguration } from "@shared/api"
+import { ALL_PROVIDERS, type ApiConfiguration, type ApiProvider } from "@shared/api"
 import type { Mode } from "@shared/storage/types"
-import { persistApiConfigurationPatch } from "./apiConfigurationPersistence"
+import { isProviderSetupField } from "@shared/providerSetupFields"
+import { persistApiConfigurationPatch, persistProviderSetupPatch } from "./apiConfigurationPersistence"
 
 export type ActiveTaskWorkingConfigurationUpdate =
 	| TaskWorkingConfigurationPatch
@@ -74,4 +75,38 @@ export async function applyApiConfigurationTransaction(
 	}
 
 	await commitWorkingConfigurationUpdate(controller, persist, controller.task ? activeTaskPatch : undefined)
+}
+
+/** Save access/setup without activating a provider or requiring an initial model. */
+export async function applyProviderSetupTransaction(
+	controller: ApiConfigurationTransactionContext,
+	setupPatch: Partial<ApiConfiguration>,
+	persist?: ApiConfigurationPersistence,
+	setupProvider?: ApiProvider,
+): Promise<void> {
+	if (setupProvider !== undefined && !ALL_PROVIDERS.includes(setupProvider)) {
+		throw new Error(`Unknown setup provider: ${setupProvider}`)
+	}
+	for (const field of Object.keys(setupPatch)) {
+		if (!isProviderSetupField(field)) {
+			throw new Error(`Provider setup cannot update execution selection or unsupported field: ${field}`)
+		}
+	}
+	if (setupPatch.openAiCompatibleProfiles) {
+		const names = new Set<string>()
+		for (const profile of setupPatch.openAiCompatibleProfiles) {
+			if (!profile.name.trim() || names.has(profile.name)) {
+				throw new Error("OpenAI-compatible endpoint names must be non-empty and unique")
+			}
+			names.add(profile.name)
+		}
+	}
+	// A live Task must receive fresh setup for Utility and future children. Its
+	// existing boundary validates/builds the unchanged selection before persistence.
+	// Without a Task, access can be saved before any application model is selected.
+	await commitWorkingConfigurationUpdate(
+		controller,
+		persist ?? (() => persistProviderSetupPatch(controller.stateManager, setupPatch, setupProvider)),
+		Object.keys(setupPatch).length > 0 ? { apiConfiguration: setupPatch } : undefined,
+	)
 }

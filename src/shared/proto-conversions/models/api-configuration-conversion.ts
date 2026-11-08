@@ -91,6 +91,7 @@ function convertModelInfoToProtoOpenRouter(info: ModelInfo | undefined): OpenRou
 		cacheWritesPrice: info.cacheWritesPrice,
 		cacheReadsPrice: info.cacheReadsPrice,
 		description: info.description,
+		temperature: info.temperature,
 		thinkingConfig: convertThinkingConfigToProto(info.thinkingConfig),
 		supportsGlobalEndpoint: info.supportsGlobalEndpoint,
 		tiers: info.tiers || [],
@@ -119,6 +120,7 @@ function convertProtoToModelInfo(info: OpenRouterModelInfo | undefined): ModelIn
 		cacheWritesPrice: info.cacheWritesPrice,
 		cacheReadsPrice: info.cacheReadsPrice,
 		description: info.description,
+		temperature: info.temperature,
 		thinkingConfig: convertProtoToThinkingConfig(info.thinkingConfig),
 		supportsGlobalEndpoint: info.supportsGlobalEndpoint,
 		tiers: info.tiers.length > 0 ? info.tiers : undefined,
@@ -404,6 +406,9 @@ export function convertModelProviderSelectionToProto(selection: AppModelProvider
 		vsCodeLmModelSelector: selection.vsCodeLmModelSelector,
 		awsBedrockCustomSelected: selection.awsBedrockCustomSelected,
 		awsBedrockCustomModelBaseId: selection.awsBedrockCustomModelBaseId,
+		reasoningEffort: selection.reasoningEffort,
+		thinkingBudgetTokens: selection.thinkingBudgetTokens,
+		geminiThinkingLevel: selection.geminiThinkingLevel,
 	}
 }
 
@@ -416,6 +421,9 @@ export function convertProtoToModelProviderSelection(selection: ProtoModelProvid
 		vsCodeLmModelSelector: selection.vsCodeLmModelSelector,
 		awsBedrockCustomSelected: selection.awsBedrockCustomSelected,
 		awsBedrockCustomModelBaseId: selection.awsBedrockCustomModelBaseId,
+		reasoningEffort: parseReasoningEffort(selection.reasoningEffort),
+		thinkingBudgetTokens: selection.thinkingBudgetTokens,
+		geminiThinkingLevel: selection.geminiThinkingLevel,
 	}
 }
 

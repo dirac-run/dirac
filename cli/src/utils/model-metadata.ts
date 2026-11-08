@@ -73,6 +73,7 @@ import { getProviderDefaultModelId } from "@/shared/storage/provider-keys";
 import { usesOpenRouterModels } from "./openrouter-models";
 
 export const providerModels: Record<string, { models: Record<string, unknown>; defaultId: string }> = {
+	dify: { models: { "dify-workflow": { supportsPromptCache: false } }, defaultId: "dify-workflow" },
 	anthropic: { models: anthropicModels, defaultId: anthropicDefaultModelId },
 	baseten: { models: basetenModels, defaultId: basetenDefaultModelId },
 	bedrock: { models: bedrockModels, defaultId: bedrockDefaultModelId },
@@ -106,6 +107,7 @@ export interface DynamicModelFetchOptions {
 	controller?: Controller
 	baseUrl?: string
 	apiKey?: string
+	headers?: Record<string, string>
 }
 
 // Single source of truth mapping dynamic providers to their remote catalog loaders.

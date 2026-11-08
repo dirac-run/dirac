@@ -1,3 +1,5 @@
+import { readModeSelection } from "../modelSelectionBinding"
+import { modelProviderSelectionUpdates } from "@shared/modelProviderSelection"
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
 import {
 	type ApiProvider,
@@ -7,7 +9,7 @@ import {
 } from "@shared/api"
 import { isValidAutoCondenseContextLimit } from "@shared/context-management"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
-import { getProviderModelIdKey, ProviderToApiKeyMap, type UtilityModelUseCases } from "@shared/storage"
+import { ProviderToApiKeyMap, type UtilityModelUseCases } from "@shared/storage"
 import { isOpenaiReasoningEffort, type OpenaiReasoningEffort } from "@shared/storage/types"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
 import { useCallback, useRef } from "react"
@@ -21,7 +23,7 @@ import { openAiCodexOAuthManager } from "@/integrations/openai-codex/oauth"
 import { Logger } from "@/shared/services/Logger"
 import { openExternal } from "@/utils/env"
 import { createModelSelectionPatch } from "../../../utils/model-selection"
-import { applyBedrockConfig, applyProviderConfig } from "../../../utils/provider-config"
+import { applyBedrockConfig, applyProviderConfig, saveBedrockSetup, saveProviderSetup } from "../../../utils/provider-config"
 import type { BedrockConfig } from "../../BedrockSetup"
 import type { ObjectEditorState } from "../../ConfigViewComponents"
 import { CUSTOM_MODEL_ID, hasModelPicker } from "../../ModelPicker"
@@ -245,12 +247,18 @@ export function useSettingsActions({
 		setIsWaitingForCodexAuth(true)
 	}, [setIsWaitingForCodexAuth])
 
-	const completeCodexAuth = useCallback(async () => {
-		await applyProviderConfig({ providerId: "openai-codex", controller })
-		setProvider("openai-codex")
+	const activatePickedProvider = useCallback(async (providerId: string) => {
+		if (initialMode !== "provider-picker") return
+		await applyProviderConfig({ providerId, controller })
+		setProvider(providerId)
 		refreshModelIds()
+	}, [initialMode, controller, setProvider, refreshModelIds])
+
+	const completeCodexAuth = useCallback(async () => {
+		await saveProviderSetup({ providerId: "openai-codex", controller })
+		await activatePickedProvider("openai-codex")
 		setIsWaitingForCodexAuth(false)
-	}, [controller, setProvider, refreshModelIds, setIsWaitingForCodexAuth])
+	}, [controller, activatePickedProvider, setIsWaitingForCodexAuth])
 
 	const startGithubAuth = useCallback(async () => {
 		const abortController = new AbortController()
@@ -263,9 +271,8 @@ export function useSettingsActions({
 			await openExternal(data.verification_uri)
 			await githubCopilotAuthManager.pollForToken(data.device_code, data.interval, abortController.signal)
 			if (abortController.signal.aborted) return
-			await applyProviderConfig({ providerId: "github-copilot", controller })
-			setProvider("github-copilot")
-			refreshModelIds()
+			await saveProviderSetup({ providerId: "github-copilot", controller })
+			await activatePickedProvider("github-copilot")
 			setIsWaitingForGithubAuth(false)
 			setGithubAuthData(null)
 		} catch (error) {
@@ -277,7 +284,7 @@ export function useSettingsActions({
 		} finally {
 			if (githubAuthAbortControllerRef.current === abortController) githubAuthAbortControllerRef.current = null
 		}
-	}, [controller, setIsWaitingForGithubAuth, setGithubAuthData, setProvider, refreshModelIds])
+	}, [controller, setIsWaitingForGithubAuth, setGithubAuthData, activatePickedProvider])
 
 	const cancelGithubAuth = useCallback(() => {
 		githubAuthAbortControllerRef.current?.abort()
@@ -286,8 +293,8 @@ export function useSettingsActions({
 		setGithubAuthData(null)
 	}, [setGithubAuthData, setIsWaitingForGithubAuth])
 
-	const handleAction = useCallback(async () => {
-		const item = items[selectedIndex]
+	const handleAction = useCallback(async (requestedItem?: ListItem) => {
+		const item = requestedItem ?? items[selectedIndex]
 		if (
 			!item ||
 			item.type === SettingsItemType.READONLY ||
@@ -465,20 +472,9 @@ export function useSettingsActions({
 			const effectiveApi = taskConfig?.apiConfiguration ?? stateManager.getApiConfiguration()
 			const taskSettingsPatch: Record<string, unknown> = { planActSeparateModelsSetting: newValue }
 			if (!newValue) {
-				const actProvider = effectiveApi.actModeApiProvider
-				const planProvider = effectiveApi.planModeApiProvider || actProvider
-				if (actProvider && planProvider) {
-					const actKey = getProviderModelIdKey(actProvider, "act")
-					const actModelId = (effectiveSettings?.[actKey] ?? stateManager.getGlobalSettingsKey(actKey as any)) as string | undefined
-					Object.assign(taskSettingsPatch, await createModelSelectionPatch(effectiveApi, "plan", actModelId, true, controller))
-				}
-				taskSettingsPatch.planModeThinkingBudgetTokens =
-					effectiveSettings?.actModeThinkingBudgetTokens ??
-					stateManager.getGlobalSettingsKey("actModeThinkingBudgetTokens") ??
-					0
-				taskSettingsPatch.planModeReasoningEffort = normalizeReasoningEffort(
-					effectiveSettings?.actModeReasoningEffort ?? stateManager.getGlobalSettingsKey("actModeReasoningEffort"),
-				)
+				const selection = readModeSelection(effectiveApi, "act")
+				if (!selection?.modelId) throw new Error("Configure the Act model before sharing it with Plan")
+				Object.assign(taskSettingsPatch, modelProviderSelectionUpdates("plan", selection, effectiveApi.actModeInferenceSpeed))
 			}
 			await commitSettings(taskSettingsPatch)
 			setSeparateModels(newValue)
@@ -584,7 +580,7 @@ export function useSettingsActions({
 			const item = items[selectedIndex]
 			if (!item) return
 			if (item.key === "baseUrl") {
-				await applyProviderConfig({ providerId: provider, baseUrl: editValue, controller })
+				await saveProviderSetup({ providerId: provider, baseUrl: editValue, controller })
 				refreshModelIds()
 				setIsEditing(false)
 				return
@@ -701,9 +697,7 @@ export function useSettingsActions({
 				setIsPickingProvider(false)
 				if (!(await githubCopilotAuthManager.isAuthenticated())) await startGithubAuth()
 				else {
-					await applyProviderConfig({ providerId, controller })
-					setProvider(providerId)
-					refreshModelIds()
+					await saveProviderSetup({ providerId, controller })
 				}
 				return
 			}
@@ -712,7 +706,7 @@ export function useSettingsActions({
 				await startCodexAuth()
 				return
 			}
-			if (requiresOpenRouterModelSelection && existingKey) {
+			if (initialMode === "provider-picker" && requiresOpenRouterModelSelection && existingKey) {
 				beginOpenRouterModelSelection()
 				return
 			}
@@ -722,9 +716,7 @@ export function useSettingsActions({
 				setIsPickingProvider(false)
 				setIsEnteringApiKey(true)
 			} else {
-				await applyProviderConfig({ providerId, controller })
-				setProvider(providerId)
-				refreshModelIds()
+				await saveProviderSetup({ providerId, controller })
 				setIsPickingProvider(false)
 			}
 		},
@@ -795,21 +787,19 @@ export function useSettingsActions({
 
 	const handleApiKeySubmit = useCallback(
 		async (submittedValue: string) => {
-			if (!pendingProvider || !submittedValue.trim()) return
+			if (!pendingProvider || (!submittedValue.trim() && pendingProvider !== "openai")) return
 			const apiConfig = stateManager.getApiConfiguration()
 			const requiresOpenRouterModelSelection =
 				pendingProvider === "openrouter" && !apiConfig.actModeOpenRouterModelId && !apiConfig.planModeOpenRouterModelId
-			if (requiresOpenRouterModelSelection) {
-				stateManager.setApiConfiguration({ openRouterApiKey: submittedValue.trim() })
-				await stateManager.flushPendingState()
+			if (initialMode === "provider-picker" && requiresOpenRouterModelSelection) {
+				await saveProviderSetup({ providerId: pendingProvider, apiKey: submittedValue.trim(), controller })
 				setIsEnteringApiKey(false)
 				setApiKeyValue("")
 				beginOpenRouterModelSelection()
 				return
 			}
-			await applyProviderConfig({ providerId: pendingProvider, apiKey: submittedValue.trim(), controller })
-			setProvider(pendingProvider)
-			refreshModelIds()
+			await saveProviderSetup({ providerId: pendingProvider, apiKey: submittedValue.trim(), controller })
+			await activatePickedProvider(pendingProvider)
 			setIsEnteringApiKey(false)
 			setPendingProvider(null)
 			setApiKeyValue("")
@@ -823,6 +813,7 @@ export function useSettingsActions({
 			initialMode,
 			onClose,
 			beginOpenRouterModelSelection,
+			activatePickedProvider,
 			setProvider,
 			setIsEnteringApiKey,
 			setPendingProvider,
@@ -832,14 +823,13 @@ export function useSettingsActions({
 
 	const handleBedrockComplete = useCallback(
 		async (bedrockConfig: BedrockConfig) => {
-			await applyBedrockConfig({ bedrockConfig, controller })
-			setProvider("bedrock")
-			refreshModelIds()
+			await saveBedrockSetup({ bedrockConfig, controller })
+			await activatePickedProvider("bedrock")
 			setIsConfiguringBedrock(false)
 			setPendingProvider(null)
 			if (initialMode) onClose()
 		},
-		[controller, refreshModelIds, initialMode, onClose, setProvider, setIsConfiguringBedrock, setPendingProvider],
+		[controller, activatePickedProvider, initialMode, onClose, setIsConfiguringBedrock, setPendingProvider],
 	)
 
 	const handleBedrockCustomFlowComplete = useCallback(

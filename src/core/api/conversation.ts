@@ -1,3 +1,4 @@
+import type { TranscriptPrefix } from "./TranscriptPrefix"
 import type { DiracStorageMessage } from "@/shared/messages/content"
 import type { DiracTool } from "@/shared/tools"
 
@@ -15,6 +16,16 @@ export interface ApiConversationContinuationReset {
 }
 
 export interface ApiConversationProviderState {
+	/** Identifies the checkpoint branch committed in the existing history operation log. */
+	historyBranchId?: string
+	/** Durable submitted generation; request changes and condensation create linked successors. */
+	transcript?: TranscriptPrefix
+	previousTranscriptId?: string
+	/** Legacy lineage field, read when reopening older state. */
+	condensedFromTranscriptId?: string
+	submittedHistoryLength?: number
+	historyPrefix?: TranscriptPrefix
+	transcriptInstructions?: { systemPrompt: string; latestInstructions: string; runtimeContext: string }
 	checkpoint?: ApiConversationCheckpoint
 	continuationReset?: ApiConversationContinuationReset
 	pendingCompaction?: PendingApiConversationCompaction

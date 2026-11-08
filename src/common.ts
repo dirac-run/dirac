@@ -10,7 +10,6 @@ import { FileContextTracker } from "./core/context/context-tracking/FileContextT
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
 import { HookProcessRegistry } from "./core/hooks/HookProcessRegistry"
 import { StateManager } from "./core/storage/StateManager"
-import { AgentConfigLoader } from "./core/task/tools/subagent/AgentConfigLoader"
 import { ErrorService } from "./services/error"
 import { featureFlagsService } from "./services/feature-flags"
 import { getDistinctId } from "./services/logging/distinctId"
@@ -180,7 +179,6 @@ export async function tearDown(): Promise<void> {
 }
 
 async function tearDownServices(): Promise<void> {
-	AgentConfigLoader.getInstance()?.dispose()
 	// Legacy telemetry removed
 	telemetryService.dispose()
 	ErrorService.get().dispose()

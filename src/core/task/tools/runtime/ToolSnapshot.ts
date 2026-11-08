@@ -28,7 +28,6 @@ export interface ToolRequestSnapshot {
 	nativeTools: DiracTool[]
 	coordinator: ToolExecutorCoordinator
 	executableToolNames: Set<string>
-	dynamicSubagentToolNames: Set<string>
 }
 
 export function validateToolRequestSnapshot(snapshot: ToolRequestSnapshot): void {

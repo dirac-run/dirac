@@ -1,5 +1,4 @@
 import type { GoalViewState } from "@shared/goal"
-import type { TaskletObservedState } from "@shared/taskletObservation"
 import { Box, Text } from "ink"
 import React from "react"
 import { theme } from "../constants/theme"
@@ -14,21 +13,19 @@ function formatDuration(durationMs: number | undefined): string {
 	return `${totalHours}h ${totalMinutes % 60}m`
 }
 
-function statusColor(status: GoalViewState["status"] | TaskletObservedState): string {
-	if (status === "achieved" || status === "completed") return theme.success
-	if (status === "blocked" || status === "failed" || status === "settlement_failed") return theme.error
-	if (status === "waiting" || status === "waiting_for_parent" || status === "paused" || status === "interrupted")
-		return theme.warning
-	if (status === "stopped" || status === "unsettled") return theme.muted
+function statusColor(status: GoalViewState["status"]): string {
+	if (status === "achieved") return theme.success
+	if (status === "blocked") return theme.error
+	if (status === "waiting" || status === "paused") return theme.warning
+	if (status === "stopped") return theme.muted
 	return theme.link
 }
 
-function statusSymbol(status: GoalViewState["status"] | TaskletObservedState): string {
-	if (status === "achieved" || status === "completed") return theme.symbols.success
-	if (status === "blocked" || status === "failed" || status === "settlement_failed") return theme.symbols.failure
-	if (status === "waiting" || status === "waiting_for_parent" || status === "paused" || status === "interrupted")
-		return theme.symbols.warning
-	if (status === "stopped" || status === "unsettled") return theme.symbols.inactive
+function statusSymbol(status: GoalViewState["status"]): string {
+	if (status === "achieved") return theme.symbols.success
+	if (status === "blocked") return theme.symbols.failure
+	if (status === "waiting" || status === "paused") return theme.symbols.warning
+	if (status === "stopped") return theme.symbols.inactive
 	return theme.symbols.active
 }
 
@@ -125,15 +122,6 @@ export const GoalSummary: React.FC<{
 						</Text>
 						{` ${theme.symbols.separator} ${plainTextObjective(goal.objective.markdown)}`}
 					</Text>
-					{goal.latestVerification && (
-						<Text color={statusColor(goal.latestVerification.status)} wrap="truncate-end">
-							Verification {theme.symbols.separator} {statusSymbol(goal.latestVerification.status)}{" "}
-							{goal.latestVerification.status} {theme.symbols.separator} {goal.latestVerification.title}
-							{goal.latestVerification.terminalSummary
-								? ` ${theme.symbols.separator} ${goal.latestVerification.terminalSummary}`
-								: ""}
-						</Text>
-					)}
 					<Text color={theme.muted} wrap="truncate-end">
 						{`${goal.id} ${theme.symbols.separator} age ${formatDuration(goal.wallDurationMs)} ${theme.symbols.separator} active ${formatDuration(goal.activeDurationMs)}`}
 					</Text>

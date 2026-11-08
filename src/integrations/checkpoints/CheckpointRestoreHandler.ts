@@ -105,6 +105,14 @@ export class CheckpointRestoreHandler {
 				return {}
 			}
 
+			// Read and validate everything needed for the task branch before changing
+			// workspace files. Generic overwrite remains append-only.
+			const taskRestore = restoreType === "workspace" ? undefined : {
+				history: this.services.messageStateHandler.getApiConversationHistory().slice(0, (message.conversationHistoryIndex ?? 0) + 2),
+				presentation: await getPresentationHistoryAtMessage(this.config.storageAddress ?? this.config.taskId, message.id),
+			}
+			if (taskRestore) this.services.messageStateHandler.validateApiConversationHistoryBranch(taskRestore.history)
+
 			let didWorkspaceRestoreFail = false
 
 			switch (restoreType) {
@@ -207,7 +215,7 @@ export class CheckpointRestoreHandler {
 			const checkpointManagerStateUpdate: CheckpointRestoreResult = {}
 
 			if (!didWorkspaceRestoreFail) {
-				await this.handleSuccessfulRestore(restoreType, message, messageIndex, messageId)
+				await this.handleSuccessfulRestore(restoreType, message, messageIndex, messageId, taskRestore)
 				if (this.conversationHistoryDeletedRange !== undefined) {
 					checkpointManagerStateUpdate.conversationHistoryDeletedRange = this.conversationHistoryDeletedRange
 				}
@@ -235,17 +243,15 @@ export class CheckpointRestoreHandler {
 		message: DiracMessage,
 		messageIndex: number,
 		messageId: string,
+		taskRestore?: { history: ReturnType<MessageStateHandler["getApiConversationHistory"]>; presentation: DiracMessage[] },
 	): Promise<void> {
 		switch (restoreType) {
 			case "task":
 			case "taskAndWorkspace":
-				// Update conversation history deleted range in our state
+				if (!taskRestore) throw new Error("Missing checkpoint restore preflight")
+				await this.services.messageStateHandler.branchApiConversationHistory(taskRestore.history)
 				this.conversationHistoryDeletedRange = message.conversationHistoryDeletedRange
 				this.services.taskState.conversationHistoryDeletedRange = message.conversationHistoryDeletedRange
-
-				const apiConversationHistory = this.services.messageStateHandler.getApiConversationHistory()
-				const newConversationHistory = apiConversationHistory.slice(0, (message.conversationHistoryIndex || 0) + 2)
-				await this.services.messageStateHandler.overwriteApiConversationHistory(newConversationHistory)
 
 				// aggregate deleted api reqs info so we don't lose costs/tokens
 				const diracMessages = this.services.messageStateHandler.getDiracMessages()
@@ -273,10 +279,7 @@ export class CheckpointRestoreHandler {
 					}
 				}
 
-				const newDiracMessages = await getPresentationHistoryAtMessage(
-					this.config.storageAddress ?? this.config.taskId,
-					message.id,
-				)
+				const newDiracMessages = taskRestore.presentation
 				const restoredCheckpointMessage = newDiracMessages.at(-1)
 				if (restoredCheckpointMessage?.id === message.id) {
 					restoredCheckpointMessage.lastCheckpointHash = message.lastCheckpointHash

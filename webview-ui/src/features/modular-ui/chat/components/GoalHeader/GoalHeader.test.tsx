@@ -64,20 +64,7 @@ describe("GoalHeader", () => {
 	it("renders a plain-text objective preview and keeps Goal disclosure state separate from task expansion", async () => {
 		useSettingsStore.setState({ expandTaskHeader: true })
 		const user = userEvent.setup()
-		render(
-			<GoalHeader
-				goal={createGoal("working", {
-					latestVerification: {
-						id: "verification-1",
-						title: "Review Goal UI",
-						status: "completed",
-						createdAt: 1_700_000_001_000,
-						endedAt: 1_700_000_002_000,
-						terminalSummary: "All checks passed.",
-					},
-				})}
-			/>,
-		)
+		render(<GoalHeader goal={createGoal("working")} />)
 
 		const disclosure = screen.getByRole("button", { name: "Expand Goal details" })
 		expect(disclosure).toHaveAttribute("aria-expanded", "false")
@@ -94,8 +81,7 @@ describe("GoalHeader", () => {
 			within(details)
 				.getAllByRole("heading", { level: 3 })
 				.map((heading) => heading.textContent),
-		).toEqual(["Status", "Objective", "Latest verification", "Timing and accounting"])
-		expect(within(details).getByText("All checks passed.")).toBeInTheDocument()
+		).toEqual(["Status", "Objective", "Timing and accounting"])
 		expect(within(details).queryByText("Revision 3")).not.toBeInTheDocument()
 	})
 
@@ -107,7 +93,7 @@ describe("GoalHeader", () => {
 		expect(within(details).getByText("Goal is paused.")).toBeInTheDocument()
 		expect(within(details).queryByText("Contained Tasks")).not.toBeInTheDocument()
 		expect(within(details).queryByText(/pending tasklet|pending request/)).not.toBeInTheDocument()
-		expect(within(details).getByText("No verification result recorded.")).toBeInTheDocument()
+		expect(within(details).queryByText(/verification/i)).not.toBeInTheDocument()
 	})
 
 	it("shows only the contextual primary lifecycle action", () => {

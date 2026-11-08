@@ -2,8 +2,7 @@ import { promises as fs } from "node:fs"
 import { ModelInfo, QwenCodeModelId, qwenCodeDefaultModelId, qwenCodeModels } from "@shared/api"
 import OpenAI from "openai"
 import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
-import * as os from "os"
-import * as path from "path"
+import { getQwenCachedCredentialPath } from "@/utils/qwenCodeCredentialPath"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { fetch } from "@/shared/net"
@@ -18,8 +17,6 @@ import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-p
 const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
 const QWEN_OAUTH_TOKEN_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token`
 const QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
-const QWEN_DIR = ".qwen"
-const QWEN_CREDENTIAL_FILENAME = "oauth_creds.json"
 
 interface QwenOAuthCredentials {
 	access_token: string
@@ -34,16 +31,6 @@ interface QwenCodeHandlerOptions extends CommonApiHandlerOptions {
 	apiModelId?: string
 }
 
-function getQwenCachedCredentialPath(customPath?: string): string {
-	if (customPath) {
-		// Support custom path that starts with ~/ or is absolute
-		if (customPath.startsWith("~/")) {
-			return path.join(os.homedir(), customPath.slice(2))
-		}
-		return path.resolve(customPath)
-	}
-	return path.join(os.homedir(), QWEN_DIR, QWEN_CREDENTIAL_FILENAME)
-}
 
 function objectToUrlEncoded(data: Record<string, string>): string {
 	return Object.keys(data)

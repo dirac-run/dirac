@@ -19,7 +19,7 @@ vi.mock("../../hooks/useTerminalSize", () => ({
 vi.mock("./CardInteractions", () => ({ CardInteractions: vi.fn(() => null) }))
 
 const data: TaskletPresentationData = {
-	taskletId: "tl_stable-string",
+	taskletId: "Feynman",
 	title: "Inspect source",
 	prompt: "Find the source of the regression",
 	createdAt: 1,
@@ -50,7 +50,7 @@ describe("CLI tasklet cards", () => {
 		const view = render(<ChatMessage message={restored} mode="act" />)
 		const frame = plain(view.lastFrame())
 		expect(frame).toContain(`Inspect source · ${status}`)
-		expect(frame).not.toContain(data.taskletId)
+		expect(frame).toContain(data.taskletId)
 		expect(frame).toContain(status)
 		expect(frame).toContain("Prompt")
 		expect(frame).toContain(data.prompt)
@@ -73,7 +73,7 @@ describe("CLI tasklet cards", () => {
 				<ModularCard
 					card={createTaskletPresentationCard({
 						...data,
-						taskletId: "tl_sibling",
+						taskletId: "Planck",
 						title: "Sibling",
 						status: "running",
 					})}
@@ -87,7 +87,7 @@ describe("CLI tasklet cards", () => {
 		expect(frame).toContain("Started tasklets")
 		expect(frame).toMatch(/Inspect source.*waiting/)
 		expect(frame).toMatch(/Sibling.*running/)
-		expect(frame).not.toContain("tl_")
+		expect(frame).toContain("Feynman")
 		expect(frame).not.toContain("Approve")
 		view.rerender(tree("completed"))
 		await new Promise((resolve) => setTimeout(resolve, 30))
@@ -97,13 +97,13 @@ describe("CLI tasklet cards", () => {
 		view.unmount()
 	})
 
-	it("keeps title and status visible without routing identities in quiet or partially visible bodies", () => {
+	it("keeps identity, title and status visible in quiet or partially visible bodies", () => {
 		const tasklet = message({ ...data, status: "waiting" })
 		for (const props of [{ suppressCardBody: true }, { tailOnly: true, maxContentLines: 1 }]) {
 			const view = render(<ChatMessage message={tasklet} {...props} />)
 			const frame = plain(view.lastFrame())
 			expect(frame).toContain("Inspect source")
-			expect(frame).not.toContain(data.taskletId)
+			expect(frame).toContain(data.taskletId)
 			expect(frame).toContain("waiting")
 			expect(frame).not.toContain(data.prompt)
 			view.unmount()
@@ -118,7 +118,7 @@ describe("CLI tasklet cards", () => {
 		"interrupted",
 	] as const)("keeps narrow %s headers within the one-row timeline budget", (status) => {
 		terminalSize.columns = 20
-		for (const taskletId of ["tl_shared-prefix-abc123", "tl_shared-prefix-xyz789"]) {
+		for (const taskletId of ["Feynman", "Planck"]) {
 			const tasklet = message({ ...data, taskletId, title: "Inspect a very long source title\nwith another line", status })
 			for (const props of [{ suppressCardBody: true }, { tailOnly: true, maxContentLines: 1 }]) {
 				const view = render(
@@ -130,8 +130,7 @@ describe("CLI tasklet cards", () => {
 				expect(frame.split("\n")).toHaveLength(estimateTimelineMessageRows(tasklet, 20, true))
 				expect(stringWidth(frame)).toBeLessThanOrEqual(20)
 				expect(frame).toContain(status)
-				expect(frame).not.toContain(taskletId.slice(-5))
-				expect(frame).not.toContain("tl_")
+				expect(frame).toContain(taskletId.slice(0, 3))
 				expect(frame).toContain("…")
 				expect(frame).not.toContain(data.prompt)
 				view.unmount()

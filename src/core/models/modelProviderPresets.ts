@@ -16,7 +16,7 @@ function openAiProfileName(baseUrl: string, modelId: string): string {
 	let endpoint = baseUrl
 	try {
 		endpoint = new URL(baseUrl).host
-	} catch {}
+	} catch { }
 	return `${endpoint || "OpenAI Compatible"} · ${modelId}`
 }
 
@@ -120,7 +120,7 @@ export function recordSavedOpenAiCompatibleProfileChanges(
 	const presets = stateManager.getGlobalSettingsKey("modelProviderPresets")
 	const reconciledPresets = presets.filter((preset) => {
 		if (preset.provider !== "openai" || !preset.openAiProfileName) return true
-		return profilesByName.get(preset.openAiProfileName)?.modelId === preset.modelId
+		return profilesByName.has(preset.openAiProfileName)
 	})
 	if (reconciledPresets.length !== presets.length) {
 		stateManager.setGlobalState("modelProviderPresets", reconciledPresets)
@@ -156,6 +156,11 @@ function modeUpdates(
 	const updates: Record<string, unknown> = {
 		...modelProviderSelectionUpdates(mode, preset, inferenceSpeed),
 	}
+	// Recent presets select identity only; unlike independent selections, they do not own reasoning.
+	const prefix = mode === "plan" ? "planMode" : "actMode"
+	delete updates[`${prefix}ReasoningEffort`]
+	delete updates[`${prefix}ThinkingBudgetTokens`]
+	delete updates[`gemini${mode === "plan" ? "Plan" : "Act"}ModeThinkingLevel`]
 	if (preset.provider === "openai" && profile) {
 		updates.openAiBaseUrl = profile.baseUrl
 		updates.openAiApiKey = profile.apiKey
@@ -182,9 +187,9 @@ export async function activateModelProviderPreset(controller: Controller, preset
 	const updates = controller.stateManager.getGlobalSettingsKey("planActSeparateModelsSetting")
 		? modeUpdates(configuration, currentMode, preset, profile)
 		: {
-				...modeUpdates(configuration, "plan", preset, profile),
-				...modeUpdates(configuration, "act", preset, profile),
-			}
+			...modeUpdates(configuration, "plan", preset, profile),
+			...modeUpdates(configuration, "act", preset, profile),
+		}
 	const candidateConfiguration = { ...configuration, ...updates }
 	await applyApiConfigurationTransaction(controller, candidateConfiguration, () =>
 		persistApiConfigurationPatch(controller.stateManager, updates),

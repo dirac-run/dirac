@@ -27,8 +27,8 @@ function profileTool(profiles: readonly TaskExecutionProfile[]): DiscoveredTool 
 const profiles = ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const
 
 describe("Task execution profiles", () => {
-	it("keeps the three Goal operations exclusive to coordinator and follow-up roots", () => {
-		assert.deepEqual(GOAL_TOOL_NAMES, ["verify_goal", "update_goal", "block_goal"])
+	it("keeps the two Goal operations exclusive to coordinator and follow-up roots", () => {
+		assert.deepEqual(GOAL_TOOL_NAMES, ["update_goal", "block_goal"])
 		for (const profile of profiles) {
 			for (const toolName of GOAL_TOOL_NAMES) {
 				assert.equal(isToolAvailableToTaskProfile(profile, toolName), profile === "goal_coordinator" || profile === "goal_followup")
@@ -38,7 +38,7 @@ describe("Task execution profiles", () => {
 
 	it("permits shared delegation and supervision for every root, never for tasklets", () => {
 		for (const profile of profiles) {
-			for (const toolName of ["use_subagents", "tasklets"]) {
+			for (const toolName of ["subagents", "tasklets"]) {
 				assert.equal(isToolAvailableToTaskProfile(profile, toolName), profile !== "tasklet")
 			}
 			assert.equal(isToolAvailableToTaskProfile(profile, "read_file"), true)
@@ -52,14 +52,14 @@ describe("Task execution profiles", () => {
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("tasklet", tool), true)
 	})
 
-	it("keeps tasklets private without imposing Goal or Act-only semantics", () => {
+	it("keeps tasklets private in Act mode without Goal authority", () => {
 		const instructions = taskProfileSystemInstructions("tasklet") ?? ""
 		assert.match(instructions, /private worker for a parent agent/)
 		assert.match(instructions, /delivered privately to the parent/)
-		assert.match(instructions, /current Plan or Act mode/)
+		assert.match(instructions, /always execute in Act mode/)
 		assert.match(instructions, /cannot delegate/)
-		assert.doesNotMatch(instructions, /Goal|always work in Act|always uses Act/)
-		assert.equal(isToolAvailableToTaskProfile("tasklet", "verify_goal"), false)
+		assert.doesNotMatch(instructions, /GOAL COORDINATOR/)
+		assert.equal(isToolAvailableToTaskProfile("tasklet", "update_goal"), false)
 	})
 
 	it("keeps foreground-only skills root-owned while retaining ordinary worker skills", () => {
@@ -74,7 +74,7 @@ describe("Task execution profiles", () => {
 		it(`gives ${profile} shared tasklet controls rather than legacy Goal supervision`, () => {
 			const instructions = taskProfileSystemInstructions(profile) ?? ""
 			assert.match(instructions, /tasklets.*inspect/)
-			assert.match(instructions, /resolve interactions under your current authority/)
+			assert.match(instructions, /under your current authority/)
 			assert.match(instructions, /interrupt or resume/)
 			assert.match(instructions, /sleep when no useful work remains/)
 			assert.doesNotMatch(instructions, /start_task|list_tasks|wait_for_goal_events|CONTAINED GOAL TASK/)

@@ -74,12 +74,16 @@ export function setTaskSettings<K extends keyof Settings>(
 	value: Settings[K],
 ): void {
 	guardInitialized(ctx)
+	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 	ctx.taskStateCache[key] = normalizeLoadedSetting(key, value)
 	ctx.persistence.addPendingTaskState(taskId, key)
 }
 
 export function setTaskSettingsBatch(ctx: StateManagerSettersContext, taskId: string, updates: Partial<Settings>): void {
 	guardInitialized(ctx)
+	if (Object.hasOwn(updates, "subagentRoles")) throw new Error("Subagent roles are user-global settings")
+	if (Object.hasOwn(updates, "addedApiProviders")) throw new Error("Added API providers are user-global settings")
 	const normalizedUpdates = normalizeLoadedSettings(updates)
 	Object.assign(ctx.taskStateCache, normalizedUpdates)
 	ctx.persistence.addPendingTaskStateBatch(taskId, Object.keys(normalizedUpdates) as SettingsKey[])
@@ -104,6 +108,8 @@ export function clearTaskSetting<K extends keyof Settings>(ctx: StateManagerSett
 export async function loadTaskSettings(ctx: StateManagerSettersContext, taskId: string): Promise<void> {
 	guardInitialized(ctx)
 	const taskSettings = (await ctx.persistence.loadTaskSettingsFromDisk(taskId)) as Partial<Settings>
+	delete taskSettings.subagentRoles
+	delete taskSettings.addedApiProviders
 	const normalizedTaskSettings = normalizeLoadedSettings(taskSettings)
 	Object.assign(ctx.taskStateCache, normalizedTaskSettings)
 	if (JSON.stringify(normalizedTaskSettings) !== JSON.stringify(taskSettings)) {
@@ -141,12 +147,16 @@ export function setSecretsBatch(ctx: StateManagerSettersContext, updates: Partia
 
 export function setWorkspaceState(ctx: StateManagerSettersContext, key: string, value: unknown): void {
 	guardInitialized(ctx)
+	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 		; (ctx.workspaceStateCache as Record<string, unknown>)[key] = value
 	ctx.persistence.addPendingWorkspaceState(key as LocalStateKey)
 }
 
 export function setWorkspaceStateBatch(ctx: StateManagerSettersContext, updates: Partial<LocalState>): void {
 	guardInitialized(ctx)
+	if (Object.hasOwn(updates, "subagentRoles")) throw new Error("Subagent roles are user-global settings")
+	if (Object.hasOwn(updates, "addedApiProviders")) throw new Error("Added API providers are user-global settings")
 	const changedKeys: LocalStateKey[] = []
 	Object.entries(updates).forEach(([key, value]) => {
 		ctx.workspaceStateCache[key as keyof LocalState] = value
@@ -157,6 +167,8 @@ export function setWorkspaceStateBatch(ctx: StateManagerSettersContext, updates:
 
 export function setSessionOverride<K extends keyof Settings>(ctx: StateManagerSettersContext, key: K, value: Settings[K]): void {
 	guardInitialized(ctx)
+	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 	ctx.sessionOverrideCache[key] = normalizeLoadedSetting(key, value)
 }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { anthropicDefaultModelId } from "@shared/api"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -18,8 +19,9 @@ import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import { TaskletEscalationCleanupError } from "../TaskMessenger"
-import { AgentConfigLoader } from "../tools/subagent/AgentConfigLoader"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
+import { StateManager } from "@core/storage/StateManager"
+import type { SubagentRole } from "@shared/subagentRoles"
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -41,6 +43,7 @@ const deliverTaskletEvents = (
 describe("TaskletHost asynchronous ownership", () => {
 	let sandbox: sinon.SinonSandbox
 	let directory: string
+	let roles: SubagentRole[]
 	let host: TaskletHost
 	let constructed: sinon.SinonStub
 	let children: ReturnType<typeof controlledTask>[]
@@ -74,6 +77,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const task = {
 			stateView: { status: TaskStatus.WAITING_FOR_API },
 			startTask: sandbox.stub().returns(outcome.promise),
+			resumeTaskFromHistory: sandbox.stub().returns(outcome.promise),
 			abortTask: sandbox.stub().callsFake(async () => {
 				outcome.resolve({ kind: "interrupted", reason: "test", interruptedAt: 124 })
 			}),
@@ -91,6 +95,8 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	beforeEach(async () => {
 		sandbox = sinon.createSandbox()
+		roles = []
+		sandbox.stub(StateManager, "get").returns({ getSystemDefaultSettingsKey: () => roles } as unknown as StateManager)
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-host-"))
 		setVscodeHostProviderMock({ globalStorageFsPath: directory })
 		children = []
@@ -155,7 +161,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	}
 
 	async function registerInteraction(input = request("card")) {
-		const child = await host.start({ title: "requesting child", prompt: "work" })
+		const child = await host.start({ type: "default", title: "requesting child", prompt: "work" })
 		const counterparty = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		const cancellation = new AbortController()
 		const waiting = counterparty.requestInteraction(input, cancellation.signal)
@@ -165,14 +171,16 @@ describe("TaskletHost asynchronous ownership", () => {
 		return { child, counterparty, cancellation, waiting, requestId: interaction.id }
 	}
 
-	it("persists generic configuration with the default timeout and forwards it to the Task", async () => {
-		const record = await host.start({ title: "Generic child", prompt: "Work" })
-		assert.deepEqual(record.configuration, { includeHistory: false, timeoutSeconds: 600 })
+	it("persists the default role and creation-time selection and forwards them to the Task", async () => {
+		const record = await host.start({ type: "default", title: "Generic child", prompt: "Work" })
+		assert.equal(record.configuration?.name, "default")
+		assert.equal(record.configuration?.modelSelection.modelId, anthropicDefaultModelId)
+		assert.equal(record.role, "default")
 		assert.deepEqual((await saved(record.id)).configuration, record.configuration)
 		const params = constructed.firstCall.args[0] as taskModule.TaskParams
 		assert.deepEqual(params.tasklet!.configuration, record.configuration)
 		assert.equal(params.workingConfiguration.settings.mode, "act")
-		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, "claude-opus-4-20250514")
+		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, anthropicDefaultModelId)
 	})
 
 	it("preserves the active Plan provider and model instead of substituting the unrelated Act provider", async () => {
@@ -189,128 +197,56 @@ describe("TaskletHost asynchronous ownership", () => {
 			},
 		})
 		host = new TaskletHost(owner, options, constructed as unknown as typeof taskModule.Task)
-		await host.start({ title: "Plan review", prompt: "Read only" })
+		await host.start({ type: "default", title: "Plan review", prompt: "Read only" })
 		const config = (constructed.firstCall.args[0] as taskModule.TaskParams).workingConfiguration
 		assert.equal(config.settings.mode, "act")
 		assert.equal(config.apiConfiguration.actModeApiProvider, "anthropic")
-		assert.equal(config.apiConfiguration.actModeApiModelId, "claude-sonnet-4-20250514")
+		assert.equal(config.apiConfiguration.actModeApiModelId, anthropicDefaultModelId)
 		assert.equal(options.workingConfiguration.settings.mode, "plan")
 		assert.equal(options.workingConfiguration.apiConfiguration.actModeApiProvider, "openai-native")
 	})
 
-	it("forwards named profile configuration and its model selection to the Task", async () => {
-		const profile = {
-			name: "reviewer",
-			description: "Review an assignment",
-			systemPrompt: "Review carefully.",
-			skills: ["review"],
-			tools: ["read_file", "respond"],
-			modelId: "claude-sonnet-5",
-		}
-		const getCachedConfig = sandbox.stub().withArgs("reviewer").returns(profile)
-		sandbox.stub(AgentConfigLoader, "getInstance").returns({ ready: async () => { }, getCachedConfig } as any)
-		const record = await host.start({
-			title: "Review",
-			prompt: "Review this change",
-			agentName: "reviewer",
-			timeoutSeconds: 45,
+	it("forwards a global role's saved selection without role prompts or allowlists", async () => {
+		roles.push({
+			name: "reviewer", description: "Review an assignment", enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6", reasoningEffort: "high" }
 		})
+		const record = await host.start({ type: "reviewer", title: "Review", prompt: "Review this change" })
 		const params = constructed.firstCall.args[0] as taskModule.TaskParams
 		assert.deepEqual(params.tasklet!.configuration, record.configuration)
-		const { modelSelection, ...configuration } = record.configuration!
-		assert.deepEqual((await saved(record.id)).configuration, {
-			...configuration,
-			modelSelection: { provider: "anthropic", modelId: profile.modelId },
-		})
-		assert.deepEqual(configuration, {
-			name: profile.name,
-			description: profile.description,
-			systemPrompt: profile.systemPrompt,
-			skills: profile.skills,
-			allowedTools: ["read_file", "respond"],
-			includeHistory: false,
-			timeoutSeconds: 45,
-		})
-		assert.equal(modelSelection?.provider, "anthropic")
-		assert.equal(modelSelection?.modelId, profile.modelId)
-		assert.equal(params.workingConfiguration.apiConfiguration.actModeApiModelId, profile.modelId)
+		assert.equal(record.configuration!.name, "reviewer")
+		assert.equal(host.observationInventory()[0].role, "reviewer")
+		assert.equal((await host.readObservationTranscript(record.id)).role, "reviewer")
+		assert.equal(record.configuration!.modelSelection.modelId, "claude-sonnet-4-6")
+		assert.equal(params.workingConfiguration.apiConfiguration.actModeReasoningEffort, "high")
+		assert.deepEqual((await saved(record.id)).configuration, JSON.parse(JSON.stringify(record.configuration)))
 	})
 
-	for (const includeHistory of [false, true]) {
-		it(`${includeHistory ? "snapshots" : "omits"} root history on start when includeHistory is ${includeHistory}`, async () => {
-			const history = {
-				messages: [{ role: "user" as const, content: "Root context" }],
-				deletedRange: [1, 2] as [number, number],
-			}
-			const getParentHistory = sandbox.stub().returns(history)
-			host = new TaskletHost(
-				owner,
-				{ ...taskOptions(), getParentHistory },
-				constructed as unknown as typeof taskModule.Task,
-			)
-			await host.start({ title: "History child", prompt: "Work", includeHistory, timeoutSeconds: 30 })
-			const params = constructed.firstCall.args[0] as taskModule.TaskParams
-			if (!includeHistory) {
-				sinon.assert.notCalled(getParentHistory)
-				assert.equal(params.tasklet!.initialHistory, undefined)
-				return
-			}
-			sinon.assert.calledOnce(getParentHistory)
-			assert.deepEqual(params.tasklet!.initialHistory, history)
-			history.messages[0].content = "Changed after delegation"
-			history.deletedRange[0] = 9
-			assert.deepEqual(params.tasklet!.initialHistory, {
-				messages: [{ role: "user", content: "Root context" }],
-				deletedRange: [1, 2],
-			})
-		})
-	}
+	it("starts with assignment context only and no copied-history binding", async () => {
+		await host.start({ type: "default", title: "Independent child", prompt: "Complete instructions" })
+		const params = constructed.firstCall.args[0] as taskModule.TaskParams
+		assert.equal(Object.hasOwn(params.tasklet!, "initialHistory"), false)
+		assert.deepEqual(Object.keys(params.tasklet!.configuration!).sort(), ["modelSelection", "name"])
+		sinon.assert.calledOnceWithExactly(children[0].task.startTask, "Complete instructions")
+	})
 
-	for (const pendingSpawn of [false, true]) {
-		it(`inherits completed tool exchanges ${pendingSpawn ? "without the executing spawn turn" : "unchanged"}`, async () => {
-			const messages: import("@shared/messages/content").DiracStorageMessage[] = [
-				{ role: "user", content: "Root context" },
-				{ role: "assistant", content: [{ type: "tool_use", id: "read", name: "read_file", input: {} }] },
-				{ role: "user", content: [{ type: "tool_result", tool_use_id: "read", content: "File contents" }] },
-			]
-			const completedHistory = structuredClone(messages)
-			if (pendingSpawn) messages.push({
-				role: "assistant",
-				content: [
-					{ type: "text", text: "Delegate now" },
-					{ type: "tool_use", id: "spawn", name: "use_subagents", input: {} },
-					{ type: "tool_use", id: "sibling-call", name: "read_file", input: {} },
-				],
-			})
-			const parentHistory = structuredClone(messages)
-			host = new TaskletHost(owner, { ...taskOptions(), getParentHistory: () => ({ messages }) }, constructed as unknown as typeof taskModule.Task)
-			const child = await host.start({ title: "History child", prompt: "Work", includeHistory: true })
-			const params = constructed.firstCall.args[0] as taskModule.TaskParams
-			assert.deepEqual(params.tasklet!.initialHistory!.messages, completedHistory)
-			assert.equal(child.inheritedMessageCount, completedHistory.length)
-			assert.deepEqual(messages, parentHistory, "Delegation must not modify the parent's pending tool turn")
-		})
-	}
 
-	it("cancels an unfinished Task at its configured positive timeout", async () => {
+	it("does not impose an execution deadline and still interrupts explicitly", async () => {
 		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-		const record = await host.start({ title: "Timed child", prompt: "Work", timeoutSeconds: 2 })
-		const sleeping = host.sleep()
-		await clock.tickAsync(1999)
+		const record = await host.start({ type: "default", title: "Long child", prompt: "Work" })
+		await clock.tickAsync(60 * 60 * 1000)
 		sinon.assert.notCalled(children[0].task.abortTask)
-		await clock.tickAsync(1)
-		sinon.assert.calledOnceWithExactly(children[0].task.abortTask, {
-			kind: "interrupted",
-			reason: "Tasklet execution timed out after 2 seconds",
-		})
+		assert.equal(host.inspect(record.id).outcome, undefined)
 		const stopped = await host.interrupt(record.id)
 		assert.equal(stopped.outcome?.kind, "interrupted")
 		assert.equal(stopped.outcomePersisted, true)
-		const events = await savedCommunications(record.id)
-		assert.equal(events.length, 1)
-		assert.deepEqual(events[0].communication, { type: "outcome", outcome: stopped.outcome })
-		assert.deepEqual(await sleeping, { reason: "event", taskletId: record.id, eventId: events[0].id })
-		assert.deepEqual(stopped.responses, [], "A deadline notification is not an agent response")
+		assert.equal(clock.countTimers(), 0)
+		const resumed = await host.resume(record.id, "Continue")
+		assert.equal(resumed.id, record.id)
+		await clock.tickAsync(60 * 60 * 1000)
+		sinon.assert.notCalled(children[1].task.abortTask)
+		sinon.assert.calledOnce(children[1].task.resumeTaskFromHistory)
+		await host.interrupt(record.id)
 		assert.equal(clock.countTimers(), 0)
 	})
 
@@ -580,8 +516,8 @@ describe("TaskletHost asynchronous ownership", () => {
 	}
 
 	it("retains detached requests per child and rejects duplicate, retired and late registrations", async () => {
-		const first = await host.start({ title: "first", prompt: "first" })
-		const second = await host.start({ title: "second", prompt: "second" })
+		const first = await host.start({ type: "default", title: "first", prompt: "first" })
+		const second = await host.start({ type: "default", title: "second", prompt: "second" })
 		const firstOwner = (constructed.firstCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		const secondOwner = (constructed.secondCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		const input = request("same-card-id")
@@ -612,7 +548,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("retires signal-aborted requests without closing siblings and rejects pre-aborted registration", async () => {
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		const owner = (constructed.firstCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		const aborted = new AbortController()
 		aborted.abort(new Error("already aborted"))
@@ -632,8 +568,8 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("accepts two unfinished children durably, without joining, and scopes detached inspection snapshots", async () => {
 		const [first, second] = await Promise.all([
-			host.start({ title: "first", prompt: "first assignment" }),
-			host.start({ title: "second", prompt: "second assignment" }),
+			host.start({ type: "default", title: "first", prompt: "first assignment" }),
+			host.start({ type: "default", title: "second", prompt: "second assignment" }),
 		])
 		assert.notEqual(first.id, second.id)
 		assert.equal(first.outcome, undefined)
@@ -657,7 +593,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("acknowledges steering acceptance and reads live transcripts without waiting for a result", async () => {
-		const record = await host.start({ title: "work", prompt: "assignment" })
+		const record = await host.start({ type: "default", title: "work", prompt: "assignment" })
 		assert.deepEqual(await host.steer(record.id, "change focus"), { id: record.id, messageId: "steering-id", accepted: true })
 		sinon.assert.calledOnceWithExactly(children[0].task.enqueueSteeringMessage, "change focus")
 		assert.equal(host.inspect(record.id).outcome, undefined)
@@ -670,8 +606,8 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("interrupts only the selected child and preserves its identity and durable artifacts", async () => {
-		const first = await host.start({ title: "first", prompt: "first" })
-		const second = await host.start({ title: "second", prompt: "second" })
+		const first = await host.start({ type: "default", title: "first", prompt: "first" })
+		const second = await host.start({ type: "default", title: "second", prompt: "second" })
 		const stopped = await host.interrupt(first.id, "stop first")
 		assert.equal(stopped.id, first.id)
 		assert.equal(stopped.conversationUlid, first.conversationUlid)
@@ -685,7 +621,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("does not mistake a completion presentation for the committed run outcome", async () => {
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		children[0].task.stateView.status = TaskStatus.COMPLETED
 		assert.equal(host.inspect(record.id).outcome, undefined)
 		children[0].outcome.resolve({ kind: "failed", failedAt: 123, error: { name: "Error", message: "finalization failed" } })
@@ -696,14 +632,14 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("rejects initial persistence failure without constructing or publishing a child", async () => {
 		sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("disk unavailable"))
-		await assert.rejects(host.start({ title: "work", prompt: "work" }), /disk unavailable/)
+		await assert.rejects(host.start({ type: "default", title: "work", prompt: "work" }), /disk unavailable/)
 		sinon.assert.notCalled(constructed)
 		assert.deepEqual(host.list(), [])
 	})
 
 	it("records constructor failures with a stable inspectable handle", async () => {
 		constructed.throws(new Error("construction failed"))
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		assert.equal(record.outcome?.kind, "failed")
 		assert.match(JSON.stringify(record.outcome), /construction failed/)
 		assert.deepEqual(await saved(record.id), record)
@@ -711,7 +647,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("retires a constructed execution if start rejects unexpectedly", async () => {
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		children[0].outcome.reject(new Error("start rejected"))
 		const result = await host.interrupt(record.id)
 		assert.equal(result.outcome?.kind, "failed")
@@ -720,7 +656,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("waits for rejected-start cancellation before retiring persistence, even when cancellation fails", async () => {
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		const abort = deferred<void>()
 		const abortEntered = deferred<void>()
 		children[0].task.abortTask.callsFake(() => {
@@ -745,7 +681,7 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("retains outcome-write failures for inspection and propagates them through interruption", async () => {
 		expectLoggerErrors()
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("outcome disk failure"))
 		children[0].outcome.resolve(completed)
 		await assert.rejects(host.interrupt(record.id), /interruption failed/)
@@ -755,12 +691,12 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.match(result.settlementError!.message, /outcome disk failure/)
 		assert.equal((await saved(record.id)).outcome, undefined)
 		assert.equal(host.observationSummary().activeCount, 1)
-		assert.deepEqual(host.observationInventory("active"), [{ taskletId: record.id, title: "work", state: "settlement_failed" }])
+		assert.deepEqual(host.observationInventory("active"), [{ taskletId: record.id, title: "work", role: "default", state: "settlement_failed" }])
 		assert.equal((await host.readObservationTranscript(record.id)).outcome, undefined)
 	})
 
 	it("joins settlement even when cancellation rejects, without losing the committed outcome", async () => {
-		const record = await host.start({ title: "work", prompt: "work" })
+		const record = await host.start({ type: "default", title: "work", prompt: "work" })
 		children[0].task.abortTask.rejects(new Error("abort failed"))
 		let settled = false
 		const interruption = host.interrupt(record.id).finally(() => {
@@ -775,16 +711,19 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("lists running, input-waiting and acceptance-pending children without joining or cancelling them", async () => {
-		const running = await host.start({ title: "running", prompt: "work" })
-		const waiting = await host.start({ title: "waiting", prompt: "ask" })
+		const running = await host.start({ type: "default", title: "running", prompt: "work" })
+		const waiting = await host.start({ type: "default", title: "waiting", prompt: "ask" })
 		children[1].task.stateView.status = TaskStatus.AWAITING_USER_INPUT
 		const releaseAcceptance = deferred<void>()
+		const writeEntered = deferred<void>()
 		const originalSave = storage.saveTaskletRecord
 		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			writeEntered.resolve()
 			if (!record.outcome) await releaseAcceptance.promise
 			return originalSave(record)
 		})
-		const starting = host.start({ title: "starting", prompt: "later" })
+		const starting = host.start({ type: "default", title: "starting", prompt: "later" })
+		await writeEntered.promise
 		try {
 			const active = host.listActive()
 			assert.equal(active.length, 3)
@@ -807,14 +746,29 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.equal(host.listActive().length, 2)
 	})
 
+	it("rejects a start when shutdown wins during configuration resolution before admission", async () => {
+		const save = sandbox.spy(storage, "saveTaskletRecord")
+		const starting = host.start({ type: "default", title: "Resolving", prompt: "Work" })
+		const rejected = assert.rejects(starting, /shutting down/)
+		await host.shutdown()
+		await rejected
+		sinon.assert.notCalled(save)
+		sinon.assert.notCalled(constructed)
+		assert.deepEqual(host.listActive(), [])
+		assert.deepEqual(host.list(), [])
+	})
+
 	it("joins an in-flight acceptance write at shutdown without constructing late work", async () => {
 		const releaseAcceptance = deferred<void>()
+		const writeEntered = deferred<void>()
 		const originalSave = storage.saveTaskletRecord
 		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			writeEntered.resolve()
 			if (!record.outcome) await releaseAcceptance.promise
 			return originalSave(record)
 		})
-		const starting = host.start({ title: "starting", prompt: "work" })
+		const starting = host.start({ type: "default", title: "starting", prompt: "work" })
+		await writeEntered.promise
 		let settled = false
 		const shutdown = host.shutdown().then(() => {
 			settled = true
@@ -823,7 +777,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			await new Promise<void>((resolve) => setImmediate(resolve))
 			assert.equal(settled, false)
 			sinon.assert.notCalled(constructed)
-			await assert.rejects(host.start({ title: "too late", prompt: "work" }), /shutting down/)
+			await assert.rejects(host.start({ type: "default", title: "too late", prompt: "work" }), /shutting down/)
 		} finally {
 			releaseAcceptance.resolve()
 		}
@@ -837,7 +791,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("does not settle shutdown before a completed child's final record write finishes", async () => {
-		const record = await host.start({ title: "finishing", prompt: "work" })
+		const record = await host.start({ type: "default", title: "finishing", prompt: "work" })
 		const writeEntered = deferred<void>()
 		const releaseWrite = deferred<void>()
 		const originalSave = storage.saveTaskletRecord
@@ -867,14 +821,14 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("shares one shutdown promise, interrupts every live child once and permanently closes admission", async () => {
-		const first = await host.start({ title: "first", prompt: "work" })
-		const second = await host.start({ title: "second", prompt: "work" })
+		const first = await host.start({ type: "default", title: "first", prompt: "work" })
+		const second = await host.start({ type: "default", title: "second", prompt: "work" })
 		children[1].task.stateView.status = TaskStatus.AWAITING_USER_INPUT
 		const shutdown = host.shutdown()
 		assert.equal(host.shutdown(), shutdown)
 		await shutdown
 		assert.equal(host.shutdown(), shutdown)
-		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
+		await assert.rejects(host.start({ type: "default", title: "late", prompt: "work" }), /shutting down/)
 		sinon.assert.calledTwice(constructed)
 		for (const child of children) {
 			sinon.assert.calledOnceWithExactly(child.task.abortTask, { kind: "interrupted", reason: "Root Task closed" })
@@ -887,8 +841,8 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("reports cancellation failure only after the failed child's run and sibling cleanup settle", async () => {
-		const first = await host.start({ title: "first", prompt: "work" })
-		const second = await host.start({ title: "second", prompt: "work" })
+		const first = await host.start({ type: "default", title: "first", prompt: "work" })
+		const second = await host.start({ type: "default", title: "second", prompt: "work" })
 		children[0].task.abortTask.rejects(new Error("cancel failed"))
 		let settled = false
 		const shutdown = host.shutdown()
@@ -911,8 +865,8 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("surfaces outcome-write failure without skipping sibling shutdown and persistence", async () => {
 		expectLoggerErrors()
-		const first = await host.start({ title: "first", prompt: "work" })
-		const second = await host.start({ title: "second", prompt: "work" })
+		const first = await host.start({ type: "default", title: "first", prompt: "work" })
+		const second = await host.start({ type: "default", title: "second", prompt: "work" })
 		const originalSave = storage.saveTaskletRecord
 		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
 			if (record.id === first.id) throw new Error("final record unavailable")
@@ -928,9 +882,14 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("surfaces a pending initial-write failure through both start and shutdown", async () => {
 		const acceptance = deferred<void>()
-		sandbox.stub(storage, "saveTaskletRecord").returns(acceptance.promise)
-		const starting = host.start({ title: "starting", prompt: "work" })
+		const writeEntered = deferred<void>()
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(() => {
+			writeEntered.resolve()
+			return acceptance.promise
+		})
+		const starting = host.start({ type: "default", title: "starting", prompt: "work" })
 		const startRejected = assert.rejects(starting, /acceptance failed/)
+		await writeEntered.promise
 		const shutdown = host.shutdown()
 		const shutdownRejected = assert.rejects(shutdown, (error: unknown) => {
 			assert.ok(error instanceof AggregateError)
@@ -944,7 +903,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.deepEqual(host.list(), [])
 		assert.deepEqual(host.listActive(), [])
 		assert.equal(host.shutdown(), shutdown)
-		await assert.rejects(host.start({ title: "late", prompt: "work" }), /shutting down/)
+		await assert.rejects(host.start({ type: "default", title: "late", prompt: "work" }), /shutting down/)
 	})
 
 	/** Acceptance/resume facts are monitored, not unsolicited model-bound input. */
@@ -964,7 +923,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	}
 
 	async function respondingChild() {
-		const child = await host.start({ title: "communicating child", prompt: "work" })
+		const child = await host.start({ type: "default", title: "communicating child", prompt: "work" })
 		const counterparty = (constructed.lastCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
 		return { child, counterparty }
 	}
@@ -978,7 +937,7 @@ describe("TaskletHost asynchronous ownership", () => {
 			{ kind: "interrupted", interruptedAt: 125, reason: "Silent interruption" },
 		] satisfies TaskRunOutcome[]) {
 			it(`wakes an unbounded sleep for a silent ${outcome.kind} outcome without fabricating a response`, async () => {
-				const child = await host.start({ title: "Silent worker", prompt: "work" })
+				const child = await host.start({ type: "default", title: "Silent worker", prompt: "work" })
 				const sleeping = host.sleep()
 				assert.equal(host.isSleeping, true)
 				children[0].outcome.resolve(outcome)
@@ -996,7 +955,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		}
 
 		it("retains terminal notifications until delivery acknowledgement without duplicating them", async () => {
-			const child = await host.start({ title: "Silent worker", prompt: "work" })
+			const child = await host.start({ type: "default", title: "Silent worker", prompt: "work" })
 			children[0].outcome.resolve(completed)
 			await host["children"].get(child.id)!.settlement
 			const events = await savedCommunications(child.id)
@@ -1024,8 +983,8 @@ describe("TaskletHost asynchronous ownership", () => {
 		})
 
 		it("filters terminal notifications until the selected child settles", async () => {
-			const first = await host.start({ title: "Excluded worker", prompt: "work" })
-			const selected = await host.start({ title: "Selected worker", prompt: "work" })
+			const first = await host.start({ type: "default", title: "Excluded worker", prompt: "work" })
+			const selected = await host.start({ type: "default", title: "Selected worker", prompt: "work" })
 			const sleeping = host.sleep({ taskletIds: [selected.id] })
 			children[0].outcome.resolve({ kind: "failed", failedAt: 124, error: { name: "Error", message: "Excluded failure" } })
 			await host["children"].get(first.id)!.settlement
@@ -1677,7 +1636,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	it("surfaces failed communication persistence through shutdown without skipping sibling cleanup", async () => {
 		expectLoggerErrors()
 		const { child, counterparty } = await respondingChild()
-		const sibling = await host.start({ title: "sibling", prompt: "work" })
+		const sibling = await host.start({ type: "default", title: "sibling", prompt: "work" })
 		sandbox.stub(storage, "saveTaskletEvents").rejects(new Error("communication disk failure"))
 		await assert.rejects(
 			counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "retained" }),
@@ -1693,7 +1652,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	for (const failure of ["record", "usage projection"] as const) {
 		it(`rejects a sleeping parent when ${failure} settlement fails`, async () => {
 			expectLoggerErrors()
-			const child = await host.start({ title: "Failure worker", prompt: "Work" })
+			const child = await host.start({ type: "default", title: "Failure worker", prompt: "Work" })
 			if (failure === "record") sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("outcome disk failure"))
 			else host["children"].get(child.id)!.usageProjectionError = new Error("usage projection failure")
 			const cancellation = new AbortController()
@@ -1727,7 +1686,7 @@ describe("TaskletHost asynchronous ownership", () => {
 	})
 
 	it("joins admitted message delivery before shutdown settles", async () => {
-		const child = await host.start({ title: "Delivery worker", prompt: "Work" })
+		const child = await host.start({ type: "default", title: "Delivery worker", prompt: "Work" })
 		const entered = deferred<void>()
 		const release = deferred<void>()
 		children[0].task.enqueueSteeringMessage.callsFake(async () => {
@@ -1754,8 +1713,8 @@ describe("TaskletHost asynchronous ownership", () => {
 			assert.throws(() => new TaskletHost({ ...owner, executionProfile }, taskOptions()), /Only root Tasks/)
 		}
 		assert.throws(() => new TaskletHost({ ...owner, taskId: "../escape" }, taskOptions()), /Invalid/)
-		await assert.rejects(host.start({ title: " ", prompt: "work" }), /non-empty/)
-		await assert.rejects(host.start({ title: "work", prompt: " " }), /non-empty/)
+		await assert.rejects(host.start({ type: "default", title: " ", prompt: "work" }), /non-empty/)
+		await assert.rejects(host.start({ type: "default", title: "work", prompt: " " }), /non-empty/)
 		sinon.assert.notCalled(constructed)
 	})
 })

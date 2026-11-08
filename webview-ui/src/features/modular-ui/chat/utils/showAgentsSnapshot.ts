@@ -1,5 +1,6 @@
 import { TaskletInventoryRequest } from "@shared/proto/dirac/task"
 import { TASKLET_STATE_LABELS, type TaskletInventoryPage } from "@shared/taskletObservation"
+import { formatTaskletLabel } from "@shared/taskletLabel"
 import { useChatStore } from "@/features/chat/store/chatStore"
 import { TaskServiceClient } from "@/shared/api/grpc-client"
 
@@ -40,7 +41,7 @@ export function formatAgentsSnapshot(snapshot: TaskletInventoryPage): string {
 	}
 	if (snapshot.items.length === 0) return `${heading}\nNo active agents.`
 	const rows = snapshot.items.map((item) =>
-		`• ${item.title.replace(/\s+/g, " ")} — ${TASKLET_STATE_LABELS[item.state]}\n  ${item.taskletId}`,
+		`• ${formatTaskletLabel(item).replace(/\s+/g, " ")} · ${TASKLET_STATE_LABELS[item.state]}`,
 	)
 	const more = snapshot.nextCursor || snapshot.items.length < snapshot.totalItems
 		? `Showing ${snapshot.items.length} of ${snapshot.totalItems} active agents. Ask Dirac about the remaining agents.`

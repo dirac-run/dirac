@@ -2,6 +2,7 @@ import {
 	TASKLET_RECEIPT_OPERATIONS,
 	TASKLET_RECEIPT_OUTCOMES,
 	taskletReceiptNote,
+	taskletReceiptRowTitle,
 	type TaskletReceipt,
 	type TaskletReceiptTone,
 } from "@shared/taskletReceipt"
@@ -23,7 +24,7 @@ export function TaskletReceiptBody({ receipt }: { receipt: TaskletReceipt }) {
 				<React.Fragment key={index}>
 					{index > 0 ? "\n\n" : ""}
 					<Text color={theme.toolHeader}>
-						{TASKLET_RECEIPT_OPERATIONS[row.operation].label} · {row.title}
+						{TASKLET_RECEIPT_OPERATIONS[row.operation].label} · {taskletReceiptRowTitle(row)}
 					</Text>
 					{" — "}
 					<Text color={taskletReceiptColor(TASKLET_RECEIPT_OUTCOMES[row.outcome].tone)}>

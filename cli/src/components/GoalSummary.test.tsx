@@ -43,19 +43,11 @@ describe("GoalSummary", () => {
 		expect(frame).not.toContain("**")
 		view.unmount()
 	})
-	it("retains verification and accounting in expanded details", () => {
+	it("retains accounting without a dedicated verification summary", () => {
 		const value = goal()
 		value.accounting = { totalTokens: 200, cost: 0.5 }
-		value.latestVerification = {
-			id: "verification",
-			title: "Verify build",
-			status: "completed",
-			createdAt: 1,
-			endedAt: 2,
-			terminalSummary: "Build passed",
-		}
 		const view = renderSummary(value, true)
-		expect(view.lastFrame()).toContain("Build passed")
+		expect(view.lastFrame()).not.toContain("Verification")
 		expect(view.lastFrame()).toContain("Accounting")
 		expect(view.lastFrame()).toContain("200 tokens")
 		expect(view.lastFrame()).not.toContain("Children")

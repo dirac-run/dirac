@@ -19,32 +19,61 @@ interface ReasoningEffortSelectorProps {
 	description?: string
 	allowedEfforts?: readonly OpenaiReasoningEffort[]
 	defaultEffort?: OpenaiReasoningEffort
+	compact?: boolean
 }
 
-const ReasoningEffortSelector = ({
-	currentMode,
+export const ReasoningEffortInput = ({
+	value,
+	onChange,
+	compact = false,
 	label = "Reasoning Effort",
 	description = "Higher effort improves depth, but uses more tokens.",
 	allowedEfforts = OPENAI_REASONING_EFFORT_OPTIONS,
 	defaultEffort = DEFAULT_OPENAI_REASONING_EFFORT,
-}: ReasoningEffortSelectorProps) => {
-	const { apiConfiguration } = useSettingsStore()
-	const { handleModeFieldChange } = useApiConfigurationHandlers()
-	const modeFields = getModeSpecificFields(apiConfiguration, currentMode)
+}: Omit<ReasoningEffortSelectorProps, "currentMode"> & {
+	value?: OpenaiReasoningEffort
+	onChange: (value: OpenaiReasoningEffort) => void
+}) => {
 	const selectedEffort =
-		isOpenaiReasoningEffort(modeFields.reasoningEffort) && allowedEfforts.includes(modeFields.reasoningEffort)
-			? modeFields.reasoningEffort
+		isOpenaiReasoningEffort(value) && allowedEfforts.includes(value)
+			? value
 			: allowedEfforts.includes(defaultEffort)
 				? defaultEffort
 				: allowedEfforts[0]
+
+	if (compact)
+		return (
+			<Select
+				value={selectedEffort}
+				onValueChange={(effort) => {
+					if (isOpenaiReasoningEffort(effort)) onChange(effort)
+				}}>
+				<SelectTrigger
+					size="sm"
+					aria-label={label}
+					title={`${label}: ${description}`}
+					className="h-7 rounded-sm px-2 text-xs">
+					<span className="text-description">Reasoning</span>
+					<SelectValue />
+				</SelectTrigger>
+				<SelectContent align="start">
+					{allowedEfforts.map((effort) => (
+						<SelectItem key={effort} value={effort}>
+							{OPENAI_REASONING_EFFORT_LABELS[effort]}
+						</SelectItem>
+					))}
+					<p className="max-w-56 px-2 py-1 text-xs text-description">{description}</p>
+				</SelectContent>
+			</Select>
+		)
 
 	return (
 		<div style={{ marginTop: 10, marginBottom: 5 }}>
 			<Label className="text-xs font-medium">{label}</Label>
 			<Select
-				onValueChange={(value) =>
-					handleModeFieldChange({ plan: "planModeReasoningEffort", act: "actModeReasoningEffort" }, value, currentMode)
-				}
+				onValueChange={(value) => {
+					if (isOpenaiReasoningEffort(value)) onChange(value)
+				}}
 				value={selectedEffort}>
 				<SelectTrigger className="w-full mt-1">
 					<SelectValue />
@@ -67,6 +96,25 @@ const ReasoningEffortSelector = ({
 				{description}
 			</p>
 		</div>
+	)
+}
+
+const ReasoningEffortSelector = ({ currentMode, ...props }: ReasoningEffortSelectorProps) => {
+	const { apiConfiguration } = useSettingsStore()
+	const { handleModeFieldChange } = useApiConfigurationHandlers()
+	const value = getModeSpecificFields(apiConfiguration, currentMode).reasoningEffort
+	return (
+		<ReasoningEffortInput
+			{...props}
+			value={isOpenaiReasoningEffort(value) ? value : undefined}
+			onChange={(effort) => {
+				void handleModeFieldChange(
+					{ plan: "planModeReasoningEffort", act: "actModeReasoningEffort" },
+					effort,
+					currentMode,
+				)
+			}}
+		/>
 	)
 }
 

@@ -664,8 +664,6 @@ export function createApiConfigurationForModelProviderSelection(
 		apiProvider: selection.provider,
 		ulid: options.ulid,
 		disableRetries: false,
-		actModeThinkingBudgetTokens: undefined,
-		actModeReasoningEffort: undefined,
 		geminiSearchEnabled: false,
 		enableParallelToolCalling: false,
 		onRetryAttempt: undefined,

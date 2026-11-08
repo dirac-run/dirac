@@ -41,7 +41,7 @@ export interface SystemPromptContext {
 	readonly yoloModeToggled?: boolean
 	readonly lowVerbosityEnabled?: boolean
 	readonly subagentsEnabled?: boolean
-	readonly utilityModelConfigured?: boolean
+	readonly subagentRoles?: readonly { name: string; description: string }[]
 	readonly diracWebToolsEnabled?: boolean
 	readonly isMultiRootEnabled?: boolean
 	readonly workspaceRoots?: Array<{ path: string; name: string; vcs?: string }>

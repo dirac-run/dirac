@@ -23,14 +23,14 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 		(context.executionProfile === "standalone" ||
 			context.executionProfile === "goal_coordinator" ||
 			context.executionProfile === "goal_followup") &&
-		context.subagentsEnabled === true
+			context.subagentsEnabled === true
 			? `\nTASKLET DELEGATION
 
-- Generic and configured named-agent spawn tools start tasklets asynchronously. A returned stable tasklet ID confirms startup acceptance, not assignment success or completion; startup failures are reported separately.
+- The \`subagents\` tool starts a batch of assignments asynchronously using \`default\` or an enabled role. Supply complete instructions; children do not receive the parent conversation. A returned stable tasklet ID confirms startup acceptance, not assignment success or completion; startup failures are reported separately.
 - Continue useful work after spawning. Later results, progress, and requests arrive through parent communication. Use \`tasklets\` \`list\` for compact inventory and \`inspect\` views for passive status, pending requests, messages, trajectory (calls without results), selected calls/results, child-only transcript excerpts, or committed assignment results. Retrieve exact evidence in bounded pages rather than full contexts.
 - Use \`tasklets\` \`message\` for all direct communication: addressed guidance/questions, replies to exact request IDs, and permission decisions. Batch explicitly addressed requests when useful; inspect per-item outcomes and escalate only when needed. Queued guidance is not a consumed message or a permission decision. Child Act execution never expands current parent authority.
 - When no useful work remains while tasklets are active, use \`tasklets\` with \`sleep\` to wait for events rather than repeatedly polling. Before completing the root task, let active tasklets finish or explicitly interrupt them.
-- The configured timeout applies to each execution, including explicit resumption. A deadline interrupts the tasklet while preserving its ID and conversation; continue only with explicit \`tasklets\` \`resume\`. There is no 90-second wrap-up grace, automatic continuation, or timeout-as-success.
+- Child execution has no automatic deadline. Use \`tasklets\` \`interrupt\` to stop work and explicit \`tasklets\` \`resume\` to continue the same conversation. A timed \`sleep\` only limits the parent's wait; it does not stop a child.
 `
 			: ""
 
@@ -56,37 +56,30 @@ Tasks have two modes: PLAN MODE is for read-only research and proposals, while A
 
 SYSTEM INFO
 
-- OS: {{OS}}; shell: {{SHELL}}; cwd: \`${currentCwd}\`; parallel work: max {{AVAILABLE_CORES}} CPU cores.${
-		process.platform === "win32" && !context.activeShellIsPosix
+- OS: {{OS}}; shell: {{SHELL}}; cwd: \`${currentCwd}\`; parallel work: max {{AVAILABLE_CORES}} CPU cores.${process.platform === "win32" && !context.activeShellIsPosix
 			? "\n- Non-POSIX Windows shell: use PowerShell or cmd; Unix tools are unavailable."
 			: ""
-	}${context.activeShellType === "git-bash" ? "\n- Git Bash: use `/c/...` paths and expect CRLF." : ""}${context.activeShellType === "wsl" ? "\n- WSL: Windows drives are mounted under `/mnt/`." : ""}
+		}${context.activeShellType === "git-bash" ? "\n- Git Bash: use `/c/...` paths and expect CRLF." : ""}${context.activeShellType === "wsl" ? "\n- WSL: Windows drives are mounted under `/mnt/`." : ""}
 ${yoloModeToggled ? "- Autonomous mode: keep resource use reasonable.\n" : ""}
 
 {{SKILLS_SECTION}}
-${
-	userInstructions ||
-	diracRules ||
-	preferredLanguageInstructions ||
-	globalDiracRulesFileInstructions ||
-	localDiracRulesFileInstructions ||
-	localCursorRulesFileInstructions ||
-	localCursorRulesDirInstructions ||
-	localWindsurfRulesFileInstructions ||
-	localAgentsRulesFileInstructions
-		? `\n\n# USER'S CUSTOM INSTRUCTIONS\n\nThe following additional instructions are provided by the user.\n${
-				userInstructions ? `\n${userInstructions}` : ""
-			}${diracRules ? `\n${diracRules}` : ""}${preferredLanguageInstructions ? `\n${preferredLanguageInstructions}` : ""}${
-				diracIgnoreInstructions ? `\n${diracIgnoreInstructions}` : ""
-			}${globalDiracRulesFileInstructions ? `\n${globalDiracRulesFileInstructions}` : ""}${
-				localDiracRulesFileInstructions ? `\n${localDiracRulesFileInstructions}` : ""
-			}${localCursorRulesFileInstructions ? `\n${localCursorRulesFileInstructions}` : ""}${
-				localCursorRulesDirInstructions ? `\n${localCursorRulesDirInstructions}` : ""
-			}${localWindsurfRulesFileInstructions ? `\n${localWindsurfRulesFileInstructions}` : ""}${
-				localAgentsRulesFileInstructions ? `\n${localAgentsRulesFileInstructions}` : ""
+${userInstructions ||
+			diracRules ||
+			preferredLanguageInstructions ||
+			globalDiracRulesFileInstructions ||
+			localDiracRulesFileInstructions ||
+			localCursorRulesFileInstructions ||
+			localCursorRulesDirInstructions ||
+			localWindsurfRulesFileInstructions ||
+			localAgentsRulesFileInstructions
+			? `\n\n# USER'S CUSTOM INSTRUCTIONS\n\nThe following additional instructions are provided by the user.\n${userInstructions ? `\n${userInstructions}` : ""
+			}${diracRules ? `\n${diracRules}` : ""}${preferredLanguageInstructions ? `\n${preferredLanguageInstructions}` : ""}${diracIgnoreInstructions ? `\n${diracIgnoreInstructions}` : ""
+			}${globalDiracRulesFileInstructions ? `\n${globalDiracRulesFileInstructions}` : ""}${localDiracRulesFileInstructions ? `\n${localDiracRulesFileInstructions}` : ""
+			}${localCursorRulesFileInstructions ? `\n${localCursorRulesFileInstructions}` : ""}${localCursorRulesDirInstructions ? `\n${localCursorRulesDirInstructions}` : ""
+			}${localWindsurfRulesFileInstructions ? `\n${localWindsurfRulesFileInstructions}` : ""}${localAgentsRulesFileInstructions ? `\n${localAgentsRulesFileInstructions}` : ""
 			}`
-		: ""
-}
+			: ""
+		}
 ${profileInstructions ? `\n\n${profileInstructions}` : ""}
 `
 }

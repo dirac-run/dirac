@@ -35,6 +35,7 @@ const ProviderKeyMap: Partial<Record<ApiProvider, string>> = {
 	groq: "GroqModelId",
 	baseten: "BasetenModelId",
 	huggingface: "HuggingFaceModelId",
+	"huawei-cloud-maas": "HuaweiCloudMaasModelId",
 	aihubmix: "AihubmixModelId",
 	nousResearch: "NousResearchModelId",
 	"vercel-ai-gateway": "VercelAiGatewayModelId",

@@ -94,6 +94,8 @@ function makeFakeStateManager(overrides?: {
 		getApiConfiguration: sinon.stub().returns(overrides?.apiConfiguration ?? { apiProvider: "anthropic" }),
 		getGlobalStateKey: sinon.stub().callsFake((key: string) => globalState[key]),
 		getGlobalSettingsKey: sinon.stub().callsFake((key: string) => globalSettings[key]),
+		getSystemDefaultSettingsKey: sinon.stub().callsFake((key: string) => globalSettings[key]),
+		getSecretKey: sinon.stub().returns(undefined),
 		getWorkspaceStateKey: sinon.stub().callsFake((key: string) => workspaceState[key]),
 		getModelsCache: sinon.stub().returns(overrides?.modelsCache ?? null),
 	}
@@ -236,7 +238,7 @@ describe("getStateToPostToWebview", () => {
 				path: "/skills/ordinary/SKILL.md",
 				source: "project",
 			}
-			;(skillsModule.getOrDiscoverSkills as sinon.SinonStub).resolves([webSearchSkill, ordinarySkill])
+				; (skillsModule.getOrDiscoverSkills as sinon.SinonStub).resolves([webSearchSkill, ordinarySkill])
 
 			const unsupportedState = await getStateToPostToWebview({
 				stateManager: makeFakeStateManager({ apiConfiguration: { actModeApiProvider: "anthropic" } }),

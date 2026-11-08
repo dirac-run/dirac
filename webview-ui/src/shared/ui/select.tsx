@@ -31,7 +31,7 @@ function SelectTrigger({
 	return (
 		<SelectPrimitive.Trigger
 			className={cn(
-				"border-editor-group-border data-[placeholder]:text-input-placeholder [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-error flex w-fit items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-8 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-2",
+				"border-(--vscode-dropdown-border) bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground) data-[placeholder]:text-input-placeholder focus-visible:outline focus-visible:outline-1 focus-visible:outline-(--vscode-focusBorder) aria-invalid:border-error flex min-w-0 w-fit items-center justify-between gap-2 rounded-sm border px-2 py-1 text-sm whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-7 *:data-[slot=select-value]:truncate *:data-[slot=select-value]:min-w-0 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 				className,
 			)}
 			data-size={size}
@@ -59,9 +59,9 @@ function SelectContent({
 			<SelectPrimitive.Content
 				align={align}
 				className={cn(
-					"bg-menu text-menu-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-xs border border-editor-group-border shadow-md",
+					"bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground) relative z-50 max-h-(--radix-select-content-available-height) max-w-[calc(100vw-16px)] min-w-[8rem] overflow-hidden rounded-sm border border-(--vscode-dropdown-border) shadow-md",
 					position === "popper" &&
-					"data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+						"data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
 					className,
 				)}
 				data-slot="select-content"
@@ -71,8 +71,7 @@ function SelectContent({
 				<SelectPrimitive.Viewport
 					className={cn(
 						"p-1",
-						position === "popper" &&
-						"h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1",
+						position === "popper" && "w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1",
 					)}>
 					{children}
 				</SelectPrimitive.Viewport>
@@ -96,14 +95,14 @@ function SelectItem({ className, children, ...props }: React.ComponentProps<type
 	return (
 		<SelectPrimitive.Item
 			className={cn(
-				"focus:bg-button-background/50 focus:text-input [&_svg:not([class*='text-'])]:text-description relative flex w-full cursor-default items-center gap-2 rounded-xs py-1 pr-8 pl-2 text-xs outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-2 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+				"focus:bg-(--vscode-list-activeSelectionBackground) focus:text-(--vscode-list-activeSelectionForeground) relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-sm py-1 pr-7 pl-2 text-xs outline-hidden select-none break-words data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 				className,
 			)}
 			data-slot="select-item"
 			{...props}>
-			<span className="absolute right-2 flex size-2 items-center justify-center" data-slot="select-item-indicator">
+			<span className="absolute right-2 flex size-3.5 items-center justify-center" data-slot="select-item-indicator">
 				<SelectPrimitive.ItemIndicator>
-					<CheckIcon className="size-2" />
+					<CheckIcon className="size-3.5" />
 				</SelectPrimitive.ItemIndicator>
 			</span>
 			<SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>

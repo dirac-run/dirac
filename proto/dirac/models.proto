@@ -251,6 +251,10 @@ message OpenAiModelsRequest {
   Metadata metadata = 1;
   string base_url = 2;
   string api_key = 3;
+  map<string, string> headers = 4;
+  // Resolve the saved unnamed endpoint, key override, and headers as one tuple.
+  // False keeps explicit setup/profile values isolated, including empty values.
+  bool use_saved_endpoint = 5;
 }
 
 // API secrets (credentials, API keys)
@@ -444,6 +448,10 @@ message UpdateApiConfigurationPartialRequest {
   // Field names should use camelCase (e.g., "apiKey", "planModeApiProvider").
   // If a field is in the mask but not set in api_configuration, it will be cleared (set to undefined).
   google.protobuf.FieldMask update_mask = 3;
+  // Save provider access/setup without selecting a provider or model.
+  optional bool setup_only = 4;
+  // Records explicit addition of keyless providers; valid only with setup_only.
+  optional string setup_provider = 5;
 }
 
 // Model info for OCA (OpenAI-compatible) models exposed by the OCA provider

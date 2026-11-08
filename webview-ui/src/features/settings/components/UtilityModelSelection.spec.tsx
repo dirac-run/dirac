@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import UtilityModelSelection from "./UtilityModelSelection"
+
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+beforeAll(() => Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() }))
+afterAll(() => {
+	if (originalScrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", originalScrollIntoView)
+	else Reflect.deleteProperty(Element.prototype, "scrollIntoView")
+})
 
 const mockUpdateSetting = vi.fn()
 const mockPersistSetting = vi.fn()
@@ -9,6 +16,9 @@ const mockPermissionSettings = vi.hoisted(() => ({ enabled: false, policy: "" })
 vi.mock("@/features/settings/store/settingsStore", () => ({
 	useSettingsStore: vi.fn(() => ({
 		utilityModelSelection: undefined,
+		configuredApiProviders: ["openai"],
+		apiConfiguration: {},
+		pendingApiConfigurationUpdates: {},
 		utilityModelUseCondense: true,
 		utilityModelUseGenerateCommitMessage: true,
 		utilityModelUsePermissionHandling: mockPermissionSettings.enabled,
@@ -116,7 +126,8 @@ describe("UtilityModelSelection", () => {
 	it("persists an arbitrary model ID for the selected provider", () => {
 		render(<UtilityModelSelection />)
 
-		fireEvent.change(screen.getByLabelText("Utility model provider"), { target: { value: "openai" } })
+		fireEvent.keyDown(screen.getByLabelText("Utility provider"), { key: "ArrowDown" })
+		fireEvent.click(screen.getByRole("option", { name: "OpenAI Compatible" }))
 		fireEvent.change(screen.getByLabelText("Model"), { target: { value: "custom-utility-model" } })
 
 		expect(mockUpdateSetting).toHaveBeenLastCalledWith(

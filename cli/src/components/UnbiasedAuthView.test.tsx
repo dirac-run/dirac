@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 	start: vi.fn(),
 	poll: vi.fn(),
 	apply: vi.fn(),
+	saveSetup: vi.fn(),
 	flush: vi.fn(),
 	setSecret: vi.fn(),
 	setGlobalStateBatch: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock("@/integrations/unbiased/device-auth", () => ({
 vi.mock("@/shared/net", () => ({ fetch: vi.fn() }))
 vi.mock("@/utils/env", () => ({ openExternal: vi.fn() }))
 vi.mock("../utils/clipboard", () => ({ copyToClipboardNative: vi.fn() }))
-vi.mock("../utils/provider-config", () => ({ applyProviderConfig: mocks.apply }))
+vi.mock("../utils/provider-config", () => ({ applyProviderConfig: mocks.apply, saveProviderSetup: mocks.saveSetup }))
 vi.mock("@/core/storage/StateManager", () => ({
 	StateManager: {
 		get: () => ({
@@ -59,6 +60,16 @@ describe("interactive Unbiased sign-in", () => {
 	})
 	afterEach(() => {
 		for (const view of views.splice(0)) view.unmount()
+	})
+
+	it("saves settings authentication without activating Unbiased", async () => {
+		const complete = vi.fn()
+		const view = render(<UnbiasedAuthView setupOnly onComplete={complete} onCancel={vi.fn()} />)
+		views.push(view)
+		await pause()
+		expect(mocks.saveSetup).toHaveBeenCalledWith({ providerId: "unbiased", apiKey: token.accessToken, controller: undefined })
+		expect(mocks.apply).not.toHaveBeenCalled()
+		expect(complete).toHaveBeenCalledOnce()
 	})
 
 	it("signs in despite an existing key and saves the new key before applying configuration", async () => {

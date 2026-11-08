@@ -45,6 +45,60 @@ describe("tasklet reconstruction storage", () => {
 		await fs.rm(directory, { recursive: true, force: true })
 	})
 
+	it("persists Unicode, multiword and suffixed scientist IDs under their owning roots", async () => {
+		for (const id of ["Gödel", "von Neumann", "Planck 2"]) {
+			await saveTaskletRecord(record("root", id))
+			await saveTaskletRecord({ ...record("other", id), title: "Other assignment" })
+		}
+		const first = await loadTaskletRecords("root")
+		const other = await loadTaskletRecords("other")
+		assert.deepEqual(first.map((child) => child.id).sort(), ["Gödel", "Planck 2", "von Neumann"])
+		assert.ok(first.every((child) => child.rootTaskId === "root" && child.title === "Private child"))
+		assert.ok(other.every((child) => child.rootTaskId === "other" && child.title === "Other assignment"))
+		const file = path.join(getTaskDirectoryPath(address("root", "Planck 2")), GlobalFileNames.taskletRecord)
+		await fs.writeFile(file, JSON.stringify(record("other", "Planck 2")))
+		await assert.rejects(loadTaskletRecords("root"), /Invalid tasklet record/)
+	})
+
+	it("migrates retired options without changing saved identity, selection or conversation", async () => {
+		const selection = { provider: "anthropic", modelId: "claude-opus-4-6", reasoningEffort: "high" }
+		await saveTaskletRecord({
+			...record(), configuration: {
+				name: "Deleted reviewer", modelSelection: selection, timeoutSeconds: 600,
+				includeHistory: true, systemPrompt: "Retired", allowedTools: ["read_file"], skills: ["old"],
+			}
+		} as unknown as TaskletRecord)
+		const conversation = path.join(getTaskDirectoryPath(address()), "api_conversation_history.json")
+		await fs.writeFile(conversation, "retained child conversation bytes")
+		const [loaded] = await loadTaskletRecords("root")
+		assert.deepEqual(loaded.configuration, { name: "Deleted reviewer", modelSelection: selection })
+		assert.equal(loaded.role, "Deleted reviewer")
+		assert.equal(loaded.id, firstId)
+		assert.equal(loaded.conversationUlid, "retained-conversation")
+		await saveTaskletRecord(loaded)
+		assert.deepEqual((await loadTaskletRecords("root"))[0], loaded)
+		assert.equal(await fs.readFile(conversation, "utf8"), "retained child conversation bytes")
+	})
+
+	it("recovers an explicit child-local model but never invents an unknown role or provider default", async () => {
+		await saveTaskletRecord(record())
+		const settingsFile = path.join(getTaskDirectoryPath(address()), "settings.json")
+		await fs.writeFile(settingsFile, JSON.stringify({
+			actModeApiProvider: "openai", actModeOpenAiModelId: "saved-local-model",
+			actModeOpenAiProfileName: "Local", actModeReasoningEffort: "none", actModeThinkingBudgetTokens: 0,
+			apiKey: "must-not-be-captured", subagentRoles: [{ name: "Current", modelSelection: { modelId: "wrong" } }],
+		}))
+		const [loaded] = await loadTaskletRecords("root")
+		assert.deepEqual(loaded.configuration, {
+			modelSelection: {
+				provider: "openai", modelId: "saved-local-model", openAiProfileName: "Local", reasoningEffort: "none", thinkingBudgetTokens: 0,
+			}
+		})
+		assert.equal(loaded.role, undefined)
+		await fs.writeFile(settingsFile, JSON.stringify({ actModeApiProvider: "anthropic", planModeApiModelId: "not-the-child-model" }))
+		assert.equal((await loadTaskletRecords("root"))[0].configuration, undefined)
+	})
+
 	it("returns empty missing collections/events without creating storage", async () => {
 		assert.deepEqual(await loadTaskletRecords("root"), [])
 		assert.deepEqual(await loadTaskletEvents(address()), [])
@@ -210,8 +264,8 @@ describe("tasklet reconstruction storage", () => {
 		assert.deepEqual(await fs.readdir(directory), [])
 	})
 
-	it("rejects invalid directory identities instead of treating them as child records", async () => {
+	it("rejects a child directory without its record rather than omitting it", async () => {
 		await fs.mkdir(path.join(getTaskDirectoryPath("root"), "tasklets", "ordinary-task"), { recursive: true })
-		await assert.rejects(loadTaskletRecords("root"), /Invalid tasklet directory identity/)
+		await assert.rejects(loadTaskletRecords("root"), { code: "ENOENT" })
 	})
 })

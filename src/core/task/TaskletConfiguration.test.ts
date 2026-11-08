@@ -1,284 +1,175 @@
 import { strict as assert } from "node:assert"
-import { StateManager } from "@core/storage/StateManager"
-import type { ApiConfiguration, ModelProviderSelection } from "@shared/api"
+import { anthropicDefaultModelId, anthropicModels, type ApiConfiguration } from "@shared/api"
+import { setVscodeHostProviderMock } from "@test/host-provider-test-utils"
+import { stringifyVsCodeLmModelSelector, type LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 import type { LocalState, Settings } from "@shared/storage/state-keys"
-import { afterEach, describe, it } from "mocha"
-import sinon from "sinon"
+import type { SubagentRole } from "@shared/subagentRoles"
+import { describe, it } from "mocha"
 import { buildTaskWorkingConfigurationUpdate, createTaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import { resolveTaskletConfiguration, taskletWorkingConfiguration } from "./index"
-import type { TaskletConfiguration } from "./TaskletConfiguration"
-import { type AgentBaseConfig, AgentConfigLoader } from "./tools/subagent/AgentConfigLoader"
 
 function parentConfiguration(api: ApiConfiguration = {}, settings: Partial<Settings> = {}) {
 	return createTaskWorkingConfiguration({
 		settings: { mode: "plan", preferredLanguage: "French", ...settings } as Settings,
 		apiConfiguration: {
-			planModeApiProvider: "anthropic",
-			planModeApiModelId: "claude-opus-4-6",
-			actModeApiProvider: "anthropic",
-			actModeApiModelId: "claude-opus-4-6",
-			apiKey: "parent-secret",
-			openRouterApiKey: "router-secret",
-			...api,
+			planModeApiProvider: "anthropic", planModeApiModelId: "claude-opus-4-6",
+			actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-6",
+			apiKey: "parent-secret", openRouterApiKey: "router-secret", ...api,
 		},
 		workspaceConfiguration: { localSkillsToggles: { fixture: true } } as unknown as LocalState,
-		executionOptions: {
-			terminalReuseEnabled: true,
-			vscodeTerminalExecutionMode: "backgroundExec",
-			multiRootEnabled: false,
-		},
+		executionOptions: { terminalReuseEnabled: true, vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false },
 	})
 }
 
-function namedProfile(overrides: Partial<AgentBaseConfig> = {}): AgentBaseConfig {
-	const profile = {
-		name: "Researcher",
-		description: "Research a bounded question",
-		systemPrompt: "Use the configured research approach.",
-		skills: ["research"],
-		tools: ["read_file", "respond:progress", "attempt_completion", "ask_followup_question", "say"],
-		...overrides,
-	}
-	sinon.stub(AgentConfigLoader, "getInstance").returns({
-		ready: async () => { },
-		getCachedConfig: (name: string) => (name.trim().toLowerCase() === "researcher" ? profile : undefined),
-	} as AgentConfigLoader)
-	return profile
-}
-
-describe("TaskletConfiguration", () => {
-	afterEach(() => sinon.restore())
-
-	it("keeps generic defaults secret-free and inherits the current parent without pinning its model", async () => {
-		const parent = parentConfiguration()
-		const resolved = await resolveTaskletConfiguration({}, parent)
-		assert.deepEqual(resolved, { includeHistory: false, timeoutSeconds: 600 })
-		const child = taskletWorkingConfiguration(parent, resolved)
+describe("durable tasklet model selection", () => {
+	it("captures default active Plan settings including explicit off reasoning, then retains model with current credentials and authority", async () => {
+		const parent = parentConfiguration({ planModeReasoningEffort: "none", planModeThinkingBudgetTokens: 0 })
+		const resolved = await resolveTaskletConfiguration({ type: "default" }, parent)
+		assert.equal(resolved.name, "default")
+		assert.equal(resolved.modelSelection.modelId, "claude-opus-4-6")
+		assert.equal(resolved.modelSelection.reasoningEffort, "none")
+		assert.equal(resolved.modelSelection.thinkingBudgetTokens, 0)
+		assert.doesNotMatch(JSON.stringify(resolved), /secret|apiKey|includeHistory|timeoutSeconds/)
+		const changed = buildTaskWorkingConfigurationUpdate(parent, {
+			settings: { strictPlanModeEnabled: true },
+			apiConfiguration: { planModeApiModelId: "claude-sonnet-4-6", apiKey: "rotated-secret", planModeThinkingBudgetTokens: 4096 },
+		})
+		const child = taskletWorkingConfiguration(changed, resolved)
 		assert.equal(child.settings.mode, "act")
-		assert.equal(child.apiConfiguration.actModeApiModelId, parent.apiConfiguration.planModeApiModelId)
+		assert.equal(child.settings.strictPlanModeEnabled, true)
+		assert.equal(child.apiConfiguration.actModeApiModelId, "claude-opus-4-6")
+		assert.equal(child.apiConfiguration.actModeThinkingBudgetTokens, 0)
+		assert.equal(child.apiConfiguration.apiKey, "rotated-secret")
 		assert.equal(parent.settings.mode, "plan")
-
-		const updated = buildTaskWorkingConfigurationUpdate(parent, {
-			apiConfiguration: { planModeApiModelId: "claude-sonnet-4-6", apiKey: "rotated-secret" },
-		})
-		const refreshed = taskletWorkingConfiguration(updated, resolved)
-		assert.equal(refreshed.settings.mode, "act")
-		assert.equal(refreshed.apiConfiguration.actModeApiModelId, "claude-sonnet-4-6")
-		assert.equal(refreshed.apiConfiguration.apiKey, "rotated-secret")
-		assert.doesNotMatch(JSON.stringify(resolved), /secret|apiKey|apiConfiguration/)
 	})
 
-	it("maps named prompts, skills, history and tool restrictions without restricting parent interactions", async () => {
-		const profile = namedProfile()
-		const resolved = await resolveTaskletConfiguration(
-			{ agentName: " Researcher ", includeHistory: true, timeoutSeconds: 12.5 },
-			parentConfiguration(),
-		)
-		assert.deepEqual(resolved, {
-			name: profile.name,
-			description: profile.description,
-			systemPrompt: profile.systemPrompt,
-			skills: ["research"],
-			allowedTools: ["read_file", "respond"],
-			includeHistory: true,
-			timeoutSeconds: 12.5,
-		})
-		profile.skills?.push("later")
-		profile.tools.push("execute_command")
-		assert.deepEqual(resolved.skills, ["research"])
-		assert.deepEqual(resolved.allowedTools, ["read_file", "respond"])
-		assert.equal(Object.hasOwn(resolved, "modelSelection"), false)
+	it("captures an installed default model even when the parent's configured ID is obsolete", async () => {
+		const parent = parentConfiguration({ planModeApiModelId: "claude-opus-4-20250514" })
+		const installed = { id: anthropicDefaultModelId, info: anthropicModels[anthropicDefaultModelId] }
+		const captured = await resolveTaskletConfiguration({ type: "default" }, parent, [], installed)
+		assert.equal(captured.modelSelection.modelId, installed.id)
+		assert.equal(taskletWorkingConfiguration(parent, captured).apiConfiguration.actModeApiModelId, installed.id)
+		await assert.rejects(resolveTaskletConfiguration({ type: "Reviewer" }, parent, [{
+			name: "Reviewer", description: "Explicit model must remain strict", enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "claude-opus-4-20250514" },
+		}]), /unavailable/)
 	})
 
-	it("adds full respond when a profile lists no response alias", async () => {
-		namedProfile({ tools: ["read_file", "edit_file:replace", "read_file"] })
-		const resolved = await resolveTaskletConfiguration({ agentName: "Researcher" }, parentConfiguration())
-		assert.deepEqual(resolved.allowedTools, ["read_file", "edit_file:replace", "respond"])
-	})
-
-	it("does not copy the obsolete default tool list for profiles without an explicit scope", async () => {
-		namedProfile({ tools: [], skills: undefined })
-		const resolved = await resolveTaskletConfiguration({ agentName: "Researcher" }, parentConfiguration())
-		assert.equal(resolved.allowedTools, undefined)
-		assert.equal(resolved.skills, undefined)
-	})
-
-	it("rejects unknown and blank profile names, including when Utility is requested", async () => {
-		namedProfile()
-		for (const agentName of ["missing", ""]) {
-			await assert.rejects(
-				resolveTaskletConfiguration({ agentName, useUtilityModel: true }, parentConfiguration()),
-				/Unknown tasklet agent profile/,
-			)
-		}
-	})
-
-	it("pins a named model to the current mode's provider and maps dynamic fields in both modes", async () => {
-		namedProfile({ modelId: "vendor/research-model" })
-		const state = sinon.createStubInstance(StateManager)
-		sinon.stub(StateManager, "get").returns(state)
+	it("captures provider-specific model and named endpoint rather than generic model field", async () => {
 		const parent = parentConfiguration({
-			planModeApiProvider: "openrouter",
-			planModeOpenRouterModelId: "vendor/parent-model",
+			planModeApiProvider: "openai", planModeApiModelId: "unrelated-generic",
+			planModeOpenAiModelId: "local/custom", planModeOpenAiProfileName: "Local",
+			openAiCompatibleProfiles: [{ name: "Local", baseUrl: "http://localhost:1234/v1", modelId: "legacy-model", modelInfo: { contextWindow: 8192, supportsPromptCache: false } }],
 		})
-		const before = JSON.stringify(parent)
-		const resolved = await resolveTaskletConfiguration({ agentName: "Researcher" }, parent)
-		assert.equal(resolved.modelSelection?.provider, "openrouter")
-		assert.equal(resolved.modelSelection?.modelId, "vendor/research-model")
-		const child = taskletWorkingConfiguration(parent, resolved)
-		assert.equal(child.settings.mode, "act")
-		assert.equal(child.settings.preferredLanguage, "French")
-		assert.equal(child.settings.planModeOpenRouterModelId, "vendor/research-model")
-		assert.equal(child.settings.actModeOpenRouterModelId, "vendor/research-model")
-		assert.equal(child.apiConfiguration.planModeApiProvider, "openrouter")
-		assert.equal(child.apiConfiguration.actModeApiProvider, "openrouter")
-		assert.equal(child.apiConfiguration.openRouterApiKey, "router-secret")
-		assert.equal(child.revision, parent.revision + 1)
-		assert.deepEqual(child.executionOptions, parent.executionOptions)
-		assert.deepEqual(child.workspaceConfiguration, parent.workspaceConfiguration)
-		assert.equal(Object.isFrozen(child.apiConfiguration), true)
-		assert.equal(JSON.stringify(parent), before)
+		const resolved = await resolveTaskletConfiguration({ type: "default" }, parent)
+		assert.equal(resolved.modelSelection.modelId, "local/custom")
+		assert.equal(resolved.modelSelection.openAiProfileName, "Local")
+		assert.equal(taskletWorkingConfiguration(parent, resolved).apiConfiguration.actModeOpenAiModelId, "local/custom")
 	})
 
-	it("uses the Act provider for named models when the parent is in Act", async () => {
-		namedProfile({ modelId: "vendor/act-model" })
-		const state = sinon.createStubInstance(StateManager)
-		sinon.stub(StateManager, "get").returns(state)
-		const parent = parentConfiguration(
-			{ actModeApiProvider: "openrouter", actModeOpenRouterModelId: "vendor/parent" },
-			{ mode: "act" },
-		)
-		const resolved = await resolveTaskletConfiguration({ agentName: "Researcher" }, parent)
-		assert.equal(resolved.modelSelection?.provider, "openrouter")
-		assert.equal(taskletWorkingConfiguration(parent, resolved).settings.mode, "act")
-	})
-
-	it("lets Utility override a named model while preserving its profile and OpenAI endpoint identity", async () => {
-		namedProfile({ modelId: "not-an-anthropic-model" })
-		const utility = {
-			provider: "openai",
-			modelId: "utility-model",
-			openAiProfileName: "Internal",
-			modelInfo: { contextWindow: 12000, supportsPromptCache: false },
-			apiKey: "must-not-persist",
-		}
-		const parent = parentConfiguration(
-			{
-				openAiCompatibleProfiles: [
-					{
-						name: "Internal",
-						baseUrl: "https://example.test/v1",
-						apiKey: "endpoint-secret",
-						modelId: "utility-model",
-						modelInfo: { supportsPromptCache: false },
-					},
-				],
-			},
-			{ utilityModelSelection: utility as ModelProviderSelection },
-		)
-		const resolved = await resolveTaskletConfiguration({ agentName: "Researcher", useUtilityModel: true }, parent)
-		assert.equal(resolved.name, "Researcher")
-		assert.equal(resolved.modelSelection?.provider, "openai")
-		assert.equal(resolved.modelSelection?.openAiProfileName, "Internal")
-		assert.equal(resolved.modelSelection?.modelId, "utility-model")
-		assert.ok(resolved.modelSelection)
-		assert.equal(Object.hasOwn(resolved.modelSelection, "apiKey"), false)
-		assert.doesNotMatch(JSON.stringify(resolved), /secret|must-not-persist/)
-		const child = taskletWorkingConfiguration(parent, resolved)
-		assert.equal(child.apiConfiguration.planModeOpenAiProfileName, "Internal")
-		assert.equal(child.apiConfiguration.actModeOpenAiModelId, "utility-model")
-		assert.equal(child.apiConfiguration.planModeOpenAiModelInfo?.contextWindow, 12000)
-		assert.notEqual(resolved.modelSelection?.modelInfo, parent.settings.utilityModelSelection?.modelInfo)
-	})
-
-	it("reapplies persisted selections using current parent credentials and permissions, not current profile/Utility settings", async () => {
-		const parent = parentConfiguration({}, { utilityModelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" } })
-		const resolved = await resolveTaskletConfiguration({ useUtilityModel: true }, parent)
-		const persisted = JSON.parse(JSON.stringify(resolved)) as TaskletConfiguration
-		const current = buildTaskWorkingConfigurationUpdate(parent, {
-			apiConfiguration: { apiKey: "new-parent-secret" },
-			settings: { mode: "act", yoloModeToggled: false, utilityModelSelection: undefined },
+	it("captures the Huawei model-specific selection instead of a stale generic model", async () => {
+		const modelInfo = { contextWindow: 32768, supportsPromptCache: false }
+		const parent = parentConfiguration({
+			planModeApiProvider: "huawei-cloud-maas", planModeApiModelId: "unrelated-generic",
+			planModeHuaweiCloudMaasModelId: "custom-huawei-model", planModeHuaweiCloudMaasModelInfo: modelInfo,
+			huaweiCloudMaasApiKey: "huawei-secret",
 		})
-		const resumed = taskletWorkingConfiguration(current, persisted)
-		assert.equal(resumed.apiConfiguration.apiKey, "new-parent-secret")
-		assert.equal(resumed.apiConfiguration.actModeApiModelId, "claude-sonnet-4-6")
-		assert.equal(resumed.settings.mode, "act")
-		assert.equal(resumed.settings.yoloModeToggled, false)
-		assert.doesNotMatch(JSON.stringify(persisted), /secret|apiKey/)
+		const resolved = await resolveTaskletConfiguration({ type: "default" }, parent)
+		assert.equal(resolved.modelSelection.modelId, "custom-huawei-model")
+		assert.deepEqual(resolved.modelSelection.modelInfo, modelInfo)
+		assert.equal(taskletWorkingConfiguration(parent, resolved).apiConfiguration.actModeHuaweiCloudMaasModelId, "custom-huawei-model")
 	})
 
-	it("rejects absent or malformed Utility selections", async () => {
-		for (const utilityModelSelection of [
-			undefined,
-			{ provider: "unknown", modelId: "x" },
-			{ provider: "anthropic", modelId: " " },
-		]) {
-			await assert.rejects(
-				resolveTaskletConfiguration(
-					{ useUtilityModel: true },
-					parentConfiguration({}, { utilityModelSelection } as Partial<Settings>),
-				),
-				/Utility model is not configured/,
-			)
+	it("captures Dify's fixed workflow model but rejects an invalid explicit role ID", async () => {
+		const parent = parentConfiguration({
+			planModeApiProvider: "dify", planModeApiModelId: "unrelated-generic",
+			difyApiKey: "dify-secret", difyBaseUrl: "https://dify.example/v1",
+		})
+		const resolved = await resolveTaskletConfiguration({ type: "default" }, parent)
+		assert.equal(resolved.modelSelection.modelId, "dify-workflow")
+		assert.equal(taskletWorkingConfiguration(parent, resolved).apiConfiguration.actModeApiModelId, "dify-workflow")
+		await assert.rejects(resolveTaskletConfiguration({ type: "Broken" }, parent, [{
+			name: "Broken", description: "Invalid workflow ID.", enabled: true,
+			modelSelection: { provider: "dify", modelId: "unrelated-generic" },
+		}]), /unavailable/)
+	})
+
+	it("captures the VS Code selector identity rather than a stale generic model", async () => {
+		let created = 0
+		let disposed = 0
+		setVscodeHostProviderMock({
+			capabilities: {
+				createVsCodeLmHandler: (options) => {
+					created++
+					return {
+						createMessage: () => { throw new Error("Unexpected API request") },
+						dispose: () => { disposed++ },
+						getModel: () => ({
+							id: stringifyVsCodeLmModelSelector(options.vsCodeLmModelSelector as LanguageModelChatSelector),
+							info: { contextWindow: 32768, supportsPromptCache: false },
+						}),
+					}
+				},
+			}
+		})
+		const selector = { vendor: "copilot", family: "gpt-4", id: "selected-model" }
+		const parent = parentConfiguration({
+			planModeApiProvider: "vscode-lm", planModeApiModelId: "unrelated-generic",
+			planModeVsCodeLmModelSelector: selector,
+		})
+		const resolved = await resolveTaskletConfiguration({ type: "default" }, parent)
+		assert.equal(resolved.modelSelection.modelId, stringifyVsCodeLmModelSelector(selector))
+		assert.deepEqual(resolved.modelSelection.vsCodeLmModelSelector, selector)
+		assert.deepEqual(taskletWorkingConfiguration(parent, resolved).apiConfiguration.actModeVsCodeLmModelSelector, selector)
+		assert.equal(created, 3)
+		assert.equal(disposed, created, "Every capture/validation probe must release its listener")
+		const installed = { id: "resolved-vscode-client-id", info: { contextWindow: 65536, supportsPromptCache: false } }
+		const captured = await resolveTaskletConfiguration({ type: "default" }, parent, [], installed)
+		assert.equal(created, 4, "Installed parent metadata eliminates the capture probe; only selection validation remains")
+		assert.equal(captured.modelSelection.modelId, stringifyVsCodeLmModelSelector(selector))
+		assert.equal(captured.modelSelection.modelInfo?.contextWindow, 65536)
+		assert.equal(disposed, created)
+		await assert.rejects(resolveTaskletConfiguration({ type: "Broken" }, parent, [{
+			name: "Broken", description: "Mismatched selector.", enabled: true,
+			modelSelection: { provider: "vscode-lm", modelId: "unrelated-generic", vsCodeLmModelSelector: selector },
+		}]), /unavailable/)
+		assert.equal(disposed, created, "Rejected selections must release their validation handler too")
+	})
+
+	it("snapshots role settings without credentials and never rereads the preset on resume", async () => {
+		const role: SubagentRole = {
+			name: "Reviewer", description: "Review work.", enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6", reasoningEffort: "high", thinkingBudgetTokens: 2048 }
 		}
-	})
-
-	it("rejects static-provider fallback for named and Utility models", async () => {
-		namedProfile({ modelId: "not-an-anthropic-model" })
-		await assert.rejects(
-			resolveTaskletConfiguration({ agentName: "Researcher" }, parentConfiguration()),
-			/unavailable for provider anthropic/,
-		)
-		const parent = parentConfiguration(
-			{},
-			{ utilityModelSelection: { provider: "anthropic", modelId: "not-an-anthropic-model" } },
-		)
-		await assert.rejects(resolveTaskletConfiguration({ useUtilityModel: true }, parent), /unavailable for provider anthropic/)
-	})
-
-	it("validates missing provider, credentials and endpoint profiles through the existing API validator", async () => {
-		namedProfile({ modelId: "claude-sonnet-4-6" })
-		await assert.rejects(
-			resolveTaskletConfiguration({ agentName: "Researcher" }, parentConfiguration({ planModeApiProvider: undefined })),
-			/requires a configured parent API provider/,
-		)
-		await assert.rejects(
-			resolveTaskletConfiguration(
-				{ useUtilityModel: true },
-				parentConfiguration({}, { utilityModelSelection: { provider: "dify", modelId: "dify" } }),
-			),
-			/Dify requires both an API key and base URL/,
-		)
-		await assert.rejects(
-			resolveTaskletConfiguration(
-				{ useUtilityModel: true },
-				parentConfiguration(
-					{},
-					{ utilityModelSelection: { provider: "openai", modelId: "utility", openAiProfileName: "Missing" } },
-				),
-			),
-			/profile not found/,
-		)
-	})
-
-	it("rejects invalid/overflowing timeouts and accepts the maximum JavaScript timer duration", async () => {
 		const parent = parentConfiguration()
-		for (const timeoutSeconds of [
-			0,
-			-1,
-			Number.NaN,
-			Number.POSITIVE_INFINITY,
-			Number.NEGATIVE_INFINITY,
-			2 ** 31 / 1000,
-			Number.MAX_VALUE,
+		const resolved = await resolveTaskletConfiguration({ type: "Reviewer" }, parent, [role])
+		role.modelSelection!.modelId = "claude-opus-4-6"
+		role.enabled = false
+		assert.equal(resolved.modelSelection.modelId, "claude-sonnet-4-6")
+		const reopened = JSON.parse(JSON.stringify(resolved))
+		assert.equal(taskletWorkingConfiguration(parent, reopened).apiConfiguration.actModeApiModelId, "claude-sonnet-4-6")
+		await assert.rejects(resolveTaskletConfiguration({ type: "Reviewer" }, parent, [role]), /Unavailable/)
+		await assert.rejects(resolveTaskletConfiguration({ type: "Reviewer" }, parent, []), /Unavailable/)
+	})
+
+	it("rejects credentialful or obsolete saved configuration at resumption", () => {
+		const selection = { provider: "anthropic", modelId: "claude-opus-4-6" }
+		for (const configuration of [
+			{ name: "default", modelSelection: { ...selection, apiKey: "frozen-secret" } },
+			{ name: "default", modelSelection: selection, timeoutSeconds: 600 },
 		]) {
-			await assert.rejects(resolveTaskletConfiguration({ timeoutSeconds }, parent), /Tasklet timeout/)
+			assert.throws(() => taskletWorkingConfiguration(parentConfiguration(), configuration as never), /Unsupported saved/)
 		}
-		const timeoutSeconds = (2 ** 31 - 1) / 1000
-		assert.equal((await resolveTaskletConfiguration({ timeoutSeconds }, parent)).timeoutSeconds, timeoutSeconds)
-		assert.throws(
-			() => taskletWorkingConfiguration(parent, { includeHistory: false, timeoutSeconds: Number.POSITIVE_INFINITY }),
-			/Tasklet timeout/,
-		)
+	})
+
+	it("rejects missing saved selection instead of following the parent on resume", () => {
+		assert.throws(() => taskletWorkingConfiguration(parentConfiguration(), undefined), /no saved model selection/)
+	})
+
+	it("reports unavailable role models rather than silently substituting the provider default", async () => {
+		await assert.rejects(resolveTaskletConfiguration({ type: "Broken" }, parentConfiguration(), [{
+			name: "Broken", description: "Invalid model.", enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "missing-model" },
+		}]), /unavailable/)
 	})
 })

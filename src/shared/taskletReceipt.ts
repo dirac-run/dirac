@@ -1,5 +1,6 @@
 import type { TaskletObservedState } from "./taskletObservation"
 import { TASKLET_STATE_LABELS } from "./taskletObservation"
+import { formatTaskletLabel } from "./taskletLabel"
 
 /** A frozen operation receipt, never the live execution state of a child. */
 export type TaskletReceiptOperation =
@@ -46,6 +47,7 @@ export interface TaskletReceiptRow {
 	operation: TaskletReceiptOperation
 	taskletId?: string
 	title: string
+	role?: string
 	outcome: TaskletReceiptOutcome
 	/** The observed child state is separate from the result of this operation. */
 	observedState?: TaskletObservedState
@@ -115,12 +117,17 @@ const VIEW_LABELS: Record<TaskletReceiptView, string> = {
 	assignment: "assignment result",
 }
 
+/** Show the same stable conversation ID used by creation and supervision, separate from its assignment. */
+export function taskletReceiptRowTitle(row: Pick<TaskletReceiptRow, "taskletId" | "title" | "role">): string {
+	return formatTaskletLabel(row)
+}
+
 export function taskletReceiptTitle(receipt: TaskletReceipt): string {
 	const operation =
 		receipt.operation === "inspect"
 			? `Inspect ${VIEW_LABELS[receipt.view ?? "status"]}`
 			: TASKLET_RECEIPT_OPERATIONS[receipt.operation].label
-	if (receipt.rows.length === 1 && receipt.operation !== "list") return `${operation} · ${receipt.rows[0].title}`
+	if (receipt.rows.length === 1 && receipt.operation !== "list") return `${operation} · ${taskletReceiptRowTitle(receipt.rows[0])}`
 	return receipt.rows.length > 1 && receipt.operation !== "list" ? `${operation} · ${receipt.rows.length}` : operation
 }
 
@@ -153,7 +160,7 @@ export function taskletReceiptNote(receipt: TaskletReceipt): string | undefined 
 export function formatTaskletReceipt(receipt: TaskletReceipt): string {
 	const rows = receipt.rows.map((row) =>
 		[
-			`${TASKLET_RECEIPT_OPERATIONS[row.operation].label} · ${row.title} — ${TASKLET_RECEIPT_OUTCOMES[row.outcome].label}`,
+			`${TASKLET_RECEIPT_OPERATIONS[row.operation].label} · ${taskletReceiptRowTitle(row)} — ${TASKLET_RECEIPT_OUTCOMES[row.outcome].label}`,
 			row.observedState ? `Observed: ${TASKLET_STATE_LABELS[row.observedState]}` : undefined,
 			row.message,
 			row.choice ? `Choice: ${row.choice}` : undefined,

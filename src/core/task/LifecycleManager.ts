@@ -122,7 +122,6 @@ export class LifecycleManager {
 
 	public async startTask(
 		task?: string, images?: string[], files?: string[],
-		initialHistory?: { messages: import("@shared/messages/content").DiracStorageMessage[]; deletedRange?: [number, number] },
 	): Promise<TaskRunOutcome | undefined> {
 		try {
 			await this.dependencies.diracIgnoreController.initialize()
@@ -134,11 +133,8 @@ export class LifecycleManager {
 
 		this.dependencies.messageStateHandler.setDiracMessages([])
 		this.dependencies.messageStateHandler.setApiConversationHistory([])
-		this.dependencies.taskState.conversationHistoryDeletedRange = initialHistory?.deletedRange
+		this.dependencies.taskState.conversationHistoryDeletedRange = undefined
 		this.dependencies.messageStateHandler.setApiConversationProviderState({})
-		if (initialHistory) {
-			await this.dependencies.messageStateHandler.overwriteApiConversationHistory(structuredClone(initialHistory.messages))
-		}
 
 		await this.dependencies.postStateToWebview()
 
@@ -480,39 +476,9 @@ export class LifecycleManager {
 		}
 
 		const existingApiConversationHistory = this.dependencies.messageStateHandler.getApiConversationHistory()
-		let modifiedOldUserContent: DiracContent[]
-		let modifiedApiConversationHistory: any[]
-		if (existingApiConversationHistory.length > 0) {
-			const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
-			if (lastMessage.role === "assistant") {
-				modifiedApiConversationHistory = [...existingApiConversationHistory]
-				modifiedOldUserContent = []
-			} else if (lastMessage.role === "user") {
-				const existingUserContent: DiracContent[] = Array.isArray(lastMessage.content)
-					? lastMessage.content
-					: [{ type: "text", text: lastMessage.content }]
-				modifiedApiConversationHistory = existingApiConversationHistory.slice(0, -1)
-				modifiedOldUserContent = [...existingUserContent]
-			} else {
-				throw new Error("Unexpected: Last message is not a user or assistant message")
-			}
-		} else {
-			modifiedApiConversationHistory = []
-			modifiedOldUserContent = []
-		}
-
-		const providerState = this.dependencies.messageStateHandler.getApiConversationProviderState()
-		if (
-			providerState.checkpoint &&
-			providerState.checkpoint.compactedThroughHistoryIndex >= modifiedApiConversationHistory.length
-		) {
-			await this.dependencies.messageStateHandler.overwriteApiConversationProviderState({
-				...providerState,
-				checkpoint: undefined,
-			})
-		}
-
-		newUserContent.push(...modifiedOldUserContent)
+		// Resume adds a new turn. Previously submitted user content must never be
+		// removed and reconstructed with resume instructions in front of it.
+		const modifiedApiConversationHistory = [...existingApiConversationHistory]
 
 		const agoText = (() => {
 			const timestamp = lastDiracMessage?.ts ?? Date.now()

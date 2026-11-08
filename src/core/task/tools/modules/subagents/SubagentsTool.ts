@@ -11,7 +11,7 @@ import {
 import { SUBAGENT_TASK_TITLE_MAX_CHARS, SUBAGENT_TASK_TITLE_MAX_WORDS } from "@shared/subagents"
 import { toError } from "@/shared/errors"
 import { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
-import { IDiracTool } from "../../interfaces/IDiracTool"
+import type { IDiracTool } from "../../interfaces/IDiracTool"
 import type {
 	TaskletControls,
 	TaskletInspectionQuery,
@@ -19,53 +19,36 @@ import type {
 	TaskletMessageResult,
 	TaskletSleepOptions,
 } from "../../interfaces/IToolEnvironment"
-import { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
-import { AgentConfigLoader } from "../../subagent/AgentConfigLoader"
+import type { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
-import { DEFAULT_SUBAGENT_TIMEOUT_SECONDS, resolveSubagentTimeoutSeconds } from "../../subagent/SubagentExecutionPolicy"
 
-export const use_subagents_spec: DiracToolSpec = {
-	id: DiracDefaultTool.USE_SUBAGENTS,
-	name: "use_subagents",
-	description:
-		"Start subagents asynchronously. Returns per-assignment accepted tasklet IDs or startup errors, not completed results. Accepted children continue independently; later results and requests arrive through parent communication. Use tasklets to inspect stable IDs or voluntarily sleep for communication, rather than joining or polling.",
+export const subagents_spec: DiracToolSpec = {
+	id: DiracDefaultTool.SUBAGENTS,
+	name: "subagents",
+	description: "Start a batch of subagents asynchronously. Returns each accepted stable ID and task header or its startup error, not completed results. Supply complete instructions: children do not receive the parent conversation. Use tasklets with the returned IDs to supervise them.",
 	contextRequirements: (context) => context.subagentsEnabled === true,
-	parameters: [
-		{
-			name: "subagents",
-			type: "array",
-			required: true,
-			instruction: "Assignments to start concurrently; acceptance does not mean assignment completion.",
-			items: {
-				type: "object",
-				properties: {
-					task_title: {
-						type: "string",
-						description: `Task header for user observability. No more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words or ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters.`,
-					},
-					prompt: {
-						type: "string",
-						description: "Task for this subagent.",
-					},
-					timeout: {
-						type: "integer",
-						description: `Timeout in seconds. Default: ${DEFAULT_SUBAGENT_TIMEOUT_SECONDS}.`,
-					},
-					include_history: {
-						type: "boolean",
-						description: "Include the main task conversation history.",
-					},
-				},
-				required: ["task_title", "prompt"],
-				additionalProperties: false,
+	parameters: [{
+		name: "assignments",
+		type: "array",
+		required: true,
+		minItems: 1,
+		instruction: "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
+		items: {
+			type: "object",
+			properties: {
+				type: { type: "string", enum: ["default"], description: "Role for this assignment. default uses the main agent's current model settings." },
+				task_header: { type: "string", minLength: 1, maxLength: SUBAGENT_TASK_TITLE_MAX_CHARS, description: `Short assignment header, at most ${SUBAGENT_TASK_TITLE_MAX_WORDS} words.` },
+				task_description: { type: "string", minLength: 1, description: "Complete assignment instructions and necessary context; no parent conversation is copied." },
 			},
+			required: ["type", "task_header", "task_description"],
+			additionalProperties: false,
 		},
-	],
+	}],
 }
 
-export class UseSubagentsTool implements IDiracTool {
+export class SubagentsTool implements IDiracTool {
 	spec(): DiracToolSpec {
-		return use_subagents_spec
+		return subagents_spec
 	}
 
 	supportedSurfaces() {
@@ -75,15 +58,15 @@ export class UseSubagentsTool implements IDiracTool {
 	async processCall(args: unknown, env: IToolEnvironment): Promise<string> {
 		const controls = env.orchestration.tasklets
 		if (!controls) throw new Error("Tasklet spawning is available only to an owning root")
-		const agentName = AgentConfigLoader.getInstance().resolveSubagentNameForTool(env.toolName)
-		const batch = args && typeof args === "object" && "subagents" in args ? args.subagents : undefined
-		const assignments: unknown[] = agentName ? [args] : Array.isArray(batch) ? batch : []
+		const input = requireArguments(args)
+		rejectUnknownFields(input, ["assignments"], "subagents")
+		const assignments: unknown[] = Array.isArray(input.assignments) ? input.assignments : []
 		if (assignments.length === 0) {
 			env.orchestration.setTaskState(
 				"consecutiveMistakeCount",
 				env.orchestration.getTaskState("consecutiveMistakeCount") + 1,
 			)
-			return formatResponse.toolError(`Missing required parameter: ${agentName ? "prompt" : "subagents"}`)
+			return formatResponse.toolError("assignments must be a non-empty array")
 		}
 
 		const card = await this.createSpawnCard(env)
@@ -93,7 +76,7 @@ export class UseSubagentsTool implements IDiracTool {
 				try {
 					const request = this.parseRequest(assignment, `Subagent ${index + 1}`)
 					title = request.title
-					const record = await controls.start({ ...request, agentName })
+					const record = await controls.start(request)
 					const outcome = record.outcome
 					const error =
 						outcome?.kind === "failed"
@@ -105,6 +88,7 @@ export class UseSubagentsTool implements IDiracTool {
 						index,
 						id: record.id,
 						title: record.title,
+						...(record.role === undefined ? {} : { role: record.role }),
 						accepted: error === undefined,
 						...(outcome ? { outcome } : {}),
 						...(error === undefined ? {} : { error }),
@@ -124,6 +108,7 @@ export class UseSubagentsTool implements IDiracTool {
 					operation: "spawn",
 					taskletId: "id" in result ? result.id : undefined,
 					title: result.title ?? `Agent ${result.index + 1}`,
+					role: "role" in result ? result.role : undefined,
 					outcome: result.accepted ? "accepted" : "failed",
 					error: result.error,
 				})),
@@ -135,35 +120,15 @@ export class UseSubagentsTool implements IDiracTool {
 	}
 
 	private parseRequest(input: unknown, subject: string) {
-		if (!input || typeof input !== "object" || Array.isArray(input))
-			throw new Error(`${subject} assignment must be an object`)
+		if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error(`${subject} assignment must be an object`)
 		const args = input as Record<string, unknown>
-		const prompt = typeof args.prompt === "string" ? args.prompt.trim() : ""
-		if (!prompt) throw new Error(`${subject} is missing required parameter: prompt`)
-		return {
-			title: this.parseTaskTitle(args.task_title, prompt, subject),
-			prompt,
-			timeoutSeconds: resolveSubagentTimeoutSeconds(
-				args.timeout === undefined ? DEFAULT_SUBAGENT_TIMEOUT_SECONDS : Number(args.timeout),
-			),
-			includeHistory: args.include_history === true || args.include_history === "true",
-			useUtilityModel: args.use_utility_model === true || args.use_utility_model === "true",
-		}
-	}
-
-	private parseTaskTitle(value: unknown, prompt: string, subject: string): string {
-		const taskTitle = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : ""
-		if (!taskTitle) {
-			const title = prompt.replace(/\s+/g, " ").split(" ").slice(0, SUBAGENT_TASK_TITLE_MAX_WORDS).join(" ")
-			return title.length <= SUBAGENT_TASK_TITLE_MAX_CHARS ? title : `${title.slice(0, SUBAGENT_TASK_TITLE_MAX_CHARS - 1)}…`
-		}
-		if (taskTitle.split(" ").length > SUBAGENT_TASK_TITLE_MAX_WORDS)
-			throw new Error(`${subject} parameter task_title must contain no more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words`)
-		if (taskTitle.length > SUBAGENT_TASK_TITLE_MAX_CHARS)
-			throw new Error(
-				`${subject} parameter task_title must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`,
-			)
-		return taskTitle
+		rejectUnknownFields(args, ["type", "task_header", "task_description"], subject)
+		const type = requireString(args, "type").trim()
+		const prompt = requireString(args, "task_description").trim()
+		const title = requireString(args, "task_header").trim().replace(/\s+/g, " ")
+		if (title.split(" ").length > SUBAGENT_TASK_TITLE_MAX_WORDS) throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words`)
+		if (title.length > SUBAGENT_TASK_TITLE_MAX_CHARS) throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`)
+		return { title, prompt, type }
 	}
 
 	private async createSpawnCard(env: IToolEnvironment): Promise<ICardHandle | undefined> {
@@ -174,14 +139,14 @@ export class UseSubagentsTool implements IDiracTool {
 		try {
 			const result = await waitForPresentationOperation(creation)
 			if (!result.timedOut) return result.value
-			env.logging.warn("[UseSubagentsTool] Spawn card creation timed out")
+			env.logging.warn("[SubagentsTool] Spawn card creation timed out")
 			void creation
 				.then((card) => this.present(card.finalize(CardStatus.ABANDONED), env))
 				.catch((error) => {
-					env.logging.warn("[UseSubagentsTool] Late spawn card creation failed", toError(error))
+					env.logging.warn("[SubagentsTool] Late spawn card creation failed", toError(error))
 				})
 		} catch (error) {
-			env.logging.warn("[UseSubagentsTool] Spawn card creation failed", toError(error))
+			env.logging.warn("[SubagentsTool] Spawn card creation failed", toError(error))
 		}
 		return undefined
 	}
@@ -189,9 +154,9 @@ export class UseSubagentsTool implements IDiracTool {
 	private async present(operation: Promise<void>, env: IToolEnvironment): Promise<void> {
 		try {
 			const result = await waitForPresentationOperation(operation)
-			if (result.timedOut) env.logging.warn("[UseSubagentsTool] Spawn card presentation timed out")
+			if (result.timedOut) env.logging.warn("[SubagentsTool] Spawn card presentation timed out")
 		} catch (error) {
-			env.logging.warn("[UseSubagentsTool] Spawn card presentation failed", toError(error))
+			env.logging.warn("[SubagentsTool] Spawn card presentation failed", toError(error))
 		}
 	}
 }
@@ -523,6 +488,7 @@ async function executeOperation(controls: TaskletControls, request: ControlReque
 			return {
 				id: record.id,
 				title: clipText(record.title, 256),
+				...(record.role === undefined ? {} : { role: record.role }),
 				accepted: !record.outcome,
 				...(record.outcome ? { startupOutcome: record.outcome.kind } : {}),
 			}
@@ -546,11 +512,11 @@ function compactMessageResults(items: TaskletMessage[], results: TaskletMessageR
 		512,
 		Math.floor(
 			(MAX_MESSAGE_RESULTS_BYTES - Buffer.byteLength(JSON.stringify(compact), "utf8") - results.length * 128) /
-				(results.length * 3),
+			(results.length * 4),
 		),
 	)
 	for (const [index, result] of results.entries()) {
-		for (const key of ["title", "request", "error"] as const) {
+		for (const key of ["title", "role", "request", "error"] as const) {
 			if (result[key] !== undefined) compact[index][key] = clipText(result[key]!, fieldBudget)
 		}
 	}
@@ -595,25 +561,25 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 		rows:
 			"taskletId" in request
 				? [
-						{
-							operation: request.operation,
-							taskletId: request.taskletId,
-							title: "Agent",
-							outcome: "requested",
-							message: "message" in request ? request.message : undefined,
-						},
-					]
+					{
+						operation: request.operation,
+						taskletId: request.taskletId,
+						title: "Agent",
+						outcome: "requested",
+						message: "message" in request ? request.message : undefined,
+					},
+				]
 				: [],
 		...(request.operation === "sleep"
 			? {
-					waitScope:
-						request.options.taskletIds === undefined
-							? "any_tasklet"
-							: request.options.taskletIds.length
-								? "selected_tasklets"
-								: "time_or_user",
-					waitSourceCount: request.options.taskletIds?.length,
-				}
+				waitScope:
+					request.options.taskletIds === undefined
+						? "any_tasklet"
+						: request.options.taskletIds.length
+							? "selected_tasklets"
+							: "time_or_user",
+				waitSourceCount: request.options.taskletIds?.length,
+			}
 			: {}),
 	}
 }
@@ -641,6 +607,7 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 	const result = resultObject(value)
 	const receipt = controlReceipt(request)
 	const title = resultTitle(result)
+	const role = typeof result.role === "string" ? result.role : undefined
 	if (request.operation === "resume") {
 		const outcome = result.accepted ? "accepted" : "failed"
 		return {
@@ -650,6 +617,7 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 				{
 					...receipt.rows[0],
 					title,
+					role,
 					outcome,
 					error: result.accepted ? undefined : `Resumption did not start: ${String(result.startupOutcome)}`,
 				},
@@ -666,6 +634,7 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 				{
 					...receipt.rows[0],
 					title,
+					role,
 					outcome,
 					observedState: observedReceiptState(result),
 					error: failed
@@ -690,26 +659,28 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 		rows:
 			request.operation === "inspect"
 				? [
-						{
-							...receipt.rows[0],
-							title,
-							outcome: "retrieved",
-							observedState:
-								(request.query?.view ?? "status") === "status" && items.length === 1
-									? observedReceiptState(resultObject(items[0]))
-									: undefined,
-						},
-					]
+					{
+						...receipt.rows[0],
+						title,
+						role,
+						outcome: "retrieved",
+						observedState:
+							(request.query?.view ?? "status") === "status" && items.length === 1
+								? observedReceiptState(resultObject(items[0]))
+								: undefined,
+					},
+				]
 				: items.map((item) => {
-						const summary = resultObject(item)
-						return {
-							operation: "list",
-							taskletId: typeof summary.id === "string" ? summary.id : undefined,
-							title: resultTitle(summary),
-							outcome: "retrieved",
-							observedState: observedReceiptState(summary),
-						}
-					}),
+					const summary = resultObject(item)
+					return {
+						operation: "list",
+						taskletId: typeof summary.id === "string" ? summary.id : undefined,
+						title: resultTitle(summary),
+						role: typeof summary.role === "string" ? summary.role : undefined,
+						outcome: "retrieved",
+						observedState: observedReceiptState(summary),
+					}
+				}),
 	}
 }
 
@@ -744,6 +715,7 @@ function messageReceiptResult(items: TaskletMessage[], results: TaskletMessageRe
 	const rows = receipt.rows.map((row, index) => ({
 		...row,
 		title: results[index].title ?? "Agent",
+		role: results[index].role,
 		outcome: results[index].status,
 		request: results[index].request,
 		error: results[index].error,
@@ -763,9 +735,9 @@ function redactRoutingIds(body: string, request: ControlRequest): string {
 	const ids =
 		request.operation === "message"
 			? request.items.flatMap((item) => [
-					[item.taskletId, "tasklet"],
-					...("replyTo" in item ? [[item.replyTo, "request"]] : []),
-				])
+				[item.taskletId, "tasklet"],
+				...("replyTo" in item ? [[item.replyTo, "request"]] : []),
+			])
 			: "taskletId" in request
 				? [[request.taskletId, "tasklet"]]
 				: []

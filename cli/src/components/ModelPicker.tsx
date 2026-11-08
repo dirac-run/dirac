@@ -9,7 +9,8 @@ import Spinner from "ink-spinner"
 import React, { useEffect, useMemo, useState } from "react"
 import type { Controller } from "@/core/controller"
 import { logOpenAiModelsError } from "@/core/controller/models/refreshOpenAiModels"
-import { type ApiProvider } from "@/shared/api"
+import { type ApiProvider, type ModelInfo } from "@/shared/api"
+import { supportsCustomModelId } from "@shared/customModelIds"
 import { filterOpenRouterModelIds } from "@/shared/utils/model-filters"
 import { COLORS } from "../constants/colors"
 import { Logger } from "@/shared/services/Logger"
@@ -36,9 +37,11 @@ interface ModelPickerProps {
 	controller?: Controller
 	onChange: (modelId: string) => void
 	onSubmit: (modelId: string) => void
+	onSelectModel?: (modelId: string, modelInfo?: ModelInfo) => void
 	isActive?: boolean
 	baseUrl?: string
 	apiKey?: string
+	headers?: Record<string, string>
 }
 
 export const ModelPicker: React.FC<ModelPickerProps> = ({
@@ -46,12 +49,15 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 	controller,
 	onChange,
 	onSubmit,
+	onSelectModel,
 	isActive = true,
 	baseUrl,
 	apiKey,
+	headers,
 }) => {
 	const [isLoading, setIsLoading] = useState(false)
 	const [asyncModels, setAsyncModels] = useState<string[]>([])
+	const [catalog, setCatalog] = useState<Record<string, unknown>>({})
 	const [loadError, setLoadError] = useState<string | null>(null)
 
 	// Fetch dynamic models when needed
@@ -68,9 +74,10 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 		setLoadError(null)
 		setIsLoading(true)
 
-		fetchDynamicModels(provider, { controller, baseUrl, apiKey }).then(
+		fetchDynamicModels(provider, { controller, baseUrl, apiKey, ...(headers ? { headers } : {}) }).then(
 			(models) => {
 				if (cancelled) return
+				setCatalog(models)
 				const modelIds = Object.keys(models).sort((a, b) => a.localeCompare(b))
 				if (modelIds.length === 0) {
 					setLoadError("The provider returned no models.")
@@ -97,7 +104,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 		return () => {
 			cancelled = true
 		}
-	}, [provider, controller, baseUrl, apiKey])
+	}, [provider, controller, baseUrl, apiKey, headers])
 
 	const fallbackModels = useMemo(() => getModelList(provider), [provider])
 	const modelList = useMemo(() => {
@@ -105,7 +112,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 		return asyncModels.length ? asyncModels : fallbackModels
 	}, [provider, asyncModels, fallbackModels])
 
-	const customModelLabel = getCustomModelLabel(provider)
+	const customModelLabel = getCustomModelLabel(provider) ?? (supportsCustomModelId(provider as ApiProvider) ? "Custom Model ID" : undefined)
 	const supportsCustomModel = Boolean(customModelLabel)
 
 	const items: SearchableListItem[] = useMemo(() => {
@@ -123,7 +130,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 	}, [modelList, customModelLabel])
 
 	// For providers without a model picker, render nothing
-	if (!hasModelPicker(provider)) {
+	if (!hasModelPicker(provider) && !supportsCustomModel) {
 		return null
 	}
 
@@ -160,6 +167,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 				onSelect={(item) => {
 					onChange(item.id)
 					onSubmit(item.id)
+					onSelectModel?.(item.id, catalog[item.id] as ModelInfo | undefined)
 				}}
 			/>
 		</Box>

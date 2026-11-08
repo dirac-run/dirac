@@ -1,39 +1,6 @@
-import { Card, CardStatus, DiracMessage, DiracMessageType, SubagentExecutionStatus } from "./ExtensionMessage"
+import { Card, CardStatus, SubagentExecutionStatus } from "./ExtensionMessage"
 
-export const SUBAGENT_NAMES = [
-	"Feynman",
-	"Planck",
-	"Bohr",
-	"Heisenberg",
-	"Curie",
-	"Shannon",
-	"Maxwell",
-	"Gödel",
-	"Euler",
-	"Tao",
-	"Hawking",
-	"Pauli",
-	"Noether",
-	"Ramanujan",
-	"Turing",
-	"Faraday",
-	"Gauss",
-	"Newton",
-	"Einstein",
-	"Descartes",
-	"von Neumann",
-	"Schrödinger",
-	"Witten",
-	"Fermi",
-	"Boltzmann",
-	"Riemann",
-	"Hilbert",
-	"Poincaré",
-	"Lagrange",
-	"Laplace",
-	"Faraday",
-	"Kolmogorov",
-] as const
+export { SUBAGENT_NAMES } from "./subagentNames"
 
 export const SUBAGENT_TRAJECTORY_MAX_EVENTS = 80
 export const SUBAGENT_TRAJECTORY_EVENT_MAX_CHARS = 1200
@@ -80,31 +47,7 @@ interface SubagentProgressEvent {
 	trajectoryEvent?: SubagentTrajectoryEvent
 }
 
-export function allocateSubagentIdentity(messages: DiracMessage[], reserved: SubagentIdentity[] = []): SubagentIdentity {
-	const existing = messages
-		.filter((message) => message.content.type === DiracMessageType.CARD)
-		.map((message) => readSubagentCardData(message.content.type === DiracMessageType.CARD ? message.content.card : undefined))
-		.filter((agent): agent is SubagentCardData => agent !== undefined)
-	const identities = [...existing, ...reserved]
-	const usedNames = new Set(identities.map((agent) => agent.name))
-	const name = allocateUniqueSubagentName(usedNames)
-	const id = identities.reduce((highest, agent) => Math.max(highest, agent.id), 1) + 1
-	return { id, name }
-}
 
-function allocateUniqueSubagentName(usedNames: Set<string>): string {
-	const availableNames = SUBAGENT_NAMES.filter((name) => !usedNames.has(name))
-	if (availableNames.length > 0) return availableNames[Math.floor(Math.random() * availableNames.length)]
-
-	for (const firstName of SUBAGENT_NAMES) {
-		for (const secondName of SUBAGENT_NAMES) {
-			const compoundName = `${firstName} ${secondName}`
-			if (!usedNames.has(compoundName)) return compoundName
-		}
-	}
-
-	throw new Error("Subagent name pool exhausted")
-}
 
 export function createSubagentCardInput(identity: SubagentIdentity, prompt: string, taskTitle?: string): Record<string, unknown> {
 	return {
@@ -131,14 +74,14 @@ export function createSubagentCardOutput(
 			.map((event) => createSubagentTrajectoryEvent(event.type, event.text)),
 		...(usage
 			? {
-					usage: {
-						inputTokens: usage.inputTokens,
-						outputTokens: usage.outputTokens,
-						cacheReadTokens: usage.cacheReadTokens,
-						cacheWriteTokens: usage.cacheWriteTokens,
-						totalCost: usage.totalCost,
-					},
-				}
+				usage: {
+					inputTokens: usage.inputTokens,
+					outputTokens: usage.outputTokens,
+					cacheReadTokens: usage.cacheReadTokens,
+					cacheWriteTokens: usage.cacheWriteTokens,
+					totalCost: usage.totalCost,
+				},
+			}
 			: {}),
 	}
 }

@@ -39,8 +39,6 @@ async function collect(source: TaskletInspectionSource, query: TaskletInspection
 
 function fixture(): TaskletInspectionSource {
 	const conversation: DiracStorageMessage[] = [
-		{ role: "user", content: "INHERITED_PARENT_SECRET" },
-		{ role: "assistant", content: [{ type: "tool_use", id: "parent-call", name: "execute_command", input: {} }] },
 		{ role: "user", content: "CHILD_ASSIGNMENT" },
 		{
 			role: "assistant",
@@ -74,7 +72,6 @@ function fixture(): TaskletInspectionSource {
 			backgroundCommandRunning: false,
 		} satisfies TaskletInspection,
 		events: [],
-		inheritedMessageCount: 2,
 		readConversation: async () => conversation,
 	}
 }
@@ -98,9 +95,9 @@ describe("bounded passive tasklet inspection", () => {
 		const source = fixture()
 		const evidence = '界😀\\\"\n'.repeat(20_000)
 		const conversation = await source.readConversation()
-		const assistant = conversation[3].content as any[]
+		const assistant = conversation[1].content as any[]
 		assistant[0].input = { evidence }
-		const results = conversation[4].content as any[]
+		const results = conversation[2].content as any[]
 		results[0].content = evidence
 		const outcome = { kind: "completed" as const, response: evidence, completedAt: 10 }
 		source.inspection.outcome = outcome
@@ -112,7 +109,7 @@ describe("bounded passive tasklet inspection", () => {
 		assert.deepEqual(await collect(source, { view: "result", callId: "call-a" }), [
 			{ callId: "call-a", ts: 5, result: results[0] },
 		])
-		assert.deepEqual(await collect(source, { view: "transcript" }), conversation.slice(2))
+		assert.deepEqual(await collect(source, { view: "transcript" }), conversation)
 		const assignment = (await collect(source, { view: "assignment" }))[0] as any
 		assert.deepEqual(assignment.outcome, outcome)
 		assert.equal(assignment.evidence.outcomeEventId, "outcome")
@@ -141,7 +138,7 @@ describe("bounded passive tasklet inspection", () => {
 		)
 	})
 
-	it("excludes inherited calls and result text from trajectory, correlates selected evidence and pending calls", async () => {
+	it("excludes result text from trajectory and correlates selected evidence and pending calls", async () => {
 		const source = fixture()
 		const trajectory = await collect(source, { view: "trajectory", limit: 1 })
 		assert.deepEqual(

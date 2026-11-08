@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
-import { createApiConfigurationForModelProviderSelection } from "@core/api"
+import { buildApiHandler, buildApiHandlerForSelection, createApiConfigurationForModelProviderSelection } from "@core/api"
 import { modelProviderSelectionUpdates } from "@core/api/modelProviderSelection"
 import type { ApiConfiguration, ModelInfo, ModelProviderSelection } from "@shared/api"
 
@@ -46,6 +46,41 @@ describe("modelProviderSelectionUpdates", () => {
 		assert.equal(bedrock.actModeAwsBedrockCustomModelBaseId, "anthropic.claude-base")
 	})
 
+	for (const mode of ["plan", "act"] as const) {
+		it(`projects explicit reasoning off/zero only into ${mode} fields`, () => {
+			const independent: ModelProviderSelection = {
+				...selection("gemini", "gemini-model"),
+				reasoningEffort: "none",
+				thinkingBudgetTokens: 0,
+				geminiThinkingLevel: "low",
+			}
+			const original = structuredClone(independent)
+			const updates = modelProviderSelectionUpdates(mode, independent)
+			const prefix = mode === "plan" ? "planMode" : "actMode"
+			assert.deepEqual(updates, {
+				[`${prefix}ApiProvider`]: "gemini",
+				[`${prefix}ApiModelId`]: "gemini-model",
+				[`${prefix}ReasoningEffort`]: "none",
+				[`${prefix}ThinkingBudgetTokens`]: 0,
+				[`gemini${mode === "plan" ? "Plan" : "Act"}ModeThinkingLevel`]: "low",
+			})
+			assert.deepEqual(independent, original)
+		})
+
+		it(`explicitly clears omitted ${mode} reasoning rather than inheriting it`, () => {
+			const updates = modelProviderSelectionUpdates(mode, selection("gemini", "gemini-model"))
+			const prefix = mode === "plan" ? "planMode" : "actMode"
+			for (const key of [
+				`${prefix}ReasoningEffort`,
+				`${prefix}ThinkingBudgetTokens`,
+				`gemini${mode === "plan" ? "Plan" : "Act"}ModeThinkingLevel`,
+			]) {
+				assert.equal(Object.hasOwn(updates, key), true)
+				assert.equal(updates[key as keyof ApiConfiguration], undefined)
+			}
+		})
+	}
+
 	it("preserves Standard for speed-aware providers and clears invalid Fast selections", () => {
 		const standard = modelProviderSelectionUpdates("act", selection("anthropic", "claude-opus-4-6"), "standard")
 		assert.equal("actModeInferenceSpeed" in standard, false)
@@ -58,6 +93,27 @@ describe("modelProviderSelectionUpdates", () => {
 	})
 })
 
+describe("LM Studio selection context", () => {
+	const selected: ModelProviderSelection = {
+		provider: "lmstudio", modelId: "local-model", modelInfo: { supportsPromptCache: false, contextWindow: 32768 },
+	}
+	for (const mode of ["plan", "act"] as const) {
+		it(`projects discovered context into the persisted ${mode} configuration`, () => {
+			const patch = modelProviderSelectionUpdates(mode, selected)
+			assert.equal(patch.lmStudioMaxTokens, "32768")
+			assert.equal(buildApiHandler(patch, mode).getModel().info.contextWindow, 32768)
+		})
+	}
+	it("uses independent context without changing defaults and does not inherit stale context", () => {
+		const base: ApiConfiguration = { lmStudioMaxTokens: "4096" }
+		assert.equal(buildApiHandlerForSelection(base, selected).getModel().info.contextWindow, 32768)
+		const withoutMetadata = createApiConfigurationForModelProviderSelection(base, { provider: "lmstudio", modelId: "unknown" })
+		assert.equal(Object.hasOwn(withoutMetadata, "lmStudioMaxTokens"), true)
+		assert.equal(withoutMetadata.lmStudioMaxTokens, undefined)
+		assert.deepEqual(base, { lmStudioMaxTokens: "4096" })
+	})
+})
+
 describe("createApiConfigurationForModelProviderSelection", () => {
 	it("preserves credentials while isolating selection and runtime settings from active mode state", () => {
 		const base: ApiConfiguration = {
@@ -65,6 +121,7 @@ describe("createApiConfigurationForModelProviderSelection", () => {
 			actModeApiModelId: "active-model",
 			actModeReasoningEffort: "high",
 			actModeThinkingBudgetTokens: 4096,
+			geminiActModeThinkingLevel: "high",
 			apiKey: "credential",
 			openRouterApiKey: "openrouter-credential",
 			ulid: "active-task",
@@ -81,6 +138,7 @@ describe("createApiConfigurationForModelProviderSelection", () => {
 			actModeApiModelId: "active-model",
 			actModeReasoningEffort: "high",
 			actModeThinkingBudgetTokens: 4096,
+			geminiActModeThinkingLevel: "high",
 			apiKey: "credential",
 			openRouterApiKey: "openrouter-credential",
 			ulid: "active-task",
@@ -90,8 +148,42 @@ describe("createApiConfigurationForModelProviderSelection", () => {
 		assert.equal(configuration.actModeOpenRouterModelId, "openrouter/utility")
 		assert.equal(configuration.actModeReasoningEffort, undefined)
 		assert.equal(configuration.actModeThinkingBudgetTokens, undefined)
+		assert.equal(configuration.geminiActModeThinkingLevel, undefined)
 		assert.equal(configuration.disableRetries, false)
 		assert.equal(configuration.ulid, "utility-invocation")
+	})
+
+	it("carries Utility reasoning without changing either main mode or runtime controls", () => {
+		const base: ApiConfiguration = {
+			planModeReasoningEffort: "high",
+			planModeThinkingBudgetTokens: 8192,
+			geminiPlanModeThinkingLevel: "high",
+			actModeReasoningEffort: "high",
+			actModeThinkingBudgetTokens: 4096,
+			geminiActModeThinkingLevel: "high",
+			geminiSearchEnabled: true,
+			enableParallelToolCalling: true,
+			disableRetries: true,
+		}
+		const original = structuredClone(base)
+		for (const reasoningEffort of ["none", "high"] as const) {
+			const configuration = createApiConfigurationForModelProviderSelection(base, {
+				...selection("gemini", "gemini-model"),
+				reasoningEffort,
+				thinkingBudgetTokens: 0,
+				geminiThinkingLevel: "low",
+			})
+			assert.equal(configuration.actModeReasoningEffort, reasoningEffort)
+			assert.equal(configuration.actModeThinkingBudgetTokens, 0)
+			assert.equal(configuration.geminiActModeThinkingLevel, "low")
+			assert.equal(configuration.planModeReasoningEffort, "high")
+			assert.equal(configuration.planModeThinkingBudgetTokens, 8192)
+			assert.equal(configuration.geminiPlanModeThinkingLevel, "high")
+			assert.equal(configuration.disableRetries, false)
+			assert.equal(configuration.geminiSearchEnabled, false)
+			assert.equal(configuration.enableParallelToolCalling, false)
+		}
+		assert.deepEqual(base, original)
 	})
 
 	it("enables provider retries even when the active runtime disabled them", () => {
@@ -101,5 +193,5 @@ describe("createApiConfigurationForModelProviderSelection", () => {
 		assert.equal(configuration.disableRetries, false)
 		assert.equal(configuration.actModeApiModelId, "gpt-6-luna")
 		assert.equal(base.disableRetries, true)
-})
+	})
 })

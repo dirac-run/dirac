@@ -77,6 +77,11 @@ function inferProtoType(typeText, fieldName) {
 		return "map<string, StringArray>"
 	}
 
+	// Role catalogs need message presence to distinguish omitted from explicitly empty.
+	if (cleanType === "SubagentRole[]") {
+		return "SubagentRoles"
+	}
+
 	// Handle specific known types that map to proto messages/enums
 	// Order matters! More specific types must come before generic ones
 	// (e.g., OpenAiCompatibleModelInfo before ModelInfo)
@@ -465,7 +470,8 @@ async function main() {
 
 	const apiHandlerFields = parseFieldDefinitions(sourceFile, "API_HANDLER_SETTINGS_FIELDS")
 	const userSettingsFields = parseFieldDefinitions(sourceFile, "USER_SETTINGS_FIELDS")
-	const settingsFields = [...apiHandlerFields, ...userSettingsFields]
+	// Provider membership is written only by successful setup transactions, never generic settings RPCs.
+	const settingsFields = [...apiHandlerFields, ...userSettingsFields].filter((field) => field.name !== "addedApiProviders")
 	console.log(`Found ${settingsFields.length} settings fields`)
 
 	// Load existing field numbers from proto file

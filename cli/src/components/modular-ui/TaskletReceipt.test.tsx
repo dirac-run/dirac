@@ -29,7 +29,7 @@ const inspection: TaskletReceipt = {
 	operation: "inspect",
 	outcome: "retrieved",
 	view: "pending",
-	rows: [{ operation: "inspect", title: "Audit protocol", outcome: "retrieved" }],
+	rows: [{ operation: "inspect", taskletId: "Planck 2", title: "Audit protocol", role: "Reviewer", outcome: "retrieved" }],
 	returnedCount: 0,
 	totalCount: 0,
 }
@@ -47,7 +47,7 @@ describe("CLI tasklet operation receipts", () => {
 				<ChatMessage message={{ id: card.id, ts: 1, content: { type: DiracMessageType.CARD, card } }} {...props} />,
 			)
 			const frame = plain(view.lastFrame())
-			expect(frame).toContain("Inspect pending requests · Audit protocol")
+			expect(frame).toContain("Inspect pending requests · Planck 2 (Reviewer) — Audit protocol")
 			expect(frame).toContain("[Retrieved]")
 			expect(frame).not.toContain("Completed")
 			view.unmount()
@@ -73,7 +73,7 @@ describe("CLI tasklet operation receipts", () => {
 			operation: "message",
 			outcome: "partial_failure",
 			rows: [
-				{ operation: "guidance", title: "Audit", outcome: "queued", message: "Check persistence first" },
+				{ operation: "guidance", taskletId: "Gödel", title: "Audit", outcome: "queued", message: "Check persistence first" },
 				{
 					operation: "permission_decision",
 					title: "Build",
@@ -95,6 +95,7 @@ describe("CLI tasklet operation receipts", () => {
 		expect(frame).toContain("[Partial failure]")
 		expect(frame).toContain("Queued")
 		expect(frame).toContain("Check persistence first")
+		expect(frame).toContain("Gödel — Audit")
 		expect(frame).toContain("this request only, within parent authority")
 		expect(frame).toContain("Authority changed")
 		expect(frame).toContain("consumption is not confirmed")

@@ -20,7 +20,7 @@ import {
 import { GlobalFileNames } from "@core/storage/fileNames"
 import { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/taskDirectory"
-import { updateTaskMetadata } from "@core/storage/taskStorage"
+import { loadTaskletRecords, updateTaskMetadata } from "@core/storage/taskStorage"
 import * as checkpointFactory from "@integrations/checkpoints/factory"
 import { ErrorService } from "@/services/error/ErrorService"
 import { HostProvider } from "@/hosts/host-provider"
@@ -30,20 +30,21 @@ import { DiracAskResponse } from "@/shared/WebviewMessage"
 import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import * as notifications from "@integrations/notifications"
 import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
-import { createTaskletId } from "@/shared/taskletId"
+import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { Task, TaskletHost, type TaskParams, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import * as taskLocks from "../TaskLockUtils"
 import { SqliteLockManager } from "@core/locks/SqliteLockManager"
-import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
+import { buildTaskWorkingConfigurationUpdate, createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { createDefaultTextCondensationTemplateRegistry } from "@core/text-condensation/templates"
-import { AgentConfigLoader, type AgentBaseConfig } from "../tools/subagent/AgentConfigLoader"
+import type { SubagentRole } from "@shared/subagentRoles"
+import { createModelProviderSelection, type ApiConfiguration, type ModelProviderPreset } from "@shared/api"
 import * as skillsModule from "@core/context/instructions/user-instructions/skills"
 import type { DiracStorageMessage } from "@shared/messages/content"
-import { TaskletsTool } from "../tools/modules/use_subagents/UseSubagentsTool"
+import { TaskletsTool } from "../tools/modules/subagents/SubagentsTool"
 import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
 import { GoalCoordinatorToolEnvironmentFactory } from "@core/goal/GoalCoordinatorEnvironment"
 import { GoalLoop } from "@core/goal/GoalLoop"
@@ -77,6 +78,7 @@ describe("Tasklet real Task execution", function () {
 	let requests: Request[]
 	let forbidden: sinon.SinonStub[]
 	let stateManager: StateManager
+	let globalRoles: SubagentRole[]
 	let requestLimit: number
 	let nextTurn:
 		| ((
@@ -110,6 +112,7 @@ describe("Tasklet real Task execution", function () {
 		requests = []
 		forbidden = []
 		nextTurn = undefined
+		globalRoles = []
 		nextTool = undefined
 		requestLimit = 3
 		directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-execution-")))
@@ -146,6 +149,7 @@ describe("Tasklet real Task execution", function () {
 		} as any)
 		stateManager = {
 			getGlobalSettingsKey: (key: keyof typeof SETTINGS_DEFAULTS) => SETTINGS_DEFAULTS[key],
+			getSystemDefaultSettingsKey: (key: keyof Settings) => key === "subagentRoles" ? globalRoles : SETTINGS_DEFAULTS[key],
 			getGlobalStateKey: () => undefined,
 			getWorkspaceStateKey: () => undefined,
 			getSecretKey: () => undefined,
@@ -299,6 +303,10 @@ describe("Tasklet real Task execution", function () {
 			pinnedContext: "PINNED_PRIVATE_CONSTRAINT",
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file"] },
 			tasklet: {
+				configuration: {
+					name: "default",
+					modelSelection: { provider: "anthropic", modelId: mode === "plan" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514" },
+				},
 				// Controlled answers exercise legacy execution/resource cases, not production host authorization.
 				counterparty: {
 					recordResponse: sandbox.stub().resolves(),
@@ -352,7 +360,7 @@ describe("Tasklet real Task execution", function () {
 		return host.inspect(id)
 	}
 
-	function createHost(params = parameters(), getParentHistory?: TaskletTaskOptions["getParentHistory"]) {
+	function createHost(params = parameters()) {
 		const options: TaskletTaskOptions = {
 			controller: params.controller,
 			cwd,
@@ -365,7 +373,6 @@ describe("Tasklet real Task execution", function () {
 			vscodeTerminalExecutionMode: params.vscodeTerminalExecutionMode,
 			toolSelectionPolicy: params.toolSelectionPolicy,
 			pinnedContext: params.pinnedContext,
-			getParentHistory,
 		}
 		return new TaskletHost(
 			{
@@ -434,20 +441,12 @@ describe("Tasklet real Task execution", function () {
 	}
 
 	for (const execution of ["coordinator", "paused follow-up", "achieved follow-up"] as const) {
-		it(`dispatches generic, named, verification and inspection tools through a real Goal ${execution}`, async () => {
+		it(`delegates ordinary work and verification assignments and inspects evidence through a real Goal ${execution}`, async () => {
 			const h = await createGoalExecution(execution === "achieved follow-up" ? "achieved" : "paused")
-			const profile: AgentBaseConfig = {
-				name: "goal-reviewer",
-				description: "Controlled Goal reviewer",
-				tools: [],
-				systemPrompt: "NAMED_GOAL_REVIEWER_INSTRUCTIONS",
+			const role: SubagentRole = {
+				name: "goal-reviewer", description: "Controlled Goal reviewer", enabled: true,
+				modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
 			}
-			const loader = Object.assign(Object.create(AgentConfigLoader.prototype), {
-				cachedConfigs: new Map<string, AgentBaseConfig>(),
-				cachedAgentToolNames: new Map<string, string>(),
-				cachedToolNameToAgentName: new Map<string, string>(),
-			}) as AgentConfigLoader
-			sandbox.stub(AgentConfigLoader, "getInstance").returns(loader)
 			let rootTurn = 0
 			let genericId = ""
 			let namedId = ""
@@ -461,7 +460,7 @@ describe("Tasklet real Task execution", function () {
 			nextTool = async (request) => {
 				if (!isGoalRequest(request)) {
 					for (const forbiddenTool of [
-						"use_subagents",
+						"subagents",
 						"use_subagent_goal_reviewer",
 						"tasklets",
 						"verify_goal",
@@ -473,10 +472,12 @@ describe("Tasklet real Task execution", function () {
 					assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
 					return { name: "respond", args: { operation: "complete", text: "GOAL_PRIVATE_WORK_COMPLETE" } }
 				}
-				for (const name of ["tasklets", "verify_goal", "update_goal", "block_goal"])
+				for (const name of ["tasklets", "update_goal", "block_goal"])
 					assert.ok(request.tools.includes(name), `Goal must advertise ${name}`)
-				assert.ok(request.tools.includes(rootTurn === 0 ? "use_subagents" : "use_subagent_goal_reviewer"))
+				assert.ok(request.tools.includes("subagents"))
+				assert.equal(request.tools.some((name) => name.startsWith("use_subagent_")), false)
 				for (const name of [
+					"verify_goal",
 					"start_task",
 					"list_tasks",
 					"send_task_message",
@@ -490,42 +491,52 @@ describe("Tasklet real Task execution", function () {
 				const root = h.loop.coordinator!
 				const turn = ++rootTurn
 				if (turn === 1) {
-					// Keep this request's generic native schema, then advertise the named
-					// profile on the next request. Dispatch and both children remain real.
-					loader["cachedConfigs"].set(profile.name, profile)
-					loader["cachedAgentToolNames"].set(profile.name, "use_subagent_goal_reviewer")
-					loader["cachedToolNameToAgentName"].set("use_subagent_goal_reviewer", profile.name)
+					// Newly enabled global role is available on the next ordinary request.
+					globalRoles = [role]
 					const executor = (root as any).toolExecutor
 					executor.markToolsDirty("manual_refresh")
 					return {
-						name: "use_subagents",
-						args: { subagents: [{ task_title: "Generic Goal worker", prompt: "GENERIC_GOAL_ASSIGNMENT" }] },
+						name: "subagents",
+						args: { assignments: [{ type: "default", task_header: "Generic Goal worker", task_description: "GENERIC_GOAL_ASSIGNMENT" }] },
 					}
 				}
 				if (turn === 2 || turn === 3) {
 					const result = JSON.parse(toolResults(request).at(-1)!).subagents[0]
 					assert.equal(result.accepted, true)
 					assert.equal(result.outcome, undefined, "Public spawn returns acceptance, not assignment completion")
-					assert.match(result.id, /^tasklet_[0-9a-f-]{36}$/)
+					assert.equal(result.id, turn === 2 ? "Feynman" : "Planck")
 					assert.equal((await waitForOutcome(root.taskletHost!, result.id)).outcome?.kind, "completed")
 					if (turn === 2) {
 						genericId = result.id
 						return {
-							name: "use_subagent_goal_reviewer",
-							args: { task_title: "Named Goal reviewer", prompt: "NAMED_GOAL_ASSIGNMENT" },
+							name: "subagents",
+							args: { assignments: [{ type: role.name, task_header: "Named Goal reviewer", task_description: "NAMED_GOAL_ASSIGNMENT" }] },
 						}
 					}
 					namedId = result.id
-					return { name: "verify_goal", args: { focus: "VERIFY_CURRENT_GOAL_FOCUS" } }
+					return {
+						name: "subagents",
+						args: {
+							assignments: [{
+								type: role.name,
+								task_header: "Verify current Goal evidence",
+								task_description: `Verify ROOT_GOAL_ASSIGNMENT independently. VERIFY_CURRENT_GOAL_FOCUS: inspect the work reported by ${genericId} and ${namedId}; report evidence and remaining gaps.`,
+							}]
+						},
+					}
 				}
 				if (turn === 4) {
-					const verification = JSON.parse(toolResults(request).at(-1)!)
+					const verification = JSON.parse(toolResults(request).at(-1)!).subagents[0]
+					assert.equal(verification.accepted, true)
 					verificationId = verification.id
-					assert.equal(verification.purpose, "goal_verification")
-					assert.match(verification.prompt, /ROOT_GOAL_ASSIGNMENT/)
-					assert.match(verification.prompt, /VERIFY_CURRENT_GOAL_FOCUS/)
-					assert.ok(verification.prompt.includes(genericId) && verification.prompt.includes(namedId))
-					assert.equal((await waitForOutcome(root.taskletHost!, verificationId)).outcome?.kind, "completed")
+					assert.equal(verificationId, "Bohr")
+					const record = await waitForOutcome(root.taskletHost!, verificationId)
+					assert.equal(record.outcome?.kind, "completed")
+					assert.equal(record.configuration?.name, role.name)
+					assert.equal("purpose" in record, false)
+					assert.match(record.prompt, /ROOT_GOAL_ASSIGNMENT/)
+					assert.match(record.prompt, /VERIFY_CURRENT_GOAL_FOCUS/)
+					assert.ok(record.prompt.includes(genericId) && record.prompt.includes(namedId))
 					return { name: "tasklets", args: { operation: "inspect", tasklet_id: verificationId } }
 				}
 				assert.equal(turn, 5, "No retry or additional parent loop after public completion")
@@ -535,8 +546,7 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(inspection.items[0].outcome.summary, "GOAL_PRIVATE_WORK_COMPLETE")
 				const view = await h.loop.inspect()
 				assert.equal("children" in view, false)
-				assert.equal(view.latestVerification?.id, verificationId)
-				assert.equal(view.latestVerification?.status, "completed")
+				assert.equal("latestVerification" in view, false, "Verification is ordinary child evidence, not Goal metadata")
 				assert.equal("pendingInteractionCount" in view, false)
 				return { name: "respond", args: { operation: "complete", text: "GOAL_PUBLIC_SUPERVISION_COMPLETE" } }
 			}
@@ -546,10 +556,18 @@ describe("Tasklet real Task execution", function () {
 				await h.loop["runtime"]!.settlement!
 				assert.equal(rootTurn, 5)
 				assert.equal(requests.filter((request) => !isGoalRequest(request)).length, 3)
-				assert.ok(requests.some((request) => request.systemPrompt.includes("NAMED_GOAL_REVIEWER_INSTRUCTIONS")))
+				assert.ok(requests.some((request) => !isGoalRequest(request) && request.model === role.modelSelection!.modelId))
+				const verificationRequest = requests.find((request) => !isGoalRequest(request) && JSON.stringify(request.messages).includes("VERIFY_CURRENT_GOAL_FOCUS"))
+				assert.ok(verificationRequest, "The ordinary child receives the explicit verification assignment")
 				assert.equal((await h.store.read("root")).status, execution === "paused follow-up" ? "paused" : "achieved")
 				const saved = await h.loop.inspect()
-				assert.equal(saved.latestVerification?.id, verificationId, "Verification purpose survives disk-only inspection")
+				assert.equal("latestVerification" in saved, false)
+				const records = await loadTaskletRecords("root")
+				assert.equal(records.length, 3)
+				const verification = records.find((record) => record.id === verificationId)!
+				assert.equal(verification.outcome?.kind, "completed", "Ordinary verification evidence survives disk-only inspection")
+				assert.equal(verification.outcome?.kind === "completed" && verification.outcome.response, "GOAL_PRIVATE_WORK_COMPLETE")
+				assert.equal("purpose" in verification, false)
 				assert.equal("children" in saved, false)
 			} finally {
 				await h.loop.cancelCurrentExecution()
@@ -580,7 +598,7 @@ describe("Tasklet real Task execution", function () {
 				const expectedStatus =
 					execution === "coordinator" ? "working" : execution === "paused follow-up" ? "paused" : "achieved"
 				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
-				const child = await host.start({ title: "Goal permission worker", prompt: "GOAL_CHILD_INTERACTION_ASSIGNMENT" })
+				const child = await host.start({ type: "default", title: "Goal permission worker", prompt: "GOAL_CHILD_INTERACTION_ASSIGNMENT" })
 				const question = await waitForInteraction(host, child.id)
 				assert.equal((await h.store.read("root")).status, expectedStatus, "Child-local question is not a user wait")
 				assert.equal(root.stateView.lastWaitingCardId, undefined)
@@ -735,6 +753,7 @@ describe("Tasklet real Task execution", function () {
 				await rootEntered.promise
 				const original = h.loop.coordinator!
 				const child = await original.taskletHost!.start({
+					type: "default",
 					title: "Accounted Goal worker",
 					prompt: "GOAL_ACCOUNTING_PRIVATE_ASSIGNMENT",
 				})
@@ -851,10 +870,11 @@ describe("Tasklet real Task execution", function () {
 			nextTurn = async () => "complete"
 			const host = root.taskletHost!
 			assert.ok(host)
-			const child = await host.start({ title: "private", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
+			const child = await host.start({ type: "default", title: "private", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			assert.equal(child.rootTaskId, "root")
-			assert.equal(child.configuration?.timeoutSeconds, 600)
+			assert.equal(child.configuration?.name, "default")
+			assert.equal(child.configuration?.modelSelection.modelId, "claude-opus-4-20250514")
 			assert.match(requests[0].systemPrompt, /# CONTAINED TASKLET/)
 			assert.equal(requests[0].mode, "act")
 			sinon.assert.notCalled(createGoalTrait)
@@ -894,13 +914,13 @@ describe("Tasklet real Task execution", function () {
 				await rootEntered.promise
 				const root = h.loop.coordinator!
 				const host = root.taskletHost!
-				const child = await host.start({ title: "owned", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
+				const child = await host.start({ type: "default", title: "owned", prompt: "PRIVATE_GOAL_CHILD_ASSIGNMENT" })
 				await childEntered.promise
 				closing = h.loop[operation]()
 				providerGate.resolve()
 				await writeEntered.promise
 				await assert.rejects(taskLocks.acquireTaskLock(getTaskDirectoryPath("root")), /another Dirac instance/)
-				await assert.rejects(host.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+				await assert.rejects(host.start({ type: "default", title: "late", prompt: "Do not launch" }), /shutting down/)
 				assert.equal(h.loop.hasRunningCoordinator, true)
 				assert.equal(host.inspect(child.id).outcomePersisted, false)
 				writeGate.resolve()
@@ -939,7 +959,7 @@ describe("Tasklet real Task execution", function () {
 		try {
 			await rootEntered.promise
 			const root = h.loop.coordinator!
-			const child = await root.taskletHost!.start({ title: "failed writer", prompt: "PRIVATE_UNPERSISTED_GOAL_CHILD" })
+			const child = await root.taskletHost!.start({ type: "default", title: "failed writer", prompt: "PRIVATE_UNPERSISTED_GOAL_CHILD" })
 			await waitForInteraction(root.taskletHost!, child.id)
 			const storage = await import("@core/storage/taskStorage")
 			const saveRecord = storage.saveTaskletRecord
@@ -982,7 +1002,7 @@ describe("Tasklet real Task execution", function () {
 			await h.loop.start()
 			await rootEntered.promise
 			const original = h.loop.coordinator!
-			const child = await original.taskletHost!.start({ title: "retained", prompt: "PRIVATE_ORIGINAL_GOAL_ASSIGNMENT" })
+			const child = await original.taskletHost!.start({ type: "default", title: "retained", prompt: "PRIVATE_ORIGINAL_GOAL_ASSIGNMENT" })
 			await waitForOutcome(original.taskletHost!, child.id)
 			const pause = h.loop.pause()
 			rootGate.resolve()
@@ -1040,7 +1060,7 @@ describe("Tasklet real Task execution", function () {
 				await rootEntered.promise
 				const root = h.loop.coordinator!
 				assert.equal(root.executionProfile, "goal_followup")
-				const child = await root.taskletHost!.start({ title: "follow-up child", prompt: "PRIVATE_FOLLOWUP_ASSIGNMENT" })
+				const child = await root.taskletHost!.start({ type: "default", title: "follow-up child", prompt: "PRIVATE_FOLLOWUP_ASSIGNMENT" })
 				await waitForOutcome(root.taskletHost!, child.id)
 				assert.equal((await h.store.read("root")).status, status)
 				const settlement = h.loop["runtime"]!.settlement!
@@ -1090,7 +1110,7 @@ describe("Tasklet real Task execution", function () {
 				}
 				await saveRecord(record)
 			})
-			const starting = root.taskletHost!.start({ title: "active child", prompt: "PRIVATE_WAITING_GOAL_ASSIGNMENT" })
+			const starting = root.taskletHost!.start({ type: "default", title: "active child", prompt: "PRIVATE_WAITING_GOAL_ASSIGNMENT" })
 			await writeEntered.promise
 			try {
 				const completion = await goal.commitCompletion("too early")
@@ -1109,7 +1129,7 @@ describe("Tasklet real Task execution", function () {
 			save.restore()
 			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
 			assert.deepEqual(await h.loop["commitCompletion"](surface, "Goal completed"), { committed: true })
-			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+			await assert.rejects(root.taskletHost!.start({ type: "default", title: "late", prompt: "Do not launch" }), /shutting down/)
 			rootGate.resolve()
 			await runtime.settlement
 			assert.equal((await h.store.read("root")).status, "achieved")
@@ -1147,7 +1167,7 @@ describe("Tasklet real Task execution", function () {
 			})
 			await transitionEntered.promise
 			const blocked = assert.rejects(goal.blockGoal("Cannot continue"), /Active tasklets:.*racing child/)
-			const starting = root.taskletHost!.start({ title: "racing child", prompt: "PRIVATE_RACING_ASSIGNMENT" })
+			const starting = root.taskletHost!.start({ type: "default", title: "racing child", prompt: "PRIVATE_RACING_ASSIGNMENT" })
 			transitionGate.resolve()
 			await holdingTransition
 			await blocked
@@ -1157,7 +1177,7 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(root.taskletHost!.inspect(child.id).outcome, undefined)
 			await root.taskletHost!.interrupt(child.id, "Parent stopped the work")
 			await goal.blockGoal("No work remains active")
-			await assert.rejects(root.taskletHost!.start({ title: "late", prompt: "Do not launch" }), /shutting down/)
+			await assert.rejects(root.taskletHost!.start({ type: "default", title: "late", prompt: "Do not launch" }), /shutting down/)
 			rootGate.resolve()
 			await runtime.settlement
 			assert.equal((await h.store.read("root")).status, "blocked")
@@ -1167,76 +1187,38 @@ describe("Tasklet real Task execution", function () {
 		}
 	})
 
-	for (const includeHistory of [undefined, false, true]) {
-		it(`starts a real Task with ${includeHistory === true ? "an independent parent history snapshot" : `no inherited history (${includeHistory})`}`, async () => {
-			const parentHistory: { messages: DiracStorageMessage[]; deletedRange?: [number, number] } = {
-				messages: [
-					{ role: "user", content: [{ type: "text", text: "PARENT_HISTORY_PRIVATE_CONTEXT" }] },
-					{ role: "assistant", content: [{ type: "text", text: "PARENT_HISTORY_PRIOR_ANSWER" }] },
-				],
-			}
-			const originalHistory = structuredClone(parentHistory)
-			const getParentHistory = sandbox.stub().returns(parentHistory)
-			const host = createHost(parameters(), getParentHistory)
-			try {
-				const child = await host.start({ title: "history", prompt: "CHILD_HISTORY_ASSIGNMENT", includeHistory })
-				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
-				assert.deepEqual(parentHistory, originalHistory, "child tool results and completion must not mutate the parent")
-				assert.equal(getParentHistory.callCount, includeHistory === true ? 1 : 0)
-				assert.equal(child.configuration?.timeoutSeconds, 600)
-				for (const request of requests) {
-					const serialized = JSON.stringify(request.messages)
-					assert.equal(serialized.includes("PARENT_HISTORY_PRIVATE_CONTEXT"), includeHistory === true)
-					assert.equal(serialized.includes("PARENT_HISTORY_PRIOR_ANSWER"), includeHistory === true)
-					assert.match(serialized, /CHILD_HISTORY_ASSIGNMENT/)
-				}
-				assert.match(JSON.stringify(requests[1].messages), /PRIVATE_FILE_CONTENT/)
-				const transcript = await host.readTranscript(child.id)
-				assert.equal(
-					JSON.stringify(transcript.conversation).includes("PARENT_HISTORY_PRIVATE_CONTEXT"),
-					includeHistory === true,
-				)
-				assert.doesNotMatch(JSON.stringify(transcript.presentation), /PARENT_HISTORY_PRIVATE_CONTEXT/)
-				assert.doesNotMatch(
-					JSON.stringify(await host.query(child.id, { view: "transcript" })),
-					/PARENT_HISTORY_PRIVATE_CONTEXT|PARENT_HISTORY_PRIOR_ANSWER/,
-				)
-				if (includeHistory === true) {
-					parentHistory.messages[0].content = "PARENT_HISTORY_REPLACED_AFTER_START"
-					await host.resume(child.id, "CHILD_HISTORY_FOLLOWUP")
-					assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
-					assert.equal(
-						getParentHistory.callCount,
-						1,
-						"resume restores the child transcript, never recaptures parent history",
-					)
-					assert.match(JSON.stringify(requests[2].messages), /PARENT_HISTORY_PRIVATE_CONTEXT/)
-					assert.match(JSON.stringify(requests[2].messages), /PRIVATE_FILE_CONTENT/)
-					assert.match(JSON.stringify(requests[2].messages), /CHILD_HISTORY_FOLLOWUP/)
-					assert.doesNotMatch(JSON.stringify(requests[2].messages), /PARENT_HISTORY_REPLACED_AFTER_START/)
-					assert.doesNotMatch(
-						JSON.stringify(await host.query(child.id, { view: "transcript" })),
-						/PARENT_HISTORY_PRIVATE_CONTEXT|PARENT_HISTORY_PRIOR_ANSWER/,
-					)
-				}
-			} finally {
-				await host.shutdown()
-			}
+	it("starts with assignment context only and resumes its own conversation", async () => {
+		const params = parameters()
+		const parent = create({
+			...params, taskId: "root", tasklet: undefined, executionProfile: "standalone",
+			releaseTaskLock: async () => { }, updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { }
 		})
-	}
-
-	it("applies a named profile prompt, skills, model and tool scope to real provider requests", async () => {
-		const profile: AgentBaseConfig = {
-			name: "controlled-reviewer",
-			description: "Controlled profile",
-			systemPrompt: "NAMED_PROFILE_PRIVATE_INSTRUCTIONS",
-			skills: ["allowed_skill"],
-			tools: ["use_skill", "read_file"],
-			modelId: "claude-sonnet-4-20250514",
+		await parent.messageStateHandler.addToApiConversationHistory({ role: "user", content: "PARENT_HISTORY_PRIVATE_CONTEXT" })
+		const host = parent.taskletHost!
+		try {
+			const child = await host.start({ type: "default", title: "history", prompt: "CHILD_HISTORY_ASSIGNMENT" })
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			for (const request of requests) {
+				assert.doesNotMatch(JSON.stringify(request.messages), /PARENT_HISTORY_PRIVATE_CONTEXT/)
+				assert.match(JSON.stringify(request.messages), /CHILD_HISTORY_ASSIGNMENT/)
+			}
+			assert.match(JSON.stringify(requests[1].messages), /PRIVATE_FILE_CONTENT/)
+			await host.resume(child.id, "CHILD_HISTORY_FOLLOWUP")
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+			assert.match(JSON.stringify(requests[2].messages), /PRIVATE_FILE_CONTENT/)
+			assert.match(JSON.stringify(requests[2].messages), /CHILD_HISTORY_FOLLOWUP/)
+			assert.doesNotMatch(JSON.stringify(await host.readTranscript(child.id)), /PARENT_HISTORY_PRIVATE_CONTEXT/)
+		} finally {
+			await host.shutdown()
 		}
-		const loader = AgentConfigLoader.getInstance()
-		sandbox.stub(loader, "ready").resolves()
-		sandbox.stub(loader, "getCachedConfig").withArgs(profile.name).returns(profile)
+	})
+
+	it("uses a global role model without replacing common instructions or filtering ordinary skills/tools", async () => {
+		const role: SubagentRole = {
+			name: "controlled-reviewer", description: "Review this assignment.", enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+		}
+		globalRoles = [role]
 		const skills = await Promise.all(
 			["allowed_skill", "excluded_skill"].map(async (name) => {
 				const skillPath = path.join(directory, name, "SKILL.md")
@@ -1255,23 +1237,21 @@ describe("Tasklet real Task execution", function () {
 		const host = createHost(params)
 		try {
 			const child = await host.start({
-				title: "profile",
-				prompt: "PROFILE_ASSIGNMENT",
-				agentName: profile.name,
-				timeoutSeconds: 120,
+				type: role.name,
+				title: "role",
+				prompt: "ROLE_ASSIGNMENT",
 			})
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			assert.equal(requests.length, 3)
 			for (const request of requests) {
-				assert.equal(request.model, profile.modelId)
-				assert.match(request.systemPrompt, /NAMED_PROFILE_PRIVATE_INSTRUCTIONS/)
+				assert.equal(request.model, role.modelSelection!.modelId)
+				assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
 				assert.match(request.systemPrompt, /PINNED_PRIVATE_CONSTRAINT/)
-				assert.match(request.systemPrompt, /120 seconds/)
-				assert.deepEqual(request.tools.sort(), ["read_file", "respond", "use_skill"])
+				assert.doesNotMatch(request.systemPrompt, /Execution Deadline|NAMED_PROFILE_PRIVATE_INSTRUCTIONS/)
+				assert.deepEqual(request.tools.sort(), ["execute_command", "read_file", "respond", "use_skill"])
 			}
 			assert.match(JSON.stringify(requests[1].messages), /ALLOWED_SKILL_PRIVATE_INSTRUCTIONS/)
-			assert.match(JSON.stringify(requests[2].messages), /Skill \\"excluded_skill\\" not found/)
-			assert.doesNotMatch(JSON.stringify(requests[2].messages), /EXCLUDED_SKILL_PRIVATE_INSTRUCTIONS/)
+			assert.match(JSON.stringify(requests[2].messages), /EXCLUDED_SKILL_PRIVATE_INSTRUCTIONS/)
 		} finally {
 			await host.shutdown()
 		}
@@ -1310,8 +1290,12 @@ describe("Tasklet real Task execution", function () {
 	}
 
 	for (const profile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
-		for (const useUtilityModel of [false, true]) {
-			it(`inherits changed parent preferences at the next child request, including resume (${profile}, Utility=${useUtilityModel})`, async () => {
+		for (const type of ["default", "reviewer"]) {
+			it(`inherits changed non-model preferences but retains creation selection, including resume (${profile}, ${type})`, async () => {
+				globalRoles = [{
+					name: "reviewer", description: "Review work.", enabled: true,
+					modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" }
+				}]
 				const root = createResolutionRoot(profile)
 				await root.applyWorkingConfigurationUpdate({
 					settings: {
@@ -1348,7 +1332,7 @@ describe("Tasklet real Task execution", function () {
 					toolBackgroundEdit = (childTask as any).toolExecutor.asToolConfig().backgroundEditEnabled
 					return "complete"
 				}
-				const record = await host.start({ title: "Preference worker", prompt: "Check preferences", useUtilityModel })
+				const record = await host.start({ type, title: "Preference worker", prompt: "Check preferences" })
 				assert.equal((await waitForOutcome(host, record.id)).outcome?.kind, "completed")
 				const settings = childTask.getWorkingConfiguration().settings
 				assert.equal(settings.backgroundEditEnabled, true)
@@ -1359,8 +1343,8 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(childTask.getWorkingConfiguration().workspaceConfiguration.localSkillsToggles?.disabledSkill, false)
 				assert.match(secondRequest.systemPrompt, /Speak in fr\./)
 				assert.equal(secondRequest.model,
-					useUtilityModel || profile === "standalone" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514",
-					"Act execution preserves explicit Utility selection or the parent's active model")
+					type === "reviewer" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514",
+					"Role and default children retain creation-time model even when parent mode changes")
 				await root.applyWorkingConfigurationUpdate({ settings: { backgroundEditEnabled: false } })
 				nextTurn = async () => {
 					const [owned] = [...(host as any).children.values()]
@@ -1414,14 +1398,15 @@ describe("Tasklet real Task execution", function () {
 			let maxParentRequests = 0
 			const buildApi = apiModule.buildApiHandler as sinon.SinonStub
 			buildApi.callsFake(() => {
-				const role = handlerNumber++ // Original root, permission child, sibling, reopened root, resumed child.
-				assert.ok(role < turns.length, "Reconstruction must not construct historical children")
+				let role: number | undefined // Assign on execution, not selection-only getModel calls.
 				return {
 					getModel: () => ({
 						id: "claude-opus-4-20250514",
 						info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 					}),
 					async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
+						role ??= handlerNumber++
+						assert.ok(role < turns.length, "Reconstruction must not execute historical children")
 						const turn = ++turns[role]
 						const serialized = JSON.stringify(messages)
 						const parent = role === 0 || role === 3
@@ -1558,12 +1543,14 @@ describe("Tasklet real Task execution", function () {
 								if (turns[0] === 1) {
 									childId = (
 										await controls.start({
+											type: "default",
 											title: "permission child",
 											prompt: "FOUNDATION_PERMISSION_ASSIGNMENT",
 										})
 									).id
 									siblingId = (
 										await controls.start({
+											type: "default",
 											title: "private reader",
 											prompt: "Read the private file, then report fully",
 										})
@@ -1770,14 +1757,15 @@ describe("Tasklet real Task execution", function () {
 
 		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
 		buildApi.callsFake(() => {
-			const role = handlerNumber++
-			assert.ok(role < 2, "Both engines must be real Tasks, with no replacement child")
+			let role: number | undefined
 			return {
 				getModel: () => ({
 					id: "claude-opus-4-20250514",
 					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 				}),
 				async *createMessage(_systemPrompt, messages, tools): ApiStream {
+					role ??= handlerNumber++
+					assert.ok(role < 2, "Both engines must be real Tasks, with no replacement child")
 					const turn = ++turns[role]
 					const history = messages as DiracStorageMessage[]
 					const serialized = JSON.stringify(history)
@@ -1787,17 +1775,17 @@ describe("Tasklet real Task execution", function () {
 					if (role === 0) {
 						assert.ok(turn <= 6, "Unexpected parent retry or request after completion")
 						parentInputs.push(serialized)
-						assert.ok(advertised.includes("use_subagents") && advertised.includes("tasklets"))
+						assert.ok(advertised.includes("subagents") && advertised.includes("tasklets"))
 						assert.doesNotMatch(serialized, /PRIVATE_FILE_CONTENT|taskletEventIds/)
 						if (turn < 6) assert.doesNotMatch(serialized, /PUBLIC_RESULT_END/)
 						if (turn === 1) {
-							name = "use_subagents"
+							name = "subagents"
 							args = {
-								subagents: [
+								assignments: [
 									{
-										task_title: "Public question worker",
-										prompt: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully",
-										include_history: true,
+										type: "default",
+										task_header: "Public question worker",
+										task_description: "Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully",
 									},
 								],
 							}
@@ -1807,7 +1795,7 @@ describe("Tasklet real Task execution", function () {
 							assert.equal(accepted[0].accepted, true)
 							assert.equal(accepted[0].outcome, undefined, "Acceptance precedes assignment completion")
 							childId = accepted[0].id
-							assert.match(childId, /^tasklet_[0-9a-f-]{36}$/)
+							assert.equal(childId, "Feynman")
 							assert.deepEqual(root.taskletHost!.listActive(), [{ id: childId, title: "Public question worker" }])
 							releaseChild()
 							await waitForInteraction(root.taskletHost!, childId)
@@ -1863,7 +1851,7 @@ describe("Tasklet real Task execution", function () {
 						}
 					} else {
 						assert.ok(turn <= 3, "Unexpected child request")
-						assert.ok(!advertised.includes("use_subagents") && !advertised.includes("tasklets"))
+						assert.ok(!advertised.includes("subagents") && !advertised.includes("tasklets"))
 						if (turn === 1) {
 							assert.match(serialized, /Supervise a worker through public tools/)
 							assert.ok(
@@ -1900,7 +1888,7 @@ describe("Tasklet real Task execution", function () {
 			taskId: "root",
 			executionProfile: "standalone",
 			tasklet: undefined,
-			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "use_subagents", "tasklets"] },
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "subagents", "tasklets"] },
 			releaseTaskLock: async () => { },
 			updateTaskHistory: async () => [],
 			postStateToWebview: async () => { },
@@ -1948,7 +1936,7 @@ describe("Tasklet real Task execution", function () {
 		let handlerNumber = 0
 		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
 		buildApi.callsFake(() => {
-			const role = handlerNumber++
+			let role: number | undefined
 			let turn = 0
 			return {
 				getModel: () => ({
@@ -1956,6 +1944,7 @@ describe("Tasklet real Task execution", function () {
 					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 				}),
 				async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
+					role ??= handlerNumber++
 					const currentTurn = ++turn
 					const serialized = JSON.stringify(messages)
 					if (role === 0) {
@@ -2041,12 +2030,13 @@ describe("Tasklet real Task execution", function () {
 						if (rootTurn === 1) {
 							childId = (
 								await controls.start({
+									type: "default",
 									title: "question worker",
 									prompt: "Read privately then ask CHILD_QUESTION",
 								})
 							).id
 							questionId = (await waitForInteraction(root.taskletHost!, childId)).id
-							siblingId = (await controls.start({ title: "running sibling", prompt: "Work independently" })).id
+							siblingId = (await controls.start({ type: "default", title: "running sibling", prompt: "Work independently" })).id
 							await siblingStarted
 							assert.equal(parentMessages.length, 1, "Child events must not start another parent loop")
 							return
@@ -2196,7 +2186,7 @@ describe("Tasklet real Task execution", function () {
 				return "complete"
 			}
 			const root = await createSleepingRoot(async (controls, parent) => {
-				childId = (await controls.start({ title: "sleep worker", prompt: "Complete while the parent sleeps" })).id
+				childId = (await controls.start({ type: "default", title: "sleep worker", prompt: "Complete while the parent sleeps" })).id
 				await bounded(childStarted, "Child provider did not start")
 				assert.equal(requests.length, 2)
 				const result = await controls.sleep({ taskletIds: [childId], timeoutMs: 5_000 })
@@ -2438,10 +2428,10 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "question" : "complete")
-		const child = await host.start({ title: "question", prompt: "Ask privately" })
+		const child = await host.start({ type: "default", title: "question", prompt: "Ask privately" })
 		const request = await waitForInteraction(host, child.id)
 		assert.equal(request.permissionOperation, undefined)
-		const sibling = await host.start({ title: "sibling", prompt: "Finish independently" })
+		const sibling = await host.start({ type: "default", title: "sibling", prompt: "Finish independently" })
 		assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
 		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
 		assert.deepEqual(
@@ -2466,7 +2456,7 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
-		const child = await host.start({ title: "command", prompt: "Ask command permission" })
+		const child = await host.start({ type: "default", title: "command", prompt: "Ask command permission" })
 		const request = await waitForInteraction(host, child.id)
 		assert.deepEqual(request.permissionOperation, { kind: "commands", commands: ["touch permission-bypass-marker"] })
 		await host.resolveInteraction(child.id, request.id, { operation: "reject" })
@@ -2482,7 +2472,7 @@ describe("Tasklet real Task execution", function () {
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
-		const child = await host.start({ title: "command", prompt: "Ask command permission" })
+		const child = await host.start({ type: "default", title: "command", prompt: "Ask command permission" })
 		const request = await waitForInteraction(host, child.id)
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
 		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), {
@@ -2505,7 +2495,7 @@ describe("Tasklet real Task execution", function () {
 			? { name: "execute_command", args: { commands: ["printf strict-plan-command-ok"] } }
 			: { name: "respond", args: { operation: "complete", text: "Read-only review finished" } }
 		const host = root.taskletHost!
-		const child = await host.start({ title: "read-only command", prompt: "Run the approved read-only command" })
+		const child = await host.start({ type: "default", title: "read-only command", prompt: "Run the approved read-only command" })
 		const request = await waitForInteraction(host, child.id)
 		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
 		const card = await waitForRootCard(root)
@@ -2526,7 +2516,7 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "question" : "complete")
-		const record = await host.start({ title: "mutation boundary", prompt: "Wait for guidance" })
+		const record = await host.start({ type: "default", title: "mutation boundary", prompt: "Wait for guidance" })
 		const request = await waitForInteraction(host, record.id)
 		const child = host["children"].get(record.id)!.task!
 		const callbacks = (child as any).toolExecutor.asToolConfig().callbacks
@@ -2567,7 +2557,7 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn <= 2 ? "execute_command" : "complete")
-		const child = await host.start({ title: "command", prompt: "Ask command permission twice" })
+		const child = await host.start({ type: "default", title: "command", prompt: "Ask command permission twice" })
 		const request = await waitForInteraction(host, child.id)
 		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), {
 			status: "requires_user_approval",
@@ -2601,7 +2591,7 @@ describe("Tasklet real Task execution", function () {
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
-		const child = await host.start({ title: "command", prompt: "Explicitly escalate" })
+		const child = await host.start({ type: "default", title: "command", prompt: "Explicitly escalate" })
 		const request = await waitForInteraction(host, child.id)
 		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
 		const card = await waitForRootCard(root)
@@ -2622,7 +2612,7 @@ describe("Tasklet real Task execution", function () {
 			if (++turn === 1) throw new Error("authentication failed: controlled provider")
 			return "complete"
 		}
-		const child = await host.start({ title: "runtime", prompt: "Retry when instructed" })
+		const child = await host.start({ type: "default", title: "runtime", prompt: "Retry when instructed" })
 		const request = await waitForInteraction(host, child.id)
 		assert.equal(request.card.header, "API Request Failed")
 		assert.equal(request.permissionOperation, undefined)
@@ -2655,7 +2645,7 @@ describe("Tasklet real Task execution", function () {
 		nextTurn = async () => (++turn === 1 ? "progress" : "complete")
 		const host = createHost()
 		try {
-			const child = await host.start({ title: "updates", prompt: "Report privately" })
+			const child = await host.start({ type: "default", title: "updates", prompt: "Report privately" })
 			const result = await waitForOutcome(host, child.id)
 			assert.equal(result.outcome?.kind, "completed")
 			assert.deepEqual(
@@ -2698,7 +2688,7 @@ describe("Tasklet real Task execution", function () {
 			nextTurn = async () => (++turn === 1 ? operation : "complete")
 			const host = createHost(params)
 			try {
-				const child = await host.start({ title: "waiting", prompt: "Private request" })
+				const child = await host.start({ type: "default", title: "waiting", prompt: "Private request" })
 				const request = await waitForInteraction(host, child.id)
 				assert.equal(request.toolCall?.name, operation === "question" ? "respond" : operation)
 				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
@@ -2706,7 +2696,7 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(host.inspect(child.id).responses.length, 0)
 				assert.doesNotMatch(JSON.stringify(await host.readTranscript(child.id)), /PRIVATE_FILE_CONTENT/)
 				assert.equal(requests.length, 1)
-				const sibling = await host.start({ title: "independent", prompt: "Complete independently" })
+				const sibling = await host.start({ type: "default", title: "independent", prompt: "Complete independently" })
 				assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
 				assert.equal(host.inspect(child.id).interactions[0].status, "pending")
 				await host.shutdown()
@@ -2727,7 +2717,7 @@ describe("Tasklet real Task execution", function () {
 		}
 		const host = createHost()
 		try {
-			const child = await host.start({ title: "runtime", prompt: "Runtime wait" })
+			const child = await host.start({ type: "default", title: "runtime", prompt: "Runtime wait" })
 			const request = await waitForInteraction(host, child.id)
 			assert.equal(request.card.header, "API Request Failed")
 			assert.equal(request.toolCall, undefined)
@@ -2750,7 +2740,7 @@ describe("Tasklet real Task execution", function () {
 		}
 		const host = createHost()
 		try {
-			const child = await host.start({ title: "retry", prompt: "Retry transport" })
+			const child = await host.start({ type: "default", title: "retry", prompt: "Retry transport" })
 			const result = await waitForOutcome(host, child.id)
 			assert.equal(result.outcome?.kind, "completed")
 			assert.equal(requests.length, 2)
@@ -2801,7 +2791,7 @@ describe("Tasklet real Task execution", function () {
 		const run = root.startTask("Root assignment")
 		try {
 			await rootEntered
-			const child = await root.taskletHost!.start({ title: "child", prompt: "Child assignment" })
+			const child = await root.taskletHost!.start({ type: "default", title: "child", prompt: "Child assignment" })
 			await childEntered
 			const abort = root.abortTask()
 			releaseProviders()
@@ -2838,7 +2828,7 @@ describe("Tasklet real Task execution", function () {
 				await originalSave(record)
 			})
 			nextTurn = async () => "complete"
-			const child = await host.start({ title: "settling child", prompt: "Finish this assignment" })
+			const child = await host.start({ type: "default", title: "settling child", prompt: "Finish this assignment" })
 			try {
 				await entered.promise
 				assert.ok(host.inspect(child.id).outcome)
@@ -2930,8 +2920,8 @@ describe("Tasklet real Task execution", function () {
 		let abort: Promise<void> | undefined
 		let retirement: Promise<void> | undefined
 		try {
-			const first = await host.start({ title: "first", prompt: "first owned child" })
-			const second = await host.start({ title: "second", prompt: "second owned child" })
+			const first = await host.start({ type: "default", title: "first", prompt: "first owned child" })
+			const second = await host.start({ type: "default", title: "second", prompt: "second owned child" })
 			await entered
 			const completion = await (root as any).commitAttemptCompletion("too soon")
 			assert.equal(completion.committed, false)
@@ -2949,7 +2939,7 @@ describe("Tasklet real Task execution", function () {
 			await Promise.all([abort, retirement])
 			sinon.assert.calledOnce(release)
 			assert.ok(host.list().every((record) => record.outcomePersisted && record.outcome?.kind === "interrupted"))
-			await assert.rejects(host.start({ title: "late", prompt: "must not launch" }), /shutting down/)
+			await assert.rejects(host.start({ type: "default", title: "late", prompt: "must not launch" }), /shutting down/)
 			const writesAtDeletion = save.callCount
 			const deletionLock = await taskLocks.acquireTaskLock(rootDirectory)
 			try {
@@ -2973,7 +2963,7 @@ describe("Tasklet real Task execution", function () {
 
 	it("interrupts a real Task immediately after acceptance without starting a provider request", async () => {
 		const host = createHost()
-		const record = await host.start({ title: "early stop", prompt: "Do not start this work" })
+		const record = await host.start({ type: "default", title: "early stop", prompt: "Do not start this work" })
 		const stopped = await host.interrupt(record.id, "stop during startup")
 		assert.equal(stopped.outcome?.kind, "interrupted", JSON.stringify(stopped))
 		assert.equal(stopped.outcomePersisted, true)
@@ -3006,9 +2996,9 @@ describe("Tasklet real Task execution", function () {
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		let expectedShutdownFailure = false
 		try {
-			const child = await host.start({ title: "permission", prompt: "Wait for command approval" })
+			const child = await host.start({ type: "default", title: "permission", prompt: "Wait for command approval" })
 			const request = await waitForInteraction(host, child.id)
-			const sibling = await host.start({ title: "sibling", prompt: "Complete independently" })
+			const sibling = await host.start({ type: "default", title: "sibling", prompt: "Complete independently" })
 			assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
 			const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
 			const failedEscalation = assert.rejects(escalation, (error) => {
@@ -3085,9 +3075,9 @@ describe("Tasklet real Task execution", function () {
 			return originalRetire.call(this)
 		})
 		try {
-			const first = await host.start({ title: "failure", prompt: "Complete privately" })
+			const first = await host.start({ type: "default", title: "failure", prompt: "Complete privately" })
 			await assert.rejects(host["children"].get(first.id)!.settlement!, /child transcript disk failure/)
-			const second = await host.start({ title: "sibling", prompt: "Sibling completes independently" })
+			const second = await host.start({ type: "default", title: "sibling", prompt: "Sibling completes independently" })
 			await waitForOutcome(host, second.id)
 			assert.equal(host.inspect(first.id).outcome?.kind, "failed")
 			assert.match(host.inspect(first.id).settlementError!.message, /child transcript disk failure/)
@@ -3128,7 +3118,7 @@ describe("Tasklet real Task execution", function () {
 			}
 			return originalRetire.call(this)
 		})
-		const record = await host.start({ title: "failure", prompt: "Complete privately" })
+		const record = await host.start({ type: "default", title: "failure", prompt: "Complete privately" })
 		try {
 			await assert.rejects(host["children"].get(record.id)!.settlement!, /final transcript flush failed/)
 			const result = host.inspect(record.id)
@@ -3184,10 +3174,10 @@ describe("Tasklet real Task execution", function () {
 			return "complete"
 		}
 		try {
-			const first = await host.start({ title: "first", prompt: "FIRST_PRIVATE_ASSIGNMENT" })
+			const first = await host.start({ type: "default", title: "first", prompt: "FIRST_PRIVATE_ASSIGNMENT" })
 			assert.equal(first.outcome, undefined)
 			await firstEntered
-			const second = await host.start({ title: "second", prompt: "SECOND_PRIVATE_ASSIGNMENT" })
+			const second = await host.start({ type: "default", title: "second", prompt: "SECOND_PRIVATE_ASSIGNMENT" })
 			await secondEntered
 			assert.equal(host.list().filter((record) => !record.outcome).length, 2)
 			const steering = await host.steer(second.id, "SECOND_PRIVATE_GUIDANCE")
@@ -3230,7 +3220,7 @@ describe("Tasklet real Task execution", function () {
 	it("explicitly follows up a completed real tasklet under the same handle and restores task-local context", async () => {
 		const host = createHost()
 		const resumed = sandbox.spy(Task.prototype, "resumeTaskFromHistory")
-		const child = await host.start({ title: "follow-up", prompt: "READ_BEFORE_FOLLOWUP" })
+		const child = await host.start({ type: "default", title: "follow-up", prompt: "READ_BEFORE_FOLLOWUP" })
 		try {
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
@@ -3298,7 +3288,7 @@ describe("Tasklet real Task execution", function () {
 			const root = createResolutionRoot()
 			let host = root.taskletHost!
 			nextTurn = async () => "complete"
-			const child = await host.start({ title: "compacted child", prompt: "INITIAL_TASKLET_CONTEXT" })
+			const child = await host.start({ type: "default", title: "compacted child", prompt: "INITIAL_TASKLET_CONTEXT" })
 			await waitForOutcome(host, child.id)
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
 			// Seed the persisted outcome of completed plaintext compaction, not the
@@ -3373,11 +3363,107 @@ describe("Tasklet real Task execution", function () {
 		})
 	}
 
+	it("preserves a custom endpoint Reviewer selection across preset edits, interruption and reconstruction with current credentials", async () => {
+		const preset: ModelProviderPreset = {
+			id: "local-review", provider: "openai", modelId: "custom/reviewer-v1", openAiProfileName: "Local",
+			modelInfo: { contextWindow: 32768, maxTokens: 4096, supportsPromptCache: false }, lastUsedAt: 1,
+		}
+		const selection = { ...createModelProviderSelection(preset), reasoningEffort: "high" as const }
+		globalRoles = [{ name: "Reviewer", description: "Review local work", enabled: true, modelSelection: selection }]
+		const params = parameters()
+		params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+			settings: { modelProviderPresets: [preset] },
+			apiConfiguration: {
+				openAiCompatibleProfiles: [{ name: "Local", baseUrl: "http://localhost:1234/v1", modelId: "profile-default-must-not-win", modelInfo: preset.modelInfo! }],
+			},
+		})
+		const dispatched: ApiConfiguration[] = []
+		let rejectModel = false
+		const buildApi = apiModule.buildApiHandler as sinon.SinonStub
+		buildApi.callsFake((configuration: ApiConfiguration) => ({
+			getModel: () => ({ id: configuration.actModeOpenAiModelId!, info: preset.modelInfo! }),
+			async *createMessage(): ApiStream {
+				dispatched.push({ ...configuration })
+				if (rejectModel) throw Object.assign(new Error("404 model_not_found: custom/reviewer-v1"), { status: 404 })
+				const operation = dispatched.length === 1 ? "question" : "complete"
+				yield {
+					type: "tool_calls", tool_call: {
+						call_id: `review-${dispatched.length}`, function: {
+							name: "respond", arguments: JSON.stringify({ operation, text: operation === "question" ? "REVIEW_SCOPE_QUESTION" : "REVIEW_EVIDENCE" }),
+						}
+					}
+				}
+				yield { type: "usage", inputTokens: 100, outputTokens: 20, stopReason: "tool_use" }
+			},
+		}))
+		const host = createHost(params)
+		let reconstructed: TaskletHost | undefined
+		try {
+			const child = await host.start({ type: "Reviewer", title: "Review original", prompt: "REVIEW_ORIGINAL_ASSIGNMENT" })
+			await waitForInteraction(host, child.id)
+			assert.equal(dispatched[0].actModeOpenAiModelId, "custom/reviewer-v1")
+			assert.equal(dispatched[0].actModeOpenAiProfileName, "Local")
+			assert.equal(dispatched[0].actModeReasoningEffort, "high")
+			assert.equal(dispatched[0].openAiCompatibleProfiles![0].apiKey, undefined, "Named endpoint initially requires no key")
+			await host.interrupt(child.id, "Pause for later review")
+
+			// Presets are copied selections, not live bindings. Editing the role affects only new conversations.
+			preset.modelId = "edited-preset-must-not-win"
+			assert.equal(globalRoles[0].modelSelection!.modelId, "custom/reviewer-v1")
+			globalRoles = [{ ...globalRoles[0], modelSelection: { ...selection, modelId: "custom/reviewer-v2", reasoningEffort: "low" } }]
+			const newer = await host.start({ type: "Reviewer", title: "Review newer", prompt: "REVIEW_NEW_ASSIGNMENT" })
+			assert.equal((await waitForOutcome(host, newer.id)).outcome?.kind, "completed")
+			assert.equal(dispatched[1].actModeOpenAiModelId, "custom/reviewer-v2")
+			assert.equal(dispatched[1].actModeReasoningEffort, "low")
+			globalRoles = []
+			await assert.rejects(host.start({ type: "Reviewer", title: "Removed role", prompt: "Must not launch" }), /Unavailable subagent role/)
+			await host.shutdown()
+
+			params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+				settings: { modelProviderPresets: [] },
+				apiConfiguration: {
+					openAiCompatibleProfiles: [{ name: "Local", baseUrl: "http://localhost:4321/v1", apiKey: "rotated-current-key", modelId: "different-profile-default", modelInfo: preset.modelInfo! }],
+				},
+			})
+			reconstructed = createHost(params)
+			await reconstructed.reconstruct()
+			assert.equal(dispatched.length, 2, "Root reconstruction never executes historical children")
+			await reconstructed.resume(child.id, "Resume the original review")
+			const resumed = await waitForOutcome(reconstructed, child.id)
+			assert.equal(resumed.outcome?.kind, "completed")
+			assert.equal(resumed.id, child.id)
+			assert.equal(resumed.conversationUlid, child.conversationUlid)
+			assert.deepEqual(resumed.configuration, child.configuration)
+			assert.equal(dispatched[2].actModeOpenAiModelId, "custom/reviewer-v1")
+			assert.equal(dispatched[2].actModeReasoningEffort, "high")
+			assert.equal(dispatched[2].openAiCompatibleProfiles![0].apiKey, "rotated-current-key")
+			assert.equal(dispatched[2].openAiCompatibleProfiles![0].baseUrl, "http://localhost:4321/v1")
+			assert.doesNotMatch(JSON.stringify(resumed.configuration), /rotated-current-key|localhost/)
+
+			// A provider rejection remains visible to the owner; it cannot select a fallback model.
+			expectLoggerErrors()
+			rejectModel = true
+			sandbox.stub(retryPolicy, "getApiRequestRetryDelay").returns(1)
+			await reconstructed.resume(child.id, "Review after endpoint model removal")
+			const failed = await waitForInteraction(reconstructed, child.id)
+			assert.equal(failed.card.header, "API Request Failed")
+			assert.match(JSON.stringify(failed.card), /model_not_found/)
+			assert.equal(dispatched.length, 4 + retryPolicy.MAX_API_REQUEST_RETRIES)
+			assert.ok(dispatched.slice(3).every((configuration) => configuration.actModeOpenAiModelId === "custom/reviewer-v1"),
+				"Ordinary retries retain the rejected custom ID rather than substituting a model")
+			assert.deepEqual(reconstructed.inspect(child.id).configuration, child.configuration)
+			await reconstructed.interrupt(child.id, "Endpoint no longer serves the saved model")
+		} finally {
+			await reconstructed?.shutdown()
+			await host.shutdown()
+		}
+	})
+
 	it("reconstructs a real root without starting its completed children and explicitly restores an opaque child checkpoint", async () => {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
 		nextTurn = async () => "complete"
-		const child = await host.start({ title: "persisted child", prompt: "COMPLETED_BEFORE_ROOT_CLOSE" })
+		const child = await host.start({ type: "default", title: "persisted child", prompt: "COMPLETED_BEFORE_ROOT_CLOSE" })
 		await waitForOutcome(host, child.id)
 		await root.messageStateHandler.overwriteApiConversationHistory([
 			{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_CONTEXT" }] },
@@ -3447,7 +3533,7 @@ describe("Tasklet real Task execution", function () {
 		const root = createResolutionRoot()
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
-		const child = await root.taskletHost!.start({ title: "permission wait", prompt: "REQUEST_COMMAND_ONCE" })
+		const child = await root.taskletHost!.start({ type: "default", title: "permission wait", prompt: "REQUEST_COMMAND_ONCE" })
 		const oldRequest = await waitForInteraction(root.taskletHost!, child.id)
 		await root.abortTask()
 		assert.equal(root.taskletHost!.inspect(child.id).interactions[0].status, "retired")
@@ -3459,7 +3545,7 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
 			assert.equal(host.inspect(child.id).interactions[0].status, "retired")
 			await assert.rejects(host.resolveInteraction(child.id, oldRequest.id, { operation: "approve" }), /not pending/)
-			const sibling = await host.start({ title: "independent", prompt: "SIBLING_AFTER_REOPEN" })
+			const sibling = await host.start({ type: "default", title: "independent", prompt: "SIBLING_AFTER_REOPEN" })
 			assert.equal((await waitForOutcome(host, sibling.id)).outcome?.kind, "completed")
 			await host.resume(child.id, "DO_NOT_EXECUTE_PREVIOUS_COMMAND")
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
@@ -3483,7 +3569,7 @@ describe("Tasklet real Task execution", function () {
 			const publish = sandbox.stub(root as any, "postPresentationToWebview").resolves()
 			const completion = deferred<TaskRunOutcome>()
 			const start = sandbox.stub(Task.prototype, "startTask").returns(completion.promise)
-			const child = await host.start({ title: "Active usage", prompt: "Keep working" })
+			const child = await host.start({ type: "default", title: "Active usage", prompt: "Keep working" })
 			const childTask = start.firstCall.thisValue as Task
 			const cancellation = new AbortController()
 			const sleeping = host.sleep({ taskletIds: [child.id] }, cancellation.signal)
@@ -3521,7 +3607,7 @@ describe("Tasklet real Task execution", function () {
 			const publish = sandbox.stub(root as any, "postPresentationToWebview").resolves()
 			const completion = deferred<TaskRunOutcome>()
 			const start = sandbox.stub(Task.prototype, "startTask").returns(completion.promise)
-			const child = await host.start({ title: "Usage publication failure", prompt: "Work" })
+			const child = await host.start({ type: "default", title: "Usage publication failure", prompt: "Work" })
 			const childTask = start.firstCall.thisValue as Task
 			publish.resetHistory()
 			publish.rejects(new Error("Controlled accounting publication failure"))
@@ -3556,8 +3642,8 @@ describe("Tasklet real Task execution", function () {
 				if (rootTurn) {
 					rootTurn = false
 					const children = await Promise.all([
-						root.taskletHost!.start({ title: "first usage", prompt: "FIRST_USAGE" }),
-						root.taskletHost!.start({ title: "second usage", prompt: "SECOND_USAGE" }),
+						root.taskletHost!.start({ type: "default", title: "first usage", prompt: "FIRST_USAGE" }),
+						root.taskletHost!.start({ type: "default", title: "second usage", prompt: "SECOND_USAGE" }),
 					])
 					ids.push(...children.map((child) => child.id))
 					await Promise.all(ids.map((id) => waitForOutcome(root.taskletHost!, id)))
@@ -3588,7 +3674,7 @@ describe("Tasklet real Task execution", function () {
 			const root = createResolutionRoot()
 			const host = root.taskletHost!
 			nextTurn = async () => "complete"
-			const child = await host.start({ title: "usage follow-up", prompt: "FIRST_USAGE_TURN" })
+			const child = await host.start({ type: "default", title: "usage follow-up", prompt: "FIRST_USAGE_TURN" })
 			assert.equal((await waitForOutcome(host, child.id)).usage?.primary.tokensIn, 100)
 			await host.resume(child.id, "SECOND_USAGE_TURN")
 			const resumed = await waitForOutcome(host, child.id)
@@ -3611,7 +3697,7 @@ describe("Tasklet real Task execution", function () {
 		it("preserves durable primary spend ahead of its transcript through reconstruction and explicit resumption", async () => {
 			const root = createResolutionRoot()
 			nextTurn = async () => "complete"
-			const child = await root.taskletHost!.start({ title: "ahead of transcript", prompt: "PERSIST_TRANSCRIPT_USAGE" })
+			const child = await root.taskletHost!.start({ type: "default", title: "ahead of transcript", prompt: "PERSIST_TRANSCRIPT_USAGE" })
 			await waitForOutcome(root.taskletHost!, child.id)
 			await root.abortTask()
 			const address = { kind: "tasklet" as const, rootTaskId: "root", taskletId: child.id }
@@ -3672,7 +3758,7 @@ describe("Tasklet real Task execution", function () {
 			const root = createResolutionRoot()
 			const host = root.taskletHost!
 			nextTurn = async () => (requests.length === 1 ? "execute_command" : "complete")
-			const child = await host.start({ title: "interrupted usage", prompt: "REQUEST_USAGE_THEN_PERMISSION" })
+			const child = await host.start({ type: "default", title: "interrupted usage", prompt: "REQUEST_USAGE_THEN_PERMISSION" })
 			await waitForInteraction(host, child.id)
 			const stopped = await host.interrupt(child.id, "Retain incurred spend")
 			assert.equal(stopped.outcome?.kind, "interrupted")
@@ -3689,7 +3775,7 @@ describe("Tasklet real Task execution", function () {
 		it("restores root accounting after presentation loading without constructing or charging historical child runs again", async () => {
 			const root = createResolutionRoot()
 			nextTurn = async () => "complete"
-			const child = await root.taskletHost!.start({ title: "durable usage", prompt: "PERSIST_USAGE" })
+			const child = await root.taskletHost!.start({ type: "default", title: "durable usage", prompt: "PERSIST_USAGE" })
 			await waitForOutcome(root.taskletHost!, child.id)
 			await root.messageStateHandler.overwriteApiConversationHistory([
 				{ role: "user", content: [{ type: "text", text: "ROOT_REOPEN_USAGE" }] },
@@ -3764,7 +3850,7 @@ describe("Tasklet real Task execution", function () {
 					}
 					return "complete"
 				}
-				const child = await host.start({ title: "Utility usage", prompt: "INCUR_UTILITY_USAGE" })
+				const child = await host.start({ type: "default", title: "Utility usage", prompt: "INCUR_UTILITY_USAGE" })
 				const first = await waitForOutcome(host, child.id)
 				assert.equal(first.outcome?.kind, "completed")
 				assert.equal(first.usage?.primary.tokensIn, 100)
@@ -3823,7 +3909,7 @@ describe("Tasklet real Task execution", function () {
 		assert.ok(requests[0].tools.includes("respond"))
 		assert.ok(requests[0].tools.includes("read_file"))
 		assert.ok(!requests[0].tools.includes("execute_command"))
-		assert.ok(!requests[0].tools.includes("use_subagents"))
+		assert.ok(!requests[0].tools.includes("subagents"))
 		assert.ok(!requests[0].tools.includes("task"))
 		assert.ok(!requests[0].tools.some((name) => name.startsWith("task_")))
 		sinon.assert.called(params.tasklet!.postStateToOwner as sinon.SinonStub)
@@ -3881,7 +3967,7 @@ describe("Tasklet real Task execution", function () {
 		const host = createHost(params)
 		nextTurn = async () => "complete"
 		try {
-			const child = await host.start({ title: "Read-only review", prompt: "Finish the review" })
+			const child = await host.start({ type: "default", title: "Read-only review", prompt: "Finish the review" })
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			await host.resume(child.id, "Follow up")
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")

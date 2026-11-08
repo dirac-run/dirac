@@ -1,9 +1,5 @@
-import {
-	applyApiConfigurationTransaction,
-	type ApiConfigurationTransactionTask,
-} from "@core/controller/models/apiConfigurationTransaction"
+import { applyProviderSetupTransaction, type ApiConfigurationTransactionTask } from "@core/controller/models/apiConfigurationTransaction"
 import type { StateManager } from "@core/storage/StateManager"
-import type { ApiProvider } from "@shared/api"
 import { ShowMessageType } from "@shared/proto/host/window"
 import axios from "axios"
 import { HostProvider } from "@/hosts/host-provider"
@@ -20,7 +16,7 @@ export interface AuthControllerDependencies {
 }
 
 export class AuthController {
-	constructor(private readonly deps: AuthControllerDependencies) {}
+	constructor(private readonly deps: AuthControllerDependencies) { }
 
 	async completeOpenRouterAuth(code: string) {
 		let apiKey: string
@@ -36,19 +32,7 @@ export class AuthController {
 			throw error
 		}
 
-		const openrouter: ApiProvider = "openrouter"
-		const currentApiConfiguration = this.deps.stateManager.getApiConfiguration()
-		const updatedConfig = {
-			...currentApiConfiguration,
-			openRouterApiKey: apiKey,
-			...(currentApiConfiguration.planModeOpenRouterModelId ? { planModeApiProvider: openrouter } : {}),
-			...(currentApiConfiguration.actModeOpenRouterModelId ? { actModeApiProvider: openrouter } : {}),
-		}
-		await applyApiConfigurationTransaction(this.deps, updatedConfig, undefined, undefined, {
-			openRouterApiKey: apiKey,
-			...(currentApiConfiguration.planModeOpenRouterModelId ? { planModeApiProvider: openrouter } : {}),
-			...(currentApiConfiguration.actModeOpenRouterModelId ? { actModeApiProvider: openrouter } : {}),
-		})
+		await applyProviderSetupTransaction(this.deps, { openRouterApiKey: apiKey })
 		await this.deps.postStateToWebview()
 	}
 
@@ -87,19 +71,7 @@ export class AuthController {
 	}
 
 	async completeRequestyAuth(code: string) {
-		const requesty: ApiProvider = "requesty"
-		const currentApiConfiguration = this.deps.stateManager.getApiConfiguration()
-		const updatedConfig = {
-			...currentApiConfiguration,
-			planModeApiProvider: requesty,
-			actModeApiProvider: requesty,
-			requestyApiKey: code,
-		}
-		await applyApiConfigurationTransaction(this.deps, updatedConfig, undefined, undefined, {
-			planModeApiProvider: requesty,
-			actModeApiProvider: requesty,
-			requestyApiKey: code,
-		})
+		await applyProviderSetupTransaction(this.deps, { requestyApiKey: code })
 		await this.deps.postStateToWebview()
 	}
 }

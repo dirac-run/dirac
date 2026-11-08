@@ -75,6 +75,7 @@ function prepareTaskSettings(
 	settings: any,
 	activeSettings?: DeepReadonly<Settings>,
 ): PreparedTaskSettings {
+	if (settings.subagentRoles !== undefined) throw new Error("Subagent roles are user-global settings")
 	const {
 		autoApprovalSettings: incomingAutoApprovalSettings,
 		planModeReasoningEffort,
@@ -124,7 +125,7 @@ function persistTaskSettings(controller: Controller, taskId: string, prepared: P
 	const previouslyOwned = new Set<keyof Settings>()
 	for (const key of keys) {
 		if (stateManager.hasTaskSetting(key)) previouslyOwned.add(key)
-		;(previousValues as Record<string, unknown>)[key] = structuredClone(stateManager.getTaskSetting(key))
+			; (previousValues as Record<string, unknown>)[key] = structuredClone(stateManager.getTaskSetting(key))
 	}
 
 	try {

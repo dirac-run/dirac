@@ -87,6 +87,16 @@ describe("OpenRouter provider selection", () => {
 		})
 	})
 
+	it("browses setup without activation and adds a keyless provider only explicitly", () => {
+		render(<ApiOptions currentMode="plan" intent="setup" showModelOptions={true} />)
+		fireEvent.focus(screen.getByTestId("provider-selector-input"))
+		fireEvent.click(screen.getByTestId("provider-option-openrouter"))
+		expect(handleFieldsChange).not.toHaveBeenCalled()
+		expect(useSettingsStore.getState().apiConfiguration.planModeApiProvider).toBe("requesty")
+		fireEvent.click(screen.getByRole("button", { name: "Add provider" }))
+		expect(handleFieldsChange).toHaveBeenCalledWith({}, "openrouter")
+	})
+
 	it("discards a first-time OpenRouter selection without persisting an invalid provider", () => {
 		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
 		fireEvent.focus(screen.getByTestId("provider-selector-input"))
@@ -224,7 +234,7 @@ describe("OpenApiInfoOptions", () => {
 		} as any)
 
 		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
-		expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", undefined)
+		expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", undefined, undefined)
 	})
 
 	it("refreshes OpenAI-compatible models when switching saved profiles", async () => {
@@ -251,7 +261,7 @@ describe("OpenApiInfoOptions", () => {
 		fireEvent(dropdown, new Event("change", { bubbles: true }))
 
 		await waitFor(() => {
-			expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", "")
+			expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", "", undefined)
 		})
 	})
 })

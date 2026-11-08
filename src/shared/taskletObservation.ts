@@ -25,6 +25,7 @@ export interface TaskletActivitySummary extends TaskletObservationScope {
 export interface TaskletInventoryRow {
 	taskletId: string
 	title: string
+	role?: string
 	state: TaskletObservedState
 }
 
@@ -41,8 +42,8 @@ export interface TaskletObservedMessage {
 	id: string
 	ts: number
 	content:
-		| { type: "markdown"; content: string; role?: "user" | "assistant"; isReasoning?: boolean }
-		| { type: "card"; card: { id: string; header: string; body?: string; status: string } }
+	| { type: "markdown"; content: string; role?: "user" | "assistant"; isReasoning?: boolean }
+	| { type: "card"; card: { id: string; header: string; body?: string; status: string } }
 }
 
 /** Bounded human presentation, with no child actions or raw model conversation. */
@@ -50,6 +51,7 @@ export interface TaskletTranscriptPage extends TaskletObservationScope {
 	observedAt: number
 	taskletId: string
 	title: string
+	role?: string
 	state: TaskletObservedState
 	messages: TaskletObservedMessage[]
 	nextCursor?: string

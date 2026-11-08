@@ -14,7 +14,6 @@ function emptyToolSnapshot(): ToolRequestSnapshot {
 		nativeTools: [],
 		coordinator: { has: () => false } as any,
 		executableToolNames: new Set(),
-		dynamicSubagentToolNames: new Set(),
 	}
 }
 

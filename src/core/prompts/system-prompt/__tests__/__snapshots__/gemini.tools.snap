@@ -481,44 +481,48 @@
     }
   },
   {
-    "name": "use_subagents",
-    "description": "Run subagents in parallel.",
+    "name": "subagents",
+    "description": "Start a batch of subagents asynchronously. Returns each accepted stable ID and task header or its startup error, not completed results. Supply complete instructions: children do not receive the parent conversation. Use tasklets with the returned IDs to supervise them.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
-        "subagents": {
+        "assignments": {
           "type": "ARRAY",
           "items": {
             "type": "OBJECT",
             "properties": {
-              "task_title": {
+              "type": {
                 "type": "STRING",
-                "description": "Task header for user observability. No more than 5 words or 80 characters."
+                "description": "default: Use the main agent's current model settings.",
+                "enum": [
+                  "default"
+                ]
               },
-              "prompt": {
+              "task_header": {
                 "type": "STRING",
-                "description": "Task for this subagent."
+                "description": "Short assignment header, at most 5 words.",
+                "minLength": 1,
+                "maxLength": 80
               },
-              "timeout": {
-                "type": "NUMBER",
-                "description": "Timeout in seconds. Default: 600."
-              },
-              "include_history": {
-                "type": "BOOLEAN",
-                "description": "Include the main task conversation history."
+              "task_description": {
+                "type": "STRING",
+                "description": "Complete assignment instructions and necessary context; no parent conversation is copied.",
+                "minLength": 1
               }
             },
             "required": [
-              "task_title",
-              "prompt"
+              "type",
+              "task_header",
+              "task_description"
             ],
             "additionalProperties": false
           },
-          "description": "Subagents to run in parallel."
+          "minItems": 1,
+          "description": "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion."
         }
       },
       "required": [
-        "subagents"
+        "assignments"
       ]
     }
   },

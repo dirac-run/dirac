@@ -18,6 +18,7 @@ export type ApiConversationOperation =
 	| { offset: number; type: "append_message"; message: DiracStorageMessage }
 	| { offset: number; type: "append_user_content"; content: DiracUserContent }
 	| { offset: number; type: "reset"; messages: DiracStorageMessage[] }
+	| { offset: number; type: "branch"; messages: DiracStorageMessage[]; providerState: ApiConversationProviderState }
 
 export interface SavedPresentationHistory {
 	messages: DiracMessage[]
@@ -27,9 +28,12 @@ export interface SavedPresentationHistory {
 export interface SavedApiConversationHistory {
 	messages: DiracStorageMessage[]
 	lastOffset: number
+	branchProviderState?: ApiConversationProviderState
 }
 
-type ApiConversationBaselineRecord = { type: "baseline"; offset: number } | { type: "message"; message: DiracStorageMessage }
+type ApiConversationBaselineRecord =
+	| { type: "baseline"; offset: number; branchProviderState?: ApiConversationProviderState }
+	| { type: "message"; message: DiracStorageMessage }
 
 type PresentationBaselineRecord = { type: "baseline"; offset: number } | { type: "message"; message: DiracMessage }
 
@@ -57,15 +61,16 @@ export async function getSavedApiConversationState(address: string | TaskStorage
 	const taskDirectory = await ensureTaskDirectoryExists(address)
 	const filePath = path.join(taskDirectory, GlobalFileNames.apiConversationHistory)
 	const baselinePath = path.join(taskDirectory, GlobalFileNames.apiConversationHistoryBaseline)
-	let { messages, lastOffset } = await readApiConversationBaseline(filePath, baselinePath)
+	let { messages, lastOffset, branchProviderState } = await readApiConversationBaseline(filePath, baselinePath)
 	const operationPath = path.join(path.dirname(filePath), GlobalFileNames.apiConversationHistoryOperations)
 	await replayOperationRecords<ApiConversationOperation>(operationPath, (operation) => {
 		if (operation.offset <= lastOffset) return
-		assertNextOffset(operation.offset, lastOffset, operationPath, operation.type === "reset")
+		assertNextOffset(operation.offset, lastOffset, operationPath, operation.type === "reset" || operation.type === "branch")
+		if (operation.type === "branch") branchProviderState = operation.providerState
 		lastOffset = operation.offset
 		messages = applyApiConversationOperation(messages, operation)
 	})
-	return { messages, lastOffset }
+	return branchProviderState ? { messages, lastOffset, branchProviderState } : { messages, lastOffset }
 }
 
 export async function appendApiConversationOperations(
@@ -80,6 +85,15 @@ export async function appendApiConversationOperations(
 	)
 	if (operations.length > 0 && completeHistory) {
 		enqueueConversationFile(address, GlobalFileNames.apiConversationHistory, JSON.stringify(completeHistory))
+		// Remote history retains its existing array format. The matching provider state
+		// is queued separately, as for ordinary saves; remote restoration is not atomic.
+		let branch: ApiConversationOperation | undefined
+		for (const operation of operations) {
+			if (operation.type === "branch") branch = operation
+		}
+		if (branch?.type === "branch") {
+			enqueueConversationFile(address, GlobalFileNames.apiConversationProviderState, JSON.stringify(branch.providerState))
+		}
 	}
 	return appendedBytes
 }
@@ -90,8 +104,9 @@ export async function createApiConversationBaseline(
 	offset: number,
 ): Promise<void> {
 	const taskDirectory = await ensureTaskDirectoryExists(address)
+	const { branchProviderState } = await getSavedApiConversationState(address)
 	const records = function* (): Generator<ApiConversationBaselineRecord> {
-		yield { type: "baseline", offset }
+		yield { type: "baseline", offset, branchProviderState }
 		for (const message of messages) yield { type: "message", message }
 	}
 	await writeFramedBaseline(path.join(taskDirectory, GlobalFileNames.apiConversationHistoryBaseline), records())
@@ -103,8 +118,13 @@ export async function getSavedApiConversationProviderState(
 	address: string | TaskStorageAddress,
 ): Promise<ApiConversationProviderState> {
 	const filePath = path.join(await ensureTaskDirectoryExists(address), GlobalFileNames.apiConversationProviderState)
-	if (!(await fileExistsAtPath(filePath))) return {}
-	return JSON.parse(await fs.readFile(filePath, "utf8"))
+	const state: ApiConversationProviderState = (await fileExistsAtPath(filePath))
+		? JSON.parse(await fs.readFile(filePath, "utf8")) : {}
+	const { branchProviderState } = await getSavedApiConversationState(address)
+	// A committed branch is authoritative over a provider file left by the old
+	// generation. Subsequent saves in the same branch retain their newer state.
+	return branchProviderState && state.historyBranchId !== branchProviderState.historyBranchId
+		? branchProviderState : state
 }
 
 // Persists opaque provider-native checkpoints without encoding them as generic messages.
@@ -114,9 +134,9 @@ export async function saveApiConversationProviderState(
 ): Promise<void> {
 	const fileName = GlobalFileNames.apiConversationProviderState
 	const data = JSON.stringify(state)
-	enqueueConversationFile(address, fileName, data)
 	const filePath = path.join(await ensureTaskDirectoryExists(address), fileName)
 	await atomicWriteFile(filePath, data)
+	enqueueConversationFile(address, fileName, data)
 }
 
 // Persists API conversation history for a task, queuing remote sync without blocking.
@@ -240,9 +260,11 @@ async function readApiConversationBaseline(legacyPath: string, baselinePath: str
 
 	const messages: DiracStorageMessage[] = []
 	let lastOffset: number | undefined
+	let branchProviderState: ApiConversationProviderState | undefined
 	await replayOperationRecords<ApiConversationBaselineRecord>(baselinePath, (record, lineNumber) => {
 		if (lineNumber === 1 && record.type === "baseline" && Number.isSafeInteger(record.offset)) {
 			lastOffset = record.offset
+			branchProviderState = record.branchProviderState
 			return
 		}
 		if (lastOffset === undefined || record.type !== "message") {
@@ -251,7 +273,7 @@ async function readApiConversationBaseline(legacyPath: string, baselinePath: str
 		messages.push(record.message)
 	})
 	if (lastOffset === undefined) throw new Error(`API conversation baseline has no header: ${baselinePath}`)
-	return { messages, lastOffset }
+	return branchProviderState ? { messages, lastOffset, branchProviderState } : { messages, lastOffset }
 }
 
 async function readPresentationBaseline(
@@ -298,7 +320,7 @@ function applyApiConversationOperation(
 	messages: DiracStorageMessage[],
 	operation: ApiConversationOperation,
 ): DiracStorageMessage[] {
-	if (operation.type === "reset") return operation.messages
+	if (operation.type === "reset" || operation.type === "branch") return operation.messages
 	if (operation.type === "append_message") {
 		messages.push(operation.message)
 		return messages

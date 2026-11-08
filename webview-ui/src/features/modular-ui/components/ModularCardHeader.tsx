@@ -3,6 +3,7 @@ import { StringRequest } from "@shared/proto/dirac/common"
 import { extractFirstPath } from "@shared/string"
 import { readSubagentCardData } from "@shared/subagents"
 import { readTaskletPresentation, type TaskletPresentationStatus } from "@shared/taskletPresentation"
+import { formatTaskletLabel } from "@shared/taskletLabel"
 import { TASKLET_RECEIPT_OUTCOMES, taskletReceiptTitle } from "@shared/taskletReceipt"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { DynamicIcon } from "lucide-react/dynamic"
@@ -44,7 +45,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const taskletStatus = tasklet ? TASKLET_STATUS_PRESENTATION[tasklet.status] : undefined
 	const receipt = card.taskletReceipt
-	const header = receipt ? taskletReceiptTitle(receipt) : (tasklet?.title ?? card.header)
+	const header = receipt ? taskletReceiptTitle(receipt) : (tasklet ? formatTaskletLabel(tasklet) : card.header)
 	const status = taskletStatus?.status ?? (isTaskletCard ? CardStatus.PENDING : card.status)
 	const isTerminal = isFinalStatus(status)
 	const subagentData = isTaskletCard ? undefined : readSubagentCardData(card)
@@ -82,7 +83,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				onClick={onToggleCollapse}
 				title={isCollapsed ? `Expand ${header}` : `Collapse ${header}`}
 				type="button">
-				{tasklet && <SubagentAvatar agentId={tasklet.taskletId} agentName={tasklet.title} />}
+				{tasklet && <SubagentAvatar agentId={tasklet.taskletId} agentName={tasklet.taskletId} />}
 				{subagentData && <SubagentAvatar agentId={subagentData.id} agentName={subagentData.name} />}
 
 				<span aria-hidden="true" className="shrink-0 leading-none">

@@ -33,23 +33,25 @@ export const FireworksProvider = ({ currentMode, isPopup, showModelOptions }: Fi
 				providerName="Fireworks"
 				signupUrl="https://fireworks.ai/"
 			/>
-			<ModelSelector
-				label="Model"
-				models={fireworksModels}
-				onChange={(e: any) => {
-					handleModeFieldChange(
-						{
-							plan: "planModeFireworksModelId",
-							act: "actModeFireworksModelId",
-						},
-						e.target.value,
-						currentMode,
-					)
-				}}
-				selectedModelId={selectedModelId}
-			/>
+			{showModelOptions && <>
+				<ModelSelector
+					label="Model"
+					models={fireworksModels}
+					onChange={(e: { target: EventTarget | null }) => {
+						handleModeFieldChange(
+							{
+								plan: "planModeFireworksModelId",
+								act: "actModeFireworksModelId",
+							},
+							(e.target as HTMLSelectElement).value,
+							currentMode,
+						)
+					}}
+					selectedModelId={selectedModelId}
+				/>
 
-			<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
+				<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
+			</>}
 		</div>
 	)
 }

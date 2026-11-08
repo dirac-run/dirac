@@ -1,11 +1,11 @@
-import { ALL_MODEL_MAPS, ALL_PROVIDERS, type ApiProvider, type ModelInfo, type ModelProviderSelection } from "@shared/api"
-import PROVIDERS from "@shared/providers/providers.json"
+import type { ModelProviderSelection } from "@shared/api"
+import { supportsCustomModelId } from "@shared/customModelIds"
 import { convertModelProviderSelectionToProto } from "@shared/proto-conversions/models/api-configuration-conversion"
 import { SETTINGS_HELP } from "@shared/settings-presentation"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
-import { ModelAutocomplete } from "./common/ModelAutocomplete"
+import { ModelSelectionEditor } from "./ModelSelectionEditor"
 import { persistSetting, updateSetting } from "./utils/settingsHandlers"
 
 const USE_CASES = [
@@ -26,21 +26,6 @@ const USE_CASES = [
 	},
 ]
 
-function getProviderModels(provider: ApiProvider, dynamicModels: Record<string, unknown>): Record<string, ModelInfo> {
-	const staticModels = ALL_MODEL_MAPS.filter(([candidate]) => candidate === provider).reduce<Record<string, ModelInfo>>(
-		(models, [, candidateModels]) => ({ ...models, ...candidateModels }),
-		{},
-	)
-	const providerModels = dynamicModels[provider]
-	return providerModels && typeof providerModels === "object"
-		? { ...staticModels, ...(providerModels as Record<string, ModelInfo>) }
-		: staticModels
-}
-
-function getProviderLabel(provider: ApiProvider): string {
-	return PROVIDERS.list.find((candidate) => candidate.value === provider)?.label ?? provider
-}
-
 const UtilityModelSelection = () => {
 	const {
 		utilityModelSelection,
@@ -48,37 +33,7 @@ const UtilityModelSelection = () => {
 		utilityModelUseGenerateCommitMessage,
 		utilityModelUsePermissionHandling,
 		utilityModelPermissionPolicy,
-		openRouterModels,
-		openAiModels,
-		liteLlmModels,
-		requestyModels,
-		groqModels,
-		basetenModels,
-		huggingFaceModels,
-		vercelAiGatewayModels,
 	} = useSettingsStore()
-	const dynamicModels = useMemo<Record<string, unknown>>(
-		() => ({
-			openrouter: openRouterModels,
-			openai: openAiModels,
-			litellm: liteLlmModels,
-			requesty: requestyModels,
-			groq: groqModels,
-			baseten: basetenModels,
-			huggingface: huggingFaceModels,
-			"vercel-ai-gateway": vercelAiGatewayModels,
-		}),
-		[
-			basetenModels,
-			groqModels,
-			huggingFaceModels,
-			liteLlmModels,
-			openAiModels,
-			openRouterModels,
-			requestyModels,
-			vercelAiGatewayModels,
-		],
-	)
 	const [pendingSelection, setPendingSelection] = useState<ModelProviderSelection | undefined>()
 	useEffect(() => setPendingSelection(undefined), [utilityModelSelection])
 	const [permissionPolicy, setPermissionPolicy] = useState(utilityModelPermissionPolicy)
@@ -86,34 +41,11 @@ const UtilityModelSelection = () => {
 	const [permissionPolicySaving, setPermissionPolicySaving] = useState(false)
 	const [permissionPolicySaveError, setPermissionPolicySaveError] = useState(false)
 	const selection = pendingSelection ?? utilityModelSelection
-	const provider = selection?.provider ?? "openrouter"
-	const models = useMemo(() => getProviderModels(provider, dynamicModels), [dynamicModels, provider])
-	const anyUseCaseEnabled =
-		utilityModelUseCondense ||
-		utilityModelUseGenerateCommitMessage ||
-		utilityModelUsePermissionHandling
+	const anyUseCaseEnabled = utilityModelUseCondense || utilityModelUseGenerateCommitMessage || utilityModelUsePermissionHandling
 
 	const persistSelection = (nextSelection: ModelProviderSelection) => {
 		setPendingSelection(nextSelection)
 		updateSetting("utilityModelSelection", convertModelProviderSelectionToProto(nextSelection))
-	}
-
-	const handleProviderChange = (nextProvider: ApiProvider) => {
-		const nextModels = getProviderModels(nextProvider, dynamicModels)
-		const modelId = Object.keys(nextModels)[0] ?? ""
-		persistSelection({ provider: nextProvider, modelId, modelInfo: nextModels[modelId] })
-	}
-
-	const handleModelChange = (modelId: string, modelInfo: ModelInfo | undefined) => {
-		persistSelection({
-			provider,
-			modelId,
-			modelInfo,
-			openAiProfileName: selection?.openAiProfileName,
-			vsCodeLmModelSelector: selection?.vsCodeLmModelSelector,
-			awsBedrockCustomSelected: selection?.awsBedrockCustomSelected,
-			awsBedrockCustomModelBaseId: selection?.awsBedrockCustomModelBaseId,
-		})
 	}
 
 	const persistPermissionPolicy = async () => {
@@ -130,44 +62,18 @@ const UtilityModelSelection = () => {
 	}
 
 	return (
-		<div className="space-y-5">
-			<div>
-				<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider">Utility model</div>
-				<p className="mt-1 text-xs text-description">
-					Choose a separate provider and model for supporting operations. It uses credentials already configured for
-					that provider; credentials are not copied into the Utility Model selection.
-				</p>
-			</div>
+		<div className="space-y-2">
+			<ModelSelectionEditor
+				label="Utility"
+				selection={selection}
+				onChange={persistSelection}
+				allowCustomModelId={supportsCustomModelId}
+			/>
 
-			<div className="space-y-3">
-				<label className="flex flex-col gap-1 text-sm" htmlFor="utility-model-provider">
-					<span className="font-medium">API Provider</span>
-					<select
-						aria-label="Utility model provider"
-						className="w-full rounded-sm border border-(--vscode-dropdown-border) bg-(--vscode-dropdown-background) px-2 py-1 text-sm text-(--vscode-dropdown-foreground)"
-						id="utility-model-provider"
-						value={provider}
-						onChange={(event) => handleProviderChange(event.target.value as ApiProvider)}>
-						{ALL_PROVIDERS.map((candidate) => (
-							<option key={candidate} value={candidate}>
-								{getProviderLabel(candidate)}
-							</option>
-						))}
-					</select>
-				</label>
-				<ModelAutocomplete
-					label="Model"
-					models={models}
-					onChange={handleModelChange}
-					placeholder="Search or enter any model ID..."
-					selectedModelId={selection?.modelId}
-				/>
-			</div>
-
-			<div className="space-y-2 border-t border-(--vscode-panel-border) pt-4">
-				<div className="text-sm font-medium">Use utility model for</div>
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1">
+				<span className="text-xs font-medium text-description">Use utility model for</span>
 				{USE_CASES.map(({ field, label, description }) => (
-					<div key={field}>
+					<div key={field} title={description}>
 						<VSCodeCheckbox
 							aria-label={label}
 							checked={
@@ -180,7 +86,6 @@ const UtilityModelSelection = () => {
 							onChange={(event: any) => updateSetting(field, event.target.checked === true)}>
 							{label}
 						</VSCodeCheckbox>
-						<p className="ml-6 mt-0.5 text-xs text-description">{description}</p>
 					</div>
 				))}
 			</div>

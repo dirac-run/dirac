@@ -307,7 +307,7 @@ export class StatePersistenceManager {
 		return this.storage.globalStateBackingStore.get(key)
 	}
 
-	async readAllFromDisk(): Promise<{ globalState: GlobalState; secrets: Secrets; workspaceState: LocalState }> {
+	async readAllFromDisk(): Promise<{ globalState: GlobalStateAndSettings; secrets: Secrets; workspaceState: LocalState }> {
 		const globalState = await readGlobalStateFromStorage(this.storage.globalState)
 		const secrets = readSecretsFromStorage(this.storage.secrets)
 		const workspaceState = readWorkspaceStateFromStorage(this.storage.workspaceState)

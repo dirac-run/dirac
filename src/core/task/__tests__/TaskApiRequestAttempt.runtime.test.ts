@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert"
+import { TranscriptIntegrityError } from "@core/api/TranscriptPrefix"
 import * as modelPresets from "@core/models/modelProviderPresets"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { describe, it } from "mocha"
@@ -53,7 +54,7 @@ describe("TaskApiRequestAttempt request runtime", () => {
 				})
 				const ctx = {
 					taskState: new TaskState(),
-					postStateToWebview: async () => {},
+					postStateToWebview: async () => { },
 					requestRuntime: { api: { createMessage } },
 					apiConversationManager: { prepareProviderConversationDispatch: async () => ({ messages: [], options: {} }) },
 				} as any
@@ -120,9 +121,9 @@ describe("TaskApiRequestAttempt request runtime", () => {
 			sinon.assert.calledTwice(ctx.postStateToWebview)
 			assert.equal(ctx.taskState.isWaitingForFirstChunk, false)
 			assert.deepEqual(chunks, [])
-			sinon.assert.calledTwice(build)
+			sinon.assert.calledOnce(build)
 			assert.equal(build.firstCall.args[1], requestRuntime)
-			assert.equal(build.secondCall.args[1], requestRuntime)
+			sinon.assert.calledOnce(ctx.apiConversationManager.prepareProviderConversationDispatch)
 			sinon.assert.calledTwice(requestRuntime.api.createMessage)
 			assert.equal(requestRuntime.api.createMessage.firstCall.args[0], "request prompt")
 			assert.equal(requestRuntime.api.createMessage.secondCall.args[0], "request prompt")
@@ -132,6 +133,59 @@ describe("TaskApiRequestAttempt request runtime", () => {
 			sandbox.restore()
 		}
 	})
+	for (const mutation of ["tools", "options", "provider-owned copies"] as const) {
+		it(`seals retries against mutation of ${mutation}`, async () => {
+			const sandbox = sinon.createSandbox()
+			try {
+				const request = {
+					systemPrompt: "sealed",
+					toolSnapshot: { nativeTools: [{ name: "original" }] },
+					contextManagementMetadata: { truncatedConversationHistory: [] },
+					providerInfo: { providerId: "anthropic", model: { id: "model", info: {} }, mode: "act" },
+				}
+				const dispatch = { messages: [{ role: "user", content: "original" }], options: { enableNativeWebSearch: false } }
+				sandbox.stub(requestBuilder, "buildApiRequestParams").resolves(request as any)
+				sandbox.stub(steering, "appendQueuedSteeringToNextApiRequest").resolves()
+				sandbox.stub(StreamingMetricsManager.prototype, "updateApiReqMsgFromMetrics").resolves()
+				sandbox.stub(requestOutcome, "handleApiRequestError").callsFake(async () => {
+					if (mutation === "tools") request.toolSnapshot.nativeTools[0].name = "changed"
+					if (mutation === "options") dispatch.options.enableNativeWebSearch = true
+					return true
+				})
+				const createMessage = sandbox.stub().callsFake((_system, messages, tools, options) => {
+					if (createMessage.callCount === 1) {
+						if (mutation === "provider-owned copies") {
+							messages[0].content = "provider mutation"
+							tools[0].name = "provider mutation"
+							options.enableNativeWebSearch = true
+						}
+						return failingStream(new Error("retry me"))
+					}
+					assert.equal(messages[0].content, "original")
+					assert.equal(tools[0].name, "original")
+					assert.equal(options.enableNativeWebSearch, false)
+					return emptyStream()
+				})
+				const ctx = {
+					taskState: new TaskState(), postStateToWebview: async () => { },
+					requestRuntime: { api: { createMessage } },
+					messageStateHandler: { updateDiracMessage: async () => { } },
+					apiConversationManager: { prepareProviderConversationDispatch: async () => dispatch },
+				} as any
+				const consume = async () => { for await (const _chunk of attemptApiRequest(ctx, -1, 0)) { } }
+				if (mutation === "provider-owned copies") {
+					await consume()
+					sinon.assert.calledTwice(createMessage)
+				} else {
+					await assert.rejects(consume(), TranscriptIntegrityError)
+					sinon.assert.calledOnce(createMessage)
+				}
+			} finally {
+				sandbox.restore()
+			}
+		})
+	}
+
 	it("publishes the waiting state before requesting a delayed first chunk", async () => {
 		const sandbox = sinon.createSandbox()
 		try {

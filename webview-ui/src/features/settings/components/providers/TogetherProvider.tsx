@@ -30,15 +30,17 @@ export const TogetherProvider = ({ showModelOptions, isPopup, currentMode }: Tog
 				onChange={(value: string) => handleFieldChange("togetherApiKey", value)}
 				providerName="Together"
 			/>
-			<DebouncedTextField
-				initialValue={togetherModelId || ""}
-				onChange={(value: string) =>
-					handleModeFieldChange({ plan: "planModeTogetherModelId", act: "actModeTogetherModelId" }, value, currentMode)
-				}
-				placeholder={"Enter Model ID..."}
-				style={{ width: "100%" }}>
-				<span style={{ fontWeight: 500 }}>Model ID</span>
-			</DebouncedTextField>
+			{showModelOptions && <>
+				<DebouncedTextField
+					initialValue={togetherModelId || ""}
+					onChange={(value: string) =>
+						handleModeFieldChange({ plan: "planModeTogetherModelId", act: "actModeTogetherModelId" }, value, currentMode)
+					}
+					placeholder={"Enter Model ID..."}
+					style={{ width: "100%" }}>
+					<span style={{ fontWeight: 500 }}>Model ID</span>
+				</DebouncedTextField>
+			</>}
 			<p
 				style={{
 					fontSize: "12px",

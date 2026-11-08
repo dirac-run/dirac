@@ -1,3 +1,5 @@
+import { transcriptHash, TranscriptIntegrityError } from "@core/api/TranscriptPrefix"
+import type { ApiConversationManager } from "./ApiConversationManager"
 import { ApiStream } from "@core/api/transform/stream"
 import { recordSuccessfulModelProviderPreset } from "@core/models/modelProviderPresets"
 import type { ApiProvider } from "@shared/api"
@@ -12,6 +14,23 @@ import type { TaskRequestLoopContext } from "./TaskRequestLoop"
 import { handleApiRequestError } from "./TaskRequestOutcome"
 import { appendQueuedSteeringToNextApiRequest } from "./TaskSteering"
 
+interface SealedAttempt {
+	request: Awaited<ReturnType<typeof buildApiRequestParams>>
+	dispatch: Awaited<ReturnType<ApiConversationManager["prepareProviderConversationDispatch"]>>
+	fingerprint: string
+}
+
+function attemptFingerprint(request: SealedAttempt["request"], dispatch: SealedAttempt["dispatch"]): string {
+	return transcriptHash({
+		systemPrompt: request.systemPrompt,
+		tools: request.toolSnapshot.nativeTools,
+		providerId: request.providerInfo.providerId,
+		modelId: request.providerInfo.model.id,
+		messages: dispatch.messages,
+		options: dispatch.options,
+	})
+}
+
 export async function* attemptApiRequest(
 	ctx: TaskRequestLoopContext,
 	previousApiReqIndex: number,
@@ -19,16 +38,14 @@ export async function* attemptApiRequest(
 	shouldCompact?: boolean,
 	metricsManager = new StreamingMetricsManager(ctx.messageStateHandler, lastApiReqIndex, ctx.requestRuntime.api),
 	settleUsageSideEffects?: () => Promise<void>,
+	sealedAttempt?: SealedAttempt,
 ): ApiStream {
 	const requestPreparationStartedAt = performance.now()
-	const { systemPrompt, toolSnapshot, contextManagementMetadata, providerInfo } = await buildApiRequestParams(
-		ctx,
-		ctx.requestRuntime,
-		{
-			previousApiReqIndex,
-			shouldCompact,
-		},
-	)
+	const request = sealedAttempt?.request ?? await buildApiRequestParams(ctx, ctx.requestRuntime, { previousApiReqIndex, shouldCompact })
+	if (sealedAttempt && attemptFingerprint(request, sealedAttempt.dispatch) !== sealedAttempt.fingerprint) {
+		throw new TranscriptIntegrityError("sealed request retry")
+	}
+	const { systemPrompt, toolSnapshot, contextManagementMetadata, providerInfo } = request
 	const { model, providerId } = providerInfo
 
 
@@ -44,10 +61,11 @@ export async function* attemptApiRequest(
 		ctx.taskState.endApiRequest()
 	}
 
-	await appendQueuedSteeringToNextApiRequest(ctx.steeringContext, contextManagementMetadata.truncatedConversationHistory)
-	await ctx.deliverTaskletEvents?.(contextManagementMetadata.truncatedConversationHistory)
-
-	const providerDispatch = await ctx.apiConversationManager.prepareProviderConversationDispatch({
+	if (!sealedAttempt) {
+		await appendQueuedSteeringToNextApiRequest(ctx.steeringContext, contextManagementMetadata.truncatedConversationHistory)
+		await ctx.deliverTaskletEvents?.(contextManagementMetadata.truncatedConversationHistory)
+	}
+	const providerDispatch = sealedAttempt?.dispatch ?? await ctx.apiConversationManager.prepareProviderConversationDispatch({
 		systemPrompt,
 		tools: toolSnapshot.nativeTools,
 		truncatedMessages: contextManagementMetadata.truncatedConversationHistory as DiracStorageMessage[],
@@ -60,11 +78,12 @@ export async function* attemptApiRequest(
 		`[Task ${ctx.taskId}] Request assembled for ${providerId}/${model.id} in ${Math.round(performance.now() - requestPreparationStartedAt)}ms`,
 	)
 
+	const fingerprint = sealedAttempt?.fingerprint ?? attemptFingerprint(request, providerDispatch)
 	const stream = ctx.requestRuntime.api.createMessage(
 		systemPrompt,
-		providerDispatch.messages.map(removeProviderBoundaryMetadataFromMessage),
-		toolSnapshot.nativeTools,
-		providerDispatch.options,
+		structuredClone(providerDispatch.messages.map(removeProviderBoundaryMetadataFromMessage)),
+		structuredClone(toolSnapshot.nativeTools),
+		structuredClone(providerDispatch.options),
 	)
 	const iterator = stream[Symbol.asyncIterator]()
 	let emittedOutput = false
@@ -110,6 +129,7 @@ export async function* attemptApiRequest(
 		}
 		await finalizeApiReqMsg()
 	} catch (error) {
+		if (error instanceof TranscriptIntegrityError) throw error
 		// Once output is exposed, replaying this request would append a second response
 		// to the same stream. Let the outer loop persist the interrupted turn instead.
 		if (emittedOutput) throw error
@@ -124,7 +144,11 @@ export async function* attemptApiRequest(
 			metricsManager,
 		})
 		if (shouldRetry) {
-			yield* attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact, metricsManager, settleUsageSideEffects)
+			if (attemptFingerprint(request, providerDispatch) !== fingerprint) {
+				throw new TranscriptIntegrityError("sealed request retry")
+			}
+			yield* attemptApiRequest(ctx, previousApiReqIndex, lastApiReqIndex, shouldCompact, metricsManager, settleUsageSideEffects,
+				ctx.taskState.pendingApiConversationCompaction ? undefined : { request, dispatch: providerDispatch, fingerprint })
 		}
 		return
 	}

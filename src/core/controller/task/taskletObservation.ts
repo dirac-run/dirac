@@ -68,10 +68,11 @@ export function outcomeObservation(outcome: TaskRunOutcome | undefined): Tasklet
 }
 
 
-export function savedInventoryRow(record: { id: string; title: string; outcome?: TaskRunOutcome }): TaskletInventoryRow {
+export function savedInventoryRow(record: { id: string; title: string; role?: string; outcome?: TaskRunOutcome }): TaskletInventoryRow {
 	return {
 		taskletId: record.id,
 		title: clipObservationText(record.title, 512),
+		...(record.role === undefined ? {} : { role: record.role }),
 		state: record.outcome?.kind === "cancelled" ? "interrupted" : (record.outcome?.kind ?? "unsettled"),
 	}
 }

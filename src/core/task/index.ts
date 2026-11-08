@@ -1,8 +1,6 @@
 import { modelProviderSelectionUpdates } from "@core/api/modelProviderSelection"
-import { getConfiguredUtilityModelSelection } from "@core/utility-model/UtilityModelSelection"
-import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME } from "@shared/responseTool"
-import { AgentConfigLoader } from "./tools/subagent/AgentConfigLoader"
-import { DEFAULT_SUBAGENT_TIMEOUT_SECONDS } from "./tools/subagent/SubagentExecutionPolicy"
+import type { SubagentRole } from "@shared/subagentRoles"
+import { getProviderModelInfoKey } from "@shared/storage/provider-keys"
 import { getSavedApiConversationState, getSavedPresentationHistory, readSavedPresentationHistory } from "@core/storage/conversationHistory"
 import {
 	loadTaskletRecords,
@@ -12,12 +10,13 @@ import {
 	type TaskletRecord,
 	type TaskletEvent,
 } from "@core/storage/taskStorage"
-import type { TaskletConfiguration, TaskletStartOptions } from "./TaskletConfiguration"
+import { assertTaskletConfiguration, type TaskletConfiguration, type TaskletStartOptions } from "./TaskletConfiguration"
 import { createTaskletId, getTaskScopedStateKey } from "@shared/taskletId"
 import { taskletUsageAvailability, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
 import { getApiMetrics, getApiUsageKnowledge } from "@shared/getApiMetrics"
 import type { TaskletActivitySummary, TaskletInventoryRow, TaskletObservedState } from "@shared/taskletObservation"
-import { ApiHandler, ApiProviderInfo, buildApiHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
+import { ApiHandler, type ApiHandlerModel, ApiProviderInfo, buildApiHandler, createRegistryHandler, resolveModeConfig, validateApiConfiguration } from "@core/api"
+import { stringifyVsCodeLmModelSelector } from "@shared/vsCodeSelectorUtils"
 import { ApiStream } from "@core/api/transform/stream"
 import { ContextManager } from "@core/context/context-management/ContextManager"
 import { EnvironmentContextTracker } from "@core/context/context-tracking/EnvironmentContextTracker"
@@ -159,7 +158,6 @@ export interface TaskletExecutionBindings {
 	configuration?: TaskletConfiguration
 	/** Current immutable owner configuration; inherited only between model requests. */
 	getParentWorkingConfiguration?: () => TaskWorkingConfiguration
-	initialHistory?: { messages: DiracStorageMessage[]; deletedRange?: [number, number] }
 	retainMutationUntil: (completion: Promise<void>) => void
 	counterparty: TaskCounterparty
 	withMutationAuthorization: <T>(toolName: DiracToolSpec["id"] | undefined, mutation: () => Promise<T>) => Promise<T>
@@ -525,7 +523,6 @@ export class Task {
 	readonly executionProfile: TaskExecutionProfile
 	private readonly getPinnedContext: () => Promise<string | undefined>
 	private readonly taskletConfiguration?: TaskletConfiguration
-	private readonly initialTaskletHistory?: TaskletExecutionBindings["initialHistory"]
 	private readonly ownerBindings?: TaskletExecutionBindings
 	private inheritedParentConfiguration?: TaskWorkingConfiguration
 
@@ -565,7 +562,6 @@ export class Task {
 		this.executionProfile = params.executionProfile ?? "standalone"
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
 		this.taskletConfiguration = params.tasklet?.configuration
-		this.initialTaskletHistory = params.tasklet?.initialHistory
 		this.ownerBindings = params.tasklet
 		this.inheritedParentConfiguration = params.tasklet?.getParentWorkingConfiguration?.()
 		if (this.executionProfile !== "standalone" && workingConfiguration.settings.mode !== "act") {
@@ -1010,8 +1006,6 @@ export class Task {
 				}
 			},
 			recordUsage,
-			params.tasklet?.configuration?.allowedTools,
-			params.tasklet?.configuration?.skills,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1204,10 +1198,7 @@ export class Task {
 					get workingConfiguration() {
 						return root.getWorkingConfiguration()
 					},
-					getParentHistory: () => ({
-						messages: this.messageStateHandler.getApiConversationHistory(),
-						deletedRange: this.taskState.conversationHistoryDeletedRange,
-					}),
+					getParentModel: () => root.api.getModel(),
 					get pinnedContext() {
 						return root.taskState.pinnedContext
 					},
@@ -1243,7 +1234,12 @@ export class Task {
 				}
 				const candidate = buildTaskWorkingConfigurationUpdate(previous, resolvedPatch)
 				validateApiConfiguration(candidate.apiConfiguration as ApiConfiguration, candidate.settings.mode)
-				const candidateApi = this.createApiHandlerForRuntime(
+				const sameProvider = (previous.settings.mode === "plan" ? previous.apiConfiguration.planModeApiProvider : previous.apiConfiguration.actModeApiProvider) ===
+					(candidate.settings.mode === "plan" ? candidate.apiConfiguration.planModeApiProvider : candidate.apiConfiguration.actModeApiProvider)
+				const sameConfiguration = JSON.stringify(previous.apiConfiguration) === JSON.stringify(candidate.apiConfiguration)
+				const sameModeConfiguration = JSON.stringify(resolveModeConfig(previous.apiConfiguration as ApiConfiguration, previous.settings.mode)) ===
+					JSON.stringify(resolveModeConfig(candidate.apiConfiguration as ApiConfiguration, candidate.settings.mode))
+				const candidateApi = sameProvider && sameConfiguration && sameModeConfiguration ? this.api : this.createApiHandlerForRuntime(
 					candidate.apiConfiguration as ApiConfiguration,
 					candidate.settings.mode,
 				)
@@ -1272,7 +1268,7 @@ export class Task {
 		if (!parent || parent === this.inheritedParentConfiguration) return
 		const inherited = taskletWorkingConfiguration(
 			parent,
-			this.taskletConfiguration ?? { includeHistory: false, timeoutSeconds: DEFAULT_SUBAGENT_TIMEOUT_SECONDS },
+			this.taskletConfiguration,
 		)
 		// The runtime API configuration owns provider/model fields, not legacy Settings defaults.
 		const settings = { ...inherited.settings }
@@ -1481,7 +1477,7 @@ export class Task {
 	public async startTask(task?: string, images?: string[], files?: string[]): Promise<TaskRunOutcome> {
 		return this.runTaskLifecycle(async () => {
 			await this.toolExecutor.refreshToolsForTask()
-			return this.lifecycleManager.startTask(task, images, files, this.initialTaskletHistory)
+			return this.lifecycleManager.startTask(task, images, files)
 		})
 	}
 
@@ -1843,7 +1839,7 @@ export type TaskletTaskOptions = Pick<
 	| "pinnedContext"
 	| "toolSelectionPolicy"
 	| "toolEnvironmentFactory"
-> & { getParentHistory?: () => NonNullable<TaskletExecutionBindings["initialHistory"]> }
+> & { getParentModel?: () => ApiHandlerModel }
 
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
@@ -1878,7 +1874,6 @@ interface OwnedTasklet {
 	settlement?: Promise<void>
 	settling?: boolean
 	backgroundCommandRunning: boolean
-	deadlineAt?: number
 	outcomePersisted: boolean
 	settlementError?: SerializedTaskError
 }
@@ -1893,6 +1888,8 @@ export class TaskletHost {
 	readonly observationSourceId = `live:${ulid()}`
 	private publishedActiveCount = 0
 	private readonly children = new Map<string, OwnedTasklet>()
+	// Includes failed initial writes: an allocated identity is never reused by this owner.
+	private readonly reservedIds = new Set<string>()
 	private readonly rootTaskId: string
 	private readonly starting = new Map<string, { record: TaskletRecord; acceptance: Promise<TaskletRecord> }>()
 	private closing = false
@@ -1986,7 +1983,7 @@ export class TaskletHost {
 	reconstruct(): Promise<void> {
 		if (this.closing) return Promise.reject(new Error("Tasklet host is shutting down"))
 		if (!this.reconstruction) {
-			if (this.children.size || this.starting.size) return Promise.reject(new Error("Tasklet host already owns executions"))
+			if (this.reservedIds.size || this.children.size || this.starting.size) return Promise.reject(new Error("Tasklet host already owns executions"))
 			this.reconstruction = this.restoreRecords().finally(() => this.publishActivityIfChanged())
 		}
 		return this.reconstruction
@@ -1995,24 +1992,11 @@ export class TaskletHost {
 	private async restoreRecords(): Promise<void> {
 		this.usageProjectionReady = false
 		const records = await loadTaskletRecords(this.rootTaskId)
+		for (const record of records) this.reservedIds.add(record.id)
 		for (const record of records) {
-			if (record.inheritedMessageCount === undefined) {
-				const conversation = record.configuration?.includeHistory
-					? (await getSavedApiConversationState(this.address(record.id))).messages
-					: []
-				const marker = `<task>\n${record.prompt}\n</task>`
-				const assignmentIndex = conversation.findIndex(
-					(message) =>
-						message.role === "user" &&
-						(typeof message.content === "string"
-							? message.content.includes(marker)
-							: message.content.some((block) => block.type === "text" && block.text.includes(marker))),
-				)
-				// Legacy provenance is reconstructed once. If the assignment cannot be
-				// identified, exclude the uncertain prefix rather than leak inherited context.
-				record.inheritedMessageCount = assignmentIndex < 0 ? conversation.length : assignmentIndex
-				await saveTaskletRecord(record)
-			}
+			// Reconstruction owns these stopped records. Persist read-boundary migration
+			// without rewriting any conversation or making passive history reads write.
+			await saveTaskletRecord(record)
 			const events = await loadTaskletEvents(this.address(record.id))
 			const child: OwnedTasklet = {
 				record,
@@ -2092,6 +2076,8 @@ export class TaskletHost {
 		if (this.starting.has(id) || child.task || !child.record.outcome || !child.outcomePersisted || child.settlementError) {
 			throw new Error(`Tasklet ${id} has not settled successfully for resumption`)
 		}
+		// Validate before clearing committed outcomes or appending a resumed event.
+		taskletWorkingConfiguration(this.options.workingConfiguration, child.record.configuration)
 		const record = { ...child.record, outcome: undefined }
 		const acceptance = this.acceptResume(child, record, message)
 		this.starting.set(id, { record, acceptance })
@@ -2130,16 +2116,26 @@ export class TaskletHost {
 		const title = input.title.trim()
 		const prompt = input.prompt.trim()
 		if (!title || !prompt) throw new Error("Tasklet title and prompt must be non-empty")
+		const configuration = await resolveTaskletConfiguration(
+			input, this.options.workingConfiguration, StateManager.get().getSystemDefaultSettingsKey("subagentRoles"),
+			this.options.getParentModel?.(),
+		)
+		// Configuration loading may yield to reconstruction or root shutdown before admission.
+		if (this.reconstruction) await this.reconstruction
+		if (this.closing) throw new Error("Tasklet host is shutting down")
+		const id = createTaskletId(this.reservedIds)
+		this.reservedIds.add(id)
 		const record: TaskletRecord = {
-			id: createTaskletId(),
+			id,
+			configuration,
+			role: configuration.name,
 			rootTaskId: this.rootTaskId,
 			conversationUlid: ulid(),
 			title,
 			prompt,
 			createdAt: Date.now(),
-			...(input.purpose ? { purpose: input.purpose } : {}),
 		}
-		const acceptance = this.acceptAndStart(record, input)
+		const acceptance = this.acceptAndStart(record)
 		this.starting.set(record.id, { record, acceptance })
 		this.publishActivityIfChanged()
 		try {
@@ -2150,23 +2146,7 @@ export class TaskletHost {
 		}
 	}
 
-	private async acceptAndStart(record: TaskletRecord, input: TaskletStartOptions): Promise<TaskletRecord> {
-		record.configuration = await resolveTaskletConfiguration(input, this.options.workingConfiguration)
-		const initialHistory = record.configuration.includeHistory
-			? structuredClone(this.options.getParentHistory?.())
-			: undefined
-		// The executing spawn call is already recorded, but its tool results are not.
-		// Inherit completed exchanges only; never send an unanswered tool call to the child provider.
-		const lastMessage = initialHistory?.messages.at(-1)
-		if (
-			initialHistory &&
-			lastMessage?.role === "assistant" &&
-			Array.isArray(lastMessage.content) &&
-			lastMessage.content.some((block) => block.type === "tool_use")
-		) {
-			initialHistory.messages.pop()
-		}
-		record.inheritedMessageCount = initialHistory?.messages.length ?? 0
+	private async acceptAndStart(record: TaskletRecord): Promise<TaskletRecord> {
 		// No Task or live handle exists if this initial write fails.
 		await saveTaskletRecord(record)
 		const child: OwnedTasklet = {
@@ -2186,13 +2166,12 @@ export class TaskletHost {
 			createdAt: record.createdAt,
 			communication: { type: "lifecycle", state: "accepted" },
 		})
-		return this.launch(child, undefined, initialHistory)
+		return this.launch(child)
 	}
 
 	private async launch(
 		child: OwnedTasklet,
 		resumeMessage?: string,
-		initialHistory?: TaskletExecutionBindings["initialHistory"],
 	): Promise<TaskletRecord> {
 		const record = child.record
 		// A start admitted before shutdown still owns its write, but must not launch late work.
@@ -2211,7 +2190,7 @@ export class TaskletHost {
 				...this.options,
 				workingConfiguration: taskletWorkingConfiguration(
 					this.options.workingConfiguration,
-					record.configuration ?? { includeHistory: false, timeoutSeconds: DEFAULT_SUBAGENT_TIMEOUT_SECONDS },
+					record.configuration,
 				),
 				taskId: record.id,
 				conversationUlid: record.conversationUlid,
@@ -2226,7 +2205,6 @@ export class TaskletHost {
 					getParentWorkingConfiguration: () => this.options.workingConfiguration,
 					withMutationAuthorization: (toolName, mutation) => this.owner.withMutationAuthorization(toolName, mutation),
 					retainMutationUntil: (completion) => this.owner.retainMutationUntil(completion),
-					initialHistory,
 					counterparty: {
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
@@ -2363,38 +2341,20 @@ export class TaskletHost {
 	observationInventory(filter: "active" | "all" = "all"): TaskletInventoryRow[] {
 		const rows = new Map<string, TaskletInventoryRow>()
 		for (const { record } of this.starting.values()) {
-			rows.set(record.id, { taskletId: record.id, title: record.title, state: "starting" })
+			rows.set(record.id, { taskletId: record.id, title: record.title, role: record.role, state: "starting" })
 		}
 		for (const child of this.children.values()) {
 			if (filter === "active" && !this.ownsUnsettledExecution(child)) continue
 			rows.set(child.record.id, {
 				taskletId: child.record.id,
 				title: child.record.title,
+				role: child.record.role,
 				state: this.observedChildState(child),
 			})
 		}
 		return [...rows.values()]
 	}
 
-	/** Purpose-specific metadata only; Goal verification does not need a second child inventory. */
-	latestObservationForPurpose(purpose: NonNullable<TaskletRecord["purpose"]>) {
-		let latest: TaskletRecord | undefined
-		for (const { record } of [...this.children.values(), ...this.starting.values()]) {
-			if (record.purpose !== purpose) continue
-			if (!latest || record.createdAt > latest.createdAt || (record.createdAt === latest.createdAt && record.id > latest.id)) {
-				latest = record
-			}
-		}
-		if (!latest) return undefined
-		const child = this.children.get(latest.id)
-		return {
-			taskletId: latest.id,
-			title: latest.title,
-			createdAt: latest.createdAt,
-			state: child ? this.observedChildState(child) : "starting" as TaskletObservedState,
-			outcome: child && !this.ownsUnsettledExecution(child) ? child.record.outcome : undefined,
-		}
-	}
 
 	/** Live messages are borrowed for immediate bounded paging; never clone the entire child history here. */
 	async readObservationTranscript(id: string) {
@@ -2405,6 +2365,7 @@ export class TaskletHost {
 			return {
 				taskletId: id,
 				title: admitted.record.title,
+				role: admitted.record.role,
 				state: "starting" as TaskletObservedState,
 				messages: [] as TaskletTranscript["presentation"],
 				presentationOffset: -1,
@@ -2443,6 +2404,7 @@ export class TaskletHost {
 		return {
 			taskletId: id,
 			title: record.title,
+			role: record.role,
 			state: this.observedChildState(child),
 			messages: presentation.messages,
 			presentationOffset: presentation.lastOffset,
@@ -2551,7 +2513,6 @@ export class TaskletHost {
 			{
 				inspection: this.inspect(id),
 				events: structuredClone(child.events),
-				inheritedMessageCount: child.record.inheritedMessageCount ?? 0,
 				readConversation: async () =>
 					structuredClone(
 						child.failedTranscript?.conversation ??
@@ -2580,7 +2541,6 @@ export class TaskletHost {
 			executionStatus: child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
 			lastActivityAt: child.task?.messageStateHandler.getDiracMessages().at(-1)?.ts ?? child.events.at(-1)?.createdAt,
-			deadlineAt: child.deadlineAt,
 			outcomePersisted: child.outcomePersisted,
 			settlementError: child.settlementError,
 		})
@@ -2656,6 +2616,7 @@ export class TaskletHost {
 		const base = {
 			taskletId: item.taskletId,
 			title: child?.record.title,
+			role: child?.record.role,
 			...("replyTo" in item ? { replyTo: item.replyTo } : {}),
 		}
 		if (!child) return { ...base, status: "stale", error: "Tasklet does not belong to this root" }
@@ -2736,6 +2697,7 @@ export class TaskletHost {
 			return {
 				id: child.record.id,
 				title: child.record.title.slice(0, 80),
+				role: child.record.role,
 				status: child.record.outcome?.kind ?? child.task?.stateView.status ?? "accepted",
 				pendingRequestCount: pending.length,
 				pendingRequests: pending.slice(0, 10).map((request) => ({
@@ -2852,27 +2814,11 @@ export class TaskletHost {
 
 	private async observeRun(child: OwnedTasklet, task: Task, resumeMessage?: string): Promise<void> {
 		let outcome: TaskRunOutcome
-		let timeoutAbort: Promise<void> | undefined
-		const timeoutSeconds = child.record.configuration?.timeoutSeconds
-		child.deadlineAt = timeoutSeconds === undefined ? undefined : Date.now() + timeoutSeconds * 1000
-		const timer =
-			timeoutSeconds === undefined
-				? undefined
-				: setTimeout(() => {
-					timeoutAbort = task.abortTask({
-						kind: "interrupted",
-						reason: `Tasklet execution timed out after ${timeoutSeconds} seconds`,
-					})
-					void timeoutAbort.catch((error) =>
-						Logger.error(`[Tasklet ${child.record.id}] Timeout cancellation failed:`, error),
-					)
-				}, timeoutSeconds * 1000)
 		try {
 			outcome =
 				resumeMessage === undefined
 					? await task.startTask(child.record.prompt)
 					: await task.resumeTaskFromHistory(undefined, { taskletResumeMessage: resumeMessage })
-			await timeoutAbort
 		} catch (error) {
 			// Task normally returns a failed outcome, including finalization errors.
 			// A rejected start still requires cancellation before persistence retirement.
@@ -2887,8 +2833,6 @@ export class TaskletHost {
 				failedAt: Date.now(),
 				error: serializeTaskError(failures.length > 1 ? new AggregateError(failures, "Tasklet startup failed") : error),
 			}
-		} finally {
-			if (timer !== undefined) clearTimeout(timer)
 		}
 		child.settling = true
 		const settlementFailures: unknown[] = []
@@ -3055,121 +2999,98 @@ async function unavailableForegroundCallback(): Promise<never> {
 	throw new Error("Tasklet cannot use a foreground lifecycle callback")
 }
 
-function taskletTimeoutSeconds(timeoutSeconds = DEFAULT_SUBAGENT_TIMEOUT_SECONDS): number {
-	if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds * 1000 > 2 ** 31 - 1) {
-		throw new Error("Tasklet timeout must be a positive number of seconds within the JavaScript timer range.")
-	}
-	return timeoutSeconds
-}
 
 /** Pick only selection fields, never arbitrary persisted settings or credentials. */
 function copyModelSelection(selection: ModelProviderSelection): ModelProviderSelection {
-	return cloneConfigurationValue({
-		provider: selection.provider,
-		modelId: selection.modelId,
-		modelInfo: selection.modelInfo,
-		openAiProfileName: selection.openAiProfileName,
-		vsCodeLmModelSelector: selection.vsCodeLmModelSelector,
+	const fields: ModelProviderSelection = {
+		provider: selection.provider, modelId: selection.modelId, modelInfo: selection.modelInfo,
+		openAiProfileName: selection.openAiProfileName, vsCodeLmModelSelector: selection.vsCodeLmModelSelector,
 		awsBedrockCustomSelected: selection.awsBedrockCustomSelected,
 		awsBedrockCustomModelBaseId: selection.awsBedrockCustomModelBaseId,
-	})
+		reasoningEffort: selection.reasoningEffort, thinkingBudgetTokens: selection.thinkingBudgetTokens,
+		geminiThinkingLevel: selection.geminiThinkingLevel,
+	}
+	return cloneConfigurationValue(Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined))) as unknown as ModelProviderSelection
 }
 
-function taskletAllowedTools(tools: string[]): string[] | undefined {
-	if (tools.length === 0) return undefined
-	const migrated = tools.map((tool) => {
-		const name = tool.trim()
-		if (Object.hasOwn(LEGACY_RESPONSE_TOOLS, name) || name.startsWith(`${RESPOND_TOOL_NAME}:`)) {
-			return RESPOND_TOOL_NAME
-		}
-		return name
-	})
-	return [...new Set([...migrated, RESPOND_TOOL_NAME])]
-}
 
-/** Resolve a named profile and explicit model choice before accepting a start. */
+/** Resolve current global role settings once, before accepting a conversation. */
 export async function resolveTaskletConfiguration(
 	options: TaskletStartOptions,
 	workingConfiguration: TaskWorkingConfiguration,
+	roles: readonly SubagentRole[] = [],
+	parentModel?: ApiHandlerModel,
 ): Promise<TaskletConfiguration> {
-	const resolved: TaskletConfiguration = {
-		includeHistory: options.includeHistory === true,
-		timeoutSeconds: taskletTimeoutSeconds(options.timeoutSeconds),
-	}
-	if (options.agentName !== undefined) {
-		const loader = AgentConfigLoader.getInstance()
-		await loader.ready()
-		const profile = loader.getCachedConfig(options.agentName)
-		if (!profile) throw new Error(`Unknown tasklet agent profile: ${options.agentName}`)
-		resolved.name = profile.name
-		resolved.description = profile.description
-		resolved.systemPrompt = profile.systemPrompt
-		resolved.skills = profile.skills ? [...profile.skills] : undefined
-		resolved.allowedTools = taskletAllowedTools(profile.tools)
-		if (profile.modelId && !options.useUtilityModel) {
-			const configuration = workingConfiguration.apiConfiguration
-			const mode = workingConfiguration.settings.mode
-			const provider =
-				(mode === "plan" ? configuration.planModeApiProvider : configuration.actModeApiProvider) ??
-				configuration.apiProvider
-			if (!provider) throw new Error("Tasklet agent model requires a configured parent API provider.")
-			const current = resolveModeConfig(configuration as ApiConfiguration, mode)
-			resolved.modelSelection = copyModelSelection({
+	if (typeof options.type !== "string" || !options.type.trim()) throw new Error("Tasklet type is required")
+	let resolved: TaskletConfiguration
+	if (options.type === "default") {
+		const configuration = workingConfiguration.apiConfiguration as ApiConfiguration
+		const mode = workingConfiguration.settings.mode
+		const provider = (mode === "plan" ? configuration.planModeApiProvider : configuration.actModeApiProvider) ?? configuration.apiProvider
+		if (!provider) throw new Error("Default tasklet requires a configured parent provider")
+		const current = resolveModeConfig(configuration, mode)
+		const fields = configuration as Record<string, unknown>
+		const modelInfoKey = getProviderModelInfoKey(provider, mode)
+		// Default follows the model actually installed on the parent, not stale
+		// settings that its provider may already have resolved to another model.
+		const model = parentModel ?? taskletModelMetadata(configuration, mode)
+		const modelId = provider === "vscode-lm" && current.vsCodeLmModelSelector
+			? stringifyVsCodeLmModelSelector(current.vsCodeLmModelSelector)
+			: model.id
+		resolved = {
+			name: "default", modelSelection: copyModelSelection({
 				provider,
-				modelId: profile.modelId,
+				modelId,
+				modelInfo: ((modelInfoKey ? fields[modelInfoKey] : undefined) ?? model.info) as ModelProviderSelection["modelInfo"],
 				openAiProfileName: current.openAiProfileName,
 				vsCodeLmModelSelector: current.vsCodeLmModelSelector,
 				awsBedrockCustomSelected: current.awsBedrockCustomSelected,
 				awsBedrockCustomModelBaseId: current.awsBedrockCustomModelBaseId,
+				reasoningEffort: current.reasoningEffort as ModelProviderSelection["reasoningEffort"],
+				thinkingBudgetTokens: current.thinkingBudgetTokens,
+				geminiThinkingLevel: mode === "plan" ? configuration.geminiPlanModeThinkingLevel : configuration.geminiActModeThinkingLevel,
 			})
 		}
+	} else {
+		const role = roles.find((candidate) => candidate.name === options.type && candidate.enabled)
+		if (!role?.modelSelection) throw new Error(`Unavailable subagent role: ${options.type}`)
+		resolved = { name: role.name, modelSelection: copyModelSelection(role.modelSelection) }
 	}
-	if (options.useUtilityModel) {
-		const selection = getConfiguredUtilityModelSelection(workingConfiguration.settings.utilityModelSelection)
-		if (!selection) throw new Error("Utility model is not configured.")
-		resolved.modelSelection = copyModelSelection(selection)
-	}
-
-	if (resolved.modelSelection) taskletWorkingConfiguration(workingConfiguration, resolved)
+	taskletWorkingConfiguration(workingConfiguration, resolved)
 	return resolved
 }
 
 /** Reapply durable choices with current parent credentials and authority, always in Act. */
 export function taskletWorkingConfiguration(
 	current: TaskWorkingConfiguration,
-	resolved: TaskletConfiguration,
+	resolved: TaskletConfiguration | undefined,
 ): TaskWorkingConfiguration {
-	taskletTimeoutSeconds(resolved.timeoutSeconds)
+	assertTaskletConfiguration(resolved)
 	const selection = resolved.modelSelection
-	if (!selection && current.settings.mode === "act") return current
-	// Mode is an execution invariant, not a model choice. Copy the parent's
-	// active Plan configuration before forcing Act, including provider tuning.
-	const activeModel: Record<string, unknown> = {}
-	if (!selection && current.settings.mode === "plan") {
-		for (const key of Object.keys(current.apiConfiguration)) {
-			if (!key.startsWith("planMode") && !key.startsWith("actMode")) continue
-			const suffix = key.replace(/^(planMode|actMode)/, "")
-			activeModel[`actMode${suffix}`] = (current.apiConfiguration as Record<string, unknown>)[`planMode${suffix}`]
-		}
-		activeModel.actModeApiProvider = current.apiConfiguration.planModeApiProvider ?? current.apiConfiguration.apiProvider
-	}
 	const candidate = buildTaskWorkingConfigurationUpdate(current, {
 		settings: { mode: "act" },
-		apiConfiguration: selection
-			? {
-				...modelProviderSelectionUpdates("plan", selection, current.apiConfiguration.planModeInferenceSpeed),
-				...modelProviderSelectionUpdates("act", selection, current.apiConfiguration.actModeInferenceSpeed),
-			}
-			: activeModel,
+		apiConfiguration: {
+			...modelProviderSelectionUpdates("plan", selection, current.apiConfiguration.planModeInferenceSpeed),
+			...modelProviderSelectionUpdates("act", selection, current.apiConfiguration.actModeInferenceSpeed),
+		},
 	})
-	if (!selection) return candidate
 	const configuration = candidate.apiConfiguration as ApiConfiguration
 	validateApiConfiguration(configuration, "act")
-	const modelId = buildApiHandler(configuration, "act").getModel().id
+	const modelId = taskletModelMetadata(configuration, "act").id
 	if (modelId !== selection.modelId) {
-		throw new Error(
-			`Tasklet model ${selection.modelId} is unavailable for provider ${selection.provider} (resolved ${modelId}).`,
-		)
+		throw new Error(`Tasklet model ${selection.modelId} is unavailable for provider ${selection.provider} (resolved ${modelId}).`)
 	}
 	return candidate
+}
+/** Provider validation may allocate resources; metadata probes never own a live runtime. */
+function taskletModelMetadata(configuration: ApiConfiguration, mode: Mode): ApiHandlerModel {
+	const provider = (mode === "plan" ? configuration.planModeApiProvider : configuration.actModeApiProvider) ?? configuration.apiProvider
+	// Metadata needs one provider instance, not buildApiHandler's possible
+	// second construction for thinking-budget clipping.
+	const handler = createRegistryHandler({ ...configuration, apiProvider: provider }, mode) as ApiHandler & { dispose?: () => void }
+	try {
+		return handler.getModel()
+	} finally {
+		handler.dispose?.()
+	}
 }

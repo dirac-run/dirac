@@ -62,7 +62,7 @@ describe("Goal-specific tools", () => {
 
 	it("discovers only retained Goal operations for coordinators and follow-ups, never workers", () => {
 		const allTools = ToolDiscoveryService.scanBuiltinTools()
-		for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
+		for (const name of ["verify_goal", "start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
 			assert.equal(allTools.some((tool) => tool.name === name), false, name)
 		}
 		const tools = allTools.filter((tool) => (GOAL_TOOL_NAMES as readonly string[]).includes(tool.name))
@@ -80,7 +80,6 @@ describe("Goal-specific tools", () => {
 		for (const tool of tools) registry.registerBuiltin(tool)
 		assert.deepEqual(registry.getConfigurableTools(), [])
 		assert.equal(registry.getEnabledTools().length, GOAL_TOOL_NAMES.length)
-		assert.equal(registry.scopeToolForSubagent(tools[0], GOAL_TOOL_NAMES), undefined)
 		assert.throws(() => registry.disable(tools[0].id), /\(profile_only\) cannot be enabled or disabled directly/)
 		ToolRegistry.resetInstance()
 	})

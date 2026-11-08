@@ -27,8 +27,11 @@ import { createMockTaskConfig } from "../tools/__tests__/helpers/mockTaskConfig"
 import { buildOrchestrationTrait } from "../tools/adapters/traits/OrchestrationTraitBuilder"
 import type { ICardHandle, TaskletControls, TaskletWakeResult } from "../tools/interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment } from "../tools/interfaces/ToolEnvironmentFactory"
-import { create, createSecondary } from "../tools/modules/use_subagents/tool"
-import { AgentConfigLoader } from "../tools/subagent/AgentConfigLoader"
+import { create, createSecondary } from "../tools/modules/subagents/tool"
+import { StateManager } from "@core/storage/StateManager"
+import { anthropicDefaultModelId } from "@shared/api"
+import { SETTINGS_DEFAULTS, type Settings } from "@shared/storage/state-keys"
+import type { SubagentRole } from "@shared/subagentRoles"
 
 import { summarizeTasklet } from "../TaskletInspection"
 import type { TaskletInspectionPage, TaskletMessageResult, TaskletSummary } from "../types/tasklet"
@@ -106,20 +109,18 @@ describe("TaskletsTool public controls", () => {
 		children = []
 		cards = []
 		rootMessages = undefined
-		sandbox.stub(AgentConfigLoader, "getInstance").returns({
-			ready: async () => { },
-			getCachedConfig: (name: string) =>
-				name === "Research"
-					? {
-						name: "Research",
-						description: "Research assignment",
-						systemPrompt: "Investigate independently",
-						tools: ["read_file"],
-					}
-					: undefined,
-			resolveSubagentNameForTool: (name: string) => (name === "subagent_research" ? "Research" : undefined),
-			isDynamicSubagentTool: (name: string) => name === "subagent_research",
-		} as unknown as AgentConfigLoader)
+		const roles: SubagentRole[] = [{
+			name: "Research",
+			description: "Research assignment",
+			enabled: true,
+			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+		}]
+		sandbox.stub(StateManager, "get").returns({
+			getSystemDefaultSettingsKey: (key: string) => {
+				assert.equal(key, "subagentRoles")
+				return roles
+			},
+		} as unknown as StateManager)
 		constructed = sandbox.stub().callsFake((params: TaskParams) => {
 			const child = controlledTask(params)
 			children.push(child)
@@ -138,9 +139,16 @@ describe("TaskletsTool public controls", () => {
 		}
 		options = {
 			workingConfiguration: createTaskWorkingConfiguration({
-				settings: { mode: "act" } as any,
-				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
-				workspaceConfiguration: {} as any,
+				settings: { ...SETTINGS_DEFAULTS, mode: "act" } as Settings,
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: anthropicDefaultModelId, apiKey: "test-key" },
+				workspaceConfiguration: {
+					localDiracRulesToggles: {},
+					localCursorRulesToggles: {},
+					localWindsurfRulesToggles: {},
+					localAgentsRulesToggles: {},
+					localSkillsToggles: {},
+					workflowToggles: {},
+				},
 				executionOptions: {
 					terminalReuseEnabled: true,
 					vscodeTerminalExecutionMode: "backgroundExec",
@@ -283,9 +291,8 @@ describe("TaskletsTool public controls", () => {
 		}>
 	}
 
-	async function spawn(assignments: unknown[], toolName = "use_subagents"): Promise<SpawnResult> {
-		const params = toolName === "use_subagents" ? { subagents: assignments } : (assignments[0] as Record<string, unknown>)
-		const result = await coordinator.execute(config, { type: "tool_use", name: toolName, params })
+	async function spawn(assignments: unknown[]): Promise<SpawnResult> {
+		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params: { assignments } })
 		assert.equal(typeof result, "string")
 		return JSON.parse(result as string) as SpawnResult
 	}
@@ -314,17 +321,24 @@ describe("TaskletsTool public controls", () => {
 	}
 
 
-	it("returns generic and named acceptance without joining, and always constructs Act children", async () => {
-		for (const toolName of ["use_subagents", "subagent_research"]) {
-			const id = acceptedId(await spawn([{ task_title: "Trace startup", prompt: "Investigate startup" }], toolName))
+	it("accepts default and global roles without joining, saves their model selections, and constructs Act children", async () => {
+		for (const type of ["default", "Research"]) {
+			const id = acceptedId(await spawn([{ type, task_header: "Trace startup", task_description: "Investigate startup" }]))
 			assert.equal((await inspect(id)).outcome, undefined)
 			const child = children.at(-1)!
+			const modelId = type === "default" ? anthropicDefaultModelId : "claude-sonnet-4-6"
 			assert.equal(child.params.workingConfiguration!.settings.mode, "act")
+			assert.equal(child.params.workingConfiguration!.apiConfiguration.actModeApiModelId, modelId)
 			assert.equal(child.params.executionProfile, "tasklet")
 			sinon.assert.calledOnceWithExactly(child.task.startTask, "Investigate startup")
 			sinon.assert.notCalled(child.task.retirePersistence)
 			assert.equal(cards.at(-1)!.status, CardStatus.SUCCESS)
-			if (toolName !== "use_subagents") assert.equal(host.inspect(id).configuration?.name, "Research")
+			const saved = (await loadTaskletRecords("root")).find((record) => record.id === id)!
+			assert.ok(saved.configuration)
+			assert.equal(saved.configuration.name, type)
+			assert.equal(saved.configuration.modelSelection.provider, "anthropic")
+			assert.equal(saved.configuration.modelSelection.modelId, modelId)
+			assert.doesNotMatch(JSON.stringify(saved.configuration), /test-key|apiKey/)
 		}
 		assert.equal(host.listActive().length, 2)
 	})
@@ -337,12 +351,12 @@ describe("TaskletsTool public controls", () => {
 			return child.task
 		})
 		const result = await spawn([
-			{ task_title: "Accepted child", prompt: "Keep investigating" },
+			{ type: "default", task_header: "Accepted child", task_description: "Keep investigating" },
 			null,
-			{ task_title: "Missing prompt" },
-			{ task_title: "Bad timeout", prompt: "Do not start", timeout: 0 },
-			{ task_title: "Failed startup", prompt: "Constructor fails" },
-			{ task_title: "Sibling", prompt: "Continue" },
+			{ type: "default", task_header: "Missing description" },
+			{ type: "missing-role", task_header: "Unavailable role", task_description: "Do not start" },
+			{ type: "default", task_header: "Failed startup", task_description: "Constructor fails" },
+			{ type: "Research", task_header: "Sibling", task_description: "Continue" },
 		])
 		assert.deepEqual(
 			result.subagents.map(({ accepted }) => accepted),
@@ -359,11 +373,10 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(cards[0].status, CardStatus.ERROR)
 	})
 
-	it("returns compact inventory/status and exact selected evidence without inherited history or presentation", async () => {
-		options.getParentHistory = () => ({ messages: [{ role: "user", content: "INHERITED_PARENT_SECRET" }] })
-		const id = acceptedId(await spawn([{ task_title: "Evidence", prompt: "Inspect", include_history: true }]))
+	it("returns compact inventory/status and exact selected child evidence without parent history or presentation", async () => {
+		await projectRoot()
+		const id = acceptedId(await spawn([{ type: "default", task_header: "Evidence", task_description: "Inspect" }]))
 		const child = children[0]
-		child.conversation.unshift({ role: "user", content: "INHERITED_PARENT_SECRET" })
 		child.conversation.push(
 			{
 				role: "assistant",
@@ -378,7 +391,7 @@ describe("TaskletsTool public controls", () => {
 		const listed = await call<TaskletInspectionPage<TaskletSummary>>({ operation: "list" })
 		assert.equal(listed.totalItems, 1)
 		assert.equal(listed.items[0].pendingRequestCount, 1)
-		assert.ok(listed.items[0].deadlineAt! > Date.now())
+		assert.equal("deadlineAt" in listed.items[0], false)
 		assert.ok(!JSON.stringify(listed).includes("END-OF-FULL-CONTENT"))
 		assert.equal("responses" in listed.items[0], false)
 		assert.equal("interactions" in listed.items[0], false)
@@ -388,7 +401,7 @@ describe("TaskletsTool public controls", () => {
 		const result = await call({ operation: "inspect", tasklet_id: id, view: "result", call_id: "call-1" })
 		assert.match(JSON.stringify(result), /END-OF-FULL-CONTENT/)
 		const transcript = await call<TaskletInspectionPage>({ operation: "inspect", tasklet_id: id, view: "transcript" })
-		assert.ok(!JSON.stringify(transcript).includes("INHERITED_PARENT_SECRET"))
+		assert.ok(!JSON.stringify(transcript).includes("Parent assignment"))
 		assert.equal("presentation" in transcript, false)
 		assert.deepEqual(await loadTaskletEvents(address(id)), before, "Passive queries never acknowledge events")
 		sinon.assert.notCalled(child.task.enqueueSteeringMessage)
@@ -397,7 +410,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("publishes only committed outcomes and recovers the record/event crash gap without duplication", async () => {
-		const id = acceptedId(await spawn([{ task_title: "Committed result", prompt: "Inspect" }]))
+		const id = acceptedId(await spawn([{ type: "default", task_header: "Committed result", task_description: "Inspect" }]))
 		await assert.rejects(
 			children[0].params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.COMPLETE, text: fullText }),
 			/Only progress/,
@@ -430,7 +443,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("records correlated questions before delivery and never treats queued guidance as an answer", async () => {
-		const id = acceptedId(await spawn([{ task_title: "Waiting child", prompt: "Ask" }]))
+		const id = acceptedId(await spawn([{ type: "default", task_header: "Waiting child", task_description: "Ask" }]))
 		const pending = registerInteraction(children[0], "question")
 		const question = await message(id, { type: "question", text: "Why that approach?" })
 		assert.equal(question.status, "queued")
@@ -473,8 +486,8 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("prevalidates the whole batch and reports independent partial success with idempotent retries", async () => {
-		const first = await host.start({ title: "First", prompt: "Ask" })
-		const sibling = await host.start({ title: "Sibling", prompt: "Ask" })
+		const first = await host.start({ type: "default", title: "First", prompt: "Ask" })
+		const sibling = await host.start({ type: "default", title: "Sibling", prompt: "Ask" })
 		const question = registerInteraction(children[0], "question")
 		const permission = registerInteraction(children[1], "permission", true)
 		const reply = { tasklet_id: first.id, type: "reply", reply_to: question.requestId, text: "Continue" }
@@ -516,7 +529,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("keeps prose answers and invented choices separate from permission grants", async () => {
-		const { id } = await host.start({ title: "Permission", prompt: "Ask" })
+		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Ask" })
 		const permission = registerInteraction(children[0], "permission", true)
 		assert.equal((await message(id, { type: "reply", reply_to: permission.requestId, text: "approved" })).status, "failed")
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
@@ -533,7 +546,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("rechecks parent authority after an asynchronous decision and leaves a refused request pending", async () => {
-		const { id } = await host.start({ title: "Permission", prompt: "Work" })
+		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Work" })
 		const permission = registerInteraction(children[0], "permission", true)
 		assert.equal(
 			(await message(id, { type: "permission_decision", reply_to: permission.requestId, decision: "approve" })).status,
@@ -567,8 +580,8 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("escalates only the exact pending request and preserves concurrent sibling progress", async () => {
-		const { id } = await host.start({ title: "Escalation", prompt: "Work" })
-		const sibling = await host.start({ title: "Sibling", prompt: "Work" })
+		const { id } = await host.start({ type: "default", title: "Escalation", prompt: "Work" })
+		const sibling = await host.start({ type: "default", title: "Sibling", prompt: "Work" })
 		const permission = registerInteraction(children[0], "permission", true)
 		await acknowledgeEvents()
 		const entered = deferred<void>()
@@ -597,8 +610,8 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("retires old request identities and requires explicit same-conversation Act resumption", async () => {
-		const record = await host.start({ title: "Retirement", prompt: "Ask" })
-		const sibling = await host.start({ title: "Sibling", prompt: "Keep working" })
+		const record = await host.start({ type: "default", title: "Retirement", prompt: "Ask" })
+		const sibling = await host.start({ type: "default", title: "Sibling", prompt: "Keep working" })
 		const pending = registerInteraction(children[0], "question")
 		await call({ operation: "interrupt", tasklet_id: record.id, message: "Pause only this child" })
 		await assert.rejects(pending.waiting, /retired/)
@@ -630,8 +643,8 @@ describe("TaskletsTool public controls", () => {
 
 	it("observes sixteen independent tasklets without publishing trajectories into parent history", async () => {
 		await projectRoot()
-		const { id } = await host.start({ title: "Child 0", prompt: "Work" })
-		await Promise.all(Array.from({ length: 15 }, (_, index) => host.start({ title: `Child ${index + 1}`, prompt: "Work" })))
+		const { id } = await host.start({ type: "default", title: "Child 0", prompt: "Work" })
+		await Promise.all(Array.from({ length: 15 }, (_, index) => host.start({ type: "default", title: `Child ${index + 1}`, prompt: "Work" })))
 		const sourceId = host.observationSourceId
 		const readPresentation = sandbox.spy(children[0].task.messageStateHandler, "getDiracMessages")
 		const fullInspection = sandbox.spy(host, "inspect")
@@ -679,7 +692,7 @@ describe("TaskletsTool public controls", () => {
 		expectLoggerErrors()
 		await projectRoot()
 		owner.postTaskletActivity.rejects(new Error("Controlled display failure"))
-		const { id } = await host.start({ title: "Display failure", prompt: "Work" })
+		const { id } = await host.start({ type: "default", title: "Display failure", prompt: "Work" })
 		const answered = registerInteraction(children[0], "answered")
 		assert.equal((await message(id, { type: "reply", reply_to: answered.requestId, text: "Continue" })).status, "resolved")
 		await answered.waiting
@@ -706,10 +719,10 @@ describe("TaskletsTool public controls", () => {
 
 	it("replaces cumulative usage exactly once across repeated snapshots, reconstruction and explicit resume", async () => {
 		await projectRoot()
-		const { id } = await host.start({ title: "Account once", prompt: "Use primary and Utility" })
+		const { id } = await host.start({ type: "default", title: "Account once", prompt: "Use the selected model" })
 		const usage: TaskletUsageSnapshot = {
 			primary: { tokensIn: 100, tokensOut: 20, cost: 1, reasoningTokens: 3 },
-			utility: { tokensIn: 10, tokensOut: 2, cost: 0.25, reasoningTokens: 1 },
+			utility: { tokensIn: 0, tokensOut: 0, cost: 0, reasoningTokens: 0, usageObserved: false },
 		}
 		children[0].params.tasklet!.recordUsage!(usage)
 		children[0].params.tasklet!.recordUsage!(usage)
@@ -735,13 +748,13 @@ describe("TaskletsTool public controls", () => {
 			accounting.map((entry) => entry.id),
 			[`tasklet-usage:${id}`],
 		)
-		assert.equal(getApiMetrics(messages).totalCost, 1.75)
-		assert.equal(getApiMetrics(messages).totalTokensIn, 160)
+		assert.equal(getApiMetrics(messages).totalCost, 1.5)
+		assert.equal(getApiMetrics(messages).totalTokensIn, 150)
 		assert.deepEqual((await loadTaskletRecords("root"))[0].usage, increased)
 	})
 
 	it("sleep wakes on committed silent failure without consuming it or joining other children", async () => {
-		const { id } = await host.start({ title: "Silent failure", prompt: "Work" })
+		const { id } = await host.start({ type: "default", title: "Silent failure", prompt: "Work" })
 		await acknowledgeEvents()
 		const sleeping = call<TaskletWakeResult>({ operation: "sleep", tasklet_ids: [id] })
 		await inspect(id)
@@ -765,7 +778,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	it("supports time-only waits and gives user input priority over retained communication", async () => {
-		const { id } = await host.start({ title: "Selected", prompt: "Work" })
+		const { id } = await host.start({ type: "default", title: "Selected", prompt: "Work" })
 		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
 		const sleeping = call({ operation: "sleep", tasklet_ids: [], timeout_ms: 50 })
 		await inspect(id)

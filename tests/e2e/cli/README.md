@@ -222,7 +222,7 @@ node --test tests/e2e/cli/tasklets.test.mjs
 ```
 
 The opt-in `tasklets` fixture enables subagents only in its private configuration.
-It uses public native `use_subagents`, `tasklets`, and child `respond` calls through
+It uses public native `subagents`, `tasklets`, and child `respond` calls through
 the real built CLI. Root/child requests are distinguished by tool availability and
 assignment markers, not global request ordering. Two siblings report progress and
 ask private parent-directed questions; the parent inspects them and voluntarily

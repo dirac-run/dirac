@@ -1,9 +1,12 @@
+import type { ApiProvider } from "@shared/api"
 import { Empty } from "@shared/proto/dirac/common"
 import { UpdateApiConfigurationPartialRequest } from "@shared/proto/dirac/models"
 import { convertProtoToApiConfiguration } from "@shared/proto-conversions/models/api-configuration-conversion"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
-import { applyApiConfigurationTransaction } from "./apiConfigurationTransaction"
+import { applyApiConfigurationTransaction, applyProviderSetupTransaction } from "./apiConfigurationTransaction"
+import { persistApiConfigurationPatch } from "./apiConfigurationPersistence"
+import { recordSavedOpenAiCompatibleProfileChanges } from "@/core/models/modelProviderPresets"
 
 /**
  * Updates API configuration with partial values using FieldMask
@@ -22,7 +25,11 @@ export async function updateApiConfigurationPartial(
 ): Promise<Empty> {
 	try {
 		// Validate request
-		if (!request.updateMask || request.updateMask.length === 0) {
+		if (request.setupProvider !== undefined && !request.setupOnly) {
+			throw new Error("setup_provider requires setup_only")
+		}
+		const membershipOnly = request.setupOnly === true && request.setupProvider !== undefined
+		if ((!request.updateMask || request.updateMask.length === 0) && !membershipOnly) {
 			throw new Error("update_mask is required and must contain at least one field")
 		}
 
@@ -36,14 +43,23 @@ export async function updateApiConfigurationPartial(
 
 		// Apply only the fields specified in the mask
 		const updatedConfig = { ...currentConfig }
-		for (const field of request.updateMask) {
-			;(updatedConfig as Record<string, any>)[field] = (newConfigValues as Record<string, any>)[field]
+		const fields = request.updateMask ?? []
+		for (const field of fields) {
+			; (updatedConfig as Record<string, any>)[field] = (newConfigValues as Record<string, any>)[field]
 		}
 
 		const explicitPatch = Object.fromEntries(
-			request.updateMask.map((field) => [field, (newConfigValues as Record<string, any>)[field]]),
+			fields.map((field) => [field, (newConfigValues as Record<string, any>)[field]]),
 		)
-		await applyApiConfigurationTransaction(controller, updatedConfig, undefined, undefined, explicitPatch)
+		const persist = () => persistApiConfigurationPatch(controller.stateManager, explicitPatch)
+		if (request.setupOnly) {
+			await applyProviderSetupTransaction(controller, explicitPatch, undefined, request.setupProvider as ApiProvider | undefined)
+		} else {
+			await applyApiConfigurationTransaction(controller, updatedConfig, persist, undefined, explicitPatch)
+		}
+		if (fields.includes("openAiCompatibleProfiles")) {
+			recordSavedOpenAiCompatibleProfileChanges(controller.stateManager, currentConfig.openAiCompatibleProfiles ?? [])
+		}
 
 		// Notify webview
 		await controller.postStateToWebview()

@@ -74,7 +74,7 @@ describe("ToolRegistry", () => {
 		for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
 			assert.equal(toolNames.includes(name), false, name)
 		}
-		for (const name of ["use_subagents", "tasklets", "verify_goal", "update_goal", "block_goal"]) {
+		for (const name of ["subagents", "tasklets", "update_goal", "block_goal"]) {
 			assert.ok(toolNames.includes(name), name)
 		}
 	})
@@ -263,106 +263,6 @@ describe("ToolRegistry", () => {
 		})
 	})
 
-	describe("createEnabledToolsForSubagent", () => {
-		it("returns only tools in the allowed list", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerBuiltin(makeTool({ id: "a", source: "builtin" }))
-			registry.registerBuiltin(makeTool({ id: "b", source: "builtin" }))
-			registry.registerBuiltin(makeTool({ id: "c", source: "builtin" }))
-			const tools = registry.createEnabledToolsForSubagent({} as any, ["a", "c"])
-			assert.strictEqual(tools.length, 2)
-		})
-
-		it("matches allowed user tools by id or name", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerUserTool(makeTool({ id: "user_id", name: "user_name", source: "workspace" }))
-			registry.enable("user_id")
-			const tools = registry.createEnabledToolsForSubagent({} as any, ["user_name"])
-			assert.strictEqual(tools.length, 1)
-		})
-
-		it("filters out disabled tools even if in allowed list", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerBuiltin(makeTool({ id: "a", source: "builtin" }))
-			registry.registerUserTool(makeTool({ id: "b", source: "global" }))
-			const tools = registry.createEnabledToolsForSubagent({} as any, ["a", "b"])
-			assert.strictEqual(tools.length, 1)
-		})
-
-		it("matches a runtime tool call by name when allowlisted by id", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerUserTool(makeTool({ id: "user_id", name: "user_name", source: "workspace" }))
-			registry.enable("user_id")
-			assert.strictEqual(registry.isToolAllowed("user_name", ["user_id"]), true)
-		})
-
-		it("rejects a disabled runtime tool call even when allowlisted", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerUserTool(makeTool({ id: "user_id", name: "user_name", source: "workspace" }))
-			assert.strictEqual(registry.isToolAllowed("user_name", ["user_id"]), false)
-		})
-
-		it("narrows consolidated AST schemas and runtime execution to scoped operations", async () => {
-			const registry = ToolRegistry.getInstance()
-			let receivedOperation: string | undefined
-			registry.registerBuiltin(
-				makeTool({
-					id: "inspect_ast",
-					spec: {
-						id: "inspect_ast" as DiracDefaultTool,
-						name: "inspect_ast",
-						description: "Inspect source AST",
-						parameters: [
-							{
-								name: "operation",
-								required: true,
-								type: "string",
-								enum: ["outline", "implementation", "definitions", "references", "occurrences"],
-								instruction: "Operation",
-							},
-						],
-					} as DiracToolSpec,
-					factory: () => ({
-						spec: () => ({}) as DiracToolSpec,
-						supportedSurfaces: () => ["all" as const],
-						processCall: async (args: any) => {
-							receivedOperation = args.operation
-							return "ok"
-						},
-					}),
-				}),
-			)
-
-			const specs = registry.getEnabledSpecsForSubagent({} as any, ["inspect_ast:outline"])
-			assert.deepStrictEqual(specs[0].parameters?.find((parameter) => parameter.name === "operation")?.enum, ["outline"])
-
-			const [tool] = registry.createEnabledToolsForSubagent({} as any, ["inspect_ast:outline"])
-			await tool.processCall({ operation: "outline" }, {} as any)
-			assert.strictEqual(receivedOperation, "outline")
-			await assert.rejects(() => tool.processCall({ operation: "references" }, {} as any), /not authorized/)
-		})
-
-		it("plain consolidated AST names grant every family operation", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerBuiltin(makeTool({ id: "edit_ast" }))
-			assert.strictEqual(registry.isToolAllowed("edit_ast", ["edit_ast"], "rename"), true)
-			assert.strictEqual(registry.isToolAllowed("edit_ast", ["edit_ast"], "replace"), true)
-		})
-
-		it("scoped consolidated AST entries reject unauthorized runtime operations", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerBuiltin(makeTool({ id: "edit_ast" }))
-			assert.strictEqual(registry.isToolAllowed("edit_ast", ["edit_ast:rename"], "rename"), true)
-			assert.strictEqual(registry.isToolAllowed("edit_ast", ["edit_ast:rename"], "replace"), false)
-		})
-
-		it("narrows response operations consistently for subagents", () => {
-			const registry = ToolRegistry.getInstance()
-			registry.registerBuiltin(makeTool({ id: RESPOND_TOOL_NAME }))
-			assert.equal(registry.isToolAllowed(RESPOND_TOOL_NAME, [`${RESPOND_TOOL_NAME}:progress`], "progress"), true)
-			assert.equal(registry.isToolAllowed(RESPOND_TOOL_NAME, [`${RESPOND_TOOL_NAME}:progress`], "question"), false)
-		})
-	})
 
 	describe("replaceUserTool", () => {
 		it("replaces a same-source tool and preserves its enabled state", () => {
@@ -634,7 +534,7 @@ describe("ToolRegistry", () => {
 	describe("context-only subagents", () => {
 		function registerSubagentTool(): ToolRegistry {
 			const registry = ToolRegistry.getInstance()
-			const tool = ToolDiscoveryService.scanBuiltinTools().find((tool) => tool.id === "use_subagents")
+			const tool = ToolDiscoveryService.scanBuiltinTools().find((tool) => tool.id === "subagents")
 			assert.ok(tool)
 			assert.deepStrictEqual(tool.exposure, { kind: "context_only" })
 			registry.registerBuiltin(tool)
@@ -644,9 +544,9 @@ describe("ToolRegistry", () => {
 		it("omits the duplicate Tools setting and rejects direct toggles", () => {
 			const registry = registerSubagentTool()
 			assert.deepStrictEqual(registry.getConfigurableTools(), [])
-			assert.throws(() => registry.enable("use_subagents"), /cannot be enabled or disabled directly/)
-			assert.throws(() => registry.disable("use_subagents"), /cannot be enabled or disabled directly/)
-			assert.throws(() => registry.toggleAndPersist("use_subagents", false), /cannot be enabled or disabled directly/)
+			assert.throws(() => registry.enable("subagents"), /cannot be enabled or disabled directly/)
+			assert.throws(() => registry.disable("subagents"), /cannot be enabled or disabled directly/)
+			assert.throws(() => registry.toggleAndPersist("subagents", false), /cannot be enabled or disabled directly/)
 		})
 
 		for (const legacyToggle of [undefined, false, true]) {
@@ -656,16 +556,16 @@ describe("ToolRegistry", () => {
 					registry.registerBuiltin(makeTool({ id: "other_tool" }))
 					registry.loadToggles({
 						other_tool: false,
-						...(legacyToggle === undefined ? {} : { use_subagents: legacyToggle }),
+						...(legacyToggle === undefined ? {} : { subagents: legacyToggle }),
 					})
 
 					assert.deepStrictEqual(registry.getToggles(), { other_tool: false })
-					assert.equal(registry.isEnabled("use_subagents"), true)
-					assert.deepStrictEqual(registry.getEnabledTools().map((tool) => tool.id), ["use_subagents"])
+					assert.equal(registry.isEnabled("subagents"), true)
+					assert.deepStrictEqual(registry.getEnabledTools().map((tool) => tool.id), ["subagents"])
 					const context = { subagentsEnabled } as SystemPromptContext
 					assert.deepStrictEqual(
 						registry.getEnabledSpecs(context).map((spec) => spec.name),
-						subagentsEnabled ? ["use_subagents"] : [],
+						subagentsEnabled ? ["subagents"] : [],
 					)
 				})
 			}

@@ -49,9 +49,6 @@ export class OpenAiHandler implements ApiHandler {
 
 	private ensureClient(): OpenAI {
 		if (!this.client) {
-			if (!this.options.openAiApiKey && !this.options.azureIdentity) {
-				throw new Error("OpenAI API key or Azure Identity Authentication is required")
-			}
 			try {
 				let baseUrl = this.options.openAiBaseUrl?.trim() || ""
 				if (baseUrl) {
@@ -62,6 +59,11 @@ export class OpenAiHandler implements ApiHandler {
 				}
 				const baseUrlLower = baseUrl.toLowerCase()
 				const isAzureDomain = baseUrlLower.includes("azure.com") || baseUrlLower.includes("azure.us")
+				const isKeylessEndpoint = Boolean(baseUrl) && !isAzureDomain && !this.options.azureApiVersion &&
+					!this.options.azureIdentity && new URL(baseUrl).hostname !== "api.openai.com" && !this.options.openAiApiKey
+				if (!this.options.openAiApiKey && !this.options.azureIdentity && !isKeylessEndpoint) {
+					throw new Error("OpenAI API key or Azure Identity Authentication is required")
+				}
 				const externalHeaders = buildExternalBasicHeaders()
 				// Azure API shape slightly differs from the core API shape...
 				if (
@@ -97,8 +99,14 @@ export class OpenAiHandler implements ApiHandler {
 				} else {
 					this.client = createOpenAIClient({
 						baseURL: baseUrl,
-						apiKey: this.options.openAiApiKey,
-						defaultHeaders: this.options.openAiHeaders,
+						// The SDK requires a non-empty key; Authorization suppression below
+						// keeps this non-secret sentinel off the wire for keyless endpoints.
+						apiKey: isKeylessEndpoint ? "keyless-endpoint" : this.options.openAiApiKey,
+						...(isKeylessEndpoint ? { organization: null, project: null } : {}),
+						defaultHeaders: {
+							...(isKeylessEndpoint ? { Authorization: null } : {}),
+							...this.options.openAiHeaders,
+						},
 					})
 				}
 			} catch (error: any) {

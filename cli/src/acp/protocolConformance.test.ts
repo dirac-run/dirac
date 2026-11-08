@@ -779,7 +779,6 @@ describe("ACP protocol conformance over raw stdio", () => {
 				expect(JSON.parse(await readFile(path.join(directory, "tasklet.json"), "utf8"))).toEqual({
 					...record,
 					rootTaskId: forkHistory.id,
-					inheritedMessageCount: 0,
 				})
 				for (const name of artifactNames.slice(1)) {
 					expect(await readFile(path.join(directory, name))).toEqual(await readFile(path.join(sourceTaskDir, "tasklets", record.id, name)))

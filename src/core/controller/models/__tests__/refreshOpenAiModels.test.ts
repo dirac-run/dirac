@@ -35,6 +35,76 @@ describe("refreshOpenAiModels", () => {
 		)
 	})
 
+	it("forwards selected endpoint headers through the RPC without saved credentials or cache pollution", async () => {
+		const setModelsCache = sinon.stub()
+		sinon.stub(StateManager, "isInitialized").returns(true)
+		sinon.stub(StateManager, "get").returns({
+			getApiConfiguration: () => ({ openAiBaseUrl: "https://other.example/v1", openAiApiKey: "other-key" }),
+			getGlobalSettingsKey: () => ({ "X-Other": "private" }),
+			setModelsCache,
+		} as any)
+		const get = sinon.stub(axios, "get").resolves({ data: { data: [{ id: "local-model" }] } })
+		const result = await refreshOpenAiModels(undefined, OpenAiModelsRequest.create({
+			baseUrl: "http://localhost:1234/v1", apiKey: "", headers: { "X-Endpoint": "local" },
+		}))
+		result.values.should.deepEqual(["local-model"])
+		sinon.assert.calledOnceWithExactly(get, "http://localhost:1234/v1/models", sinon.match({ headers: { "X-Endpoint": "local" } }))
+		sinon.assert.notCalled(setModelsCache)
+	})
+
+	it("uses the complete saved endpoint tuple when explicitly requested over the RPC", async () => {
+		const setModelsCache = sinon.stub()
+		sinon.stub(StateManager, "isInitialized").returns(true)
+		sinon.stub(StateManager, "get").returns({
+			getApiConfiguration: () => ({
+				openAiBaseUrl: "https://saved.example/v1/responses",
+				openAiApiKey: "ordinary-key", openAiCompatibleCustomApiKey: "override-key",
+			}),
+			getGlobalSettingsKey: () => ({ "X-Saved": "saved-header" }),
+			setModelsCache,
+		} as unknown as StateManager)
+		const get = sinon.stub(axios, "get").resolves({ data: { data: [{ id: "saved-model" }] } })
+		for (const fields of [
+			{ useSavedEndpoint: true },
+			{ useSavedEndpoint: true, baseUrl: "https://other.example/v1", apiKey: "other-key", headers: { "X-Other": "other-header" } },
+		]) {
+			get.resetHistory()
+			setModelsCache.resetHistory()
+			const request = OpenAiModelsRequest.fromJSON(OpenAiModelsRequest.toJSON(OpenAiModelsRequest.create(fields)))
+			const result = await refreshOpenAiModels(undefined, request)
+			result.values.should.deepEqual(["saved-model"])
+			sinon.assert.calledOnceWithExactly(get, "https://saved.example/v1/models", sinon.match({
+				headers: { "X-Saved": "saved-header", Authorization: "Bearer override-key" },
+			}))
+			const headers = get.firstCall.args[1]?.headers as Record<string, string>
+			headers.should.not.have.property("X-Other")
+			sinon.assert.calledOnceWithExactly(setModelsCache, "openai", { "saved-model": { ...openAiModelInfoSaneDefaults } })
+		}
+	})
+
+	it("keeps the default false RPC path explicit even at the saved URL with an empty key", async () => {
+		const setModelsCache = sinon.stub()
+		sinon.stub(StateManager, "isInitialized").returns(true)
+		sinon.stub(StateManager, "get").returns({
+			getApiConfiguration: () => ({
+				openAiBaseUrl: "https://saved.example/v1", openAiCompatibleCustomApiKey: "saved-secret",
+			}),
+			getGlobalSettingsKey: () => ({ "X-Saved": "saved-header" }),
+			setModelsCache,
+		} as unknown as StateManager)
+		const get = sinon.stub(axios, "get").resolves({ data: { data: [{ id: "explicit-model" }] } })
+		const empty = OpenAiModelsRequest.fromJSON(OpenAiModelsRequest.toJSON(OpenAiModelsRequest.create({})))
+			; (await refreshOpenAiModels(undefined, empty)).values.should.deepEqual([])
+		sinon.assert.notCalled(get)
+		const explicit = OpenAiModelsRequest.fromJSON(OpenAiModelsRequest.toJSON(OpenAiModelsRequest.create({
+			baseUrl: "https://saved.example/v1", apiKey: "", headers: {},
+		})))
+			; (await refreshOpenAiModels(undefined, explicit)).values.should.deepEqual(["explicit-model"])
+		sinon.assert.calledOnce(get)
+			; (get.firstCall.args[1]?.headers === undefined).should.be.true()
+		sinon.assert.notCalled(setModelsCache)
+	})
+
 	it("returns empty models without making network requests when baseUrl is empty", async () => {
 		const get = sinon.stub(axios, "get")
 
@@ -154,7 +224,7 @@ describe("refreshOpenAiModels", () => {
 			"endpoint-b-model": { ...openAiModelInfoSaneDefaults },
 		})
 		sinon.assert.calledOnce(get)
-		;(get.firstCall.args[1]?.headers === undefined).should.be.true()
+			; (get.firstCall.args[1]?.headers === undefined).should.be.true()
 		sinon.assert.notCalled(setModelsCache)
 	})
 
@@ -180,7 +250,7 @@ describe("refreshOpenAiModels", () => {
 			"local-model": { ...openAiModelInfoSaneDefaults },
 		})
 		sinon.assert.calledOnce(get)
-		;(get.firstCall.args[1]?.headers === undefined).should.be.true()
+			; (get.firstCall.args[1]?.headers === undefined).should.be.true()
 		sinon.assert.notCalled(setModelsCache)
 	})
 
@@ -196,10 +266,10 @@ describe("refreshOpenAiModels", () => {
 		} as unknown as StateManager)
 		const get = sinon.stub(axios, "get")
 
-		;(await getOpenAiModels({ baseUrl: "", apiKey: "secret-b" })).should.deepEqual({})
-		;(await getOpenAiModels({ baseUrl: "   ", apiKey: "" })).should.deepEqual({})
-		;(await getOpenAiModels({ apiKey: "secret-b" })).should.deepEqual({})
-		;(await getOpenAiModels({ apiKey: "" })).should.deepEqual({})
+			; (await getOpenAiModels({ baseUrl: "", apiKey: "secret-b" })).should.deepEqual({})
+			; (await getOpenAiModels({ baseUrl: "   ", apiKey: "" })).should.deepEqual({})
+			; (await getOpenAiModels({ apiKey: "secret-b" })).should.deepEqual({})
+			; (await getOpenAiModels({ apiKey: "" })).should.deepEqual({})
 		sinon.assert.notCalled(get)
 	})
 

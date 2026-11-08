@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
+import { StateManager } from "@core/storage/StateManager"
+import { anthropicDefaultModelId } from "@shared/api"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import * as storage from "@core/storage/taskStorage"
 import { CardKind, CardStatus, TaskStatus } from "@shared/ExtensionMessage"
 import { ResponseOperation } from "@shared/responseTool"
-import { createTaskletId } from "@shared/taskletId"
+import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
@@ -59,7 +61,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		const options = {
 			workingConfiguration: createTaskWorkingConfiguration({
 				settings: { mode: "act" } as any,
-				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				apiConfiguration: { apiKey: "test-key", actModeApiProvider: "anthropic", actModeApiModelId: anthropicDefaultModelId },
 				workspaceConfiguration: {} as any,
 				executionOptions: {
 					terminalReuseEnabled: true,
@@ -82,6 +84,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			id: createTaskletId(),
 			rootTaskId: "root",
 			conversationUlid: "retained-conversation",
+			configuration: { name: "default", modelSelection: { provider: "anthropic", modelId: anthropicDefaultModelId } },
 			title: "Retained assignment",
 			prompt: "Original assignment",
 			createdAt: 100,
@@ -130,6 +133,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 
 	beforeEach(async () => {
 		sandbox = sinon.createSandbox()
+		sandbox.stub(StateManager, "get").returns({ getSystemDefaultSettingsKey: () => [] } as unknown as StateManager)
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-reopening-"))
 		setVscodeHostProviderMock({ globalStorageFsPath: directory })
 		hosts = []
@@ -167,7 +171,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 	for (const acknowledge of [false, true]) {
 		it(`retains a ${acknowledge ? "delivered" : "pending"} terminal notification across repeated reconstruction without duplicating it`, async () => {
 			const original = newHost()
-			const record = await original.start({ title: "Silent completed child", prompt: "Work" })
+			const record = await original.start({ type: "default", title: "Silent completed child", prompt: "Work" })
 			children[0].outcome.resolve(completed)
 			await original["children"].get(record.id)!.settlement
 			const terminalEvents = (await storage.loadTaskletEvents(address(record.id))).filter(
@@ -206,7 +210,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 
 	it("publishes a new terminal notification only after an explicitly resumed execution settles", async () => {
 		const original = newHost()
-		const record = await original.start({ title: "Same handle", prompt: "Work" })
+		const record = await original.start({ type: "default", title: "Same handle", prompt: "Work" })
 		children[0].outcome.resolve(completed)
 		await original["children"].get(record.id)!.settlement
 		const firstEvents = (await storage.loadTaskletEvents(address(record.id))).filter(
@@ -265,34 +269,48 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		assert.equal(await final.prepareEventDelivery(), undefined)
 	})
 
-	it("preserves durable configuration across reopening without reinjecting parent history on resume", async () => {
-		const getParentHistory = sandbox.stub().returns({ messages: [{ role: "user", content: "Original root context" }] })
-		const original = newHost({ getParentHistory })
-		const record = await original.start({
-			title: "Retained configuration",
-			prompt: "Work",
-			includeHistory: true,
-			timeoutSeconds: 45,
-		})
-		const params = constructed.firstCall.args[0] as TaskParams
-		assert.deepEqual(params.tasklet!.initialHistory, getParentHistory.firstCall.returnValue)
+	it("keeps unresolved historical children inspectable and rejects resume before mutating outcome/events", async () => {
+		const record = await seed()
+		await storage.saveTaskletRecord({ ...record, configuration: { name: "Retired reviewer", timeoutSeconds: 600, includeHistory: false } } as unknown as storage.TaskletRecord)
+		await storage.saveTaskletEvents(address(record.id), [{
+			id: "original-outcome", taskletId: record.id, createdAt: 123, communication: { type: "outcome", outcome: completed },
+		}])
+		const reopened = newHost()
+		await reopened.reconstruct()
+		assert.equal(reopened.inspect(record.id).role, "Retired reviewer")
+		assert.equal((await reopened.readObservationTranscript(record.id)).role, "Retired reviewer")
+		const before = await storage.loadTaskletRecords("root")
+		const events = await storage.loadTaskletEvents(address(record.id))
+		assert.equal(before[0].configuration, undefined)
+		await assert.rejects(reopened.resume(record.id, "Continue"), /no saved model selection.*start a new subagent/)
+		assert.deepEqual(await storage.loadTaskletRecords("root"), before)
+		assert.deepEqual(await storage.loadTaskletEvents(address(record.id)), events)
+		sinon.assert.notCalled(constructed)
+		const persisted = JSON.parse(await fs.readFile(path.join(directory, "tasks", "root", "tasklets", record.id, "tasklet.json"), "utf8"))
+		assert.equal(persisted.configuration, undefined)
+		assert.equal(persisted.role, "Retired reviewer")
+		assert.equal(persisted.outcome.kind, "completed")
+	})
+
+	it("preserves the saved model selection and conversation across explicit reopening", async () => {
+		const original = newHost()
+		const record = await original.start({ type: "default", title: "Retained configuration", prompt: "Work" })
 		children[0].outcome.resolve(completed)
 		await original.interrupt(record.id)
 		await original.shutdown()
-		const reopened = newHost({ getParentHistory })
+		const reopened = newHost()
 		await reopened.reconstruct()
 		assert.deepEqual(reopened.inspect(record.id).configuration, record.configuration)
 		await reopened.resume(record.id, "Follow up")
 		const resumedParams = constructed.secondCall.args[0] as TaskParams
 		assert.deepEqual(resumedParams.tasklet!.configuration, record.configuration)
-		assert.equal(resumedParams.tasklet!.initialHistory, undefined)
-		sinon.assert.calledOnce(getParentHistory)
+		assert.equal(resumedParams.conversationUlid, record.conversationUlid)
 		assert.deepEqual((await storage.loadTaskletRecords("root"))[0].configuration, record.configuration)
 	})
 
 	it("reconstructs cleanly closed completed handles without constructing or restarting engines", async () => {
 		const original = newHost()
-		const record = await original.start({ title: "Completed child", prompt: "Work" })
+		const record = await original.start({ type: "default", title: "Completed child", prompt: "Work" })
 		children[0].outcome.resolve(completed)
 		await original.interrupt(record.id)
 		await original.shutdown()
@@ -414,7 +432,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sinon.assert.notCalled(constructed)
 		assert.deepEqual(host.inspect(record.id).outcome, completed)
 		assert.equal(host.inspect(record.id).outcomePersisted, true)
-		assert.deepEqual((await storage.loadTaskletRecords("root"))[0], { ...record, inheritedMessageCount: 0 })
+		assert.deepEqual((await storage.loadTaskletRecords("root"))[0], { ...record, role: "default" })
 	})
 
 	it("rejects duplicate resume during acceptance and shutdown joins it without launching late work", async () => {
@@ -512,7 +530,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sandbox.stub(storage, "loadTaskletRecords").rejects(new Error("corrupt contained record"))
 		const host = newHost()
 		await assert.rejects(host.reconstruct(), /corrupt contained record/)
-		await assert.rejects(host.start({ title: "New", prompt: "Must not bypass reconstruction" }), /corrupt contained record/)
+		await assert.rejects(host.start({ type: "default", title: "New", prompt: "Must not bypass reconstruction" }), /corrupt contained record/)
 		await assert.rejects(host.resume(createTaskletId()), /corrupt contained record/)
 		await assert.rejects(host.shutdown(), /Tasklet shutdown failed/)
 		sinon.assert.notCalled(constructed)

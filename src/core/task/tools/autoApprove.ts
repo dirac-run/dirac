@@ -103,7 +103,7 @@ export class AutoApprove {
 				case DiracDefaultTool.FILE_NEW:
 				case DiracDefaultTool.EDIT_FILE:
 				case DiracDefaultTool.EDIT_AST:
-				case DiracDefaultTool.USE_SUBAGENTS:
+				case DiracDefaultTool.SUBAGENTS:
 				case DiracDefaultTool.USE_SKILL:
 					return [true, true]
 
@@ -125,7 +125,7 @@ export class AutoApprove {
 				case DiracDefaultTool.FILE_NEW:
 				case DiracDefaultTool.EDIT_FILE:
 				case DiracDefaultTool.EDIT_AST:
-				case DiracDefaultTool.USE_SUBAGENTS:
+				case DiracDefaultTool.SUBAGENTS:
 				case DiracDefaultTool.USE_SKILL:
 					return [true, true]
 
@@ -143,7 +143,7 @@ export class AutoApprove {
 			case DiracDefaultTool.DIAGNOSTICS_SCAN:
 			case DiracDefaultTool.LIST_FILES:
 			case DiracDefaultTool.SEARCH:
-			case DiracDefaultTool.USE_SUBAGENTS:
+			case DiracDefaultTool.SUBAGENTS:
 			case DiracDefaultTool.USE_SKILL:
 				return [autoApprovalSettings.actions.readFiles, autoApprovalSettings.actions.readFilesExternally ?? false]
 

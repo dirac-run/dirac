@@ -1,6 +1,7 @@
 import React from "react"
 import { BedrockSetup, type BedrockConfig } from "../../BedrockSetup"
 import { BedrockCustomModelFlow } from "../../BedrockCustomModelFlow"
+import { StateManager } from "@/core/storage/StateManager"
 
 interface BedrockSetupPageProps {
 	isActive: boolean
@@ -9,7 +10,7 @@ interface BedrockSetupPageProps {
 }
 
 export const BedrockSetupPage: React.FC<BedrockSetupPageProps> = ({ isActive, onCancel, onComplete }) => (
-	<BedrockSetup isActive={isActive} onCancel={onCancel} onComplete={onComplete} />
+	<BedrockSetup isActive={isActive} initialEndpoint={StateManager.get().getSystemDefaultSettingsKey("awsBedrockEndpoint")} onCancel={onCancel} onComplete={onComplete} />
 )
 
 interface BedrockCustomFlowPageProps {

@@ -481,44 +481,48 @@
     }
   },
   {
-    "name": "use_subagents",
-    "description": "Run subagents in parallel.",
+    "name": "subagents",
+    "description": "Start a batch of subagents asynchronously. Returns each accepted stable ID and task header or its startup error, not completed results. Supply complete instructions: children do not receive the parent conversation. Use tasklets with the returned IDs to supervise them.",
     "input_schema": {
       "type": "object",
       "properties": {
-        "subagents": {
+        "assignments": {
           "type": "array",
-          "description": "Subagents to run in parallel.",
+          "description": "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
           "items": {
             "type": "object",
             "properties": {
-              "task_title": {
+              "type": {
                 "type": "string",
-                "description": "Task header for user observability. No more than 5 words or 80 characters."
+                "enum": [
+                  "default"
+                ],
+                "description": "default: Use the main agent's current model settings."
               },
-              "prompt": {
+              "task_header": {
                 "type": "string",
-                "description": "Task for this subagent."
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "Short assignment header, at most 5 words."
               },
-              "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds. Default: 600."
-              },
-              "include_history": {
-                "type": "boolean",
-                "description": "Include the main task conversation history."
+              "task_description": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Complete assignment instructions and necessary context; no parent conversation is copied."
               }
             },
             "required": [
-              "task_title",
-              "prompt"
+              "type",
+              "task_header",
+              "task_description"
             ],
             "additionalProperties": false
-          }
+          },
+          "minItems": 1
         }
       },
       "required": [
-        "subagents"
+        "assignments"
       ]
     }
   },

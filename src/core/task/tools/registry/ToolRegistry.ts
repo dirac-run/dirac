@@ -7,22 +7,15 @@ import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool, ToolSource } from "../discovery/DiscoveredTool"
 import { StateManager } from "@/core/storage/StateManager"
-import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME, RESPONSE_OPERATIONS, ResponseParameter } from "@shared/responseTool"
+import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME } from "@shared/responseTool"
 import Mutex from "p-mutex"
 
 const SOURCE_PRIORITY: Record<ToolSource, number> = { builtin: 0, global: 1, workspace: 2, task: 3 }
 
-const TOOL_OPERATION_SCOPES: Readonly<Record<string, readonly string[]>> = {
-	inspect_ast: ["outline", "implementation", "definitions", "references", "occurrences"],
-	edit_ast: ["rename", "replace"],
-	[RESPOND_TOOL_NAME]: RESPONSE_OPERATIONS,
-}
 
 
-interface ToolAuthorization {
-	allowed: boolean
-	operations?: string[]
-}
+
+
 
 export interface UserToolReplacementResult {
 	replaced: boolean
@@ -30,43 +23,9 @@ export interface UserToolReplacementResult {
 	previousTool?: DiscoveredTool
 }
 
-function resolveToolAuthorization(tool: DiscoveredTool, allowed: readonly string[]): ToolAuthorization {
-	const identifiers = [tool.id, tool.name, tool.spec.name].filter(Boolean)
-	const allowedSet = new Set(allowed)
-	if (identifiers.some((identifier) => allowedSet.has(identifier))) {
-		return { allowed: true }
-	}
 
-	const supportedOperations = identifiers.flatMap((identifier) => TOOL_OPERATION_SCOPES[identifier] ?? [])
-	if (supportedOperations.length === 0) {
-		return { allowed: false }
-	}
 
-	const operations = Array.from(
-		new Set(
-			supportedOperations.filter((operation) =>
-				identifiers.some((identifier) => allowedSet.has(`${identifier}:${operation}`)),
-			),
-		),
-	)
-	return operations.length > 0 ? { allowed: true, operations } : { allowed: false }
-}
 
-function scopeToolSpec(spec: DiracToolSpec, operations: readonly string[]): DiracToolSpec {
-	const operationSummary = `This subagent is authorized only for operation${operations.length === 1 ? "" : "s"}: ${operations.join(", ")}.`
-	const promptDescription = spec.promptDescription
-	return {
-		...spec,
-		description: `${spec.description} ${operationSummary}`,
-		promptDescription:
-			typeof promptDescription === "function"
-				? (context) => `${promptDescription(context)} ${operationSummary}`
-				: `${promptDescription ?? spec.description} ${operationSummary}`,
-		parameters: spec.parameters?.map((parameter) =>
-			parameter.name === ResponseParameter.OPERATION ? { ...parameter, enum: [...operations] } : parameter,
-		),
-	}
-}
 
 export class ToolRegistry {
 	private static readonly accessMutex = new Mutex()
@@ -252,13 +211,7 @@ export class ToolRegistry {
 			.filter((spec) => !spec.contextRequirements || spec.contextRequirements(context))
 	}
 
-	getEnabledSpecsForSubagent(context: SystemPromptContext, allowed: string[]): DiracToolSpec[] {
-		return this.getEnabledTools()
-			.map((tool) => this.scopeToolForSubagent(tool, allowed))
-			.filter((tool): tool is DiscoveredTool => Boolean(tool))
-			.map((tool) => tool.spec)
-			.filter((spec) => !spec.contextRequirements || spec.contextRequirements(context))
-	}
+
 
 	getAllTools(ownerTaskId?: string, workspaceRoot?: string): DiscoveredTool[] {
 		const globalTools = [...this.builtinTools.values(), ...this.userTools.values()]
@@ -323,12 +276,7 @@ export class ToolRegistry {
 		return this.getEnabledTools().map((t) => t.factory(config))
 	}
 
-	createEnabledToolsForSubagent(config: TaskConfig, allowed: string[]): IDiracTool[] {
-		return this.getEnabledTools()
-			.map((tool) => this.scopeToolForSubagent(tool, allowed))
-			.filter((tool): tool is DiscoveredTool => Boolean(tool))
-			.map((tool) => tool.factory(config))
-	}
+
 
 	/** Restore the registry entry replaced by an upsert, or remove a newly inserted entry. */
 	rollbackUserToolReplacement(
@@ -355,58 +303,9 @@ export class ToolRegistry {
 		this._version++
 	}
 
-	isToolAllowed(toolName: string, allowed: string[], operation?: string): boolean {
-		const tool = this.findToolByIdOrName(toolName)
-		if (!tool) {
-			return allowed.includes(toolName)
-		}
-		if (!this.isEnabled(tool.id)) {
-			return false
-		}
-		const authorization = resolveToolAuthorization(tool, allowed)
-		return (
-			authorization.allowed &&
-			(!authorization.operations || (typeof operation === "string" && authorization.operations.includes(operation)))
-		)
-	}
 
-	scopeToolForSubagent(tool: DiscoveredTool, allowed: readonly string[]): DiscoveredTool | undefined {
-		if (tool.exposure.kind === "profile_only") return undefined
-		const authorization = resolveToolAuthorization(tool, allowed)
-		if (!authorization.allowed) {
-			return undefined
-		}
-		if (!authorization.operations) {
-			return tool
-		}
 
-		const operations = authorization.operations
-		const spec = scopeToolSpec(tool.spec, operations)
-		return {
-			...tool,
-			spec,
-			factory: (config?: any) => {
-				const original = tool.factory(config)
-				const scopedTool: IDiracTool & { bufferPartialToolUse?: (...args: any[]) => Promise<void> } = {
-					spec: () => spec,
-					supportedSurfaces: () => original.supportedSurfaces(),
-					processCall: async (args: any, env: any) => {
-						const operation = args?.[ResponseParameter.OPERATION]
-						if (typeof operation !== "string" || !operations.includes(operation)) {
-							throw new Error(
-								`Operation '${typeof operation === "string" ? operation : "<missing>"}' is not authorized for tool '${spec.name}' in this subagent. Allowed operations: ${operations.join(", ")}.`,
-							)
-						}
-						return original.processCall(args, env)
-					},
-				}
-				if ("bufferPartialToolUse" in original && typeof (original as any).bufferPartialToolUse === "function") {
-					scopedTool.bufferPartialToolUse = (...args: any[]) => (original as any).bufferPartialToolUse(...args)
-				}
-				return scopedTool
-			},
-		}
-	}
+
 
 	loadToggles(toggles: Record<string, boolean>): void {
 		const migrated = { ...toggles }

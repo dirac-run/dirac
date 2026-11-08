@@ -43,7 +43,7 @@ Dirac uses a modular, multi-stage pipeline to generate the final system prompt. 
 ### 4. Tool Management: `src/core/prompts/system-prompt/registry/DiracToolSet.ts`
 - **Role**: A utility class for provider-native conversion and dynamic subagent wrapper specs.
 - **Snapshot source**: Enabled and context-filtered tool specs come from the task's `ToolRequestSnapshot`, not from `DiracToolSet` reading global registry state.
-- **Dynamic Subagents**: Implements `getDynamicSubagentToolSpecs`, which dynamically generates tool definitions for subagents by loading configs from `src/core/task/tools/subagent/AgentConfigLoader.ts`.
+- **Subagent Roles**: `withSubagentRoleSpecs` projects current enabled global role names and descriptions into the single `subagents` batch tool on each request. Execution selections remain private and are resolved at child creation.
 - **Native conversion**: `convertSpecsToNativeTools(specs, context)` selects the correct converter from `src/core/prompts/system-prompt/spec.ts` based on the provider (Anthropic vs. OpenAI vs. Gemini) and maps snapshot specs to that format.
 
 ### 5. The Template: `src/core/prompts/system-prompt/template.ts`

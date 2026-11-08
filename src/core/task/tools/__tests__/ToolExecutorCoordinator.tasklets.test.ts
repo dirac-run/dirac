@@ -7,7 +7,7 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { TaskletControls } from "../interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment } from "../interfaces/ToolEnvironmentFactory"
-import { TaskletsTool, tasklets_spec } from "../modules/use_subagents/UseSubagentsTool"
+import { TaskletsTool, tasklets_spec } from "../modules/subagents/SubagentsTool"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import { createMockTaskConfig } from "./helpers/mockTaskConfig"
 
@@ -48,7 +48,6 @@ function fixture(strict = true) {
 		nativeTools: [toolSpecFunctionDefinition(tasklets_spec, { cwd: config.cwd } as SystemPromptContext, strict)],
 		coordinator,
 		executableToolNames: new Set(["tasklets"]),
-		dynamicSubagentToolNames: new Set(),
 	}
 	const execute = (parameters: Record<string, unknown>) =>
 		coordinator.execute(config, {

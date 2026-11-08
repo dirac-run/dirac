@@ -560,16 +560,65 @@ vscode-dropdown::part(control) {
 	box-shadow: var(--dirac-shadow-sm);
 }
 
+.settings-nav-rail {
+	position: relative;
+	flex: 0 0 36px;
+	width: 36px;
+}
+
+.settings-nav-overlay {
+	position: absolute;
+	inset: 0 auto 0 0;
+	z-index: 10;
+	width: 36px;
+	overflow-x: hidden;
+	overflow-y: auto;
+	scrollbar-width: none;
+	background: var(--vscode-editor-background, var(--dirac-surface));
+	border-right: 1px solid var(--dirac-border-subtle);
+	box-sizing: border-box;
+	transition: width 140ms ease, box-shadow 140ms ease;
+}
+
+.settings-nav-overlay[data-expanded="true"] {
+	width: min(clamp(184px, 22vw, 264px), calc(100vw - 24px));
+	box-shadow: var(--dirac-shadow-md);
+	scrollbar-width: thin;
+}
+
 .settings-tab-list {
-	width: clamp(184px, 22vw, 264px);
-	background: color-mix(in srgb, var(--vscode-editor-background) 22%, transparent);
-	border-color: var(--dirac-border-subtle) !important;
+	width: 100%;
 }
 
 .settings-tab-trigger {
+	display: flex;
+	align-items: center;
+	gap: 10px;
 	width: 100%;
+	min-height: 36px;
+	padding: 9px;
+	box-sizing: border-box;
+	overflow: hidden;
+	white-space: nowrap;
+	text-align: left;
+	border: 0;
 	border-radius: 0 6px 6px 0;
+	color: var(--vscode-foreground);
+	background: transparent;
+	cursor: pointer;
 	transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.settings-tab-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+}
+
+
+.settings-tab-trigger:focus-visible {
+	outline: 1px solid var(--dirac-focus);
+	outline-offset: -2px;
 }
 
 .settings-tab-trigger:hover {
@@ -584,10 +633,16 @@ vscode-dropdown::part(control) {
 
 .settings-tab-label {
 	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 100ms ease;
 }
 
-.settings-tab-compact-label {
-	display: none;
+.settings-nav-overlay[data-expanded="true"] .settings-tab-label {
+	opacity: 1;
+	visibility: visible;
 }
 
 .settings-nav-tooltip[data-slot="tooltip-content"] {
@@ -597,32 +652,12 @@ vscode-dropdown::part(control) {
 	box-shadow: var(--dirac-shadow-md);
 }
 
-@media (max-width: 639px) {
-	.settings-tab-list {
-		width: 120px;
-	}
+@media (prefers-reduced-motion: reduce) {
 
-	.settings-tab-trigger {
-		justify-content: flex-start;
-		padding-inline: 10px;
-		text-align: left;
-	}
-
-	.settings-tab-icon {
-		display: block;
-		width: 14px;
-		height: 14px;
-		flex: 0 0 auto;
-	}
-
+	.settings-nav-overlay,
+	.settings-tab-trigger,
 	.settings-tab-label {
-		display: none;
-	}
-
-	.settings-tab-compact-label {
-		display: block;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		transition: none;
 	}
 }
 
@@ -694,7 +729,7 @@ vscode-dropdown::part(control) {
 
 [data-slot="select-item"][data-highlighted],
 [data-slot="select-item"]:focus {
-	background: var(--dirac-surface-selected);
+	background: var(--vscode-list-activeSelectionBackground);
 	color: var(--vscode-list-activeSelectionForeground);
 }
 

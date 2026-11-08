@@ -1,4 +1,5 @@
 import { openAiModelInfoSaneDefaults, openAiNativeDefaultModelId } from "@shared/api"
+import { DEFAULT_SUBAGENT_ROLES } from "@shared/subagentRoles"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
 import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
 import { render } from "ink-testing-library"
@@ -11,7 +12,7 @@ import {
 	hasModelPicker,
 	hasStaticModels,
 } from "../../../utils/model-metadata"
-import { CUSTOM_MODEL_ID, ModelPicker } from "../../ModelPicker"
+import { ModelPicker } from "../../ModelPicker"
 import { SettingsItemType, SettingsTab } from "../types"
 import { createSettingsItems, createSettingsSearchResults, createToolItems, type UseSettingsItemsProps } from "./useSettingsItems"
 
@@ -166,14 +167,13 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 		expect(ProviderToBaseUrlKeyMap.openai).toBe("openAiBaseUrl")
 	})
 
-	it("displays discovered or arbitrary OpenAI-compatible model IDs directly instead of Custom", () => {
-		const items = createSettingsItems(openAiSettingsProps)
-		expect(items.find((item) => item.key === "actModelId")?.value).toBe("qwen2.5-coder:32b")
-		expect(items.find((item) => item.key === "actCustomModelId")).toBeUndefined()
-
-		const customItems = createSettingsItems({ ...openAiSettingsProps, actModelId: CUSTOM_MODEL_ID })
-		expect(customItems.find((item) => item.key === "actModelId")?.value).toBe("Custom")
-		expect(customItems.find((item) => item.key === "actCustomModelId")?.value).toBe("")
+	it("moves model selections to Model configurations without duplicate provider-page controls", () => {
+		const providerItems = createSettingsItems(openAiSettingsProps)
+		expect(providerItems.some((item) => item.key === "actModelId" || item.key === "actSelection")).toBe(false)
+		const items = createSettingsItems({ ...openAiSettingsProps, currentTab: SettingsTab.UTILITY_MODEL, utilityModelUseCases: { condense: true, generateCommitMessage: true, permissionHandling: false }, utilityPermissionPolicy: "" })
+		expect(items.find((item) => item.key === "actSelection")?.value).toBe("qwen2.5-coder:32b")
+		expect(items.some((item) => item.key === "planSelection")).toBe(true)
+		expect(items.some((item) => item.key === "utilityModelSelection")).toBe(true)
 	})
 
 	it("renders discovered models and Custom Model ID / Preset in ModelPicker for openai", async () => {
@@ -187,8 +187,8 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 				provider: "openai",
 				baseUrl: "http://localhost:11434/v1",
 				apiKey: "test-key",
-				onChange: () => {},
-				onSubmit: () => {},
+				onChange: () => { },
+				onSubmit: () => { },
 			}),
 		)
 
@@ -213,8 +213,8 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 			React.createElement(ModelPicker, {
 				provider: "openai",
 				baseUrl: "http://localhost:11434/v1",
-				onChange: () => {},
-				onSubmit: () => {},
+				onChange: () => { },
+				onSubmit: () => { },
 			}),
 		)
 
@@ -227,5 +227,20 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 			expect(frame).toContain("Custom Model ID / Preset")
 		})
 		unmount()
+	})
+})
+describe("CLI subagent roles section", () => {
+	it("shows disabled starters and one default explanation without an editable default row", () => {
+		const items = createSettingsItems({
+			...props, currentTab: SettingsTab.UTILITY_MODEL,
+			utilityModelUseCases: { condense: false, generateCommitMessage: false, permissionHandling: false },
+			utilityPermissionPolicy: "", subagentRoles: DEFAULT_SUBAGENT_ROLES
+		})
+		const roles = items.filter((item) => item.key.startsWith("subagentRole:"))
+		expect(roles.map((item) => item.label)).toEqual(DEFAULT_SUBAGENT_ROLES.map((role) => role.name))
+		expect(roles.every((item) => item.value === "Disabled · Not configured")).toBe(true)
+		expect(items.filter((item) => item.key === "subagentRolesExplanation")).toHaveLength(1)
+		expect(items.some((item) => item.label.toLowerCase() === "default")).toBe(false)
+		expect(items.find((item) => item.key === "addSubagentRole")?.type).toBe(SettingsItemType.ACTION)
 	})
 })

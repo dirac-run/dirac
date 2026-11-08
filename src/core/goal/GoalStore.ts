@@ -9,7 +9,6 @@ import Mutex from "p-mutex"
 import path from "path"
 import { applyGoalStatusTransition } from "./GoalLifecycle"
 import { assertGoalRecord, isLegacyGoalRecord } from "./validateGoalRecord"
-import { TASKLET_ID_PREFIX } from "@/shared/taskletId"
 
 const GOAL_STATE_FILE = "goal.json"
 const goalLocks = new Map<string, Mutex>()
@@ -108,7 +107,7 @@ function ownedGoalDirectoryIds(goalId: string, value: unknown): { directoryIds: 
 		const id = (child as Record<string, unknown>).id
 		if (typeof id !== "string" || !id) continue
 		// New contained handles are nested under the root, not independent directories.
-		if (record.version === 2 && id.startsWith(TASKLET_ID_PREFIX)) continue
+		if (record.version === 2) continue
 		try {
 			getTaskDirectoryPath(id)
 			ids.add(id)
@@ -125,7 +124,7 @@ async function writeGoalRecord(record: GoalRecord): Promise<void> {
 }
 
 export class GoalStore {
-	constructor(private readonly clock: () => number = Date.now) {}
+	constructor(private readonly clock: () => number = Date.now) { }
 
 	async create(goalId: string, conversationUlid: string, objectiveMarkdown: string): Promise<GoalRecord> {
 		if (!objectiveMarkdown.trim()) throw new Error("A Goal objective cannot be empty")

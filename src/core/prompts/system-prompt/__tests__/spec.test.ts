@@ -12,7 +12,7 @@ import {
 import type { SystemPromptContext } from "../types"
 import { respondSpec } from "@core/task/tools/modules/respond/RespondTool"
 import { RESPONSE_OPERATIONS } from "@shared/responseTool"
-import { tasklets_spec } from "@core/task/tools/modules/use_subagents/UseSubagentsTool"
+import { tasklets_spec } from "@core/task/tools/modules/subagents/SubagentsTool"
 const mockContext: SystemPromptContext = {
 	cwd: "/test/project",
 	ide: "TestIde",

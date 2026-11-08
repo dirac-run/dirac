@@ -1,5 +1,4 @@
 import type { ToolUse } from "@core/assistant-message"
-import { DiracDefaultTool } from "@/shared/tools"
 import { CardStatus, isFinalStatus } from "../../../shared/ExtensionMessage"
 import { SurfaceToolEnvironmentFactory } from "./adapters/SurfaceAdapter"
 import type { ToolEnvironmentFactory } from "./interfaces/ToolEnvironmentFactory"
@@ -8,7 +7,6 @@ import { IDiracTool } from "./interfaces/IDiracTool"
 import { SurfaceType } from "./interfaces/SurfaceType"
 import { assertValidToolResponse } from "./runtime/assertValidToolResponse"
 import { normalizeOptionalToolParameters } from "./runtime/normalizeOptionalToolParameters"
-import { AgentConfigLoader } from "./subagent/AgentConfigLoader"
 import type { TaskConfig } from "./types/TaskConfig"
 import type { ToolResponse } from "./types/ToolResponse"
 import { ToolSkippedByUserMessage } from "./types/ToolSkippedByUserMessage"
@@ -49,32 +47,14 @@ export class ToolExecutorCoordinator {
 		}
 	}
 
-	has(toolName: string): boolean {
-		if (this.modularTools.has(toolName)) {
-			return true
-		}
-
-		return (
-			AgentConfigLoader.getInstance().isDynamicSubagentTool(toolName) &&
-			this.modularTools.has(DiracDefaultTool.USE_SUBAGENTS)
-		)
+		has(toolName: string): boolean {
+		return this.modularTools.has(toolName)
 	}
 
-	async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
+		async execute(config: TaskConfig, block: ToolUse): Promise<ToolResponse> {
 		const modularTool = this.modularTools.get(block.name)
-
-		if (!modularTool && AgentConfigLoader.getInstance().isDynamicSubagentTool(block.name)) {
-			const subagentTool = this.modularTools.get(DiracDefaultTool.USE_SUBAGENTS)
-			if (subagentTool) {
-				return this.executeModularTool(subagentTool, config, block)
-			}
-		}
-
-		if (modularTool) {
-			return this.executeModularTool(modularTool, config, block)
-		}
-
-		throw new Error(`No modular tool registered for: ${block.name}`)
+		if (!modularTool) throw new Error(`No modular tool registered for: ${block.name}`)
+		return this.executeModularTool(modularTool, config, block)
 	}
 
 	private async executeModularTool(tool: IDiracTool, config: TaskConfig, block: ToolUse): Promise<ToolResponse> {

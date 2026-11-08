@@ -7,8 +7,7 @@ import * as skills from "@core/context/instructions/user-instructions/skills"
 import { DiracToolSet } from "@core/prompts/system-prompt"
 import * as systemPrompt from "@core/prompts/system-prompt"
 import * as disk from "@core/storage/disk"
-import { use_subagents_spec } from "@core/task/tools/modules/use_subagents/UseSubagentsTool"
-import { AgentConfigLoader } from "@core/task/tools/subagent/AgentConfigLoader"
+import { subagents_spec } from "@core/task/tools/modules/subagents/SubagentsTool"
 import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
@@ -59,9 +58,6 @@ describe("TaskRequestBuilder", () => {
 		sandbox.stub(disk, "ensureRulesDirectoryExists").resolves("/tmp/rules")
 		sandbox.stub(disk, "ensureTaskDirectoryExists").resolves("/tmp/task")
 		sandbox.stub(systemPrompt, "getSystemPrompt").resolves({ systemPrompt: "built system prompt" })
-		sandbox.stub(AgentConfigLoader, "getInstance").returns({
-			getAllCachedConfigsWithToolNames: () => configuredAgents,
-		} as unknown as AgentConfigLoader)
 	})
 
 	afterEach(() => {
@@ -100,7 +96,6 @@ describe("TaskRequestBuilder", () => {
 				nativeTools,
 				coordinator: {},
 				executableToolNames: new Set(),
-				dynamicSubagentToolNames: new Set(),
 			}
 		})
 		const context = {
@@ -112,6 +107,7 @@ describe("TaskRequestBuilder", () => {
 			api: {},
 			stateManager: {
 				getGlobalSettingsKey,
+				getSystemDefaultSettingsKey: sandbox.stub().callsFake((key: string) => key === "subagentRoles" ? configuredAgents : undefined),
 				getGlobalStateKey: sandbox.stub().returns(undefined),
 				getWorkspaceStateKey: sandbox.stub().returns(undefined),
 			},
@@ -131,7 +127,10 @@ describe("TaskRequestBuilder", () => {
 					conversationHistoryDeletedRange: deletedRange,
 				}),
 			},
-			apiConversationManager: { scheduleProviderConversationCompaction: sandbox.stub().resolves() },
+			apiConversationManager: {
+				scheduleProviderConversationCompaction: sandbox.stub().resolves(),
+				prepareTranscriptInstructions: sandbox.stub().callsFake(async (instructions: string) => instructions),
+			},
 			diracIgnoreController: { yoloMode: false, diracIgnoreContent: undefined },
 			taskState: {
 				availableSkills: [],
@@ -191,8 +190,8 @@ describe("TaskRequestBuilder", () => {
 	}
 
 	function genericSubagentProperties(context: SystemPromptContext): Record<string, unknown> {
-		const [spec] = DiracToolSet.withDynamicSubagentToolSpecs([use_subagents_spec], context)
-		const subagents = spec.parameters?.find((parameter) => parameter.name === "subagents")
+		const [spec] = DiracToolSet.withSubagentRoleSpecs([subagents_spec], context)
+		const subagents = spec.parameters?.find((parameter) => parameter.name === "assignments")
 		return subagents?.items?.properties ?? {}
 	}
 
@@ -213,97 +212,52 @@ describe("TaskRequestBuilder", () => {
 		})
 	}
 
-	it("rebuilds current structured supervision after compaction rather than relying on narrative history", async () => {
+	it("delivers changing supervision as tail context without changing system instructions", async () => {
 		const { context, requestRuntime } = createContext(undefined)
 		let current = JSON.stringify({ pending: [{ taskletId: "child", requestId: "exact-current-request" }] })
-		const supervision = sandbox.stub().callsFake(() => current)
-		context.getTaskletSupervisionContext = supervision
-		const compacted = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0, shouldCompact: true })
-		assert.match(compacted.systemPrompt, /exact-current-request/)
+		context.getTaskletSupervisionContext = () => current
+		const first = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+		assert.doesNotMatch(first.systemPrompt, /exact-current-request/)
+		const prepare = context.apiConversationManager.prepareTranscriptInstructions as sinon.SinonStub
+		assert.match(prepare.firstCall.args[1], /exact-current-request/)
 		current = JSON.stringify({ pending: [], outcome: "committed" })
 		const next = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-		assert.doesNotMatch(next.systemPrompt, /exact-current-request/)
-		assert.match(next.systemPrompt, /committed/)
-		sinon.assert.calledTwice(supervision)
+		assert.equal(next.systemPrompt, first.systemPrompt)
+		assert.match(prepare.secondCall.args[1], /committed/)
+		assert.doesNotMatch(prepare.secondCall.args[1], /exact-current-request/)
 	})
 
-	it("exposes Utility routing in generic and dynamic subagent schemas for a valid selection", async () => {
-		const { context, requestRuntime, getCapturedPromptContext, writePromptMetadataArtifacts } = createContext({
-			provider: "anthropic",
-			modelId: "utility-model",
-		})
-
-		await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-
-		const promptContext = getCapturedPromptContext()
-		assert.ok(promptContext)
-		assert.equal(promptContext.utilityModelConfigured, true)
-		assert.ok("use_utility_model" in genericSubagentProperties(promptContext))
+	it("projects only current enabled global role names and descriptions on every request", async () => {
+		const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined)
+		const selection = { provider: "anthropic", modelId: "role-model", reasoningEffort: "high" }
 		configuredAgents = [
-			{
-				toolName: "subagent_reviewer",
-				config: {
-					name: "reviewer",
-					description: "Reviews code",
-					tools: [],
-					systemPrompt: "Review the code.",
-				},
-			},
+			{ name: "Reviewer", description: "Reviews code.", enabled: true, modelSelection: selection },
+			{ name: "Disabled", description: "Not available.", enabled: false, modelSelection: selection },
 		]
-		const [dynamicSpec] = DiracToolSet.getDynamicSubagentToolSpecs(promptContext)
-		assert.equal(
-			dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"),
-			true,
-		)
-		sinon.assert.calledOnce(writePromptMetadataArtifacts)
-		assert.deepEqual(writePromptMetadataArtifacts.firstCall.args[0], {
-			systemPrompt: "built system prompt",
-			providerInfo: { ...providerInfo, customPrompt: undefined, supportsNativeWebSearch: false },
-			tools: nativeTools,
-			fullHistory,
-			deletedRange,
-		})
+		await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+		const first = getCapturedPromptContext()!
+		assert.deepEqual(first.subagentRoles, [{ name: "Reviewer", description: "Reviews code." }])
+		assert.doesNotMatch(JSON.stringify(first.subagentRoles), /role-model|reasoningEffort|modelSelection/)
+		configuredAgents = [{ name: "Scout", description: "Examines code.", enabled: true, modelSelection: selection }]
+		await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+		assert.deepEqual(getCapturedPromptContext()!.subagentRoles, [{ name: "Scout", description: "Examines code." }])
+		assert.deepEqual(first.subagentRoles, [{ name: "Reviewer", description: "Reviews code." }])
+		assert.deepEqual(Object.keys(genericSubagentProperties(getCapturedPromptContext()!)), ["type", "task_header", "task_description"])
 	})
 
-	it("does not expose Utility routing for absent or invalid selections", async () => {
-		const selections = [
-			undefined,
-			{ provider: "not-a-provider", modelId: "utility-model" },
-			{ provider: "anthropic", modelId: "   " },
-		]
-
-		for (const selection of selections) {
-			const { context, requestRuntime, getCapturedPromptContext, writePromptMetadataArtifacts } = createContext(selection)
-			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-
-			const promptContext = getCapturedPromptContext()
-			assert.ok(promptContext)
-			assert.equal(promptContext.utilityModelConfigured, false)
-			assert.equal("use_utility_model" in genericSubagentProperties(promptContext), false)
-			configuredAgents = [
-				{
-					toolName: "subagent_reviewer",
-					config: {
-						name: "reviewer",
-						description: "Reviews code",
-						tools: [],
-						systemPrompt: "Review the code.",
-					},
-				},
-			]
-			const [dynamicSpec] = DiracToolSet.getDynamicSubagentToolSpecs(promptContext)
-			assert.equal(
-				dynamicSpec.parameters?.some((parameter) => parameter.name === "use_utility_model"),
-				false,
-			)
-			configuredAgents = []
-			sinon.assert.calledOnce(writePromptMetadataArtifacts)
-		}
+	it("keeps ordinary prompt assembly for children and adds only a non-default role label", async () => {
+		const { context, requestRuntime } = createContext(undefined)
+		context.executionProfile = "tasklet"
+		context.taskletConfiguration = { name: "Reviewer", modelSelection: { provider: "anthropic", modelId: "role-model" } }
+		const result = await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+		assert.match(result.systemPrompt, /built system prompt/)
+		assert.match(result.systemPrompt, /Subagent Role\nReviewer/)
+		assert.doesNotMatch(result.systemPrompt, /Execution Deadline|Agent Profile/)
 	})
 
 	it("does not advertise the board skill in a headless request even with cached discovery metadata", async () => {
 		setHostCapabilities({})
-		;(skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
+			; (skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
 		const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined)
 		await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
 		assert.equal(
@@ -320,13 +274,13 @@ describe("TaskRequestBuilder", () => {
 		it(`advertises foreground-only skills correctly in ${executionProfile} request assembly`, async () => {
 			setHostCapabilities({
 				architectureViewer: {
-					prepare: async () => {},
+					prepare: async () => { },
 					createPanel: async () => {
 						throw new Error("not used")
 					},
 				},
 			})
-			;(skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
+				; (skills.getOrDiscoverSkills as sinon.SinonStub).resolves(skills.BUILTIN_SKILLS)
 			const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined)
 			context.executionProfile = executionProfile
 			context.getPinnedContext = async () => undefined

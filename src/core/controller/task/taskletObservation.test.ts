@@ -14,7 +14,7 @@ import { saveTaskletEvents, saveTaskletRecord } from "@core/storage/taskStorage"
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
-import { createTaskletId } from "@shared/taskletId"
+import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
 
 const ROOT = "observation-root"
 const text = (id: string, content = id): DiracMessage => ({ id, ts: 1, content: { type: DiracMessageType.MARKDOWN, content } })

@@ -59,7 +59,7 @@ describe("Unbiased sign-in local completion", () => {
 			interval: 1,
 		})
 		sinon.stub(deviceAuth, "pollUnbiasedDeviceAuth").resolves(token)
-		apply = sinon.stub(transaction, "applyApiConfigurationTransaction").resolves()
+		apply = sinon.stub(transaction, "applyProviderSetupTransaction").resolves()
 	})
 	afterEach(() => sinon.restore())
 
@@ -79,7 +79,17 @@ describe("Unbiased sign-in local completion", () => {
 			token.workloadName,
 		)
 		assert.deepEqual(harness.events, ["credentials_saved", "configuration_applied", "state_published", "completed"])
+		sinon.assert.calledOnceWithExactly(apply, harness.controller, { unbiasedApiKey: token.accessToken }, sinon.match.func)
 		assert.equal(harness.responses.at(-1)?.completed, true)
+	})
+
+	it("completes initial setup without a selected application provider or model", async () => {
+		apply.restore()
+		const harness = createHarness()
+		await authenticateUnbiased(harness.controller, EmptyRequest.create({}), harness.stream)
+		assert.equal(harness.key(), token.accessToken)
+		assert.deepEqual(harness.events, ["credentials_saved", "state_published", "completed"])
+		sinon.assert.calledOnceWithExactly(harness.stateManager.setApiConfiguration, { unbiasedApiKey: token.accessToken })
 	})
 
 	it("preserves the issued key and account when applying local configuration fails", async () => {

@@ -49,13 +49,12 @@ function* answer(id, request, text) {
 
 function* parentScenario() {
 	const spawned = yield {
-		name: "use_subagents",
+		name: "subagents",
 		args: {
-			subagents: ["ALPHA", "BETA"].map((name) => ({
-				task_title: `Fixture ${name}`,
-				prompt: `TASKLET_FIXTURE_${name}: report privately and ask the parent before completing.`,
-				timeout: 240,
-				include_history: false,
+			assignments: ["ALPHA", "BETA"].map((name) => ({
+				type: "default",
+				task_header: `Fixture ${name}`,
+				task_description: `TASKLET_FIXTURE_${name}: report privately and ask the parent before completing.`,
 			})),
 		},
 	}
@@ -113,7 +112,7 @@ export function createTaskletFixture(workspace) {
 	return async (completion) => {
 		if (failure) throw failure
 		const names = completion.tools?.map((tool) => tool.function.name) ?? []
-		const root = names.includes("use_subagents")
+		const root = names.includes("subagents")
 		const messages = JSON.stringify(completion.messages)
 		let actor = "parent"
 		let call

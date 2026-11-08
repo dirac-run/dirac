@@ -22,7 +22,6 @@ interface ToolSnapshotManagerOptions {
 	getSelectionPolicy: () => ToolSelectionPolicy | undefined
 	getActiveSkills: () => readonly SkillMetadata[]
 	isToolAvailable?: (tool: DiscoveredTool) => boolean
-	allowedTools?: readonly string[]
 	environmentFactory?: import("../interfaces/ToolEnvironmentFactory").ToolEnvironmentFactory
 }
 
@@ -34,7 +33,7 @@ export class ToolSnapshotManager {
 	private inventorySnapshot?: ToolInventorySnapshot
 	private activeRequestSnapshot?: ToolRequestSnapshot
 
-	constructor(private readonly options: ToolSnapshotManagerOptions) {}
+	constructor(private readonly options: ToolSnapshotManagerOptions) { }
 
 	markDirty(reason: ToolSnapshotDirtyReason): void {
 		if (reason === "tool_toggles_changed") {
@@ -76,20 +75,11 @@ export class ToolSnapshotManager {
 			)
 			const effectiveTools = this.mergeTools(selectedConfiguredTools, skillTools)
 				.filter((tool) => meetsHostCapabilityRequirement(tool.spec) && (this.options.isToolAvailable?.(tool) ?? true))
-				.map((tool) =>
-					this.options.allowedTools ? registry.scopeToolForSubagent(tool, this.options.allowedTools) : tool,
-				)
-				.filter((tool): tool is DiscoveredTool => tool !== undefined)
 			const promptVisibleSpecs = this.buildPromptVisibleSpecs(effectiveTools, context)
 			const nativeTools = DiracToolSet.convertSpecsToNativeTools(promptVisibleSpecs, context)
-			const dynamicSubagentToolNames = new Set(
-				promptVisibleSpecs
-					.filter((spec) => spec.id === DiracDefaultTool.USE_SUBAGENTS && spec.name !== DiracDefaultTool.USE_SUBAGENTS)
-					.map((spec) => spec.name),
-			)
 			const coordinator = this.buildCoordinator(effectiveTools)
 			this.validateInventoryCoordinator(effectiveTools, coordinator)
-			const executableToolNames = new Set([...effectiveTools.map((tool) => tool.spec.name), ...dynamicSubagentToolNames])
+			const executableToolNames = new Set(effectiveTools.map((tool) => tool.spec.name))
 
 			const snapshot: ToolRequestSnapshot = {
 				inventoryVersion: inventory.version,
@@ -101,7 +91,6 @@ export class ToolSnapshotManager {
 				nativeTools,
 				coordinator,
 				executableToolNames,
-				dynamicSubagentToolNames,
 			}
 
 			validateToolRequestSnapshot(snapshot)
@@ -197,23 +186,23 @@ export class ToolSnapshotManager {
 			.map((spec) =>
 				context.executionProfile === "tasklet" && spec.name === DiracDefaultTool.RESPOND
 					? {
-							...spec,
-							description:
-								"Report progress, ask the parent, or complete the assignment. Tasklets always execute in Act mode.",
-							parameters: spec.parameters?.map((parameter) =>
-								parameter.name === "operation"
-									? {
-											...parameter,
-											enum: parameter.enum.filter((operation: string) => operation !== "plan"),
-											instruction:
-												"progress = interim update; question = required parent input; complete = assignment result.",
-										}
-									: parameter,
-							),
-						}
+						...spec,
+						description:
+							"Report progress, ask the parent, or complete the assignment. Tasklets always execute in Act mode.",
+						parameters: spec.parameters?.map((parameter) =>
+							parameter.name === "operation"
+								? {
+									...parameter,
+									enum: parameter.enum.filter((operation: string) => operation !== "plan"),
+									instruction:
+										"progress = interim update; question = required parent input; complete = assignment result.",
+								}
+								: parameter,
+						),
+					}
 					: spec,
 			)
 
-		return DiracToolSet.withDynamicSubagentToolSpecs(contextFilteredSpecs, context)
+		return DiracToolSet.withSubagentRoleSpecs(contextFilteredSpecs, context)
 	}
 }

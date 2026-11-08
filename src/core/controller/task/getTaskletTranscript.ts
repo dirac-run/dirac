@@ -43,6 +43,7 @@ export async function getTaskletTranscript(controller: Controller, request: Task
 		observedAt: Date.now(),
 		taskletId: request.taskletId,
 		title: clipObservationText(transcript.title, 512),
+		...(transcript.role === undefined ? {} : { role: transcript.role }),
 		state: transcript.state,
 		messages: [],
 		truncatedMessageIds: [],

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { SUBAGENT_NAMES } from "./subagentNames";
 
 /** Storage location only, not proof of ownership or permission to access an execution. */
 export type TaskStorageAddress = { kind: "task"; taskId: string } | { kind: "tasklet"; rootTaskId: string; taskletId: string }
@@ -10,15 +10,24 @@ export function getTaskScopedStateKey(identity: string, address?: string | TaskS
 		: identity
 }
 
+/** Historical reserved prefix; new conversation IDs do not depend on it. */
 export const TASKLET_ID_PREFIX = "tasklet_"
-const TASKLET_ID_PATTERN = /^tasklet_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const UNIQUE_SUBAGENT_NAMES = [...new Set(SUBAGENT_NAMES)]
 
-/** Stable conversation identity, independent of a Task ID or a storage path. */
-export function createTaskletId(): string {
-	return `${TASKLET_ID_PREFIX}${randomUUID()}`
+/** Select the next unused identity. The owning host must reserve it synchronously before starting work. */
+export function createTaskletId(usedIds: ReadonlySet<string>): string {
+	for (let round = 1; ; round++) {
+		for (const name of UNIQUE_SUBAGENT_NAMES) {
+			const id = round === 1 ? name : `${name} ${round}`
+			if (!usedIds.has(id)) return id
+		}
+	}
 }
 
-/** Format classification only; the owning root must resolve and authorize the handle. */
+/** Safe opaque path segment only; the root must separately resolve and authorize the conversation. */
 export function isTaskletId(id: string): boolean {
-	return id.length === TASKLET_ID_PREFIX.length + 36 && TASKLET_ID_PATTERN.test(id)
+	return typeof id === "string" && id.length > 0 && id.length <= 128 &&
+		id !== "." && id !== ".." && id === id.trim() &&
+		!/[<>:"/\\|?*\u0000-\u001f\u007f]/.test(id) && !id.endsWith(".") &&
+		!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(id)
 }

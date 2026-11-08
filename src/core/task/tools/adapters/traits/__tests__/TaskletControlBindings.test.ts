@@ -27,7 +27,7 @@ describe("Tasklet environment control bindings", () => {
 			const { config, callbacks } = fixture()
 			config.executionProfile = executionProfile
 			const tasklets = buildOrchestrationTrait(config).tasklets!
-			const input = { title: "investigate", prompt: "Find the cause" }
+			const input = { type: "default", title: "investigate", prompt: "Find the cause" }
 			assert.deepEqual(await tasklets.start(input), { id: "child" })
 			assert.deepEqual(await tasklets.resume("child", "follow up"), { id: "child" })
 			assert.deepEqual(tasklets.list(), { items: [], totalItems: 0 })

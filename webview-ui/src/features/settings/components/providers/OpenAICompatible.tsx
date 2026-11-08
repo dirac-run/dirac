@@ -1,9 +1,9 @@
 import { TooltipContent, TooltipTrigger } from "@radix-ui/react-tooltip"
-import { azureOpenAiDefaultApiVersion, ModelInfo, OpenAiCompatibleProfile, openAiModelInfoSaneDefaults } from "@shared/api"
+import { type ApiConfiguration, azureOpenAiDefaultApiVersion, ModelInfo, OpenAiCompatibleProfile, openAiModelInfoSaneDefaults } from "@shared/api"
 import { Mode } from "@shared/ExtensionMessage"
 import { VSCodeButton, VSCodeCheckbox, VSCodeDropdown, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { PlusIcon, RefreshCwIcon, TrashIcon, XIcon } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import {
 	getModeSpecificFields,
 	normalizeApiConfiguration,
@@ -12,7 +12,6 @@ import {
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { getAsVar, VSC_DESCRIPTION_FOREGROUND } from "@/shared/lib/vscStyles"
 import { Tooltip } from "@/shared/ui/tooltip"
-import { ApiKeyField } from "../common/ApiKeyField"
 import { DebouncedTextField } from "../common/DebouncedTextField"
 import { ModelAutocomplete } from "../common/ModelAutocomplete"
 import { ModelInfoView } from "../common/ModelInfoView"
@@ -27,190 +26,154 @@ interface OpenAICompatibleProviderProps {
 	showModelOptions: boolean
 	isPopup?: boolean
 	currentMode: Mode
+	intent?: "setup" | "activate"
 }
 
 /**
  * The OpenAI Compatible provider configuration component
  */
-export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMode }: OpenAICompatibleProviderProps) => {
-	const { apiConfiguration, remoteConfigSettings, openAiModels, refreshOpenAiModels } = useSettingsStore()
-	const { handleFieldChange, handleModeFieldChange, handleModeFieldsChange, handleFieldsChange } = useApiConfigurationHandlers()
-
+export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMode, intent = "activate" }: OpenAICompatibleProviderProps) => {
+	const savedConfiguration = useSettingsStore((state) => state.apiConfiguration)
+	const remoteConfigSettings = useSettingsStore((state) => state.remoteConfigSettings)
+	const openAiModels = useSettingsStore((state) => state.openAiModels)
+	const refreshOpenAiModels = useSettingsStore((state) => state.refreshOpenAiModels)
+	const { handleFieldsChange: persistFields, handleModeFieldChange: persistModeField, handleModeFieldsChange: persistModeFields } = useApiConfigurationHandlers()
+	const profiles: OpenAiCompatibleProfile[] = savedConfiguration?.openAiCompatibleProfiles || []
+	const selectedProfileName = currentMode === "plan" ? savedConfiguration?.planModeOpenAiProfileName : savedConfiguration?.actModeOpenAiProfileName
+	const hasLegacySetup = !!(savedConfiguration?.openAiBaseUrl || savedConfiguration?.openAiApiKey)
+	const [editingLegacy, setEditingLegacy] = useState(intent === "setup" && hasLegacySetup)
+	const initialProfile = intent === "setup" && hasLegacySetup ? undefined : profiles.find((profile) => profile.name === selectedProfileName)
+	const [currentProfileName, setCurrentProfileName] = useState(initialProfile?.name)
+	const [profileNameInput, setProfileNameInput] = useState(initialProfile?.name || "")
+	const [profileError, setProfileError] = useState<string>()
 	const [modelConfigurationSelected, setModelConfigurationSelected] = useState(false)
 	const [isRefreshingModels, setIsRefreshingModels] = useState(false)
-	const [profileNameInput, setProfileNameInput] = useState("")
-	const previousProfileNameRef = useRef<string | undefined>(undefined)
-
-	// Get the normalized configuration
+	const profileConfiguration = (profile?: OpenAiCompatibleProfile): ApiConfiguration => ({
+		openAiBaseUrl: profile?.baseUrl || "",
+		openAiApiKey: profile?.apiKey,
+		openAiHeaders: profile?.headers,
+		azureApiVersion: profile?.azureApiVersion,
+		planModeApiProvider: "openai",
+		actModeApiProvider: "openai",
+		planModeOpenAiModelId: profile?.modelId || "",
+		actModeOpenAiModelId: profile?.modelId || "",
+		planModeOpenAiModelInfo: structuredClone(profile?.modelInfo || openAiModelInfoSaneDefaults),
+		actModeOpenAiModelInfo: structuredClone(profile?.modelInfo || openAiModelInfoSaneDefaults),
+	})
+	const [apiConfiguration, setDraft] = useState<ApiConfiguration>(() => initialProfile
+		? profileConfiguration(initialProfile)
+		: { ...structuredClone(savedConfiguration), planModeApiProvider: "openai", actModeApiProvider: "openai" })
+	// Keep rows while names are incomplete or duplicated instead of collapsing them into an object.
+	const [headerEntries, setHeaderEntries] = useState<[string, string][]>(() => Object.entries(apiConfiguration.openAiHeaders ?? {}))
+	const headerNames = headerEntries.map(([name]) => name.toLowerCase())
+	const headerError = headerEntries.some(([name]) => !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name))
+		? "Each custom header needs a valid, non-empty name."
+		: new Set(headerNames).size !== headerNames.length
+			? "Custom header names must be unique (case-insensitive)."
+			: undefined
+	const currentProfile = profiles.find((profile) => profile.name === currentProfileName)
 	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
 	const showReasoningEffort = supportsReasoningEffortForModelId(selectedModelId, selectedModelInfo)
-
-	// Get mode-specific fields
 	const { openAiModelInfo } = getModeSpecificFields(apiConfiguration, currentMode)
-
-	// Debounced function to refresh OpenAI models (prevents excessive API calls while typing)
-	const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-
-	// Auto-fetch models on mount when a base URL is already configured
+	const handleFieldChange = (field: keyof ApiConfiguration, value: unknown) => setDraft((draft) => ({ ...draft, [field]: value }))
+	const handleModeFieldChange = (pair: { plan: keyof ApiConfiguration; act: keyof ApiConfiguration }, value: ApiConfiguration[keyof ApiConfiguration], mode: Mode) => {
+		if (intent === "activate" || showModelOptions) void persistModeField(pair, value, mode)
+		setDraft((draft) => ({ ...draft, [pair.plan]: value, [pair.act]: value }))
+	}
+	const handleModeFieldsChange = (pairs: Record<string, { plan: keyof ApiConfiguration; act: keyof ApiConfiguration }>, values: Record<string, unknown>, mode: Mode) => {
+		if (intent === "activate" || showModelOptions) void persistModeFields(pairs, values, mode)
+		setDraft((draft) => {
+			const next = { ...draft }
+			for (const [key, pair] of Object.entries(pairs)) {
+				Object.assign(next, { [pair.plan]: values[key], [pair.act]: values[key] })
+			}
+			return next
+		})
+	}
+	const endpointHeadersKey = JSON.stringify([...headerEntries].sort(([a], [b]) => a.localeCompare(b)))
+	// Input edits update the draft immediately; only endpoint discovery is debounced.
 	useEffect(() => {
-		if (apiConfiguration?.openAiBaseUrl) {
-			void refreshOpenAiModels(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey)
-		}
-		return () => {
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current)
-			}
-		}
-	}, [])
-
-	const currentProfileName =
-		currentMode === "plan" ? apiConfiguration?.planModeOpenAiProfileName : apiConfiguration?.actModeOpenAiProfileName
-	const profiles = apiConfiguration?.openAiCompatibleProfiles || []
-	const currentProfile = profiles.find((p: OpenAiCompatibleProfile) => p.name === currentProfileName)
-
-	const persistOpenAiHeaders = (headers: Record<string, string>) => {
-		if (!currentProfileName || !currentProfile) return handleFieldChange("openAiHeaders", headers)
-
-		return handleFieldsChange({
-			openAiHeaders: headers,
-			openAiCompatibleProfiles: profiles.map((profile: OpenAiCompatibleProfile) =>
-				profile.name === currentProfileName ? { ...profile, headers } : profile,
-			),
-		})
-	}
-
-	const handleProfileChange = async (e: any) => {
-		const name = e.target.value
-		if (name === "manual" || name === "new") {
-			await handleNewProfile()
-			return
-		}
-
-		const profile = profiles.find((p: OpenAiCompatibleProfile) => p.name === name)
-		if (profile) {
-			// Copy profile values to active fields
-			const didPersist = await handleFieldsChange({
-				openAiBaseUrl: profile.baseUrl,
-				openAiApiKey: profile.apiKey,
-				openAiHeaders: profile.headers,
-				azureApiVersion: profile.azureApiVersion,
-				...(currentMode === "plan"
-					? { planModeOpenAiModelId: profile.modelId, planModeOpenAiModelInfo: profile.modelInfo }
-					: { actModeOpenAiModelId: profile.modelId, actModeOpenAiModelInfo: profile.modelInfo }),
-				[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: name,
+		if (headerError) return
+		const timer = setTimeout(() => {
+			void refreshOpenAiModels(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey, Object.fromEntries(JSON.parse(endpointHeadersKey)))
+		}, 250)
+		return () => clearTimeout(timer)
+	}, [apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey, endpointHeadersKey, headerError, refreshOpenAiModels])
+	const handleProfileChange = async (event: { target: EventTarget | null }) => {
+		const name = (event.target as HTMLSelectElement).value
+		const profile = profiles.find((candidate) => candidate.name === name)
+		if (!profile) { handleNewProfile(); return }
+		setCurrentProfileName(profile.name)
+		setEditingLegacy(false)
+		setProfileNameInput(profile.name)
+		setDraft(profileConfiguration(profile))
+		setHeaderEntries(Object.entries(profile.headers ?? {}))
+		setProfileError(undefined)
+		if (intent === "activate") {
+			await persistFields({
+				[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: profile.name,
+				[currentMode === "plan" ? "planModeOpenAiModelId" : "actModeOpenAiModelId"]: profile.modelId,
+				[currentMode === "plan" ? "planModeOpenAiModelInfo" : "actModeOpenAiModelInfo"]: profile.modelInfo,
 			})
-			if (!didPersist) return
-			previousProfileNameRef.current = name
-			setProfileNameInput(name)
-			await refreshOpenAiModels(profile.baseUrl, profile.apiKey)
 		}
 	}
-
-	const handleNewProfile = async () => {
-		const didPersist = await handleFieldsChange({
-			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
-		})
-		if (!didPersist) return
-		previousProfileNameRef.current = currentProfileName
+	const handleNewProfile = () => {
+		setEditingLegacy(false)
+		setCurrentProfileName(undefined)
 		setProfileNameInput("")
+		setDraft(profileConfiguration())
+		setHeaderEntries([])
+		setProfileError(undefined)
 	}
-
+	const editLegacySetup = () => {
+		setEditingLegacy(true)
+		setCurrentProfileName(undefined)
+		setProfileNameInput("")
+		setDraft({ ...structuredClone(savedConfiguration), planModeApiProvider: "openai", actModeApiProvider: "openai" })
+		setHeaderEntries(Object.entries(savedConfiguration.openAiHeaders ?? {}))
+		setProfileError(undefined)
+	}
+	const saveLegacySetup = async () => {
+		if (headerError) return
+		await persistFields({
+			openAiBaseUrl: apiConfiguration.openAiBaseUrl ?? "", openAiApiKey: apiConfiguration.openAiApiKey ?? "",
+			openAiHeaders: Object.fromEntries(headerEntries), azureApiVersion: apiConfiguration.azureApiVersion ?? "",
+		}, "openai")
+	}
 	const handleSaveProfile = async () => {
-		const nameToSave = profileNameInput.trim()
-		if (!nameToSave) return
-
-		const newProfile: OpenAiCompatibleProfile = {
-			name: nameToSave,
-			baseUrl: apiConfiguration?.openAiBaseUrl || "",
-			apiKey: apiConfiguration?.openAiApiKey,
-			modelId: selectedModelId || "",
-			modelInfo: openAiModelInfo || openAiModelInfoSaneDefaults,
-			headers: apiConfiguration?.openAiHeaders,
-			azureApiVersion: apiConfiguration?.azureApiVersion,
-		}
-
-		const updatedProfiles = [...profiles]
-		const existingIndex = updatedProfiles.findIndex((p) => p.name === newProfile.name)
-		if (existingIndex !== -1) {
-			updatedProfiles[existingIndex] = newProfile
-		} else {
-			updatedProfiles.push(newProfile)
-		}
-
-		const didPersist = await handleFieldsChange({
-			openAiCompatibleProfiles: updatedProfiles,
-			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: newProfile.name,
-		})
-		if (!didPersist) return
-		previousProfileNameRef.current = newProfile.name
-	}
-
-	const handleDeleteProfile = async () => {
-		if (!currentProfileName) {
-			// Cancel "New" mode and revert to previous profile
-			if (previousProfileNameRef.current) {
-				const prevProfile = profiles.find((p: OpenAiCompatibleProfile) => p.name === previousProfileNameRef.current)
-				if (prevProfile) {
-					const didPersist = await handleFieldsChange({
-						openAiBaseUrl: prevProfile.baseUrl,
-						openAiApiKey: prevProfile.apiKey,
-						openAiHeaders: prevProfile.headers,
-						azureApiVersion: prevProfile.azureApiVersion,
-						...(currentMode === "plan"
-							? { planModeOpenAiModelId: prevProfile.modelId, planModeOpenAiModelInfo: prevProfile.modelInfo }
-							: { actModeOpenAiModelId: prevProfile.modelId, actModeOpenAiModelInfo: prevProfile.modelInfo }),
-						[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]:
-							previousProfileNameRef.current,
-					})
-					if (!didPersist) return
-					setProfileNameInput(previousProfileNameRef.current)
-				} else {
-					// Fallback if previous profile is gone
-					const didPersist = await handleFieldsChange({
-						[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
-					})
-					if (!didPersist) return
-				}
-			}
+		if (headerError) return
+		const name = profileNameInput.trim()
+		if (!name) { setProfileError("A configuration name is required."); return }
+		if (profiles.some((profile) => profile.name === name && profile.name !== currentProfileName)) {
+			setProfileError("A configuration with this name already exists.")
 			return
 		}
-
-		const updatedProfiles = profiles.filter((p: OpenAiCompatibleProfile) => p.name !== currentProfileName)
-		const didPersist = await handleFieldsChange({
-			openAiCompatibleProfiles: updatedProfiles,
-			[currentMode === "plan" ? "planModeOpenAiProfileName" : "actModeOpenAiProfileName"]: undefined,
-		})
-		if (!didPersist) return
-		setProfileNameInput("")
-		previousProfileNameRef.current = undefined
-	}
-
-	const onRefreshModels = async () => {
-		if (apiConfiguration?.openAiBaseUrl) {
-			setIsRefreshingModels(true)
-			try {
-				await refreshOpenAiModels(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey)
-			} finally {
-				setIsRefreshingModels(false)
-			}
+		// Endpoint names are stable references; rename is not implicit activation or retargeting.
+		if (currentProfileName && name !== currentProfileName) {
+			setProfileError("Create a new configuration to use a different name.")
+			return
+		}
+		const profile: OpenAiCompatibleProfile = {
+			name, baseUrl: apiConfiguration.openAiBaseUrl || "", apiKey: apiConfiguration.openAiApiKey,
+			modelId: getModeSpecificFields(apiConfiguration, currentMode).openAiModelId || "", modelInfo: openAiModelInfo || openAiModelInfoSaneDefaults,
+			headers: Object.fromEntries(headerEntries), azureApiVersion: apiConfiguration.azureApiVersion,
+		}
+		const next = currentProfileName ? profiles.map((entry) => entry.name === currentProfileName ? profile : entry) : [...profiles, profile]
+		if (await persistFields({ openAiCompatibleProfiles: next })) {
+			setCurrentProfileName(name)
+			setProfileError(undefined)
 		}
 	}
-
-	const debouncedRefreshOpenAiModels = useCallback(
-		(baseUrl?: string, apiKey?: string) => {
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current)
-			}
-
-			// Require baseUrl (avoid sending custom API keys to default OpenAI before baseUrl is entered), while allowing keyless local servers
-			if (baseUrl) {
-				debounceTimerRef.current = setTimeout(() => {
-					refreshOpenAiModels(baseUrl, apiKey)
-				}, 500)
-			}
-		},
-		[refreshOpenAiModels],
-	)
+	const handleDeleteProfile = async () => {
+		if (!currentProfileName) { handleNewProfile(); return }
+		if (await persistFields({ openAiCompatibleProfiles: profiles.filter((profile) => profile.name !== currentProfileName) })) handleNewProfile()
+	}
+	const onRefreshModels = async () => {
+		if (headerError) return
+		setIsRefreshingModels(true)
+		try { await refreshOpenAiModels(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey, Object.fromEntries(headerEntries)) }
+		finally { setIsRefreshingModels(false) }
+	}
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -246,6 +209,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 					)}
 				</div>
 			</div>
+			{intent === "setup" && hasLegacySetup && <VSCodeButton onClick={editLegacySetup}>Edit legacy endpoint</VSCodeButton>}
 
 			{/* Settings Section */}
 			<div className="flex flex-col gap-3">
@@ -258,18 +222,15 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 									<i className="codicon codicon-lock text-description text-sm" />
 								)}
 							</div>
-							<DebouncedTextField
+							<VSCodeTextField
 								disabled={remoteConfigSettings?.openAiBaseUrl !== undefined}
-								helpText="The base URL of the OpenAI-compatible API. Note: Do not include /chat/completions at the end."
-								initialValue={apiConfiguration?.openAiBaseUrl || ""}
-								onChange={(value: string) => {
-									handleFieldChange("openAiBaseUrl", value)
-									debouncedRefreshOpenAiModels(value, apiConfiguration?.openAiApiKey)
-								}}
-								placeholder={"Enter base URL..."}
+								value={apiConfiguration?.openAiBaseUrl || ""}
+								onInput={(event) => handleFieldChange("openAiBaseUrl", (event.target as HTMLInputElement).value)}
+								placeholder="Enter base URL..."
 								style={{ width: "100%" }}
-								type="text"
-							/>
+								type="text">
+								<div slot="helper-text" className="text-xs text-description">The base URL of the OpenAI-compatible API. Note: Do not include /chat/completions at the end.</div>
+							</VSCodeTextField>
 						</div>
 					</TooltipTrigger>
 					<TooltipContent hidden={remoteConfigSettings?.openAiBaseUrl === undefined}>
@@ -277,52 +238,58 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 					</TooltipContent>
 				</Tooltip>
 
-				<ApiKeyField
-					initialValue={apiConfiguration?.openAiApiKey || ""}
-					onChange={(value: string) => {
-						handleFieldChange("openAiApiKey", value)
-						debouncedRefreshOpenAiModels(apiConfiguration?.openAiBaseUrl, value)
-					}}
-					providerName="OpenAI Compatible"
-				/>
-
-				<div className="flex flex-col gap-2">
-					<ModelAutocomplete
-						label="Model ID"
-						models={openAiModels}
-						onChange={(newModelId: string, modelInfo: ModelInfo | undefined) => {
-							handleModeFieldsChange(
-								{
-									openAiModelId: { plan: "planModeOpenAiModelId", act: "actModeOpenAiModelId" },
-									openAiModelInfo: { plan: "planModeOpenAiModelInfo", act: "actModeOpenAiModelInfo" },
-								},
-								{
-									openAiModelId: newModelId,
-									openAiModelInfo: modelInfo || openAiModelInfoSaneDefaults,
-								},
-								currentMode,
-							)
-						}}
-						placeholder="Enter or select Model ID..."
-						selectedModelId={selectedModelId}
-					/>
-					<VSCodeButton
-						className={`self-start ${isRefreshingModels ? "animate-pulse" : ""}`}
-						disabled={isRefreshingModels || !apiConfiguration?.openAiBaseUrl}
-						onClick={onRefreshModels}>
-						{isRefreshingModels ? (
-							"Refreshing..."
-						) : (
-							<>
-								Refresh Models <RefreshCwIcon className="ml-1" size={14} />
-							</>
-						)}
-					</VSCodeButton>
+				<div>
+					<VSCodeTextField
+						value={apiConfiguration?.openAiApiKey || ""}
+						onInput={(event) => handleFieldChange("openAiApiKey", (event.target as HTMLInputElement).value)}
+						placeholder="Enter API Key..."
+						required
+						type="password"
+						style={{ width: "100%" }}>
+						<span style={{ fontWeight: 500 }}>OpenAI Compatible API Key</span>
+					</VSCodeTextField>
+					<p className="mt-1 text-xs text-description">This key is stored locally and only used to make API requests from this extension.</p>
 				</div>
 
+				{showModelOptions && <>
+					<div className="flex flex-col gap-2">
+						<ModelAutocomplete
+							label="Model ID"
+							models={openAiModels}
+							onChange={(newModelId: string, modelInfo: ModelInfo | undefined) => {
+								handleModeFieldsChange(
+									{
+										openAiModelId: { plan: "planModeOpenAiModelId", act: "actModeOpenAiModelId" },
+										openAiModelInfo: { plan: "planModeOpenAiModelInfo", act: "actModeOpenAiModelInfo" },
+									},
+									{
+										openAiModelId: newModelId,
+										openAiModelInfo: modelInfo || openAiModelInfoSaneDefaults,
+									},
+									currentMode,
+								)
+							}}
+							placeholder="Enter or select Model ID..."
+							selectedModelId={selectedModelId}
+						/>
+						<VSCodeButton
+							className={`self-start ${isRefreshingModels ? "animate-pulse" : ""}`}
+							disabled={isRefreshingModels || !apiConfiguration?.openAiBaseUrl}
+							onClick={onRefreshModels}>
+							{isRefreshingModels ? (
+								"Refreshing..."
+							) : (
+								<>
+									Refresh Models <RefreshCwIcon className="ml-1" size={14} />
+								</>
+							)}
+						</VSCodeButton>
+					</div>
+				</>}
+
 				{/* Custom Headers */}
+				{headerError && <p role="alert" className="text-xs text-error">{headerError}</p>}
 				{(() => {
-					const headerEntries = Object.entries(apiConfiguration?.openAiHeaders ?? {}) as [string, string][]
 
 					return (
 						<div className="flex flex-col gap-2">
@@ -343,11 +310,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 								<VSCodeButton
 									disabled={remoteConfigSettings?.openAiHeaders !== undefined}
 									onClick={() => {
-										const currentHeaders = { ...(apiConfiguration?.openAiHeaders || {}) }
-										const headerCount = Object.keys(currentHeaders).length
-										const newKey = `header${headerCount + 1}`
-										currentHeaders[newKey] = ""
-										persistOpenAiHeaders(currentHeaders)
+										setHeaderEntries((entries) => [...entries, ["", ""]])
 									}}>
 									Add Header
 								</VSCodeButton>
@@ -356,30 +319,22 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 							<div className="flex flex-col gap-2">
 								{headerEntries.map(([key, value], index) => (
 									<div className="flex gap-2" key={index}>
-										<DebouncedTextField
+										<VSCodeTextField
 											disabled={remoteConfigSettings?.openAiHeaders !== undefined}
-											initialValue={key}
-											onChange={(newValue: string) => {
-												const currentHeaders = apiConfiguration?.openAiHeaders ?? {}
-												if (newValue && newValue !== key) {
-													const { [key]: _, ...rest } = currentHeaders
-													persistOpenAiHeaders({
-														...rest,
-														[newValue]: value,
-													})
-												}
+											value={key}
+											onInput={(event) => {
+												const newValue = (event.target as HTMLInputElement).value
+												setHeaderEntries((entries) => entries.map((entry, i) => i === index ? [newValue, entry[1]] : entry))
 											}}
 											placeholder="Header name"
 											style={{ flex: 1 }}
 										/>
-										<DebouncedTextField
+										<VSCodeTextField
 											disabled={remoteConfigSettings?.openAiHeaders !== undefined}
-											initialValue={value as string}
-											onChange={(newValue: string) => {
-												persistOpenAiHeaders({
-													...(apiConfiguration?.openAiHeaders ?? {}),
-													[key]: newValue,
-												})
+											value={value}
+											onInput={(event) => {
+												const newValue = (event.target as HTMLInputElement).value
+												setHeaderEntries((entries) => entries.map((entry, i) => i === index ? [entry[0], newValue] : entry))
 											}}
 											placeholder="Header value"
 											style={{ flex: 1 }}
@@ -388,8 +343,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 											appearance="secondary"
 											disabled={remoteConfigSettings?.openAiHeaders !== undefined}
 											onClick={() => {
-												const { [key]: _, ...rest } = apiConfiguration?.openAiHeaders ?? {}
-												persistOpenAiHeaders(rest)
+												setHeaderEntries((entries) => entries.filter((_, i) => i !== index))
 											}}>
 											Remove
 										</VSCodeButton>
@@ -407,33 +361,35 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 							<i className="codicon codicon-lock text-description text-sm" />
 						)}
 					</div>
-					<DebouncedTextField
+					<VSCodeTextField
 						disabled={remoteConfigSettings?.azureApiVersion !== undefined}
-						initialValue={apiConfiguration?.azureApiVersion || ""}
-						onChange={(value: string) => handleFieldChange("azureApiVersion", value)}
+						value={apiConfiguration?.azureApiVersion || ""}
+						onInput={(event) => handleFieldChange("azureApiVersion", (event.target as HTMLInputElement).value)}
 						placeholder={`Default: ${azureOpenAiDefaultApiVersion}`}
 						style={{ width: "100%" }}
 						type="text"
 					/>
 				</div>
 
-				<div
-					onClick={() => setModelConfigurationSelected((val) => !val)}
-					style={{
-						color: getAsVar(VSC_DESCRIPTION_FOREGROUND),
-						display: "flex",
-						margin: "8px 0",
-						cursor: "pointer",
-						alignItems: "center",
-					}}>
-					<span
-						className={`codicon ${modelConfigurationSelected ? "codicon-chevron-down" : "codicon-chevron-right"}`}
-						style={{ marginRight: "4px" }}
-					/>
-					<span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "11px" }}>Model Configuration</span>
-				</div>
+				{showModelOptions && <>
+					<div
+						onClick={() => setModelConfigurationSelected((val) => !val)}
+						style={{
+							color: getAsVar(VSC_DESCRIPTION_FOREGROUND),
+							display: "flex",
+							margin: "8px 0",
+							cursor: "pointer",
+							alignItems: "center",
+						}}>
+						<span
+							className={`codicon ${modelConfigurationSelected ? "codicon-chevron-down" : "codicon-chevron-right"}`}
+							style={{ marginRight: "4px" }}
+						/>
+						<span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "11px" }}>Model Configuration</span>
+					</div>
+				</>}
 
-				{modelConfigurationSelected && (
+				{showModelOptions && modelConfigurationSelected && (
 					<div className="flex flex-col gap-3 pl-2 border-l-2 border-vscode-widget-border">
 						<VSCodeCheckbox
 							checked={!!openAiModelInfo?.supportsImages}
@@ -583,8 +539,9 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 				)}
 			</div>
 
+			{profileError && <p role="alert">{profileError}</p>}
 			{/* Save Configuration Section */}
-			<div className="mt-2 p-3 border border-vscode-widget-border rounded-md bg-vscode-sideBar-background">
+			{editingLegacy ? <VSCodeButton onClick={saveLegacySetup}>Save legacy endpoint</VSCodeButton> : <div className="mt-2 p-3 border border-vscode-widget-border rounded-md bg-vscode-sideBar-background">
 				<span style={{ fontWeight: 600, fontSize: "11px", textTransform: "uppercase", opacity: 0.8 }}>
 					Save Configuration
 				</span>
@@ -603,7 +560,7 @@ export const OpenAICompatibleProvider = ({ showModelOptions, isPopup, currentMod
 						Save Configuration
 					</VSCodeButton>
 				</div>
-			</div>
+			</div>}
 		</div>
 	)
 }

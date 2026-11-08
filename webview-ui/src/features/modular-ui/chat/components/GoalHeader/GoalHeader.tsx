@@ -1,5 +1,4 @@
 import type { GoalAccounting, GoalStatus, GoalViewState } from "@shared/goal"
-import { TASKLET_STATE_LABELS } from "@shared/taskletObservation"
 import { GoalControlRequest } from "@shared/proto/dirac/goal"
 import {
 	AlertTriangleIcon,
@@ -96,19 +95,6 @@ function AccountingMetrics({ accounting }: { accounting: GoalAccounting }) {
 	)
 }
 
-function VerificationSummary({ verification }: { verification: NonNullable<GoalViewState["latestVerification"]> }) {
-	return (
-		<li className="rounded-sm border border-foreground/5 bg-foreground/5 px-2 py-1.5">
-			<div className="flex min-w-0 flex-wrap items-center gap-1.5">
-				<span className="min-w-0 flex-1 truncate text-xs font-medium">{verification.title}</span>
-				<Badge className="shrink-0 capitalize" type="default" variant="outline">
-					{TASKLET_STATE_LABELS[verification.status]}
-				</Badge>
-			</div>
-			{verification.terminalSummary && <p className="mb-0 mt-1 line-clamp-2 text-xs text-description">{verification.terminalSummary}</p>}
-		</li>
-	)
-}
 
 interface GoalHeaderProps {
 	goal: GoalViewState
@@ -305,18 +291,6 @@ const GoalHeader = ({ goal }: GoalHeaderProps) => {
 						</section>
 
 
-						<section aria-labelledby={`${detailsId}-verification`}>
-							<h3 className="mb-1 mt-0 text-xs font-medium" id={`${detailsId}-verification`}>
-								Latest verification
-							</h3>
-							{goal.latestVerification ? (
-								<ul className="m-0 list-none p-0">
-									<VerificationSummary verification={goal.latestVerification} />
-								</ul>
-							) : (
-								<p className="mb-0 mt-0 text-xs text-description">No verification result recorded.</p>
-							)}
-						</section>
 
 						<section aria-labelledby={`${detailsId}-timing`}>
 							<h3 className="mb-1 mt-0 text-xs font-medium" id={`${detailsId}-timing`}>

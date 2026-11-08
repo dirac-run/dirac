@@ -2,6 +2,7 @@ import {
 	TASKLET_RECEIPT_OPERATIONS,
 	TASKLET_RECEIPT_OUTCOMES,
 	taskletReceiptNote,
+	taskletReceiptRowTitle,
 	type TaskletReceipt,
 	type TaskletReceiptOutcome,
 	type TaskletReceiptTone,
@@ -32,7 +33,7 @@ export function TaskletReceiptBody({ receipt }: { receipt: TaskletReceipt }) {
 			{receipt.rows.map((row, index) => (
 				<div className="flex flex-col gap-1 border-l-2 border-foreground/10 pl-2" key={index}>
 					<div className="flex flex-wrap items-center gap-1.5">
-						<span className="min-w-0 break-words font-medium">{row.title}</span>
+						<span className="min-w-0 break-words font-medium">{taskletReceiptRowTitle(row)}</span>
 						{receipt.operation === "message" && (
 							<span className="text-xs text-muted-foreground">
 								{TASKLET_RECEIPT_OPERATIONS[row.operation].label}

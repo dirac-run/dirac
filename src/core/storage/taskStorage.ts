@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import type { TaskletRecord, TaskletEvent } from "@core/task/types/tasklet"
+import { historicalTaskletSelection, migrateTaskletConfiguration } from "./migrateTaskletConfiguration"
 import { isTaskletUsageSnapshot } from "@shared/taskletUsage"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
 import { fileExistsAtPath } from "@utils/fs"
@@ -54,11 +55,17 @@ export async function loadTaskletRecord(
 		!record || record.id !== address.taskletId || record.rootTaskId !== recordRootTaskId ||
 		typeof record.conversationUlid !== "string" || !record.conversationUlid ||
 		typeof record.title !== "string" || typeof record.prompt !== "string" || !Number.isFinite(record.createdAt) ||
-		(record.inheritedMessageCount !== undefined && (!Number.isSafeInteger(record.inheritedMessageCount) || record.inheritedMessageCount < 0)) ||
-		(record.purpose !== undefined && record.purpose !== "goal_verification") ||
 		(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
 	) throw new Error(`Invalid tasklet record for ${address.taskletId} under root ${address.rootTaskId}`)
-	return record
+	if (record.configuration?.modelSelection !== undefined) return migrateTaskletConfiguration(record)
+	let savedSettings: string
+	try {
+		savedSettings = await fs.readFile(path.join(getTaskDirectoryPath(address), "settings.json"), "utf8")
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return migrateTaskletConfiguration(record)
+		throw error
+	}
+	return migrateTaskletConfiguration(record, historicalTaskletSelection(JSON.parse(savedSettings)))
 }
 
 /** Retain full communication and delivery state; missing pre-communication snapshots are empty. */

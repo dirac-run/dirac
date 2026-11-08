@@ -1,15 +1,13 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
-import { CardStatus, DiracMessage, DiracMessageType, SubagentExecutionStatus } from "../ExtensionMessage"
+import { CardStatus, SubagentExecutionStatus } from "../ExtensionMessage"
 import {
-	allocateSubagentIdentity,
 	appendSubagentTrajectoryEvent,
 	createSubagentCardInput,
 	createSubagentCardOutput,
 	formatSubagentTrajectory,
 	readSubagentCardData,
 	recordSubagentProgress,
-	SUBAGENT_NAMES,
 	SUBAGENT_TRAJECTORY_EVENT_MAX_CHARS,
 	SUBAGENT_TRAJECTORY_MAX_EVENTS,
 	SubagentTrajectoryEventType,
@@ -17,23 +15,7 @@ import {
 } from "../subagents"
 
 describe("subagent observability", () => {
-	it("allocates unique scientist names after Dirac without reusing reserved identities", () => {
-		const first = allocateSubagentIdentity([])
-		const second = allocateSubagentIdentity([], [first])
 
-		assert.equal(first.id, 2)
-		assert.equal(second.id, 3)
-		assert.ok(SUBAGENT_NAMES.includes(first.name as (typeof SUBAGENT_NAMES)[number]))
-		assert.notEqual(first.name, second.name)
-	})
-
-	it("uses non-numeric compound names after the single-name pool is exhausted", () => {
-		const reserved = SUBAGENT_NAMES.map((name, index) => ({ id: index + 2, name }))
-		const identity = allocateSubagentIdentity([], reserved)
-
-		assert.ok(!reserved.some((agent) => agent.name === identity.name))
-		assert.doesNotMatch(identity.name, /\d/)
-	})
 
 	it("round-trips structured card metadata and bounds every trajectory line", () => {
 		const identity = { id: 2, name: "Feynman" }
@@ -124,28 +106,4 @@ describe("subagent observability", () => {
 		assert.deepEqual(trajectory, [{ type: SubagentTrajectoryEventType.RESULT, text: "Finished" }])
 	})
 
-	it("discovers prior agents from persisted task messages", () => {
-		const identity = { id: 7, name: "Curie" }
-		const messages: DiracMessage[] = [
-			{
-				id: "agent-card",
-				ts: 1,
-				content: {
-					type: DiracMessageType.CARD,
-					card: {
-						id: "agent-card",
-						header: "Curie",
-						status: CardStatus.RUNNING,
-						renderType: "markdown" as const,
-						rawInput: createSubagentCardInput(identity, "Research", "Researching prior agents"),
-						rawOutput: createSubagentCardOutput(SubagentExecutionStatus.RUNNING, []),
-					},
-				},
-			},
-		]
-
-		const next = allocateSubagentIdentity(messages)
-		assert.equal(next.id, 8)
-		assert.notEqual(next.name, identity.name)
-	})
 })

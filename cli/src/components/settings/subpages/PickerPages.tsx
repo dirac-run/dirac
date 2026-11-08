@@ -6,9 +6,6 @@ import { ProviderPicker } from "../../ProviderPicker"
 import { ModelPicker } from "../../ModelPicker"
 import { LanguagePicker } from "../../LanguagePicker"
 import type { Controller } from "@/core/controller"
-import type { ModelProviderPreset } from "@shared/api"
-import { getProviderLabel } from "../../../utils/providers"
-import { SearchableList } from "../../SearchableList"
 
 interface ProviderPickerPageProps {
 	isActive: boolean
@@ -72,43 +69,6 @@ export const LanguagePickerPage: React.FC<LanguagePickerPageProps> = ({ isActive
 		</Box>
 		<Box marginTop={1}>
 			<Text color={theme.muted}>Type to search, arrows to navigate, Enter to select, Esc to cancel</Text>
-		</Box>
-	</Box>
-)
-
-interface UtilityModelPresetPickerPageProps {
-	isActive: boolean
-	presets: ModelProviderPreset[]
-	onSelect: (preset: ModelProviderPreset) => void
-}
-
-export const UtilityModelPresetPickerPage: React.FC<UtilityModelPresetPickerPageProps> = ({
-	isActive,
-	presets,
-	onSelect,
-}) => (
-	<Box flexDirection="column">
-		<Text bold color={COLORS.primaryBlue}>
-			Select Utility Model
-		</Text>
-		<Box marginTop={1}>
-			<SearchableList
-				isActive={isActive}
-				items={presets.map((preset) => ({
-					id: preset.id,
-					label: `${getProviderLabel(preset.provider)} · ${preset.modelId}`,
-					suffix: preset.openAiProfileName,
-				}))}
-				onSelect={(item) => {
-					const preset = presets.find((candidate) => candidate.id === item.id)
-					if (preset) onSelect(preset)
-				}}
-			/>
-		</Box>
-		<Box marginTop={1}>
-			<Text color={theme.muted}>
-				Choose a saved provider/model. Conversation source text may be sent to a provider other than the active task provider.
-			</Text>
 		</Box>
 	</Box>
 )

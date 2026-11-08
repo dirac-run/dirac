@@ -7,7 +7,9 @@ import type { Environment } from "./config-types"
 import type { OpenAiCodexUsageSnapshot } from "./openai-codex-usage"
 import { AutoApprovalSettings } from "./AutoApprovalSettings"
 import { ApiConfiguration, ModelProviderPreset, ModelProviderSelection } from "./api"
+import type { ApiProvider } from "./api/providerNames"
 import { SkillMetadata } from "./skills"
+import type { SubagentRole } from "./subagentRoles"
 import { BrowserSettings } from "./BrowserSettings"
 import { DiracFeatureSetting } from "./DiracFeatureSetting"
 import { BannerCardData } from "./dirac/banner"
@@ -87,7 +89,11 @@ export interface ExtensionState {
 	shouldShowUnbiasedWelcome?: boolean
 	onboardingModels?: OnboardingModelGroup | undefined
 	apiConfiguration?: ApiConfiguration
+	/** Explicit keyless additions and the membership projected from global saved setup/auth. */
+	addedApiProviders?: ApiProvider[]
+	configuredApiProviders?: ApiProvider[]
 	modelProviderPresets: ModelProviderPreset[]
+	subagentRoles?: SubagentRole[]
 	utilityModelEnabled: boolean
 	utilityModelSelection?: ModelProviderSelection
 	utilityModelUseCondense: boolean

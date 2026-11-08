@@ -93,7 +93,7 @@ export interface OpenAiCompatibleProfile {
 
 export interface ModelProviderPreset {
 	id: string
-	provider: import("../../api").ApiProvider
+	provider: import("../providerNames").ApiProvider
 	modelId: string
 	modelInfo?: ModelInfo
 	openAiProfileName?: string
@@ -120,17 +120,20 @@ export function createModelProviderSelection(preset: ModelProviderPreset): Model
 }
 
 /**
- * Secret-free provider and model identity for an independently configured model.
+ * Secret-free provider, model and reasoning settings for an independently configured model.
  * It intentionally excludes credentials and Plan/Act state.
  */
 export interface ModelProviderSelection {
-	provider: import("../../api").ApiProvider
+	provider: import("../providerNames").ApiProvider
 	modelId: string
 	modelInfo?: ModelInfo
 	openAiProfileName?: string
 	vsCodeLmModelSelector?: LanguageModelChatSelector
 	awsBedrockCustomSelected?: boolean
 	awsBedrockCustomModelBaseId?: string
+	reasoningEffort?: OpenaiReasoningEffort
+	thinkingBudgetTokens?: number
+	geminiThinkingLevel?: string
 }
 
 export interface OpenAiCompatibleModelInfo extends ModelInfo {

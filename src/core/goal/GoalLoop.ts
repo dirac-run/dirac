@@ -1,14 +1,13 @@
 import type { StateManager } from "@core/storage/StateManager"
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
-import type { Task, TaskletHost } from "@core/task"
-import { loadTaskletRecords, savedSettledRecord } from "@core/storage/taskStorage"
+import type { Task } from "@core/task"
 import { acquireTaskLock } from "@core/task/TaskLockUtils"
 import { serializeTaskError, type TaskRunOutcome } from "@core/task/TaskRunOutcome"
 import { SurfaceAdapter } from "@core/task/tools/adapters/SurfaceAdapter"
 import type { CompletionCommitResult, IGoalTrait } from "@core/task/tools/interfaces/IToolEnvironment"
 import { combineCardSequences } from "@shared/combineCardSequences"
 import { getApiUsageKnowledge, getApiMetrics } from "@shared/getApiMetrics"
-import type { GoalAccounting, GoalRecord, GoalVerificationSummary, GoalViewState } from "@shared/goal"
+import type { GoalAccounting, GoalRecord, GoalViewState } from "@shared/goal"
 import { GOAL_MODE_SWITCHING_EXPLANATION, isActiveGoalStatus, isResumableGoalStatus } from "@shared/goal"
 import { type GoalHistoryItem, type HistoryItem, isGoalHistoryItem } from "@shared/HistoryItem"
 import { Logger } from "@shared/services/Logger"
@@ -151,7 +150,7 @@ export class GoalLoop {
 	}
 
 	async inspect(): Promise<GoalViewState> {
-		return goalViewState(await this.dependencies.store.read(this.goalId), await loadGoalVerification(this.goalId, this.coordinator?.taskletHost), this.isFollowUpActive, this.hasRunningCoordinator)
+		return goalViewState(await this.dependencies.store.read(this.goalId), this.isFollowUpActive, this.hasRunningCoordinator)
 	}
 
 	async publishHistory(): Promise<void> {
@@ -559,7 +558,7 @@ function transitionForOutcome(outcome: TaskRunOutcome): { status: RequestedEnd; 
 	}
 }
 
-function goalViewState(record: GoalRecord, latestVerification: GoalVerificationSummary | undefined, followUpActive: boolean, hasLocalExecution: boolean): GoalViewState {
+function goalViewState(record: GoalRecord, followUpActive: boolean, hasLocalExecution: boolean): GoalViewState {
 	const now = Date.now()
 	return {
 		id: record.id,
@@ -572,7 +571,6 @@ function goalViewState(record: GoalRecord, latestVerification: GoalVerificationS
 		updatedAt: record.updatedAt,
 		wallDurationMs: goalWallDurationAt(record, now),
 		activeDurationMs: goalActiveDurationAt(record, now),
-		...(latestVerification ? { latestVerification } : {}),
 		accounting: record.accounting,
 		mode: "act",
 		modeSwitchingDisabled: true,
@@ -590,40 +588,4 @@ function goalFollowUpWake(record: GoalRecord): string {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
-}
-
-/** Observe only the newest verification; no general child summaries or pending-request projection. */
-export async function loadGoalVerification(goalId: string, host?: TaskletHost): Promise<GoalVerificationSummary | undefined> {
-	if (host) {
-		const verification = host.latestObservationForPurpose("goal_verification")
-		if (!verification) return undefined
-		return {
-			id: verification.taskletId,
-			title: verification.title,
-			status: verification.state,
-			createdAt: verification.createdAt,
-			...(verification.outcome ? terminalSummary(verification.outcome) : {}),
-		}
-	}
-	const record = (await loadTaskletRecords(goalId))
-		.filter((child) => child.purpose === "goal_verification")
-		.sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))[0]
-	if (!record) return undefined
-	const { outcome } = await savedSettledRecord(record)
-	return {
-		id: record.id,
-		title: record.title,
-		createdAt: record.createdAt,
-		status: outcome ? (outcome.kind === "cancelled" ? "interrupted" : outcome.kind) : "unsettled",
-		...(outcome ? terminalSummary(outcome) : {}),
-	}
-}
-
-function terminalSummary(outcome: TaskRunOutcome): Pick<GoalVerificationSummary, "endedAt" | "terminalSummary"> {
-	switch (outcome.kind) {
-		case "completed": return { endedAt: outcome.completedAt, terminalSummary: outcome.response }
-		case "failed": return { endedAt: outcome.failedAt, terminalSummary: `${outcome.error.name}: ${outcome.error.message}` }
-		case "cancelled": return { endedAt: outcome.cancelledAt, terminalSummary: outcome.reason }
-		case "interrupted": return { endedAt: outcome.interruptedAt, terminalSummary: outcome.reason }
-	}
 }

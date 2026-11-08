@@ -1,12 +1,11 @@
 import { strict as assert } from "node:assert"
 import type { TaskletRecord } from "@core/storage/taskStorage"
 import { CardStatus } from "@shared/ExtensionMessage"
-import { afterEach, beforeEach, describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
-import { AgentConfigLoader } from "../../subagent/AgentConfigLoader"
 import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
-import { UseSubagentsTool, use_subagents_spec } from "./UseSubagentsTool"
+import { SubagentsTool, subagents_spec } from "./SubagentsTool"
 
 function record(id: string, title = "Inspect code", outcome?: TaskletRecord["outcome"]): TaskletRecord {
 	return {
@@ -47,7 +46,7 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 	}
 	let mistakes = 0
 	const env = {
-		toolName: "use_subagents",
+		toolName: "subagents",
 		orchestration: {
 			tasklets: { start },
 			getHistory: unexpectedBatchAccounting,
@@ -65,36 +64,54 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 }
 
 async function spawn(env: IToolEnvironment, subagents: unknown[]) {
-	return JSON.parse(await new UseSubagentsTool().processCall({ subagents }, env)).subagents
+	return JSON.parse(await new SubagentsTool().processCall({ assignments: subagents }, env)).subagents
 }
 
-const assignment = { task_title: "Inspect code", prompt: "Inspect" }
+const assignment = { type: "default", task_header: "Inspect code", task_description: "Inspect" }
 
-describe("UseSubagentsTool asynchronous tasklet startup", () => {
-	let resolveName: sinon.SinonStub
-	beforeEach(() => {
-		resolveName = sinon.stub().returns(undefined)
-		sinon
-			.stub(AgentConfigLoader, "getInstance")
-			.returns({ resolveSubagentNameForTool: resolveName } as unknown as AgentConfigLoader)
-	})
+describe("SubagentsTool asynchronous tasklet startup", () => {
 	afterEach(() => sinon.restore())
 
+	it("requires every assignment field and rejects all retired options without starting children", async () => {
+		const start = sinon.stub()
+		const { env } = fixture(start)
+		const invalid = [
+			...Object.keys(assignment).map((key) => Object.fromEntries(Object.entries(assignment).filter(([field]) => field !== key))),
+			...["timeout", "include_history", "use_utility_model", "prompt", "task_title", "unknown"].map((key) => ({ ...assignment, [key]: true })),
+		]
+		const results = await spawn(env, invalid)
+		assert.equal(results.length, invalid.length)
+		assert.ok(results.every((result: { accepted: boolean }) => !result.accepted))
+		sinon.assert.notCalled(start)
+		await assert.rejects(new SubagentsTool().processCall({ subagents: [assignment] }, env), /not valid/)
+	})
+
+	it("forwards a selected role and complete trimmed instructions through the environment only", async () => {
+		const start = sinon.stub().resolves(record("Planck", "Review code"))
+		const { env } = fixture(start)
+		await spawn(env, [{ type: "Reviewer", task_header: " Review   code ", task_description: " Review this diff " }])
+		sinon.assert.calledOnceWithExactly(start, { type: "Reviewer", title: "Review code", prompt: "Review this diff" })
+	})
+
+	it("keeps the accepted saved role in spawn results and receipt labels", async () => {
+		const { env, updates } = fixture(async () => ({ ...record("Feynman", "Review code"), role: "Reviewer" }))
+		const [result] = await spawn(env, [{ type: "Reviewer", task_header: "Review code", task_description: "Review" }])
+		assert.equal(result.role, "Reviewer")
+		assert.equal(updates[0].taskletReceipt.rows[0].role, "Reviewer")
+		assert.match(updates[0].header, /Feynman \(Reviewer\) — Review code/)
+	})
+
 	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {
-		assert.match(use_subagents_spec.description, /asynchronously/)
-		assert.match(use_subagents_spec.description, /not completed results/)
-		assert.match(use_subagents_spec.description, /later results and requests/)
-		assert.match(use_subagents_spec.description, /tasklets to inspect/)
-		assert.match(use_subagents_spec.description, /sleep/)
-		assert.match(String(use_subagents_spec.parameters![0].instruction), /acceptance does not mean assignment completion/)
+		assert.match(subagents_spec.description, /asynchronously/)
+		assert.match(subagents_spec.description, /not completed results/)
+		assert.match(String(subagents_spec.parameters![0].instruction), /Acceptance is not completion/)
 	})
 
 	it("uses the environment capability guard even with no legacy config", async () => {
 		const { env, createCard } = fixture()
 		delete (env.orchestration as { tasklets?: TaskletControls }).tasklets
-		await assert.rejects(new UseSubagentsTool().processCall({ subagents: [assignment] }, env), /owning root/)
+		await assert.rejects(new SubagentsTool().processCall({ assignments: [assignment] }, env), /owning root/)
 		assert.equal(createCard.callCount, 0)
-		assert.equal(resolveName.callCount, 0)
 	})
 
 	it("returns stable acceptance and finishes only its own card while child execution remains pending", async () => {
@@ -122,12 +139,8 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 		assert.deepEqual(start.firstCall.args[0], {
 			title: "Inspect code",
 			prompt: "Inspect",
-			agentName: undefined,
-			timeoutSeconds: 600,
-			includeHistory: false,
-			useUtilityModel: false,
+			type: "default",
 		})
-		assert.equal(resolveName.firstCall.args[0], "use_subagents")
 		execution.resolve()
 	})
 
@@ -141,7 +154,7 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 			return record("tasklet:second", "Second")
 		})
 		const { env } = fixture(start)
-		const pending = spawn(env, [assignment, { task_title: "Second", prompt: "Second prompt" }])
+		const pending = spawn(env, [assignment, { ...assignment, task_header: "Second", task_description: "Second prompt" }])
 		await secondStarted.promise
 		assert.equal(start.callCount, 2)
 		first.resolve(record("tasklet:first"))
@@ -154,57 +167,12 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 		)
 	})
 
-	it("resolves a named route and forwards profile, Utility, history and timeout choices", async () => {
-		resolveName.returns("Code reviewer")
-		const start = sinon.stub().resolves(record("tasklet:named", "Review code"))
-		const { env } = fixture(start)
-		Object.defineProperty(env, "toolName", { value: "code_reviewer" })
-		const results = JSON.parse(
-			await new UseSubagentsTool().processCall(
-				{
-					task_title: "  Review   code ",
-					prompt: " Review this diff ",
-					timeout: "42",
-					include_history: "true",
-					use_utility_model: true,
-				},
-				env,
-			),
-		).subagents
-		assert.equal(resolveName.firstCall.args[0], "code_reviewer")
-		assert.deepEqual(start.firstCall.args[0], {
-			title: "Review code",
-			prompt: "Review this diff",
-			agentName: "Code reviewer",
-			timeoutSeconds: 42,
-			includeHistory: true,
-			useUtilityModel: true,
-		})
-		assert.deepEqual(results, [{ index: 0, id: "tasklet:named", title: "Review code", accepted: true }])
-	})
 
-	it("maps explicit generic options and derives a bounded title when omitted", async () => {
-		const start = sinon.stub().callsFake(async (input) => record("tasklet:generic", input.title))
-		const { env } = fixture(start)
-		const results = await spawn(env, [
-			{ prompt: "x".repeat(100), timeout: 12, include_history: true, use_utility_model: "true" },
-		])
-		assert.equal(results[0].title.length, 80)
-		assert.ok(results[0].title.endsWith("…"))
-		assert.deepEqual(start.firstCall.args[0], {
-			title: results[0].title,
-			prompt: "x".repeat(100),
-			agentName: undefined,
-			timeoutSeconds: 12,
-			includeHistory: true,
-			useUtilityModel: true,
-		})
-	})
 
-	for (const input of [undefined, {}, { subagents: [] }, { subagents: "invalid" }]) {
+	for (const input of [{}, { assignments: [] }, { assignments: "invalid" }]) {
 		it(`reports a missing batch without creating a card: ${JSON.stringify(input)}`, async () => {
 			const { env, createCard, mistakes } = fixture()
-			assert.match(await new UseSubagentsTool().processCall(input, env), /Missing required parameter: subagents/)
+			assert.match(await new SubagentsTool().processCall(input, env), /assignments must be a non-empty array/)
 			assert.equal(mistakes(), 1)
 			assert.equal(createCard.callCount, 0)
 		})
@@ -212,19 +180,19 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 
 	it("preserves successful handles across malformed assignments, validation errors and host startup rejection", async () => {
 		const start = sinon.stub().callsFake(async (input) => {
-			if (input.prompt === "Bad model") throw new Error("Utility model is unavailable")
+			if (input.prompt === "Bad model") throw new Error("Role model is unavailable")
 			return record(`tasklet:${input.prompt}`, input.title)
 		})
 		const { env, finalized, updates } = fixture(start)
 		const results = await spawn(env, [
 			null,
 			assignment,
-			{ prompt: "Bad model" },
+			{ ...assignment, task_header: "Bad model", task_description: "Bad model" },
 			[],
-			{ prompt: " " },
-			{ prompt: "Bad title", task_title: "one two three four five six" },
-			{ prompt: "Bad timeout", timeout: 0 },
-			{ task_title: "Second", prompt: "Second" },
+			{ ...assignment, task_description: " " },
+			{ ...assignment, task_header: "one two three four five six" },
+			{ ...assignment, timeout: 0 },
+			{ ...assignment, task_header: "Second", task_description: "Second" },
 		])
 		assert.equal(results.length, 8)
 		assert.deepEqual(
@@ -232,18 +200,18 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 			["tasklet:Inspect", "tasklet:Second"],
 		)
 		assert.match(results[0].error, /assignment must be an object/)
-		assert.match(results[2].error, /Utility model is unavailable/)
+		assert.match(results[2].error, /Role model is unavailable/)
 		assert.equal(results[2].title, "Bad model")
 		assert.match(results[3].error, /assignment must be an object/)
-		assert.match(results[4].error, /missing required parameter: prompt/)
-		assert.match(results[5].error, /task_title/)
+		assert.match(results[4].error, /task_description/)
+		assert.match(results[5].error, /task_header/)
 		assert.match(results[6].error, /timeout/)
 		assert.equal(start.callCount, 3)
 		assert.deepEqual(finalized, [CardStatus.ERROR])
 		assert.equal(updates[0].taskletReceipt.outcome, "partial_failure")
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "accepted").length, 2)
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "failed").length, 6)
-		assert.match(updates[0].body, /Utility model is unavailable/)
+		assert.match(updates[0].body, /Role model is unavailable/)
 	})
 
 	for (const outcome of [
@@ -263,16 +231,6 @@ describe("UseSubagentsTool asynchronous tasklet startup", () => {
 		})
 	}
 
-	it("returns named malformed input as a startup failure rather than crashing the batch path", async () => {
-		resolveName.returns("Reviewer")
-		const start = sinon.stub()
-		const { env, finalized } = fixture(start)
-		const result = JSON.parse(await new UseSubagentsTool().processCall(null, env)).subagents[0]
-		assert.equal(result.accepted, false)
-		assert.match(result.error, /assignment must be an object/)
-		assert.equal(start.callCount, 0)
-		assert.deepEqual(finalized, [CardStatus.ERROR])
-	})
 
 	for (const phase of ["create", "update", "finalize"] as const) {
 		it(`does not hide acceptance when card ${phase} rejects`, async () => {

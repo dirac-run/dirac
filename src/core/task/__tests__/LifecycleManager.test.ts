@@ -323,7 +323,7 @@ describe("LifecycleManager", () => {
 						id: "tasklet:child", ts: 2, content: {
 							type: DiracMessageType.CARD, card: {
 								id: "tasklet:child", header: "Child", status: CardStatus.RUNNING, renderType: "text",
-								rawInput: { isTasklet: true, taskletId: "child" }, rawOutput: { tasklet: { taskletId: "child", status } },
+								rawInput: { isTasklet: true, taskletId: "child" }, rawOutput: { tasklet: { taskletId: "child", status, communications: [] } },
 							}
 						}
 					},
@@ -598,8 +598,8 @@ describe("LifecycleManager", () => {
 			const restoredBlock = restoredHistory[0].content[0]
 				; (restoredBlock.isUserInput === undefined).should.equal(true)
 			const replayedContent = deps.initiateTaskLoop.firstCall.args[0]
-			const replayedBlock = replayedContent.find((block: any) => block.text === "<task>/reloadtools</task>")
-				; (replayedBlock.isUserInput === undefined).should.equal(true)
+			// Saved content remains in its original turn, not copied into the resume turn.
+			replayedContent.some((block: any) => block.text === "<task>/reloadtools</task>").should.equal(false)
 		})
 
 		it("restores provider-native conversation state", async () => {
@@ -619,7 +619,7 @@ describe("LifecycleManager", () => {
 			sinon.assert.calledWith(deps.messageStateHandler.setApiConversationProviderState, providerState)
 		})
 
-		it("clears a checkpoint whose boundary is removed during resume", async () => {
+		it("preserves the final user turn and its checkpoint during resume", async () => {
 			const providerState = {
 				checkpoint: {
 					providerId: "openai-codex",
@@ -640,10 +640,11 @@ describe("LifecycleManager", () => {
 
 			await manager.resumeTaskFromHistory()
 
-			sinon.assert.calledWith(
-				deps.messageStateHandler.overwriteApiConversationProviderState,
-				sinon.match({ checkpoint: undefined }),
-			)
+			sinon.assert.notCalled(deps.messageStateHandler.overwriteApiConversationProviderState)
+			deps.messageStateHandler.overwriteApiConversationHistory.firstCall.args[0].should.eql([
+				{ role: "assistant", content: "answer" },
+				{ role: "user", content: "unfinished" },
+			])
 		})
 
 		it("sets taskState to initialized and not aborted", async () => {

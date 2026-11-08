@@ -1,5 +1,6 @@
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import type { StateManager } from "@core/storage/StateManager"
+import { getProviderMembershipState } from "@core/storage/providerMembership"
 import { featureFlagsService } from "@/services/feature-flags"
 
 /** Reads persisted settings/state and shapes them into ExtensionState fields. */
@@ -7,7 +8,9 @@ export function assembleModelState(stateManager: StateManager) {
 	const enableCheckpointsSetting = stateManager.getGlobalSettingsKey("enableCheckpointsSetting")
 	return {
 		apiConfiguration: stateManager.getApiConfiguration(),
+		...getProviderMembershipState(stateManager),
 		modelProviderPresets: stateManager.getGlobalSettingsKey("modelProviderPresets"),
+		subagentRoles: stateManager.getSystemDefaultSettingsKey("subagentRoles"),
 		utilityModelEnabled: stateManager.getGlobalSettingsKey("utilityModelEnabled"),
 		utilityModelSelection: stateManager.getGlobalSettingsKey("utilityModelSelection"),
 		utilityModelUseCondense: stateManager.getGlobalSettingsKey("utilityModelUseCondense"),

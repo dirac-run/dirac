@@ -16,8 +16,9 @@ export interface TaskInteractionRequest {
 
 /** Durable child identity/assignment; an absent outcome means accepted, not completed. */
 export interface TaskletRecord {
-	purpose?: "goal_verification"
 	configuration?: TaskletConfiguration
+	/** Creation-time role; absent only when historical identity did not record one. */
+	role?: string
 	id: string
 	rootTaskId: string
 	conversationUlid: string
@@ -25,8 +26,6 @@ export interface TaskletRecord {
 	prompt: string
 	createdAt: number
 	outcome?: TaskRunOutcome
-	/** Immutable inherited prefix, excluded from passive child-only monitoring. */
-	inheritedMessageCount?: number
 	/** Lifetime snapshots, replaced rather than added on explicit resumption. */
 	usage?: TaskletUsageSnapshot
 }
@@ -37,11 +36,11 @@ export interface TaskletEvent {
 	createdAt: number
 	deliveredAt?: number
 	communication:
-		| { type: "response"; response: ResponseArguments }
-		| { type: "message"; message: TaskletMessage }
-		| { type: "lifecycle"; state: "accepted" | "resumed"; assignment?: string }
-		| { type: "interaction"; request: TaskletInteraction }
-		| { type: "outcome"; outcome: TaskRunOutcome }
+	| { type: "response"; response: ResponseArguments }
+	| { type: "message"; message: TaskletMessage }
+	| { type: "lifecycle"; state: "accepted" | "resumed"; assignment?: string }
+	| { type: "interaction"; request: TaskletInteraction }
+	| { type: "outcome"; outcome: TaskRunOutcome }
 }
 
 export type TaskletInteractionResult = Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
@@ -65,7 +64,6 @@ export interface TaskletInspection extends TaskletRecord {
 	executionStatus?: import("@shared/ExtensionMessage").TaskStatus
 	backgroundCommandRunning: boolean
 	lastActivityAt?: number
-	deadlineAt?: number
 	outcomePersisted: boolean
 	settlementError?: SerializedTaskError
 	/** Informational projection failure; does not change child outcome or resumption authority. */
@@ -92,6 +90,7 @@ export type TaskletMessage =
 export interface TaskletMessageResult {
 	taskletId: string
 	title?: string
+	role?: string
 	replyTo?: string
 	messageId?: string
 	request?: string
@@ -122,6 +121,7 @@ export interface TaskletInspectionPage<T = unknown> {
 	view?: TaskletInspectionQuery["view"]
 	taskletId?: string
 	title?: string
+	role?: string
 	items: T[]
 	totalItems: number
 	/** Concatenate consecutive JSON fragments, then parse once. Offsets count UTF-16 code units. */
@@ -135,13 +135,12 @@ export interface TaskletInspectionPage<T = unknown> {
 export interface TaskletSummary {
 	id: string
 	title: string
+	role?: string
 	createdAt: number
 	executionStatus?: TaskletInspection["executionStatus"]
 	pendingRequestCount: number
 	latestProgress?: string
-	timeoutSeconds?: number
 	lastActivityAt?: number
-	deadlineAt?: number
 	backgroundCommandRunning: boolean
 	outcomePersisted: boolean
 	outcome?: { kind: TaskRunOutcome["kind"]; summary: string; at: number }

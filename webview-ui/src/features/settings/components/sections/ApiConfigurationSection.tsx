@@ -1,92 +1,37 @@
-import { Mode } from "@shared/ExtensionMessage"
-import { UpdateSettingsRequest } from "@shared/proto/dirac/state"
-import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { useState } from "react"
-import { syncModeConfigurations } from "@/features/settings/components/utils/providerUtils"
+import type { ApiProvider } from "@shared/api"
+import PROVIDERS from "@shared/providers/providers.json"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
-import { StateServiceClient } from "@/shared/api/grpc-client"
-import { TabButton } from "../../../../shared/ui/TabButton"
 import ApiOptions from "../ApiOptions"
 import Section from "../Section"
-import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
+import { ProviderSetupSummary } from "../ProviderSetupSummary"
 
 interface ApiConfigurationSectionProps {
 	renderSectionHeader?: (tabId: string) => JSX.Element | null
 }
 
 const ApiConfigurationSection = ({ renderSectionHeader }: ApiConfigurationSectionProps) => {
-	const { planActSeparateModelsSetting, mode, apiConfiguration } = useSettingsStore()
-	const [currentTab, setCurrentTab] = useState<Mode>(mode as Mode)
-	const { handleFieldsChange } = useApiConfigurationHandlers()
-	return (
-		<div>
-			{renderSectionHeader?.("models-api")}
-			<Section>
-				{/* Tabs container */}
-				{planActSeparateModelsSetting ? (
-					<div className="rounded-md mb-5">
-						<div className="flex gap-px mb-[10px] -mt-2 border-0 border-b border-solid border-(--vscode-panel-border)">
-							<TabButton
-								disabled={currentTab === "plan"}
-								isActive={currentTab === "plan"}
-								onClick={() => setCurrentTab("plan")}
-								style={{
-									opacity: 1,
-									cursor: "pointer",
-								}}>
-								Plan Mode
-							</TabButton>
-							<TabButton
-								disabled={currentTab === "act"}
-								isActive={currentTab === "act"}
-								onClick={() => setCurrentTab("act")}
-								style={{
-									opacity: 1,
-									cursor: "pointer",
-								}}>
-								Act Mode
-							</TabButton>
-						</div>
-
-						{/* Content container */}
-						<div className="-mb-3">
-							<ApiOptions currentMode={currentTab as Mode} showModelOptions={true} />
-						</div>
-					</div>
-				) : (
-					<ApiOptions currentMode={mode as Mode} showModelOptions={true} />
-				)}
-
-				<div className="mb-[5px]">
-					<VSCodeCheckbox
-						checked={planActSeparateModelsSetting}
-						className="mb-[5px]"
-						onClick={async (e: any) => {
-							const checked = e.target.checked === true
-							try {
-								// If unchecking the toggle, wait a bit for state to update, then sync configurations
-								if (!checked) {
-									await syncModeConfigurations(apiConfiguration, currentTab, handleFieldsChange)
-								}
-								await StateServiceClient.updateSettings(
-									UpdateSettingsRequest.create({
-										planActSeparateModelsSetting: checked,
-									}),
-								)
-							} catch (error) {
-								console.error("Failed to update separate models setting:", error)
-							}
-						}}>
-						Use separate models for Plan and Act
-					</VSCodeCheckbox>
-					<p className="text-xs mt-[5px] text-(--vscode-descriptionForeground)">
-						Use one provider/model for planning and another for implementation. Before disabling, note that the
-						current {currentTab === "plan" ? "Plan" : "Act"} configuration becomes shared.
-					</p>
-				</div>
-			</Section>
-		</div>
-	)
+	const { configuredApiProviders, apiConfiguration } = useSettingsStore()
+	const [editingProvider, setEditingProvider] = useState<ApiProvider>()
+	const profiles: { name: string; baseUrl: string }[] = apiConfiguration?.openAiCompatibleProfiles ?? []
+	return <div>
+		{renderSectionHeader?.("models-api")}
+		<Section>
+			<div className="divide-y divide-(--vscode-panel-border)">
+				{configuredApiProviders.map((provider) => <div className="flex items-center justify-between py-2" key={provider}>
+					<div><span>{PROVIDERS.list.find((entry) => entry.value === provider)?.label ?? provider}</span><ProviderSetupSummary provider={provider} /></div>
+					<button type="button" onClick={() => setEditingProvider(provider)}>Edit setup</button>
+				</div>)}
+				{profiles.map((profile) => <div key={profile.name} className="flex justify-between gap-2 py-1 text-xs">
+					<span>{profile.name}</span><span className="text-description">{profile.baseUrl}</span>
+				</div>)}
+			</div>
+			<div className="mt-4">
+				<h3 className="text-sm font-medium">Add or configure a provider</h3>
+				<ApiOptions key={editingProvider ?? "add"} initialSetupProvider={editingProvider} currentMode="act" intent="setup" showModelOptions={false} />
+			</div>
+		</Section>
+	</div>
 }
 
 export default ApiConfigurationSection

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const stateManager = {
 	getGlobalSettingsKey: vi.fn(),
+	getSystemDefaultSettingsKey: vi.fn(),
+	setGlobalState: vi.fn(),
 	getApiConfiguration: vi.fn(),
 	getSecretKey: vi.fn(),
 	setApiConfiguration: vi.fn(),
@@ -40,13 +42,14 @@ vi.mock("@shared/storage", () => ({
 			: mode === "act"
 				? "actModeOpenRouterModelId"
 				: "planModeOpenRouterModelId",
-	isSecretKey: (key: string) => ["openRouterApiKey", "awsAccessKey", "awsSecretKey", "awsSessionToken"].includes(key),
-	ProviderToApiKeyMap: { openrouter: "openRouterApiKey" },
-	ProviderToBaseUrlKeyMap: {},
+	isSecretKey: (key: string) => ["openRouterApiKey", "openAiApiKey", "awsAccessKey", "awsSecretKey", "awsSessionToken", "openai-codex-oauth-credentials", "github-copilot-oauth-credentials"].includes(key),
+	ProviderToApiKeyMap: { openrouter: "openRouterApiKey", openai: "openAiApiKey" },
+	ProviderToBaseUrlKeyMap: { openai: "openAiBaseUrl" },
 }))
 
 vi.mock("@/core/controller/models/apiConfigurationTransaction", () => ({
 	applyApiConfigurationTransaction,
+	applyProviderSetupTransaction: vi.fn(async (_context: unknown, _patch: unknown, persist: () => Promise<void>) => persist()),
 }))
 
 vi.mock("@/core/controller/models/refreshOpenRouterModels", () => ({
@@ -62,7 +65,7 @@ vi.mock("./model-metadata", () => ({
 	getModelList: vi.fn(() => []),
 }))
 
-const { applyBedrockConfig, applyProviderConfig } = await import("./provider-config")
+const { applyBedrockConfig, applyProviderConfig, saveProviderSetup, saveBedrockSetup } = await import("./provider-config")
 
 function createController(task?: any) {
 	return {
@@ -75,6 +78,9 @@ describe("provider configuration transactions", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		stateManager.getGlobalSettingsKey.mockReturnValue(undefined)
+		stateManager.getSystemDefaultSettingsKey.mockImplementation((key: string) =>
+			key === "addedApiProviders" ? [] : key.endsWith("ApiProvider") ? "anthropic" : undefined,
+		)
 		stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "anthropic",
 			planModeApiProvider: "anthropic",
@@ -84,6 +90,75 @@ describe("provider configuration transactions", () => {
 			key === "openRouterApiKey" ? "old-secret" : undefined,
 		)
 		stateManager.flushPendingState.mockResolvedValue(undefined)
+	})
+
+	it("records explicit keyless addition and restores membership on failed persistence", async () => {
+		await saveProviderSetup({ providerId: "lmstudio" })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({})
+		expect(stateManager.setGlobalState).toHaveBeenCalledWith("addedApiProviders", ["lmstudio"])
+		stateManager.flushPendingState.mockRejectedValueOnce(new Error("flush failed"))
+		await expect(saveProviderSetup({ providerId: "lmstudio" })).rejects.toThrow("flush failed")
+		expect(stateManager.setGlobalState).toHaveBeenLastCalledWith("addedApiProviders", [])
+	})
+
+	it("projects only the newly authenticated OAuth credential into setup", async () => {
+		stateManager.getSecretKey.mockReturnValue("fresh-credential")
+		await saveProviderSetup({ providerId: "openai-codex", controller: createController() })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({ "openai-codex-oauth-credentials": "fresh-credential" })
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+	})
+
+	it("accepts onboarding's empty optional base URL for providers without endpoint setup", async () => {
+		await applyProviderConfig({ providerId: "openrouter", apiKey: "new-secret", modelId: "model", baseUrl: "" })
+		expect(stateManager.setApiConfiguration.mock.calls[0][0]).not.toHaveProperty("openAiBaseUrl")
+	})
+
+	it("saves OpenRouter access before any application model exists", async () => {
+		stateManager.getApiConfiguration.mockReturnValue({})
+		await saveProviderSetup({ providerId: "openrouter", apiKey: "new-secret", controller: createController() })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({ openRouterApiKey: "new-secret" })
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+	})
+
+	it("saves keyless setup without provider/model writes", async () => {
+		await saveProviderSetup({ providerId: "openai", apiKey: "", baseUrl: "http://localhost:1234/v1/chat/completions/" })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({ openAiApiKey: "", openAiBaseUrl: "http://localhost:1234/v1" })
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+	})
+
+	it.each<Record<string, string>>([{ "X-Proxy": "new-value" }, {}])("saves legacy headers with endpoint access in one setup patch: %j", async (headers) => {
+		await saveProviderSetup({ providerId: "openai", apiKey: "new-key", baseUrl: "http://proxy/v1/", headers })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledExactlyOnceWith({ openAiApiKey: "new-key", openAiBaseUrl: "http://proxy/v1", openAiHeaders: headers })
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+	})
+
+	it("rolls back headers together with legacy credentials and URL on persistence failure", async () => {
+		const previous = { openAiApiKey: "old-key", openAiBaseUrl: "http://old/v1", openAiHeaders: { "X-Proxy": "old" } }
+		stateManager.getSecretKey.mockReturnValue(previous.openAiApiKey)
+		stateManager.getSystemDefaultSettingsKey.mockImplementation((key: string) => key === "addedApiProviders" ? [] : previous[key as keyof typeof previous])
+		stateManager.flushPendingState.mockRejectedValueOnce(new Error("flush failed"))
+		await expect(saveProviderSetup({ providerId: "openai", apiKey: "new", baseUrl: "http://new", headers: {} })).rejects.toThrow("flush failed")
+		expect(stateManager.setApiConfiguration).toHaveBeenLastCalledWith(previous)
+	})
+
+	it.each([" https://bedrock.internal/ ", ""])("persists a changed or cleared Bedrock endpoint without model writes: %j", async (endpoint) => {
+		const setup = { awsAuthentication: "profile", awsProfile: "work", awsRegion: "us-east-1", awsUseCrossRegionInference: false, awsBedrockEndpoint: endpoint }
+		await saveBedrockSetup({ bedrockConfig: setup })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledExactlyOnceWith({ ...setup, awsBedrockEndpoint: endpoint.trim(), awsUseProfile: true })
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+	})
+
+	it("saves Bedrock profile setup without custom-model flags or selection", async () => {
+		await saveBedrockSetup({ bedrockConfig: { awsAuthentication: "profile", awsProfile: "work", awsRegion: "us-east-1", awsUseCrossRegionInference: false } })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({ awsAuthentication: "profile", awsUseProfile: true, awsProfile: "work", awsRegion: "us-east-1", awsUseCrossRegionInference: false })
+	})
+
+	it("restores persisted setup defaults rather than effective task overrides on failure", async () => {
+		stateManager.getSystemDefaultSettingsKey.mockImplementation((key: string) => key === "openAiBaseUrl" ? "http://saved" : [])
+		stateManager.getApiConfiguration.mockReturnValue({ openAiBaseUrl: "http://task-override" })
+		stateManager.flushPendingState.mockRejectedValueOnce(new Error("flush failed"))
+		await expect(saveProviderSetup({ providerId: "openai", baseUrl: "http://new" })).rejects.toThrow("flush failed")
+		expect(stateManager.setApiConfiguration).toHaveBeenLastCalledWith({ openAiBaseUrl: "http://saved" })
 	})
 
 	it("rejects OpenRouter without an explicit or saved model", async () => {
@@ -136,7 +211,7 @@ describe("provider configuration transactions", () => {
 		})
 		expect(restored).toEqual(
 			Object.fromEntries(
-				Object.keys(written).map((key) => [key, key === "openRouterApiKey" ? "old-secret" : stateManager.getApiConfiguration.mock.results[0].value[key]]),
+				Object.keys(written).map((key) => [key, key === "openRouterApiKey" ? "old-secret" : stateManager.getSystemDefaultSettingsKey(key)]),
 			),
 		)
 		expect(restored).not.toHaveProperty("unrelatedSetting")

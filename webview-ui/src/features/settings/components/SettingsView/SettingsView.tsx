@@ -13,7 +13,7 @@ import {
 	ShieldCheck,
 	SquareTerminal,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useEvent } from "react-use"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { cn } from "@/lib/utils"
@@ -115,6 +115,25 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 	const initialTarget = resolveSettingsTarget(targetSection)
 	const [activeTab, setActiveTab] = useState<SettingsTabID>(initialTarget.tab)
 	const [focusTarget, setFocusTarget] = useState(initialTarget.focusId)
+	const [navigationExpanded, setNavigationExpanded] = useState(false)
+	const inputModality = useRef<"keyboard" | "pointer">("keyboard")
+	const navigationHasKeyboardFocus = useRef(false)
+
+	useEffect(() => {
+		const recordKeyboardInput = () => {
+			inputModality.current = "keyboard"
+		}
+		const recordPointerInput = () => {
+			inputModality.current = "pointer"
+			navigationHasKeyboardFocus.current = false
+		}
+		document.addEventListener("keydown", recordKeyboardInput, true)
+		document.addEventListener("pointerdown", recordPointerInput, true)
+		return () => {
+			document.removeEventListener("keydown", recordKeyboardInput, true)
+			document.removeEventListener("pointerdown", recordPointerInput, true)
+		}
+	}, [])
 
 	const selectTarget = useCallback((target?: string) => {
 		const resolved = resolveSettingsTarget(target)
@@ -181,48 +200,82 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 		<Tab>
 			<ViewHeader environment={environment} onDone={onDone} title="Settings" />
 			<div className="flex flex-1 overflow-hidden">
-				<TabList
-					aria-label="Settings destinations"
-					aria-orientation="vertical"
-					className="settings-tab-list shrink-0 flex flex-col overflow-y-auto border-r border-sidebar-background"
-					onValueChange={(value) => setActiveTab(value as SettingsTabID)}
-					value={activeTab}>
-					{SETTINGS_TABS.map((tab) => {
-						const presentation = SETTINGS_DESTINATIONS[tab.id]
-						return (
-							<Tooltip key={tab.id}>
-								<TooltipTrigger asChild>
-									<TabTrigger
-										aria-controls={`settings-panel-${tab.id}`}
-										aria-label={presentation.label}
-										className={cn(
-											"settings-tab-trigger w-full whitespace-nowrap overflow-hidden h-12 box-border flex items-center border-l-2 border-transparent text-left text-foreground opacity-70 bg-transparent hover:bg-list-hover px-4 cursor-pointer gap-2",
-											activeTab === tab.id && "opacity-100 border-l-foreground bg-selection",
-										)}
-										data-testid={`tab-${tab.id}`}
-										id={`settings-tab-${tab.id}`}
-										value={tab.id}>
-										<tab.icon aria-hidden="true" className="settings-tab-icon w-4 h-4" />
-										<span className="settings-tab-label">{presentation.label}</span>
-										<span aria-hidden="true" className="settings-tab-compact-label">
-											{presentation.compactLabel}
-										</span>
-									</TabTrigger>
-								</TooltipTrigger>
-								<TooltipContent
-									className="settings-nav-tooltip max-w-xs"
-									showArrow={false}
-									side="right"
-									sideOffset={6}>
-									{presentation.webviewTooltip}
-								</TooltipContent>
-							</Tooltip>
-						)
-					})}
-				</TabList>
+				<div className="settings-nav-rail">
+					<nav
+						aria-label="Settings navigation"
+						className="settings-nav-overlay"
+						data-expanded={navigationExpanded}
+						onBlur={(event) => {
+							if (event.currentTarget.contains(event.relatedTarget)) return
+							navigationHasKeyboardFocus.current = false
+							setNavigationExpanded(false)
+						}}
+						onFocus={() => {
+							if (inputModality.current !== "keyboard") return
+							navigationHasKeyboardFocus.current = true
+							setNavigationExpanded(true)
+						}}
+						onKeyDownCapture={(event) => {
+							if (event.key === "Escape") {
+								event.preventDefault()
+								event.stopPropagation()
+								setNavigationExpanded(false)
+							} else if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+								navigationHasKeyboardFocus.current = true
+								setNavigationExpanded(true)
+							}
+						}}
+						onPointerDown={(event) => {
+							if (event.pointerType === "touch") setNavigationExpanded(true)
+						}}
+						onPointerEnter={(event) => {
+							if (event.pointerType === "mouse" || event.pointerType === "pen") setNavigationExpanded(true)
+						}}
+						onPointerLeave={(event) => {
+							if (event.pointerType === "touch" || navigationHasKeyboardFocus.current) return
+							setNavigationExpanded(false)
+						}}>
+						<TabList
+							aria-label="Settings destinations"
+							aria-orientation="vertical"
+							className="settings-tab-list flex flex-col"
+							onValueChange={(value) => setActiveTab(value as SettingsTabID)}
+							value={activeTab}>
+							{SETTINGS_TABS.map((tab) => {
+								const presentation = SETTINGS_DESTINATIONS[tab.id]
+								return (
+									<Tooltip key={tab.id}>
+										<TooltipTrigger asChild>
+											<TabTrigger
+												aria-controls={`settings-panel-${tab.id}`}
+												aria-label={presentation.label}
+												className={cn(
+													"settings-tab-trigger text-foreground opacity-70",
+													activeTab === tab.id && "opacity-100",
+												)}
+												data-testid={`tab-${tab.id}`}
+												id={`settings-tab-${tab.id}`}
+												value={tab.id}>
+												<tab.icon aria-hidden="true" className="settings-tab-icon w-4 h-4" />
+												<span className="settings-tab-label">{presentation.label}</span>
+											</TabTrigger>
+										</TooltipTrigger>
+										<TooltipContent
+											className="settings-nav-tooltip max-w-xs"
+											showArrow={false}
+											side="right"
+											sideOffset={6}>
+											{presentation.webviewTooltip}
+										</TooltipContent>
+									</Tooltip>
+								)
+							})}
+						</TabList>
+					</nav>
+				</div>
 				<TabContent
 					aria-labelledby={`settings-tab-${activeTab}`}
-					className="flex-1 overflow-auto"
+					className="min-w-0 flex-1 overflow-auto"
 					id={`settings-panel-${activeTab}`}
 					role="tabpanel">
 					{ActiveContent}

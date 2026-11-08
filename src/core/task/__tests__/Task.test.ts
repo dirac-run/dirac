@@ -300,6 +300,8 @@ describe("Task (original)", () => {
 		sinon.assert.calledOnceWithExactly(toolExecutorSetApi, installed)
 		setters.forEach((setter) => sinon.assert.calledOnceWithExactly(setter, installed))
 		sinon.assert.notCalled(markDirty)
+		await t.applyWorkingConfigurationUpdate({ settings: { lowVerbosityEnabled: !updated.settings.lowVerbosityEnabled } })
+		assert.equal(t.api, installed, "non-provider settings must preserve the handler and its cache session")
 	})
 
 	it("records notices only for actual mode transitions", () => {

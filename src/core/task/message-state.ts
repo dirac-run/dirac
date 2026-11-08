@@ -1,3 +1,4 @@
+import { extendTranscriptPrefix, TranscriptIntegrityError } from "@core/api/TranscriptPrefix"
 import type { ApiConversationProviderState } from "@core/api/conversation"
 import CheckpointTracker from "@integrations/checkpoints/CheckpointTracker"
 import { EventEmitter } from "events"
@@ -15,7 +16,7 @@ import {
 import type { PresentationOperation } from "@/shared/PresentationOperation"
 import { Logger } from "@/shared/services/Logger"
 import { getCwd, getDesktopDir } from "@/utils/path"
-import { type ApiConversationOperation, readPresentationHistory } from "../storage/conversationHistory"
+import { type ApiConversationOperation, getSavedApiConversationState, readPresentationHistory } from "../storage/conversationHistory"
 import {
 	appendApiConversationOperations,
 	appendPresentationOperations,
@@ -398,12 +399,19 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		await this.persistenceMutex.withLock(() => this.updateTaskHistoryInternal())
 	}
 
+	private assertHistoryPrefix(history: DiracStorageMessage[]): void {
+		if (this.apiConversationProviderState.historyPrefix) {
+			extendTranscriptPrefix(this.apiConversationProviderState.historyPrefix, {}, history)
+		}
+	}
+
 	getApiConversationHistory(): DiracStorageMessage[] {
-		return this.apiConversationHistory
+		return structuredClone(this.apiConversationHistory)
 	}
 
 	setApiConversationHistory(newHistory: DiracStorageMessage[], lastOffset = -1): void {
-		this.apiConversationHistory = newHistory.map(removeUserInputMarkersFromMessage)
+		this.assertHistoryPrefix(newHistory)
+		this.apiConversationHistory = structuredClone(newHistory.map(removeUserInputMarkersFromMessage))
 		this.apiHistoryOffset = lastOffset
 		this.pendingApiConversationOperations = []
 		this.pendingApiConversationBytes = 0
@@ -411,11 +419,57 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	}
 
 	getApiConversationProviderState(): ApiConversationProviderState {
-		return this.apiConversationProviderState
+		return structuredClone(this.apiConversationProviderState)
 	}
 
 	setApiConversationProviderState(state: ApiConversationProviderState): void {
-		this.apiConversationProviderState = state
+		this.apiConversationProviderState = structuredClone(state)
+	}
+
+	/** Checkpoint restore may retain an exact prefix, never rewrite messages within it. */
+	validateApiConversationHistoryBranch(retainedHistory: DiracStorageMessage[]): void {
+		this.assertHistoryPrefix(this.apiConversationHistory)
+		if (retainedHistory.length > this.apiConversationHistory.length) {
+			throw new TranscriptIntegrityError("checkpoint retained prefix length")
+		}
+		const retainedPrefix = extendTranscriptPrefix(undefined, {}, this.apiConversationHistory.slice(0, retainedHistory.length))
+		extendTranscriptPrefix(retainedPrefix, {}, retainedHistory)
+	}
+
+	/** One framed operation commits both the retained history and its new provider generation. */
+	async branchApiConversationHistory(retainedHistory: DiracStorageMessage[]): Promise<void> {
+		await this.flushPendingWrites()
+		await this.persistenceMutex.withLock(async () => {
+			if (this.persistenceRetired) throw new Error("Task persistence retired")
+			await this.withStateLock(async () => {
+				this.validateApiConversationHistoryBranch(retainedHistory)
+				const history = structuredClone(retainedHistory)
+				const previous = this.apiConversationProviderState
+				const historyPrefix = extendTranscriptPrefix(undefined, {}, history, previous.historyPrefix?.id)
+				const providerState: ApiConversationProviderState = {
+					historyBranchId: historyPrefix.id,
+					historyPrefix,
+					submittedHistoryLength: history.length,
+					previousTranscriptId: previous.transcript?.id ?? previous.previousTranscriptId ?? previous.condensedFromTranscriptId,
+				}
+				const offset = this.apiHistoryOffset + 1
+				let appendError: unknown
+				try {
+					await appendApiConversationOperations(this.storageAddress, [{ offset, type: "branch", messages: history, providerState }], history)
+				} catch (error) {
+					// A completed frame can survive an append/sync error. Adopt only a
+					// confirmed commit, so this instance agrees with a subsequent reload.
+					const saved = await getSavedApiConversationState(this.storageAddress)
+					if (saved.branchProviderState?.historyBranchId !== providerState.historyBranchId) throw error
+					appendError = error
+				}
+				this.apiConversationHistory = history
+				this.apiConversationProviderState = providerState
+				this.apiHistoryOffset = offset
+				this.lastModelInfo = findLastModelInfo(history)
+				if (appendError) throw appendError
+			})
+		})
 	}
 
 	async overwriteApiConversationProviderState(state: ApiConversationProviderState): Promise<void> {
@@ -424,8 +478,11 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 		await this.persistenceMutex.withLock(async () => {
 			if (this.persistenceRetired) return
 			await this.withStateLock(async () => {
-				this.apiConversationProviderState = state
+				if (state.historyBranchId !== this.apiConversationProviderState.historyBranchId) {
+					throw new TranscriptIntegrityError("stale provider state after checkpoint branch")
+				}
 				await saveApiConversationProviderState(this.storageAddress, state)
+				this.apiConversationProviderState = structuredClone(state)
 			})
 		})
 	}
@@ -638,7 +695,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 
 	async addToApiConversationHistory(message: DiracStorageMessage) {
 		await this.withStateLock(async () => {
-			const storedMessage = removeUserInputMarkersFromMessage(message)
+			const storedMessage = structuredClone(removeUserInputMarkersFromMessage(message))
 			this.apiConversationHistory.push(storedMessage)
 			if (storedMessage.modelInfo) this.lastModelInfo = storedMessage.modelInfo
 			this.recordApiConversationOperation({
@@ -652,8 +709,11 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	}
 
 	async appendToLastApiConversationUserMessage(contentBlock: DiracUserContent): Promise<DiracStorageMessage> {
-		const sanitizedContentBlock = removeUserInputMarkersFromContent(contentBlock) as DiracUserContent
+		const sanitizedContentBlock = structuredClone(removeUserInputMarkersFromContent(contentBlock)) as DiracUserContent
 		const message = await this.withStateLock(() => {
+			if (this.apiConversationHistory.length <= (this.apiConversationProviderState.submittedHistoryLength ?? 0)) {
+				throw new TranscriptIntegrityError("submitted user message")
+			}
 			const lastMessage = this.apiConversationHistory.at(-1)
 			if (!lastMessage || lastMessage.role !== "user") {
 				throw new Error("Cannot append content without a final user API conversation message")
@@ -668,7 +728,7 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 				type: "append_user_content",
 				content: structuredClone(sanitizedContentBlock),
 			})
-			return lastMessage
+			return structuredClone(lastMessage)
 		})
 		await this.flushIfPersistenceBatchIsFull()
 		this.scheduleApiHistoryFlush()
@@ -678,7 +738,8 @@ export class MessageStateHandler extends EventEmitter<MessageStateHandlerEvents>
 	async overwriteApiConversationHistory(newHistory: DiracStorageMessage[]): Promise<void> {
 		await this.flushPendingWrites()
 		await this.withStateLock(() => {
-			this.apiConversationHistory = newHistory.map(removeUserInputMarkersFromMessage)
+			this.assertHistoryPrefix(newHistory)
+			this.apiConversationHistory = structuredClone(newHistory.map(removeUserInputMarkersFromMessage))
 			this.lastModelInfo = findLastModelInfo(this.apiConversationHistory)
 			this.recordApiConversationOperation({
 				offset: ++this.apiHistoryOffset,

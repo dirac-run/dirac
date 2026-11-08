@@ -1,6 +1,7 @@
 import type { ApiConfiguration, ModelInfo } from "@shared/api"
 import type { RunHistoryItem } from "@shared/HistoryItem"
 import { buildLegacyModelIdStateUpdates } from "@shared/storage/legacy-model-id-migration"
+import { getLegacyKeylessApiProviders } from "@shared/configuredApiProviders"
 import {
 	type GlobalState,
 	type GlobalStateAndSettings,
@@ -11,7 +12,6 @@ import {
 import type { StorageContext } from "@shared/storage/storage-context"
 import { initializeDistinctId } from "@/services/logging/distinctId"
 import { Logger } from "@/shared/services/Logger"
-import { AgentConfigLoader } from "../task/tools/subagent/AgentConfigLoader"
 import {
 	createTaskWorkingConfiguration,
 	type TaskExecutionOptions,
@@ -179,6 +179,13 @@ export class StateManager {
 
 			// Load all extension state from file-backed stores
 			const { globalState, secrets, workspaceState } = await StateManager.instance.persistence.readAllFromDisk()
+			// Missing membership marks pre-setup-catalog storage. Persist once before any
+			// model-selection update can erase the only evidence of a keyless setup.
+			if (storage.globalStateBackingStore.get("addedApiProviders") === undefined) {
+				const addedApiProviders = getLegacyKeylessApiProviders(globalState)
+				await storage.globalStateBackingStore.setBatch({ addedApiProviders })
+				globalState.addedApiProviders = addedApiProviders
+			}
 			const rawLegacyUtilityModelEnabled = storage.globalStateBackingStore.get<boolean>("utilityModelEnabled")
 			const rawUtilityModelUseCondense = storage.globalStateBackingStore.get<boolean>("utilityModelUseCondense")
 			const rawUtilityModelUseGenerateCommitMessage = storage.globalStateBackingStore.get<boolean>(
@@ -221,7 +228,6 @@ export class StateManager {
 
 			StateManager.instance.isInitialized = true
 
-			await AgentConfigLoader.getInstance().ready()
 		} catch (error) {
 			Logger.error("[StateManager] Failed to initialize:", error)
 			throw error

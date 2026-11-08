@@ -529,13 +529,10 @@ describe("ApiConversationManager steering delivery", () => {
 			})
 			assert.equal(enabledDispatch.options.enableNativeWebSearch, true)
 
-			dependencies.api.supportsNativeWebSearch = () => false
-			const disabledDispatch = await new ApiConversationManager(dependencies).prepareProviderConversationDispatch({
-				systemPrompt: "system",
-				tools: [],
-				truncatedMessages: history,
-				providerId: "unsupported",
-				modelId: "model",
+			const { dependencies: unsupported, history: unsupportedHistory } = createCompactionDependencies()
+			unsupported.api.supportsNativeWebSearch = () => false
+			const disabledDispatch = await new ApiConversationManager(unsupported).prepareProviderConversationDispatch({
+				systemPrompt: "system", tools: [], truncatedMessages: unsupportedHistory, providerId: "unsupported", modelId: "model",
 			})
 			assert.equal(disabledDispatch.options.enableNativeWebSearch, false)
 		})

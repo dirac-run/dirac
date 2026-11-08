@@ -171,7 +171,6 @@ function emptyToolSnapshot(): ToolRequestSnapshot {
 		nativeTools: [],
 		coordinator: { has: () => false } as any,
 		executableToolNames: new Set(),
-		dynamicSubagentToolNames: new Set(),
 	}
 }
 
@@ -180,17 +179,9 @@ function builtinToolSnapshot(context: SystemPromptContext): ToolRequestSnapshot 
 	const contextFilteredSpecs = inventoryEnabledTools
 		.map((tool) => tool.spec)
 		.filter((spec) => !spec.contextRequirements || spec.contextRequirements(context))
-	const promptVisibleSpecs = DiracToolSet.withDynamicSubagentToolSpecs(contextFilteredSpecs, context)
+	const promptVisibleSpecs = DiracToolSet.withSubagentRoleSpecs(contextFilteredSpecs, context)
 	const nativeTools = DiracToolSet.convertSpecsToNativeTools(promptVisibleSpecs, context)
-	const dynamicSubagentToolNames = new Set(
-		promptVisibleSpecs
-			.filter((spec) => spec.id === "use_subagents" && spec.name !== "use_subagents")
-			.map((spec) => spec.name),
-	)
-	const executableToolNames = new Set([
-		...inventoryEnabledTools.map((tool) => tool.spec.name),
-		...dynamicSubagentToolNames,
-	])
+	const executableToolNames = new Set(inventoryEnabledTools.map((tool) => tool.spec.name))
 	return {
 		inventoryVersion: 1,
 		requestId: "test-builtins",
@@ -200,7 +191,6 @@ function builtinToolSnapshot(context: SystemPromptContext): ToolRequestSnapshot 
 		nativeTools,
 		coordinator: { has: (name: string) => executableToolNames.has(name) } as any,
 		executableToolNames,
-		dynamicSubagentToolNames,
 	}
 }
 

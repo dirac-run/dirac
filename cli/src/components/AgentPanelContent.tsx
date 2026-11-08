@@ -8,6 +8,7 @@ import {
 	type TaskletInventoryPage,
 	type TaskletTranscriptPage,
 } from "@shared/taskletObservation"
+import { formatTaskletLabel } from "@shared/taskletLabel"
 import { Box, Text, useInput } from "ink"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import stringWidth from "string-width"
@@ -180,7 +181,7 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 			isSubpage={!!openAgentId}
 			label={
 				openAgentId
-					? clipAgentTitle(transcript?.title ?? "Agent transcript", columns - 4 - stringWidth(" (Esc to go back)"))
+					? clipAgentTitle(formatTaskletLabel({ taskletId: openAgentId, title: transcript?.title ?? "Agent transcript", role: transcript?.role }), columns - 4 - stringWidth(" (Esc to go back)"))
 					: "Agents · read only"
 			}>
 			<Text color={theme.muted} wrap="truncate">
@@ -212,7 +213,7 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 							color={selectedIndex === startIndex + index ? theme.primary : theme.text}
 							wrap="truncate">
 							{selectedIndex === startIndex + index ? "❯ " : "  "}
-							{clipAgentTitle(agent.title, contentColumns - 3 - stringWidth(TASKLET_STATE_LABELS[agent.state]))} ·{" "}
+							{clipAgentTitle(formatTaskletLabel(agent), contentColumns - 3 - stringWidth(TASKLET_STATE_LABELS[agent.state]))} ·{" "}
 							{TASKLET_STATE_LABELS[agent.state]}
 						</Text>
 					))}

@@ -133,7 +133,7 @@ describe("API configuration active-task ingress characterization", () => {
 		expect(harness.events.indexOf("persist-settings")).to.be.lessThan(harness.events.indexOf("install-handler"))
 	})
 
-	it("the partial endpoint persists a complete merged configuration and commits one active revision", async () => {
+	it("the partial endpoint persists only addressed fields and commits one active revision", async () => {
 		const harness = createHarness()
 		buildApiHandler.returns(harness.replacementHandler as any)
 		const request = UpdateApiConfigurationPartialRequest.create({
@@ -144,8 +144,7 @@ describe("API configuration active-task ingress characterization", () => {
 		await updateApiConfigurationPartial(harness.controller, request)
 
 		expect(harness.stateManager.setApiConfiguration.calledOnce).to.equal(true)
-		expect(harness.stateManager.setApiConfiguration.firstCall.args[0]).to.include({
-			planModeApiModelId: "plan-model",
+		expect(harness.stateManager.setApiConfiguration.firstCall.args[0]).to.deep.equal({
 			actModeApiModelId: "partial-model",
 		})
 		expectHandlerCommitBeforePublication(harness)
@@ -242,7 +241,7 @@ describe("API configuration active-task ingress characterization", () => {
 		const original = harness.getWorkingConfiguration()
 		const before = harness.stateManager.getApiConfiguration()
 		let persisted = before
-		;(harness.stateManager.getApiConfiguration as sinon.SinonStub).callsFake(() => ({ ...persisted }))
+			; (harness.stateManager.getApiConfiguration as sinon.SinonStub).callsFake(() => ({ ...persisted }))
 		harness.stateManager.getSystemDefaultSettingsKey.callsFake((key: string) => persisted[key])
 		harness.stateManager.getSecretKey.callsFake((key: string) => persisted[key])
 		harness.stateManager.setApiConfiguration.onFirstCall().callsFake((configuration: Record<string, unknown>) => {

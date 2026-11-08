@@ -9,7 +9,7 @@ import { shouldIgnoreTerminalInput } from "../utils/input"
 
 type AuthMethod = "profile" | "credentials" | "default"
 
-type BedrockStep = "auth_method" | "profile_name" | "access_key" | "secret_key" | "session_token" | "region" | "options"
+type BedrockStep = "auth_method" | "profile_name" | "access_key" | "secret_key" | "session_token" | "region" | "endpoint" | "options"
 
 export interface BedrockConfig {
 	awsAuthentication: string
@@ -19,10 +19,12 @@ export interface BedrockConfig {
 	awsSessionToken?: string
 	awsRegion: string
 	awsUseCrossRegionInference: boolean
+	awsBedrockEndpoint?: string
 }
 
 interface BedrockSetupProps {
 	isActive: boolean
+	initialEndpoint?: string
 	onComplete: (config: BedrockConfig) => void
 	onCancel: () => void
 }
@@ -92,7 +94,7 @@ const CredentialInput: React.FC<{
 	)
 }
 
-export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete, onCancel }) => {
+export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, initialEndpoint, onComplete, onCancel }) => {
 	const { isRawModeSupported } = useStdinContext()
 
 	const [step, setStep] = useState<BedrockStep>("auth_method")
@@ -112,6 +114,7 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 	// Options state
 	const [crossRegion, setCrossRegion] = useState(false)
 	const [optionIndex, setOptionIndex] = useState(0)
+	const [endpoint, setEndpoint] = useState(initialEndpoint ?? "")
 
 	// Filtered regions
 	const filteredRegions = useMemo(() => {
@@ -168,8 +171,11 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 				else if (authMethod === "credentials") setStep("session_token")
 				else setStep("auth_method")
 				break
-			case "options":
+			case "endpoint":
 				setStep("region")
+				break
+			case "options":
+				setStep("endpoint")
 				break
 		}
 	}, [step, authMethod, onCancel])
@@ -187,6 +193,8 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 			awsAuthentication: authMethod === "default" ? "credentials" : authMethod,
 			awsRegion: getSelectedRegion(),
 			awsUseCrossRegionInference: crossRegion,
+			// Onboarding without a supplied endpoint must not clear existing saved setup.
+			...(initialEndpoint !== undefined || endpoint.trim() ? { awsBedrockEndpoint: endpoint.trim() } : {}),
 		}
 		if (authMethod === "profile") {
 			config.awsProfile = profileName || ""
@@ -196,7 +204,7 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 			if (sessionToken) config.awsSessionToken = sessionToken
 		}
 		onComplete(config)
-	}, [authMethod, profileName, accessKey, secretKey, sessionToken, getSelectedRegion, crossRegion, onComplete])
+	}, [authMethod, profileName, accessKey, secretKey, sessionToken, getSelectedRegion, crossRegion, initialEndpoint, endpoint, onComplete])
 
 	// Handle input for auth_method, region, and options steps
 	useInput(
@@ -221,7 +229,7 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 				} else if (key.downArrow && filteredRegions.length > 0) {
 					setRegionIndex((prev) => (prev < filteredRegions.length - 1 ? prev + 1 : 0))
 				} else if (key.return && (filteredRegions.length > 0 || regionSearch.trim())) {
-					setStep("options")
+					setStep("endpoint")
 				} else if (key.backspace || key.delete) {
 					setRegionSearch((prev) => prev.slice(0, -1))
 					setRegionIndex(0)
@@ -365,6 +373,20 @@ export const BedrockSetup: React.FC<BedrockSetupProps> = ({ isActive, onComplete
 				<Text> </Text>
 				<Text color={theme.muted}>Type to search, arrows to navigate, Enter to select, Esc to go back</Text>
 			</Box>
+		)
+	}
+
+	if (step === "endpoint") {
+		return (
+			<CredentialInput
+				hint="Optional - leave empty to use the default AWS endpoint"
+				isActive={isActive}
+				label="Bedrock endpoint URL"
+				onCancel={goBack}
+				onChange={setEndpoint}
+				onSubmit={() => setStep("options")}
+				value={endpoint}
+			/>
 		)
 	}
 

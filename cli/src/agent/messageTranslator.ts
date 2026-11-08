@@ -49,8 +49,7 @@ const TOOL_KIND_MAP: Record<string, acp.ToolKind> = {
 	condense: "think",
 	use_skill: "other",
 	useSkill: "other",
-	use_subagents: "other",
-	useSubagents: "other",
+	subagents: "other",
 	execute_command: "execute",
 }
 

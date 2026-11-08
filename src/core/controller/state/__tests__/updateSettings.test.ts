@@ -87,9 +87,9 @@ function createMockController(overrides: any = {}) {
 	const controller: any = {
 		stateManager,
 		task: overrides.task ?? null,
-		postStateToWebview: sinon.spy(async () => {}),
-		updateTelemetrySetting: sinon.spy(async (_setting: any) => {}),
-		markToolsDirty: sinon.spy(() => {}),
+		postStateToWebview: sinon.spy(async () => { }),
+		updateTelemetrySetting: sinon.spy(async (_setting: any) => { }),
+		markToolsDirty: sinon.spy(() => { }),
 		...overrides,
 	}
 
@@ -144,7 +144,7 @@ function createMockController(overrides: any = {}) {
 					return workingConfiguration
 				},
 			),
-			markToolsDirty: sinon.spy(() => {}),
+			markToolsDirty: sinon.spy(() => { }),
 			...controller.task,
 		}
 	}
@@ -184,6 +184,46 @@ describe("updateSettings", () => {
 
 	afterEach(() => {
 		sandbox.restore()
+	})
+
+	describe("global role catalog updates", () => {
+		for (const client of ["webview", "cli"] as const) {
+			it(`${client} persists roles without rebuilding an active Task`, async () => {
+				const controller = createMockController({ task: {} })
+				const before = controller.task.getWorkingConfiguration()
+				const subagentRoles = { roles: [{ name: "Reviewer", description: "Review code.", enabled: false }] }
+				if (client === "webview") await updateSettings(controller, UpdateSettingsRequest.create({ subagentRoles }))
+				else await updateSettingsCli(controller, UpdateSettingsRequestCli.create({ settings: { subagentRoles } }))
+				expect(controller.stateManager._store.subagentRoles).to.deep.equal(subagentRoles.roles)
+				expect(controller.task.applyWorkingConfigurationUpdate.called).to.be.false
+				expect((apiModule.buildApiHandler as sinon.SinonStub).called).to.be.false
+				expect(controller.task.getWorkingConfiguration()).to.equal(before)
+				expect(controller.postStateToWebview.calledOnce).to.be.true
+			})
+
+			it(`${client} keeps roles out of a mixed active-task settings patch`, async () => {
+				const controller = createMockController({ task: {} })
+				const settings = { subagentRoles: { roles: [] }, preferredLanguage: "French" }
+				if (client === "webview") await updateSettings(controller, UpdateSettingsRequest.create(settings))
+				else await updateSettingsCli(controller, UpdateSettingsRequestCli.create({ settings }))
+				expect(controller.stateManager._store.subagentRoles).to.deep.equal([])
+				expect(controller.task.lastAppliedPatch.settings).not.to.have.property("subagentRoles")
+				expect(controller.task.lastAppliedPatch.settings.preferredLanguage).to.equal("French")
+			})
+
+			it(`${client} rejects invalid roles before changing settings`, async () => {
+				const controller = createMockController({ task: {} })
+				const settings = { subagentRoles: { roles: [{ name: "default", description: "Invalid.", enabled: false }] } }
+				let error: unknown
+				try {
+					if (client === "webview") await updateSettings(controller, UpdateSettingsRequest.create(settings))
+					else await updateSettingsCli(controller, UpdateSettingsRequestCli.create({ settings }))
+				} catch (caught) { error = caught }
+				expect(error).to.be.instanceOf(Error)
+				expect(controller.stateManager._store).not.to.have.property("subagentRoles")
+				expect(controller.task.applyWorkingConfigurationUpdate.called).to.be.false
+			})
+		}
 	})
 
 	describe("updateSettings (webview)", () => {
@@ -252,7 +292,7 @@ describe("updateSettings", () => {
 
 		it("does not persist an invalid API configuration", async () => {
 			const controller = createMockController({ task: {} })
-			;(apiModule.buildApiHandler as sinon.SinonStub).throws(new Error("invalid candidate"))
+				; (apiModule.buildApiHandler as sinon.SinonStub).throws(new Error("invalid candidate"))
 
 			try {
 				await updateSettings(controller, UpdateSettingsRequest.create({ apiConfiguration: {} as any }))
@@ -405,8 +445,8 @@ describe("updateSettings", () => {
 		it("restores registry and persisted toggles when persistence throws after mutation", async () => {
 			const controller = createMockController({ task: {} })
 			const registry = ToolRegistry.getInstance()
-			;(registry.loadToggles as sinon.SinonStub | undefined)?.restore?.()
-			;(registry.getToggles as sinon.SinonStub | undefined)?.restore?.()
+				; (registry.loadToggles as sinon.SinonStub | undefined)?.restore?.()
+				; (registry.getToggles as sinon.SinonStub | undefined)?.restore?.()
 			registry.registerBuiltin({
 				id: "edit_file" as any,
 				name: "edit_file",
@@ -549,7 +589,7 @@ describe("updateSettings", () => {
 		})
 
 		it("should convert actModeApiProvider from proto to string", async () => {
-			;(conversionModule.convertProtoToApiProvider as sinon.SinonStub).returns("openai")
+			; (conversionModule.convertProtoToApiProvider as sinon.SinonStub).returns("openai")
 			const controller = createMockController()
 			const request = UpdateSettingsRequestCli.create({
 				settings: { actModeApiProvider: ApiProvider.OPENAI } as any,
@@ -670,13 +710,13 @@ describe("updateSettings", () => {
 			}
 			controller.stateManager._store.mode = "act"
 			activeConfiguration.settings.mode = "act"
-			;(apiModule.buildApiHandler as sinon.SinonStub).callsFake((configuration: any, mode: string) => {
-				const provider = mode === "act" ? configuration.actModeApiProvider : configuration.planModeApiProvider
-				if (provider === "dify" && (!configuration.difyApiKey || !configuration.difyBaseUrl)) {
-					throw new Error("Dify requires both an API key and base URL")
-				}
-				return {}
-			})
+				; (apiModule.buildApiHandler as sinon.SinonStub).callsFake((configuration: any, mode: string) => {
+					const provider = mode === "act" ? configuration.actModeApiProvider : configuration.planModeApiProvider
+					if (provider === "dify" && (!configuration.difyApiKey || !configuration.difyBaseUrl)) {
+						throw new Error("Dify requires both an API key and base URL")
+					}
+					return {}
+				})
 
 			try {
 				await updateSettingsCli(

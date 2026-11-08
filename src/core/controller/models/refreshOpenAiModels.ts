@@ -186,10 +186,13 @@ export async function refreshOpenAiModels(
 	request: OpenAiModelsRequest,
 ): Promise<StringArray> {
 	try {
-		const models = await getOpenAiModels({
+		// Proto scalars/maps have empty defaults, so saved access needs an explicit
+		// intent flag rather than treating an empty key or URL as omission.
+		const models = await getOpenAiModels(request.useSavedEndpoint ? { controller } : {
 			controller,
 			baseUrl: request.baseUrl,
 			apiKey: request.apiKey,
+			headers: request.headers,
 		})
 		return StringArray.create({ values: Object.keys(models) })
 	} catch (error) {

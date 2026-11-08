@@ -18,11 +18,15 @@ interface InferenceSpeedSelectorProps {
 	description: string
 	supportsFastMode: boolean
 	allowedSpeeds?: readonly InferenceSpeed[]
+	compact?: boolean
+	label?: string
 }
 
 const InferenceSpeedSelector = ({
 	currentMode,
 	description,
+	compact = false,
+	label = "Inference Speed",
 	supportsFastMode,
 	allowedSpeeds = INFERENCE_SPEED_OPTIONS,
 }: InferenceSpeedSelectorProps) => {
@@ -43,6 +47,36 @@ const InferenceSpeedSelector = ({
 		isInferenceSpeed(configuredSpeed) && selectableSpeeds.includes(configuredSpeed)
 			? configuredSpeed
 			: DEFAULT_INFERENCE_SPEED
+
+	if (compact)
+		return (
+			<Select
+				value={selectedSpeed}
+				onValueChange={(value) => {
+					void handleModeFieldChange(
+						{ plan: "planModeInferenceSpeed", act: "actModeInferenceSpeed" },
+						value as InferenceSpeed,
+						currentMode,
+					)
+				}}>
+				<SelectTrigger
+					size="sm"
+					aria-label={label}
+					title={`${label}: ${description}`}
+					className="h-7 rounded-sm px-2 text-xs">
+					<span className="text-description">Speed</span>
+					<SelectValue />
+				</SelectTrigger>
+				<SelectContent align="start">
+					{selectableSpeeds.map((speed) => (
+						<SelectItem key={speed} value={speed}>
+							{INFERENCE_SPEED_LABELS[speed]}
+						</SelectItem>
+					))}
+					<p className="max-w-56 px-2 py-1 text-xs text-description">{description}</p>
+				</SelectContent>
+			</Select>
+		)
 
 	return (
 		<div style={{ marginTop: 10, marginBottom: 5 }}>

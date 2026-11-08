@@ -1,6 +1,16 @@
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
 import { DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
-import type { ModelProviderPreset, ModelProviderSelection } from "@shared/api"
+import type { ModelProviderSelection } from "@shared/api"
+import { ModelSelectionEditor } from "./ModelSelectionEditor"
+import type { SubagentRole } from "@shared/subagentRoles"
+import { RoleSettingsEditor } from "./RoleSettingsEditor"
+import { saveRoleSettings } from "./roleSettingsBinding"
+import { EndpointSetupForm } from "./EndpointSetupForm"
+import { ApiProvidersPage } from "./ApiProvidersPage"
+import { ProviderAccessForm } from "./ProviderAccessForm"
+import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
+import type { ApiProvider } from "@shared/api"
+import { readModeSelection, saveApplicationModelSelection } from "./modelSelectionBinding"
 import { getAutoCondenseContextLimit } from "@shared/context-management"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
 import { getProviderModelIdKey, isSettingsKey, type UtilityModelUseCases } from "@shared/storage"
@@ -36,7 +46,7 @@ import { commitInteractiveSetting, persistInteractiveSettingWithRollback } from 
 import { GithubAuthPage } from "./subpages/AuthPages"
 import { ApiKeyInputPage, EditValuePage, ObjectEditorPage } from "./subpages/EditPages"
 import { OpenRouterRoutingPage } from "./subpages/OpenRouterRoutingPage"
-import { LanguagePickerPage, ModelPickerPage, ProviderPickerPage, UtilityModelPresetPickerPage } from "./subpages/PickerPages"
+import { LanguagePickerPage, ProviderPickerPage } from "./subpages/PickerPages"
 import { BedrockCustomFlowPage, BedrockSetupPage } from "./subpages/SetupPages"
 import {
 	SettingsNavigationDirection,
@@ -145,9 +155,11 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	const [utilityPermissionPolicy, setUtilityPermissionPolicy] = useState<string>(() =>
 		stateManager.getGlobalSettingsKey("utilityModelPermissionPolicy"),
 	)
-	const [modelProviderPresets] = useState<ModelProviderPreset[]>(
-		() => stateManager.getGlobalSettingsKey("modelProviderPresets") ?? [],
-	)
+	const [selectionTarget, setSelectionTarget] = useState<"plan" | "act" | "utility" | null>(initialMode === "model-picker" ? (initialModelKey === "planModelId" ? "plan" : "act") : null)
+	const [accessProvider, setAccessProvider] = useState<ApiProvider | null>(null)
+	const [endpointName, setEndpointName] = useState<string | null>(null)
+	const [subagentRoles, setSubagentRoles] = useState<SubagentRole[]>(() => stateManager.getSystemDefaultSettingsKey("subagentRoles"))
+	const [roleIndex, setRoleIndex] = useState<number | null>(null)
 
 	const [vimModeEnabled, setVimModeEnabled] = useState(() => stateManager.getGlobalSettingsKey("cliVimMode"))
 	const [lightTerminalTheme, setLightTerminalTheme] = useState<boolean>(() => {
@@ -267,6 +279,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 
 	const settingsItemsProps: UseSettingsItemsProps = {
 		currentTab,
+		planProvider: (controller?.task?.getWorkingConfiguration().apiConfiguration ?? stateManager.getApiConfiguration()).planModeApiProvider,
 		provider,
 		actModelId,
 		planModelId,
@@ -280,6 +293,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		features,
 		utilityModelUseCases,
 		utilityModelSelection,
+		subagentRoles,
 		utilityPermissionPolicy,
 		lightTerminalTheme,
 		vimModeEnabled,
@@ -320,12 +334,10 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		handleAction,
 		handleSave,
 		handleProviderSelect,
-		handleModelSelect,
 		handleApiKeySubmit,
 		handleBedrockComplete,
 		handleBedrockCustomFlowComplete,
 		handleLanguageSelect,
-		handleUtilityModelPresetSelect,
 		completeCodexAuth,
 		cancelGithubAuth,
 		navigateItems,
@@ -450,6 +462,14 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	const activateSettingsItem = useCallback(() => {
 		const item = items[selectedIndex]
 		if (!item) return
+		if (item.key === "addSubagentRole" || item.key.startsWith("subagentRole:")) {
+			setRoleIndex(item.key === "addSubagentRole" ? -1 : Number(item.key.slice("subagentRole:".length)))
+			return
+		}
+		if (["planSelection", "actSelection", "utilityModelSelection"].includes(item.key)) {
+			setSelectionTarget(item.key === "planSelection" ? "plan" : item.key === "actSelection" ? "act" : "utility")
+			return
+		}
 		if (item.key === "approvedCommandRules") {
 			setIsEditingApprovedCommands(true)
 			return
@@ -490,6 +510,10 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 
 	useInput(
 		(input, key) => {
+			if (accessProvider) return
+			if (endpointName !== null) return
+			if (selectionTarget) return
+			if (roleIndex !== null) return
 			if (objectEditor || openRouterRoutingModelId || isEditingApprovedCommands || isSearching) return
 			if (shouldIgnoreTerminalInput(input, key)) return
 			if (helpItem) {
@@ -558,6 +582,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 				}
 				return
 			}
+			if (currentTab === SettingsTab.MODELS_API) return
 			if (key.upArrow) navigateItems(SettingsNavigationDirection.UP)
 			else if (key.downArrow) navigateItems(SettingsNavigationDirection.DOWN)
 			else if (input === "?") {
@@ -572,6 +597,34 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	)
 
 	const renderContent = () => {
+		if (roleIndex !== null) return <RoleSettingsEditor
+			role={subagentRoles[roleIndex]} controller={controller} onCancel={() => setRoleIndex(null)}
+			onSave={async (role) => {
+				const next = roleIndex < 0 ? [...subagentRoles, role] : subagentRoles.map((entry, index) => index === roleIndex ? role : entry)
+				setSubagentRoles(await saveRoleSettings(stateManager, next, controller))
+				setRoleIndex(null)
+			}}
+			onRemove={roleIndex < 0 ? undefined : async () => {
+				setSubagentRoles(await saveRoleSettings(stateManager, subagentRoles.filter((_, index) => index !== roleIndex), controller))
+				setRoleIndex(null)
+				setSelectedIndex(0)
+			}} />
+		if (accessProvider) return <ProviderAccessForm provider={accessProvider} controller={controller} onCancel={() => setAccessProvider(null)} onDone={() => { setAccessProvider(null); refreshModelIds() }} />
+		if (endpointName !== null) return <EndpointSetupForm
+			profile={stateManager.getSystemDefaultSettingsKey("openAiCompatibleProfiles").find((item) => item.name === endpointName)}
+			controller={controller} onCancel={() => setEndpointName(null)} onDone={() => { setEndpointName(null); refreshModelIds() }} />
+		if (selectionTarget) return <ModelSelectionEditor
+			value={selectionTarget === "utility" ? utilityModelSelection : readModeSelection(controller?.task?.getWorkingConfiguration().apiConfiguration ?? stateManager.getApiConfiguration(), selectionTarget)}
+			controller={controller}
+			onCancel={() => { setSelectionTarget(null); if (initialMode === "model-picker") onClose() }}
+			onSave={async (selection) => {
+				await saveApplicationModelSelection(selectionTarget, selection, separateModels, controller)
+				if (selectionTarget === "utility") setUtilityModelSelection(selection)
+				else setProvider(stateManager.getGlobalSettingsKey("actModeApiProvider"))
+				refreshModelIds(); setSelectionTarget(null)
+				if (initialMode === "model-picker") onClose()
+			}}
+		/>
 		if (isSearching) {
 			return (
 				<SettingsSearchView
@@ -683,9 +736,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			)
 		}
 		if (isWaitingForUnbiasedAuth) return (
-			<UnbiasedAuthView controller={controller} onCancel={() => setIsWaitingForUnbiasedAuth(false)} onComplete={() => {
-				setProvider("unbiased")
-				refreshModelIds()
+			<UnbiasedAuthView setupOnly controller={controller} onCancel={() => setIsWaitingForUnbiasedAuth(false)} onComplete={() => {
 				setIsWaitingForUnbiasedAuth(false)
 			}} />
 		)
@@ -694,31 +745,16 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		)
 		if (isWaitingForGithubAuth && githubAuthData) return <GithubAuthPage githubAuthData={githubAuthData} />
 		if (isPickingModel && pickingModelKey) {
-			const apiConfiguration = controller?.task?.getWorkingConfiguration().apiConfiguration ?? stateManager.getApiConfiguration()
-			const selectedProvider = pickingModelKey === "actModelId"
-				? apiConfiguration.actModeApiProvider
-				: apiConfiguration.planModeApiProvider || apiConfiguration.actModeApiProvider
-			const label = pickingModelKey === "actModelId" ? "Model ID (Act)" : "Model ID (Plan)"
-			return (
-				<ModelPickerPage
-					controller={controller}
-					isActive={isPickingModel && !isApplyingSetting}
-					label={label}
-					onSelect={(modelId) => runSettingsAction("model update", () => handleModelSelect(modelId))}
-					provider={pendingProvider || selectedProvider || provider}
-				/>
-			)
-		}
-		if (isPickingUtilityModel) {
-			return (
-				<UtilityModelPresetPickerPage
-					isActive={isPickingUtilityModel && !isApplyingSetting}
-					onSelect={(preset) =>
-						runSettingsAction("utility model selection", () => handleUtilityModelPresetSelect(preset))
-					}
-					presets={modelProviderPresets}
-				/>
-			)
+			const mode = pickingModelKey === "actModelId" ? "act" : "plan"
+			const current = readModeSelection(controller?.task?.getWorkingConfiguration().apiConfiguration ?? stateManager.getApiConfiguration(), mode)
+			return <ModelSelectionEditor controller={controller}
+				value={pendingProvider ? { provider: pendingProvider as ApiProvider, modelId: "" } : current}
+				onCancel={() => { setIsPickingModel(false); if (initialMode) onClose() }}
+				onSave={async (selection) => {
+					await saveApplicationModelSelection(mode, selection, separateModels, controller)
+					setIsPickingModel(false); setPendingProvider(null); setPickingModelKey(null); refreshModelIds()
+					if (initialMode) onClose()
+				}} />
 		}
 		if (isPickingLanguage) {
 			return (
@@ -766,10 +802,26 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			)
 		}
 
+		if (currentTab === SettingsTab.MODELS_API) return <ApiProvidersPage
+			isActive={!isApplyingSetting} onCancel={returnHome}
+			onEndpoint={setEndpointName}
+			onLegacyEndpoint={() => setAccessProvider("openai")}
+			onProvider={(id) => { if (id === "openai") setEndpointName(""); else if (id === "unbiased") setIsWaitingForUnbiasedAuth(true); else if (id !== "bedrock" && ProviderToBaseUrlKeyMap[id as ApiProvider]) setAccessProvider(id as ApiProvider); else void runSettingsAction("provider setup", () => handleProviderSelect(id)) }}
+			actions={items.filter((item) => item.key.endsWith("SignOut"))}
+			onAction={(item) => void runSettingsAction("sign out", async () => {
+				if (item.key === "unbiasedSignOut") await signOutUnbiasedKey(stateManager, controller?.task)
+				else await handleAction(item)
+				refreshModelIds()
+			})}
+		/>
 		return <SettingsListView items={items} maxRows={settingsMaxRows} selectedIndex={selectedIndex} />
 	}
 
 	const hasNestedPage =
+		roleIndex !== null ||
+		!!selectionTarget ||
+		endpointName !== null ||
+		!!accessProvider ||
 		isPickingProvider ||
 		isPickingModel ||
 		isPickingLanguage ||

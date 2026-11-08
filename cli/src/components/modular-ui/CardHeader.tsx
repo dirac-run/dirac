@@ -1,5 +1,6 @@
 import { CardStatus } from "@shared/ExtensionMessage"
 import type { TaskletPresentationData } from "@shared/taskletPresentation"
+import { formatTaskletLabel } from "@shared/taskletLabel"
 import {
 	TASKLET_RECEIPT_OPERATIONS,
 	TASKLET_RECEIPT_OUTCOMES,
@@ -21,7 +22,7 @@ interface CardHeaderProps {
 	isCollapsed?: boolean
 	compact?: boolean
 	statusLabel?: string
-	tasklet?: Pick<TaskletPresentationData, "title" | "status"> & { width: number }
+	tasklet?: Pick<TaskletPresentationData, "taskletId" | "title" | "role" | "status"> & { width: number }
 	receipt?: TaskletReceipt
 	renderWidth?: number
 }
@@ -41,8 +42,8 @@ function getHeaderPresentation(status: CardStatus) {
 	}
 }
 
-function taskletHeaderText({ title, status, width }: NonNullable<CardHeaderProps["tasklet"]>): string {
-	const normalized = title.replace(/\s+/g, " ").trim()
+function taskletHeaderText({ taskletId, title, role, status, width }: NonNullable<CardHeaderProps["tasklet"]>): string {
+	const normalized = formatTaskletLabel({ taskletId, title, role }).replace(/\s+/g, " ").trim()
 	const full = `${normalized} · ${status}`
 	if (stringWidth(full) <= width) return full
 	const titleWidth = width - stringWidth(status) - 3

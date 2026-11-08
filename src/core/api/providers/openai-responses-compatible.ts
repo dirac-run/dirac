@@ -35,14 +35,24 @@ export class OpenAiResponsesCompatibleHandler implements ApiHandler {
 
 	private ensureClient(): OpenAI {
 		if (!this.client) {
-			if (!this.options.openAiApiKey) {
-				throw new Error("OpenAI API key is required")
-			}
 			try {
+				const baseUrl = this.options.openAiBaseUrl?.trim().replace(/\/responses\/?$/, "").replace(/\/+$/, "") || ""
+				const hostname = baseUrl ? new URL(baseUrl).hostname.toLowerCase() : ""
+				const isKeylessEndpoint = Boolean(baseUrl) && hostname !== "api.openai.com" &&
+					!hostname.includes("azure.com") && !hostname.includes("azure.us") && !this.options.openAiApiKey
+				if (!this.options.openAiApiKey && !isKeylessEndpoint) {
+					throw new Error("OpenAI API key is required")
+				}
 				this.client = createOpenAIClient({
-					apiKey: this.options.openAiApiKey,
-					baseURL: this.options.openAiBaseUrl,
-					defaultHeaders: this.options.openAiHeaders,
+					// The SDK requires a non-empty key; the sentinel never leaves the client
+					// because keyless requests explicitly remove the Authorization header.
+					apiKey: isKeylessEndpoint ? "keyless-endpoint" : this.options.openAiApiKey,
+					baseURL: baseUrl || undefined,
+					...(isKeylessEndpoint ? { organization: null, project: null } : {}),
+					defaultHeaders: {
+						...(isKeylessEndpoint ? { Authorization: null } : {}),
+						...this.options.openAiHeaders,
+					},
 				})
 			} catch (error) {
 				throw new Error(`Error creating OpenAI client: ${getErrorMessage(error)}`)

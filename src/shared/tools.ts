@@ -54,7 +54,7 @@ export enum DiracDefaultTool {
 	CONDENSE = "condense",
 	USE_SKILL = "use_skill",
 	LIST_SKILLS = "list_skills",
-	USE_SUBAGENTS = "use_subagents",
+	SUBAGENTS = "subagents",
 	INSPECT_AST = "inspect_ast",
 
 	UPSERT_TOOL = "upsert_tool",
@@ -92,7 +92,7 @@ export const READ_ONLY_TOOLS = [
 
 	DiracDefaultTool.USE_SKILL,
 	DiracDefaultTool.LIST_SKILLS,
-	DiracDefaultTool.USE_SUBAGENTS,
+	DiracDefaultTool.SUBAGENTS,
 ] as const
 
 // Tools that can modify the filesystem or workspace state.

@@ -8,12 +8,12 @@ export function isSkillAvailableToTaskProfile(profile: TaskExecutionProfile, ski
 	return profile === "standalone" || profile === "goal_coordinator" || profile === "goal_followup"
 }
 
-export const GOAL_TOOL_NAMES = ["verify_goal", "update_goal", "block_goal"] as const
+export const GOAL_TOOL_NAMES = ["update_goal", "block_goal"] as const
 
 const goalToolNames = new Set<string>(GOAL_TOOL_NAMES)
 
 export function isToolAvailableToTaskProfile(profile: TaskExecutionProfile, toolName: string): boolean {
-	if ((toolName === "use_subagents" || toolName === "tasklets") && profile === "tasklet") return false
+	if ((toolName === "subagents" || toolName === "tasklets") && profile === "tasklet") return false
 	if (profile === "goal_coordinator" || profile === "goal_followup") return true
 	return !goalToolNames.has(toolName)
 }
@@ -39,7 +39,7 @@ You always execute in Act mode and cannot call the Plan responder or switch mode
 
 You are continuing the selected Goal coordinator conversation for a user-initiated follow-up turn. The durable Goal lifecycle status is authoritative. This turn must not resume or otherwise change that status.
 
-You may work directly and use private tasklets or explicit verify_goal when useful. Supervise children through tasklets: inspect bounded results and pending requests passively, use message for guidance, questions, correlated replies and permission decisions under your current authority, explicitly interrupt or resume children, and sleep when no useful work remains. Calling respond with complete finishes only this follow-up turn; it does not newly achieve the Goal. Calling block_goal ends only this follow-up turn. Both require all tasklets to be terminal. The user must explicitly resume paused, blocked, or stopped Goal pursuit. An achieved Goal cannot be resumed.
+You may work directly and use subagents for ordinary assignments, including verification when useful. Supervise children through tasklets: inspect bounded results and pending requests passively, use message for guidance, questions, correlated replies and permission decisions under your current authority, explicitly interrupt or resume children, and sleep when no useful work remains. Calling respond with complete finishes only this follow-up turn; it does not newly achieve the Goal. Calling block_goal ends only this follow-up turn. Both require all tasklets to be terminal. The user must explicitly resume paused, blocked, or stopped Goal pursuit. An achieved Goal cannot be resumed.
 
 When the Goal is achieved, do not revise its durable objective; it records exactly what was achieved. A materially new objective requires a new Goal.
 
@@ -57,5 +57,5 @@ Keep the visible transcript current enough that a user opening it during the run
 
 Exercise judgment over child updates. Most should remain private; synthesize only information that helps the user understand status, decisions, risks, or next steps. Do not mechanically forward child messages or narrate routine tool activity. Keep each progress update compact—normally one sentence, sometimes two, and only rarely three.
 
-Keep contained assignments narrow and complete. Use tasklets to inspect bounded results and pending requests passively, message children through the single addressed protocol under your current authority, and explicitly interrupt or resume them. Use tasklets with sleep when no useful work remains; child communication arrives through the shared parent channel, not a separate Goal event protocol. Update the durable objective selectively when important intent or constraints must survive compaction. Use verify_goal explicitly when verification is useful; completion has no automatic verification gate. Goal completion and blocking are valid only when no tasklet is active. Goal execution is semantically separate from Plan mode and always uses Act tools.`
+Keep contained assignments narrow and complete. Use tasklets to inspect bounded results and pending requests passively, message children through the single addressed protocol under your current authority, and explicitly interrupt or resume them. Use tasklets with sleep when no useful work remains; child communication arrives through the shared parent channel, not a separate Goal event protocol. Update the durable objective selectively when important intent or constraints must survive compaction. Assign verification through subagents when useful and supervise it with tasklets; completion has no automatic verification gate. Goal completion and blocking are valid only when no tasklet is active. Goal execution is semantically separate from Plan mode and always uses Act tools.`
 }

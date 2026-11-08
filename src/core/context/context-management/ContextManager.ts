@@ -246,10 +246,10 @@ export class ContextManager {
 		deletedRange: [number, number] | undefined,
 	): Anthropic.Messages.MessageParam[] {
 		if (messages.length <= 1) {
-			return messages
+			return cloneDeep(messages)
 		}
 
-		const updatedMessages = this.applyContextHistoryUpdates(messages, deletedRange ? deletedRange[1] + 1 : 2)
+		const updatedMessages = this.applyContextHistoryUpdates(cloneDeep(messages), deletedRange ? deletedRange[1] + 1 : 2)
 
 		// Validate and fix tool_use/tool_result pairing
 		this.ensureToolResultsFollowToolUse(updatedMessages)
@@ -325,7 +325,7 @@ export class ContextManager {
 
 			// Ensure content is an array
 			if (!Array.isArray(nextMessage.content)) {
-				nextMessage.content = []
+				nextMessage.content = [{ type: "text", text: nextMessage.content }]
 			}
 
 			// Separate tool_results from other blocks in a single pass

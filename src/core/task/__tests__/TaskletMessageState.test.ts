@@ -13,7 +13,7 @@ import { getTaskDirectoryPath, type TaskStorageAddress } from "@core/storage/tas
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
 import { type DiracMessage, DiracMessageType } from "@/shared/ExtensionMessage"
-import { createTaskletId } from "@/shared/taskletId"
+import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { MessageStateHandler } from "../message-state"
 import { TaskState } from "../TaskState"

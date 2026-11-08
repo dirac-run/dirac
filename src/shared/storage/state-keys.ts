@@ -17,6 +17,7 @@ import { InferenceSpeed, Mode, normalizeInferenceSpeed } from "@shared/storage/t
 import { TelemetrySetting } from "@shared/TelemetrySetting"
 import { normalizeUserApprovedCommands, type UserApprovedCommand } from "@shared/UserApprovedCommand"
 import { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
+import { DEFAULT_SUBAGENT_ROLES, type SubagentRole, validateSubagentRoles } from "@shared/subagentRoles"
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH FOR STORAGE KEYS
@@ -224,6 +225,8 @@ const API_HANDLER_SETTINGS_FIELDS = {
 
 const USER_SETTINGS_FIELDS = {
 	// Settings that are NOT part of ApiHandlerOptions
+	// User-global evidence of explicit setup for providers with no required saved fields.
+	addedApiProviders: { default: [] as ApiProvider[] },
 	acpDisabledProviders: { default: {} as Record<string, string> },
 	acpProviderApiTypes: { default: {} as Record<string, string> },
 	modelProviderPresets: { default: [] as import("@shared/api").ModelProviderPreset[] },
@@ -234,6 +237,7 @@ const USER_SETTINGS_FIELDS = {
 	utilityModelUsePermissionHandling: { default: false as boolean },
 	utilityModelPermissionPolicy: { default: "" as string },
 	utilityModelSelection: { default: undefined as ModelProviderSelection | undefined },
+	subagentRoles: { default: DEFAULT_SUBAGENT_ROLES as SubagentRole[], transform: validateSubagentRoles },
 	autoApprovalSettings: {
 		default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,
 	},

@@ -35,7 +35,6 @@ describe("TaskRequestRuntime", () => {
 			nativeTools: [],
 			coordinator: {} as any,
 			executableToolNames: new Set<string>(),
-			dynamicSubagentToolNames: new Set<string>(),
 		}
 		const bound = bindToolSnapshotToRequestRuntime(runtime, snapshot)
 		assert.equal(bound.toolSnapshot, snapshot)
@@ -55,7 +54,6 @@ describe("TaskRequestRuntime", () => {
 			nativeTools: [],
 			coordinator: {} as any,
 			executableToolNames: new Set<string>(),
-			dynamicSubagentToolNames: new Set<string>(),
 		}
 		assert.throws(() => bindToolSnapshotToRequestRuntime(runtime, snapshot), /identity mismatch/)
 		assert.throws(

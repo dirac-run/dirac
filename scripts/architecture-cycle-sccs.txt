@@ -317,8 +317,8 @@ src/core/task/tools/modules/upsert_tool/subagent-builder.ts
 src/core/task/tools/modules/upsert_tool/tool.ts
 src/core/task/tools/modules/use_skill/UseSkillTool.ts
 src/core/task/tools/modules/use_skill/tool.ts
-src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts
-src/core/task/tools/modules/use_subagents/tool.ts
+src/core/task/tools/modules/subagents/SubagentsTool.ts
+src/core/task/tools/modules/subagents/tool.ts
 src/core/task/tools/modules/verify_goal/VerifyGoalTool.ts
 src/core/task/tools/modules/verify_goal/tool.ts
 src/core/task/tools/modules/wait_for_goal_events/WaitForGoalEventsTool.ts

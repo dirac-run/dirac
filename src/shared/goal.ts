@@ -1,4 +1,3 @@
-import type { TaskletObservedState } from "./taskletObservation"
 
 export type GoalStatus = "working" | "waiting" | "paused" | "blocked" | "achieved" | "stopped"
 
@@ -43,15 +42,6 @@ export interface GoalStatusTransition {
 	statusReason?: string
 }
 
-/** Goal-specific verification metadata; general tasklet inventory uses the common observation protocol. */
-export interface GoalVerificationSummary {
-	id: string
-	title: string
-	status: TaskletObservedState
-	createdAt: number
-	endedAt?: number
-	terminalSummary?: string
-}
 
 export interface GoalViewState {
 	id: string
@@ -65,7 +55,6 @@ export interface GoalViewState {
 	updatedAt: number
 	wallDurationMs: number
 	activeDurationMs: number
-	latestVerification?: GoalVerificationSummary
 	accounting: GoalAccounting
 	mode: "act"
 	modeSwitchingDisabled: true

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict"
+import { StateManager } from "@core/storage/StateManager"
+import { anthropicDefaultModelId } from "@shared/api"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -86,7 +88,7 @@ describe("TaskletHost durable usage attribution", () => {
 		const options = {
 			workingConfiguration: createTaskWorkingConfiguration({
 				settings: { mode: "act" } as any,
-				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				apiConfiguration: { apiKey: "test-key", actModeApiProvider: "anthropic", actModeApiModelId: anthropicDefaultModelId },
 				workspaceConfiguration: {} as any,
 				executionOptions: {
 					terminalReuseEnabled: true,
@@ -111,6 +113,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	beforeEach(async () => {
 		sandbox = sinon.createSandbox()
+		sandbox.stub(StateManager, "get").returns({ getSystemDefaultSettingsKey: () => [] } as unknown as StateManager)
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "tasklet-usage-"))
 		setVscodeHostProviderMock({ globalStorageFsPath: directory })
 		hosts = []
@@ -169,8 +172,8 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("replaces each child's cumulative snapshot while counting root and sibling spend once", async () => {
 		const host = newHost()
-		const first = await host.start({ title: "First", prompt: "One" })
-		const second = await host.start({ title: "Second", prompt: "Two" })
+		const first = await host.start({ type: "default", title: "First", prompt: "One" })
+		const second = await host.start({ type: "default", title: "Second", prompt: "Two" })
 		record(0, usage(1, 0.5))
 		record(1, usage(2))
 		record(0, usage(3, 0.5))
@@ -200,7 +203,7 @@ describe("TaskletHost durable usage attribution", () => {
 	for (const kind of ["failed", "interrupted"] as const) {
 		it(`retains incurred primary and Utility usage for ${kind} executions`, async () => {
 			const host = newHost()
-			const child = await host.start({ title: kind, prompt: "Work before stopping" })
+			const child = await host.start({ type: "default", title: kind, prompt: "Work before stopping" })
 			record(0, usage(2, 0.5))
 			if (kind === "failed") {
 				children[0].outcome.resolve({ kind, failedAt: 125, error: { name: "Error", message: "Provider failed" } })
@@ -215,7 +218,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("passes lifetime usage into same-identity resumption without adding historical spend again", async () => {
 		const host = newHost()
-		const child = await host.start({ title: "Reopen", prompt: "Original work" })
+		const child = await host.start({ type: "default", title: "Reopen", prompt: "Original work" })
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
 		await host.interrupt(child.id)
@@ -234,7 +237,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("reconstructs stopped snapshots without constructing engines and reconciles root projection idempotently", async () => {
 		const original = newHost()
-		const child = await original.start({ title: "Durable", prompt: "Work" })
+		const child = await original.start({ type: "default", title: "Durable", prompt: "Work" })
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
 		await original.interrupt(child.id)
@@ -255,7 +258,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("replaces an older restored root snapshot with the durable child total", async () => {
 		const original = newHost()
-		const child = await original.start({ title: "Latest snapshot", prompt: "Work" })
+		const child = await original.start({ type: "default", title: "Latest snapshot", prompt: "Work" })
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
 		await original.interrupt(child.id)
@@ -272,7 +275,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("preserves crash-active incurred usage while reconstructing a stopped handle", async () => {
 		const original = newHost()
-		const child = await original.start({ title: "Crash interrupted", prompt: "Work" })
+		const child = await original.start({ type: "default", title: "Crash interrupted", prompt: "Work" })
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
 		await original.interrupt(child.id)
@@ -294,7 +297,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("detaches callback snapshots from caller mutation", async () => {
 		const host = newHost()
-		const child = await host.start({ title: "Detached", prompt: "Work" })
+		const child = await host.start({ type: "default", title: "Detached", prompt: "Work" })
 		const snapshot = usage(1, 0.5)
 		record(0, snapshot)
 		snapshot.primary.cost = 999
@@ -307,7 +310,7 @@ describe("TaskletHost durable usage attribution", () => {
 
 	it("joins gated usage writes before terminal persistence and admits resumption only after settlement", async () => {
 		const host = newHost()
-		const child = await host.start({ title: "Ordered", prompt: "Work" })
+		const child = await host.start({ type: "default", title: "Ordered", prompt: "Work" })
 		const entered = deferred<void>()
 		const release = deferred<void>()
 		const write = storage.saveTaskletRecord
@@ -361,7 +364,7 @@ describe("TaskletHost durable usage attribution", () => {
 			utility: { tokensIn: 5, tokensOut: 1, cost: 0, reasoningTokens: 0, usageObserved: true, usageAvailability: unknown },
 		}
 		const original = newHost()
-		const child = await original.start({ title: "availability", prompt: "Private work" })
+		const child = await original.start({ type: "default", title: "availability", prompt: "Private work" })
 		record(0, snapshot)
 		children[0].outcome.resolve(completed)
 		await original.interrupt(child.id)
@@ -386,7 +389,7 @@ describe("TaskletHost durable usage attribution", () => {
 	it("surfaces a usage record write failure through settlement and root shutdown", async () => {
 		expectLoggerErrors()
 		const host = newHost()
-		const child = await host.start({ title: "Write failure", prompt: "Work" })
+		const child = await host.start({ type: "default", title: "Write failure", prompt: "Work" })
 		sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("Usage disk failure"))
 		record(0, usage(2, 0.5))
 		children[0].outcome.resolve(completed)
@@ -401,7 +404,7 @@ describe("TaskletHost durable usage attribution", () => {
 	it("retains the durable child snapshot and surfaces failed root projection during settlement", async () => {
 		expectLoggerErrors()
 		const host = newHost()
-		const child = await host.start({ title: "Projection failure", prompt: "Work" })
+		const child = await host.start({ type: "default", title: "Projection failure", prompt: "Work" })
 		owner.recordTaskletUsage = sandbox.stub().rejects(new Error("Root accounting unavailable"))
 		record(0, usage(2, 0.5))
 		record(0, usage(4, 1))

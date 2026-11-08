@@ -1,23 +1,21 @@
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
-import { type ApiProvider, getModelInfoForProvider, type ModelProviderSelection } from "@shared/api"
+import { type ModelProviderSelection } from "@shared/api"
+import type { SubagentRole } from "@shared/subagentRoles"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
 import { SETTINGS_DESTINATIONS, SETTINGS_HELP, TOOL_SOURCE_HELP } from "@shared/settings-presentation"
-import { ProviderToBaseUrlKeyMap, type UtilityModelUseCases } from "@shared/storage"
+import { type UtilityModelUseCases } from "@shared/storage"
 import type { OpenaiReasoningEffort } from "@shared/storage/types"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
-import { getReasoningEffortOptionsForModel, resolveReasoningEffortForModel } from "@shared/utils/reasoning-support"
 import { useMemo } from "react"
-import { StateManager } from "@/core/storage/StateManager"
 import { version as CLI_VERSION } from "../../../../package.json"
-import { usesOpenRouterModels } from "../../../utils/openrouter-models"
 import { getProviderLabel } from "../../../utils/providers"
-import { CUSTOM_MODEL_ID, getModelList } from "../../ModelPicker"
 import { FEATURE_SETTINGS, type FeatureKey } from "../constants"
 import { type ListItem, SettingsItemType, SettingsTab } from "../types"
 
 export interface UseSettingsItemsProps {
 	currentTab: SettingsTab
 	provider: string
+	planProvider?: string
 	actModelId: string
 	planModelId: string
 	separateModels: boolean
@@ -30,6 +28,7 @@ export interface UseSettingsItemsProps {
 	features: Record<FeatureKey, boolean>
 	utilityModelUseCases: UtilityModelUseCases
 	utilityModelSelection?: ModelProviderSelection
+	subagentRoles?: SubagentRole[]
 	utilityPermissionPolicy: string
 	lightTerminalTheme: boolean
 	vimModeEnabled?: boolean
@@ -75,265 +74,13 @@ const checkbox = (
 })
 
 function createModelItems(props: UseSettingsItemsProps): ListItem[] {
-	const {
-		provider,
-		actModelId,
-		planModelId,
-		separateModels,
-		actThinkingEnabled,
-		planThinkingEnabled,
-		actReasoningEffort,
-		planReasoningEffort,
-		openAiHeaders,
-		openAiCodexIsAuthenticated,
-		unbiasedIsAuthenticated,
-		unbiasedWorkloadName,
-		openAiCodexEmail,
-		githubIsAuthenticated,
-		githubEmail,
-		openRouterModels,
-		openRouterPinnedProviders,
-		openRouterProviderSorting,
-		openRouterPreventFallbacks,
-	} = props
-	const stateManager = StateManager.get()
-	const modelList = usesOpenRouterModels(provider) ? openRouterModels || [] : getModelList(provider)
-	// OpenAI-compatible endpoints expose arbitrary server-defined model IDs, so only explicit CUSTOM_MODEL_ID is treated as custom.
-	const isCustomModelId = (modelId: string) =>
-		modelId === CUSTOM_MODEL_ID || Boolean(modelId && provider !== "openai" && !modelList.includes(modelId))
-	const isActCustom = isCustomModelId(actModelId)
-	const isPlanCustom = isCustomModelId(planModelId)
-	const providerId = provider as ApiProvider
-	const actModelInfo = getModelInfoForProvider(providerId, actModelId)
-	const planModelInfo = getModelInfoForProvider(providerId, planModelId)
-	const actReasoningEffortOptions = getReasoningEffortOptionsForModel(actModelId, actModelInfo)
-	const planReasoningEffortOptions = getReasoningEffortOptionsForModel(planModelId, planModelInfo)
-	const showActReasoningEffort = actReasoningEffortOptions.length > 0
-	const showPlanReasoningEffort = planReasoningEffortOptions.length > 0
-	const providerHidesThinkingBudget = provider === "openai-native" || provider === "openai-codex" || provider === "unbiased" || provider === "zai"
-	const showActThinkingOption = !providerHidesThinkingBudget && !showActReasoningEffort
-	const showPlanThinkingOption = !providerHidesThinkingBudget && !showPlanReasoningEffort
-	const displayedActReasoningEffort =
-		resolveReasoningEffortForModel(actModelId, actModelInfo, actReasoningEffort) ?? actReasoningEffort
-	const displayedPlanReasoningEffort =
-		resolveReasoningEffortForModel(planModelId, planModelInfo, planReasoningEffort) ?? planReasoningEffort
-	const isOpenRouter = provider === "openrouter"
-	const formatPinnedProviderCount = (modelId: string) => {
-		const count = openRouterPinnedProviders[modelId]?.length || 0
-		return count > 0 ? `${count} allowed` : "Unrestricted"
-	}
-	const providerSortingLabel = openRouterProviderSorting
-		? openRouterProviderSorting[0].toUpperCase() + openRouterProviderSorting.slice(1)
-		: "Default"
-	const modelItems = (
-		mode: "act" | "plan",
-		modelId: string,
-		isCustom: boolean,
-		thinkingEnabled: boolean,
-		reasoningEffort: OpenaiReasoningEffort,
-		reasoningEffortOptions: readonly OpenaiReasoningEffort[],
-		showThinking: boolean,
-		showReasoning: boolean,
-	): ListItem[] => {
-		const prefix = mode === "act" ? "act" : "plan"
-		return [
-			editable(
-				`${prefix}ModelId`,
-				"Task model",
-				isCustom ? "Custom" : modelId || "not set",
-				"The model used for the current task mode.",
-			),
-			...(isCustom
-				? [editable(`${prefix}CustomModelId`, "Preset / model ID", modelId === CUSTOM_MODEL_ID ? "" : modelId)]
-				: []),
-			...(isOpenRouter
-				? [
-					editable(
-						`${prefix}OpenRouterProviders`,
-						mode === "plan" && planModelId === actModelId
-							? "Allowed upstream providers (shared with Act)"
-							: "Allowed upstream providers",
-						formatPinnedProviderCount(modelId),
-						"Restrict which upstream providers OpenRouter may use. Restrictions can reduce availability.",
-					),
-				]
-				: []),
-			...(showThinking
-				? [
-					checkbox(
-						`${prefix}ThinkingEnabled`,
-						"Thinking budget (1,024 tokens)",
-						thinkingEnabled,
-						"Enable the existing 1,024-token extended-thinking budget. Thinking may increase latency and cost.",
-					),
-				]
-				: []),
-			...(showReasoning
-				? [
-					{
-						key: `${prefix}ReasoningEffort`,
-						label: "Reasoning effort",
-						type: SettingsItemType.CYCLE,
-						value: reasoningEffort,
-						cycleOptions: reasoningEffortOptions,
-						description: "Higher effort can improve depth but usually increases latency and token usage.",
-					},
-				]
-				: []),
-		]
-	}
-
 	return [
-		editable(
-			"provider",
-			"Provider",
-			provider ? getProviderLabel(provider) : "not configured",
-			"The API provider used by the main task model.",
-		),
-		...(ProviderToBaseUrlKeyMap[provider as ApiProvider]
-			? [
-				editable(
-					"baseUrl",
-					"Base URL",
-					(stateManager.getGlobalSettingsKey(ProviderToBaseUrlKeyMap[provider as ApiProvider]!) as string) || "",
-					"Base address of an OpenAI-compatible API. Do not include /chat/completions.",
-				),
-			]
-			: []),
-		...(provider === "openai"
-			? [
-				{
-					key: "openAiHeaders",
-					label: "Custom headers",
-					type: SettingsItemType.OBJECT,
-					value: openAiHeaders,
-					description: "Additional sensitive headers sent with requests to this provider.",
-				},
-			]
-			: []),
-		...(provider === "unbiased"
-			? unbiasedIsAuthenticated
-				? [
-					{
-						key: "unbiasedAccount",
-						label: "Signed in to",
-						type: SettingsItemType.READONLY,
-						value: unbiasedWorkloadName || "Unbiased",
-					},
-					{ key: "unbiasedSignOut", label: "Sign out on this device", type: SettingsItemType.ACTION, value: "" },
-				]
-				: [{ key: "unbiasedSignIn", label: "Sign in with Unbiased", type: SettingsItemType.ACTION, value: "" }]
-			: []),
-		...(provider === "openai-codex" && openAiCodexIsAuthenticated
-			? [
-				{
-					key: "codexEmail",
-					label: "Authenticated as",
-					type: SettingsItemType.READONLY,
-					value: openAiCodexEmail || "ChatGPT User",
-				},
-				{
-					key: "codexSignOut",
-					label: "Sign out",
-					type: SettingsItemType.ACTION,
-					value: "",
-				},
-			]
-			: []),
-		...(provider === "github-copilot" && githubIsAuthenticated
-			? [
-				{
-					key: "githubEmail",
-					label: "Authenticated as",
-					type: SettingsItemType.READONLY,
-					value: githubEmail || "GitHub User",
-				},
-				{
-					key: "githubSignOut",
-					label: "Sign out",
-					type: SettingsItemType.ACTION,
-					value: "",
-				},
-			]
-			: []),
-		...(provider === "github-copilot" && !githubIsAuthenticated
-			? [
-				{
-					key: "githubSignIn",
-					label: "Sign in to GitHub Copilot",
-					type: SettingsItemType.ACTION,
-					value: "",
-				},
-			]
-			: []),
-		...(separateModels
-			? [
-				{
-					key: "actHeader",
-					label: "Act Mode",
-					type: SettingsItemType.HEADER,
-					value: "",
-				},
-				...modelItems(
-					"act",
-					actModelId,
-					isActCustom,
-					actThinkingEnabled,
-					displayedActReasoningEffort,
-					actReasoningEffortOptions,
-					showActThinkingOption,
-					showActReasoningEffort,
-				),
-				{
-					key: "planHeader",
-					label: "Plan Mode",
-					type: SettingsItemType.HEADER,
-					value: "",
-				},
-				...modelItems(
-					"plan",
-					planModelId,
-					isPlanCustom,
-					planThinkingEnabled,
-					displayedPlanReasoningEffort,
-					planReasoningEffortOptions,
-					showPlanThinkingOption,
-					showPlanReasoningEffort,
-				),
-			]
-			: modelItems(
-				"act",
-				actModelId,
-				isActCustom,
-				actThinkingEnabled,
-				displayedActReasoningEffort,
-				actReasoningEffortOptions,
-				showActThinkingOption,
-				showActReasoningEffort,
-			)),
-		...(isOpenRouter
-			? [
-				{
-					key: "openRouterProviderSorting",
-					label: "Provider sorting",
-					type: SettingsItemType.CYCLE,
-					value: providerSortingLabel,
-					description: "Choose how OpenRouter prioritizes eligible upstream providers.",
-				},
-				checkbox(
-					"openRouterPreventFallbacks",
-					"Prevent fallbacks",
-					openRouterPreventFallbacks,
-					"Fail instead of routing to another eligible provider. This can reduce reliability.",
-				),
-			]
-			: []),
-		checkbox(
-			"separateModels",
-			"Use separate models for Plan and Act",
-			separateModels,
-			"Use one provider/model for planning and another for implementation. Before disabling, review which Act settings become shared.",
-		),
+		...(props.unbiasedIsAuthenticated ? [
+			{ key: "unbiasedAccount", label: "Unbiased", type: SettingsItemType.READONLY, value: props.unbiasedWorkloadName || "Unbiased" },
+			{ key: "unbiasedSignOut", label: "Sign out of Unbiased", type: SettingsItemType.ACTION, value: "" },
+		] : [{ key: "unbiasedSignIn", label: "Sign in with Unbiased", type: SettingsItemType.ACTION, value: "" }]),
+		...(props.openAiCodexIsAuthenticated ? [{ key: "codexSignOut", label: `ChatGPT · ${props.openAiCodexEmail || "Signed in"}`, type: SettingsItemType.ACTION, value: "Sign out" }] : []),
+		...(props.githubIsAuthenticated ? [{ key: "githubSignOut", label: `GitHub · ${props.githubEmail || "Signed in"}`, type: SettingsItemType.ACTION, value: "Sign out" }] : []),
 	]
 }
 
@@ -344,15 +91,18 @@ function createUtilityItems(props: UseSettingsItemsProps): ListItem[] {
 		: "Not configured"
 	const hasEnabledUseCase = Object.values(utilityModelUseCases).some(Boolean)
 	return [
-		{
-			key: "utilityIntroduction",
-			label: "",
-			type: SettingsItemType.READONLY,
-			value: "Uses credentials already configured for the selected provider; credentials are not copied into this selection.",
-		},
+		{ key: "planSelection", label: "Plan", type: SettingsItemType.ACTION, value: props.planModelId || "Required: select a model" },
+		{ key: "actSelection", label: "Act", type: SettingsItemType.ACTION, value: props.actModelId || "Required: select a model" },
+		checkbox("separateModels", "Use separate Plan / Act configurations", props.separateModels, "When disabled, model selection updates both modes."),
+		...(props.provider === "openrouter" ? [editable("actOpenRouterProviders", "Act allowed upstream providers", props.openRouterPinnedProviders[props.actModelId]?.join(", ") || "Unrestricted")] : []),
+		...(props.separateModels && props.planProvider === "openrouter" ? [editable("planOpenRouterProviders", "Plan allowed upstream providers", props.openRouterPinnedProviders[props.planModelId]?.join(", ") || "Unrestricted")] : []),
+		...(props.provider === "openrouter" || props.planProvider === "openrouter" ? [
+			{ key: "openRouterProviderSorting", label: "Provider sorting", type: SettingsItemType.CYCLE, value: props.openRouterProviderSorting || "Default" },
+			checkbox("openRouterPreventFallbacks", "Prevent fallbacks", props.openRouterPreventFallbacks, "Fail rather than route to another provider."),
+		] : []),
 		{
 			key: "utilityModelSelection",
-			label: "Provider & model",
+			label: "Utility",
 			type: SettingsItemType.ACTION,
 			value: selectionLabel,
 			description: "The model used for the enabled supporting operations below.",
@@ -407,6 +157,14 @@ function createUtilityItems(props: UseSettingsItemsProps): ListItem[] {
 			type: SettingsItemType.READONLY,
 			value: SETTINGS_HELP.utilityDisclosure,
 		},
+		{ key: "subagentRolesHeading", label: "Subagent roles", type: SettingsItemType.HEADER, value: "" },
+		{ key: "subagentRolesExplanation", label: "", type: SettingsItemType.READONLY, value: "Subagents use the current model by default unless you enable a role with different settings." },
+		...(props.subagentRoles ?? []).map((role, index) => ({
+			key: `subagentRole:${index}`, label: role.name, type: SettingsItemType.ACTION,
+			value: `${role.enabled ? "Enabled" : "Disabled"} · ${role.modelSelection ? `${role.modelSelection.openAiProfileName ?? getProviderLabel(role.modelSelection.provider)} · ${role.modelSelection.modelId}` : "Not configured"}`,
+			description: role.description,
+		})),
+		{ key: "addSubagentRole", label: "Add role", type: SettingsItemType.ACTION, value: "" },
 	]
 }
 
@@ -702,6 +460,7 @@ export function useSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 		[
 			props.currentTab,
 			props.provider,
+			props.planProvider,
 			props.actModelId,
 			props.planModelId,
 			props.separateModels,
@@ -714,6 +473,7 @@ export function useSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 			props.features,
 			props.utilityModelUseCases,
 			props.utilityModelSelection,
+			props.subagentRoles,
 			props.utilityPermissionPolicy,
 			props.lightTerminalTheme,
 			props.vimModeEnabled,
