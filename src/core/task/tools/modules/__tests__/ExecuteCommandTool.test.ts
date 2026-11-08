@@ -69,22 +69,36 @@ function createMocks() {
 
 describe("ExecuteCommandTool", () => {
 	for (const utilityEnabled of [false, true]) {
-		it(`intercepts matched rules and unrestricted commands before execution (Utility enabled: ${utilityEnabled})`, async () => {
+		it(`auto-approves statically allowed child commands (Utility enabled: ${utilityEnabled})`, async () => {
 			const { tool, env, autoApprover, commandPermissionController, mockCard } = createMocks()
 				; (autoApprover as any).requiresCounterpartyApproval = true
 			autoApprover.isUnrestrictedAutoApprove.returns(true)
 			commandPermissionController.validateTool.returns({ allowed: true, reason: "allowed", matchedPattern: "**" })
 			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
-			mockCard.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
 
 			await tool.processCall({ commands: ["ls"] }, env as any)
 
+			sinon.assert.notCalled(mockCard.waitForInteraction)
+			sinon.assert.notCalled(autoApprover.isUnrestrictedAutoApprove)
+			sinon.assert.calledOnce(commandPermissionController.validateTool)
+			sinon.assert.calledOnce(env.system.executeCommand)
+		})
+
+		it(`requires unresolved child batches to use eligible approval (Utility enabled: ${utilityEnabled})`, async () => {
+			const { tool, env, autoApprover, commandPermissionController, mockCard } = createMocks()
+				; (autoApprover as any).requiresCounterpartyApproval = true
+			autoApprover.isUnrestrictedAutoApprove.returns(true)
+			autoApprover.isCommandAutoApproved.callsFake((command: string) => command === "ls")
+			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			mockCard.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+
+			await tool.processCall({ commands: ["ls", "curl https://example.com"] }, env as any)
+
 			sinon.assert.calledOnce(mockCard.waitForInteraction)
 			sinon.assert.notCalled(autoApprover.isUnrestrictedAutoApprove)
-			sinon.assert.notCalled(autoApprover.isCommandAutoApproved)
-			sinon.assert.notCalled(commandPermissionController.validateTool)
+			sinon.assert.calledTwice(commandPermissionController.validateTool)
 			sinon.assert.notCalled(env.system.executeCommand)
-			if (utilityEnabled) sinon.assert.calledWithMatch(env.ui.createCard, { permissionRequestKind: "manual_tool" })
+			assert.equal(env.ui.createCard.firstCall.args[0].permissionRequestKind, utilityEnabled ? "tool" : undefined)
 		})
 	}
 

@@ -125,6 +125,7 @@ export class ToolExecutor {
 		private storageAddress?: TaskStorageAddress,
 		private getTaskletControls?: () => import("./tools/interfaces/IToolEnvironment").TaskletControls | undefined,
 		private onUtilityUsageRecorded?: () => void,
+		private getPermissionWorkingConfiguration?: () => TaskWorkingConfiguration,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -160,7 +161,7 @@ export class ToolExecutor {
 	private requestAutoApprover(): AutoApprove {
 		return new AutoApprove(
 			this.commandPermissionController,
-			() => this.getCurrentWorkingConfiguration().settings,
+			() => (this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)().settings,
 			this.getCurrentWorkingConfiguration().executionOptions.multiRootEnabled,
 			this.executionProfile === "tasklet",
 		)
@@ -198,15 +199,18 @@ export class ToolExecutor {
 		const disposition = await this.taskletPermissionDisposition(request, autoApprover, !!binding)
 		assertCurrent()
 		if (disposition === "auto_approve") return { approved: true, assertCurrent }
-		if (disposition !== "utility_eligible" || !binding) return { approved: false, assertCurrent }
+		if (disposition !== "utility_eligible" || !binding || request.utilityPermissionEscalation !== undefined) {
+			return { approved: false, assertCurrent }
+		}
 		const decision = await binding.service.decide({
 			toolCall: structuredClone(request.toolCall),
 			permission: {
 				header: request.card.header,
+				operation: structuredClone(operation),
 				...(request.card.locations ? { locations: structuredClone(request.card.locations) } : {}),
 				...(request.card.diffs ? { diffs: structuredClone(request.card.diffs) } : {}),
 			},
-			runtime: { cwd: this.cwd, mode: configuration.settings.mode, isSubagent: false },
+			runtime: { cwd: this.cwd, mode: configuration.settings.mode, isSubagent: true },
 		}, signal)
 		assertCurrent()
 		return { approved: decision.decision === "approve", assertCurrent }
@@ -347,9 +351,10 @@ export class ToolExecutor {
 			service: new UtilityPermissionDecisionService(
 				this.createUtilityRunner(selection, {}, configuration.apiConfiguration),
 				settings.utilityModelPermissionPolicy,
-				(error) => Logger.warn("Utility permission decision failed; escalating to the user", error),
+				(error) => Logger.warn("Utility permission decision failed; escalating the request", error),
 			),
 			configurationRevision: configuration.revision,
+			commandPermissionRevision: this.commandPermissionController.revision,
 		}
 	}
 
@@ -357,9 +362,9 @@ export class ToolExecutor {
 	private asToolConfig(coordinator = this.coordinator): TaskConfig {
 		const runtime = this.requestRuntime()
 		const settings = runtime.workingConfiguration.settings
-		const currentSettings = () => this.getCurrentWorkingConfiguration().settings
-		const currentPermissionDecisionBinding = () =>
-			this.createPermissionDecisionBinding(this.getCurrentWorkingConfiguration())
+		const permissionConfiguration = () => (this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)()
+		const currentSettings = () => permissionConfiguration().settings
+		const currentPermissionDecisionBinding = () => this.createPermissionDecisionBinding(permissionConfiguration())
 		const autoApprover = this.requestAutoApprover()
 		const config: TaskConfig = {
 			executionProfile: this.executionProfile,
@@ -401,7 +406,7 @@ export class ToolExecutor {
 			autoApprover,
 			browserSettings: settings.browserSettings,
 			get permissionDecisionBinding() {
-				return autoApprover.requiresCounterpartyApproval ? undefined : currentPermissionDecisionBinding()
+				return currentPermissionDecisionBinding()
 			},
 			services: {
 				browserSession: this.browserSession,

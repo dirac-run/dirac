@@ -148,7 +148,7 @@ export class ExecuteCommandTool implements IDiracTool {
 		utilityPermissionHandlingEnabled: boolean,
 	): CommandApprovalRequirement {
 		return resolveCommandApproval(commands.map(({ command }) => command), utilityPermissionHandlingEnabled,
-			this.autoApprover, this.commandPermissionController)
+			this.autoApprover, this.commandPermissionController, DiracDefaultTool.EXECUTE_COMMAND)
 	}
 
 	private async requestApproval(

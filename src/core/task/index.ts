@@ -1006,6 +1006,7 @@ export class Task {
 				}
 			},
 			recordUsage,
+			contained?.getParentWorkingConfiguration,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,

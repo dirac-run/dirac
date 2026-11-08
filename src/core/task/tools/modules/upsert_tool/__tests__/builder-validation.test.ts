@@ -107,6 +107,25 @@ describe("validateStagedTool smoke-args boundary", () => {
 		assert.deepEqual(forwarded.toolCall, { name: "upsert_tool", arguments: { tools: [] } })
 	})
 
+	for (const staticallyApproved of [false, true]) {
+		it(`keeps child smoke approval manual-only with Utility enabled (static approval: ${staticallyApproved})`, async () => {
+			fixture.autoApprover.requiresCounterpartyApproval = true
+			fixture.autoApprover.isUnrestrictedAutoApprove.returns(true)
+			fixture.autoApprover.isCommandAutoApproved.returns(staticallyApproved)
+			fixture.commandPermissionController.validateTool.returns({ allowed: true, reason: "allowed", matchedPattern: "**" })
+			fixture.env.config.permissionDecisionBinding = {} as NonNullable<IToolEnvironment["config"]["permissionDecisionBinding"]>
+			fixture.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
+
+			const result = await validateStagedTool(fixture.env, await staged("{}"), "workspace")
+
+			assert.match(result.error ?? "", /rejected/)
+			assert.equal(fixture.createCard.firstCall.args[0].permissionRequestKind, "manual_tool")
+			assert.equal(fixture.autoApprover.isCommandAutoApproved.callCount, 0)
+			assert.equal(fixture.commandPermissionController.validateTool.callCount, 0)
+			assert.equal(fixture.executeCommand.callCount, 0)
+		})
+	}
+
 	it("keeps deterministic command restrictions manual-only with Utility enabled", async () => {
 		fixture.env.config.permissionDecisionBinding = {} as NonNullable<IToolEnvironment["config"]["permissionDecisionBinding"]>
 		fixture.commandPermissionController.validateTool.returns({ allowed: false, reason: "denied" })

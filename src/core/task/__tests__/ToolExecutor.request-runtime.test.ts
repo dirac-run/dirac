@@ -158,7 +158,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
 	})
 
-	it("keeps tasklet interception enabled across live permission changes", async () => {
+	it("allows tasklet writes without enabling unrestricted approval across live permission changes", async () => {
 		let current = configuration("act", 1, false)
 		const harness = {
 			executionProfile: "tasklet",
@@ -170,11 +170,11 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
 		current = configuration("act", 2, true)
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
-		assert.equal(await autoApprover.resolveToolPathPermission(DiracDefaultTool.EDIT_FILE, "src/index.ts"), "manual_only")
+		assert.equal(await autoApprover.resolveToolPathPermission(DiracDefaultTool.EDIT_FILE, "src/index.ts"), "auto_approve")
 		sinon.assert.notCalled(harness.commandPermissionController.validateTool)
 	})
 
-	it("keeps tasklet question/plan flows interactive without legacy subagent or Utility shortcuts", () => {
+	it("exposes Utility permission evaluation to tasklets without enabling YOLO interactions", () => {
 		const current = configuration("act", 2, true)
 		const workingConfiguration = { ...current, settings: { ...current.settings, yoloModeToggled: true } }
 		const runtime = createTaskRequestRuntime(workingConfiguration, { getModel: () => ({ id: "test", info: {} }) } as any, "request-1")
@@ -191,13 +191,36 @@ describe("ToolExecutor request-runtime authorization", () => {
 		const config = executor.asToolConfig()
 		assert.equal(config.yoloModeToggled, false)
 		assert.equal(config.executionProfile, "tasklet")
-		assert.equal(config.permissionDecisionBinding, undefined)
-		sinon.assert.notCalled(executor.createPermissionDecisionBinding)
+		assert.ok(config.permissionDecisionBinding)
+		sinon.assert.calledOnce(executor.createPermissionDecisionBinding)
 		executor.executionProfile = "standalone"
 		const foreground = executor.asToolConfig()
 		assert.equal(foreground.yoloModeToggled, true)
 		assert.ok(foreground.permissionDecisionBinding)
-		sinon.assert.calledOnce(executor.createPermissionDecisionBinding)
+		sinon.assert.calledTwice(executor.createPermissionDecisionBinding)
+	})
+
+	it("uses the live owner's permission settings instead of the child's request snapshot", () => {
+		const child = configuration("act", 1)
+		let parent = configuration("plan", 2)
+		const executor = Object.assign(Object.create(ToolExecutor.prototype), {
+			executionProfile: "tasklet",
+			requestRuntime: () => createTaskRequestRuntime(child, { getModel: () => ({ id: "test", info: {} }) } as any, "child"),
+			getCurrentWorkingConfiguration: () => child,
+			getPermissionWorkingConfiguration: () => parent,
+			commandPermissionController: {},
+			createPermissionDecisionBinding: sinon.stub().returns({ service: {} }),
+		})
+		for (const key of TASK_CALLBACKS_KEYS) {
+			if (typeof executor[key] !== "function") executor[key] = sinon.stub()
+		}
+		const config = executor.asToolConfig()
+		assert.ok(config.permissionDecisionBinding)
+		sinon.assert.calledWithExactly(executor.createPermissionDecisionBinding, parent)
+		parent = configuration("plan", 3)
+		assert.ok(config.permissionDecisionBinding)
+		sinon.assert.calledWithExactly(executor.createPermissionDecisionBinding, parent)
+		assert.equal(config.mode, "act")
 	})
 
 	it("builds permission handling from the supplied current configuration", () => {
@@ -222,12 +245,13 @@ describe("ToolExecutor request-runtime authorization", () => {
 			revision: 3,
 			settings: { ...enabled.settings, utilityModelUsePermissionHandling: false },
 		}
-		const harness = { createUtilityRunner: sinon.stub().returns({ run: sinon.stub() }) }
+		const harness = { createUtilityRunner: sinon.stub().returns({ run: sinon.stub() }), commandPermissionController: { revision: 4 } }
 		const createBinding = (ToolExecutor.prototype as any).createPermissionDecisionBinding
 
 		const binding = createBinding.call(harness, enabled)
 		assert.ok(binding)
 		assert.equal(binding.configurationRevision, enabled.revision)
+		assert.equal(binding.commandPermissionRevision, 4)
 		sinon.assert.calledOnceWithExactly(harness.createUtilityRunner, enabled.settings.utilityModelSelection, {}, enabled.apiConfiguration)
 		assert.equal(createBinding.call(harness, disabled), undefined)
 		sinon.assert.calledOnce(harness.createUtilityRunner)
@@ -271,6 +295,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 			taskState: state,
 			ulid: "utility-accounting-test",
 			onUtilityUsageRecorded: notified,
+			commandPermissionController: { revision: 1 },
 			requestRuntime: () => ({ workingConfiguration: current }),
 			createUtilityRunner: (ToolExecutor.prototype as any).createUtilityRunner,
 		}

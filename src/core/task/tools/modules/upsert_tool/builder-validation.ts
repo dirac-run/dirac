@@ -6,6 +6,7 @@ import { getErrorMessage } from "@/shared/errors"
 import { safeParseJson } from "@/shared/safe-json-parse"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { DiracDefaultTool } from "@shared/tools"
 import { resolveCommandApproval } from "../../autoApprove"
 import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
@@ -134,6 +135,7 @@ async function approveSmokeCommand(env: IToolEnvironment, command: string): Prom
 	const utilityEnabled = env.config.permissionDecisionBinding !== undefined
 	const approval = resolveCommandApproval(
 		[command], utilityEnabled, env.config.autoApprover, env.config.services.commandPermissionController,
+		DiracDefaultTool.UPSERT_TOOL,
 	)
 	if (!approval.required) return true
 

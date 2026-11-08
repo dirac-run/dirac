@@ -75,6 +75,8 @@ export interface CardParams extends SharedCardParams {
 	 */
 	permissionRequestKind?: "tool" | "manual_tool"
 	permissionOperation?: PermissionOperation
+	/** Prior child Utility escalation; the owner must not repeat the same evaluation. */
+	utilityPermissionEscalation?: string
 	/** Operational choice (for example condensation), not a security grant. */
 	operationalInput?: boolean
 	/** Internal live predicate used to resolve a displayed tool permission after settings change. */

@@ -149,7 +149,7 @@ describe("TaskMessenger tasklet escalation", () => {
 		controller.abort(new Error("retired"))
 		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), controller.signal), /retired/)
 		assert.deepEqual(messages, [])
-		const owner = createMessenger(undefined, { recordResponse: async () => {}, requestInteraction: sinon.stub() })
+		const owner = createMessenger(undefined, { recordResponse: async () => { }, requestInteraction: sinon.stub() })
 		await assert.rejects(
 			owner.messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
 			/root messenger/,
@@ -358,16 +358,20 @@ describe("TaskMessenger owner interactions", () => {
 		await rejected
 	})
 
-	it("forwards the trusted operation descriptor to its owner", async () => {
+	it("forwards the trusted operation descriptor and prior Utility escalation to its owner", async () => {
 		const counterparty = {
 			recordResponse: sinon.stub().resolves(),
 			requestInteraction: sinon.stub().resolves({ action: DiracAskResponse.REJECT }),
 		}
 		const { messenger } = createMessenger(undefined, counterparty)
 		const operation = { kind: "commands" as const, commands: ["exact normalized command"] }
-		const card = await messenger.createCard({ header: "Permission", requireApproval: true, permissionOperation: operation })
+		const card = await messenger.createCard({
+			header: "Permission", requireApproval: true, permissionOperation: operation,
+			utilityPermissionEscalation: "Policy does not cover this command",
+		})
 		await card.waitForInteraction()
 		assert.deepEqual(counterparty.requestInteraction.firstCall.args[0].permissionOperation, operation)
+		assert.equal(counterparty.requestInteraction.firstCall.args[0].utilityPermissionEscalation, "Policy does not cover this command")
 	})
 
 	it("does not register a request aborted during its transcript flush", async () => {
@@ -561,7 +565,7 @@ describe("TaskMessenger text authorship", () => {
 							},
 						)
 					}
-					const publication = sinon.stub().callsFake(stage === "presentation" ? answer : async () => {})
+					const publication = sinon.stub().callsFake(stage === "presentation" ? answer : async () => { })
 					const { messenger, taskState, messageStateHandler } = createMessenger(publication)
 					if (stage === "persistence") messageStateHandler.flushPendingWrites.callsFake(answer)
 					const card = await messenger.createCard({ header: "Permission", requireApproval: true })
@@ -708,7 +712,7 @@ describe("TaskMessenger text authorship", () => {
 	})
 
 	it("does not block card lifecycle operations on state delivery", async () => {
-		const postStateToWebview = sinon.stub().returns(new Promise<void>(() => {}))
+		const postStateToWebview = sinon.stub().returns(new Promise<void>(() => { }))
 		const { messenger, messages, messageStateHandler } = createMessenger(postStateToWebview)
 
 		const card = await messenger.createCard({ header: "Long-running publication" })

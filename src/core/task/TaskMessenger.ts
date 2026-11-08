@@ -27,6 +27,7 @@ import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
 interface TaskCardParams extends CardParams {
 	permissionRequestKind?: TaskInteractionRequest["permissionRequestKind"]
 	permissionOperation?: TaskInteractionRequest["permissionOperation"]
+	utilityPermissionEscalation?: TaskInteractionRequest["utilityPermissionEscalation"]
 	toolCall?: TaskInteractionRequest["toolCall"]
 	isAutoApproved?: () => boolean
 }
@@ -50,7 +51,7 @@ export class TaskMessenger implements ITaskMessenger {
 	private ownerWaitCount = 0
 	private statusBeforeOwnerWait?: TaskStatus
 
-	constructor(private dependencies: TaskMessengerDependencies) {}
+	constructor(private dependencies: TaskMessengerDependencies) { }
 
 	get routesToOwner(): boolean {
 		return this.dependencies.counterparty !== undefined
@@ -83,7 +84,7 @@ export class TaskMessenger implements ITaskMessenger {
 		}
 		const cancel = () => {
 			// Observe immediately, then await the same cleanup before returning below.
-			void finalize(CardStatus.CANCELLED)?.catch(() => {})
+			void finalize(CardStatus.CANCELLED)?.catch(() => { })
 		}
 		cancellation.addEventListener("abort", cancel, { once: true })
 		try {
@@ -354,6 +355,7 @@ export class TaskMessenger implements ITaskMessenger {
 							card: structuredClone(card),
 							permissionRequestKind: params.permissionRequestKind,
 							permissionOperation: params.permissionOperation,
+							utilityPermissionEscalation: params.utilityPermissionEscalation,
 							toolCall: params.toolCall,
 						},
 						AbortSignal.any([

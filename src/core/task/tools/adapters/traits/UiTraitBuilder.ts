@@ -81,7 +81,7 @@ export async function createCardFromMessenger(
 	params: CardParams,
 	tracker: CardHandle[],
 ): Promise<ICardHandle> {
-	if (config.taskMessenger.routesToOwner) return createOwnerCard(config, params, tracker)
+	if (config.taskMessenger.routesToOwner) return createTaskletPermissionCard(config, params, tracker)
 	const { permissionRequestKind, ...cardParams } = params
 	if (permissionRequestKind === undefined) {
 		return createDisplayedCardFromMessenger(config, cardParams, tracker)
@@ -115,6 +115,37 @@ export async function createCardFromMessenger(
 	return new ApprovedPermissionCardHandle(cardParams)
 }
 
+/** Only unresolved execute_command permissions may consult Utility before the owner. */
+async function createTaskletPermissionCard(
+	config: TaskConfig,
+	params: CardParams,
+	tracker: CardHandle[],
+): Promise<ICardHandle> {
+	if (config.toolUse?.name !== "execute_command" || params.permissionRequestKind !== "tool" ||
+		params.permissionOperation?.kind !== "commands" || params.operationalInput) {
+		return createOwnerCard(config, params, tracker)
+	}
+	const binding = config.permissionDecisionBinding
+	if (!binding) return createOwnerCard(config, params, tracker)
+
+	const request = createUtilityPermissionRequest(config, params)
+	const decision = await binding.service.decide(request, config.taskState.abortSignal)
+	config.taskState.abortSignal.throwIfAborted()
+	const currentBinding = config.permissionDecisionBinding
+	if (!currentBinding || currentBinding.configurationRevision !== binding.configurationRevision ||
+		currentBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
+		return createOwnerCard(config, {
+			...params,
+			utilityPermissionEscalation: "Permission settings changed during evaluation; approval requires a new authority check.",
+		}, tracker)
+	}
+	if (decision.decision === "escalate") {
+		return createOwnerCard(config, { ...params, utilityPermissionEscalation: decision.reason }, tracker)
+	}
+	await publishPermissionApprovalCard(config, params, tracker, request, decision.reason)
+	return new ApprovedPermissionCardHandle(params)
+}
+
 function isUnrestrictedToolApproval(config: TaskConfig): boolean {
 	return config.autoApprover.isUnrestrictedAutoApprove()
 }
@@ -129,13 +160,14 @@ function createUtilityPermissionRequest(config: TaskConfig, params: CardParams):
 		},
 		permission: {
 			header: params.header,
+			...(params.permissionOperation ? { operation: structuredClone(params.permissionOperation) } : {}),
 			...(params.locations ? { locations: structuredClone(params.locations) } : {}),
 			...(includesResolvedDiffs && params.diffs ? { diffs: structuredClone(params.diffs) } : {}),
 		},
 		runtime: {
 			cwd: config.cwd,
 			mode: config.mode,
-			isSubagent: false,
+			isSubagent: config.executionProfile === "tasklet",
 		},
 	}
 }
@@ -206,19 +238,19 @@ async function createDisplayedCardFromMessenger(
 			: undefined
 	const liveAutoApprovedAction = isAutoApproved
 		? () =>
-				isAutoApproved()
-					? (params.actions?.find((candidate) => candidate.primary)?.value ?? DiracAskResponse.APPROVE)
-					: undefined
+			isAutoApproved()
+				? (params.actions?.find((candidate) => candidate.primary)?.value ?? DiracAskResponse.APPROVE)
+				: undefined
 		: undefined
 	const displayedParams = autoApprovedAction
 		? {
-				...params,
-				status: params.status === CardStatus.WAITING_FOR_INPUT ? CardStatus.RUNNING : params.status,
-				requireApproval: false,
-				requireFeedback: false,
-				feedbackPlaceholder: undefined,
-				actions: undefined,
-			}
+			...params,
+			status: params.status === CardStatus.WAITING_FOR_INPUT ? CardStatus.RUNNING : params.status,
+			requireApproval: false,
+			requireFeedback: false,
+			feedbackPlaceholder: undefined,
+			actions: undefined,
+		}
 		: params
 	const messengerParams = !autoApprovedAction && isAutoApproved ? { ...displayedParams, isAutoApproved } : displayedParams
 	const handle = await config.taskMessenger.createCard(messengerParams)

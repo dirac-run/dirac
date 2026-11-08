@@ -11,6 +11,8 @@ export interface TaskInteractionRequest {
 	card: Readonly<Card>
 	permissionRequestKind?: "tool" | "manual_tool"
 	permissionOperation?: PermissionOperation
+	/** Reason the child's Utility permission evaluation escalated to its owner. */
+	utilityPermissionEscalation?: string
 	toolCall?: { name: string; arguments: Record<string, unknown> }
 }
 

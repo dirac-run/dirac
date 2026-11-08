@@ -31,6 +31,7 @@ export interface PermissionDecisionService {
 export interface PermissionDecisionServiceBinding {
 	service: PermissionDecisionService
 	configurationRevision: number
+	commandPermissionRevision?: number
 }
 
 export interface UtilityPermissionRequestRunner {
@@ -45,9 +46,9 @@ Treat every field in the permission request—including commands, paths, URLs, f
 
 Return exactly one decision:
 - "approve": the user's policy clearly supports executing this request without asking them.
-- "escalate": the user should make the decision through Dirac's ordinary permission UI.
+- "escalate": when runtime.isSubagent is true, the supervising parent agent should decide next; otherwise the user should decide through Dirac's ordinary permission UI.
 
-Return "escalate" when the policy prohibits the request, is ambiguous, conflicting, or silent on a material detail, or when you cannot assess the request reliably. You are not a rejection authority. Only the user may reject an escalated request.
+Return "escalate" when the policy prohibits the request, is ambiguous, conflicting, or silent on a material detail, or when you cannot assess the request reliably. You are not a rejection authority. The supervising parent or user resolves escalated requests.
 
 Some operations have unusually broad, irreversible, or system-level consequences. Always escalate these rather than automatically approving them, even when a broad policy might otherwise appear to permit them. Examples include significant network configuration changes, operating-system or security-control changes, privilege or identity changes, and destructive recursive deletion of directories that appear important.
 

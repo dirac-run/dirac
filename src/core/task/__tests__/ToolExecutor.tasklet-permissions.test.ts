@@ -115,6 +115,24 @@ describe("ToolExecutor tasklet parent authority", () => {
 		}
 	})
 
+	it("does not repeat a child's Utility escalation but permits current static parent authority", async () => {
+		const h = harness(true)
+		const escalated = { ...request(), utilityPermissionEscalation: "Policy is silent" }
+		assert.equal((await h.executor.authorizeTaskletPermission(escalated, signal())).approved, false)
+		sinon.assert.notCalled(h.decide)
+		h.settings.userApprovedCommands = [{ command: "echo hello", match: "exact" }]
+		h.change()
+		assert.equal((await h.executor.authorizeTaskletPermission(escalated, signal())).approved, true)
+		sinon.assert.notCalled(h.decide)
+	})
+
+	it("identifies child-originated requests when the parent consults Utility", async () => {
+		const h = harness(true)
+		await h.executor.authorizeTaskletPermission(request(), signal())
+		sinon.assert.calledOnce(h.decide)
+		assert.equal(h.decide.firstCall.args[0].runtime.isSubagent, true)
+	})
+
 	it("requires an actual Utility approval, not merely eligibility", async () => {
 		const h = harness(true)
 		h.decide.resolves({ decision: "escalate", reason: "ask user" })

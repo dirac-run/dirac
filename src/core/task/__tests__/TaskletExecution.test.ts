@@ -2487,21 +2487,18 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
 	})
 
-	it("executes an approved read-only child command under a strict-Plan parent", async () => {
+	it("executes a statically safe child command without permission under a strict-Plan parent", async () => {
 		const root = createResolutionRoot()
 		await root.applyWorkingConfigurationUpdate({ settings: { mode: "plan", strictPlanModeEnabled: true } })
 		let turn = 0
 		nextTool = async () => ++turn === 1
-			? { name: "execute_command", args: { commands: ["printf strict-plan-command-ok"] } }
+			? { name: "execute_command", args: { commands: ["echo strict-plan-command-ok"] } }
 			: { name: "respond", args: { operation: "complete", text: "Read-only review finished" } }
 		const host = root.taskletHost!
 		const child = await host.start({ type: "default", title: "read-only command", prompt: "Run the approved read-only command" })
-		const request = await waitForInteraction(host, child.id)
-		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
-		const card = await waitForRootCard(root)
-		await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)
-		assert.deepEqual(await escalation, { status: "resolved" })
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		assert.deepEqual(host.inspect(child.id).interactions, [])
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
 		const transcript = await host.readTranscript(child.id)
 		assert.ok(transcript.presentation.some((message) =>
 			message.content.type === DiracMessageType.CARD &&
