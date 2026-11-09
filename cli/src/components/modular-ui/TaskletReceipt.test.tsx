@@ -29,7 +29,7 @@ const inspection: TaskletReceipt = {
 	operation: "inspect",
 	outcome: "retrieved",
 	view: "pending",
-	rows: [{ operation: "inspect", taskletId: "Planck 2", title: "Audit protocol", role: "Reviewer", outcome: "retrieved" }],
+	rows: [{ operation: "inspect", taskletId: "Planck2", title: "Audit protocol", role: "Reviewer", outcome: "retrieved" }],
 	returnedCount: 0,
 	totalCount: 0,
 }
@@ -47,7 +47,7 @@ describe("CLI tasklet operation receipts", () => {
 				<ChatMessage message={{ id: card.id, ts: 1, content: { type: DiracMessageType.CARD, card } }} {...props} />,
 			)
 			const frame = plain(view.lastFrame())
-			expect(frame).toContain("Inspect pending requests · Planck 2")
+			expect(frame).toContain("Inspect pending requests · Planck2")
 			expect(frame).toContain("[Retrieved]")
 			expect(frame).not.toContain("Completed")
 			view.unmount()

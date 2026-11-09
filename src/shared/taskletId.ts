@@ -14,13 +14,13 @@ export function getTaskScopedStateKey(identity: string, address?: string | TaskS
 export const TASKLET_ID_PREFIX = "tasklet_"
 const UNIQUE_SUBAGENT_NAMES = [...new Set(SUBAGENT_NAMES)]
 
-/** Select the next unused identity. The owning host must reserve it synchronously before starting work. */
+/** Pick uniformly from the earliest unused round. The owning host must reserve the ID synchronously before starting work. */
 export function createTaskletId(usedIds: ReadonlySet<string>): string {
 	for (let round = 1; ; round++) {
-		for (const name of UNIQUE_SUBAGENT_NAMES) {
-			const id = round === 1 ? name : `${name} ${round}`
-			if (!usedIds.has(id)) return id
-		}
+		const available = UNIQUE_SUBAGENT_NAMES
+			.map((name) => round === 1 ? name : `${name}${round}`)
+			.filter((id) => !usedIds.has(id))
+		if (available.length > 0) return available[Math.floor(Math.random() * available.length)]
 	}
 }
 

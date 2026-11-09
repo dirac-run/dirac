@@ -58,11 +58,11 @@ describe("PromptBuilder", () => {
 			const prompt = await new PromptBuilder({
 				...mockContext,
 				executionProfile: "tasklet",
-				taskId: "Feynman 2",
+				taskId: "Feynman2",
 				subagentsEnabled: true,
 				profileInstructions: taskProfileSystemInstructions("tasklet", true),
 			}).build()
-			expect(prompt).to.match(/^Your stable ID is Feynman 2; your parent's stable ID is Dirac\./)
+			expect(prompt).to.match(/^Your stable ID is Feynman2; your parent's stable ID is Dirac\./)
 			expect(prompt).to.include("You are an assigned worker")
 			expect(prompt).to.include("assigned worker for Dirac")
 			expect(prompt).to.include("Use `respond` to report to Dirac")

@@ -65,14 +65,16 @@ describe("tasklet reconstruction storage", () => {
 		}
 	})
 
-	it("persists Unicode, multiword and suffixed scientist IDs under their owning roots", async () => {
-		for (const id of ["Gödel", "von Neumann", "Planck 2"]) {
+	it("persists current and legacy scientist IDs under their owning roots", async () => {
+		const ids = ["Gödel", "vonNeumann", "deBroglie", "Planck2", "von Neumann", "de Broglie", "Planck 2"]
+		for (const id of ids) {
 			await saveTaskletRecord(record("root", id))
 			await saveTaskletRecord({ ...record("other", id), title: "Other assignment" })
 		}
 		const first = await loadTaskletRecords("root")
 		const other = await loadTaskletRecords("other")
-		assert.deepEqual(first.map((child) => child.id).sort(), ["Gödel", "Planck 2", "von Neumann"])
+		assert.deepEqual(first.map((child) => child.id).sort(), [...ids].sort())
+		assert.deepEqual(other.map((child) => child.id).sort(), [...ids].sort())
 		assert.ok(first.every((child) => child.rootTaskId === "root" && child.title === "Private child"))
 		assert.ok(other.every((child) => child.rootTaskId === "other" && child.title === "Other assignment"))
 		const file = path.join(getTaskDirectoryPath(address("root", "Planck 2")), GlobalFileNames.taskletRecord)
