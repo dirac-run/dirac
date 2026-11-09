@@ -217,21 +217,21 @@ export enum DiracMessageType {
 export type DiracMessageContent =
 	/** Stateless conversational content (speech, reasoning, info) */
 	| {
-		type: DiracMessageType.MARKDOWN
-		content: string
-		isReasoning?: boolean
-		images?: string[]
-		files?: string[]
-		isCompletion?: boolean
-		completionType?: "act" | "plan"
-		showFeedback?: boolean
-		role?: "user" | "assistant"
-		agentId?: number
-		agentName?: string
-		steering?: { status: SteeringTranscriptStatus }
-		/** Source identities for durable contextual input; transcript-only transport metadata. */
-		contextualInput?: { references: string[] }
-	}
+			type: DiracMessageType.MARKDOWN
+			content: string
+			isReasoning?: boolean
+			images?: string[]
+			files?: string[]
+			isCompletion?: boolean
+			completionType?: "act" | "plan"
+			showFeedback?: boolean
+			role?: "user" | "assistant"
+			agentId?: number
+			agentName?: string
+			steering?: { status: SteeringTranscriptStatus }
+			/** Source identities for durable contextual input; transcript-only transport metadata. */
+			contextualInput?: { references: string[] }
+	  }
 	/** Stateful tool-mediated unit of work */
 	| { type: DiracMessageType.CARD; card: Card }
 	/** System telemetry and vitals (tokens, cost, latency) */
@@ -476,6 +476,12 @@ export type CardRawInput = Record<string, unknown>
 /** Machine-readable result produced by the tool represented by this card. */
 export type CardRawOutput = Record<string, unknown>
 
+/** Presentation metadata for outgoing agent communication; never grants interaction authority. */
+export interface CardCommunication {
+	actor: string
+	detail?: string
+}
+
 export enum CardKind {
 	GENERIC = "generic",
 	TASK_COMPLETION = "task_completion",
@@ -493,6 +499,7 @@ export interface Card {
 	status: CardStatus
 	renderType: RenderType
 	body?: string
+	communication?: CardCommunication
 
 	rawInput?: CardRawInput
 	rawOutput?: CardRawOutput
@@ -555,6 +562,7 @@ export interface CardParams {
 	status?: CardStatus
 	renderType?: RenderType
 	body?: string
+	communication?: CardCommunication
 
 	rawInput?: CardRawInput
 	rawOutput?: CardRawOutput

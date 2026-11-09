@@ -10,7 +10,7 @@ function fixture(controls: Partial<TaskletControls> = {}) {
 	const finalized: CardStatus[] = []
 	const updates: Record<string, unknown>[] = []
 	const environment = {
-		orchestration: { tasklets: controls },
+		orchestration: { tasklets: controls, agentIdentity: { id: "Dirac" } },
 		ui: {
 			createCard: async () => ({
 				update: async (patch: Record<string, unknown>) => {
@@ -127,7 +127,8 @@ describe("SubagentsTool input and result contracts", () => {
 			),
 			page,
 		)
-		assert.equal(updates[0].header, "Inspect tool result · a — Review storage")
+		assert.equal(updates[0].header, "Dirac inspected tool result of a — Review storage")
+		assert.match(String(updates[0].body), /exact result/)
 		assert.equal((updates[0].taskletReceipt as TaskletReceipt).outcome, "retrieved")
 	})
 
@@ -167,19 +168,21 @@ describe("SubagentsTool input and result contracts", () => {
 			result.map((item: { status: string }) => item.status),
 			["resolved", "failed"],
 		)
-		assert.deepEqual(finalized, [CardStatus.ERROR])
-		const receipt = updates[0].taskletReceipt as TaskletReceipt
-		assert.equal(receipt.outcome, "partial_failure")
-		assert.deepEqual(
-			receipt.rows.map((row) => row.outcome),
-			["resolved", "failed"],
-		)
-		assert.equal(receipt.rows[0].choice, "choice-2")
-		assert.equal(receipt.rows[1].decision, "approve")
-		assert.equal(receipt.rows[1].requestId, "s")
-		assert.match(String(updates[0].body), /this request only, within parent authority/)
-		assert.match(String(updates[0].body), /Use option two/)
-		assert.match(String(updates[0].body), /Authority changed/)
+		assert.deepEqual(finalized, [CardStatus.SUCCESS, CardStatus.ERROR])
+		const reply = updates[0].taskletReceipt as TaskletReceipt
+		const permission = updates[1].taskletReceipt as TaskletReceipt
+		assert.equal(reply.outcome, "resolved")
+		assert.equal(permission.outcome, "failed")
+		assert.equal(reply.rows[0].choice, "choice-2")
+		assert.equal(permission.rows[0].decision, "approve")
+		assert.equal(permission.rows[0].requestId, "s")
+		assert.equal(updates[0].header, "Dirac replied to a — Review storage")
+		assert.equal(updates[0].body, "Use option two\nchoice-2")
+		assert.equal(updates[1].header, "Dirac failed to approve b's request")
+		assert.match(String(updates[1].body), /This request only, within parent authority/)
+		assert.match((updates[1].communication as { detail: string }).detail, /Authority changed/)
+		assert.equal(updates[0].collapsed, false)
+		assert.equal(updates[1].collapsed, false)
 	})
 
 	it("bounds the entire serialized message batch while retaining every addressed outcome", async () => {
@@ -208,7 +211,7 @@ describe("SubagentsTool input and result contracts", () => {
 		})
 		await new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
 		const receipt = updates[0].taskletReceipt as TaskletReceipt
-		assert.equal(updates[0].header, "Inspect pending requests · child — Audit protocol")
+		assert.equal(updates[0].header, "Dirac inspected pending requests of child — Audit protocol")
 		assert.equal(receipt.outcome, "retrieved")
 		assert.equal(receipt.returnedCount, 0)
 		assert.equal(receipt.rows[0].observedState, undefined)
@@ -249,7 +252,9 @@ describe("SubagentsTool input and result contracts", () => {
 		assert.equal(guidance.operation, "guidance")
 		assert.equal(guidance.outcome, "queued")
 		assert.equal(guidance.rows[0].message, "Check persistence first")
-		assert.match(String(updates[0].body), /consumption is not confirmed/)
+		assert.equal(updates[0].body, "Check persistence first")
+		assert.equal(updates[0].header, "Dirac sent guidance to child — Audit")
+		assert.match((updates[0].communication as { detail: string }).detail, /consumption is not confirmed/)
 		await new SubagentsTool().processCall({ operation: "sleep" }, environment)
 		const wake = updates[1].taskletReceipt as TaskletReceipt
 		assert.equal(wake.outcome, "woke")

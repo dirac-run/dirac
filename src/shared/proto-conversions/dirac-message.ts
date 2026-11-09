@@ -160,6 +160,8 @@ function convertCardToProto(card: AppCard): Card {
 		toolName: card.toolName ?? undefined,
 		rawInputJson: serializeCardRecord(card.rawInput),
 		rawOutputJson: serializeCardRecord(card.rawOutput),
+		communication: card.communication,
+		taskletReceiptJson: card.taskletReceipt === undefined ? undefined : JSON.stringify(card.taskletReceipt),
 		architectureReference: card.architectureReference,
 		diffs:
 			card.diffs?.map((diff) => ({
@@ -206,6 +208,8 @@ function convertProtoToCard(protoCard: Card): AppCard {
 		toolName: protoCard.toolName ?? undefined,
 		rawInput: parseCardRecord(protoCard.rawInputJson),
 		rawOutput: parseCardRecord(protoCard.rawOutputJson),
+		communication: protoCard.communication,
+		taskletReceipt: protoCard.taskletReceiptJson === undefined ? undefined : JSON.parse(protoCard.taskletReceiptJson),
 		architectureReference: readArchitectureReference(protoCard.architectureReference),
 		diffs:
 			protoCard.diffs.length > 0

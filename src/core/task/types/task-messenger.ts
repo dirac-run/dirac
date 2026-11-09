@@ -3,13 +3,15 @@ import type { TaskWorkingConfiguration } from "../runtime/TaskWorkingConfigurati
 import type { TaskRequestRuntime } from "../runtime/TaskRequestRuntime"
 import { MessageStateHandler } from "../message-state"
 import { TaskState } from "../TaskState"
-import type { ICardHandle } from "@shared/ExtensionMessage"
+import type { Card, ICardHandle } from "@shared/ExtensionMessage"
 import type { ResponseArguments } from "@shared/responseTool"
-
-export type { TaskInteractionRequest } from "./tasklet"
 import type { TaskInteractionRequest } from "./tasklet"
 
+export type { TaskInteractionRequest } from "./tasklet"
+
 export interface TaskCounterparty {
+	/** Display-only child communication snapshots; never routes interaction authority. */
+	publishCommunicationCard?(card: Readonly<Card>): Promise<void>
 	recordResponse(response: ResponseArguments): Promise<void>
 	requestInteraction(request: TaskInteractionRequest, signal: AbortSignal): ReturnType<ICardHandle["waitForInteraction"]>
 }

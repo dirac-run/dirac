@@ -31,7 +31,7 @@ import { getRequestRegistry } from "@/core/controller/grpc-handler"
 import { subscribeToState } from "@/core/controller/state/subscribeToState"
 import { showTaskWithId } from "@/core/controller/task/showTaskWithId"
 import { Logger } from "@/shared/services/Logger"
-import { cardBodyForDisplay } from "./card-body"
+import { cardBodyForDisplay, communicationBodyPreview } from "./card-body"
 import { stderrStyle } from "./display"
 import { approveCardForPlainTextYolo, getStandaloneCardDisposition, StandaloneCardDisposition } from "./standalone-card-policy"
 import { emitTaskStartedMessage } from "./task-start-output"
@@ -120,7 +120,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 	// Subscription callbacks can reject completion while task initialization is
 	// still in progress. Attach a handler immediately so Node never reports that
 	// legitimate early failure as an unhandled rejection before we await it.
-	void completionPromise.catch(() => { })
+	void completionPromise.catch(() => {})
 	let completionSettled = false
 	const resolveCompletion = () => {
 		if (completionSettled) return
@@ -277,10 +277,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 		}
 
 		// Check for API failure (retries exhausted)
-		if (
-			content.type === DiracMessageType.API_STATUS &&
-			content.status.cancelReason === "retries_exhausted"
-		) {
+		if (content.type === DiracMessageType.API_STATUS && content.status.cancelReason === "retries_exhausted") {
 			rejectCompletion(new Error("API request failed: retries exhausted"))
 		}
 	}
@@ -558,7 +555,17 @@ function handleMessageForPipeMode(
 			`${stderrStyle.metadata(`${timestamp}${statusPrefix}`)}${statusIndicator}${styledHeader}${stderrStyle.metadata(`${statusStr}${extra}`)}\n`,
 		)
 
-		if (verbose && card.body && !isTaskCompletionCard(card)) {
+		if (card.communication) {
+			if (card.body) {
+				process.stderr.write(
+					`${stderrStyle.toolBody(verbose ? card.body : communicationBodyPreview(card.body, process.stderr.columns || 80))}\n`,
+				)
+			}
+			if (card.communication.detail) {
+				const detail = card.communication.detail.replace(/\s+/g, " ").trim()
+				process.stderr.write(`${stderrStyle.metadata(detail.slice(0, process.stderr.columns || 80))}\n`)
+			}
+		} else if (verbose && card.body && !isTaskCompletionCard(card)) {
 			process.stderr.write(`${stderrStyle.toolBody(cardBodyForDisplay(card.body, card.renderType))}\n`)
 		}
 		return
@@ -589,8 +596,9 @@ function handleApiReqMessage(message: DiracMessage, statusPrefix: string, isUpda
 		const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
 		const tokensStr =
 			info.tokensIn !== undefined
-				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
-				}`
+				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${
+						info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
+					}`
 				: ""
 		const cacheStr =
 			info.cacheReads !== undefined || info.cacheWrites !== undefined

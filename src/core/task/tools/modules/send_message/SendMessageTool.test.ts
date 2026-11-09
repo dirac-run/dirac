@@ -9,11 +9,11 @@ import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { SendMessageTool, send_message_spec } from "./SendMessageTool"
 import { exposure } from "./tool"
 
-function fixture() {
+function fixture(identity = { id: "Feynman", parent: "Dirac" as string | null }) {
 	const send = sinon.stub().resolves({ accepted: true, message_id: "message-1" })
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentCommunication: { send } }, ui: { createCard } } as unknown as IToolEnvironment
+	const env = { orchestration: { agentIdentity: identity, agentCommunication: { send } }, ui: { createCard } } as unknown as IToolEnvironment
 	return { env, send, card, createCard }
 }
 
@@ -23,16 +23,33 @@ describe("SendMessageTool", () => {
 			"Ordinary agent message. A wake is not assignment completion.")
 	})
 
-	it("preserves exact recipient/text and returns volatile acceptance through its own generic card", async () => {
+	it("shows the actor, recipient and verbatim text without replacing it with a receipt", async () => {
 		const { env, send, card, createCard } = fixture()
 		const input = { to: " Schrödinger 2 ", text: "  A finding\n " }
 		const output = await new SendMessageTool().processCall(input, env)
 		sinon.assert.calledOnceWithExactly(send, input)
 		assert.deepEqual(JSON.parse(output), { accepted: true, message_id: "message-1" })
 		sinon.assert.calledOnce(createCard)
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
-		assert.match(card.update.firstCall.args[0].body, /volatile.*not confirmed/)
-		assert.equal(createCard.firstCall.args[0].taskletReceipt, undefined)
+		const params = createCard.firstCall.args[0]
+		assert.equal(params.header, "Feynman is sending a message to  Schrödinger 2 ")
+		assert.equal(params.body, input.text)
+		assert.deepEqual(params.communication, { actor: "Feynman" })
+		assert.equal(params.status, CardStatus.RUNNING)
+		assert.equal(params.collapsed, false)
+		assert.equal(params.do_not_auto_collapse, true)
+		assert.equal(params.taskletReceipt, undefined)
+		const update = card.update.firstCall.args[0]
+		assert.equal(update.header, "Feynman sent a message to  Schrödinger 2 ")
+		assert.equal(update.body, undefined)
+		assert.match(update.communication.detail, /Accepted.*volatile.*not confirmed/)
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS, true)
+	})
+
+	it("always names the root Dirac rather than its task ID", async () => {
+		const { env, card, createCard } = fixture({ id: "root-task-id", parent: null })
+		await new SendMessageTool().processCall({ to: "Feynman", text: "hello" }, env)
+		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
+		assert.equal(card.update.firstCall.args[0].header, "Dirac sent a message to Feynman")
 	})
 
 	it("rejects invalid shapes, missing fields, blank content, and caller authority/correlation fields", async () => {
@@ -57,8 +74,11 @@ describe("SendMessageTool", () => {
 			const error = new Error(message)
 			send.rejects(error)
 			await assert.rejects(new SendMessageTool().processCall({ to: "Dirac", text: "hello" }, env), (caught) => caught === error)
-			sinon.assert.calledOnceWithExactly(card.update, { body: message })
-			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR)
+			sinon.assert.calledOnceWithExactly(card.update, {
+				header: "Feynman failed to send a message to Dirac",
+				communication: { actor: "Feynman", detail: message },
+			})
+			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR, true)
 		}
 	})
 

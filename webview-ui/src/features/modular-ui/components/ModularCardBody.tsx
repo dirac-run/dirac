@@ -5,6 +5,7 @@ import React, { useMemo } from "react"
 import { CARD_DECORATORS } from "../decorators"
 import { CardActions } from "./CardActions"
 import { CardContent } from "./CardContent"
+import { CommunicationCardBody } from "./CommunicationCardBody"
 import { TaskletReceiptBody } from "./TaskletReceiptBody"
 
 interface ModularCardBodyProps {
@@ -51,10 +52,12 @@ export const ModularCardBody: React.FC<ModularCardBodyProps> = ({ card, isActive
 	const { renderType } = card
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const decorators = useMemo(
-		() => (isTaskletCard || card.taskletReceipt ? [] : CARD_DECORATORS.filter((d) => d.shouldApply(card))),
+		() =>
+			card.communication || isTaskletCard || card.taskletReceipt ? [] : CARD_DECORATORS.filter((d) => d.shouldApply(card)),
 		[card, isTaskletCard],
 	)
 	const presentation = useMemo(() => resolveCardBodyPresentation(card), [card])
+	if (card.communication) return <CommunicationCardBody card={card} />
 	if (card.taskletReceipt) {
 		return (
 			<div className="overflow-y-auto border-t border-foreground/10 p-2.5" ref={scrollRef} style={{ maxHeight: 320 }}>

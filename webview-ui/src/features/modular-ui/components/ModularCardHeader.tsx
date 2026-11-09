@@ -45,7 +45,13 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const isTaskletCard = card.rawInput?.isTasklet === true
 	const taskletStatus = tasklet ? TASKLET_STATUS_PRESENTATION[tasklet.status] : undefined
 	const receipt = card.taskletReceipt
-	const header = receipt ? taskletReceiptTitle(receipt) : (tasklet ? formatTaskletLabel(tasklet) : card.header)
+	const header = card.communication
+		? card.header
+		: receipt
+			? taskletReceiptTitle(receipt)
+			: tasklet
+				? formatTaskletLabel(tasklet)
+				: card.header
 	const status = taskletStatus?.status ?? (isTaskletCard ? CardStatus.PENDING : card.status)
 	const isTerminal = isFinalStatus(status)
 	const subagentData = isTaskletCard ? undefined : readSubagentCardData(card)
@@ -54,7 +60,10 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	const [currentTime, setCurrentTime] = useState(() => Date.now())
 	const filePath = getCardFilePath(card)
 	const decorators = useMemo(
-		() => (isTaskletCard || receipt ? [] : CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card))),
+		() =>
+			card.communication || isTaskletCard || receipt
+				? []
+				: CARD_DECORATORS.filter((decorator) => decorator.shouldApply(card)),
 		[card, isTaskletCard, receipt],
 	)
 	const iconSizeClass = "size-3.5"
@@ -134,7 +143,9 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 				</span>
 			</button>
 
-			{!isTaskletCard && card.architectureReference && <ArchitectureNavigation selection={card.architectureReference} />}
+			{!card.communication && !isTaskletCard && card.architectureReference && (
+				<ArchitectureNavigation selection={card.architectureReference} />
+			)}
 			{filePath && !decorators.some((decorator) => decorator.renderHeaderActions) && (
 				<button
 					aria-label={`Open ${filePath}`}
@@ -153,7 +164,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 	)
 }
 export function getCardFilePath(card: Card): string | undefined {
-	if (card.rawInput?.isTasklet === true || card.taskletReceipt) return undefined
+	if (card.communication || card.rawInput?.isTasklet === true || card.taskletReceipt) return undefined
 	return card.locations?.[0]?.path ?? extractFirstPath(card.header) ?? undefined
 }
 

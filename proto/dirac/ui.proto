@@ -119,6 +119,12 @@ message CardLocation {
   optional int32 line = 2;
 }
 
+// Display-only metadata; does not convey interaction or approval authority.
+message CardCommunication {
+  string actor = 1;
+  optional string detail = 2;
+}
+
 message Card {
   string id = 1;
   string header = 2;
@@ -146,6 +152,8 @@ message Card {
   repeated CardLocation locations = 24;
   optional bool auto_scroll = 25;
   optional ArchitectureReference architecture_reference = 26;
+  optional CardCommunication communication = 27;
+  optional string tasklet_receipt_json = 28;
 }
 
 // Enum for DiracSayTool tool types

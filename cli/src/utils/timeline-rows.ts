@@ -17,7 +17,10 @@ export function estimateTimelineMessageRows(message: DiracMessage, terminalColum
 	if (message.content.type === DiracMessageType.CARD) {
 		const card = message.content.card
 		const bodyRows = estimateTimelineMessageBodyRows(message, terminalColumns, suppressCardBody)
-		const interactionRows = !isFinalStatus(card.status) && (card.requireFeedback || (card.actions?.length ?? 0) > 0) ? 1 : 0
+		const interactionRows =
+			!card.communication && !isFinalStatus(card.status) && (card.requireFeedback || (card.actions?.length ?? 0) > 0)
+				? 1
+				: 0
 		const taskCompletionChromeRows = !readTaskletPresentation(card) && isTaskCompletionCard(card) ? 4 : 1
 		return Math.max(1, taskCompletionChromeRows + bodyRows + interactionRows)
 	}
@@ -38,7 +41,7 @@ export function estimateTimelineMessageBodyRows(
 	const body = cardDisplayBody(message.content.card)
 	if (!body) return 0
 	const width = Math.max(1, terminalColumns - CARD_BODY_COLUMNS)
-	return message.content.card.renderType === "markdown"
+	return !message.content.card.communication && message.content.card.renderType === "markdown"
 		? renderMarkdownLines(body, width).length
 		: estimateVisualLineCount(body, width)
 }

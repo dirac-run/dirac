@@ -49,6 +49,7 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 		toolName: "subagents",
 		config: { subagentsEnabled: true },
 		orchestration: {
+			agentIdentity: { id: "Dirac" },
 			tasklets: { start },
 			getHistory: unexpectedBatchAccounting,
 			getTaskState: () => mistakes,
@@ -77,8 +78,13 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		const start = sinon.stub()
 		const { env } = fixture(start)
 		const invalid = [
-			...Object.keys(assignment).map((key) => Object.fromEntries(Object.entries(assignment).filter(([field]) => field !== key))),
-			...["timeout", "include_history", "use_utility_model", "prompt", "task_title", "unknown"].map((key) => ({ ...assignment, [key]: true })),
+			...Object.keys(assignment).map((key) =>
+				Object.fromEntries(Object.entries(assignment).filter(([field]) => field !== key)),
+			),
+			...["timeout", "include_history", "use_utility_model", "prompt", "task_title", "unknown"].map((key) => ({
+				...assignment,
+				[key]: true,
+			})),
 		]
 		const results = await spawn(env, invalid)
 		assert.equal(results.length, invalid.length)
@@ -106,13 +112,19 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {
 		assert.match(subagents_spec.description, /asynchronously/)
 		assert.match(subagents_spec.description, /not completed results/)
-		assert.match(String(subagents_spec.parameters!.find((parameter) => parameter.name === "assignments")!.instruction), /Acceptance is not completion/)
+		assert.match(
+			String(subagents_spec.parameters!.find((parameter) => parameter.name === "assignments")!.instruction),
+			/Acceptance is not completion/,
+		)
 	})
 
 	it("uses the environment capability guard even with no legacy config", async () => {
 		const { env, createCard } = fixture()
 		delete (env.orchestration as { tasklets?: TaskletControls }).tasklets
-		await assert.rejects(new SubagentsTool().processCall({ operation: "create", assignments: [assignment] }, env), /owning root/)
+		await assert.rejects(
+			new SubagentsTool().processCall({ operation: "create", assignments: [assignment] }, env),
+			/owning root/,
+		)
 		assert.equal(createCard.callCount, 0)
 	})
 
@@ -129,7 +141,9 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		])
 		assert.equal(childCompleted, false)
 		assert.equal(createCard.callCount, 1, "The spawn tool must not create child cards")
-		assert.equal(createCard.firstCall.args[0].collapsed, true)
+		assert.equal(createCard.firstCall.args[0].collapsed, false)
+		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
+		assert.equal(updates[0].header, "Dirac started tasklet:live — Inspect code")
 		assert.deepEqual(finalized, [CardStatus.SUCCESS])
 		assert.match(updates[0].body, /Acceptance is not assignment completion/)
 		assert.equal(updates[0].taskletReceipt.operation, "spawn")
@@ -169,9 +183,11 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		)
 	})
 
-
-
-	for (const input of [{ operation: "create" }, { operation: "create", assignments: [] }, { operation: "create", assignments: "invalid" }]) {
+	for (const input of [
+		{ operation: "create" },
+		{ operation: "create", assignments: [] },
+		{ operation: "create", assignments: "invalid" },
+	]) {
 		it(`reports a missing batch without creating a card: ${JSON.stringify(input)}`, async () => {
 			const { env, createCard, mistakes } = fixture()
 			assert.match(await new SubagentsTool().processCall(input, env), /assignments must be a non-empty array/)
@@ -232,7 +248,6 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 			if (outcome!.kind !== "completed") assert.equal(typeof result.error, "string")
 		})
 	}
-
 
 	for (const phase of ["create", "update", "finalize"] as const) {
 		it(`does not hide acceptance when card ${phase} rejects`, async () => {

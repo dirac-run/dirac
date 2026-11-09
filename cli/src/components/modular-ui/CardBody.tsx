@@ -18,6 +18,7 @@ interface CardBodyProps {
 	scrollOffset?: number
 	renderWidth?: number
 	stripLineAnchors?: boolean
+	previewFromStart?: boolean
 	receipt?: TaskletReceipt
 }
 
@@ -28,6 +29,7 @@ export const CardBody: React.FC<CardBodyProps> = ({
 	scrollOffset,
 	renderWidth,
 	stripLineAnchors = true,
+	previewFromStart = false,
 	receipt,
 }) => {
 	const displayBody = receipt
@@ -44,7 +46,7 @@ export const CardBody: React.FC<CardBodyProps> = ({
 	const { visibleText, hasMoreAbove, hasMoreBelow } = maxLines
 		? markdownLines
 			? clipMarkdownLines(markdownLines, maxLines, scrollOffset ?? 0)
-			: clipTextToWindow(displayBody, maxLines, columns, scrollOffset ?? 0)
+			: clipTextToWindow(displayBody, maxLines, columns, scrollOffset ?? (previewFromStart ? Number.MAX_SAFE_INTEGER : 0))
 		: { visibleText: displayBody, hasMoreAbove: false, hasMoreBelow: false }
 	if (!displayBody) return null
 	if (receipt && !maxLines) return <TaskletReceiptBody receipt={receipt} />

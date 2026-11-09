@@ -12,16 +12,25 @@ function fixture(reason = "message") {
 	const wait = sinon.stub().resolves({ reason })
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentWait: { wait } }, ui: { createCard } } as unknown as IToolEnvironment
+	const env = { orchestration: { agentIdentity: { id: "Feynman", parent: "Dirac" }, agentWait: { wait } }, ui: { createCard } } as unknown as IToolEnvironment
 	return { env, wait, card, createCard }
 }
 
 describe("WaitForMessageTool", () => {
-	it("passes the finite default and returns a wake without consuming or completing work", async () => {
-		const { env, wait, card } = fixture()
+	it("shows who is waiting and a useful wake reason while preserving the machine return", async () => {
+		const { env, wait, card, createCard } = fixture()
 		assert.deepEqual(JSON.parse(await new WaitForMessageTool().processCall({}, env)), { reason: "message" })
 		sinon.assert.calledOnceWithExactly(wait, { timeout_ms: 30000 })
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
+		const params = createCard.firstCall.args[0]
+		assert.equal(params.header, "Feynman is waiting for communication")
+		assert.match(params.body, /30 seconds/)
+		assert.deepEqual(params.communication, { actor: "Feynman" })
+		assert.equal(params.status, CardStatus.RUNNING)
+		assert.equal(params.collapsed, false)
+		assert.equal(params.do_not_auto_collapse, true)
+		assert.equal(card.update.firstCall.args[0].header, "Feynman's wait ended: message")
+		assert.match(card.update.firstCall.args[0].body, /does not consume messages or complete the assignment/)
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS, true)
 	})
 	it("accepts deadline endpoints and reports timeout/repeated-wait guidance", async () => {
 		for (const timeout_ms of [1000, 300000]) {
@@ -29,6 +38,7 @@ describe("WaitForMessageTool", () => {
 			assert.deepEqual(JSON.parse(await new WaitForMessageTool().processCall({ timeout_ms }, env)), { reason: "timeout" })
 			sinon.assert.calledOnceWithExactly(wait, { timeout_ms })
 			assert.match(card.update.firstCall.args[0].body, /another wait requires fresh/)
+			assert.equal(card.update.firstCall.args[0].header, "Feynman's wait ended: timeout")
 		}
 	})
 	it("rejects unsupported fields and invalid finite deadlines before waiting", async () => {
@@ -41,10 +51,14 @@ describe("WaitForMessageTool", () => {
 	})
 	it("finalizes cancellation and runtime rejection without swallowing failures", async () => {
 		const { env, wait, card } = fixture("cancelled")
-		await new WaitForMessageTool().processCall({}, env)
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED)
+		assert.deepEqual(JSON.parse(await new WaitForMessageTool().processCall({}, env)), { reason: "cancelled" })
+		assert.equal(card.update.firstCall.args[0].header, "Feynman's wait ended: cancelled")
+		assert.match(card.update.firstCall.args[0].body, /cancelled.*not completed/)
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED, true)
 		wait.rejects(new Error("Structured input is pending"))
 		await assert.rejects(new WaitForMessageTool().processCall({}, env), /Structured input/)
+		assert.equal(card.update.lastCall.args[0].header, "Feynman failed to wait for communication")
+		assert.equal(card.update.lastCall.args[0].body, "Structured input is pending")
 		assert.equal(card.finalize.lastCall.args[0], CardStatus.ERROR)
 	})
 	it("requires child capability and exposes no parent supervision", async () => {

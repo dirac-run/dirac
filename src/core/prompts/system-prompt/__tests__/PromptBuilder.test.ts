@@ -2,6 +2,7 @@ import { expect } from "chai"
 import { PromptBuilder } from "../registry/PromptBuilder"
 import type { SystemPromptContext } from "../types"
 import { mockProviderInfo } from "./test-helpers"
+import { taskProfileSystemInstructions } from "@core/task/TaskExecutionProfile"
 
 describe("PromptBuilder", () => {
 	const mockContext: SystemPromptContext = {
@@ -26,7 +27,14 @@ describe("PromptBuilder", () => {
 					...mockContext,
 					executionProfile,
 					subagentsEnabled: true,
+					profileInstructions: taskProfileSystemInstructions(executionProfile, true),
 				}).build()
+				expect(prompt).to.match(/^You are Dirac, the root AI agent/)
+				expect(prompt).to.include("You have no parent")
+				expect(prompt).to.include("Your stable ID is Dirac")
+				expect(prompt.match(/operation=create/g)).to.have.lengthOf(1)
+				expect(prompt).to.include("You own supervision, integration of delegated work, and the final user outcome")
+				expect(prompt).to.include("`list_agents`")
 				expect(prompt).to.include("TASKLET DELEGATION")
 				expect(prompt).to.include("The `subagents` tool with `operation=create` starts a batch of assignments asynchronously")
 				expect(prompt).not.to.include("named-agent spawn tools")
@@ -48,8 +56,13 @@ describe("PromptBuilder", () => {
 			const prompt = await new PromptBuilder({
 				...mockContext,
 				executionProfile: "tasklet",
+				taskId: "Feynman 2",
 				subagentsEnabled: true,
 			}).build()
+			expect(prompt).to.match(/^Your stable ID is Feynman 2; your parent's stable ID is Dirac\./)
+			expect(prompt).to.include("You are an assigned worker")
+			expect(prompt).not.to.include("You are Dirac")
+			expect(prompt).to.include("`list_agents`")
 			expect(prompt).to.not.include("TASKLET DELEGATION")
 			expect(prompt).to.not.include("`subagents`")
 		})
@@ -57,11 +70,29 @@ describe("PromptBuilder", () => {
 		for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
 			it(`does not advertise spawning for ${executionProfile} when delegation is disabled or unspecified`, async () => {
 				for (const subagentsEnabled of [false, undefined]) {
-					const prompt = await new PromptBuilder({ ...mockContext, executionProfile, subagentsEnabled }).build()
-					expect(prompt).to.not.include("TASKLET DELEGATION")
+					const prompt = await new PromptBuilder({
+						...mockContext,
+						executionProfile,
+						subagentsEnabled,
+						profileInstructions: taskProfileSystemInstructions(executionProfile, subagentsEnabled),
+					}).build()
+					expect(prompt).to.match(/^You are Dirac, an AI agent for software-engineering tasks\.\n/)
+					expect(prompt).to.not.match(/TASKLET DELEGATION|parent|subagents|tasklets?|child|list_agents|send_message/i)
+					expect(prompt).to.not.include("# Agent identity")
 				}
 			})
 		}
+
+		it("keeps a child's stable identity when delegation is disabled", async () => {
+			const prompt = await new PromptBuilder({
+				...mockContext,
+				executionProfile: "tasklet",
+				taskId: "Bohr",
+				subagentsEnabled: false,
+			}).build()
+			expect(prompt).to.match(/^Your stable ID is Bohr; your parent's stable ID is Dirac\./)
+			expect(prompt).not.to.include("You are Dirac")
+		})
 
 		it("does not infer parent capability from the delegation setting without a profile", async () => {
 			const prompt = await new PromptBuilder({ ...mockContext, subagentsEnabled: true }).build()

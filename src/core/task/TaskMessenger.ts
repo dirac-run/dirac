@@ -23,6 +23,7 @@ import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { clearAskResponse } from "./TaskUserInput"
 import { TaskMessengerDependencies, type TaskInteractionRequest } from "./types/task-messenger"
 import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
+import Mutex from "p-mutex"
 
 interface TaskCardParams extends CardParams {
 	permissionRequestKind?: TaskInteractionRequest["permissionRequestKind"]
@@ -50,11 +51,52 @@ export class TaskMessenger implements ITaskMessenger {
 	private lastMessageId = 0
 	private ownerWaitCount = 0
 	private statusBeforeOwnerWait?: TaskStatus
+	private communicationProjectionMutex = new Mutex()
 
 	constructor(private dependencies: TaskMessengerDependencies) { }
 
 	get routesToOwner(): boolean {
 		return this.dependencies.counterparty !== undefined
+	}
+
+	private async publishCommunicationCard(card: Readonly<Card>): Promise<void> {
+		if (card.communication) await this.dependencies.counterparty?.publishCommunicationCard?.(card)
+	}
+
+	/** Upserts an observational copy, with no buttons, approval, or input routing. */
+	async upsertCommunicationCard(actor: string, card: Readonly<Card>): Promise<void> {
+		if (this.routesToOwner) throw new Error("Only a root messenger may project child communication")
+		const id = `${actor}:${card.id}`
+		const snapshot: Card = {
+			id,
+			kind: CardKind.GENERIC,
+			header: card.header,
+			toolName: card.toolName,
+			icon: card.icon,
+			status: card.status,
+			renderType: card.renderType === "markdown" ? "markdown" : "text",
+			body: card.body,
+			communication: { actor, detail: card.communication?.detail },
+			taskletReceipt: card.taskletReceipt ? structuredClone(card.taskletReceipt) : undefined,
+			collapsed: false,
+			do_not_auto_collapse: true,
+			startTime: card.startTime,
+			endTime: card.endTime,
+		}
+		const messages = this.dependencies.messageStateHandler
+		await this.communicationProjectionMutex.withLock(async () => {
+			if (messages.findMessageIndexByCardId(id) === -1) {
+				await messages.addToDiracMessages({
+					id,
+					ts: snapshot.startTime ?? Date.now(),
+					content: { type: DiracMessageType.CARD, card: snapshot },
+				})
+			} else {
+				await messages.patchCardById(id, snapshot)
+			}
+		})
+		this.scheduleStatePublication()
+		if (isFinalStatus(card.status)) await messages.flushPendingWrites()
 	}
 
 	async recordResponse(response: ResponseArguments): Promise<void> {
@@ -91,7 +133,7 @@ export class TaskMessenger implements ITaskMessenger {
 			const card = structuredClone(request.card)
 			handle = await this.createCard({
 				kind: card.kind,
-				header: `${child.title} — ${card.header}`,
+				header: `${child.id} requested your ${card.requireApproval ? "approval" : "input"} — ${card.header}`,
 				toolName: card.toolName,
 				icon: card.icon,
 				status: CardStatus.WAITING_FOR_INPUT,
@@ -253,6 +295,7 @@ export class TaskMessenger implements ITaskMessenger {
 			rawInput: params.rawInput,
 			rawOutput: params.rawOutput,
 			taskletReceipt: params.taskletReceipt,
+			communication: params.communication,
 			architectureReference: params.architectureReference,
 			diffs: params.diffs,
 			locations: params.locations,
@@ -278,6 +321,7 @@ export class TaskMessenger implements ITaskMessenger {
 		}
 
 		await this.dependencies.messageStateHandler.addToDiracMessages(message)
+		await this.publishCommunicationCard(card)
 		this.scheduleStatePublication()
 		if (isFinalStatus(status)) await this.dependencies.messageStateHandler.flushPendingWrites()
 
@@ -319,6 +363,7 @@ export class TaskMessenger implements ITaskMessenger {
 			}
 			if (doNotAutoCollapse) recordedPatch.do_not_auto_collapse = true
 			const updated = await this.dependencies.messageStateHandler.patchCardById(id, recordedPatch)
+			await this.publishCommunicationCard(updated)
 			if (isFinalStatus(updated.status)) {
 				removeWaitingCard()
 				ownerWaitCancellation.abort(new Error(`Card ${id} became terminal while waiting for interaction`))
@@ -336,6 +381,7 @@ export class TaskMessenger implements ITaskMessenger {
 			},
 			appendBody: async (chunk: string) => {
 				await this.dependencies.messageStateHandler.appendCardBodyById(id, chunk)
+				await this.publishCommunicationCard(getCard())
 				this.scheduleStatePublication()
 			},
 			finalize: async (status: CardStatus, doNotAutoCollapse?: boolean) => {

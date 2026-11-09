@@ -29,21 +29,32 @@ export class SendMessageTool implements IDiracTool {
 		const request = parseMessage(input)
 		const communication = env.orchestration.agentCommunication
 		if (!communication) throw new Error("Agent communication is unavailable for this execution")
+		const identity = env.orchestration.agentIdentity
+		const actor = identity.parent === null ? "Dirac" : identity.id
 		const card = await env.ui.createCard({
-			header: `Send message to ${request.to}`,
+			header: `${actor} is sending a message to ${request.to}`,
+			body: request.text,
+			communication: { actor },
 			icon: DiracIcon.CHAT,
 			status: CardStatus.RUNNING,
-			collapsed: true,
+			collapsed: false,
+			do_not_auto_collapse: true,
 			rawInput: request,
 		})
 		try {
 			const receipt = await communication.send(request)
-			await card.update({ body: "Accepted into the volatile mailbox; delivery and action are not confirmed." })
-			await card.finalize(CardStatus.SUCCESS)
+			await card.update({
+				header: `${actor} sent a message to ${request.to}`,
+				communication: { actor, detail: "Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed." },
+			})
+			await card.finalize(CardStatus.SUCCESS, true)
 			return JSON.stringify(receipt)
 		} catch (error) {
-			await card.update({ body: toError(error).message })
-			await card.finalize(CardStatus.ERROR)
+			await card.update({
+				header: `${actor} failed to send a message to ${request.to}`,
+				communication: { actor, detail: toError(error).message },
+			})
+			await card.finalize(CardStatus.ERROR, true)
 			throw error
 		}
 	}

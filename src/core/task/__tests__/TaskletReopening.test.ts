@@ -5,7 +5,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import * as storage from "@core/storage/taskStorage"
-import { CardKind, CardStatus, TaskStatus } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, TaskStatus, type Card } from "@shared/ExtensionMessage"
 import { ResponseOperation } from "@shared/responseTool"
 import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
 import { DiracAskResponse } from "@shared/WebviewMessage"
@@ -534,6 +534,173 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		await assert.rejects(host.resume(createTaskletId()), /corrupt contained record/)
 		await assert.rejects(host.shutdown(), /Tasklet shutdown failed/)
 		sinon.assert.notCalled(constructed)
+	})
+
+	it("waits for root history restoration before projecting repaired outcomes and retired requests", async () => {
+		const record = await seed()
+		await storage.saveTaskletEvents(address(record.id), [interactionEvent(record.id, "restored-request", "pending")])
+		let rootRestored = false
+		const publish = sandbox.stub<[string, Readonly<Card>], Promise<void>>().callsFake(async (_actor, _card) => assert.equal(rootRestored, true))
+		owner.publishCommunicationCard = publish
+		const host = newHost()
+		await host.reconstruct()
+		sinon.assert.notCalled(publish)
+		assert.equal(host.inspect(record.id).interactions[0].status, "retired")
+		assert.equal((await storage.loadTaskletEvents(address(record.id))).filter((event) => event.communication.type === "outcome").length, 1)
+
+		// Task.resumeTaskFromHistory calls this only after the root message handler restores its history/offset.
+		rootRestored = true
+		await host.reconcileRootProjection()
+		assert.equal(publish.callCount, 2)
+		assert.equal(publish.firstCall.args[1].id, "restored-request")
+		assert.equal(publish.firstCall.args[1].status, CardStatus.CANCELLED)
+		assert.equal(publish.lastCall.args[1].body, completed.response)
+		await host.reconcileRootProjection()
+		assert.equal(publish.callCount, 2)
+	})
+
+	it("forwards child communication using the owned identity and publishes progress and committed results once", async () => {
+		const publish = sandbox.stub().callsFake(async (_actor, card) => {
+			if (card.header.includes("reported a result")) {
+				assert.equal(host.inspect(record.id).outcomePersisted, true)
+				assert.equal((await storage.loadTaskletRecords("root"))[0].outcome?.kind, "completed")
+			}
+		})
+		owner.publishCommunicationCard = publish
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Reporting child", prompt: "Work" })
+		const counterparty = (constructed.firstCall.args[0] as TaskParams).tasklet!.counterparty
+		const forwarded: Card = { id: "outgoing-mail", header: "Shared update", status: CardStatus.SUCCESS, renderType: "text", communication: { actor: "spoofed" } }
+		await counterparty.publishCommunicationCard!(forwarded)
+		assert.equal(publish.firstCall.args[0], record.id)
+		assert.equal(publish.firstCall.args[1], forwarded)
+		publish.resetHistory()
+
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "Exact progress, not a generic receipt" })
+		assert.equal(publish.callCount, 1)
+		const progress = publish.firstCall.args[1]
+		const event = (await storage.loadTaskletEvents(address(record.id))).find((entry) => entry.communication.type === "response")!
+		assert.equal(progress.id, event.id)
+		assert.equal(progress.body, "Exact progress, not a generic receipt")
+		assert.deepEqual(progress.communication, { actor: record.id })
+		await (await host.prepareEventDelivery())!.acknowledge()
+		assert.equal(publish.callCount, 1)
+		await assert.rejects(counterparty.recordResponse({ operation: ResponseOperation.COMPLETE, text: "Uncommitted attempt" }), /Only progress/)
+		assert.equal(publish.callCount, 1)
+
+		children[0].outcome.resolve(completed)
+		await host["children"].get(record.id)!.settlement
+		assert.equal(publish.callCount, 2)
+		assert.equal(publish.lastCall.args[1].body, completed.response)
+		await (await host.prepareEventDelivery())!.acknowledge()
+		assert.equal(publish.callCount, 2)
+	})
+
+	it("publishes exact question text and options, updating the same observational event card after an answer", async () => {
+		const publish = sandbox.stub().resolves()
+		owner.publishCommunicationCard = publish
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Questioning child", prompt: "Work" })
+		const counterparty = (constructed.firstCall.args[0] as TaskParams).tasklet!.counterparty
+		const waiting = counterparty.requestInteraction({
+			card: {
+				id: "child-question", header: "Question", body: "Generic receipt", renderType: "markdown", status: CardStatus.WAITING_FOR_INPUT,
+				rawInput: { operation: "question", text: "Which actual implementation?", options: ["Minimal", "Comprehensive"] },
+				requireFeedback: true, actions: [{ label: "Minimal", value: "minimal" }],
+			}
+		}, new AbortController().signal)
+		await host["children"].get(record.id)!.eventWrites
+		const requestId = host.inspect(record.id).interactions[0].id
+		const question = publish.firstCall.args[1]
+		assert.equal(question.id, requestId)
+		assert.equal(question.header, `${record.id} asked Dirac a question`)
+		assert.equal(question.body, "Which actual implementation?\n\n- Minimal\n\n- Comprehensive")
+		assert.equal(question.status, CardStatus.RUNNING)
+		assert.equal(question.requireFeedback, undefined)
+		assert.equal(question.actions, undefined)
+		await host.resolveInteraction(record.id, requestId, { operation: "answer", response: { action: "minimal", response: DiracAskResponse.MESSAGE, text: "Minimal" } })
+		await waiting
+		assert.equal(publish.callCount, 2)
+		assert.equal(publish.lastCall.args[1].id, question.id)
+		assert.equal(publish.lastCall.args[1].status, CardStatus.SUCCESS)
+	})
+
+	it("keeps permission communication informational without invoking approval or user escalation", async () => {
+		const publish = sandbox.stub().resolves()
+		owner.publishCommunicationCard = publish
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Permission child", prompt: "Work" })
+		const counterparty = (constructed.firstCall.args[0] as TaskParams).tasklet!.counterparty
+		const waiting = counterparty.requestInteraction({
+			card: { id: "permission", header: "Execute command", body: "echo exact-command", renderType: "text", status: CardStatus.WAITING_FOR_INPUT, requireApproval: true },
+			permissionRequestKind: "manual_tool", permissionOperation: { kind: "commands", commands: ["echo exact-command"] },
+		}, new AbortController().signal)
+		const retired = assert.rejects(waiting, /retired/)
+		await host["children"].get(record.id)!.eventWrites
+		const permission = publish.firstCall.args[1]
+		assert.match(permission.body, /echo exact-command/)
+		assert.match(permission.body, /Permission request only/)
+		assert.equal(permission.requireApproval, undefined)
+		assert.equal(permission.actions, undefined)
+		sinon.assert.notCalled(owner.authorizePermission as sinon.SinonStub)
+		sinon.assert.notCalled(owner.escalateInteraction as sinon.SinonStub)
+		await host.interrupt(record.id)
+		await retired
+	})
+
+	it("isolates forwarded-card and lifecycle display failures from accepted progress and actionable questions", async () => {
+		expectLoggerErrors()
+		owner.publishCommunicationCard = sandbox.stub().rejects(new Error("root timeline unavailable"))
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Communicating child", prompt: "Work" })
+		const counterparty = (constructed.firstCall.args[0] as TaskParams).tasklet!.counterparty
+		await counterparty.publishCommunicationCard!({ id: "sent-mail", header: "Accepted mail", status: CardStatus.SUCCESS, renderType: "text", communication: { actor: record.id } })
+		await counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "Accepted once" })
+		assert.equal(host.inspect(record.id).responses.length, 1)
+		const waiting = counterparty.requestInteraction({
+			card: {
+				id: "question", header: "Question", status: CardStatus.WAITING_FOR_INPUT, renderType: "text", requireFeedback: true,
+				rawInput: { operation: "question", text: "Still actionable?" },
+			}
+		}, new AbortController().signal)
+		await host["children"].get(record.id)!.eventWrites
+		const inspection = host.inspect(record.id)
+		assert.equal(inspection.presentationError?.message, "root timeline unavailable")
+		assert.equal(inspection.interactions[0].status, "pending")
+		await host.resolveInteraction(record.id, inspection.interactions[0].id, { operation: "answer", response: { action: "yes", response: DiracAskResponse.MESSAGE, text: "Yes" } })
+		assert.equal((await waiting).text, "Yes")
+		assert.equal((await storage.loadTaskletEvents(address(record.id))).filter((event) => event.communication.type === "response").length, 1)
+	})
+
+	it("reports result projection failure without invalidating committed settlement", async () => {
+		expectLoggerErrors()
+		owner.publishCommunicationCard = sandbox.stub().rejects(new Error("root timeline write failed"))
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Committed child", prompt: "Work" })
+		children[0].outcome.resolve(completed)
+		await host["children"].get(record.id)!.settlement
+		const inspection = host.inspect(record.id)
+		assert.equal(inspection.outcomePersisted, true)
+		assert.deepEqual(inspection.outcome, completed)
+		assert.equal(inspection.settlementError, undefined)
+		assert.equal(inspection.presentationError?.message, "root timeline write failed")
+	})
+
+	it("does not publish a result when outcome event persistence fails", async () => {
+		expectLoggerErrors()
+		const saveEvents = storage.saveTaskletEvents
+		sandbox.stub(storage, "saveTaskletEvents").callsFake(async (destination, events) => {
+			if (events.some((event) => event.communication.type === "outcome")) throw new Error("outcome event write failed")
+			await saveEvents(destination, events)
+		})
+		const publish = sandbox.stub().resolves()
+		owner.publishCommunicationCard = publish
+		const host = newHost()
+		const record = await host.start({ type: "default", title: "Uncommitted child", prompt: "Work" })
+		children[0].outcome.resolve(completed)
+		await assert.rejects(host["children"].get(record.id)!.settlement!, /outcome event write failed/)
+		sinon.assert.notCalled(publish)
+		assert.equal(host.inspect(record.id).outcomePersisted, false)
 	})
 
 	it("fails reconstruction when request retirement cannot persist and prevents resuming the stale approval", async () => {

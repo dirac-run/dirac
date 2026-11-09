@@ -29,22 +29,34 @@ export class ListAgentsTool implements IDiracTool {
 		const query = parseQuery(input)
 		const communication = env.orchestration.agentCommunication
 		if (!communication) throw new Error("Agent discovery is unavailable for this execution")
+		const identity = env.orchestration.agentIdentity
+		const actor = identity.parent === null ? "Dirac" : identity.id
 		const card = await env.ui.createCard({
-			header: "List agents",
+			header: `${actor} is listing agents`,
+			communication: { actor },
 			icon: DiracIcon.SUBAGENTS,
 			status: CardStatus.RUNNING,
-			collapsed: true,
+			collapsed: false,
+			do_not_auto_collapse: true,
 			rawInput: query,
 		})
 		try {
 			const page = communication.list(query)
 			const output = JSON.stringify(page)
-			await card.update({ body: output })
-			await card.finalize(CardStatus.SUCCESS)
+			const roster = page.agents.map((agent) => `${agent.id} — ${agent.title_preview}\nStatus: ${agent.status}; messages: ${agent.accepts_messages ? "available" : "unavailable"}`)
+			await card.update({
+				header: `${actor} listed agents`,
+				body: roster.length ? roster.join("\n\n") : "No agents on this page.",
+				communication: { actor, detail: `Availability is a snapshot, not a reservation.${page.next_cursor ? ` More agents available; next cursor: ${page.next_cursor}` : ""}` },
+			})
+			await card.finalize(CardStatus.SUCCESS, true)
 			return output
 		} catch (error) {
-			await card.update({ body: toError(error).message })
-			await card.finalize(CardStatus.ERROR)
+			await card.update({
+				header: `${actor} failed to list agents`,
+				communication: { actor, detail: toError(error).message },
+			})
+			await card.finalize(CardStatus.ERROR, true)
 			throw error
 		}
 	}

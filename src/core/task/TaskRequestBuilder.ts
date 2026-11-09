@@ -178,7 +178,8 @@ export async function buildApiRequestParams(
 
 	const promptContext: SystemPromptContext = {
 		executionProfile: ctx.executionProfile,
-		profileInstructions: taskProfileSystemInstructions(ctx.executionProfile),
+		taskId: ctx.taskId,
+		profileInstructions: taskProfileSystemInstructions(ctx.executionProfile, settings.subagentsEnabled),
 		cwd: ctx.cwd,
 		ide,
 		providerInfo,
@@ -232,7 +233,6 @@ export async function buildApiRequestParams(
 		configuration?.name && configuration.name !== "default" ? `# Subagent Role\n${configuration.name}` : undefined,
 	].filter(Boolean).join("\n\n")
 	const runtimeContext = [
-		`# Agent identity\n${JSON.stringify(ctx.executionProfile === "tasklet" ? { id: ctx.taskId, parent: "Dirac" } : { id: "Dirac", parent: null })}\nUse list_agents for the current root-scoped roster. send_message is ordinary agent communication, not assignment, permission, structured reply, or completion. respond retains its structured counterparty semantics.`,
 		ctx.executionProfile !== "standalone" ? pinnedContext : undefined,
 		supervisionContext ? `# Current Tasklet Supervision\n${supervisionContext}` : undefined,
 	].filter(Boolean).join("\n\n")

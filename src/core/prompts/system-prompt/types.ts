@@ -15,6 +15,7 @@ import type { TaskExecutionProfile } from "@core/task/TaskExecutionProfile"
  */
 export interface SystemPromptContext {
 	readonly executionProfile?: TaskExecutionProfile
+	readonly taskId?: string
 	readonly profileInstructions?: string
 	readonly providerInfo: ApiProviderInfo
 	readonly cwd?: string

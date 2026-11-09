@@ -101,6 +101,80 @@ const responseFields = [
 	"askResponseValue",
 ] as const
 
+describe("TaskMessenger communication projection", () => {
+	it("updates one observational card across the child card lifecycle", async () => {
+		const root = createMessenger()
+		const child = createMessenger(sinon.stub().resolves(), {
+			recordResponse: sinon.stub().resolves(),
+			requestInteraction: sinon.stub().resolves(),
+			publishCommunicationCard: (card) => root.messenger.upsertCommunicationCard("Feynman", card),
+		})
+		const handle = await child.messenger.createCard({
+			header: "Feynman is sending a message to Planck",
+			body: "Actual message",
+			communication: { actor: "Feynman" },
+			rawInput: { privateInput: true },
+			requireFeedback: true,
+			actions: [{ label: "Reply", value: "reply" }],
+		})
+		await handle.appendBody(" content")
+		await handle.update({ header: "Feynman sent a message to Planck" })
+		await handle.finalize(CardStatus.SUCCESS)
+		assert.equal(root.messages.length, 1)
+		const projected = root.messages[0].content.card
+		assert.equal(projected.id, `Feynman:${handle.id}`)
+		assert.equal(projected.body, "Actual message content")
+		assert.equal(projected.status, CardStatus.SUCCESS)
+		assert.equal(projected.header, "Feynman sent a message to Planck")
+		assert.equal(projected.communication.actor, "Feynman")
+		assert.equal(projected.requireFeedback, undefined)
+		assert.equal(projected.actions, undefined)
+		assert.equal(projected.rawInput, undefined)
+		assert.deepEqual(root.taskState.waitingCardIds, [])
+		assert.equal(child.messages.length, 1)
+	})
+
+	it("does not forward unrelated tool cards", async () => {
+		const publishCommunicationCard = sinon.stub().resolves()
+		const child = createMessenger(sinon.stub().resolves(), {
+			recordResponse: sinon.stub().resolves(),
+			requestInteraction: sinon.stub().resolves(),
+			publishCommunicationCard,
+		})
+		const card = await child.messenger.createCard({ header: "Read file", body: "contents" })
+		await card.finalize(CardStatus.SUCCESS)
+		sinon.assert.notCalled(publishCommunicationCard)
+	})
+
+	it("deduplicates concurrent snapshots and namespaces sibling card IDs", async () => {
+		const { messenger, messages } = createMessenger()
+		const card = {
+			id: "same-id", kind: CardKind.GENERIC, header: "Message", body: "content",
+			renderType: "text" as const,
+			status: CardStatus.SUCCESS, communication: { actor: "untrusted" },
+		}
+		await Promise.all([
+			messenger.upsertCommunicationCard("Feynman", card),
+			messenger.upsertCommunicationCard("Feynman", card),
+			messenger.upsertCommunicationCard("Planck", card),
+		])
+		assert.equal(messages.length, 2)
+		assert.deepEqual(messages.map((message) => message.content.card.communication.actor), ["Feynman", "Planck"])
+	})
+
+	it("surfaces publication failures instead of dropping communication silently", async () => {
+		const failure = new Error("publication failed")
+		const child = createMessenger(sinon.stub().resolves(), {
+			recordResponse: sinon.stub().resolves(),
+			requestInteraction: sinon.stub().resolves(),
+			publishCommunicationCard: sinon.stub().rejects(failure),
+		})
+		await assert.rejects(child.messenger.createCard({
+			header: "Message", communication: { actor: "Feynman" },
+		}), (error) => error === failure)
+	})
+})
+
 describe("TaskMessenger tasklet escalation", () => {
 	const child = { id: "tasklet-private", title: "Private worker" }
 	function request(): TaskInteractionRequest {
@@ -133,7 +207,7 @@ describe("TaskMessenger tasklet escalation", () => {
 		assert.equal(result.action, DiracAskResponse.APPROVE)
 		assert.notEqual(card.id, input.card.id)
 		assert.notEqual(card.startTime, 1)
-		assert.match(card.header, /Private worker.*Execute/)
+		assert.match(card.header, /tasklet-private requested your approval.*Execute/)
 		assert.deepEqual(card.rawInput, input.card.rawInput)
 		assert.deepEqual(card.actions, input.card.actions)
 		assert.equal(card.approvalScope, "once")

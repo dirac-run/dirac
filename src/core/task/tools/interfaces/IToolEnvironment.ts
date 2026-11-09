@@ -285,6 +285,8 @@ export interface TaskletControls {
 }
 
 export interface IOrchestrationTrait {
+	/** Stable runtime identity; roots are always Dirac. */
+	readonly agentIdentity: { readonly id: string; readonly parent: string | null }
 	/** Available only to an owning ordinary root; never exposes a live Task or host. */
 	readonly tasklets?: TaskletControls
 	/** Runtime-authenticated ordinary communication and discovery for roots and children. */

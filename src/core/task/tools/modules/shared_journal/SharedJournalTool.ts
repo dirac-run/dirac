@@ -27,21 +27,43 @@ export class SharedJournalTool implements IDiracTool {
 		const request = parseRequest(input)
 		const journal = env.orchestration.sharedJournal
 		if (!journal) throw new Error("Shared journal is unavailable for this execution")
-		const card = await env.ui.createCard({ header: request.operation === "publish" ? "Publish journal finding" : "Read journal finding", icon: DiracIcon.SUMMARIZE, status: CardStatus.RUNNING, collapsed: true, rawInput: request })
+		const identity = env.orchestration.agentIdentity
+		const actor = identity.parent === null ? "Dirac" : identity.id
+		const card = await env.ui.createCard({
+			header: request.operation === "publish" ? `${actor} is publishing a finding` : `${actor} is reading a finding`,
+			body: request.operation === "publish" ? `${request.headline}\n\n${request.content}` : undefined,
+			communication: { actor, ...(request.operation === "read" ? { detail: `Publication ${request.message_id}` } : {}) },
+			icon: DiracIcon.SUMMARIZE,
+			status: CardStatus.RUNNING,
+			collapsed: false,
+			do_not_auto_collapse: true,
+			rawInput: request,
+		})
 		try {
 			if (request.operation === "publish") {
 				const receipt = await journal.publish({ headline: request.headline, content: request.content })
-				await card.update({ body: JSON.stringify(receipt) })
-				await card.finalize(CardStatus.SUCCESS)
+				const notices = receipt.notifications
+				await card.update({
+					header: `${actor} published a finding`,
+					communication: { actor, detail: `Publication ${receipt.message_id}. Notices: ${notices.enqueued} accepted, ${notices.skipped_inactive} skipped inactive, ${notices.rejected_capacity} rejected for capacity. Notification delivery and action are not confirmed.` },
+				})
+				await card.finalize(CardStatus.SUCCESS, true)
 				return JSON.stringify(receipt)
 			}
 			const record = await journal.read({ message_id: request.message_id })
-			await card.update({ body: record.headline })
-			await card.finalize(CardStatus.SUCCESS)
+			await card.update({
+				header: `${actor} read ${record.author}'s finding`,
+				body: `${record.headline}\n\n${record.content}`,
+				communication: { actor, detail: `Publication ${record.id}` },
+			})
+			await card.finalize(CardStatus.SUCCESS, true)
 			return JSON.stringify(record)
 		} catch (error) {
-			await card.update({ body: toError(error).message })
-			await card.finalize(CardStatus.ERROR)
+			await card.update({
+				header: `${actor} failed to ${request.operation === "publish" ? "publish" : "read"} a finding`,
+				communication: { actor, detail: toError(error).message },
+			})
+			await card.finalize(CardStatus.ERROR, true)
 			throw error
 		}
 	}

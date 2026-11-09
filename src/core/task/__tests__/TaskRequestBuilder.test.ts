@@ -9,6 +9,7 @@ import * as systemPrompt from "@core/prompts/system-prompt"
 import * as disk from "@core/storage/disk"
 import { subagents_spec } from "@core/task/tools/modules/subagents/SubagentsTool"
 import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
+import { PromptBuilder } from "@core/prompts/system-prompt/registry/PromptBuilder"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
@@ -75,6 +76,7 @@ describe("TaskRequestBuilder", () => {
 			preferredLanguage?: string
 			requestId?: string
 			revision?: number
+			subagentsEnabled?: boolean
 		} = {},
 	) {
 		let capturedPromptContext: SystemPromptContext | undefined
@@ -160,7 +162,7 @@ describe("TaskRequestBuilder", () => {
 								({
 									mode: requestMode,
 									utilityModelSelection,
-									subagentsEnabled: true,
+									subagentsEnabled: overrides.subagentsEnabled ?? true,
 									browserSettings: overrides.browserSettings ?? {},
 									preferredLanguage: overrides.preferredLanguage ?? "English",
 									globalSkillsToggles: {},
@@ -213,19 +215,38 @@ describe("TaskRequestBuilder", () => {
 	}
 
 	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
-		it(`provides ${profile} identity on every request without changing role/model instructions`, async () => {
-			const { context, requestRuntime } = createContext(undefined)
-			context.executionProfile = profile
-			context.taskId = "Feynman 2"
-			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
-			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0, shouldCompact: true })
-			const prepare = context.apiConversationManager.prepareTranscriptInstructions as sinon.SinonStub
-			for (const call of prepare.getCalls()) {
-				assert.match(call.args[1], profile === "tasklet" ? /"id":"Feynman 2","parent":"Dirac"/ : /"id":"Dirac","parent":null/)
-				assert.match(call.args[1], /list_agents/)
-				assert.equal(call.args[0], "built system prompt")
-			}
-		})
+		for (const subagentsEnabled of [true, false]) {
+			it(`keeps ${profile} identity in system instructions across compaction with subagents ${subagentsEnabled}`, async () => {
+				const { context, requestRuntime, getCapturedPromptContext } = createContext(undefined, { subagentsEnabled })
+				const getSystemPrompt = systemPrompt.getSystemPrompt as sinon.SinonStub
+				getSystemPrompt.callsFake(async (promptContext: SystemPromptContext) => ({
+					systemPrompt: await new PromptBuilder(promptContext).build(),
+				}))
+				context.executionProfile = profile
+				context.taskId = "Feynman 2"
+				await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+				await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0, shouldCompact: true })
+				assert.equal(getCapturedPromptContext()?.taskId, "Feynman 2")
+				const prepare = context.apiConversationManager.prepareTranscriptInstructions as sinon.SinonStub
+				for (const call of prepare.getCalls()) {
+					assert.equal(call.args[1], "")
+					assert.doesNotMatch(call.args[0], /# Agent identity/)
+					if (profile === "tasklet") {
+						assert.match(call.args[0], /^Your stable ID is Feynman 2; your parent's stable ID is Dirac\./)
+						assert.match(call.args[0], /You are an assigned worker/)
+						assert.doesNotMatch(call.args[0], /You are Dirac/)
+					} else if (subagentsEnabled) {
+						assert.match(call.args[0], /^You are Dirac, the root AI agent/)
+						assert.match(call.args[0], /You have no parent/)
+						assert.match(call.args[0], /Your stable ID is Dirac/)
+					} else {
+						assert.match(call.args[0], /^You are Dirac, an AI agent for software-engineering tasks\.\n/)
+						assert.doesNotMatch(call.args[0], /parent|subagents|tasklets?|child|delegat/i)
+					}
+				}
+				assert.equal(prepare.firstCall.args[0], prepare.secondCall.args[0])
+			})
+		}
 	}
 
 	it("delivers changing supervision as tail context without changing system instructions", async () => {

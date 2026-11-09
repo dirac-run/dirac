@@ -1,11 +1,6 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
-import {
-	CardKind,
-	CardStatus,
-	DiracMessageType,
-	SteeringTranscriptStatus,
-} from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType, SteeringTranscriptStatus } from "@shared/ExtensionMessage"
 import {
 	CardKind as ProtoCardKind,
 	CardStatus as ProtoCardStatus,
@@ -48,10 +43,7 @@ describe("Dirac message proto conversion", () => {
 				steering: { status: SteeringTranscriptStatus.QUEUED },
 			},
 		})
-		assert.equal(
-			steering.markdown?.steeringTranscriptStatus,
-			ProtoSteeringTranscriptStatus.STEERING_TRANSCRIPT_STATUS_QUEUED,
-		)
+		assert.equal(steering.markdown?.steeringTranscriptStatus, ProtoSteeringTranscriptStatus.STEERING_TRANSCRIPT_STATUS_QUEUED)
 		assert.equal(steering.markdown?.steeringStatus, SteeringTranscriptStatus.QUEUED)
 	})
 
@@ -138,6 +130,30 @@ describe("Dirac message proto conversion", () => {
 		])
 	})
 
+	it("preserves communication identity, exact content, secondary detail and receipts over the wire", () => {
+		const card: import("@shared/ExtensionMessage").Card = {
+			id: "communication:child:1",
+			header: "Dirac guided Curie",
+			status: CardStatus.SUCCESS,
+			renderType: "text",
+			body: "Inspect Anchor§literal <button>not a control</button>\nKeep all content",
+			communication: { actor: "Dirac", detail: "Queued · publication-123" },
+			taskletReceipt: {
+				operation: "message",
+				outcome: "queued",
+				rows: [{ operation: "guidance", taskletId: "Curie", title: "Audit", outcome: "queued", message: "Inspect" }],
+			},
+		}
+		const proto = convertDiracMessageToProto({ id: card.id, ts: 1, content: { type: DiracMessageType.CARD, card } })
+		const decoded = ProtoDiracMessage.decode(ProtoDiracMessage.encode(proto).finish())
+		const restored = convertProtoToDiracMessage(decoded)
+		if (restored.content.type !== DiracMessageType.CARD) assert.fail("Expected card")
+		assert.equal(restored.content.card.id, card.id)
+		assert.equal(restored.content.card.header, card.header)
+		assert.equal(restored.content.card.body, card.body)
+		assert.deepEqual(restored.content.card.communication, card.communication)
+		assert.deepEqual(restored.content.card.taskletReceipt, card.taskletReceipt)
+	})
 
 	it("preserves unspecified card identity for legacy header compatibility", () => {
 		const legacy = ProtoDiracMessage.create({

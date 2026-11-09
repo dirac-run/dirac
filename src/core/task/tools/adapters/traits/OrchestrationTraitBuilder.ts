@@ -7,6 +7,9 @@ import type { TaskConfig } from "../../types/TaskConfig"
 // Builds the orchestration trait — tasklet supervision, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
 	return {
+		agentIdentity: config.executionProfile === "tasklet"
+			? { id: config.taskId, parent: "Dirac" }
+			: { id: "Dirac", parent: null },
 		tasklets: config.executionProfile !== "tasklet" ? config.callbacks.tasklets : undefined,
 		agentCommunication: config.callbacks.agentCommunication,
 		agentWait: config.executionProfile === "tasklet" ? config.callbacks.agentWait : undefined,

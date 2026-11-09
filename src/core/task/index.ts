@@ -51,7 +51,7 @@ import { telemetryService } from "@services/telemetry"
 import { type ApiConfiguration, type ModelProviderSelection } from "@shared/api"
 import { ApiHandlerSettingsKeys } from "@shared/storage/state-keys"
 import { getExtensionSourceDir } from "@shared/dirac/constants"
-import { TaskStatus } from "@shared/ExtensionMessage"
+import { TaskStatus, type Card } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import { DiracContent, DiracStorageMessage, DiracTextContentBlock, DiracToolResponseContent } from "@shared/messages/content"
 import { ShowMessageType } from "@shared/proto/index.host"
@@ -138,6 +138,7 @@ import type {
 	TaskletMessageResult,
 } from "./tools/interfaces/IToolEnvironment"
 import { inspectTasklet, summarizeTasklet, pageInspectionItems, type TaskletInspectionQuery } from "./TaskletInspection"
+import { taskletCommunicationCard } from "./TaskletCommunicationCards"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
 export type {
@@ -1224,6 +1225,7 @@ export class Task {
 						)
 					},
 					postTaskletActivity: () => this.postPresentationToWebview(),
+					publishCommunicationCard: (actor, card) => this.taskMessenger.upsertCommunicationCard(actor, card),
 					authorizePermission: (request, signal) => this.toolExecutor.authorizeTaskletPermission(request, signal),
 					retainMutationUntil: (completion) => this.mutationGate.retainMutationUntil(completion),
 					assertPermissionAllowed: (request) => this.toolExecutor.assertTaskletPermissionAllowed(request),
@@ -1915,6 +1917,7 @@ export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> 
 	hasPendingUserInput: () => boolean
 	recordTaskletUsage?: (id: string, usage: TaskletUsageSnapshot) => Promise<void>
 	postTaskletActivity?: () => Promise<void>
+	publishCommunicationCard?: (actor: string, card: Readonly<Card>) => Promise<void>
 }
 
 interface PendingTaskletInteraction {
@@ -1941,6 +1944,7 @@ interface OwnedTasklet {
 	backgroundCommandRunning: boolean
 	outcomePersisted: boolean
 	settlementError?: SerializedTaskError
+	presentationError?: SerializedTaskError
 }
 
 /**
@@ -1950,6 +1954,7 @@ interface OwnedTasklet {
  * Explicit decisions are checked against the owner; communications persist until parent delivery.
  */
 export class TaskletHost {
+	private readonly publishedCommunicationCards = new Map<string, string>()
 	readonly agentCommunication = new AgentCommunication(
 		() => this.agentRoster(),
 		() => this.sleepWaiter?.check(),
@@ -1995,6 +2000,7 @@ export class TaskletHost {
 	private shutdownPromise?: Promise<void>
 	private reconstruction?: Promise<void>
 	private usageProjectionReady = true
+	private communicationProjectionReady = true
 	private readonly resolutions = new Set<Promise<TaskletResolution>>()
 	private readonly messages = new Set<Promise<TaskletMessageResult[]>>()
 	private readonly interactionCleanupFailures: TaskletEscalationCleanupError[] = []
@@ -2098,6 +2104,7 @@ export class TaskletHost {
 
 	private async restoreRecords(): Promise<void> {
 		this.usageProjectionReady = false
+		this.communicationProjectionReady = false
 		const records = await loadTaskletRecords(this.rootTaskId)
 		for (const record of records) this.reservedIds.add(record.id)
 		for (const record of records) {
@@ -2142,9 +2149,11 @@ export class TaskletHost {
 	async reconcileRootProjection(): Promise<void> {
 		if (this.closing) throw new Error("Tasklet host is shutting down")
 		this.usageProjectionReady = true
+		this.communicationProjectionReady = true
 		for (const child of this.children.values()) {
 			if (child.record.usage) await this.persistRecord(child)
 			if (child.usageProjectionError) throw child.usageProjectionError
+			await this.publishCommunicationEvents(child, structuredClone(child.events), child.outcomePersisted)
 		}
 		this.publishActivityIfChanged()
 	}
@@ -2323,6 +2332,7 @@ export class TaskletHost {
 					withMutationAuthorization: (toolName, mutation) => this.owner.withMutationAuthorization(toolName, mutation),
 					retainMutationUntil: (completion) => this.owner.retainMutationUntil(completion),
 					counterparty: {
+						publishCommunicationCard: async (card) => { await this.publishCommunicationCard(child, card) },
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
 							if (response.operation !== "progress")
@@ -2368,14 +2378,15 @@ export class TaskletHost {
 	private persistEvents(child: OwnedTasklet, deliveredIds: ReadonlySet<string> = new Set()): Promise<void> {
 		const write = async () => {
 			const deliveredAt = Date.now()
-			const snapshot = child.events.map((event) => ({
+			const snapshot = structuredClone(child.events.map((event) => ({
 				...event,
 				deliveredAt: deliveredIds.has(event.id) ? (event.deliveredAt ?? deliveredAt) : event.deliveredAt,
-			}))
-			await saveTaskletEvents(this.address(child.record.id), structuredClone(snapshot))
+			})))
+			await saveTaskletEvents(this.address(child.record.id), snapshot)
 			for (const event of child.events) {
 				if (deliveredIds.has(event.id)) event.deliveredAt ??= deliveredAt
 			}
+			await this.publishCommunicationEvents(child, snapshot)
 		}
 		// A subsequent full snapshot may retry a failed write; the original caller still sees its failure.
 		child.eventWrites = child.eventWrites.then(write, write)
@@ -2383,6 +2394,31 @@ export class TaskletHost {
 			Logger.error(`[Tasklet ${child.record.id}] Communication persistence failed:`, error),
 		)
 		return child.eventWrites
+	}
+
+	/** Display failure is observable, but never changes delivery, interaction, or settlement authority. */
+	private async publishCommunicationCard(child: OwnedTasklet, card: Readonly<Card>): Promise<boolean> {
+		try {
+			await this.owner.publishCommunicationCard?.(child.record.id, card)
+			return true
+		} catch (error) {
+			child.presentationError = serializeTaskError(error)
+			Logger.error(`[Tasklet ${child.record.id}] Communication publication failed:`, error)
+			return false
+		}
+	}
+
+	private async publishCommunicationEvents(child: OwnedTasklet, events: readonly TaskletEvent[], includeOutcomes = false): Promise<void> {
+		if (!this.communicationProjectionReady || !this.owner.publishCommunicationCard) return
+		for (const event of events) {
+			if (event.communication.type === "outcome" && !includeOutcomes) continue
+			const card = taskletCommunicationCard(event)
+			if (!card) continue
+			const key = `${child.record.id}:${card.id}`
+			const snapshot = JSON.stringify(card)
+			if (this.publishedCommunicationCards.get(key) === snapshot) continue
+			if (await this.publishCommunicationCard(child, card)) this.publishedCommunicationCards.set(key, snapshot)
+		}
 	}
 
 	/** No claims or model execution: the root consumes this bounded snapshot in its serial request flow. */
@@ -2653,6 +2689,7 @@ export class TaskletHost {
 			lastActivityAt: child.task?.messageStateHandler.getDiracMessages().at(-1)?.ts ?? child.events.at(-1)?.createdAt,
 			outcomePersisted: child.outcomePersisted,
 			settlementError: child.settlementError,
+			presentationError: child.presentationError,
 		})
 	}
 
@@ -3029,6 +3066,7 @@ export class TaskletHost {
 			this.publishActivityIfChanged()
 			this.sleepWaiter?.check()
 		}
+		await this.publishCommunicationEvents(child, structuredClone(child.events), true)
 	}
 
 	private waitForInteraction(

@@ -1,4 +1,4 @@
-import { CardStatus } from "@shared/ExtensionMessage"
+import { type CardCommunication, CardStatus } from "@shared/ExtensionMessage"
 import type { TaskletPresentationData } from "@shared/taskletPresentation"
 import { formatTaskletLabel } from "@shared/taskletLabel"
 import {
@@ -17,6 +17,7 @@ import { taskletReceiptColor } from "./TaskletReceiptBody"
 
 interface CardHeaderProps {
 	header: string
+	communication?: CardCommunication
 	status: CardStatus
 	icon?: string
 	isCollapsed?: boolean
@@ -58,6 +59,7 @@ function taskletHeaderText({ taskletId, title, role, status, width }: NonNullabl
 
 export const CardHeader: React.FC<CardHeaderProps> = ({
 	header,
+	communication,
 	status,
 	icon,
 	compact,
@@ -74,6 +76,19 @@ export const CardHeader: React.FC<CardHeaderProps> = ({
 	const displayStatus = statusLabel ?? status.toLowerCase().replaceAll("_", " ")
 	const headerColor = headerPresentation.color
 	const headerBold = "bold" in headerPresentation ? headerPresentation.bold : false
+	if (communication) {
+		return (
+			<Text wrap="truncate-end">
+				<Text color={categoryColor}>{getIcon(icon)}</Text>{" "}
+				<Text bold={headerBold} color={headerColor}>
+					{header.replace(/\s+/g, " ").trim()}
+				</Text>
+				{communication.detail && (
+					<Text {...styles.tool.metadata}>{` · ${communication.detail.replace(/\s+/g, " ").trim()}`}</Text>
+				)}
+			</Text>
+		)
+	}
 	if (receipt) {
 		const outcome = TASKLET_RECEIPT_OUTCOMES[receipt.outcome]
 		const receiptIcon = getIcon(TASKLET_RECEIPT_OPERATIONS[receipt.operation].icon)

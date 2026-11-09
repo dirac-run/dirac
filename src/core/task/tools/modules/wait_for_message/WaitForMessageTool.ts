@@ -26,15 +26,34 @@ export class WaitForMessageTool implements IDiracTool {
 		}
 		const waiting = env.orchestration.agentWait
 		if (!waiting) throw new Error("wait_for_message is available only to an active child")
-		const card = await env.ui.createCard({ header: "Wait for communication", icon: DiracIcon.CHAT, status: CardStatus.RUNNING, collapsed: true, rawInput: args })
+		const identity = env.orchestration.agentIdentity
+		const actor = identity.parent === null ? "Dirac" : identity.id
+		const card = await env.ui.createCard({
+			header: `${actor} is waiting for communication`,
+			body: `Waiting up to ${Number(timeout) / 1000} seconds for communication or parent guidance. A wake does not complete the assignment.`,
+			communication: { actor },
+			icon: DiracIcon.CHAT,
+			status: CardStatus.RUNNING,
+			collapsed: false,
+			do_not_auto_collapse: true,
+			rawInput: args,
+		})
 		try {
 			const result = await waiting.wait({ timeout_ms: timeout as number })
-			await card.update({ body: result.reason === "timeout" ? "Deadline reached. Do useful work, complete, or ask the parent; another wait requires fresh communication or parent guidance." : `Wait ended: ${result.reason}. A wake is not assignment completion.` })
-			await card.finalize(result.reason === "cancelled" ? CardStatus.ABANDONED : CardStatus.SUCCESS)
+			const body = result.reason === "timeout"
+				? "Deadline reached. Do useful work, complete, or ask the parent; another wait requires fresh communication or parent guidance."
+				: result.reason === "cancelled"
+					? "Waiting was cancelled. The assignment was not completed by this wait."
+					: "Communication or parent guidance is available. A wake does not consume messages or complete the assignment."
+			await card.update({ header: `${actor}'s wait ended: ${result.reason}`, body })
+			await card.finalize(result.reason === "cancelled" ? CardStatus.ABANDONED : CardStatus.SUCCESS, true)
 			return JSON.stringify(result)
 		} catch (error) {
-			await card.update({ body: toError(error).message })
-			await card.finalize(CardStatus.ERROR)
+			await card.update({
+				header: `${actor} failed to wait for communication`,
+				body: toError(error).message,
+			})
+			await card.finalize(CardStatus.ERROR, true)
 			throw error
 		}
 	}

@@ -3,6 +3,8 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import {
 	formatTaskletReceipt,
 	TASKLET_RECEIPT_OPERATIONS,
+	TASKLET_RECEIPT_OUTCOMES,
+	taskletReceiptNote,
 	taskletReceiptTitle,
 	type TaskletReceipt,
 	type TaskletReceiptOutcome,
@@ -27,13 +29,27 @@ const assignmentParameter: NonNullable<DiracToolSpec["parameters"]>[number] = {
 	type: "array",
 	required: false,
 	minItems: 1,
-	instruction: "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
+	instruction:
+		"Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
 	items: {
 		type: "object",
 		properties: {
-			type: { type: "string", enum: ["default"], description: "Role for this assignment. default uses the main agent's current model settings." },
-			task_header: { type: "string", minLength: 1, maxLength: SUBAGENT_TASK_TITLE_MAX_CHARS, description: `Short assignment header, at most ${SUBAGENT_TASK_TITLE_MAX_WORDS} words.` },
-			task_description: { type: "string", minLength: 1, description: "Complete assignment instructions and necessary context; no parent conversation is copied." },
+			type: {
+				type: "string",
+				enum: ["default"],
+				description: "Role for this assignment. default uses the main agent's current model settings.",
+			},
+			task_header: {
+				type: "string",
+				minLength: 1,
+				maxLength: SUBAGENT_TASK_TITLE_MAX_CHARS,
+				description: `Short assignment header, at most ${SUBAGENT_TASK_TITLE_MAX_WORDS} words.`,
+			},
+			task_description: {
+				type: "string",
+				minLength: 1,
+				description: "Complete assignment instructions and necessary context; no parent conversation is copied.",
+			},
 		},
 		required: ["type", "task_header", "task_description"],
 		additionalProperties: false,
@@ -70,12 +86,14 @@ export class SubagentsTool implements IDiracTool {
 		}
 
 		const card = await this.createSpawnCard(env)
+		const instructions: (string | undefined)[] = []
 		const results = await Promise.all(
 			assignments.map(async (assignment, index) => {
 				let title: string | undefined
 				try {
 					const request = this.parseRequest(assignment, `Subagent ${index + 1}`)
 					title = request.title
+					instructions[index] = request.prompt
 					const record = await controls.start(request)
 					const outcome = record.outcome
 					const error =
@@ -109,32 +127,39 @@ export class SubagentsTool implements IDiracTool {
 					taskletId: "id" in result ? result.id : undefined,
 					title: result.title ?? `Agent ${result.index + 1}`,
 					role: "role" in result ? result.role : undefined,
+					message: instructions[result.index],
 					outcome: result.accepted ? "accepted" : "failed",
 					error: result.error,
 				})),
 			}
-			await this.present(card.update(receiptCard(receipt, status)), env)
+			await this.present(card.update(receiptCard(receipt, status, env.orchestration.agentIdentity.id)), env)
 			await this.present(card.finalize(status), env)
 		}
 		return JSON.stringify({ subagents: results }, null, 2)
 	}
 
 	private parseRequest(input: unknown, subject: string) {
-		if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error(`${subject} assignment must be an object`)
+		if (!input || typeof input !== "object" || Array.isArray(input))
+			throw new Error(`${subject} assignment must be an object`)
 		const args = input as Record<string, unknown>
 		rejectUnknownFields(args, ["type", "task_header", "task_description"], subject)
 		const type = requireString(args, "type").trim()
 		const prompt = requireString(args, "task_description").trim()
 		const title = requireString(args, "task_header").trim().replace(/\s+/g, " ")
-		if (title.split(" ").length > SUBAGENT_TASK_TITLE_MAX_WORDS) throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words`)
-		if (title.length > SUBAGENT_TASK_TITLE_MAX_CHARS) throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`)
+		if (title.split(" ").length > SUBAGENT_TASK_TITLE_MAX_WORDS)
+			throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words`)
+		if (title.length > SUBAGENT_TASK_TITLE_MAX_CHARS)
+			throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`)
 		return { title, prompt, type }
 	}
 
 	private async createSpawnCard(env: IToolEnvironment): Promise<ICardHandle | undefined> {
 		const creation = env.ui.createCard({
-			...receiptCard({ operation: "spawn", outcome: "requested", rows: [] }, CardStatus.RUNNING),
-			collapsed: true,
+			...receiptCard(
+				{ operation: "spawn", outcome: "requested", rows: [] },
+				CardStatus.RUNNING,
+				env.orchestration.agentIdentity.id,
+			),
 		})
 		try {
 			const result = await waitForPresentationOperation(creation)
@@ -283,38 +308,49 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 	if (!controls) throw new Error("Tasklet controls are available only to an owning root")
 	const args = requireArguments(input)
 	const request = parseControlRequest(args)
-	const initialReceipt = controlReceipt(request)
-	const card = await env.ui.createCard({
-		...receiptCard(initialReceipt, CardStatus.RUNNING),
-		collapsed: true,
-		rawInput: args,
-	})
+	const actor = env.orchestration.agentIdentity.id
+	const initialReceipts = individualReceipts(controlReceipt(request))
+	const cards = await Promise.all(
+		initialReceipts.map((receipt) =>
+			env.ui.createCard({
+				...receiptCard(receipt, CardStatus.RUNNING, actor),
+				rawInput: args,
+			}),
+		),
+	)
 	try {
 		const result = await executeOperation(controls, request)
 		const output = JSON.stringify(result)
 		if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
 			throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
-		const receipt = controlReceiptResult(request, result)
-		const status =
-			receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
-				? CardStatus.ERROR
-				: CardStatus.SUCCESS
-		await card.update(receiptCard(receipt, status))
-		await card.finalize(status)
+		const receipts = individualReceipts(controlReceiptResult(request, result))
+		for (const [index, receipt] of receipts.entries()) {
+			const status =
+				receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
+					? CardStatus.ERROR
+					: CardStatus.SUCCESS
+			const content = receiptCard(receipt, status, actor)
+			if (request.operation === "inspect") content.body = inspectionContent(result, receipt)
+			await cards[index].update(content)
+			await cards[index].finalize(status)
+		}
 		return output
 	} catch (error) {
-		await card.update(
-			receiptCard(
-				{
-					...initialReceipt,
-					outcome: "failed",
-					rows: initialReceipt.rows.map((row) => ({ ...row, outcome: "failed" })),
-					error: redactRoutingIds(clipText(toError(error).message, 2000), request),
-				},
-				CardStatus.ERROR,
-			),
-		)
-		await card.finalize(CardStatus.ERROR)
+		for (const [index, receipt] of initialReceipts.entries()) {
+			await cards[index].update(
+				receiptCard(
+					{
+						...receipt,
+						outcome: "failed",
+						rows: receipt.rows.map((row) => ({ ...row, outcome: "failed" })),
+						error: clipText(toError(error).message, 2000),
+					},
+					CardStatus.ERROR,
+					actor,
+				),
+			)
+			await cards[index].finalize(CardStatus.ERROR)
+		}
 		throw error
 	}
 }
@@ -495,7 +531,9 @@ function compactMessageResults(items: TaskletMessage[], results: TaskletMessageR
 	const compact = results.map((result, index) => ({
 		taskletId: items[index].taskletId,
 		status: result.status,
-		...("requestId" in items[index] ? { requestId: (items[index] as Extract<TaskletMessage, { requestId: string }>).requestId } : {}),
+		...("requestId" in items[index]
+			? { requestId: (items[index] as Extract<TaskletMessage, { requestId: string }>).requestId }
+			: {}),
 		...(result.messageId && Buffer.byteLength(JSON.stringify(result.messageId), "utf8") <= 128
 			? { messageId: result.messageId }
 			: {}),
@@ -504,7 +542,7 @@ function compactMessageResults(items: TaskletMessage[], results: TaskletMessageR
 		512,
 		Math.floor(
 			(MAX_MESSAGE_RESULTS_BYTES - Buffer.byteLength(JSON.stringify(compact), "utf8") - results.length * 128) /
-			(results.length * 4),
+				(results.length * 4),
 		),
 	)
 	for (const [index, result] of results.entries()) {
@@ -553,34 +591,45 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 		rows:
 			"taskletId" in request
 				? [
-					{
-						operation: request.operation,
-						taskletId: request.taskletId,
-						title: "Agent",
-						outcome: "requested",
-						message: "message" in request ? request.message : undefined,
-					},
-				]
+						{
+							operation: request.operation,
+							taskletId: request.taskletId,
+							title: "Agent",
+							outcome: "requested",
+							message: "message" in request ? request.message : undefined,
+						},
+					]
 				: [],
 		...(request.operation === "sleep"
 			? {
-				waitScope:
-					request.options.taskletIds === undefined
-						? "any_tasklet"
-						: request.options.taskletIds.length
-							? "selected_tasklets"
-							: "time_or_user",
-				waitSourceCount: request.options.taskletIds?.length,
-			}
+					waitScope:
+						request.options.taskletIds === undefined
+							? "any_tasklet"
+							: request.options.taskletIds.length
+								? "selected_tasklets"
+								: "time_or_user",
+					waitSourceCount: request.options.taskletIds?.length,
+					waitSourceIds: request.options.taskletIds,
+				}
 			: {}),
 	}
 }
 
-function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus) {
+function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: string) {
+	const detail = [
+		TASKLET_RECEIPT_OUTCOMES[taskletReceipt.outcome].label,
+		taskletReceiptNote(taskletReceipt),
+		...taskletReceipt.rows.flatMap((row) => [row.requestId ? `Request: ${row.requestId}` : undefined, row.error]),
+		taskletReceipt.error,
+	]
+		.filter(Boolean)
+		.join(" · ")
 	return {
-		header: taskletReceiptTitle(taskletReceipt),
+		header: taskletReceiptTitle(taskletReceipt, actor),
 		icon: TASKLET_RECEIPT_OPERATIONS[taskletReceipt.operation].icon,
-		body: formatTaskletReceipt(taskletReceipt),
+		body: formatTaskletReceipt(taskletReceipt, true),
+		communication: { actor, detail },
+		collapsed: false,
 		taskletReceipt,
 		status,
 	}
@@ -651,28 +700,28 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 		rows:
 			request.operation === "inspect"
 				? [
-					{
-						...receipt.rows[0],
-						title,
-						role,
-						outcome: "retrieved",
-						observedState:
-							(request.query?.view ?? "status") === "status" && items.length === 1
-								? observedReceiptState(resultObject(items[0]))
-								: undefined,
-					},
-				]
+						{
+							...receipt.rows[0],
+							title,
+							role,
+							outcome: "retrieved",
+							observedState:
+								(request.query?.view ?? "status") === "status" && items.length === 1
+									? observedReceiptState(resultObject(items[0]))
+									: undefined,
+						},
+					]
 				: items.map((item) => {
-					const summary = resultObject(item)
-					return {
-						operation: "list",
-						taskletId: typeof summary.id === "string" ? summary.id : undefined,
-						title: resultTitle(summary),
-						role: typeof summary.role === "string" ? summary.role : undefined,
-						outcome: "retrieved",
-						observedState: observedReceiptState(summary),
-					}
-				}),
+						const summary = resultObject(item)
+						return {
+							operation: "list",
+							taskletId: typeof summary.id === "string" ? summary.id : undefined,
+							title: resultTitle(summary),
+							role: typeof summary.role === "string" ? summary.role : undefined,
+							outcome: "retrieved",
+							observedState: observedReceiptState(summary),
+						}
+					}),
 	}
 }
 
@@ -723,19 +772,17 @@ function batchReceiptOutcome(rows: TaskletReceiptRow[]): TaskletReceiptOutcome {
 	return "recorded"
 }
 
-function redactRoutingIds(body: string, request: ControlRequest): string {
-	const ids =
-		request.operation === "message"
-			? request.items.flatMap((item) => [
-				[item.taskletId, "tasklet"],
-				...("requestId" in item ? [[item.requestId, "request"]] : []),
-			])
-			: "taskletId" in request
-				? [[request.taskletId, "tasklet"]]
-				: []
-	for (const [id, label] of ids) {
-		const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-		body = body.replace(new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, "g"), label)
-	}
-	return body
+function individualReceipts(receipt: TaskletReceipt): TaskletReceipt[] {
+	if (receipt.operation !== "message") return [receipt]
+	return receipt.rows.map((row) => ({ ...receipt, operation: row.operation, outcome: row.outcome, rows: [row] }))
+}
+
+function inspectionContent(value: unknown, receipt: TaskletReceipt): string {
+	const page = resultObject(value)
+	const evidence = page.fragment ?? page.items ?? value
+	const items = Array.isArray(evidence) ? evidence : [evidence]
+	const content = items
+		.map((item) => (typeof item === "string" ? item : `\`\`\`json\n${JSON.stringify(item, null, 2)}\n\`\`\``))
+		.join("\n\n")
+	return [content || "No recorded items.", taskletReceiptNote(receipt)].filter(Boolean).join("\n\n")
 }

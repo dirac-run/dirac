@@ -51,10 +51,11 @@ describe("Task execution profiles", () => {
 		assert.equal(isDiscoveredToolAvailableToTaskProfile("tasklet", tool), true)
 	})
 
-	it("keeps tasklets private in Act mode without Goal authority", () => {
+	it("keeps tasklet communication parent-directed in Act mode without Goal authority", () => {
 		const instructions = taskProfileSystemInstructions("tasklet") ?? ""
-		assert.match(instructions, /private worker for a parent agent/)
-		assert.match(instructions, /delivered privately to the parent/)
+		assert.match(instructions, /do not address the end user directly/)
+		assert.match(instructions, /routed to the parent and may also be visible in the user timeline/)
+		assert.doesNotMatch(instructions, /privately|private worker/)
 		assert.match(instructions, /always execute in Act mode/)
 		assert.match(instructions, /cannot delegate/)
 		assert.doesNotMatch(instructions, /GOAL COORDINATOR/)
@@ -70,26 +71,32 @@ describe("Task execution profiles", () => {
 	})
 
 	for (const profile of ["goal_coordinator", "goal_followup"] as const) {
-		it(`gives ${profile} shared tasklet controls rather than legacy Goal supervision`, () => {
-			const instructions = taskProfileSystemInstructions(profile) ?? ""
-			assert.match(instructions, /subagents.*inspect/)
-			assert.match(instructions, /under your current authority/)
-			assert.match(instructions, /interrupt or resume/)
-			assert.match(instructions, /sleep when no useful work remains/)
-			assert.doesNotMatch(instructions, /start_task|list_tasks|wait_for_goal_events|CONTAINED GOAL TASK/)
+		it(`leaves ${profile} delegation controls to the shared system template`, () => {
+			const instructions = taskProfileSystemInstructions(profile, true) ?? ""
+			assert.match(instructions, /tasklet/)
+			assert.doesNotMatch(instructions, /operation=create|subagents|start_task|list_tasks|wait_for_goal_events|CONTAINED GOAL TASK/)
+		})
+
+		it(`does not mention delegation in ${profile} when disabled or unspecified`, () => {
+			for (const enabled of [false, undefined]) {
+				const instructions = taskProfileSystemInstructions(profile, enabled) ?? ""
+				assert.doesNotMatch(instructions, /subagents|tasklet|child|delegat|parent/i)
+				assert.match(instructions, /progress update compact/)
+			}
 		})
 	}
 
 	it("asks the Goal coordinator to synthesize concise user-visible progress", () => {
-		const instructions = taskProfileSystemInstructions("goal_coordinator")
+		const instructions = taskProfileSystemInstructions("goal_coordinator", true)
 		assert.match(instructions ?? "", /user opening it during the run can quickly understand/)
-		assert.match(instructions ?? "", /Most should remain private; synthesize only information/)
-		assert.match(instructions ?? "", /Do not mechanically forward child messages or narrate routine tool activity/)
+		assert.match(instructions ?? "", /Synthesize child updates into meaningful user-facing summaries/)
+		assert.match(instructions ?? "", /Do not repeat individual communication cards or narrate routine tool activity/)
+		assert.doesNotMatch(instructions ?? "", /remain private/)
 		assert.match(instructions ?? "", /normally one sentence, sometimes two, and only rarely three/)
 	})
 
 	it("keeps follow-up completion separate from durable Goal lifecycle", () => {
-		const instructions = taskProfileSystemInstructions("goal_followup")
+		const instructions = taskProfileSystemInstructions("goal_followup", true)
 		assert.match(instructions ?? "", /durable Goal lifecycle status is authoritative/)
 		assert.match(instructions ?? "", /respond with complete finishes only this follow-up turn/)
 		assert.match(instructions ?? "", /block_goal ends only this follow-up turn/)

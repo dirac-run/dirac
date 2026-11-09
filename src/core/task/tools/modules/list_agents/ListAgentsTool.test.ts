@@ -10,23 +10,43 @@ import type { TaskConfig } from "../../types/TaskConfig"
 import { ListAgentsTool, list_agents_spec } from "./ListAgentsTool"
 import { exposure } from "./tool"
 
-function fixture() {
+function fixture(identity = { id: "root-task-id", parent: null as string | null }) {
 	const page = { agents: [{ id: "Dirac", title_preview: "Root task", status: "running", accepts_messages: true }, { id: "Feynman", title_preview: "Inspect", status: "completed", accepts_messages: false }], next_cursor: "next" }
 	const list = sinon.stub().returns(page)
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentCommunication: { list } }, ui: { createCard } } as unknown as IToolEnvironment
+	const env = { orchestration: { agentIdentity: identity, agentCommunication: { list } }, ui: { createCard } } as unknown as IToolEnvironment
 	return { env, list, page, card, createCard }
 }
 
 describe("ListAgentsTool", () => {
-	it("delegates default pagination and returns the runtime roster unchanged", async () => {
+	it("renders a readable roster while returning the runtime page unchanged", async () => {
 		const { env, list, page, card, createCard } = fixture()
 		assert.deepEqual(JSON.parse(await new ListAgentsTool().processCall({}, env)), page)
 		sinon.assert.calledOnceWithExactly(list, {})
 		sinon.assert.calledOnce(createCard)
-		sinon.assert.calledOnceWithExactly(card.update, { body: JSON.stringify(page) })
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
+		const params = createCard.firstCall.args[0]
+		assert.equal(params.header, "Dirac is listing agents")
+		assert.deepEqual(params.communication, { actor: "Dirac" })
+		assert.equal(params.status, CardStatus.RUNNING)
+		assert.equal(params.collapsed, false)
+		assert.equal(params.do_not_auto_collapse, true)
+		sinon.assert.calledOnceWithExactly(card.update, {
+			header: "Dirac listed agents",
+			body: "Dirac — Root task\nStatus: running; messages: available\n\nFeynman — Inspect\nStatus: completed; messages: unavailable",
+			communication: { actor: "Dirac", detail: "Availability is a snapshot, not a reservation. More agents available; next cursor: next" },
+		})
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS, true)
+	})
+
+	it("uses the stable child ID and explains an empty page without inventing pagination", async () => {
+		const { env, list, card, createCard } = fixture({ id: "Curie", parent: "Dirac" })
+		list.returns({ agents: [] })
+		assert.deepEqual(JSON.parse(await new ListAgentsTool().processCall({}, env)), { agents: [] })
+		assert.equal(createCard.firstCall.args[0].communication.actor, "Curie")
+		assert.equal(card.update.firstCall.args[0].header, "Curie listed agents")
+		assert.equal(card.update.firstCall.args[0].body, "No agents on this page.")
+		assert.equal(card.update.firstCall.args[0].communication.detail, "Availability is a snapshot, not a reservation.")
 	})
 
 	it("forwards opaque cursors and maximum limit without consuming or filtering the roster", async () => {
@@ -49,8 +69,11 @@ describe("ListAgentsTool", () => {
 		const error = new Error("Cursor belongs to another root")
 		list.throws(error)
 		await assert.rejects(new ListAgentsTool().processCall({ cursor: "wrong" }, env), (caught) => caught === error)
-		sinon.assert.calledOnceWithExactly(card.update, { body: error.message })
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR)
+		sinon.assert.calledOnceWithExactly(card.update, {
+			header: "Dirac failed to list agents",
+			communication: { actor: "Dirac", detail: error.message },
+		})
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR, true)
 	})
 
 	it("rejects discovery without a runtime capability", async () => {
