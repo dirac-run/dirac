@@ -14,6 +14,7 @@ function createMocks() {
 	}
 	const commandPermissionController = {
 		validateCommand: sinon.stub().returns({ allowed: true, reason: "no_config" }),
+		assertConfigurationValid: sinon.stub(),
 		validateTool: sinon.stub().returns({ allowed: true, reason: "no_config" }),
 	}
 	const autoApprover = {
@@ -52,6 +53,7 @@ function createMocks() {
 		interaction: {
 			askPermission: sinon.stub().resolves({ approved: true }),
 		},
+		orchestration: {},
 		system: {
 			executeCommand: callbacks.executeCommand,
 		},
@@ -80,7 +82,7 @@ describe("ExecuteCommandTool", () => {
 
 			sinon.assert.notCalled(mockCard.waitForInteraction)
 			sinon.assert.notCalled(autoApprover.isUnrestrictedAutoApprove)
-			sinon.assert.calledOnce(commandPermissionController.validateTool)
+			sinon.assert.calledThrice(commandPermissionController.validateTool)
 			sinon.assert.calledOnce(env.system.executeCommand)
 		})
 
@@ -96,7 +98,7 @@ describe("ExecuteCommandTool", () => {
 
 			sinon.assert.calledOnce(mockCard.waitForInteraction)
 			sinon.assert.notCalled(autoApprover.isUnrestrictedAutoApprove)
-			sinon.assert.calledTwice(commandPermissionController.validateTool)
+			sinon.assert.calledThrice(commandPermissionController.validateTool)
 			sinon.assert.notCalled(env.system.executeCommand)
 			assert.equal(env.ui.createCard.firstCall.args[0].permissionRequestKind, utilityEnabled ? "tool" : undefined)
 		})
@@ -138,7 +140,7 @@ describe("ExecuteCommandTool", () => {
 
 		assert.ok(mockCard.waitForInteraction.calledOnce)
 		assert.equal((env.ui.createCard as sinon.SinonStub).firstCall.args[0].permissionRequestKind, undefined)
-		sinon.assert.calledOnce(commandPermissionController.validateTool)
+		sinon.assert.calledTwice(commandPermissionController.validateTool)
 		sinon.assert.notCalled(commandPermissionController.validateCommand)
 	})
 
@@ -265,7 +267,7 @@ describe("ExecuteCommandTool", () => {
 
 			await tool.processCall({ commands: ["curl https://example.com"] }, env as any)
 
-			sinon.assert.calledOnce(commandPermissionController.validateTool)
+			sinon.assert.calledTwice(commandPermissionController.validateTool)
 			sinon.assert.calledOnce(mockCard.waitForInteraction)
 			const cardParams = env.ui.createCard.getCalls().find((call) => call.args[0].requireApproval)!.args[0]
 			assert.equal(cardParams.permissionRequestKind, utilityEnabled ? "manual_tool" : undefined)

@@ -20,6 +20,8 @@ export interface TaskInteractionRequest {
 
 /** Durable child identity/assignment; an absent outcome means accepted, not completed. */
 export interface TaskletRecord {
+	/** Exact approvals belong only to this root and stable child identity. */
+	commandGrants?: import("../tools/interfaces/CommandApprovals").CommandGrantSnapshot
 	configuration?: TaskletConfiguration
 	/** Creation-time role; absent only when historical identity did not record one. */
 	role?: string

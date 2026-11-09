@@ -179,10 +179,12 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		return undefined
 	}
 
-	public async executeCommand(command: string, options?: { timeout?: number }): Promise<SystemCommandResult> {
+	public async executeCommand(command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }): Promise<SystemCommandResult> {
 		const [userRejected, output, metadata] = await this.config.callbacks.executeCommandTool(command, options?.timeout, {
 			suppressUserInteraction: true,
 			useBackgroundExecution: true,
+			cwd: options?.cwd,
+			assertAuthorized: options?.assertAuthorized,
 		})
 		return {
 			userRejected,

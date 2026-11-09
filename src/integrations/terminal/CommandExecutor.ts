@@ -116,25 +116,33 @@ export class CommandExecutor {
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
 	): Promise<CommandExecutionResult> {
+		const cwd = options?.cwd ?? this.cwd
 		const workspaceCdPrefix = `cd ${this.cwd} && `
-		if (command.startsWith(workspaceCdPrefix)) {
+		if (options?.cwd === undefined && command.startsWith(workspaceCdPrefix)) {
 			command = command.substring(workspaceCdPrefix.length)
 		}
 
 		const useStandalone = options?.useBackgroundExecution || this.terminalExecutionMode === "backgroundExec"
 		const manager: ITerminalManager = useStandalone ? this.standaloneManager : this.terminalManager
 
-		const env = await this.callbacks.getEnvironmentVariables(this.cwd)
+		const env = await this.callbacks.getEnvironmentVariables(cwd)
 		if (execution.cancelled) return [true, "Command was cancelled before terminal acquisition."]
 		Logger.info(`Executing command in ${useStandalone ? "standalone" : "VSCode"} terminal: ${command}`)
 
-		const terminalInfo = await manager.getOrCreateTerminal(this.cwd, env)
+		const terminalInfo = await manager.getOrCreateTerminal(cwd, env)
 		if (execution.cancelled) {
 			manager.releaseTerminalReservation?.(terminalInfo)
 			return [true, "Command was cancelled before startup."]
 		}
-		terminalInfo.terminal.show()
-		const process = manager.runCommand(terminalInfo, command)
+		let process: TerminalProcessResultPromise
+		try {
+			terminalInfo.terminal.show()
+			options?.assertAuthorized?.()
+			process = manager.runCommand(terminalInfo, command)
+		} catch (error) {
+			manager.releaseTerminalReservation?.(terminalInfo)
+			throw error
+		}
 
 		execution.process = process
 		this.currentProcess = process

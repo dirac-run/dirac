@@ -1,3 +1,4 @@
+import assert from "node:assert/strict"
 import { afterEach, beforeEach, describe, it } from "mocha"
 import "should"
 
@@ -105,6 +106,278 @@ describe("CommandPermissionController", () => {
 		})
 	})
 
+	describe("Invalid project configuration", () => {
+		let workspaceRoot: string
+		let configPath: string
+		let controller: CommandPermissionController
+
+		beforeEach(async () => {
+			delete process.env[COMMAND_PERMISSIONS_ENV_VAR]
+			workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-permissions-invalid-"))
+			configPath = path.join(workspaceRoot, ".dirac", "permissions.json")
+			await fs.mkdir(path.dirname(configPath))
+			controller = new CommandPermissionController(createWatcherFactory())
+		})
+
+		afterEach(async () => {
+			sinon.restore()
+			await controller.dispose()
+			await fs.rm(workspaceRoot, { recursive: true, force: true })
+		})
+
+		async function reload() {
+			await (controller as unknown as { loadConfig(): Promise<void> }).loadConfig()
+		}
+
+		it("retains deny rules and reports a malformed reload, then accepts a valid update", async () => {
+			await fs.writeFile(configPath, JSON.stringify({ deny: ["rm *"], rules: [{ tool: "edit_file", action: "deny" }] }))
+			await controller.initialize(workspaceRoot)
+			await fs.writeFile(configPath, "{incomplete")
+			const logger = sinon.stub(Logger, "error")
+
+			await reload()
+
+			controller.validateCommand("rm important.txt").allowed.should.be.false()
+			controller.validateTool("edit_file", "src/index.ts").allowed.should.be.false()
+			sinon.assert.calledOnce(logger)
+			await fs.writeFile(configPath, JSON.stringify({ allow: ["npm test"] }))
+			await reload()
+			controller.validateCommand("npm test").allowed.should.be.true()
+			controller.validateCommand("rm important.txt").allowed.should.be.false()
+		})
+
+		it("retains restrictions when a reload cannot read the file", async () => {
+			await fs.writeFile(configPath, JSON.stringify({ deny: ["rm *"] }))
+			await controller.initialize(workspaceRoot)
+			const failure = Object.assign(new Error("permission denied"), { code: "EACCES" })
+			const read = sinon.stub(fs, "readFile").rejects(failure)
+			const logger = sinon.stub(Logger, "error")
+
+			await reload()
+
+			controller.validateCommand("rm important.txt").allowed.should.be.false()
+			sinon.assert.calledOnce(logger)
+			read.restore()
+		})
+
+		for (const contents of [
+			"{invalid",
+			"null",
+			"[]",
+			'{"deny":"rm *"}',
+			'{"rules":[{"tool":"execute_command","action":"deny","pattern":12}]}',
+		]) {
+			it(`blocks initial invalid project configuration and recovers: ${contents}`, async () => {
+				expectLoggerErrors()
+				await fs.writeFile(configPath, contents)
+				await controller.initialize(workspaceRoot)
+
+				controller.validateCommand("npm test").allowed.should.be.false()
+				controller.validateTool("read_file", "src/index.ts").allowed.should.be.false()
+				await fs.writeFile(configPath, JSON.stringify({ allow: ["npm test"] }))
+				await reload()
+				controller.validateCommand("npm test").allowed.should.be.true()
+			})
+		}
+
+		it("blocks initially unreadable config and recovers when it is readable", async () => {
+			const failure = Object.assign(new Error("permission denied"), { code: "EACCES" })
+			const read = sinon.stub(fs, "readFile").rejects(failure)
+			const logger = sinon.stub(Logger, "error")
+			await controller.initialize(workspaceRoot)
+
+			controller.validateCommand("npm test").allowed.should.be.false()
+			sinon.assert.calledOnce(logger)
+			read.restore()
+			await fs.writeFile(configPath, "{}")
+			await reload()
+			controller.validateCommand("npm test").allowed.should.be.true()
+		})
+
+		it("treats an absent or deliberately removed file as no project configuration", async () => {
+			await controller.initialize(workspaceRoot)
+			controller.validateCommand("npm test").allowed.should.be.true()
+			await controller.saveConfig({ deny: ["rm *"] })
+			await fs.unlink(configPath)
+			await reload()
+			controller.validateCommand("rm important.txt").allowed.should.be.true()
+		})
+
+		it("does not overwrite or conceal malformed files when editing or listing rules", async () => {
+			expectLoggerErrors()
+			await fs.writeFile(configPath, "{invalid")
+			await controller.initialize(workspaceRoot)
+			const rule = { tool: "execute_command", pattern: "npm test", action: "allow" as const }
+			await assert.rejects(controller.addRule(rule), /Failed to read permission configuration/)
+			await assert.rejects(controller.deleteRule(rule), /Failed to read permission configuration/)
+			await assert.rejects(controller.listRules(), /Failed to read permission configuration/)
+			assert.equal(await fs.readFile(configPath, "utf8"), "{invalid")
+		})
+
+		it("does not let an older reload replace newer deny rules", async () => {
+			await controller.initialize(workspaceRoot)
+			let finishOld!: (config: {}) => void
+			const oldConfig = new Promise<{}>((resolve) => {
+				finishOld = resolve
+			})
+			const read = sinon.stub(controller as any, "loadConfigFromFile")
+			read.onFirstCall().returns(oldConfig)
+			read.onSecondCall().resolves({ deny: ["rm *"] })
+			const older = reload()
+			await reload()
+			assert.equal(controller.validateCommand("rm important.txt").allowed, false)
+			finishOld({})
+			await older
+			assert.equal(controller.validateCommand("rm important.txt").allowed, false)
+			assert.ok(controller.getCommandRestrictionContext("rm important.txt").length > 0)
+		})
+
+		it("does not let an older valid reload clear a newer configuration error", async () => {
+			expectLoggerErrors()
+			await controller.initialize(workspaceRoot)
+			let finishOld!: (config: {}) => void
+			const oldConfig = new Promise<{}>((resolve) => {
+				finishOld = resolve
+			})
+			const read = sinon.stub(controller as any, "loadConfigFromFile")
+			read.onFirstCall().returns(oldConfig)
+			read.onSecondCall().rejects(new Error("new configuration is invalid"))
+			const older = reload()
+			await reload()
+			finishOld({})
+			await older
+			assert.throws(() => controller.assertConfigurationValid(), /Invalid command permission configuration/)
+		})
+
+		it("does not let an older failed reload poison a newer valid configuration", async () => {
+			await controller.initialize(workspaceRoot)
+			let failOld!: (error: Error) => void
+			const oldConfig = new Promise<never>((_resolve, reject) => {
+				failOld = reject
+			})
+			const read = sinon.stub(controller as any, "loadConfigFromFile")
+			read.onFirstCall().returns(oldConfig)
+			read.onSecondCall().resolves({ deny: ["rm *"] })
+			const older = reload()
+			await reload()
+			failOld(new Error("old configuration was invalid"))
+			await older
+			assert.doesNotThrow(() => controller.assertConfigurationValid())
+			assert.equal(controller.validateCommand("rm important.txt").allowed, false)
+		})
+
+		it("rejects remembered-grant contexts during invalid reloads and clears the error on recovery", async () => {
+			expectLoggerErrors()
+			await controller.initialize(workspaceRoot)
+			await controller.saveConfig({ deny: ["npm *"] })
+			const context = controller.getCommandRestrictionContext("npm test")
+			await fs.writeFile(configPath, "{invalid")
+			await reload()
+
+			assert.throws(() => controller.assertConfigurationValid(), /Invalid command permission configuration/)
+			assert.throws(() => controller.getCommandRestrictionContext("npm test"), /Invalid command permission configuration/)
+			await fs.writeFile(configPath, JSON.stringify({ deny: ["npm *"] }))
+			await reload()
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test"), context)
+		})
+
+		it("recovers from invalid initial environment configuration", async () => {
+			expectLoggerErrors()
+			process.env[COMMAND_PERMISSIONS_ENV_VAR] = "{invalid"
+			await controller.dispose()
+			controller = new CommandPermissionController(createWatcherFactory())
+			await controller.initialize(workspaceRoot)
+			assert.equal(controller.validateCommand("npm test").allowed, false)
+			assert.throws(() => controller.getCommandRestrictionContext("npm test"))
+
+			process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify({ allow: ["npm test"] })
+			await reload()
+			assert.equal(controller.validateCommand("npm test").allowed, true)
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test"), [])
+		})
+
+		it("keeps restriction contexts stable across unrelated settings and reordered rules", async () => {
+			await controller.initialize(workspaceRoot)
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test"), [])
+			await controller.saveConfig({
+				deny: ["npm *", "curl *"],
+				rules: [{ tool: "execute_command", action: "deny", pattern: "npm test" }],
+			})
+			const context = controller.getCommandRestrictionContext("npm test")
+			assert.equal(context.length, 2)
+
+			await controller.saveConfig({
+				deny: ["curl *", "npm *", "rm *"],
+				allowRedirects: true,
+				rules: [
+					{ tool: "edit_file", action: "deny" },
+					{ tool: "execute_command", action: "deny", pattern: "npm test" },
+				],
+			})
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test"), context)
+			assert.deepEqual(controller.getCommandRestrictionContext("git status"), [])
+		})
+
+		it("adds tokens for newly applicable restrictions and removes only lifted restrictions", async () => {
+			await controller.initialize(workspaceRoot)
+			await controller.saveConfig({ deny: ["npm *"] })
+			const original = controller.getCommandRestrictionContext("npm test")
+			await controller.saveConfig({ deny: ["npm *", "npm test"] })
+			const tightened = controller.getCommandRestrictionContext("npm test")
+			assert.equal(tightened.length, 2)
+			assert.ok(original.every((token) => tightened.includes(token)))
+			await controller.saveConfig({ deny: ["npm test"] })
+			const relaxed = controller.getCommandRestrictionContext("npm test")
+			assert.equal(relaxed.length, 1)
+			assert.ok(relaxed.every((token) => tightened.includes(token)))
+		})
+
+		it("tracks unmet allowlists and redirect restrictions without unrelated allow entries", async () => {
+			await controller.initialize(workspaceRoot)
+			await controller.saveConfig({ allow: ["npm *"], allowRedirects: true })
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test > result.txt"), [])
+			await controller.saveConfig({ allow: ["git *"], allowRedirects: true })
+			const denied = controller.getCommandRestrictionContext("npm test > result.txt")
+			assert.deepEqual(denied, ["allowlist"])
+			await controller.saveConfig({ allow: ["git *", "ls *"], allowRedirects: false })
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test > result.txt"), ["allowlist", "redirects"])
+		})
+
+		it("collects chained/subshell denies while preserving explicit allow semantics", async () => {
+			await controller.initialize(workspaceRoot)
+			await controller.saveConfig({ deny: ["npm *", "curl *"] })
+			assert.equal(controller.getCommandRestrictionContext("npm test && (curl example.com)").length, 2)
+			await controller.saveConfig({
+				deny: ["npm *"],
+				rules: [{ tool: "execute_command", action: "allow", pattern: "npm *" }],
+			})
+			assert.deepEqual(controller.getCommandRestrictionContext("npm test"), [])
+		})
+
+		it("does not fingerprint randomized heredoc delimiters as command identity", async () => {
+			await controller.initialize(workspaceRoot)
+			await controller.saveConfig({ deny: ["python *"] })
+			const command = (delimiter: string) => `python - <<'${delimiter}'\nprint('hello')\n${delimiter}`
+			const context = controller.getCommandRestrictionContext(command("FIRST"))
+			assert.ok(context.length > 0)
+			assert.deepEqual(controller.getCommandRestrictionContext(command("SECOND")), context)
+		})
+
+		it("retains valid restrictions on invalid environment reload and recovers", async () => {
+			process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify({ deny: ["rm *"] })
+			await controller.initialize(workspaceRoot)
+			process.env[COMMAND_PERMISSIONS_ENV_VAR] = "{invalid"
+			const logger = sinon.stub(Logger, "error")
+			await reload()
+
+			controller.validateCommand("rm important.txt").allowed.should.be.false()
+			sinon.assert.calledOnce(logger)
+			process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify({ allow: ["npm test"] })
+			await reload()
+			controller.validateCommand("npm test").allowed.should.be.true()
+		})
+	})
+
 	describe("No Configuration", () => {
 		it("should allow all commands when env var is not set", () => {
 			delete process.env[COMMAND_PERMISSIONS_ENV_VAR]
@@ -117,14 +390,13 @@ describe("CommandPermissionController", () => {
 	})
 
 	describe("Invalid Configuration", () => {
-		it("should allow all commands when env var contains invalid JSON", () => {
+		it("blocks automatic authorization when env var contains invalid JSON", () => {
 			expectLoggerErrors()
 			process.env[COMMAND_PERMISSIONS_ENV_VAR] = "not valid json"
 			const controller = new CommandPermissionController()
 
-			const result = controller.validateCommand("rm -rf /")
-			result.allowed.should.be.true()
-			result.reason.should.equal("no_config")
+			controller.validateCommand("rm -rf /").allowed.should.be.false()
+			controller.validateTool("edit_file", "src/index.ts").allowed.should.be.false()
 		})
 
 		it("should allow all commands when env var is empty string", () => {
@@ -136,19 +408,22 @@ describe("CommandPermissionController", () => {
 			result.reason.should.equal("no_config")
 		})
 
-		it("should handle non-array allow/deny values gracefully", () => {
-			process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify({
-				allow: "not an array",
-				deny: 123,
-			})
-			const controller = new CommandPermissionController()
+		for (const config of [
+			null,
+			[],
+			{ allow: "not an array" },
+			{ deny: [123] },
+			{ allowRedirects: "true" },
+			{ rules: [{ tool: "execute_command", action: "invalid" }] },
+		]) {
+			it(`blocks invalid environment config shape: ${JSON.stringify(config)}`, () => {
+				expectLoggerErrors()
+				process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify(config)
+				const controller = new CommandPermissionController()
 
-			// Invalid config values are ignored, so effectively no rules = allowed
-			const result = controller.validateCommand("npm run build")
-			result.allowed.should.be.true()
-			// Returns "allowed" because config exists (even if invalid), command passes validation
-			result.reason.should.equal("no_config")
-		})
+				controller.validateCommand("npm run build").allowed.should.be.false()
+			})
+		}
 	})
 
 	describe("Allow Rules Only", () => {
@@ -692,17 +967,16 @@ describe("CommandPermissionController", () => {
 			result.allowed.should.be.false()
 		})
 
-		it("should handle non-boolean allowRedirects gracefully", () => {
+		it("blocks malformed non-boolean allowRedirects configuration", () => {
+			expectLoggerErrors()
 			process.env[COMMAND_PERMISSIONS_ENV_VAR] = JSON.stringify({
 				allow: ["echo *"],
-				allowRedirects: "yes", // Invalid - should be boolean
+				allowRedirects: "yes",
 			})
 			const controller = new CommandPermissionController()
 
-			// Invalid allowRedirects is ignored, redirects are blocked
-			const result = controller.validateCommand("echo hello > file.txt")
-			result.allowed.should.be.false()
-			result.reason.should.equal("redirect_detected")
+			controller.validateCommand("echo hello > file.txt").allowed.should.be.false()
+			controller.validateCommand("echo hello").allowed.should.be.false()
 		})
 	})
 

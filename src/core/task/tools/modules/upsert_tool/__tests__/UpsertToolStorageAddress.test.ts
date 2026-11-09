@@ -49,7 +49,7 @@ describe("UpsertTool storage address forwarding", () => {
 					taskId: address.kind === "tasklet" ? address.taskletId : address.taskId,
 					storageAddress: kind === "legacy" ? undefined : address,
 					autoApprover: { isUnrestrictedAutoApprove: () => true },
-					services: { commandPermissionController: {} },
+					services: { commandPermissionController: { assertConfigurationValid: sinon.stub() } },
 					callbacks: {
 						withMutationAuthorization: async (_name: unknown, mutation: () => Promise<unknown>) => mutation(),
 						transitionFromMutation: async (transition: () => Promise<unknown>) => transition(),

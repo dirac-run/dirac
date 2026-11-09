@@ -116,7 +116,7 @@ export interface ISystemTrait {
 	/**
 	 * Executes a shell command.
 	 */
-	executeCommand(command: string, options?: { timeout?: number }): Promise<SystemCommandResult>
+	executeCommand(command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }): Promise<SystemCommandResult>
 
 	/**
 	 * Performs a regex search across files.
@@ -294,6 +294,7 @@ export interface IOrchestrationTrait {
 	/** Child-only voluntary communication wait; never resolves structured input. */
 	readonly agentWait?: import("../../AgentCommunication").AgentWaitCapability
 	readonly sharedJournal?: import("../../SharedJournalTypes").SharedJournalCapability
+	readonly commandApprovals?: import("./CommandApprovals").CommandApprovalsCapability
 
 
 	/**

@@ -63,7 +63,7 @@ export interface ICardHandle {
 
 /** Runtime-resolved operation, never supplied by a parent approval response. */
 export type PermissionOperation =
-	| { kind: "commands"; commands: string[] }
+	| { kind: "commands"; commands: string[]; executionContexts?: { command: string; cwd: string }[] }
 	| { kind: "paths"; paths: string[] }
 	| { kind: "browser"; url: string }
 	| { kind: "tool"; manualOnly: boolean }

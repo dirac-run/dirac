@@ -46,7 +46,7 @@ export async function createUpsertFixture() {
 		isUnrestrictedAutoApprove: sandbox.stub().returns(false),
 		isCommandAutoApproved: sandbox.stub().returns(true),
 	}
-	const commandPermissionController = { validateTool: sandbox.stub().returns({ allowed: true, reason: "no_config" }) }
+	const commandPermissionController = { assertConfigurationValid: sandbox.stub(), validateTool: sandbox.stub().returns({ allowed: true, reason: "no_config" }) }
 	const executeCommand = sandbox.stub().resolves({ ...successfulSmoke })
 	const runSubagent = sandbox.stub().rejects(new Error("upsert_tool must not generate or repair implementations"))
 	const withMutationAuthorization = sandbox.stub().callsFake(async (_name: string, mutation: () => Promise<unknown>) => mutation())

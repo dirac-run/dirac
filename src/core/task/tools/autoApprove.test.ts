@@ -4,6 +4,9 @@ import { DiracDefaultTool } from "@shared/tools"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { HostProvider } from "@/hosts/host-provider"
+import { CommandPermissionController } from "@/core/permissions/CommandPermissionController"
+import { COMMAND_PERMISSIONS_ENV_VAR } from "@/core/permissions/types"
+import { expectLoggerErrors } from "@/test/loggerGuard"
 import { AutoApprove, resolveBrowserLaunchPermission, resolveCommandApproval } from "./autoApprove"
 
 function settings(): Settings {
@@ -11,7 +14,7 @@ function settings(): Settings {
 }
 
 function commandPermissionController(result: { allowed: boolean; reason: string; matchedPattern?: string }) {
-	return { validateTool: sinon.stub().returns(result) }
+	return { assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns(result) }
 }
 
 function stubWorkspace(workspacePath = "/workspace"): void {
@@ -147,6 +150,41 @@ describe("AutoApprove child static policy", () => {
 	})
 })
 
+describe("invalid configuration blocks unrestricted automatic authorization", () => {
+	for (const flag of ["autoApproveAllToggled", "yoloModeToggled"] as const) {
+		for (const utilityEnabled of [false, true]) {
+			it(`blocks ${flag} commands and paths with Utility ${utilityEnabled}`, async () => {
+				expectLoggerErrors()
+				const original = process.env[COMMAND_PERMISSIONS_ENV_VAR]
+				process.env[COMMAND_PERMISSIONS_ENV_VAR] = "{invalid"
+				const permissions = new CommandPermissionController()
+				try {
+					const currentSettings = settings()
+					currentSettings[flag] = true
+					const approval = new AutoApprove(permissions, currentSettings, false)
+					assert.throws(
+						() => resolveCommandApproval(["npm test"], utilityEnabled, approval, permissions),
+						/Invalid .* configuration/,
+					)
+					assert.throws(() => approval.isUnrestrictedAutoApprove(), /Invalid .* configuration/)
+					assert.throws(
+						() => approval.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND),
+						/Invalid .* configuration/,
+					)
+					await assert.rejects(
+						approval.shouldAutoApproveToolWithPath(DiracDefaultTool.EDIT_FILE, "src/index.ts"),
+						/Invalid .* configuration/,
+					)
+				} finally {
+					if (original === undefined) delete process.env[COMMAND_PERMISSIONS_ENV_VAR]
+					else process.env[COMMAND_PERMISSIONS_ENV_VAR] = original
+					await permissions.dispose()
+				}
+			})
+		}
+	}
+})
+
 describe("resolveCommandApproval child static policy", () => {
 	for (const utilityEnabled of [false, true]) {
 		for (const executeCommands of [false, true]) {
@@ -156,12 +194,26 @@ describe("resolveCommandApproval child static policy", () => {
 				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 				const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-				assert.deepEqual(resolveCommandApproval(["ls -la", "@backend:git status", "pwd && echo hello", "nl -ba src/index.ts | head -220"], utilityEnabled, autoApprove, permissions as any), {
-					required: false, utilityEligible: false,
-				})
-				for (const commands of [["ls", "curl https://example.com"], ["pwd && curl https://example.com"], ["ls > out.txt"]]) {
+				assert.deepEqual(
+					resolveCommandApproval(
+						["ls -la", "@backend:git status", "pwd && echo hello", "nl -ba src/index.ts | head -220"],
+						utilityEnabled,
+						autoApprove,
+						permissions as any,
+					),
+					{
+						required: false,
+						utilityEligible: false,
+					},
+				)
+				for (const commands of [
+					["ls", "curl https://example.com"],
+					["pwd && curl https://example.com"],
+					["ls > out.txt"],
+				]) {
 					assert.deepEqual(resolveCommandApproval(commands, utilityEnabled, autoApprove, permissions as any), {
-						required: true, utilityEligible: true,
+						required: true,
+						utilityEligible: true,
 					})
 				}
 				sinon.assert.calledWithExactly(permissions.validateTool, "execute_command", "git status")
@@ -175,23 +227,34 @@ describe("resolveCommandApproval child static policy", () => {
 			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-			assert.deepEqual(resolveCommandApproval(["pwd && npm test -- --runInBand 2>&1"], utilityEnabled, autoApprove, permissions as any), {
-				required: false, utilityEligible: false,
-			})
-			assert.deepEqual(resolveCommandApproval(["npm test && curl https://example.com"], utilityEnabled, autoApprove, permissions as any), {
-				required: true, utilityEligible: true,
-			})
+			assert.deepEqual(
+				resolveCommandApproval(["pwd && npm test -- --runInBand 2>&1"], utilityEnabled, autoApprove, permissions as any),
+				{
+					required: false,
+					utilityEligible: false,
+				},
+			)
+			assert.deepEqual(
+				resolveCommandApproval(["npm test && curl https://example.com"], utilityEnabled, autoApprove, permissions as any),
+				{
+					required: true,
+					utilityEligible: true,
+				},
+			)
 		})
 
 		it(`honors explicit command allow rules (Utility: ${utilityEnabled})`, () => {
 			const currentSettings = settings()
 			currentSettings.autoApprovalSettings.actions.executeCommands = false
 			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
-			permissions.validateTool.withArgs("execute_command", "npm run build").returns({ allowed: true, reason: "allowed", matchedPattern: "npm run build" })
+			permissions.validateTool
+				.withArgs("execute_command", "npm run build")
+				.returns({ allowed: true, reason: "allowed", matchedPattern: "npm run build" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
 			assert.deepEqual(resolveCommandApproval(["ls", "npm run build"], utilityEnabled, autoApprove, permissions as any), {
-				required: false, utilityEligible: false,
+				required: false,
+				utilityEligible: false,
 			})
 		})
 
@@ -205,7 +268,8 @@ describe("resolveCommandApproval child static policy", () => {
 
 			for (const command of ["ls", "npm test"]) {
 				assert.deepEqual(resolveCommandApproval([command], utilityEnabled, autoApprove, permissions as any), {
-					required: true, utilityEligible: false,
+					required: true,
+					utilityEligible: false,
 				})
 			}
 			sinon.assert.notCalled(commandCheck)
@@ -218,9 +282,13 @@ describe("resolveCommandApproval child static policy", () => {
 				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 				const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-				assert.deepEqual(resolveCommandApproval(["curl https://example.com"], utilityEnabled, autoApprove, permissions as any), {
-					required: true, utilityEligible: true,
-				})
+				assert.deepEqual(
+					resolveCommandApproval(["curl https://example.com"], utilityEnabled, autoApprove, permissions as any),
+					{
+						required: true,
+						utilityEligible: true,
+					},
+				)
 			}
 		})
 
@@ -232,9 +300,19 @@ describe("resolveCommandApproval child static policy", () => {
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 			const commandCheck = sinon.spy(autoApprove, "isCommandAutoApproved")
 
-			assert.deepEqual(resolveCommandApproval(["npx tsx test-harness.ts"], utilityEnabled, autoApprove, permissions as any, DiracDefaultTool.UPSERT_TOOL), {
-				required: true, utilityEligible: false,
-			})
+			assert.deepEqual(
+				resolveCommandApproval(
+					["npx tsx test-harness.ts"],
+					utilityEnabled,
+					autoApprove,
+					permissions as any,
+					DiracDefaultTool.UPSERT_TOOL,
+				),
+				{
+					required: true,
+					utilityEligible: false,
+				},
+			)
 			sinon.assert.notCalled(commandCheck)
 			sinon.assert.notCalled(permissions.validateTool)
 		})
@@ -261,11 +339,20 @@ describe("resolveCommandApproval child static policy", () => {
 		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 		const autoApprove = new AutoApprove(permissions as any, currentSettings, false)
 
-		assert.deepEqual(resolveCommandApproval(["ls"], true, autoApprove, permissions as any), { required: true, utilityEligible: true })
+		assert.deepEqual(resolveCommandApproval(["ls"], true, autoApprove, permissions as any), {
+			required: true,
+			utilityEligible: true,
+		})
 		currentSettings.yoloModeToggled = true
 		permissions.validateTool.returns({ allowed: false, reason: "denied" })
-		assert.deepEqual(resolveCommandApproval(["curl https://example.com"], false, autoApprove, permissions as any), { required: false, utilityEligible: false })
-		assert.deepEqual(resolveCommandApproval(["curl https://example.com"], true, autoApprove, permissions as any), { required: true, utilityEligible: false })
+		assert.deepEqual(resolveCommandApproval(["curl https://example.com"], false, autoApprove, permissions as any), {
+			required: false,
+			utilityEligible: false,
+		})
+		assert.deepEqual(resolveCommandApproval(["curl https://example.com"], true, autoApprove, permissions as any), {
+			required: true,
+			utilityEligible: false,
+		})
 	})
 })
 

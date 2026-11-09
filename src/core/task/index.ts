@@ -139,6 +139,7 @@ import type {
 } from "./tools/interfaces/IToolEnvironment"
 import { inspectTasklet, summarizeTasklet, pageInspectionItems, type TaskletInspectionQuery } from "./TaskletInspection"
 import { taskletCommunicationCard } from "./TaskletCommunicationCards"
+import { TaskletCommandApprovals } from "./TaskletCommandApprovals"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
 export type {
@@ -160,6 +161,7 @@ import { SharedJournal } from "./SharedJournal"
 export interface TaskletExecutionBindings {
 	agentCommunication?: AgentCommunication
 	sharedJournal?: SharedJournal
+	commandApprovals?: import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability
 	getPermissionCommandController?: () => CommandPermissionController
 	hasPendingInteraction?: () => boolean
 	configuration?: TaskletConfiguration
@@ -1065,6 +1067,25 @@ export class Task {
 			}) : undefined,
 			() => (this.ownerBindings?.sharedJournal ?? this.taskletHost?.sharedJournal)?.forAgent(this.agentAddress),
 			contained?.getPermissionCommandController,
+			() => {
+				const approvals = contained?.commandApprovals
+				if (!approvals) return undefined
+				return {
+					authorize: (requests, approve) => {
+						this.taskState.abortSignal.throwIfAborted()
+						return approvals.authorize(requests, async (missing) => {
+							this.taskState.abortSignal.throwIfAborted()
+							const approved = await approve(missing)
+							this.taskState.abortSignal.throwIfAborted()
+							return approved
+						})
+					},
+					assertCurrent: (requests) => {
+						this.taskState.abortSignal.throwIfAborted()
+						approvals.assertCurrent(requests)
+					},
+				}
+			},
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -2164,10 +2185,20 @@ export class TaskletHost {
 	}
 
 
+	private commitCommandGrants(child: OwnedTasklet, grants: import("./tools/interfaces/CommandApprovals").CommandGrantSnapshot): Promise<void> {
+		const commandGrants = structuredClone(grants)
+		child.recordWrites = child.recordWrites.then(async () => {
+			await saveTaskletRecord({ ...structuredClone(child.record), commandGrants })
+			child.record = { ...child.record, commandGrants }
+		})
+		return child.recordWrites
+	}
+
 	private persistRecord(child: OwnedTasklet): Promise<void> {
 		const record = structuredClone(child.record)
 		child.recordWrites = child.recordWrites.then(async () => {
-			await saveTaskletRecord(record)
+			// A usage snapshot queued before a grant commit must not overwrite committed authority.
+			await saveTaskletRecord({ ...record, commandGrants: child.record.commandGrants })
 			if (!this.usageProjectionReady || !record.usage || child.usageProjectionError) return
 			try {
 				await this.owner.recordTaskletUsage?.(record.id, record.usage)
@@ -2326,6 +2357,21 @@ export class TaskletHost {
 				tasklet: {
 					agentCommunication: this.agentCommunication,
 					sharedJournal: this.sharedJournal,
+					commandApprovals: new TaskletCommandApprovals(
+						child.record.commandGrants,
+						(snapshot) => this.commitCommandGrants(child, snapshot),
+						(command) => {
+							const permissions = this.owner.getPermissionCommandController?.()
+							if (!permissions) throw new Error("Command permission authority is unavailable")
+							return permissions.getCommandRestrictionContext(command)
+						},
+						() => {
+							if (this.closing || child.interactionsClosed || child.record.outcome || !child.task?.getAgentCommunicationState().accepts_messages) {
+								throw new Error("Tasklet command approval authority is inactive")
+							}
+						},
+						(count) => Logger.info(`[Tasklet ${child.record.id}] Reusing ${count} committed command approval(s)`),
+					),
 					hasPendingInteraction: () => [...child.interactions.values()].some(({ record }) => record.status === "pending"),
 					configuration: record.configuration,
 					getParentWorkingConfiguration: () => this.options.workingConfiguration,

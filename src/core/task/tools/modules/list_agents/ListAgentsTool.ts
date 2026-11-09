@@ -3,7 +3,8 @@ import { toError } from "@shared/errors"
 import { DiracIcon } from "@shared/icons"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
-import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import type { CardParams, ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 
 export const list_agents_spec: DiracToolSpec = {
 	id: "list_agents",
@@ -31,7 +32,7 @@ export class ListAgentsTool implements IDiracTool {
 		if (!communication) throw new Error("Agent discovery is unavailable for this execution")
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
-		const card = await env.ui.createCard({
+		const card = await createRosterCard({
 			header: `${actor} is listing agents`,
 			communication: { actor },
 			icon: DiracIcon.SUBAGENTS,
@@ -39,26 +40,54 @@ export class ListAgentsTool implements IDiracTool {
 			collapsed: false,
 			do_not_auto_collapse: true,
 			rawInput: query,
-		})
+		}, env)
+		let page: ReturnType<typeof communication.list>
 		try {
-			const page = communication.list(query)
-			const output = JSON.stringify(page)
+			page = communication.list(query)
+		} catch (error) {
+			if (card) {
+				await present(() => card.update({
+					header: `${actor} failed to list agents`,
+					communication: { actor, detail: toError(error).message },
+				}), env)
+				await present(() => card.finalize(CardStatus.ERROR, true), env)
+			}
+			throw error
+		}
+		if (card) {
 			const roster = page.agents.map((agent) => `${agent.id} — ${agent.title_preview}\nStatus: ${agent.status}; messages: ${agent.accepts_messages ? "available" : "unavailable"}`)
-			await card.update({
+			await present(() => card.update({
 				header: `${actor} listed agents`,
 				body: roster.length ? roster.join("\n\n") : "No agents on this page.",
 				communication: { actor, detail: `Availability is a snapshot, not a reservation.${page.next_cursor ? ` More agents available; next cursor: ${page.next_cursor}` : ""}` },
-			})
-			await card.finalize(CardStatus.SUCCESS, true)
-			return output
-		} catch (error) {
-			await card.update({
-				header: `${actor} failed to list agents`,
-				communication: { actor, detail: toError(error).message },
-			})
-			await card.finalize(CardStatus.ERROR, true)
-			throw error
+			}), env)
+			await present(() => card.finalize(CardStatus.SUCCESS, true), env)
 		}
+		return JSON.stringify(page)
+	}
+}
+
+async function createRosterCard(params: CardParams, env: IToolEnvironment): Promise<ICardHandle | undefined> {
+	try {
+		const creation = env.ui.createCard(params)
+		const result = await waitForPresentationOperation(creation)
+		if (!result.timedOut) return result.value
+		env.logging.warn("[ListAgentsTool] Card creation timed out")
+		void creation
+			.then((card) => present(() => card.finalize(CardStatus.ABANDONED), env))
+			.catch((error) => env.logging.warn("[ListAgentsTool] Late card creation failed", toError(error)))
+	} catch (error) {
+		env.logging.warn("[ListAgentsTool] Card creation failed", toError(error))
+	}
+	return undefined
+}
+
+async function present(operation: () => Promise<void>, env: IToolEnvironment): Promise<void> {
+	try {
+		const result = await waitForPresentationOperation(operation())
+		if (result.timedOut) env.logging.warn("[ListAgentsTool] Card presentation timed out")
+	} catch (error) {
+		env.logging.warn("[ListAgentsTool] Card presentation failed", toError(error))
 	}
 }
 

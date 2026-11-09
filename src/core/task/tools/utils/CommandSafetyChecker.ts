@@ -28,13 +28,16 @@ const SAFE_BASE_COMMANDS = new Set([
 const SAFE_OPTIONS: Record<string, RegExp> = {
 	find: /^(?:-[HLP]|-(?:name|iname|path|ipath|regex|iregex|type|xtype|size|mtime|mmin|atime|amin|ctime|cmin|newer|newermt|maxdepth|mindepth|depth|mount|xdev|follow|print|print0|printf|ls|prune|empty|readable|writable|executable|true|false|a|and|o|or|not))$/,
 	sort: /^(?:-[bdfghinMrsuVz]+|-[kt].+|--(?:ignore-leading-blanks|dictionary-order|ignore-case|general-numeric-sort|human-numeric-sort|ignore-nonprinting|month-sort|numeric-sort|reverse|stable|unique|version-sort|zero-terminated)|--(?:key|field-separator)=.+)$/,
-	rg: /^(?:-[ivwxFnNlLcoqsSUPauHI0]+|-[ABCm]\d+|-[egftTr]|--(?:files|hidden|no-ignore|no-ignore-vcs|no-ignore-parent|follow|line-number|no-line-number|files-with-matches|files-without-match|count|count-matches|only-matching|quiet|fixed-strings|ignore-case|case-sensitive|smart-case|word-regexp|line-regexp|multiline|multiline-dotall|pcre2|text|json|null|null-data|no-heading|heading|with-filename|no-filename|no-config|no-messages|stats|passthru)|--(?:glob|iglob|type|type-not|regexp|file|context|before-context|after-context|max-count|max-depth|encoding|replace|sort|sortr)(?:=.+)?)$/,
+	rg: /^(?:-[ivwxFnNlLcoqsSUPauHI0b]+|-[ivwxFnNlLcoqsSUPauHI0b]*[ABCmj]\d*|-[ivwxFnNlLcoqsSUPauHI0b]*[egftTrE].*|--(?:files|hidden|no-ignore|no-ignore-vcs|no-ignore-parent|no-ignore-dot|no-ignore-global|no-ignore-exclude|follow|line-number|no-line-number|files-with-matches|files-without-match|count|count-matches|only-matching|quiet|fixed-strings|ignore-case|case-sensitive|smart-case|word-regexp|line-regexp|multiline|multiline-dotall|pcre2|text|json|null|null-data|no-heading|heading|with-filename|no-filename|no-config|no-messages|stats|passthru|trim|crlf|byte-offset|max-columns-preview)|--(?:glob|iglob|type|type-not|regexp|file|context|before-context|after-context|max-count|max-depth|max-columns|max-filesize|threads|encoding|replace|sort|sortr)(?:=.+)?)$/,
 	file: /^(?:-[biLh]+|--(?:brief|mime|mime-type|mime-encoding|dereference|no-dereference))$/,
 	uname: /^(?:-[amnprsvio]+|--(?:all|kernel-name|nodename|kernel-release|kernel-version|machine|processor|hardware-platform|operating-system))$/,
 }
 
 /** Tokenize only a small, literal shell subset; unsupported syntax needs approval. */
 function splitByShellOperators(command: string): string[][] | undefined {
+	// This tokenizer models POSIX shell syntax, not cmd.exe or PowerShell expansion.
+	// The terminal's custom shell profile is not available to this static classifier.
+	if (!["linux", "darwin", "freebsd", "openbsd", "netbsd", "aix", "sunos"].includes(process.platform)) return undefined
 	const segments: string[][] = []
 	let words: string[] = []
 	let word = ""
@@ -92,6 +95,12 @@ function splitByShellOperators(command: string): string[][] | undefined {
 			started = false
 			continue
 		}
+		// find's standalone negation predicate is an argument, not shell pipeline negation.
+		if (ch === "!" && !started && words[0] === "find" && (i + 1 === command.length || /[ \t]/.test(command[i + 1]))) {
+			word = ch
+			started = true
+			continue
+		}
 		// No expansions, comments, subshells, globbing, newlines, or other redirects.
 		if ("$`<>(){}[]*?~!#\n\r".includes(ch) || ch.charCodeAt(0) < 32) return undefined
 		word += ch
@@ -108,8 +117,21 @@ function hasOnlySafeOptions(args: string[], options: RegExp): boolean {
 	return args.every((arg) => !arg.startsWith("-") || arg === "-" || arg === "--" || options.test(arg))
 }
 
+// Each new read-only subcommand gets its own options, never the general Git option set.
+const SAFE_GIT_READ_OPTIONS: Record<string, RegExp> = {
+	blame: /^(?:-[wlsentfb]+|-L.*|-[MC]\d*|--(?:line-porcelain|porcelain|incremental|show-email|show-name|show-number|show-stats|root|no-progress|no-textconv)|--(?:abbrev=\d+|date=.+))$/,
+	"ls-files":
+		/^(?:-[zcdmoisukvtf]+|--(?:cached|deleted|modified|others|ignored|stage|unmerged|killed|directory|no-empty-directory|error-unmatch|exclude-standard|full-name|deduplicate|eol|debug)|--(?:exclude|format)=.+)$/,
+	"ls-tree": /^(?:-[drtlz]+|--(?:name-only|name-status|object-only|full-name|full-tree)|--abbrev(?:=\d+)?|--format=.+)$/,
+	"rev-parse":
+		/^(?:--(?:show-toplevel|show-prefix|show-cdup|git-dir|git-common-dir|absolute-git-dir|is-inside-work-tree|is-inside-git-dir|is-bare-repository|verify|quiet|symbolic|symbolic-full-name|revs-only|no-revs|flags|no-flags|end-of-options)|--short(?:=\d+)?|--abbrev-ref(?:=(?:strict|loose))?|--path-format=(?:absolute|relative))$/,
+}
+
 function isSafeGitCommand(args: string[]): boolean {
 	const [subcommand, ...options] = args
+	if (Object.hasOwn(SAFE_GIT_READ_OPTIONS, subcommand)) {
+		return hasOnlySafeOptions(options, SAFE_GIT_READ_OPTIONS[subcommand])
+	}
 	if (subcommand === "branch" || subcommand === "remote") {
 		return options.every((option) => ["-a", "-r", "-v", "--list", "--get-url", "--show-current"].includes(option))
 	}

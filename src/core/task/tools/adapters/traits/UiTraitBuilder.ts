@@ -100,6 +100,7 @@ export async function createCardFromMessenger(
 
 	const request = createUtilityPermissionRequest(config, cardParams, binding.authorityMode)
 	const decision = await binding.service.decide(request, config.taskState.abortSignal)
+	config.taskState.abortSignal.throwIfAborted()
 	if (isAutoApproved()) {
 		return new ApprovedPermissionCardHandle(cardParams)
 	}
@@ -113,6 +114,12 @@ export async function createCardFromMessenger(
 		return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 	}
 	await publishPermissionApprovalCard(config, cardParams, tracker, request, decision.reason)
+	config.taskState.abortSignal.throwIfAborted()
+	const publishedBinding = config.permissionDecisionBinding
+	if (!publishedBinding || publishedBinding.configurationRevision !== binding.configurationRevision ||
+		publishedBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
+		return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
+	}
 	return new ApprovedPermissionCardHandle(cardParams)
 }
 

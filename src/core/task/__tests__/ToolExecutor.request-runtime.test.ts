@@ -149,7 +149,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 		const harness = {
 			requestRuntime: () => runtime,
 			getCurrentWorkingConfiguration: () => current,
-			commandPermissionController: {},
+			commandPermissionController: { assertConfigurationValid: sinon.stub() },
 			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
 		}
 		const autoApprover = (ToolExecutor.prototype as any).requestAutoApprover.call(harness)
@@ -164,7 +164,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 		const harness = {
 			executionProfile: "tasklet",
 			getCurrentWorkingConfiguration: () => current,
-			commandPermissionController: { validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) },
+			commandPermissionController: { assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) },
 			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
 		}
 		const autoApprover = (ToolExecutor.prototype as any).requestAutoApprover.call(harness)
@@ -230,8 +230,8 @@ describe("ToolExecutor request-runtime authorization", () => {
 	it("binds child Utility to current parent mode and rules without changing child execution", () => {
 		const child = configuration("act", 1)
 		let parent = configuration("plan", 7)
-		const childRules = { revision: 1, validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) }
-		const parentRules = { revision: 4, validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) }
+		const childRules = { revision: 1, assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) }
+		const parentRules = { revision: 4, assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) }
 		const executor = Object.assign(Object.create(ToolExecutor.prototype), {
 			executionProfile: "tasklet",
 			requestRuntime: () => createTaskRequestRuntime(child, { getModel: () => ({ id: "test", info: {} }) } as any, "child"),

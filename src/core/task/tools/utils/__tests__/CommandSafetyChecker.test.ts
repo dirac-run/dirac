@@ -1,8 +1,41 @@
-import { describe, it } from "mocha"
+import { afterEach, beforeEach, describe, it } from "mocha"
+import sinon, { type SinonStub } from "sinon"
 import "should"
-import { isSafeCommand } from "../CommandSafetyChecker"
+import { isSafeCommand, isSupportedShellSyntax } from "../CommandSafetyChecker"
 
 describe("CommandSafetyChecker", () => {
+	let platformStub: SinonStub
+	beforeEach(() => {
+		platformStub = sinon.stub(process, "platform").value("linux")
+	})
+	afterEach(() => sinon.restore())
+
+	for (const platform of ["linux", "darwin", "freebsd", "openbsd", "netbsd", "aix", "sunos"]) {
+		it(`supports the literal POSIX subset on ${platform}`, () => {
+			platformStub.value(platform)
+			isSupportedShellSyntax("nl -ba file.ts | head -20").should.equal(true)
+			isSafeCommand("nl -ba file.ts | head -20").should.equal(true)
+		})
+	}
+
+	for (const platform of ["win32", "android", "unknown"]) {
+		it(`requires approval rather than parsing shell syntax on ${platform}`, () => {
+			platformStub.value(platform)
+			for (const command of [
+				"ls",
+				"git status",
+				"echo %VAR%",
+				"echo !VAR!",
+				"echo ^&",
+				"echo $env:VAR",
+				"nl -ba file.ts | head -20",
+			]) {
+				isSupportedShellSyntax(command).should.equal(false)
+				isSafeCommand(command).should.equal(false)
+			}
+		})
+	}
+
 	describe("isSafeCommand", () => {
 		// Positive cases
 		it("should allow simple safe commands", () => {
@@ -173,8 +206,70 @@ describe("CommandSafetyChecker", () => {
 		it("should reject environment variable prefixing", () => {
 			isSafeCommand("NODE_ENV=production ls").should.equal(false)
 		})
+		it("recognizes find negation without enabling shell negation or history syntax", () => {
+			for (const command of ["find . ! -name '*.ts'", "find . !\t-type d", "pwd | find . ! -empty"]) {
+				isSupportedShellSyntax(command).should.equal(true)
+				isSafeCommand(command).should.equal(true)
+			}
+			for (const command of [
+				"! find . -type f",
+				"find . -type f | ! cat",
+				"find . && ! pwd",
+				"echo !",
+				"find . !-name foo",
+			]) {
+				isSupportedShellSyntax(command).should.equal(false)
+				isSafeCommand(command).should.equal(false)
+			}
+		})
+
 		const unsafeCommands = [
 			// These are classifier inputs only. Never execute candidate commands.
+			"find . ! -delete",
+			"find . ! -exec touch marker ';'",
+			"find . ! -fprint marker",
+			"find . ! -name *.ts",
+			'find . ! -name "$PATTERN"',
+			"find . ! -name '*.ts' > files.txt",
+			"git blame --textconv HEAD -- file.ts",
+			"git blame --output=marker file.ts",
+			"git blame --out=marker file.ts",
+			"git blame --config=alias.foo=bar file.ts",
+			"git blame -c core.pager=program file.ts",
+			"git -c core.pager=program blame file.ts",
+			"git --exec-path=program ls-files",
+			"git ls-files --output=marker",
+			"git ls-files --config=program",
+			"git ls-files --exclude-from=local-config",
+			"git ls-tree --output=marker HEAD",
+			"git ls-tree --exec=program HEAD",
+			"git ls-tree --name-on HEAD",
+			"git rev-parse --output=marker HEAD",
+			"git rev-parse --config=program HEAD",
+			"git rev-parse --show-top",
+			"git rev-parse --parseopt",
+			'git rev-parse "$(touch marker)"',
+			"git ls-files *.ts",
+			"git constructor",
+			"rg -n --pre=program pattern src/",
+			"rg -n --pre-glob '*.ts' pattern src/",
+			"rg --host=program pattern src/",
+			"rg --config=local-config pattern src/",
+			"rg --output=marker pattern src/",
+			"rg -nC2z pattern src/",
+			"rg -nz pattern src/",
+			"rg -g*.ts pattern src/",
+			"rg -nA2 pattern src/ > matches.txt",
+			'rg -g"$GLOB" pattern src/',
+			"python -c 'print(1)'",
+			"python3 -c 'print(1)'",
+			"node -e 'console.log(1)'",
+			"npm test",
+			"bash -c 'ls'",
+			"sh script.sh",
+			"powershell -Command Get-ChildItem",
+			"cmd /c dir",
+			"Get-Content file.ts",
 			"awk 'BEGIN { system(\"touch /tmp/file\") }'",
 			'awk \'BEGIN { print "x" > "/tmp/file" }\'',
 			"awk -f program.awk file.txt",
@@ -263,6 +358,41 @@ describe("CommandSafetyChecker", () => {
 		}
 
 		for (const command of [
+			"find . -type f ! -path './node_modules/*' -print | head -20",
+			"find . ! -name '*.test.ts' -a ! -name '*.spec.ts'",
+			"find . -not -name '*.ts'",
+			"find . -type f \\! -name '*.ts'",
+			"find . -type f '!' -name '*.ts'",
+			"git blame src/index.ts",
+			"git blame -L 1,20 -- src/index.ts",
+			"git blame -w -L1,20 --line-porcelain HEAD -- src/index.ts | head -40",
+			"git blame --no-textconv --show-email --date=short -- src/index.ts",
+			"git blame -M20 -C40 --abbrev=12 src/index.ts",
+			"git ls-files",
+			"git ls-files --cached --others --exclude-standard --full-name",
+			"git ls-files -z --stage -- '*.ts'",
+			"git ls-files --modified --deleted --eol",
+			"git ls-tree HEAD",
+			"git ls-tree -r --name-only HEAD -- src/ | head -40",
+			"git ls-tree -rz --full-tree --abbrev=12 HEAD",
+			"git rev-parse --show-toplevel",
+			"git rev-parse --is-inside-work-tree --git-dir",
+			"git rev-parse --abbrev-ref HEAD",
+			"git rev-parse --verify --quiet HEAD",
+			"git rev-parse --short=12 HEAD",
+			"git rev-parse --symbolic-full-name HEAD",
+			"rg -C 3 -A 2 -B 1 -m 10 pattern src/",
+			"rg -nC3 -m10 pattern src/",
+			"rg -nC 3 pattern src/",
+			"rg -nA2 -B2 pattern src/ | head -40",
+			"rg -g'*.ts' -g'!*.test.ts' pattern src/",
+			"rg -nig'*.ts' pattern src/",
+			"rg -tpy -Tjs -e'foo|bar' src/",
+			"rg -nFepattern src/",
+			"rg -fpatterns.txt -Eutf-8 -j2 src/",
+			"rg --context=3 --max-columns 160 --max-filesize=1M --threads 2 pattern src/",
+			"rg --trim --crlf --byte-offset --max-columns-preview pattern src/",
+			"rg --no-ignore-dot --no-ignore-global --no-ignore-exclude pattern src/",
 			"find . -type f -name '*.ts' -print",
 			"find . -maxdepth 2 -printf '%p\\n'",
 			"rg -n --glob '*.ts' 'foo|bar' src/",

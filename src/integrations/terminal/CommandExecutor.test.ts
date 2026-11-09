@@ -98,6 +98,54 @@ describe("CommandExecutor ownership", () => {
 		await executor.dispose()
 	})
 
+	for (const failure of ["show", "run"] as const) {
+		it(`releases a terminal reservation when ${failure} throws before startup`, async () => {
+			const error = new Error("startup failed")
+			const terminal = { busy: true, terminal: { show: () => { if (failure === "show") throw error } } }
+			const releaseTerminalReservation = sinon.spy((reservation: typeof terminal) => { reservation.busy = false })
+			const manager = {
+				getOrCreateTerminal: async () => terminal,
+				runCommand: () => { throw error },
+				releaseTerminalReservation,
+			} as unknown as ITerminalManager
+			const executor = createExecutor(manager)
+			await assert.rejects(executor.execute("never starts", undefined), error)
+			sinon.assert.calledOnceWithExactly(releaseTerminalReservation, terminal)
+			assert.equal(terminal.busy, false)
+			await executor.dispose()
+		})
+	}
+
+	for (const restriction of ["denied", "configuration changed", "aborted"]) {
+		it(`rechecks authority after deferred terminal acquisition when ${restriction}`, async () => {
+			let acquired!: () => void
+			const acquisition = new Promise<void>((resolve) => { acquired = resolve })
+			const terminal = { busy: true, terminal: { show() { } } }
+			let release!: (value: typeof terminal) => void
+			const reservation = new Promise<typeof terminal>((resolve) => { release = resolve })
+			let authorized = true
+			const assertAuthorized = sinon.spy(() => { if (!authorized) throw new Error(restriction) })
+			const runCommand = sinon.stub()
+			const releaseTerminalReservation = sinon.spy((value: typeof terminal) => { value.busy = false })
+			const executor = createExecutor({
+				getOrCreateTerminal: () => { acquired(); return reservation },
+				runCommand,
+				releaseTerminalReservation,
+			} as unknown as ITerminalManager)
+			const execution = executor.execute("must not spawn", undefined, { cwd: "/approved", assertAuthorized })
+			await acquisition
+			sinon.assert.notCalled(assertAuthorized)
+			authorized = false
+			release(terminal)
+			await assert.rejects(execution, new RegExp(restriction))
+			sinon.assert.calledOnce(assertAuthorized)
+			sinon.assert.notCalled(runCommand)
+			sinon.assert.calledOnceWithExactly(releaseTerminalReservation, terminal)
+			assert.equal(terminal.busy, false)
+			await executor.dispose()
+		})
+	}
+
 	it("does not let older completion clear the newer foreground process", async () => {
 		const processes: any[] = []
 		const manager = {
@@ -165,6 +213,40 @@ describe("CommandExecutor ownership", () => {
 			assert.equal((callbacks.getDiracMessages as sinon.SinonStub).callCount, 0)
 		} finally {
 			await executor.dispose()
+		}
+	})
+})
+
+describe("CommandExecutor working directory", () => {
+	it("uses each frozen cwd for concurrent standalone executions and preserves the task default", async function () {
+		if (process.platform === "win32") this.skip()
+		this.timeout(10000)
+		const fs = await import("node:fs/promises")
+		const os = await import("node:os")
+		const path = await import("node:path")
+		const base = await fs.mkdtemp(path.join(os.tmpdir(), "dirac-cwd-"))
+		const first = path.join(base, 'first " $(not-a-command)')
+		const second = path.join(base, "second workspace")
+		await Promise.all([fs.mkdir(first), fs.mkdir(second)])
+		const callbacks = createCallbacks()
+		const environment = sinon.stub().resolves(undefined)
+		callbacks.getEnvironmentVariables = environment
+		const executor = new CommandExecutor({ cwd: base, taskId: "task", ulid: "ulid", terminalExecutionMode: "vscodeTerminal", terminalManager: {} as ITerminalManager }, callbacks)
+		const command = `"${process.execPath}" -e 'console.log(process.cwd())'`
+		const options = { useBackgroundExecution: true, suppressUserInteraction: true }
+		try {
+			// Seed a reusable terminal, then acquire different directories concurrently.
+			await executor.execute(command, undefined, options)
+			const results = await Promise.all([first, second].map((cwd) => executor.execute(command, undefined, { ...options, cwd })))
+			assert.ok(String(results[0][1]).includes(first))
+			assert.ok(String(results[1][1]).includes(second))
+			assert.equal(results[0][2]?.exitCode, 0)
+			assert.equal(results[1][2]?.exitCode, 0)
+			assert.ok(String((await executor.execute(command, undefined, options))[1]).includes(base))
+			assert.deepEqual(environment.getCalls().map((call) => call.args[0]), [base, first, second, base])
+		} finally {
+			await executor.dispose()
+			await fs.rm(base, { recursive: true, force: true })
 		}
 	})
 })

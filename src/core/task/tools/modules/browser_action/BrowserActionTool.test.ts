@@ -12,7 +12,7 @@ function createPermissionEnvironment() {
 		env: {
 			config: {
 				autoApprover: { isUnrestrictedAutoApprove, shouldAutoApproveTool },
-				services: { commandPermissionController: { validateTool } },
+				services: { commandPermissionController: { assertConfigurationValid: sinon.stub(), validateTool } },
 			},
 		},
 		validateTool,
@@ -104,7 +104,7 @@ describe("BrowserActionTool", () => {
 					shouldAutoApproveTool: sinon.stub().returns(true),
 				},
 				services: {
-					commandPermissionController: { validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) },
+					commandPermissionController: { assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) },
 				},
 			},
 			ui: { createCard, upsertText: sinon.stub().resolves() },

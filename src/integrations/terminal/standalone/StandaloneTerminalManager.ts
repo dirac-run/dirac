@@ -35,6 +35,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Set of terminal IDs managed by this instance */
 	private terminalIds: Set<number> = new Set()
+	private reservations = new Set<number>()
 	private disposed = false
 
 	/** Timeout for shell integration (kept for interface compatibility, not used in standalone) */
@@ -57,53 +58,37 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	/** Run a command in the specified terminal. */
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
 		if (this.disposed) throw new Error("Terminal manager is disposed")
-		return this.processManager.runCommand(terminalInfo, command)
+		const process = this.processManager.runCommand(terminalInfo, command)
+		this.reservations.delete(terminalInfo.id)
+		return process
 	}
 
-	// --- Terminal Lifecycle ---
+	/** Release an acquisition cancelled before a process was started. */
+	releaseTerminalReservation(terminalInfo: TerminalInfo): void {
+		if (this.reservations.delete(terminalInfo.id)) terminalInfo.busy = false
+	}
 
-	/** Get or create a terminal for the specified working directory. */
+	/** Reserve a terminal synchronously before returning it to a command execution. */
 	async getOrCreateTerminal(cwd: string, env?: { [key: string]: string | undefined }): Promise<TerminalInfo> {
 		if (this.disposed) throw new Error("Terminal manager is disposed")
 		const terminals = this.registry.getAllTerminals()
-
-		// Find available terminal with matching CWD
-		const matchingTerminal = terminals.find((t) => {
-			if (t.busy) {
-				return false
-			}
-			return t.terminal._cwd === cwd
-		})
-
-		if (matchingTerminal) {
-			this.terminalIds.add(matchingTerminal.id)
-			return matchingTerminal
-		}
-
-		// Find any available terminal if reuse is enabled
-		if (this.terminalReuseEnabled) {
-			const availableTerminal = terminals.find((t) => !t.busy)
-			if (availableTerminal) {
-				await this.runCommand(availableTerminal, `cd "${cwd}"`)
-				if (this.disposed) throw new Error("Terminal manager is disposed")
-				availableTerminal.terminal._cwd = cwd
-				availableTerminal.terminal._env = env
-				if (availableTerminal.terminal.shellIntegration?.cwd) {
-					availableTerminal.terminal.shellIntegration.cwd.fsPath = cwd
-				}
-				this.terminalIds.add(availableTerminal.id)
-				return availableTerminal
-			}
-		}
-
-		// Create new terminal
-		const newTerminalInfo = this.registry.createTerminal({
-			cwd: cwd,
+		const matchingTerminal = terminals.find((terminal) => !terminal.busy && terminal.terminal._cwd === cwd)
+		const reusableTerminal = this.terminalReuseEnabled ? terminals.find((terminal) => !terminal.busy) : undefined
+		const terminalInfo = matchingTerminal ?? reusableTerminal ?? this.registry.createTerminal({
+			cwd,
 			name: `Dirac Terminal ${this.registry.size + 1}`,
-			env: env,
+			env,
 		})
-		this.terminalIds.add(newTerminalInfo.id)
-		return newTerminalInfo
+		// Standalone commands spawn a fresh process; cwd is spawn data, never shell source.
+		terminalInfo.terminal._cwd = cwd
+		terminalInfo.terminal._env = env
+		if (terminalInfo.terminal.shellIntegration?.cwd) {
+			terminalInfo.terminal.shellIntegration.cwd.fsPath = cwd
+		}
+		terminalInfo.busy = true
+		this.terminalIds.add(terminalInfo.id)
+		this.reservations.add(terminalInfo.id)
+		return terminalInfo
 	}
 
 	/** Get terminals filtered by busy state. */
@@ -159,6 +144,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 		// Clear all tracking
 		this.terminalIds.clear()
+		this.reservations.clear()
 		this.processManager.clearProcesses()
 
 		// Dispose all terminals

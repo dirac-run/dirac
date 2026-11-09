@@ -79,6 +79,7 @@ export interface TaskCallbacks {
 	agentCommunication?: import("../../AgentCommunication").AgentCommunicationCapability
 	agentWait?: import("../../AgentCommunication").AgentWaitCapability
 	sharedJournal?: import("../../SharedJournalTypes").SharedJournalCapability
+	commandApprovals?: import("../interfaces/CommandApprovals").CommandApprovalsCapability
 	/** Revalidates request-bound mutation consent against the Task's current mode. */
 	assertMutationAuthorized: (toolName?: DiracToolSpec["id"]) => void
 	/** Holds task mutation consent through the complete asynchronous write boundary. */

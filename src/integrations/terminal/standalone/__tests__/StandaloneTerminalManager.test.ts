@@ -34,7 +34,7 @@ class FakeProcess extends EventEmitter<TerminalProcessEvents> {
 		return {}
 	}
 
-	terminate(): void {}
+	terminate(): void { }
 
 	// Attach promise methods so it looks like TerminalProcessResultPromise
 	then(onFulfilled?: any, onRejected?: any): Promise<void> {
@@ -67,6 +67,22 @@ function createFakeProcess(): TerminalProcessResultPromise {
 
 describe("StandaloneTerminalManager", () => {
 	describe("terminal lifecycle", () => {
+		it("reserves concurrent acquisitions and releases cancelled reservations", async () => {
+			const manager = new StandaloneTerminalManager()
+			const [first, second] = await Promise.all([
+				manager.getOrCreateTerminal("/same"),
+				manager.getOrCreateTerminal("/same"),
+			])
+			assert.notEqual(first.id, second.id)
+			assert.equal(first.busy, true)
+			assert.equal(second.busy, true)
+			manager.releaseTerminalReservation(first)
+			assert.equal(first.busy, false)
+			assert.equal(second.busy, true)
+			assert.equal((await manager.getOrCreateTerminal("/different")).id, first.id)
+			manager.disposeAll()
+		})
+
 		it("creates a terminal for a given cwd", async () => {
 			const manager = new StandaloneTerminalManager()
 			const terminal = await manager.getOrCreateTerminal("/tmp")
@@ -78,6 +94,7 @@ describe("StandaloneTerminalManager", () => {
 		it("reuses an idle terminal with matching cwd", async () => {
 			const manager = new StandaloneTerminalManager()
 			const t1 = await manager.getOrCreateTerminal("/tmp")
+			manager.releaseTerminalReservation(t1)
 			const t2 = await manager.getOrCreateTerminal("/tmp")
 			assert.equal(t1.id, t2.id, "should reuse same terminal for same cwd")
 			manager.disposeAll()
@@ -92,13 +109,14 @@ describe("StandaloneTerminalManager", () => {
 			manager.disposeAll()
 		})
 
-		it("reuses idle terminal with cd command when reuse enabled", async () => {
+		it("reuses idle terminals by updating spawn cwd without running a shell command", async () => {
 			const manager = new StandaloneTerminalManager()
 			const t1 = await manager.getOrCreateTerminal("/tmp")
 			// Mark as not busy so it can be reused
-			t1.busy = false
+			manager.releaseTerminalReservation(t1)
+			manager.runCommand = () => { throw new Error("Acquisition must not run shell commands") }
 			const t2 = await manager.getOrCreateTerminal("/usr")
-			assert.equal(t1.id, t2.id, "should reuse idle terminal via cd")
+			assert.equal(t1.id, t2.id, "should reuse idle terminal")
 			assert.equal((t2.terminal as any)._cwd, "/usr")
 			manager.disposeAll()
 		})
@@ -125,7 +143,8 @@ describe("StandaloneTerminalManager", () => {
 	describe("getTerminals", () => {
 		it("returns idle terminals when busy=false", async () => {
 			const manager = new StandaloneTerminalManager()
-			await manager.getOrCreateTerminal("/tmp")
+			const terminal = await manager.getOrCreateTerminal("/tmp")
+			manager.releaseTerminalReservation(terminal)
 			const idle = manager.getTerminals(false)
 			assert.equal(idle.length, 1)
 			assert.equal(idle[0].id, 1)
@@ -192,7 +211,8 @@ describe("StandaloneTerminalManager", () => {
 
 		it("closeTerminals closes idle terminals matching filter", async () => {
 			const manager = new StandaloneTerminalManager()
-			await manager.getOrCreateTerminal("/tmp")
+			const terminal = await manager.getOrCreateTerminal("/tmp")
+			manager.releaseTerminalReservation(terminal)
 			const closed = manager.closeTerminals((t) => t.id === 1)
 			assert.equal(closed, 1)
 			assert.equal(manager.getTerminals(false).length, 0)
@@ -237,7 +257,7 @@ describe("StandaloneTerminalManager", () => {
 		it("isCwdMatchingExpected returns true when cwd matches pending", async () => {
 			const manager = new StandaloneTerminalManager()
 			const t = await manager.getOrCreateTerminal("/tmp")
-			;(t as any).pendingCwdChange = "/tmp"
+				; (t as any).pendingCwdChange = "/tmp"
 			assert.equal(manager.isCwdMatchingExpected(t), true)
 			manager.disposeAll()
 		})

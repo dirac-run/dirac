@@ -12,7 +12,7 @@ import type { TaskConfig } from "../../types/TaskConfig"
 // Builds the system trait — command execution, file search, system info, URL opening.
 export function buildSystemTrait(
 	config: TaskConfig,
-	executeCommandFn: (command: string, options?: { timeout?: number }) => Promise<SystemCommandResult>,
+	executeCommandFn: (command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }) => Promise<SystemCommandResult>,
 ): ISystemTrait {
 	return {
 		executeCommand: async (command, options) => {

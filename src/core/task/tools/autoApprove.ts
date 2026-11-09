@@ -21,17 +21,20 @@ export function resolveCommandApproval(
 	permissions: ToolPermissionRules,
 	toolName: DiracDefaultTool.EXECUTE_COMMAND | DiracDefaultTool.UPSERT_TOOL = DiracDefaultTool.EXECUTE_COMMAND,
 ): { required: boolean; utilityEligible: boolean } {
+	permissions.assertConfigurationValid()
 	const isChild = autoApprover.requiresCounterpartyApproval
 	if (isChild && toolName !== DiracDefaultTool.EXECUTE_COMMAND) return { required: true, utilityEligible: false }
-	if (!isChild && !utilityEnabled && autoApprover.isUnrestrictedAutoApprove()) return { required: false, utilityEligible: false }
+	if (!isChild && !utilityEnabled && autoApprover.isUnrestrictedAutoApprove())
+		return { required: false, utilityEligible: false }
 	const results = commands.map((command) => {
 		const actualCommand = command.match(/^@(\w+):(.+)$/)?.[2].trim() ?? command
 		return { actualCommand, permission: permissions.validateTool("execute_command", actualCommand) }
 	})
 	if (results.some(({ permission }) => !permission.allowed)) return { required: true, utilityEligible: false }
 	if (!isChild && autoApprover.isUnrestrictedAutoApprove()) return { required: false, utilityEligible: false }
-	const required = results.some(({ actualCommand, permission }) =>
-		!autoApprover.isCommandAutoApproved(actualCommand) && !permission.matchedPattern)
+	const required = results.some(
+		({ actualCommand, permission }) => !autoApprover.isCommandAutoApproved(actualCommand) && !permission.matchedPattern,
+	)
 	return { required, utilityEligible: required }
 }
 
@@ -42,6 +45,7 @@ export function resolveBrowserLaunchPermission(
 	permissions: ToolPermissionRules,
 ): ToolPermissionDisposition {
 	if (autoApprover.requiresCounterpartyApproval) return "manual_only"
+	permissions.assertConfigurationValid()
 	const ruleResult = permissions.validateTool(DiracDefaultTool.BROWSER, url)
 	if (!ruleResult.allowed) return "manual_only"
 	if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
@@ -96,6 +100,7 @@ export class AutoApprove {
 	// Returns bool for most tools, and tuple for tools with nested settings
 	shouldAutoApproveTool(toolName: DiracDefaultTool): boolean | [boolean, boolean] {
 		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(toolName)) return false
+		this.commandPermissionController.assertConfigurationValid()
 		if (this.setting("yoloModeToggled")) {
 			switch (toolName) {
 				case DiracDefaultTool.FILE_READ:
@@ -172,6 +177,7 @@ export class AutoApprove {
 		autoApproveActionpath: string | undefined,
 	): Promise<ToolPermissionDisposition> {
 		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(blockname)) return "manual_only"
+		this.commandPermissionController.assertConfigurationValid()
 		let isLocal = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -211,6 +217,7 @@ export class AutoApprove {
 		autoApproveActionpath: string | undefined,
 	): Promise<boolean> {
 		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(blockname)) return false
+		this.commandPermissionController.assertConfigurationValid()
 		let isLocalRead = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -228,7 +235,10 @@ export class AutoApprove {
 			}
 		}
 
-		if (this.requiresCounterpartyApproval && !this.commandPermissionController.validateTool(blockname, autoApproveActionpath).allowed) {
+		if (
+			this.requiresCounterpartyApproval &&
+			!this.commandPermissionController.validateTool(blockname, autoApproveActionpath).allowed
+		) {
 			return false
 		}
 
@@ -249,10 +259,11 @@ export class AutoApprove {
 	}
 
 	public isCommandAutoApproved(command: string): boolean {
+		this.commandPermissionController.assertConfigurationValid()
 		const entries = this.setting("userApprovedCommands")
 		const autoApproveResult = this.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND)
-		const safeCommandAutoApprovalEnabled = this.requiresCounterpartyApproval
-			|| (Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult)
+		const safeCommandAutoApprovalEnabled =
+			this.requiresCounterpartyApproval || (Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult)
 
 		if (safeCommandAutoApprovalEnabled && isSafeCommand(command)) return true
 		if (!isSupportedShellSyntax(command)) return false
@@ -269,6 +280,7 @@ export class AutoApprove {
 	 */
 	public isUnrestrictedAutoApprove(): boolean {
 		if (this.requiresCounterpartyApproval) return false
+		this.commandPermissionController.assertConfigurationValid()
 		return this.setting("yoloModeToggled") || this.setting("autoApproveAllToggled")
 	}
 
@@ -277,6 +289,7 @@ export class AutoApprove {
 	 */
 	public shouldAutoApproveWithRules(toolName: DiracDefaultTool, path?: string): boolean {
 		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(toolName)) return false
+		this.commandPermissionController.assertConfigurationValid()
 		const result = this.commandPermissionController.validateTool(toolName, path)
 		return result.allowed && result.reason === "allowed"
 	}

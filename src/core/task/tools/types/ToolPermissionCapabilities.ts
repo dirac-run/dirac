@@ -12,5 +12,6 @@ export interface ToolAutoApproval {
 }
 
 export interface ToolPermissionRules {
+	assertConfigurationValid(): void
 	validateTool(tool: string, pattern?: string): PermissionValidationResult
 }

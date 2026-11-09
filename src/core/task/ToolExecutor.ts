@@ -130,6 +130,7 @@ export class ToolExecutor {
 		private getAgentWait?: () => import("./AgentCommunication").AgentWaitCapability | undefined,
 		private getSharedJournal?: () => import("./SharedJournalTypes").SharedJournalCapability | undefined,
 		private getPermissionCommandController?: () => CommandPermissionController,
+		private getCommandApprovals?: () => import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability | undefined,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -433,6 +434,7 @@ export class ToolExecutor {
 				agentCommunication: this.getAgentCommunication?.(),
 				agentWait: this.executionProfile === "tasklet" ? this.getAgentWait?.() : undefined,
 				sharedJournal: this.getSharedJournal?.(),
+				commandApprovals: this.getCommandApprovals?.(),
 				assertMutationAuthorized: (toolName) => this.assertMutationAuthorized(toolName),
 				withMutationAuthorization: (toolName, mutation) => this.withMutationAuthorization(toolName, mutation),
 				transitionFromMutation: (transition) => this.transitionFromMutation(transition),

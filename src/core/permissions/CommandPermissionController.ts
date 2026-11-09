@@ -1,5 +1,4 @@
 import type { WatcherFactory } from "@core/ignore/DiracIgnoreController"
-import { fileExistsAtPath } from "@utils/fs"
 import chokidar, { FSWatcher } from "chokidar"
 import fs from "fs/promises"
 import path from "path"
@@ -33,15 +32,25 @@ export class CommandPermissionController {
 	private disposed = false
 	private config: CommandPermissionConfig | null = null
 	private configRevision = 0
+	private configLoadGeneration = 0
+	private configError: Error | null = null
+	private hasValidConfig = false
 
 	/** Changes independently of Task working configuration (including live file reloads). */
-	get revision(): number { return this.configRevision }
+	get revision(): number {
+		return this.configRevision
+	}
 	private readonly ruleEvaluator = new PermissionRuleEvaluator()
 	private readonly commandParser = new CommandParser()
 	private readonly dangerousCharDetector = new DangerousCharDetector()
 
 	constructor(private watcherFactory: WatcherFactory = chokidar.watch) {
-		this.config = this.parseConfigFromEnv()
+		try {
+			this.config = this.parseConfigFromEnv()
+		} catch (error) {
+			this.configError = new Error(`Invalid ${COMMAND_PERMISSIONS_ENV_VAR} configuration`, { cause: error })
+			Logger.error(this.configError.message, error)
+		}
 	}
 
 	/** Initialize the controller with a workspace root and load configuration from file. */
@@ -92,31 +101,39 @@ export class CommandPermissionController {
 		}
 	}
 
-	/** Load configuration from environment and file. */
+	/** Load a complete valid snapshot; invalid updates must not replace existing restrictions. */
 	private async loadConfig(): Promise<void> {
-		const envConfig = this.parseConfigFromEnv()
-		const fileConfig = await this.loadConfigFromFile()
-
-		this.configRevision++
-		this.config = {
-			...envConfig,
-			...fileConfig,
-			rules: [...(envConfig?.rules || []), ...(fileConfig?.rules || [])],
+		const generation = ++this.configLoadGeneration
+		try {
+			const envConfig = this.parseConfigFromEnv()
+			const fileConfig = await this.loadConfigFromFile()
+			if (generation !== this.configLoadGeneration) return
+			this.config = {
+				...envConfig,
+				...fileConfig,
+				rules: [...(envConfig?.rules || []), ...(fileConfig?.rules || [])],
+			}
+			this.hasValidConfig = true
+			this.configError = null
+		} catch (error) {
+			if (generation !== this.configLoadGeneration) return
+			this.configError = new Error("Invalid command permission configuration", { cause: error })
+			Logger.error("Failed to load command permissions; retaining the last valid restrictions:", error)
 		}
+		this.configRevision++
 	}
 
-	/** Load configuration from .dirac/permissions.json */
+	/** Only a missing file means no project configuration; invalid and unreadable files are errors. */
 	private async loadConfigFromFile(): Promise<CommandPermissionConfig | null> {
 		if (!this.workspaceRoot) return null
 
 		const configPath = path.join(this.workspaceRoot, ".dirac", "permissions.json")
-		if (!(await fileExistsAtPath(configPath))) return null
-
 		try {
 			const content = await fs.readFile(configPath, "utf8")
-			return JSON.parse(content) as CommandPermissionConfig
-		} catch (_error) {
-			return null
+			return this.parseConfig(content)
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+			throw new Error(`Failed to read permission configuration at ${configPath}`, { cause: error })
 		}
 	}
 
@@ -162,21 +179,13 @@ export class CommandPermissionController {
 			throw new Error("Workspace root not set. Cannot save permissions.")
 		}
 
+		const content = JSON.stringify(config, null, 2)
+		this.parseConfig(content)
 		const diracDir = path.join(this.workspaceRoot, ".dirac")
 		const configPath = path.join(diracDir, "permissions.json")
-
 		await fs.mkdir(diracDir, { recursive: true })
-		await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf8")
-
-		// Update in-memory config. loadConfig() will be called by file watcher,
-		// but we update it here for immediate effect.
-		const envConfig = this.parseConfigFromEnv()
-		this.configRevision++
-		this.config = {
-			...envConfig,
-			...config,
-			rules: [...(envConfig?.rules || []), ...(config.rules || [])],
-		}
+		await fs.writeFile(configPath, content, "utf8")
+		await this.loadConfig()
 	}
 
 	private isConfigEmpty(): boolean {
@@ -184,25 +193,101 @@ export class CommandPermissionController {
 		return !(this.config.rules?.length || this.config.allow?.length || this.config.deny?.length)
 	}
 
-	/** Parse the DIRAC_COMMAND_PERMISSIONS environment variable. */
+	/** Parse the DIRAC_COMMAND_PERMISSIONS environment variable without discarding invalid restrictions. */
 	private parseConfigFromEnv(): CommandPermissionConfig | null {
 		const envValue = commandPermissionsEnv()
 		if (!envValue) return null
+		return this.parseConfig(envValue)
+	}
 
-		try {
-			const parsed = JSON.parse(envValue)
-			return {
-				allow: Array.isArray(parsed.allow) ? parsed.allow : undefined,
-				deny: Array.isArray(parsed.deny) ? parsed.deny : undefined,
-				allowRedirects: typeof parsed.allowRedirects === "boolean" ? parsed.allowRedirects : undefined,
-			}
-		} catch (error) {
-			Logger.error(`Failed to parse ${COMMAND_PERMISSIONS_ENV_VAR}:`, error)
-			return null
+	/** Invalid configuration must never be overridden by automatic approval or a remembered grant. */
+	assertConfigurationValid(): void {
+		if (this.configError) throw this.configError
+	}
+
+	private parseConfig(content: string): CommandPermissionConfig {
+		const parsed = JSON.parse(content)
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new Error("Permission configuration must be an object")
 		}
+		for (const key of ["allow", "deny"] as const) {
+			if (
+				parsed[key] !== undefined &&
+				(!Array.isArray(parsed[key]) || !parsed[key].every((pattern: unknown) => typeof pattern === "string"))
+			) {
+				throw new Error(`Permission ${key} must be an array of strings`)
+			}
+		}
+		if (parsed.allowRedirects !== undefined && typeof parsed.allowRedirects !== "boolean") {
+			throw new Error("Permission allowRedirects must be a boolean")
+		}
+		if (parsed.rules !== undefined) {
+			if (!Array.isArray(parsed.rules)) throw new Error("Permission rules must be an array")
+			for (const rule of parsed.rules) {
+				if (
+					!rule ||
+					typeof rule !== "object" ||
+					Array.isArray(rule) ||
+					typeof rule.tool !== "string" ||
+					!rule.tool ||
+					(rule.action !== "allow" && rule.action !== "deny") ||
+					(rule.pattern !== undefined && typeof rule.pattern !== "string")
+				) {
+					throw new Error("Permission rules require a tool, allow/deny action, and optional string pattern")
+				}
+			}
+		}
+		return parsed as CommandPermissionConfig
+	}
+
+	/** Applicable restriction tokens, independent of unrelated settings, rule order, and command identity. */
+	getCommandRestrictionContext(command: string): readonly string[] {
+		this.assertConfigurationValid()
+		if (this.isConfigEmpty()) return []
+
+		const restrictions = new Set<string>()
+		const rules = this.config?.rules || []
+		for (const rule of rules) {
+			if (rule.action === "deny" && this.ruleEvaluator.matchesRule(rule, "execute_command", command)) {
+				restrictions.add(JSON.stringify(["rule", rule.tool, rule.pattern ?? null]))
+			}
+		}
+		const explicitlyAllowed = rules.some(
+			(rule) => rule.action === "allow" && this.ruleEvaluator.matchesRule(rule, "execute_command", command),
+		)
+		if (!explicitlyAllowed) {
+			const dangerousChar = this.dangerousCharDetector.detect(command)
+			if (dangerousChar) restrictions.add(JSON.stringify(["shell_operator", dangerousChar.operator]))
+		}
+		const parsed = this.commandParser.parseCommandSegments(command)
+		if (!parsed) restrictions.add("parse_error")
+		else this.collectParsedCommandRestrictions(parsed, restrictions)
+		return [...restrictions].sort()
+	}
+
+	private collectParsedCommandRestrictions(parsed: ParsedCommand, restrictions: Set<string>): void {
+		const config = this.config!
+		if (parsed.hasRedirects && !config.allowRedirects) restrictions.add("redirects")
+		for (const segment of parsed.segments) {
+			const matchingRules = (config.rules || []).filter(
+				(rule) => rule.pattern && this.ruleEvaluator.matchesRule(rule, "execute_command", segment),
+			)
+			for (const rule of matchingRules) {
+				if (rule.action === "deny") restrictions.add(JSON.stringify(["rule", rule.tool, rule.pattern]))
+			}
+			if (matchingRules.some((rule) => rule.action === "allow")) continue
+			for (const pattern of config.deny || []) {
+				if (this.ruleEvaluator.matchesPattern(segment, pattern)) restrictions.add(JSON.stringify(["deny", pattern]))
+			}
+			if (config.allow?.length && !config.allow.some((pattern) => this.ruleEvaluator.matchesPattern(segment, pattern))) {
+				restrictions.add("allowlist")
+			}
+		}
+		for (const subshell of parsed.subshells) this.collectParsedCommandRestrictions(subshell, restrictions)
 	}
 
 	validateTool(tool: string, pattern?: string): PermissionValidationResult {
+		if (this.configError && !this.hasValidConfig) return { allowed: false, reason: "denied" }
 		if (this.isConfigEmpty()) {
 			return { allowed: true, reason: "no_config" }
 		}
@@ -260,6 +345,7 @@ export class CommandPermissionController {
 	 *                        Use this only when the command has already matched an explicit allow rule.
 	 */
 	validateCommand(command: string, allowDangerous = false): PermissionValidationResult {
+		if (this.configError && !this.hasValidConfig) return { allowed: false, reason: "denied" }
 		// No config = allow everything (backward compatibility)
 		if (this.isConfigEmpty()) {
 			return { allowed: true, reason: "no_config" }

@@ -45,6 +45,26 @@ describe("tasklet reconstruction storage", () => {
 		await fs.rm(directory, { recursive: true, force: true })
 	})
 
+	it("retains exact command grants on reload but strips them when copying to another root", async () => {
+		const commandGrants = { version: 1 as const, grants: [{ identity: { kind: "command" as const, command: "npm test", cwd: "/workspace" }, restrictions: ["explicit exception"] }] }
+		await saveTaskletRecord({ ...record(), commandGrants })
+		assert.deepEqual((await loadTaskletRecords("root"))[0].commandGrants, commandGrants)
+		await fs.cp(getTaskDirectoryPath("root"), getTaskDirectoryPath("fork"), { recursive: true })
+		await rebindCopiedTaskletRecords("root", "fork")
+		assert.equal((await loadTaskletRecords("fork"))[0].commandGrants, undefined)
+		assert.deepEqual((await loadTaskletRecords("root"))[0].commandGrants, commandGrants)
+	})
+
+	it("accepts legacy records without grants and rejects malformed durable command authority", async () => {
+		await saveTaskletRecord(record())
+		assert.equal((await loadTaskletRecords("root"))[0].commandGrants, undefined)
+		const file = path.join(getTaskDirectoryPath(address()), GlobalFileNames.taskletRecord)
+		for (const commandGrants of [{ version: 2, grants: [] }, { version: 1, grants: [{}] }, null]) {
+			await fs.writeFile(file, JSON.stringify({ ...record(), commandGrants }))
+			await assert.rejects(loadTaskletRecords("root"), /Invalid tasklet record/)
+		}
+	})
+
 	it("persists Unicode, multiword and suffixed scientist IDs under their owning roots", async () => {
 		for (const id of ["Gödel", "von Neumann", "Planck 2"]) {
 			await saveTaskletRecord(record("root", id))

@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { isDiscoveredToolAvailableToTaskProfile } from "../../../TaskExecutionProfile"
 import { buildOrchestrationTrait } from "../../adapters/traits/OrchestrationTraitBuilder"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
+import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
 import { ListAgentsTool, list_agents_spec } from "./ListAgentsTool"
 import { exposure } from "./tool"
 
@@ -15,11 +16,14 @@ function fixture(identity = { id: "root-task-id", parent: null as string | null 
 	const list = sinon.stub().returns(page)
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentIdentity: identity, agentCommunication: { list } }, ui: { createCard } } as unknown as IToolEnvironment
-	return { env, list, page, card, createCard }
+	const warn = sinon.stub()
+	const env = { orchestration: { agentIdentity: identity, agentCommunication: { list } }, ui: { createCard }, logging: { warn } } as unknown as IToolEnvironment
+	return { env, list, page, card, createCard, warn }
 }
 
 describe("ListAgentsTool", () => {
+	afterEach(() => sinon.restore())
+
 	it("renders a readable roster while returning the runtime page unchanged", async () => {
 		const { env, list, page, card, createCard } = fixture()
 		assert.deepEqual(JSON.parse(await new ListAgentsTool().processCall({}, env)), page)
@@ -75,6 +79,72 @@ describe("ListAgentsTool", () => {
 		})
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR, true)
 	})
+
+	for (const runtimeFails of [false, true]) {
+		for (const phase of ["create", "update", "finalize"] as const) {
+			it(`preserves the ${runtimeFails ? "runtime error" : "roster"} when card ${phase} rejects`, async () => {
+				const { env, list, page, card, createCard, warn } = fixture()
+				const runtimeError = new Error("Invalid roster cursor")
+				if (runtimeFails) list.throws(runtimeError)
+				const presentationError = new Error("Display unavailable")
+				const operation = phase === "create" ? createCard : card[phase]
+				operation.rejects(presentationError)
+				const result = new ListAgentsTool().processCall({}, env)
+				if (runtimeFails) await assert.rejects(result, (error) => error === runtimeError)
+				else assert.deepEqual(JSON.parse(await result), page)
+				sinon.assert.calledOnceWithExactly(list, {})
+				sinon.assert.calledOnce(warn)
+				assert.equal(warn.firstCall.args[1], presentationError)
+				if (phase === "create") {
+					sinon.assert.notCalled(card.update)
+					sinon.assert.notCalled(card.finalize)
+				} else {
+					sinon.assert.calledOnce(card.update)
+					sinon.assert.calledOnceWithExactly(card.finalize, runtimeFails ? CardStatus.ERROR : CardStatus.SUCCESS, true)
+				}
+			})
+
+			for (const lateOutcome of ["resolve", "reject"] as const) {
+				it(`bounds stalled card ${phase} with late ${lateOutcome} while preserving the ${runtimeFails ? "runtime error" : "roster"}`, async () => {
+					const clock = sinon.useFakeTimers()
+					const { env, list, page, card, createCard, warn } = fixture()
+					const runtimeError = new Error("Invalid roster cursor")
+					if (runtimeFails) list.throws(runtimeError)
+					let resolve!: (value: unknown) => void
+					let reject!: (error: Error) => void
+					const stalled = new Promise((settle, fail) => { resolve = settle; reject = fail })
+					const operation = phase === "create" ? createCard : card[phase]
+					operation.returns(stalled)
+					const pending = new ListAgentsTool().processCall({}, env)
+					// Attach the rejection assertion before advancing the deadline.
+					const checked = runtimeFails
+						? assert.rejects(pending, (error) => error === runtimeError)
+						: pending.then((output) => assert.deepEqual(JSON.parse(output), page))
+					await clock.tickAsync(PRESENTATION_OPERATION_TIMEOUT_MS + 1)
+					await checked
+					sinon.assert.calledOnceWithExactly(list, {})
+					sinon.assert.calledOnce(warn)
+					if (phase === "create") {
+						sinon.assert.notCalled(card.update)
+						sinon.assert.notCalled(card.finalize)
+					} else {
+						sinon.assert.calledOnce(card.update)
+						sinon.assert.calledOnceWithExactly(card.finalize, runtimeFails ? CardStatus.ERROR : CardStatus.SUCCESS, true)
+					}
+					const lateError = new Error("Late display failure")
+					if (lateOutcome === "reject") reject(lateError)
+					else resolve(phase === "create" ? card : undefined)
+					await clock.tickAsync(0)
+					if (phase === "create" && lateOutcome === "resolve")
+						sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED)
+					if (phase === "create" && lateOutcome === "reject")
+						assert.equal(warn.lastCall.args[1], lateError)
+					sinon.assert.calledOnce(list)
+					assert.equal(clock.countTimers(), 0)
+				})
+			}
+		}
+	}
 
 	it("rejects discovery without a runtime capability", async () => {
 		const { env, createCard } = fixture()

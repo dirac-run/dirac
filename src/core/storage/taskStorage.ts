@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import type { TaskletRecord, TaskletEvent } from "@core/task/types/tasklet"
+import { isCommandGrantSnapshot } from "@core/task/TaskletCommandApprovals"
 import { historicalTaskletSelection, migrateTaskletConfiguration } from "./migrateTaskletConfiguration"
 import { isTaskletUsageSnapshot } from "@shared/taskletUsage"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
@@ -25,7 +26,7 @@ export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRec
 export async function rebindCopiedTaskletRecords(sourceRootTaskId: string, destinationRootTaskId: string): Promise<void> {
 	const records = await readTaskletRecords(destinationRootTaskId, sourceRootTaskId)
 	for (const record of records) {
-		await saveTaskletRecord({ ...record, rootTaskId: destinationRootTaskId })
+		await saveTaskletRecord({ ...record, rootTaskId: destinationRootTaskId, commandGrants: undefined })
 	}
 }
 
@@ -64,7 +65,8 @@ export async function loadTaskletRecord(
 		!record || record.id !== address.taskletId || record.rootTaskId !== recordRootTaskId ||
 		typeof record.conversationUlid !== "string" || !record.conversationUlid ||
 		typeof record.title !== "string" || typeof record.prompt !== "string" || !Number.isFinite(record.createdAt) ||
-		(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage))
+		(record.usage !== undefined && !isTaskletUsageSnapshot(record.usage)) ||
+		(record.commandGrants !== undefined && !isCommandGrantSnapshot(record.commandGrants))
 	) throw new Error(`Invalid tasklet record for ${address.taskletId} under root ${address.rootTaskId}`)
 	if (record.configuration?.modelSelection !== undefined) return migrateTaskletConfiguration(record)
 	let savedSettings: string

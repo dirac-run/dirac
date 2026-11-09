@@ -740,7 +740,8 @@ describe("SurfaceAdapter", () => {
 			config.callbacks.executeCommandTool = sinon
 				.stub()
 				.resolves([true, "output", { completed: true, exitCode: 2, signal: null, logFilePath: "/tmp/output.log" }])
-			const result = await adapter.system.executeCommand("ls", { timeout: 5000 })
+			const assertAuthorized = sinon.spy()
+			const result = await adapter.system.executeCommand("ls", { timeout: 5000, cwd: "/approved workspace", assertAuthorized })
 			expect(result).to.deep.equal({
 				userRejected: true,
 				output: "output",
@@ -755,6 +756,8 @@ describe("SurfaceAdapter", () => {
 			callArgs[1].should.equal(5000)
 			callArgs[2].suppressUserInteraction.should.equal(true)
 			callArgs[2].useBackgroundExecution.should.equal(true)
+			callArgs[2].cwd.should.equal("/approved workspace")
+			callArgs[2].assertAuthorized.should.equal(assertAuthorized)
 			sinon.assert.notCalled(config.callbacks.retainMutationUntil)
 		})
 
@@ -1000,7 +1003,7 @@ function createMockConfig(): any {
 		vscodeTerminalExecutionMode: "backgroundExec",
 		enableParallelToolCalling: false,
 		backgroundEditEnabled: false,
-		taskState: { conversationHistoryDeletedRange: undefined },
+		taskState: { conversationHistoryDeletedRange: undefined, abortSignal: new AbortController().signal },
 		messageState: { getDiracMessages: () => [], getApiConversationHistory: () => [] },
 		providerId: "test",
 		model: { id: "test-model", info: { supportsImages: false, supportsPromptCache: false } },

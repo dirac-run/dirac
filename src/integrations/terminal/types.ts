@@ -380,6 +380,10 @@ export type CommandExecutionResult = [
 
 
 export interface CommandExecutionOptions {
+	/** Absolute working directory captured for this execution; defaults to the task directory. */
+	cwd?: string
+	/** Recheck current authority synchronously at the process-start boundary. */
+	assertAuthorized?: () => void
 	/**
 	 * Force command execution in standalone/background terminal mode for this command.
 	 * This is useful for subagent runs and headless-style execution flows.

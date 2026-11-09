@@ -30,7 +30,7 @@ function harness(utility = false) {
 			vscodeTerminalExecutionMode: "backgroundExec", multiRootEnabled: false
 		}
 	})
-	const permissions = { revision: 0, validateTool: sinon.stub().returns({ allowed: true, reason: "no_config" }) }
+	const permissions = { revision: 0, assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: true, reason: "no_config" }) }
 	const decide = sinon.stub().resolves({ decision: "approve", reason: "allowed" })
 	const executor = Object.assign(Object.create(ToolExecutor.prototype), {
 		getCurrentWorkingConfiguration: config,
@@ -55,6 +55,23 @@ const signal = () => new AbortController().signal
 
 describe("ToolExecutor tasklet parent authority", () => {
 	afterEach(() => sinon.restore())
+
+	it("supplies the exact resolved cwd per command when parent Utility evaluates a child request", async () => {
+		const h = harness(true)
+		const operation = {
+			kind: "commands" as const,
+			commands: ["python clean.py", "npm run clean"],
+			executionContexts: [
+				{ command: "python clean.py", cwd: "/workspace" },
+				{ command: "npm run clean", cwd: "/sensitive/secondary" },
+			],
+		}
+		const expected = structuredClone(operation)
+		const result = await h.executor.authorizeTaskletPermission(request("execute_command", operation), signal())
+		assert.equal(result.approved, true)
+		operation.executionContexts[1].cwd = "/changed/after-evaluation"
+		assert.deepEqual(h.decide.firstCall.args[0].permission.operation, expected)
+	})
 
 	it("uses current parent authority rather than the child's interception classification", async () => {
 		const h = harness()
