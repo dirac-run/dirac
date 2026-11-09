@@ -34,7 +34,7 @@ describe("Tasklet environment control bindings", () => {
 			const query = { view: "result" as const, callId: "call-1", cursor: "cursor" }
 			assert.deepEqual(await tasklets.inspect("child", query), { items: [], totalItems: 0 })
 			const messages: TaskletMessage[] = [
-				{ taskletId: "child", type: "permission_decision", replyTo: "request", decision: "reject" },
+				{ taskletId: "child", type: "permission_decision", requestId: "request", decision: "reject" },
 			]
 			assert.deepEqual(await tasklets.message(messages), [{ taskletId: "child", status: "resolved" }])
 			await tasklets.interrupt("child", "stop")
@@ -70,7 +70,7 @@ describe("Tasklet environment control bindings", () => {
 		callbacks.message.onSecondCall().rejects(failure)
 		const tasklets = buildOrchestrationTrait(config).tasklets!
 		const messages: TaskletMessage[] = [
-			{ taskletId: "child", type: "permission_decision", replyTo: "request", decision: "approve" },
+			{ taskletId: "child", type: "permission_decision", requestId: "request", decision: "approve" },
 		]
 		assert.deepEqual(await tasklets.message(messages), [{ taskletId: "child", status: "requires_user_approval" }])
 		await assert.rejects(tasklets.message(messages), (error) => error === failure)

@@ -1,3 +1,5 @@
+import type { FileInfo } from "./FileInfo"
+export type { FileInfo } from "./FileInfo"
 import { createReadStream, promises as fs } from "node:fs"
 import { workspaceResolver } from "@core/workspace"
 import { arePathsEqual } from "@utils/path"
@@ -25,13 +27,6 @@ const DEFAULT_IGNORE_DIRECTORIES = [
 	"Pods",
 	"*.log",
 ]
-
-export interface FileInfo {
-	path: string
-	mtime: number
-	isDirectory: boolean
-	lineCount?: number
-}
 
 function isRestrictedPath(absolutePath: string): boolean {
 	return arePathsEqual(absolutePath, path.parse(absolutePath).root) || arePathsEqual(absolutePath, os.homedir())

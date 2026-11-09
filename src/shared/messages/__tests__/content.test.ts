@@ -4,13 +4,15 @@ import { convertDiracStorageToAnthropicMessage } from "../content"
 
 describe("message content provenance cleanup", () => {
 	for (const provider of ["anthropic", "openrouter"]) {
-		it(`removes tasklet receipts without mutating persisted content for ${provider}`, () => {
-			const message = { role: "user" as const, content: [{ type: "text" as const, text: "child update", taskletEventIds: ["event-1"] }] }
-			const result = convertDiracStorageToAnthropicMessage(message, provider)
-			assert.equal(JSON.stringify(result).includes("taskletEventIds"), false)
-			assert.match(JSON.stringify(result), /child update/)
-			assert.deepEqual(message.content[0].taskletEventIds, ["event-1"])
-		})
+		for (const identity of ["taskletEventIds", "agentMessageIds", "journalNotificationIds"] as const) {
+			it(`removes ${identity} without mutating persisted content for ${provider}`, () => {
+				const message = { role: "user" as const, content: [{ type: "text" as const, text: "child update", [identity]: ["event-1"] }] }
+				const result = convertDiracStorageToAnthropicMessage(message, provider)
+				assert.equal(JSON.stringify(result).includes(identity), false)
+				assert.match(JSON.stringify(result), /child update/)
+				assert.deepEqual(message.content[0][identity], ["event-1"])
+			})
+		}
 	}
 
 	it("removes transient user-input provenance for ordinary providers", () => {

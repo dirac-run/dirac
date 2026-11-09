@@ -10,14 +10,15 @@ import { areCommandSegmentsApproved, isUserApprovedCommandSegment } from "./util
 
 const WRITE_TOOLS: DiracDefaultTool[] = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
 
-export type ToolPermissionDisposition = "auto_approve" | "utility_eligible" | "manual_only"
+import type { ToolAutoApproval, ToolPermissionRules, ToolPermissionDisposition } from "./types/ToolPermissionCapabilities"
+export type { ToolPermissionDisposition } from "./types/ToolPermissionCapabilities"
 
 /** Shared by command execution and parent authorization of the exact normalized commands. */
 export function resolveCommandApproval(
 	commands: readonly string[],
 	utilityEnabled: boolean,
-	autoApprover: AutoApprove,
-	permissions: Pick<CommandPermissionController, "validateTool">,
+	autoApprover: ToolAutoApproval,
+	permissions: ToolPermissionRules,
 	toolName: DiracDefaultTool.EXECUTE_COMMAND | DiracDefaultTool.UPSERT_TOOL = DiracDefaultTool.EXECUTE_COMMAND,
 ): { required: boolean; utilityEligible: boolean } {
 	const isChild = autoApprover.requiresCounterpartyApproval
@@ -37,8 +38,8 @@ export function resolveCommandApproval(
 /** Utility browser path; the legacy browser path intentionally does not use these shortcuts. */
 export function resolveBrowserLaunchPermission(
 	url: string,
-	autoApprover: AutoApprove,
-	permissions: Pick<CommandPermissionController, "validateTool">,
+	autoApprover: ToolAutoApproval,
+	permissions: ToolPermissionRules,
 ): ToolPermissionDisposition {
 	if (autoApprover.requiresCounterpartyApproval) return "manual_only"
 	const ruleResult = permissions.validateTool(DiracDefaultTool.BROWSER, url)

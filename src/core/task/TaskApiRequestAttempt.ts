@@ -64,6 +64,7 @@ export async function* attemptApiRequest(
 	if (!sealedAttempt) {
 		await appendQueuedSteeringToNextApiRequest(ctx.steeringContext, contextManagementMetadata.truncatedConversationHistory)
 		await ctx.deliverTaskletEvents?.(contextManagementMetadata.truncatedConversationHistory)
+		await ctx.deliverAgentMessages?.(contextManagementMetadata.truncatedConversationHistory)
 	}
 	const providerDispatch = sealedAttempt?.dispatch ?? await ctx.apiConversationManager.prepareProviderConversationDispatch({
 		systemPrompt,

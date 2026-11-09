@@ -1,4 +1,4 @@
-import type { TaskletRecord } from "@core/storage/taskStorage"
+import type { TaskletRecord } from "../../types/tasklet"
 import type {
 	TaskletMessage,
 	TaskletMessageResult,
@@ -26,12 +26,12 @@ import type { GoalObjectiveRevision } from "@shared/goal"
 import { FileDiagnostics } from "@shared/proto/index.dirac"
 import type { ResponseArguments } from "@shared/responseTool"
 import type { TextFileWindow, TextFileWindowOptions } from "@shared/text-file-window"
-import { FileInfo } from "../../../../services/glob/list-files"
+import { FileInfo } from "../../../../services/glob/FileInfo"
 import { BrowserActionResult, DiracMessage } from "../../../../shared/ExtensionMessage"
 import { SkillContent, SkillMetadata } from "../../../../shared/skills"
-import { HookExecutionResult } from "../../../hooks/hook-executor"
+import { HookExecutionResult } from "../../../hooks/HookExecutionResult"
 import { TaskState, type TaskStateWritableKey } from "../../TaskState"
-import { TaskConfig } from "../types/TaskConfig"
+import { ToolConfig } from "../types/ToolConfig"
 import { IDiracContext } from "./IDiracContext"
 export type { CardParams, ICardHandle } from "./ICardHandle"
 export type { IArchitectureTrait } from "./IArchitectureTrait"
@@ -287,6 +287,11 @@ export interface TaskletControls {
 export interface IOrchestrationTrait {
 	/** Available only to an owning ordinary root; never exposes a live Task or host. */
 	readonly tasklets?: TaskletControls
+	/** Runtime-authenticated ordinary communication and discovery for roots and children. */
+	readonly agentCommunication?: import("../../AgentCommunication").AgentCommunicationCapability
+	/** Child-only voluntary communication wait; never resolves structured input. */
+	readonly agentWait?: import("../../AgentCommunication").AgentWaitCapability
+	readonly sharedJournal?: import("../../SharedJournalTypes").SharedJournalCapability
 
 
 	/**
@@ -458,7 +463,7 @@ export interface IToolEnvironment {
 	readonly toolName: string
 
 	/** Task and environment configuration */
-	readonly config: TaskConfig
+	readonly config: ToolConfig
 
 	/** Structured logging access for tools */
 	readonly logging: ILoggingTrait

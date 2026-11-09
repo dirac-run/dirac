@@ -1,3 +1,5 @@
+import type { HookExecutionResult } from "./HookExecutionResult"
+export type { HookExecutionResult } from "./HookExecutionResult"
 import { CardStatus, DiracMessageType, type HookOutputStreamMeta } from "@shared/ExtensionMessage"
 import type { HookOutput } from "@shared/proto/dirac/hooks"
 import { Logger } from "@/shared/services/Logger"
@@ -29,13 +31,6 @@ export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	model?: HookModelInputContext
 	toolName?: string // Optional tool name for PreToolUse/PostToolUse hooks
 	pendingToolInfo?: any // Optional metadata about pending tool execution for PreToolUse
-}
-
-export interface HookExecutionResult {
-	cancel?: boolean
-	contextModification?: string
-	errorMessage?: string
-	wasCancelled: boolean
 }
 
 function fromHookOutput(output: HookOutput): HookExecutionResult {

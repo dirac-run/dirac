@@ -32,14 +32,24 @@ export interface TaskletRecord {
 	usage?: TaskletUsageSnapshot
 }
 
+/** Read-only compatibility for retained responses from the former control-question protocol. */
+export type RecordedTaskletResponse = ResponseArguments & { reply_to?: string }
+
+/** Historical control records remain readable; these variants are not callable inputs. */
+export type RecordedTaskletMessage = TaskletMessage
+	| { taskletId: string; type: "question"; text: string }
+	| { taskletId: string; type: "reply"; replyTo: string; text?: string; action?: string }
+	| { taskletId: string; type: "permission_decision"; replyTo: string; decision: "approve" | "reject" | "escalate" }
+
 export interface TaskletEvent {
 	id: string
 	taskletId: string
 	createdAt: number
 	deliveredAt?: number
 	communication:
-	| { type: "response"; response: ResponseArguments }
-	| { type: "message"; message: TaskletMessage }
+	| { type: "waiting_for_message" }
+	| { type: "response"; response: RecordedTaskletResponse }
+	| { type: "message"; message: RecordedTaskletMessage }
 	| { type: "lifecycle"; state: "accepted" | "resumed"; assignment?: string }
 	| { type: "interaction"; request: TaskletInteraction }
 	| { type: "outcome"; outcome: TaskRunOutcome }
@@ -60,10 +70,10 @@ export interface TaskletInteraction extends TaskInteractionRequest {
 }
 
 export interface TaskletInspection extends TaskletRecord {
-	responses: ResponseArguments[]
+	responses: RecordedTaskletResponse[]
 	interactions: TaskletInteraction[]
 	/** Live engine status is informational, never evidence of a committed outcome. */
-	executionStatus?: import("@shared/ExtensionMessage").TaskStatus
+	executionStatus?: import("@shared/ExtensionMessage").TaskStatus | "waiting_for_message"
 	backgroundCommandRunning: boolean
 	lastActivityAt?: number
 	outcomePersisted: boolean
@@ -85,15 +95,15 @@ export type TaskletResolution = { status: "resolved" | "requires_user_approval" 
 
 /** One addressed direct-message protocol; replies never infer permission from prose. */
 export type TaskletMessage =
-	| { taskletId: string; type: "guidance" | "question"; text: string }
-	| { taskletId: string; type: "reply"; replyTo: string; text?: string; action?: string }
-	| { taskletId: string; type: "permission_decision"; replyTo: string; decision: "approve" | "reject" | "escalate" }
+	| { taskletId: string; type: "guidance"; text: string }
+	| { taskletId: string; type: "reply"; requestId: string; text?: string; action?: string }
+	| { taskletId: string; type: "permission_decision"; requestId: string; decision: "approve" | "reject" | "escalate" }
 
 export interface TaskletMessageResult {
 	taskletId: string
 	title?: string
 	role?: string
-	replyTo?: string
+	requestId?: string
 	messageId?: string
 	request?: string
 	status: "queued" | "resolved" | "already_resolved" | "stale" | "requires_user_approval" | "failed"
@@ -109,6 +119,8 @@ export interface TaskletSleepOptions {
 
 export type TaskletWakeResult =
 	| { reason: "event"; taskletId: string; eventId: string }
+	| { reason: "mail"; from: string; messageId: string }
+	| { reason: "journal"; from: string; messageId: string }
 	| { reason: "timeout" | "user_message" | "cancelled" }
 
 export interface TaskletInspectionQuery {

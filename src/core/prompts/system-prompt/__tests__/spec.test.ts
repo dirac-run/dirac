@@ -12,7 +12,7 @@ import {
 import type { SystemPromptContext } from "../types"
 import { respondSpec } from "@core/task/tools/modules/respond/RespondTool"
 import { RESPONSE_OPERATIONS } from "@shared/responseTool"
-import { tasklets_spec } from "@core/task/tools/modules/subagents/SubagentsTool"
+import { subagents_spec } from "@core/task/tools/modules/subagents/SubagentsTool"
 const mockContext: SystemPromptContext = {
 	cwd: "/test/project",
 	ide: "TestIde",
@@ -132,9 +132,10 @@ describe("respond provider schemas", () => {
 	})
 })
 
-describe("tasklets provider schemas", () => {
+describe("subagents provider schemas", () => {
 	const names = [
 		"operation",
+		"assignments",
 		"tasklet_id",
 		"view",
 		"cursor",
@@ -146,15 +147,15 @@ describe("tasklets provider schemas", () => {
 		"tasklet_ids",
 		"timeout_ms",
 	]
-	const operations = ["list", "inspect", "message", "interrupt", "resume", "sleep"]
+	const operations = ["create", "list", "inspect", "message", "interrupt", "resume", "sleep"]
 
 	for (const provider of ["Anthropic", "Gemini", "OpenAI non-strict", "OpenAI strict"] as const) {
 		it(`${provider}: preserves control fields, constraints and answer/action semantics`, () => {
 			const strict = provider === "OpenAI strict"
 			const gemini = provider === "Gemini"
-			const anthropic = toolSpecInputSchema(tasklets_spec, mockContext)
-			const google = toolSpecFunctionDeclarations(tasklets_spec, mockContext)
-			const openAI = toolSpecFunctionDefinition(tasklets_spec, mockContext, strict) as any
+			const anthropic = toolSpecInputSchema(subagents_spec, mockContext)
+			const google = toolSpecFunctionDeclarations(subagents_spec, mockContext)
+			const openAI = toolSpecFunctionDefinition(subagents_spec, mockContext, strict) as any
 			const schema = (provider === "Anthropic" ? anthropic.input_schema : gemini ? google.parameters : openAI.function.parameters) as any
 			const properties = schema.properties
 			const type = (value: string, optional = false) => {
@@ -171,7 +172,11 @@ describe("tasklets provider schemas", () => {
 			expect(properties.messages.minItems).to.equal(1)
 			expect(properties.messages.maxItems).to.equal(20)
 			const item = properties.messages.items
-			expect(item.properties.type.enum).to.deep.equal(["guidance", "question", "reply", "permission_decision"])
+			expect(item.properties.type.enum).to.deep.equal(["guidance", "reply", "permission_decision"])
+			expect(item.properties).to.have.property("request_id")
+			expect(item.properties).not.to.have.property("reply_to")
+			expect(properties.assignments.type).to.deep.equal(type("array", true))
+			expect(properties.assignments.items.required).to.deep.equal(["type", "task_header", "task_description"])
 			expect(item.properties.action.description).to.include("not a permission grant")
 			for (const name of ["tasklet_id", "message", "cursor", "call_id", "message_type"]) {
 				expect(properties[name].type).to.deep.equal(type("string", true))

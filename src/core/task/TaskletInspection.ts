@@ -213,6 +213,7 @@ function pendingRequest(request: TaskletInteraction) {
 
 function messageType(event: TaskletEvent): string {
 	const communication = event.communication
+	if (communication.type === "waiting_for_message") return "waiting_for_message"
 	if (communication.type === "message") return communication.message.type
 	if (communication.type === "interaction") return requestType(communication.request)
 	if (communication.type === "outcome") return "outcome"

@@ -22,28 +22,22 @@ import type {
 import type { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 
-export const subagents_spec: DiracToolSpec = {
-	id: DiracDefaultTool.SUBAGENTS,
-	name: "subagents",
-	description: "Start a batch of subagents asynchronously. Returns each accepted stable ID and task header or its startup error, not completed results. Supply complete instructions: children do not receive the parent conversation. Use tasklets with the returned IDs to supervise them.",
-	contextRequirements: (context) => context.subagentsEnabled === true,
-	parameters: [{
-		name: "assignments",
-		type: "array",
-		required: true,
-		minItems: 1,
-		instruction: "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
-		items: {
-			type: "object",
-			properties: {
-				type: { type: "string", enum: ["default"], description: "Role for this assignment. default uses the main agent's current model settings." },
-				task_header: { type: "string", minLength: 1, maxLength: SUBAGENT_TASK_TITLE_MAX_CHARS, description: `Short assignment header, at most ${SUBAGENT_TASK_TITLE_MAX_WORDS} words.` },
-				task_description: { type: "string", minLength: 1, description: "Complete assignment instructions and necessary context; no parent conversation is copied." },
-			},
-			required: ["type", "task_header", "task_description"],
-			additionalProperties: false,
+const assignmentParameter: NonNullable<DiracToolSpec["parameters"]>[number] = {
+	name: "assignments",
+	type: "array",
+	required: false,
+	minItems: 1,
+	instruction: "Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
+	items: {
+		type: "object",
+		properties: {
+			type: { type: "string", enum: ["default"], description: "Role for this assignment. default uses the main agent's current model settings." },
+			task_header: { type: "string", minLength: 1, maxLength: SUBAGENT_TASK_TITLE_MAX_CHARS, description: `Short assignment header, at most ${SUBAGENT_TASK_TITLE_MAX_WORDS} words.` },
+			task_description: { type: "string", minLength: 1, description: "Complete assignment instructions and necessary context; no parent conversation is copied." },
 		},
-	}],
+		required: ["type", "task_header", "task_description"],
+		additionalProperties: false,
+	},
 }
 
 export class SubagentsTool implements IDiracTool {
@@ -56,10 +50,16 @@ export class SubagentsTool implements IDiracTool {
 	}
 
 	async processCall(args: unknown, env: IToolEnvironment): Promise<string> {
+		const input = requireArguments(args)
+		if (input.operation !== "create") return executeControlCall(input, env)
+		if (!env.config.subagentsEnabled) throw new Error("Subagent creation is disabled")
+		return this.createAssignments(input, env)
+	}
+
+	private async createAssignments(input: Record<string, unknown>, env: IToolEnvironment): Promise<string> {
 		const controls = env.orchestration.tasklets
 		if (!controls) throw new Error("Tasklet spawning is available only to an owning root")
-		const input = requireArguments(args)
-		rejectUnknownFields(input, ["assignments"], "subagents")
+		rejectUnknownFields(input, ["operation", "assignments"], "subagents create")
 		const assignments: unknown[] = Array.isArray(input.assignments) ? input.assignments : []
 		if (assignments.length === 0) {
 			env.orchestration.setTaskState(
@@ -163,7 +163,7 @@ export class SubagentsTool implements IDiracTool {
 
 const operations = ["list", "inspect", "message", "interrupt", "resume", "sleep"] as const
 const inspectionViews = ["status", "messages", "pending", "trajectory", "call", "result", "transcript", "assignment"] as const
-const messageTypes = ["guidance", "question", "reply", "permission_decision"] as const
+const messageTypes = ["guidance", "reply", "permission_decision"] as const
 const permissionDecisions = ["approve", "reject", "escalate"] as const
 const queryFields = ["view", "cursor", "limit", "call_id", "message_type"]
 const MAX_MESSAGE_RESULTS_BYTES = 16 * 1024
@@ -176,13 +176,14 @@ type ControlRequest =
 	| { operation: "interrupt" | "resume"; taskletId: string; message?: string }
 	| { operation: "sleep"; options: TaskletSleepOptions }
 
-export const tasklets_spec: DiracToolSpec = {
-	id: "tasklets",
-	name: "tasklets",
+export const subagents_spec: DiracToolSpec = {
+	id: DiracDefaultTool.SUBAGENTS,
+	name: "subagents",
 	description:
-		"Supervise this root's private tasklets. List and inspect are passive, bounded reads: status, messages, pending requests, trajectory (no results), one call/result, child-only transcript excerpt, or assignment result. Use returned cursors for continuation and call_id for exact evidence. Message is the only direct communication path: send 1–20 addressed guidance/questions/replies/permission decisions together. Guidance is queued, not necessarily consumed; free-text replies never grant permission. Decisions identify the exact reply_to request and never exceed current parent authority. Each item reports its own outcome, including partial failure. Resume explicitly accepts a follow-up assignment under the same ID: acceptance, not completion. Interrupt may carry a reason. Sleep waits for communication, a deadline or user input without consuming events, joining children or polling. Omit tasklet_ids for any child; [] requires timeout_ms and waits only for time/user input. A wake is not completion.",
+		"Create and supervise this root's private subagents. Create accepts a batch of complete assignments asynchronously, not completed results; children do not receive the parent conversation. List and inspect are passive bounded reads; use returned cursors and call_id for exact evidence. Message sends 1–20 parent guidance, structured replies or permission decisions. Ordinary questions and peer mail use send_message instead. Guidance is queued, not necessarily consumed; free-text replies never grant permission. Replies and permission decisions require the exact request_id and never exceed current parent authority. Each item reports its own outcome, including partial failure. Ask the user and relay their answer for child questions needing user input. Resume explicitly accepts follow-up work under the same ID, not completion. Interrupt awaits settlement. Sleep waits for communication, a deadline or user input without consuming events or joining children. Omit tasklet_ids for any child; [] requires timeout_ms and waits only for time/user input. A wake is not completion.",
 	parameters: [
-		{ name: "operation", required: true, instruction: "Supervision operation.", enum: operations },
+		{ name: "operation", required: true, instruction: "Creation or supervision operation.", enum: ["create", ...operations] },
+		assignmentParameter,
 		{
 			name: "tasklet_id",
 			required: false,
@@ -234,9 +235,9 @@ export const tasklets_spec: DiracToolSpec = {
 						type: "string",
 						minLength: 1,
 						maxLength: 8000,
-						description: "Guidance/question text or reply text; never permission authority.",
+						description: "Guidance or reply text; never permission authority.",
 					},
-					reply_to: {
+					request_id: {
 						type: "string",
 						minLength: 1,
 						description: "Exact request identity, required for replies and permission decisions.",
@@ -277,53 +278,44 @@ export const tasklets_spec: DiracToolSpec = {
 	],
 }
 
-export class TaskletsTool implements IDiracTool {
-	spec(): DiracToolSpec {
-		return tasklets_spec
-	}
-	supportedSurfaces() {
-		return ["all" as const]
-	}
-
-	async processCall(input: unknown, env: IToolEnvironment): Promise<string> {
-		const controls = env.orchestration.tasklets
-		if (!controls) throw new Error("Tasklet controls are available only to an owning root")
-		const args = requireArguments(input)
-		const request = parseControlRequest(args)
-		const initialReceipt = controlReceipt(request)
-		const card = await env.ui.createCard({
-			...receiptCard(initialReceipt, CardStatus.RUNNING),
-			collapsed: true,
-			rawInput: args,
-		})
-		try {
-			const result = await executeOperation(controls, request)
-			const output = JSON.stringify(result)
-			if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
-				throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
-			const receipt = controlReceiptResult(request, result)
-			const status =
-				receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
-					? CardStatus.ERROR
-					: CardStatus.SUCCESS
-			await card.update(receiptCard(receipt, status))
-			await card.finalize(status)
-			return output
-		} catch (error) {
-			await card.update(
-				receiptCard(
-					{
-						...initialReceipt,
-						outcome: "failed",
-						rows: initialReceipt.rows.map((row) => ({ ...row, outcome: "failed" })),
-						error: redactRoutingIds(clipText(toError(error).message, 2000), request),
-					},
-					CardStatus.ERROR,
-				),
-			)
-			await card.finalize(CardStatus.ERROR)
-			throw error
-		}
+async function executeControlCall(input: unknown, env: IToolEnvironment): Promise<string> {
+	const controls = env.orchestration.tasklets
+	if (!controls) throw new Error("Tasklet controls are available only to an owning root")
+	const args = requireArguments(input)
+	const request = parseControlRequest(args)
+	const initialReceipt = controlReceipt(request)
+	const card = await env.ui.createCard({
+		...receiptCard(initialReceipt, CardStatus.RUNNING),
+		collapsed: true,
+		rawInput: args,
+	})
+	try {
+		const result = await executeOperation(controls, request)
+		const output = JSON.stringify(result)
+		if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
+			throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
+		const receipt = controlReceiptResult(request, result)
+		const status =
+			receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
+				? CardStatus.ERROR
+				: CardStatus.SUCCESS
+		await card.update(receiptCard(receipt, status))
+		await card.finalize(status)
+		return output
+	} catch (error) {
+		await card.update(
+			receiptCard(
+				{
+					...initialReceipt,
+					outcome: "failed",
+					rows: initialReceipt.rows.map((row) => ({ ...row, outcome: "failed" })),
+					error: redactRoutingIds(clipText(toError(error).message, 2000), request),
+				},
+				CardStatus.ERROR,
+			),
+		)
+		await card.finalize(CardStatus.ERROR)
+		throw error
 	}
 }
 
@@ -428,32 +420,32 @@ function parseMessageBatch(input: unknown): TaskletMessage[] {
 		const taskletId = requireRoutingIdentity(args, "tasklet_id")
 		const type = args.type
 		let item: TaskletMessage
-		if (type === "guidance" || type === "question") {
+		if (type === "guidance") {
 			rejectUnknownFields(args, ["tasklet_id", "type", "text"], type)
 			item = { taskletId, type, text: requireMessageText(args) }
 		} else if (type === "reply") {
-			rejectUnknownFields(args, ["tasklet_id", "type", "reply_to", "text", "action"], type)
+			rejectUnknownFields(args, ["tasklet_id", "type", "request_id", "text", "action"], type)
 			if (args.text === undefined && args.action === undefined)
 				throw new Error("A reply requires text or an exact displayed action")
 			item = {
 				taskletId,
 				type,
-				replyTo: requireRoutingIdentity(args, "reply_to"),
+				requestId: requireRoutingIdentity(args, "request_id"),
 				...(args.text === undefined ? {} : { text: requireMessageText(args) }),
 				...(args.action === undefined ? {} : { action: requireMessageText({ text: args.action }) }),
 			}
 		} else if (type === "permission_decision") {
-			rejectUnknownFields(args, ["tasklet_id", "type", "reply_to", "decision"], type)
+			rejectUnknownFields(args, ["tasklet_id", "type", "request_id", "decision"], type)
 			if (!permissionDecisions.includes(args.decision as (typeof permissionDecisions)[number]))
 				throw new Error("Invalid permission decision")
 			item = {
 				taskletId,
 				type,
-				replyTo: requireRoutingIdentity(args, "reply_to"),
+				requestId: requireRoutingIdentity(args, "request_id"),
 				decision: args.decision as "approve" | "reject" | "escalate",
 			}
 		} else throw new Error("Unknown tasklet message type")
-		const target = JSON.stringify([taskletId, "replyTo" in item ? ["request", item.replyTo] : [type, item.text]])
+		const target = JSON.stringify([taskletId, "requestId" in item ? ["request", item.requestId] : [type, item.text]])
 		if (targets.has(target)) throw new Error("Duplicate or conflicting message targets in batch")
 		targets.add(target)
 		return item
@@ -503,7 +495,7 @@ function compactMessageResults(items: TaskletMessage[], results: TaskletMessageR
 	const compact = results.map((result, index) => ({
 		taskletId: items[index].taskletId,
 		status: result.status,
-		...("replyTo" in items[index] ? { replyTo: (items[index] as Extract<TaskletMessage, { replyTo: string }>).replyTo } : {}),
+		...("requestId" in items[index] ? { requestId: (items[index] as Extract<TaskletMessage, { requestId: string }>).requestId } : {}),
 		...(result.messageId && Buffer.byteLength(JSON.stringify(result.messageId), "utf8") <= 128
 			? { messageId: result.messageId }
 			: {}),
@@ -549,7 +541,7 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 				outcome: "requested",
 				message: "text" in item ? item.text : undefined,
 				choice: item.type === "reply" ? item.action : undefined,
-				requestId: "replyTo" in item ? item.replyTo : undefined,
+				requestId: "requestId" in item ? item.requestId : undefined,
 				decision: item.type === "permission_decision" ? item.decision : undefined,
 			})),
 		}
@@ -736,7 +728,7 @@ function redactRoutingIds(body: string, request: ControlRequest): string {
 		request.operation === "message"
 			? request.items.flatMap((item) => [
 				[item.taskletId, "tasklet"],
-				...("replyTo" in item ? [[item.replyTo, "request"]] : []),
+				...("requestId" in item ? [[item.requestId, "request"]] : []),
 			])
 			: "taskletId" in request
 				? [[request.taskletId, "tasklet"]]

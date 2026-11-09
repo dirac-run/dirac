@@ -33,17 +33,21 @@ export interface DiracTextContentBlock extends Anthropic.TextBlockParam, DiracSh
 	steeringMessageIds?: string[]
 	// Durable tasklet communication receipt. Removed before provider dispatch.
 	taskletEventIds?: string[]
+	// Ordinary agent-mail inclusion identity. Removed before provider dispatch.
+	agentMessageIds?: string[]
+	// Journal headline inclusion identity. Removed before provider dispatch.
+	journalNotificationIds?: string[]
 	// reasoning_details only exists for providers listed in REASONING_DETAILS_PROVIDERS
 	reasoning_details?: DiracReasoningDetailParam[]
 	// Thought Signature associates with Gemini
 	signature?: string
 }
 
-export interface DiracImageContentBlock extends Anthropic.ImageBlockParam, DiracSharedMessageParam {}
+export interface DiracImageContentBlock extends Anthropic.ImageBlockParam, DiracSharedMessageParam { }
 
-export interface DiracDocumentContentBlock extends Anthropic.DocumentBlockParam, DiracSharedMessageParam {}
+export interface DiracDocumentContentBlock extends Anthropic.DocumentBlockParam, DiracSharedMessageParam { }
 
-export interface DiracUserToolResultContentBlock extends Anthropic.ToolResultBlockParam, DiracSharedMessageParam {}
+export interface DiracUserToolResultContentBlock extends Anthropic.ToolResultBlockParam, DiracSharedMessageParam { }
 
 /**
  * Assistant only content types
@@ -61,7 +65,7 @@ export interface DiracAssistantThinkingBlock extends Anthropic.ThinkingBlock, Di
 	summary?: unknown[] | DiracReasoningDetailParam[]
 }
 
-export interface DiracAssistantRedactedThinkingBlock extends Anthropic.RedactedThinkingBlockParam, DiracSharedMessageParam {}
+export interface DiracAssistantRedactedThinkingBlock extends Anthropic.RedactedThinkingBlockParam, DiracSharedMessageParam { }
 
 export type DiracToolResponseContent = DiracPromptInputContent | Array<DiracTextContentBlock | DiracImageContentBlock>
 
@@ -167,10 +171,12 @@ export function convertDiracStorageToAnthropicMessage(
 }
 
 function removeProviderBoundaryMetadata(block: DiracContent): DiracContent {
-	const { isUserInput, steeringMessageIds, taskletEventIds, ...contentBlock } = block as DiracContent & {
+	const { isUserInput, steeringMessageIds, taskletEventIds, agentMessageIds, journalNotificationIds, ...contentBlock } = block as DiracContent & {
 		isUserInput?: boolean
 		steeringMessageIds?: string[]
 		taskletEventIds?: string[]
+		agentMessageIds?: string[]
+		journalNotificationIds?: string[]
 	}
 	if (block.type === "tool_result" && Array.isArray(block.content)) {
 		return {
@@ -191,7 +197,7 @@ function removeProviderBoundaryMetadata(block: DiracContent): DiracContent {
 }
 
 export function cleanContentBlock(block: DiracContent): Anthropic.ContentBlock {
-	const { reasoning_details, call_id, summary, isComplete, isNativeToolCall, isUserInput, steeringMessageIds, taskletEventIds, ...rest } =
+	const { reasoning_details, call_id, summary, isComplete, isNativeToolCall, isUserInput, steeringMessageIds, taskletEventIds, agentMessageIds, journalNotificationIds, ...rest } =
 		block as any
 
 	if (block.type === "tool_result" && Array.isArray(block.content)) {

@@ -76,6 +76,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		const outcome = deferred<TaskRunOutcome>()
 		const task = {
 			stateView: { status: TaskStatus.WAITING_FOR_API },
+			getAgentCommunicationState: () => ({ status: "running", accepts_messages: true }),
 			startTask: sandbox.stub().returns(outcome.promise),
 			resumeTaskFromHistory: sandbox.stub().returns(outcome.promise),
 			abortTask: sandbox.stub().callsFake(async () => {
@@ -108,6 +109,7 @@ describe("TaskletHost asynchronous ownership", () => {
 		owner = {
 			taskId: "root",
 			executionProfile: "standalone",
+			getAgentCommunicationState: () => ({ status: "running", accepts_messages: true }),
 			authorizePermission: sandbox.stub().resolves({ approved: false, assertCurrent: () => { } }),
 			assertPermissionAllowed: sandbox.stub(),
 			escalateInteraction: sandbox.stub().resolves(rejected),
@@ -129,6 +131,224 @@ describe("TaskletHost asynchronous ownership", () => {
 		sandbox.restore()
 		HostProvider.reset()
 		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("observes child voluntary wait, wakes selected parent sleep, and keeps the child active until cancellation", async () => {
+		const child = await host.start({ type: "default", title: "waiting child", prompt: "work" })
+		const parentWait = host.sleep({ taskletIds: [child.id], timeoutMs: 1000 })
+		const signal = new AbortController().signal
+		const waiting = host.agentCommunication.forWaiter(child.id, { signal, hasPendingInteraction: () => false, hasPendingGuidance: () => false }).wait()
+		assert.equal(host.inspect(child.id).executionStatus, "waiting_for_message")
+		assert.match(host.supervisionSnapshot()!, /waiting_for_message/)
+		assert.match(host.getCompletionBlocker()!, /Active tasklets/)
+		const wake = await parentWait
+		assert.equal(wake.reason, "event")
+		if (wake.reason === "event") assert.equal(wake.taskletId, child.id)
+		await host.interrupt(child.id)
+		assert.deepEqual(await waiting, { reason: "cancelled" })
+		assert.equal(host.agentCommunication.isWaiting(child.id), false)
+	})
+
+	it("resets a timed-out child's wait only after accepted parent guidance", async () => {
+		const child = await host.start({ type: "default", title: "waiting child", prompt: "work" })
+		children[0].task.enqueueSteeringMessage.callsFake(async () => {
+			host.agentCommunication.notifyControl(child.id)
+			return "steering-id"
+		})
+		const clock = sandbox.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		const wait = host.agentCommunication.forWaiter(child.id, { signal: new AbortController().signal, hasPendingInteraction: () => false, hasPendingGuidance: () => false })
+		const timeout = wait.wait({ timeout_ms: 1000 })
+		await clock.tickAsync(1000)
+		assert.deepEqual(await timeout, { reason: "timeout" })
+		await assert.rejects(wait.wait(), /fresh inbound/)
+		await host.steer(child.id, "New parent direction")
+		const next = wait.wait()
+		await host.interrupt(child.id)
+		assert.deepEqual(await next, { reason: "cancelled" })
+	})
+
+	it("joins an admitted journal write at host shutdown and skips recipients closed before notification", async () => {
+		const child = await host.start({ type: "default", title: "publisher", prompt: "work" })
+		const atomic = await import("@core/storage/atomicWrite")
+		const original = atomic.atomicWriteFile
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		sandbox.stub(atomic, "atomicWriteFile").callsFake(async (...args) => {
+			if (args[0].includes(`${path.sep}journal${path.sep}`)) {
+				entered.resolve()
+				await release.promise
+			}
+			return original(...args)
+		})
+		const publishing = host.sharedJournal.forAgent(child.id).publish({ headline: "Committed first", content: "Joined during shutdown" })
+		await entered.promise
+		assert.equal(host.agentCommunication.firstPendingJournalNotice("Dirac"), undefined)
+		let settled = false
+		const shutdown = host.shutdown().then(() => { settled = true })
+		try {
+			await new Promise((resolve) => setImmediate(resolve))
+			assert.equal(settled, false)
+			await assert.rejects(host.sharedJournal.forAgent("Dirac").publish({ headline: "Late", content: "Must reject" }), /closed/)
+		} finally { release.resolve() }
+		const receipt = await publishing
+		assert.deepEqual(receipt.notifications, { enqueued: 0, skipped_inactive: 1, rejected_capacity: 0 })
+		await shutdown
+		assert.equal(settled, true)
+		const saved = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath("root"), "journal", `${receipt.message_id}.json`), "utf8"))
+		assert.equal(saved.content, "Joined during shutdown")
+		assert.equal(host.agentCommunication.firstPendingJournalNotice("Dirac"), undefined)
+	})
+
+	it("wakes parent sleep for selected journal authors, keeps user precedence, and never consumes on wake", async () => {
+		const first = await host.start({ type: "default", title: "first", prompt: "work" })
+		const second = await host.start({ type: "default", title: "second", prompt: "work" })
+		const waiting = host.sleep({ taskletIds: [second.id], timeoutMs: 1000 })
+		await host.sharedJournal.forAgent(first.id).publish({ headline: "Other source", content: "Private body" })
+		assert.equal(host.isSleeping, true)
+		const receipt = await host.sharedJournal.forAgent(second.id).publish({ headline: "Selected source", content: "Full body stored once" })
+		assert.deepEqual(await waiting, { reason: "journal", from: second.id, messageId: receipt.message_id })
+		assert.deepEqual(receipt.notifications, { enqueued: 2, skipped_inactive: 0, rejected_capacity: 0 })
+		assert.equal(host.agentCommunication.hasPending("Dirac"), false)
+		assert.deepEqual(await host.sleep({ taskletIds: [], timeoutMs: 0 }), { reason: "timeout" })
+		owner.hasPendingUserInput.returns(true)
+		assert.deepEqual(await host.sleep(), { reason: "user_message" })
+		owner.hasPendingUserInput.returns(false)
+		const delivery = host.agentCommunication.prepareJournalDelivery("Dirac")!
+		assert.equal(delivery.content.length, 2)
+		assert.doesNotMatch(JSON.stringify(delivery.content), /Full body stored once|Private body/)
+		assert.equal((await host.sharedJournal.forAgent("Dirac").read({ message_id: receipt.message_id })).content, "Full body stored once")
+		await host.shutdown()
+		assert.equal(host.agentCommunication.firstPendingJournalNotice("Dirac"), undefined)
+		await assert.rejects(host.sharedJournal.forAgent("Dirac").read({ message_id: receipt.message_id }), /closed/)
+	})
+
+	it("wakes parent sleep for selected direct mail without consuming it or resolving interactions", async () => {
+		const first = await host.start({ type: "default", title: "first", prompt: "work" })
+		const second = await host.start({ type: "default", title: "second", prompt: "work" })
+		const waiting = host.sleep({ taskletIds: [second.id], timeoutMs: 1000 })
+		await host.agentCommunication.forAgent(first.id).send({ to: "Dirac", text: "other source" })
+		assert.equal(host.isSleeping, true)
+		const receipt = await host.agentCommunication.forAgent(second.id).send({ to: "Dirac", text: "selected source" })
+		assert.deepEqual(await waiting, { reason: "mail", from: second.id, messageId: receipt.message_id })
+		assert.equal(host.agentCommunication.hasPending("Dirac"), true)
+		assert.deepEqual(await host.sleep({ taskletIds: [second.id] }), { reason: "mail", from: second.id, messageId: receipt.message_id })
+		assert.deepEqual(await host.sleep({ taskletIds: [], timeoutMs: 0 }), { reason: "timeout" })
+		owner.hasPendingUserInput.returns(true)
+		assert.deepEqual(await host.sleep(), { reason: "user_message" })
+		owner.hasPendingUserInput.returns(false)
+		await host.shutdown()
+		assert.equal(host.agentCommunication.hasPending("Dirac"), false)
+		await assert.rejects(host.agentCommunication.forAgent(first.id).send({ to: "Dirac", text: "late" }), /closed/)
+	})
+
+	it("admits mail during initial acceptance but never starts work because mail arrives", async () => {
+		const originalSave = storage.saveTaskletRecord
+		const gate = deferred<void>()
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			await gate.promise
+			return originalSave(record)
+		})
+		const starting = host.start({ type: "default", title: "starting", prompt: "work" })
+		while (!save.called) await new Promise((resolve) => setImmediate(resolve))
+		const roster = host.agentCommunication.forAgent("Dirac").list().agents
+		const child = roster.find((entry) => entry.id !== "Dirac")!
+		assert.equal(child.status, "starting")
+		await host.agentCommunication.forAgent("Dirac").send({ to: child.id, text: "early" })
+		assert.equal(constructed.callCount, 0)
+		gate.resolve()
+		await starting
+		assert.equal(host.agentCommunication.hasPending(child.id), true)
+		await host.interrupt(child.id)
+		assert.equal(host.agentCommunication.hasPending(child.id), false)
+		await assert.rejects(host.agentCommunication.forAgent("Dirac").send({ to: child.id, text: "late" }), /cannot accept/)
+	})
+
+	for (const outcome of [
+		completed,
+		{ kind: "failed", failedAt: 124, error: { name: "Error", message: "Execution failed" } },
+		{ kind: "interrupted", interruptedAt: 125, reason: "Stopped by parent" },
+		{ kind: "cancelled", cancelledAt: 126 },
+	] satisfies TaskRunOutcome[]) {
+		it(`reports ${outcome.kind} in discovery only after settlement is persisted`, async () => {
+			const child = await host.start({ type: "default", title: "settling child", prompt: "work" })
+			const root = host.agentCommunication.forAgent("Dirac")
+			const originalSave = storage.saveTaskletRecord
+			const entered = deferred<void>()
+			const release = deferred<void>()
+			sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+				if (record.outcome) { entered.resolve(); await release.promise }
+				return originalSave(record)
+			})
+			children[0].outcome.resolve(outcome)
+			try {
+				await entered.promise
+				const settling = root.list().agents.find(({ id }) => id === child.id)!
+				assert.equal(settling.status, "settling")
+				assert.equal(settling.accepts_messages, false)
+			} finally {
+				release.resolve()
+				await host["children"].get(child.id)!.settlement
+			}
+			const settled = root.list().agents.find(({ id }) => id === child.id)!
+			assert.equal(settled.status, outcome.kind)
+			assert.equal(settled.accepts_messages, false)
+		})
+	}
+
+	it("admits resumed mail during the acceptance write despite the previous execution's settling flag", async () => {
+		const child = await host.start({ type: "default", title: "resuming", prompt: "work" })
+		await host.interrupt(child.id)
+		assert.equal(host.agentCommunication.forAgent("Dirac").list().agents.find(({ id }) => id === child.id)!.status, "interrupted")
+		const originalSave = storage.saveTaskletRecord
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (!record.outcome) { entered.resolve(); await release.promise }
+			return originalSave(record)
+		})
+		const resuming = host.resume(child.id, "Explicit new work")
+		try {
+			await entered.promise
+			const sender = host.agentCommunication.forAgent("Dirac")
+			assert.equal(sender.list().agents.find(({ id }) => id === child.id)!.status, "starting")
+			assert.equal(sender.list().agents.find(({ id }) => id === child.id)!.accepts_messages, true)
+			await sender.send({ to: child.id, text: "RESUME_ACCEPTANCE_MAIL" })
+			assert.equal(host.agentCommunication.hasPending(child.id), true)
+		} finally {
+			release.resolve()
+			await resuming
+			assert.equal(host.agentCommunication.forAgent("Dirac").list().agents.find(({ id }) => id === child.id)!.status, "running")
+		}
+	})
+
+	it("skips a paused journal publication's old recipient execution after completion and explicit resume", async () => {
+		const author = await host.start({ type: "default", title: "author", prompt: "publish" })
+		const recipient = await host.start({ type: "default", title: "recipient", prompt: "work" })
+		const atomic = await import("@core/storage/atomicWrite")
+		const original = atomic.atomicWriteFile
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		sandbox.stub(atomic, "atomicWriteFile").callsFake(async (...args) => {
+			if (args[0].includes(`${path.sep}journal${path.sep}`)) { entered.resolve(); await release.promise }
+			return original(...args)
+		})
+		const publishing = host.sharedJournal.forAgent(author.id).publish({ headline: "OLD_EXECUTION_NOTICE", content: "Still readable" })
+		try {
+			await entered.promise
+			children[1].outcome.resolve(completed)
+			await host.interrupt(recipient.id)
+			await host.resume(recipient.id, "Fresh execution")
+			release.resolve()
+			const receipt = await publishing
+			assert.deepEqual(receipt.notifications, { enqueued: 1, skipped_inactive: 1, rejected_capacity: 0 })
+			assert.equal(host.agentCommunication.firstPendingJournalNotice(recipient.id), undefined)
+			assert.equal(host.agentCommunication.firstPendingJournalNotice("Dirac")?.message_id, receipt.message_id)
+			const read = await host.sharedJournal.forAgent(recipient.id).read({ message_id: receipt.message_id })
+			assert.match(JSON.stringify(read), /Still readable/)
+		} finally {
+			release.resolve()
+			await publishing
+		}
 	})
 
 	async function saved(id: string) {
@@ -637,6 +857,46 @@ describe("TaskletHost asynchronous ownership", () => {
 		assert.deepEqual(host.list(), [])
 	})
 
+	it("rejects mail while constructor failure settles and never carries it into explicit resume", async () => {
+		const originalSave = storage.saveTaskletRecord
+		const writingOutcome = deferred<void>()
+		const releaseOutcome = deferred<void>()
+		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (record.outcome) {
+				writingOutcome.resolve()
+				await releaseOutcome.promise
+			}
+			return originalSave(record)
+		})
+		constructed.onFirstCall().throws(new Error("construction failed"))
+		const starting = host.start({ type: "default", title: "failed constructor", prompt: "work" })
+		await writingOutcome.promise
+		const id = host.list()[0].id
+		const root = host.agentCommunication.forAgent("Dirac")
+		assert.equal(root.list().agents.find((agent) => agent.id === id)!.accepts_messages, false)
+		await assert.rejects(root.send({ to: id, text: "must not leak" }), /cannot accept/)
+		releaseOutcome.resolve()
+		await starting
+		assert.equal(host.agentCommunication.hasPending(id), false)
+		await host.resume(id, "explicit new assignment")
+		assert.equal(host.agentCommunication.hasPending(id), false)
+		await root.send({ to: id, text: "fresh mail" })
+		assert.equal(host.agentCommunication.hasPending(id), true)
+	})
+
+	it("ordinary approval text cannot resolve a pending structured permission request", async () => {
+		const record = await host.start({ type: "default", title: "permission", prompt: "work" })
+		const counterparty = (constructed.firstCall.args[0] as taskModule.TaskParams).tasklet!.counterparty
+		const waiting = counterparty.requestInteraction(request("mail-not-a-decision"), new AbortController().signal)
+		const pending = host.inspect(record.id).interactions[0]
+		await host.agentCommunication.forAgent("Dirac").send({ to: record.id, text: "approved, proceed" })
+		assert.equal(host.inspect(record.id).interactions[0].status, "pending")
+		sinon.assert.notCalled(owner.authorizePermission)
+		await host.resolveInteraction(record.id, pending.id, { operation: "reject" })
+		assert.equal((await waiting).response, DiracAskResponse.REJECT)
+		assert.equal(host.agentCommunication.hasPending(record.id), true)
+	})
+
 	it("records constructor failures with a stable inspectable handle", async () => {
 		constructed.throws(new Error("construction failed"))
 		const record = await host.start({ type: "default", title: "work", prompt: "work" })
@@ -688,6 +948,9 @@ describe("TaskletHost asynchronous ownership", () => {
 		const result = host.inspect(record.id)
 		assert.deepEqual(result.outcome, completed)
 		assert.equal(result.outcomePersisted, false)
+		const discovery = host.agentCommunication.forAgent("Dirac").list().agents.find(({ id }) => id === record.id)!
+		assert.equal(discovery.status, "settling")
+		assert.equal(discovery.accepts_messages, false)
 		assert.match(result.settlementError!.message, /outcome disk failure/)
 		assert.equal((await saved(record.id)).outcome, undefined)
 		assert.equal(host.observationSummary().activeCount, 1)
@@ -1672,7 +1935,7 @@ describe("TaskletHost asynchronous ownership", () => {
 
 	it("rejects late message batches without recreating deleted tasklet storage", async () => {
 		const entry = await registerInteraction()
-		const decision = { taskletId: entry.child.id, type: "permission_decision" as const, replyTo: entry.requestId, decision: "reject" as const }
+		const decision = { taskletId: entry.child.id, type: "permission_decision" as const, requestId: entry.requestId, decision: "reject" as const }
 		await host.message([decision])
 		await entry.waiting
 		await host.shutdown()

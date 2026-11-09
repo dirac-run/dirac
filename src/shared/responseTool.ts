@@ -6,7 +6,6 @@ export enum ResponseParameter {
 	OPERATION = "operation",
 	TEXT = "text",
 	OPTIONS = "options",
-	REPLY_TO = "reply_to",
 }
 
 export enum LegacyResponseParameter {
@@ -79,11 +78,9 @@ export interface ResponseArguments {
 	operation: ResponseOperation
 	text: string
 	options?: string[]
-	/** Tasklet reply to an addressed parent question; not a permission decision. */
-	reply_to?: string
 }
 
-export class ResponseShapeError extends Error {}
+export class ResponseShapeError extends Error { }
 
 export function validateResponseShape(args: unknown): ResponseArguments {
 	if (!args || typeof args !== "object" || Array.isArray(args)) throw new ResponseShapeError("Expected an object.")
@@ -110,19 +107,10 @@ export function validateResponseShape(args: unknown): ResponseArguments {
 		throw new ResponseShapeError(`'options' is valid only for the 'question' response operation.`)
 	}
 	if (normalizedOperation === ResponseOperation.QUESTION && options) validateQuestionOptions(options)
-	const replyTo = input[ResponseParameter.REPLY_TO]
-	if (
-		replyTo !== undefined &&
-		replyTo !== null &&
-		(normalizedOperation !== ResponseOperation.PROGRESS || typeof replyTo !== "string" || !replyTo.trim())
-	) {
-		throw new ResponseShapeError("'reply_to' requires a non-empty parent question ID on a progress response.")
-	}
 	return {
 		operation: normalizedOperation,
 		text,
 		...(options ? { options } : {}),
-		...(typeof replyTo === "string" ? { reply_to: replyTo } : {}),
 	}
 }
 

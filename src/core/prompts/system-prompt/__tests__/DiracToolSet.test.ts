@@ -13,8 +13,8 @@ const context: SystemPromptContext = {
 function assignmentSchema(ctx: SystemPromptContext) {
 	const specs = DiracToolSet.withSubagentRoleSpecs([subagents_spec], ctx)
 	assert.deepEqual(specs.map((spec) => spec.name), ["subagents"])
-	assert.deepEqual(specs[0].parameters?.map((parameter) => parameter.name), ["assignments"])
-	return specs[0].parameters![0].items
+	assert.deepEqual(specs[0].parameters?.find((parameter) => parameter.name === "operation")?.enum, ["create", "list", "inspect", "message", "interrupt", "resume", "sleep"])
+	return specs[0].parameters!.find((parameter) => parameter.name === "assignments")!.items
 }
 
 describe("Subagent role discovery", () => {
@@ -32,7 +32,7 @@ describe("Subagent role discovery", () => {
 		assert.deepEqual(first.properties.type.enum, ["default", "Reviewer"])
 		assert.match(first.properties.type.description, /Reviewer: Reviews code\./)
 		assert.deepEqual(next.properties.type.enum, ["default", "Scout"])
-		assert.deepEqual(subagents_spec.parameters![0].items.properties.type.enum, ["default"])
+		assert.deepEqual(subagents_spec.parameters!.find((parameter) => parameter.name === "assignments")!.items.properties.type.enum, ["default"])
 		assert.doesNotMatch(JSON.stringify(next), /Reviewer|modelSelection|apiKey|reasoningEffort/)
 	})
 
@@ -43,7 +43,7 @@ describe("Subagent role discovery", () => {
 			const native = DiracToolSet.convertSpecsToNativeTools(specs, ctx)
 			assert.equal(native.length, 1)
 			assert.match(JSON.stringify(native), /task_header/)
-			assert.doesNotMatch(JSON.stringify(native), /use_utility_model|include_history|timeout|task_title/)
+			assert.doesNotMatch(JSON.stringify(assignmentSchema(ctx)), /use_utility_model|include_history|timeout|task_title/)
 		}
 	})
 })

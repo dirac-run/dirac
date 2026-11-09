@@ -1,20 +1,9 @@
 import type { DiracToolSpec } from "@/shared/tools";
-import type { TaskExecutionProfile } from "../../TaskExecutionProfile";
+import type { ToolExposure } from "./ToolExposure"
+export { CONFIGURABLE_TOOL_EXPOSURE, GOAL_COORDINATOR_TOOL_EXPOSURE } from "./ToolExposure"
+export type { ToolExposure } from "./ToolExposure"
 import type { IDiracTool } from "../interfaces/IDiracTool";
-import type { TaskConfig } from "../types/TaskConfig";
-
-export type ToolExposure =
-	| { kind: "configurable" }
-	/** Available by default; visibility is controlled solely by the spec's contextRequirements. */
-	| { kind: "context_only" }
-	| { kind: "skill_only"; authorizedSkillIds: readonly string[] }
-	| { kind: "profile_only"; profiles: readonly TaskExecutionProfile[] }
-
-export const CONFIGURABLE_TOOL_EXPOSURE: ToolExposure = { kind: "configurable" }
-export const GOAL_COORDINATOR_TOOL_EXPOSURE: ToolExposure = {
-	kind: "profile_only",
-	profiles: ["goal_coordinator", "goal_followup"],
-}
+import type { ToolConfig } from "../types/ToolConfig";
 
 export type ToolSource = "builtin" | "global" | "workspace" | "task"
 
@@ -32,7 +21,7 @@ export interface DiscoveredTool {
 	/** For LLM API schema generation */
 	spec: DiracToolSpec
 	/** For runtime instantiation */
-	factory: (config?: TaskConfig) => IDiracTool
+	factory: (config?: ToolConfig) => IDiracTool
 	/** Filesystem path to the tool.ts manifest */
 	modulePath: string
 	/** Content fingerprint for a user tool's manifest entrypoint. */

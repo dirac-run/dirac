@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, it } from "mocha"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
+import { createMockTaskConfig } from "../../../__tests__/helpers/mockTaskConfig"
 import { createCardFromMessenger } from "../../../adapters/traits/UiTraitBuilder"
 import { validateStagedTool } from "../builder-validation"
 import { buildManifest, SMOKE_ARGS_FILE } from "../constants"
@@ -93,11 +94,13 @@ describe("validateStagedTool smoke-args boundary", () => {
 	it("requires a command decision from the tasklet owner even when local policy approves", async () => {
 		fixture.autoApprover.requiresCounterpartyApproval = true
 		fixture.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
-		fixture.env.config.taskMessenger = {
-			routesToOwner: true, createCard: fixture.createCard,
-		} as unknown as IToolEnvironment["config"]["taskMessenger"]
-		fixture.env.config.toolUse = { name: "upsert_tool", params: { tools: [] } }
-		fixture.env.ui.createCard = (params) => createCardFromMessenger(fixture.env.config, params, [])
+		const { config } = createMockTaskConfig({
+			cwd: fixture.root,
+			overrides: { toolUse: { name: "upsert_tool", params: { tools: [] } } },
+		})
+		Object.defineProperty(config.taskMessenger, "routesToOwner", { value: true })
+		config.taskMessenger.createCard = fixture.createCard
+		fixture.env.ui.createCard = (params) => createCardFromMessenger(config, params, [])
 		const result = await validateStagedTool(fixture.env, await staged("{}"), "workspace")
 		assert.match(result.error ?? "", /rejected/)
 		assert.equal(fixture.autoApprover.isCommandAutoApproved.callCount, 0)

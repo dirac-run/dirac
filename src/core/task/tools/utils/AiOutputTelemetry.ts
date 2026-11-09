@@ -1,5 +1,5 @@
 import { telemetryService } from "@/services/telemetry";
-import type { TaskConfig } from "../types/TaskConfig";
+import type { ToolConfig } from "../types/ToolConfig";
 import { computeLineDiffStats } from "./lineDiffStats";
 
 /**
@@ -10,7 +10,7 @@ import { computeLineDiffStats } from "./lineDiffStats";
 /**
  * Extracts provider and model information from task config for telemetry.
  */
-export function getModelInfo(config: TaskConfig): { providerId: string; modelId: string } {
+export function getModelInfo(config: Pick<ToolConfig, "providerId" | "model">): { providerId: string; modelId: string } {
 	const providerId = config.providerId
 	const modelId = config.model.id
 	return { providerId, modelId }

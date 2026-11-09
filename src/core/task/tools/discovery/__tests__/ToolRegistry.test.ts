@@ -74,7 +74,7 @@ describe("ToolRegistry", () => {
 		for (const name of ["start_task", "list_tasks", "send_task_message", "cancel_task", "read_task_transcript", "resolve_task_interaction", "wait_for_goal_events"]) {
 			assert.equal(toolNames.includes(name), false, name)
 		}
-		for (const name of ["subagents", "tasklets", "update_goal", "block_goal"]) {
+		for (const name of ["subagents", "update_goal", "block_goal"]) {
 			assert.ok(toolNames.includes(name), name)
 		}
 	})
@@ -531,12 +531,12 @@ describe("ToolRegistry", () => {
 		})
 	})
 
-	describe("context-only subagents", () => {
+	describe("profile-only subagents", () => {
 		function registerSubagentTool(): ToolRegistry {
 			const registry = ToolRegistry.getInstance()
 			const tool = ToolDiscoveryService.scanBuiltinTools().find((tool) => tool.id === "subagents")
 			assert.ok(tool)
-			assert.deepStrictEqual(tool.exposure, { kind: "context_only" })
+			assert.deepStrictEqual(tool.exposure, { kind: "profile_only", profiles: ["standalone", "goal_coordinator", "goal_followup"] })
 			registry.registerBuiltin(tool)
 			return registry
 		}
@@ -551,7 +551,7 @@ describe("ToolRegistry", () => {
 
 		for (const legacyToggle of [undefined, false, true]) {
 			for (const subagentsEnabled of [false, true]) {
-				it(`uses only the feature setting (${subagentsEnabled}) with legacy toggle ${legacyToggle}`, () => {
+				it(`retains supervision with creation setting (${subagentsEnabled}) and legacy toggle ${legacyToggle}`, () => {
 					const registry = registerSubagentTool()
 					registry.registerBuiltin(makeTool({ id: "other_tool" }))
 					registry.loadToggles({
@@ -565,7 +565,7 @@ describe("ToolRegistry", () => {
 					const context = { subagentsEnabled } as SystemPromptContext
 					assert.deepStrictEqual(
 						registry.getEnabledSpecs(context).map((spec) => spec.name),
-						subagentsEnabled ? ["subagents"] : [],
+						["subagents"],
 					)
 				})
 			}

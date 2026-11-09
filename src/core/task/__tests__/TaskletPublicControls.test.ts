@@ -27,7 +27,7 @@ import { createMockTaskConfig } from "../tools/__tests__/helpers/mockTaskConfig"
 import { buildOrchestrationTrait } from "../tools/adapters/traits/OrchestrationTraitBuilder"
 import type { ICardHandle, TaskletControls, TaskletWakeResult } from "../tools/interfaces/IToolEnvironment"
 import type { ToolExecutionEnvironment } from "../tools/interfaces/ToolEnvironmentFactory"
-import { create, createSecondary } from "../tools/modules/subagents/tool"
+import { create } from "../tools/modules/subagents/tool"
 import { StateManager } from "@core/storage/StateManager"
 import { anthropicDefaultModelId } from "@shared/api"
 import { SETTINGS_DEFAULTS, type Settings } from "@shared/storage/state-keys"
@@ -44,7 +44,7 @@ function deferred<T>() {
 }
 
 /** Public tool dispatch and real host/storage; only child execution and surface cards are controlled. */
-describe("TaskletsTool public controls", () => {
+describe("SubagentsTool public controls", () => {
 	let sandbox: sinon.SinonSandbox
 	let directory: string
 	let host: TaskletHost
@@ -208,7 +208,6 @@ describe("TaskletsTool public controls", () => {
 			},
 		})
 		coordinator.registerModularTool(create())
-		coordinator.registerModularTool(createSecondary())
 	})
 
 	afterEach(async () => {
@@ -223,7 +222,7 @@ describe("TaskletsTool public controls", () => {
 	})
 
 	async function dispatch(params: Record<string, unknown>): Promise<string> {
-		const result = await coordinator.execute(config, { type: "tool_use", name: "tasklets", params })
+		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params })
 		assert.equal(typeof result, "string")
 		return result as string
 	}
@@ -292,7 +291,7 @@ describe("TaskletsTool public controls", () => {
 	}
 
 	async function spawn(assignments: unknown[]): Promise<SpawnResult> {
-		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params: { assignments } })
+		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments } })
 		assert.equal(typeof result, "string")
 		return JSON.parse(result as string) as SpawnResult
 	}
@@ -406,7 +405,7 @@ describe("TaskletsTool public controls", () => {
 		assert.deepEqual(await loadTaskletEvents(address(id)), before, "Passive queries never acknowledge events")
 		sinon.assert.notCalled(child.task.enqueueSteeringMessage)
 		sinon.assert.calledOnce(constructed)
-		assert.match(cards.at(-1)!.header, /Evidence.*transcript/)
+		assert.match(cards.at(-1)!.header, /Inspect transcript.*Evidence/)
 	})
 
 	it("publishes only committed outcomes and recovers the record/event crash gap without duplication", async () => {
@@ -442,46 +441,25 @@ describe("TaskletsTool public controls", () => {
 		sinon.assert.calledOnce(constructed)
 	})
 
-	it("records correlated questions before delivery and never treats queued guidance as an answer", async () => {
+	it("rejects retired control questions and never treats queued guidance or progress as an answer", async () => {
 		const id = acceptedId(await spawn([{ type: "default", task_header: "Waiting child", task_description: "Ask" }]))
 		const pending = registerInteraction(children[0], "question")
-		const question = await message(id, { type: "question", text: "Why that approach?" })
-		assert.equal(question.status, "queued")
-		assert.equal(
-			(await loadTaskletEvents(address(id))).find((event) => event.id === question.messageId)?.deliveredAt,
-			undefined,
-			"Parent-to-child acceptance must not fabricate a parent-input delivery receipt",
-		)
-		assert.match(children[0].task.enqueueSteeringMessage.firstCall.args[0], new RegExp(question.messageId!))
-		await children[0].params.tasklet!.counterparty.recordResponse({
-			operation: ResponseOperation.PROGRESS,
-			text: "Because it preserves ownership",
-			reply_to: question.messageId,
-		})
-		await assert.rejects(
-			children[0].params.tasklet!.counterparty.recordResponse({
-				operation: ResponseOperation.PROGRESS,
-				text: "Wrong recipient",
-				reply_to: "unknown",
-			}),
-			/does not address/,
-		)
-		assert.equal(host.inspect(id).interactions[0].status, "pending")
+		const before = await loadTaskletEvents(address(id))
+		assert.match(await dispatch({ operation: "message", messages: [{ tasklet_id: id, type: "question", text: "Why?" }] }), /Unknown tasklet message type/)
+		assert.deepEqual(await loadTaskletEvents(address(id)), before)
+		sinon.assert.notCalled(children[0].task.enqueueSteeringMessage)
+		await children[0].params.tasklet!.counterparty.recordResponse({ operation: ResponseOperation.PROGRESS, text: "Still investigating" })
 		const guidance = await message(id, { type: "guidance", text: "Narrow the investigation" })
 		assert.equal(guidance.status, "queued")
-		assert.match(cards.at(-1)!.body!, /Narrow the investigation.*\nOutcome: queued/)
-		assert.ok(!cards.at(-1)!.header.includes(id))
-		const replies = await call<TaskletInspectionPage>({
-			operation: "inspect",
-			tasklet_id: id,
-			view: "messages",
-			message_type: "reply",
-		})
-		assert.equal(replies.totalItems, 1)
-		assert.equal(
-			(await message(id, { type: "reply", reply_to: pending.requestId, text: "Explicit answer" })).status,
-			"resolved",
-		)
+		assert.equal((await loadTaskletEvents(address(id))).find((event) => event.id === guidance.messageId)?.deliveredAt, undefined,
+			"Parent-to-child acceptance must not fabricate a parent-input delivery receipt")
+		sinon.assert.calledOnceWithExactly(children[0].task.enqueueSteeringMessage, "Narrow the investigation")
+		assert.match(cards.at(-1)!.body!, /Narrow the investigation/)
+		assert.match(cards.at(-1)!.body!, /Queued for delivery; consumption is not confirmed/)
+		assert.equal(host.inspect(id).interactions[0].status, "pending")
+		assert.match(await dispatch({ operation: "message", messages: [{ tasklet_id: id, type: "reply", reply_to: pending.requestId, text: "Old field" }] }), /reply_to.*not valid/)
+		assert.equal(host.inspect(id).interactions[0].status, "pending")
+		assert.equal((await message(id, { type: "reply", request_id: pending.requestId, text: "Explicit answer" })).status, "resolved")
 		assert.equal((await pending.waiting).text, "Explicit answer")
 	})
 
@@ -490,7 +468,7 @@ describe("TaskletsTool public controls", () => {
 		const sibling = await host.start({ type: "default", title: "Sibling", prompt: "Ask" })
 		const question = registerInteraction(children[0], "question")
 		const permission = registerInteraction(children[1], "permission", true)
-		const reply = { tasklet_id: first.id, type: "reply", reply_to: question.requestId, text: "Continue" }
+		const reply = { tasklet_id: first.id, type: "reply", request_id: question.requestId, text: "Continue" }
 		assert.match(
 			await dispatch({ operation: "message", messages: [reply, { ...reply, text: "Conflicting" }] }),
 			/Duplicate or conflicting/,
@@ -500,8 +478,8 @@ describe("TaskletsTool public controls", () => {
 			operation: "message",
 			messages: [
 				reply,
-				{ tasklet_id: sibling.id, type: "permission_decision", reply_to: permission.requestId, decision: "approve" },
-				{ tasklet_id: "not-owned", type: "reply", reply_to: "not-a-request", text: "No" },
+				{ tasklet_id: sibling.id, type: "permission_decision", request_id: permission.requestId, decision: "approve" },
+				{ tasklet_id: "not-owned", type: "reply", request_id: "not-a-request", text: "No" },
 			],
 		})
 		assert.deepEqual(
@@ -511,17 +489,17 @@ describe("TaskletsTool public controls", () => {
 		assert.equal((await question.waiting).text, "Continue")
 		assert.equal(host.inspect(sibling.id).interactions[0].status, "pending")
 		assert.equal(cards.at(-1)!.status, CardStatus.ERROR)
-		assert.match(cards.at(-1)!.body!, /requires_user_approval/)
+		assert.match(cards.at(-1)!.body!, /User approval needed/)
 		assert.equal(
-			(await message(first.id, { type: "reply", reply_to: question.requestId, text: "Continue" })).status,
+			(await message(first.id, { type: "reply", request_id: question.requestId, text: "Continue" })).status,
 			"already_resolved",
 		)
 		assert.equal(
-			(await message(first.id, { type: "reply", reply_to: question.requestId, text: "Different" })).status,
+			(await message(first.id, { type: "reply", request_id: question.requestId, text: "Different" })).status,
 			"failed",
 		)
 		assert.equal(
-			(await message(sibling.id, { type: "permission_decision", reply_to: permission.requestId, decision: "reject" }))
+			(await message(sibling.id, { type: "permission_decision", request_id: permission.requestId, decision: "reject" }))
 				.status,
 			"resolved",
 		)
@@ -531,15 +509,15 @@ describe("TaskletsTool public controls", () => {
 	it("keeps prose answers and invented choices separate from permission grants", async () => {
 		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Ask" })
 		const permission = registerInteraction(children[0], "permission", true)
-		assert.equal((await message(id, { type: "reply", reply_to: permission.requestId, text: "approved" })).status, "failed")
+		assert.equal((await message(id, { type: "reply", request_id: permission.requestId, text: "approved" })).status, "failed")
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
 		const question = registerInteraction(children[0], "question")
 		assert.equal(
-			(await message(id, { type: "permission_decision", reply_to: question.requestId, decision: "approve" })).status,
+			(await message(id, { type: "permission_decision", request_id: question.requestId, decision: "approve" })).status,
 			"failed",
 		)
 		assert.equal(
-			(await message(id, { type: "reply", reply_to: question.requestId, action: "invented-choice" })).status,
+			(await message(id, { type: "reply", request_id: question.requestId, action: "invented-choice" })).status,
 			"failed",
 		)
 		sinon.assert.notCalled(owner.authorizePermission)
@@ -549,7 +527,7 @@ describe("TaskletsTool public controls", () => {
 		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Work" })
 		const permission = registerInteraction(children[0], "permission", true)
 		assert.equal(
-			(await message(id, { type: "permission_decision", reply_to: permission.requestId, decision: "approve" })).status,
+			(await message(id, { type: "permission_decision", request_id: permission.requestId, decision: "approve" })).status,
 			"requires_user_approval",
 		)
 		sinon.assert.notCalled(owner.escalateInteraction)
@@ -559,7 +537,7 @@ describe("TaskletsTool public controls", () => {
 			entered.resolve()
 			return authority.promise
 		})
-		const deciding = message(id, { type: "permission_decision", reply_to: permission.requestId, decision: "approve" })
+		const deciding = message(id, { type: "permission_decision", request_id: permission.requestId, decision: "approve" })
 		await entered.promise
 		authority.resolve({
 			approved: true,
@@ -572,7 +550,7 @@ describe("TaskletsTool public controls", () => {
 		const assertCurrent = sandbox.stub()
 		owner.authorizePermission.resolves({ approved: true, assertCurrent })
 		assert.equal(
-			(await message(id, { type: "permission_decision", reply_to: permission.requestId, decision: "approve" })).status,
+			(await message(id, { type: "permission_decision", request_id: permission.requestId, decision: "approve" })).status,
 			"resolved",
 		)
 		assert.deepEqual(await permission.waiting, approved)
@@ -590,7 +568,7 @@ describe("TaskletsTool public controls", () => {
 			entered.resolve()
 			return user.promise
 		})
-		const resolving = message(id, { type: "permission_decision", reply_to: permission.requestId, decision: "escalate" })
+		const resolving = message(id, { type: "permission_decision", request_id: permission.requestId, decision: "escalate" })
 		await entered.promise
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
 		assert.deepEqual(owner.escalateInteraction.firstCall.args[0], { id, title: "Escalation" })
@@ -627,11 +605,11 @@ describe("TaskletsTool public controls", () => {
 		assert.equal(resumed.accepted, true)
 		assert.equal(host.inspect(record.id).conversationUlid, record.conversationUlid)
 		assert.equal(children[2].params.workingConfiguration!.settings.mode, "act")
-		assert.equal((await message(record.id, { type: "reply", reply_to: pending.requestId, text: "Too late" })).status, "stale")
+		assert.equal((await message(record.id, { type: "reply", request_id: pending.requestId, text: "Too late" })).status, "stale")
 		const fresh = registerInteraction(children[2], "question")
 		assert.notEqual(fresh.requestId, pending.requestId)
 		assert.equal(
-			(await message(record.id, { type: "reply", reply_to: fresh.requestId, text: "Current answer" })).status,
+			(await message(record.id, { type: "reply", request_id: fresh.requestId, text: "Current answer" })).status,
 			"resolved",
 		)
 		assert.equal((await fresh.waiting).text, "Current answer")
@@ -664,7 +642,7 @@ describe("TaskletsTool public controls", () => {
 		assert.strictEqual(transcript.messages, children[0].presentation, "Live reads borrow history for bounded paging")
 		assert.equal("conversation" in transcript, false)
 		assert.equal(transcript.outcome, undefined)
-		await message(id, { type: "reply", reply_to: pending.requestId, text: "Continue" })
+		await message(id, { type: "reply", request_id: pending.requestId, text: "Continue" })
 		await pending.waiting
 		assert.equal(host.observationInventory().find((row) => row.taskletId === id)!.state, "running")
 		children[0].outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })
@@ -694,7 +672,7 @@ describe("TaskletsTool public controls", () => {
 		owner.postTaskletActivity.rejects(new Error("Controlled display failure"))
 		const { id } = await host.start({ type: "default", title: "Display failure", prompt: "Work" })
 		const answered = registerInteraction(children[0], "answered")
-		assert.equal((await message(id, { type: "reply", reply_to: answered.requestId, text: "Continue" })).status, "resolved")
+		assert.equal((await message(id, { type: "reply", request_id: answered.requestId, text: "Continue" })).status, "resolved")
 		await answered.waiting
 		const retired = registerInteraction(children[0], "retired")
 		children[0].outcome.resolve({ kind: "completed", response: fullText, completedAt: 123 })

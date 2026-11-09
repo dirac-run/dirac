@@ -47,6 +47,7 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 	let mistakes = 0
 	const env = {
 		toolName: "subagents",
+		config: { subagentsEnabled: true },
 		orchestration: {
 			tasklets: { start },
 			getHistory: unexpectedBatchAccounting,
@@ -64,7 +65,7 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 }
 
 async function spawn(env: IToolEnvironment, subagents: unknown[]) {
-	return JSON.parse(await new SubagentsTool().processCall({ assignments: subagents }, env)).subagents
+	return JSON.parse(await new SubagentsTool().processCall({ operation: "create", assignments: subagents }, env)).subagents
 }
 
 const assignment = { type: "default", task_header: "Inspect code", task_description: "Inspect" }
@@ -83,7 +84,8 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(results.length, invalid.length)
 		assert.ok(results.every((result: { accepted: boolean }) => !result.accepted))
 		sinon.assert.notCalled(start)
-		await assert.rejects(new SubagentsTool().processCall({ subagents: [assignment] }, env), /not valid/)
+		await assert.rejects(new SubagentsTool().processCall({ operation: "create", subagents: [assignment] }, env), /not valid/)
+		await assert.rejects(new SubagentsTool().processCall({ assignments: [assignment] }, env), /Unknown tasklet operation/)
 	})
 
 	it("forwards a selected role and complete trimmed instructions through the environment only", async () => {
@@ -104,13 +106,13 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {
 		assert.match(subagents_spec.description, /asynchronously/)
 		assert.match(subagents_spec.description, /not completed results/)
-		assert.match(String(subagents_spec.parameters![0].instruction), /Acceptance is not completion/)
+		assert.match(String(subagents_spec.parameters!.find((parameter) => parameter.name === "assignments")!.instruction), /Acceptance is not completion/)
 	})
 
 	it("uses the environment capability guard even with no legacy config", async () => {
 		const { env, createCard } = fixture()
 		delete (env.orchestration as { tasklets?: TaskletControls }).tasklets
-		await assert.rejects(new SubagentsTool().processCall({ assignments: [assignment] }, env), /owning root/)
+		await assert.rejects(new SubagentsTool().processCall({ operation: "create", assignments: [assignment] }, env), /owning root/)
 		assert.equal(createCard.callCount, 0)
 	})
 
@@ -169,7 +171,7 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 
 
 
-	for (const input of [{}, { assignments: [] }, { assignments: "invalid" }]) {
+	for (const input of [{ operation: "create" }, { operation: "create", assignments: [] }, { operation: "create", assignments: "invalid" }]) {
 		it(`reports a missing batch without creating a card: ${JSON.stringify(input)}`, async () => {
 			const { env, createCard, mistakes } = fixture()
 			assert.match(await new SubagentsTool().processCall(input, env), /assignments must be a non-empty array/)

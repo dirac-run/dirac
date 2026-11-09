@@ -90,6 +90,7 @@ async function createSnapshot(
 		services: {},
 	} as TaskConfig
 	const environment = {
+		config,
 		context: { save: sinon.stub().resolves() },
 		getCustomMetadata: () => ({}),
 		getCreatedCards: () => [],
@@ -103,8 +104,7 @@ async function createSnapshot(
 		getSelectionPolicy: () => selectionPolicy,
 		getActiveSkills: () => activeSkills,
 		// Same availability wiring as ToolExecutor; no mocked profile decisions.
-		isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(profile, tool) &&
-			(tool.id !== DiracDefaultTool.SUBAGENTS || subagentsEnabled),
+		isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(profile, tool),
 		environmentFactory: { create: createEnvironment },
 	})
 	const context = {
@@ -169,11 +169,10 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				assertNoSubagents(snapshot)
 				assertGoalTools(snapshot, profile)
 				assert.ok(snapshot.executableToolNames.has("read_file"))
-				// The real dispatcher is context_only, so policies cannot select it
-				// as a configurable tool. Do not change its exposure for this fixture.
+				// Profile-only supervision cannot be selected back into a child.
 				assert.equal(
 					ToolRegistry.getInstance().getAllTools().find((tool) => tool.id === "subagents")?.exposure.kind,
-					"context_only",
+					"profile_only",
 				)
 			})
 		}
@@ -213,16 +212,17 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 		it(`${profile} exposes tasklet controls only to root profiles`, async () => {
 			const { snapshot, config } = await createSnapshot(profile)
 			const expected = profile !== "tasklet"
-			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.spec.name === "tasklets"), expected)
-			assert.equal(snapshot.promptVisibleSpecs.some((spec) => spec.name === "tasklets"), expected)
-			assert.equal(nativeNames(snapshot).includes("tasklets"), expected)
-			assert.equal(snapshot.executableToolNames.has("tasklets"), expected)
-			assert.equal(snapshot.coordinator.has("tasklets"), expected)
-			if (!expected) {
-				await assert.rejects(snapshot.coordinator.execute(config, {
-					type: "tool_use", name: "tasklets", params: { operation: "list" }, isComplete: true,
-				}), { message: "No modular tool registered for: tasklets" })
-			}
+			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.spec.name === "subagents"), expected)
+			assert.equal(snapshot.promptVisibleSpecs.some((spec) => spec.name === "subagents"), expected)
+			assert.equal(nativeNames(snapshot).includes("subagents"), expected)
+			assert.equal(snapshot.executableToolNames.has("subagents"), expected)
+			assert.equal(snapshot.coordinator.has("subagents"), expected)
+			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.spec.name === "tasklets"), false)
+			assert.equal(nativeNames(snapshot).includes("tasklets"), false)
+			assert.equal(snapshot.executableToolNames.has("tasklets"), false)
+			await assert.rejects(snapshot.coordinator.execute(config, {
+				type: "tool_use", name: "tasklets", params: { operation: "list" }, isComplete: true,
+			}), { message: "No modular tool registered for: tasklets" })
 		})
 	}
 
@@ -255,16 +255,25 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 		for (const namedAgents of [false, true]) {
 			it(`${profile} disables generic and named spawning, not retained controls, when subagents are disabled (${namedAgents ? "named" : "generic"})`, async () => {
 				if (!namedAgents) configuredAgents = []
-				const { snapshot, config, createEnvironment } = await createSnapshot(profile, undefined, [], "act", false)
-				assertNoSubagents(snapshot)
+				const { snapshot, config, environment } = await createSnapshot(profile, undefined, [], "act", false)
 				assertGoalTools(snapshot, profile)
-				assert.ok(snapshot.coordinator.has("tasklets"), "existing children remain controllable")
-				for (const name of subagentToolNames) {
+				assert.ok(snapshot.coordinator.has("subagents"), "existing children remain controllable")
+				const list = sinon.stub().returns({ items: [], totalItems: 0 })
+				const start = sinon.stub()
+				Object.assign(environment, {
+					orchestration: { tasklets: { list, start } },
+					ui: { createCard: async () => ({ id: "control-card", update: async () => undefined, finalize: async () => undefined }) },
+				})
+				const result = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments: [{ type: "default", task_header: "Blocked", task_description: "Blocked" }] }, isComplete: true })
+				assert.match(result as string, /Subagent creation is disabled/)
+				sinon.assert.notCalled(start)
+				await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "list" }, isComplete: true })
+				sinon.assert.calledOnce(list)
+				for (const name of namedToolNames) {
 					await assert.rejects(snapshot.coordinator.execute(config, { type: "tool_use", name, params: {}, isComplete: true }), {
 						message: `No modular tool registered for: ${name}`,
 					})
 				}
-				sinon.assert.notCalled(createEnvironment)
 			})
 		}
 	}
@@ -282,13 +291,13 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				orchestration: { tasklets: { start, list, resume } },
 				ui: { createCard: async () => ({ id: "tool-card", update: async () => undefined, finalize: async () => undefined }) },
 			})
-			const spawnParams = { assignments: [{ type: "default", task_header: "Inspect", task_description: "Inspect it" }] }
+			const spawnParams = { operation: "create", assignments: [{ type: "default", task_header: "Inspect", task_description: "Inspect it" }] }
 			const spawned = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: spawnParams, isComplete: true })
 			assert.deepEqual(JSON.parse(spawned as string).subagents, [{ index: 0, id: tasklet.id, title: "Inspect", accepted: true }])
 			sinon.assert.calledOnceWithExactly(start, { title: "Inspect", prompt: "Inspect it", type: "default" })
-			const listed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "tasklets", params: { operation: "list" }, isComplete: true })
+			const listed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "list" }, isComplete: true })
 			assert.equal(JSON.parse(listed as string)[0].id, tasklet.id)
-			const resumed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "tasklets", params: { operation: "resume", tasklet_id: tasklet.id, message: "Continue" }, isComplete: true })
+			const resumed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "resume", tasklet_id: tasklet.id, message: "Continue" }, isComplete: true })
 			assert.equal(JSON.parse(resumed as string).id, tasklet.id)
 			sinon.assert.calledOnceWithExactly(resume, tasklet.id, "Continue")
 			for (const name of retiredGoalTools) {
@@ -312,7 +321,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				assert.ok(snapshot.inventoryEnabledTools.some((tool) => tool.id === DiracDefaultTool.SUBAGENTS))
 				assertGoalTools(snapshot, profile)
 				const creation = snapshot.promptVisibleSpecs.find((spec) => spec.name === "subagents")!
-				assert.deepEqual(creation.parameters![0].items.properties.type.enum, ["default", ...configuredAgents.map((role) => role.name)])
+				assert.deepEqual(creation.parameters!.find((parameter) => parameter.name === "assignments")!.items.properties.type.enum, ["default", ...configuredAgents.map((role) => role.name)])
 				for (const retiredName of namedToolNames) {
 					assert.equal(snapshot.coordinator.has(retiredName), false)
 					assert.equal(snapshot.executableToolNames.has(retiredName), false)
@@ -322,7 +331,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				for (const name of executable) {
 					assert.ok(snapshot.executableToolNames.has(name), name)
 					assert.ok(snapshot.coordinator.has(name), name)
-					const params = { assignments: [{ type: "default", task_header: "Fixture task", task_description: "Do the fixture task" }] }
+					const params = { operation: "create", assignments: [{ type: "default", task_header: "Fixture task", task_description: "Do the fixture task" }] }
 					assert.equal(
 						await snapshot.coordinator.execute(config, { type: "tool_use", name, params, isComplete: true }),
 						"fixture dispatched",

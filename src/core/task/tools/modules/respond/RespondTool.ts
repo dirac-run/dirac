@@ -46,13 +46,6 @@ export const respondSpec: DiracToolSpec = {
 			instruction: (context) => (isLowVerbosityEnabled(context) ? LOW_VERBOSITY_RESPONSE_INSTRUCTION : "Response text."),
 		},
 		{
-			name: ResponseParameter.REPLY_TO,
-			type: "string",
-			required: false,
-			contextRequirements: (context) => context.executionProfile === "tasklet",
-			instruction: "For a tasklet progress reply: the exact parent question message ID. Omit for unsolicited progress.",
-		},
-		{
 			name: ResponseParameter.OPTIONS,
 			type: "array",
 			items: { type: "string" },

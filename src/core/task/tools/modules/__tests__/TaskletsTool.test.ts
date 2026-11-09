@@ -4,7 +4,7 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import type { TaskletReceipt } from "@shared/taskletReceipt"
 import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
 import { normalizeOptionalToolParameters } from "../../runtime/normalizeOptionalToolParameters"
-import { TaskletsTool, tasklets_spec } from "../subagents/SubagentsTool"
+import { SubagentsTool, subagents_spec } from "../subagents/SubagentsTool"
 
 function fixture(controls: Partial<TaskletControls> = {}) {
 	const finalized: CardStatus[] = []
@@ -25,17 +25,17 @@ function fixture(controls: Partial<TaskletControls> = {}) {
 	return { environment, finalized, updates }
 }
 
-describe("TaskletsTool input and result contracts", () => {
+describe("SubagentsTool input and result contracts", () => {
 	it("documents passive bounded inspection, canonical messaging and acceptance rather than completion", () => {
-		assert.match(tasklets_spec.description, /passive|Passive/)
-		assert.match(tasklets_spec.description, /message/)
-		assert.match(tasklets_spec.description, /acceptance, not completion/)
-		assert.match(tasklets_spec.description, /current parent authority/)
+		assert.match(subagents_spec.description, /passive|Passive/)
+		assert.match(subagents_spec.description, /message/)
+		assert.match(subagents_spec.description, /not completion/)
+		assert.match(subagents_spec.description, /current parent authority/)
 	})
 
 	it("rejects environments without parent controls", async () => {
 		await assert.rejects(
-			new TaskletsTool().processCall({ operation: "list" }, { orchestration: {} } as IToolEnvironment),
+			new SubagentsTool().processCall({ operation: "list" }, { orchestration: {} } as IToolEnvironment),
 			/owning root/,
 		)
 	})
@@ -55,9 +55,9 @@ describe("TaskletsTool input and result contracts", () => {
 		{ operation: "inspect", tasklet_id: "a", call_id: "not-a-result-view" },
 		{ operation: "inspect", tasklet_id: "a", limit: 51 },
 		{ operation: "message", messages: [] },
-		{ operation: "message", messages: [{ tasklet_id: "a", type: "reply", reply_to: "r" }] },
+		{ operation: "message", messages: [{ tasklet_id: "a", type: "reply", request_id: "r" }] },
 		{ operation: "message", messages: [{ tasklet_id: "a", type: "guidance", text: "x", decision: "approve" }] },
-		{ operation: "message", messages: [{ tasklet_id: "a", type: "permission_decision", reply_to: "r", decision: "yes" }] },
+		{ operation: "message", messages: [{ tasklet_id: "a", type: "permission_decision", request_id: "r", decision: "yes" }] },
 		{ operation: "message", messages: ["approve", null] },
 		{ operation: "message", messages: Array.from({ length: 21 }, () => ({ tasklet_id: "a", type: "question", text: "x" })) },
 		{
@@ -65,7 +65,7 @@ describe("TaskletsTool input and result contracts", () => {
 			messages: ["approve", "reject"].map((decision) => ({
 				tasklet_id: "a",
 				type: "permission_decision",
-				reply_to: "r",
+				request_id: "r",
 				decision,
 			})),
 		},
@@ -78,7 +78,7 @@ describe("TaskletsTool input and result contracts", () => {
 	]) {
 		it(`rejects invalid input ${JSON.stringify(input)}`, async () => {
 			const { environment, finalized } = fixture()
-			await assert.rejects(new TaskletsTool().processCall(input, environment))
+			await assert.rejects(new SubagentsTool().processCall(input, environment))
 			assert.deepEqual(finalized, [])
 		})
 	}
@@ -96,16 +96,16 @@ describe("TaskletsTool input and result contracts", () => {
 			tasklet_ids: null,
 			timeout_ms: null,
 			messages: [
-				{ tasklet_id: "child", type: "reply", reply_to: "request", text: "Continue", action: null, decision: null },
+				{ tasklet_id: "child", type: "reply", request_id: "request", text: "Continue", action: null, decision: null },
 			],
 		}
 		const { environment } = fixture({
 			message: async (items) => {
-				assert.deepEqual(items, [{ taskletId: "child", type: "reply", replyTo: "request", text: "Continue" }])
-				return [{ taskletId: "child", replyTo: "request", status: "resolved" }]
+				assert.deepEqual(items, [{ taskletId: "child", type: "reply", requestId: "request", text: "Continue" }])
+				return [{ taskletId: "child", requestId: "request", status: "resolved" }]
 			},
 		})
-		const output = await new TaskletsTool().processCall(normalizeOptionalToolParameters(input, tasklets_spec), environment)
+		const output = await new SubagentsTool().processCall(normalizeOptionalToolParameters(input, subagents_spec), environment)
 		assert.equal(JSON.parse(output)[0].status, "resolved")
 	})
 
@@ -120,7 +120,7 @@ describe("TaskletsTool input and result contracts", () => {
 		})
 		assert.deepEqual(
 			JSON.parse(
-				await new TaskletsTool().processCall(
+				await new SubagentsTool().processCall(
 					{ operation: "inspect", tasklet_id: "a", view: "result", call_id: "call", cursor: "cursor", limit: 1 },
 					environment,
 				),
@@ -135,16 +135,16 @@ describe("TaskletsTool input and result contracts", () => {
 		const { environment, finalized, updates } = fixture({
 			message: async (items) => {
 				assert.deepEqual(items, [
-					{ taskletId: "a", type: "reply", replyTo: "r", text: "Use option two", action: "choice-2" },
-					{ taskletId: "b", type: "permission_decision", replyTo: "s", decision: "approve" },
+					{ taskletId: "a", type: "reply", requestId: "r", text: "Use option two", action: "choice-2" },
+					{ taskletId: "b", type: "permission_decision", requestId: "s", decision: "approve" },
 				])
 				return [
-					{ taskletId: "a", title: "Review storage", request: "Which format?", replyTo: "r", status: "resolved" },
+					{ taskletId: "a", title: "Review storage", request: "Which format?", requestId: "r", status: "resolved" },
 					{
 						taskletId: "b",
 						title: "Review lifecycle",
 						request: "Run command",
-						replyTo: "s",
+						requestId: "s",
 						status: "failed",
 						error: "Authority changed",
 					},
@@ -152,12 +152,12 @@ describe("TaskletsTool input and result contracts", () => {
 			},
 		})
 		const result = JSON.parse(
-			await new TaskletsTool().processCall(
+			await new SubagentsTool().processCall(
 				{
 					operation: "message",
 					messages: [
-						{ tasklet_id: "a", type: "reply", reply_to: "r", text: "Use option two", action: "choice-2" },
-						{ tasklet_id: "b", type: "permission_decision", reply_to: "s", decision: "approve" },
+						{ tasklet_id: "a", type: "reply", request_id: "r", text: "Use option two", action: "choice-2" },
+						{ tasklet_id: "b", type: "permission_decision", request_id: "s", decision: "approve" },
 					],
 				},
 				environment,
@@ -197,7 +197,7 @@ describe("TaskletsTool input and result contracts", () => {
 					error: "x".repeat(8000),
 				})),
 		})
-		const output = await new TaskletsTool().processCall({ operation: "message", messages }, environment)
+		const output = await new SubagentsTool().processCall({ operation: "message", messages }, environment)
 		assert.ok(Buffer.byteLength(output) <= 16 * 1024)
 		assert.equal(JSON.parse(output).length, 20)
 	})
@@ -206,7 +206,7 @@ describe("TaskletsTool input and result contracts", () => {
 		const { environment, finalized, updates } = fixture({
 			inspect: async () => ({ taskletId: "child", title: "Audit protocol", view: "pending", items: [], totalItems: 0 }),
 		})
-		await new TaskletsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
+		await new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
 		const receipt = updates[0].taskletReceipt as TaskletReceipt
 		assert.equal(updates[0].header, "Inspect pending requests · child — Audit protocol")
 		assert.equal(receipt.outcome, "retrieved")
@@ -227,7 +227,7 @@ describe("TaskletsTool input and result contracts", () => {
 		const { environment, updates } = fixture({
 			list: () => ({ items: summaries, totalItems: summaries.length }) as ReturnType<TaskletControls["list"]>,
 		})
-		await new TaskletsTool().processCall({ operation: "list" }, environment)
+		await new SubagentsTool().processCall({ operation: "list" }, environment)
 		const receipt = updates[0].taskletReceipt as TaskletReceipt
 		assert.equal(receipt.outcome, "retrieved")
 		assert.deepEqual(
@@ -241,7 +241,7 @@ describe("TaskletsTool input and result contracts", () => {
 			message: async () => [{ taskletId: "child", title: "Audit", status: "queued" }],
 			sleep: async () => ({ reason: "event", taskletId: "child", eventId: "event" }),
 		})
-		await new TaskletsTool().processCall(
+		await new SubagentsTool().processCall(
 			{ operation: "message", messages: [{ tasklet_id: "child", type: "guidance", text: "Check persistence first" }] },
 			environment,
 		)
@@ -250,7 +250,7 @@ describe("TaskletsTool input and result contracts", () => {
 		assert.equal(guidance.outcome, "queued")
 		assert.equal(guidance.rows[0].message, "Check persistence first")
 		assert.match(String(updates[0].body), /consumption is not confirmed/)
-		await new TaskletsTool().processCall({ operation: "sleep" }, environment)
+		await new SubagentsTool().processCall({ operation: "sleep" }, environment)
 		const wake = updates[1].taskletReceipt as TaskletReceipt
 		assert.equal(wake.outcome, "woke")
 		assert.equal(wake.wakeReason, "event")
@@ -260,7 +260,7 @@ describe("TaskletsTool input and result contracts", () => {
 	it("fails rather than returning an accidentally unbounded control result", async () => {
 		const { environment, finalized } = fixture({ inspect: async () => ({ items: ["x".repeat(100000)], totalItems: 1 }) })
 		await assert.rejects(
-			new TaskletsTool().processCall({ operation: "inspect", tasklet_id: "a" }, environment),
+			new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "a" }, environment),
 			/aggregate bound/,
 		)
 		assert.deepEqual(finalized, [CardStatus.ERROR])
@@ -273,7 +273,7 @@ describe("TaskletsTool input and result contracts", () => {
 			},
 		})
 		await assert.rejects(
-			new TaskletsTool().processCall({ operation: "inspect", tasklet_id: "missing" }, environment),
+			new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "missing" }, environment),
 			/unknown handle/,
 		)
 		assert.deepEqual(finalized, [CardStatus.ERROR])

@@ -139,7 +139,7 @@ export const formatResponse = {
 		absolutePath: string,
 		files: FileInfo[],
 		didHitLimit: boolean,
-		diracIgnoreController?: DiracIgnoreController,
+		diracIgnoreController?: Pick<DiracIgnoreController, "validateAccess">,
 	): string => {
 		const pathMap = new Map<string, FileInfo>(files.map((f) => [f.path, f]))
 

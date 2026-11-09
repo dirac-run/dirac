@@ -27,7 +27,7 @@ import { HostProvider } from "@/hosts/host-provider"
 import { SETTINGS_DEFAULTS, type Settings } from "@/shared/storage/state-keys"
 import type { Mode } from "@/shared/storage/types"
 import { DiracAskResponse } from "@/shared/WebviewMessage"
-import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import * as notifications from "@integrations/notifications"
 import * as retryPolicy from "@core/api/ApiRequestRetryPolicy"
 import { createTaskletFixtureId as createTaskletId } from "@/test/taskletFixtures"
@@ -41,11 +41,13 @@ import { getApiMetrics } from "@shared/getApiMetrics"
 import { getTaskletUsage } from "@shared/taskletUsage"
 import { createDefaultTextCondensationTemplateRegistry } from "@core/text-condensation/templates"
 import type { SubagentRole } from "@shared/subagentRoles"
-import { createModelProviderSelection, type ApiConfiguration, type ModelProviderPreset } from "@shared/api"
+import { anthropicDefaultModelId, createModelProviderSelection, type ApiConfiguration, type ModelProviderPreset } from "@shared/api"
 import * as skillsModule from "@core/context/instructions/user-instructions/skills"
 import type { DiracStorageMessage } from "@shared/messages/content"
-import { TaskletsTool } from "../tools/modules/subagents/SubagentsTool"
+import { SubagentsTool } from "../tools/modules/subagents/SubagentsTool"
 import { ToolExecutorCoordinator } from "../tools/ToolExecutorCoordinator"
+import { ToolExecutor } from "../ToolExecutor"
+import { LifecycleManager } from "../LifecycleManager"
 import { GoalCoordinatorToolEnvironmentFactory } from "@core/goal/GoalCoordinatorEnvironment"
 import { GoalLoop } from "@core/goal/GoalLoop"
 import { GoalStore } from "@core/goal/GoalStore"
@@ -262,8 +264,8 @@ describe("Tasklet real Task execution", function () {
 			apiConfiguration: {
 				planModeApiProvider: "anthropic",
 				actModeApiProvider: "anthropic",
-				planModeApiModelId: "claude-sonnet-4-20250514",
-				actModeApiModelId: "claude-opus-4-20250514",
+				planModeApiModelId: "claude-sonnet-4-6",
+				actModeApiModelId: "claude-opus-4-6",
 			},
 			workspaceConfiguration: {} as any,
 			executionOptions: {
@@ -305,7 +307,7 @@ describe("Tasklet real Task execution", function () {
 			tasklet: {
 				configuration: {
 					name: "default",
-					modelSelection: { provider: "anthropic", modelId: mode === "plan" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514" },
+					modelSelection: { provider: "anthropic", modelId: mode === "plan" ? "claude-sonnet-4-6" : "claude-opus-4-6" },
 				},
 				// Controlled answers exercise legacy execution/resource cases, not production host authorization.
 				counterparty: {
@@ -445,7 +447,7 @@ describe("Tasklet real Task execution", function () {
 			const h = await createGoalExecution(execution === "achieved follow-up" ? "achieved" : "paused")
 			const role: SubagentRole = {
 				name: "goal-reviewer", description: "Controlled Goal reviewer", enabled: true,
-				modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+				modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
 			}
 			let rootTurn = 0
 			let genericId = ""
@@ -462,7 +464,6 @@ describe("Tasklet real Task execution", function () {
 					for (const forbiddenTool of [
 						"subagents",
 						"use_subagent_goal_reviewer",
-						"tasklets",
 						"verify_goal",
 						"update_goal",
 						"block_goal",
@@ -472,7 +473,7 @@ describe("Tasklet real Task execution", function () {
 					assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
 					return { name: "respond", args: { operation: "complete", text: "GOAL_PRIVATE_WORK_COMPLETE" } }
 				}
-				for (const name of ["tasklets", "update_goal", "block_goal"])
+				for (const name of ["subagents", "update_goal", "block_goal"])
 					assert.ok(request.tools.includes(name), `Goal must advertise ${name}`)
 				assert.ok(request.tools.includes("subagents"))
 				assert.equal(request.tools.some((name) => name.startsWith("use_subagent_")), false)
@@ -497,7 +498,7 @@ describe("Tasklet real Task execution", function () {
 					executor.markToolsDirty("manual_refresh")
 					return {
 						name: "subagents",
-						args: { assignments: [{ type: "default", task_header: "Generic Goal worker", task_description: "GENERIC_GOAL_ASSIGNMENT" }] },
+						args: { operation: "create", assignments: [{ type: "default", task_header: "Generic Goal worker", task_description: "GENERIC_GOAL_ASSIGNMENT" }] },
 					}
 				}
 				if (turn === 2 || turn === 3) {
@@ -510,13 +511,14 @@ describe("Tasklet real Task execution", function () {
 						genericId = result.id
 						return {
 							name: "subagents",
-							args: { assignments: [{ type: role.name, task_header: "Named Goal reviewer", task_description: "NAMED_GOAL_ASSIGNMENT" }] },
+							args: { operation: "create", assignments: [{ type: role.name, task_header: "Named Goal reviewer", task_description: "NAMED_GOAL_ASSIGNMENT" }] },
 						}
 					}
 					namedId = result.id
 					return {
 						name: "subagents",
 						args: {
+							operation: "create",
 							assignments: [{
 								type: role.name,
 								task_header: "Verify current Goal evidence",
@@ -537,7 +539,7 @@ describe("Tasklet real Task execution", function () {
 					assert.match(record.prompt, /ROOT_GOAL_ASSIGNMENT/)
 					assert.match(record.prompt, /VERIFY_CURRENT_GOAL_FOCUS/)
 					assert.ok(record.prompt.includes(genericId) && record.prompt.includes(namedId))
-					return { name: "tasklets", args: { operation: "inspect", tasklet_id: verificationId } }
+					return { name: "subagents", args: { operation: "inspect", tasklet_id: verificationId } }
 				}
 				assert.equal(turn, 5, "No retry or additional parent loop after public completion")
 				const inspection = JSON.parse(toolResults(request).at(-1)!)
@@ -874,7 +876,7 @@ describe("Tasklet real Task execution", function () {
 			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 			assert.equal(child.rootTaskId, "root")
 			assert.equal(child.configuration?.name, "default")
-			assert.equal(child.configuration?.modelSelection.modelId, "claude-opus-4-20250514")
+			assert.equal(child.configuration?.modelSelection.modelId, "claude-opus-4-6")
 			assert.match(requests[0].systemPrompt, /# CONTAINED TASKLET/)
 			assert.equal(requests[0].mode, "act")
 			sinon.assert.notCalled(createGoalTrait)
@@ -1187,6 +1189,112 @@ describe("Tasklet real Task execution", function () {
 		}
 	})
 
+	for (const initialization of ["tool refresh", "lifecycle initialization"] as const) {
+		it(`admits mail during real Task start and resume ${initialization}`, async () => {
+			sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+			nextTurn = async () => "complete"
+			const root = createResolutionRoot()
+			assert.equal(root.getAgentCommunicationState().accepts_messages, false, "An unstarted IDLE Task has no admitted work")
+			root.taskState.status = TaskStatus.WAITING_FOR_API
+			const host = root.taskletHost!
+			const sender = host.agentCommunication.forAgent("Dirac")
+			let release = deferred<void>()
+			let entered = deferred<void>()
+			const pause = async () => { entered.resolve(); await release.promise }
+			if (initialization === "tool refresh") {
+				const original = ToolExecutor.prototype.refreshToolsForTask
+				sandbox.stub(ToolExecutor.prototype, "refreshToolsForTask").callsFake(async function (this: ToolExecutor) {
+					await pause()
+					return original.call(this)
+				})
+			} else {
+				const start = LifecycleManager.prototype.startTask
+				const resume = LifecycleManager.prototype.resumeTaskFromHistory
+				sandbox.stub(LifecycleManager.prototype, "startTask").callsFake(async function (this: LifecycleManager, ...args) {
+					await pause()
+					return start.apply(this, args)
+				})
+				sandbox.stub(LifecycleManager.prototype, "resumeTaskFromHistory").callsFake(async function (this: LifecycleManager, ...args) {
+					await pause()
+					return resume.apply(this, args)
+				})
+			}
+			const starting = sandbox.spy(Task.prototype, "startTask")
+			const resuming = sandbox.spy(Task.prototype, "resumeTaskFromHistory")
+			try {
+				const child = await host.start({ type: "default", title: "initializing", prompt: "Complete the assignment" })
+				await entered.promise
+				const task = starting.firstCall.thisValue as Task
+				assert.equal(task.taskState.status, TaskStatus.IDLE)
+				assert.equal(task.getAgentCommunicationState().accepts_messages, true)
+				await sender.send({ to: child.id, text: "MAIL_DURING_START_INITIALIZATION" })
+				release.resolve()
+				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+				assert.match(JSON.stringify(requests[0].messages), /MAIL_DURING_START_INITIALIZATION/)
+				await assert.rejects(sender.send({ to: child.id, text: "no implicit restart" }), /cannot accept/)
+				release = deferred<void>()
+				entered = deferred<void>()
+				await host.resume(child.id, "Explicit follow-up")
+				await entered.promise
+				const resumed = resuming.firstCall.thisValue as Task
+				assert.notEqual(resumed, task)
+				assert.equal(resumed.taskState.status, TaskStatus.IDLE)
+				assert.equal(resumed.getAgentCommunicationState().accepts_messages, true)
+				await sender.send({ to: child.id, text: "MAIL_DURING_RESUME_INITIALIZATION" })
+				release.resolve()
+				assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+				assert.match(JSON.stringify(requests[1].messages), /MAIL_DURING_RESUME_INITIALIZATION/)
+				await assert.rejects(sender.send({ to: child.id, text: "terminal mail" }), /cannot accept/)
+			} finally {
+				release.resolve()
+				await host.shutdown()
+			}
+		})
+	}
+
+	for (const termination of ["failure", "cancellation", "shutdown"] as const) {
+		it(`closes real Task initialization mail admission on ${termination}`, async () => {
+			const root = createResolutionRoot()
+			root.taskState.status = TaskStatus.WAITING_FOR_API
+			const host = root.taskletHost!
+			const sender = host.agentCommunication.forAgent("Dirac")
+			const release = deferred<void>()
+			const entered = deferred<void>()
+			sandbox.stub(ToolExecutor.prototype, "refreshToolsForTask").callsFake(async () => {
+				entered.resolve()
+				await release.promise
+				if (termination === "failure") throw new Error("Tool initialization failed")
+			})
+			const starting = sandbox.spy(Task.prototype, "startTask")
+			const child = await host.start({ type: "default", title: "initializing", prompt: "Admitted work" })
+			try {
+				await entered.promise
+				const task = starting.firstCall.thisValue as Task
+				await sender.send({ to: child.id, text: "accepted before termination" })
+				task.taskState.completionCommitted = true
+				await assert.rejects(sender.send({ to: child.id, text: "after committed completion" }), /cannot accept/)
+				task.taskState.completionCommitted = false
+				if (termination === "failure") {
+					release.resolve()
+					assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "failed")
+					await assert.rejects(sender.send({ to: child.id, text: "after startup failure" }), /cannot accept/)
+				} else {
+					const closing = termination === "shutdown" ? host.shutdown() : host.interrupt(child.id)
+					await new Promise<void>((resolve) => setImmediate(resolve))
+					assert.equal(task.getAgentCommunicationState().accepts_messages, false)
+					await assert.rejects(sender.send({ to: child.id, text: "after closing" }), /cannot accept|closed/)
+					release.resolve()
+					await closing
+					assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+				}
+				assert.equal(host.agentCommunication.hasPending(child.id), false)
+			} finally {
+				release.resolve()
+				await host.shutdown()
+			}
+		})
+	}
+
 	it("starts with assignment context only and resumes its own conversation", async () => {
 		const params = parameters()
 		const parent = create({
@@ -1216,7 +1324,7 @@ describe("Tasklet real Task execution", function () {
 	it("uses a global role model without replacing common instructions or filtering ordinary skills/tools", async () => {
 		const role: SubagentRole = {
 			name: "controlled-reviewer", description: "Review this assignment.", enabled: true,
-			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+			modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
 		}
 		globalRoles = [role]
 		const skills = await Promise.all(
@@ -1246,9 +1354,9 @@ describe("Tasklet real Task execution", function () {
 			for (const request of requests) {
 				assert.equal(request.model, role.modelSelection!.modelId)
 				assert.match(request.systemPrompt, /# CONTAINED TASKLET/)
-				assert.match(request.systemPrompt, /PINNED_PRIVATE_CONSTRAINT/)
+				assert.match(JSON.stringify(request.messages), /PINNED_PRIVATE_CONSTRAINT/)
 				assert.doesNotMatch(request.systemPrompt, /Execution Deadline|NAMED_PROFILE_PRIVATE_INSTRUCTIONS/)
-				assert.deepEqual(request.tools.sort(), ["execute_command", "read_file", "respond", "use_skill"])
+				assert.deepEqual(request.tools.sort(), ["execute_command", "list_agents", "read_file", "respond", "send_message", "shared_journal", "use_skill", "wait_for_message"])
 			}
 			assert.match(JSON.stringify(requests[1].messages), /ALLOWED_SKILL_PRIVATE_INSTRUCTIONS/)
 			assert.match(JSON.stringify(requests[2].messages), /EXCLUDED_SKILL_PRIVATE_INSTRUCTIONS/)
@@ -1289,19 +1397,329 @@ describe("Tasklet real Task execution", function () {
 		})
 	}
 
+	it("discards unread headlines at standalone completion without closing subsequent user follow-up", async () => {
+		sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+		const root = createResolutionRoot()
+		const host = root.taskletHost!
+		let followups = 0
+		Object.defineProperty(root, "waitForFollowUp", {
+			value: async () => {
+				assert.equal(host.agentCommunication.firstPendingJournalNotice("Dirac"), undefined)
+				return ++followups === 1 ? [{ type: "text", text: "EXPLICIT_USER_FOLLOWUP" }] : undefined
+			}
+		})
+		let turn = 0
+		nextTool = async (request) => {
+			if (JSON.stringify(request.messages).includes("Complete journal fixture")) return { name: "respond", args: { operation: "complete", text: "Fixture done" } }
+			if (++turn === 1) {
+				const child = await host.start({ type: "default", title: "notice author", prompt: "Complete journal fixture" })
+				const recipients = host.agentCommunication.snapshotRecipients(child.id).filter(({ id }) => id === "Dirac")
+				host.agentCommunication.enqueueJournalNotice(recipients, { author: child.id, message_id: "late-notice", headline: "UNREAD_NOTICE_MUST_NOT_REPLAY" })
+				assert.ok(host.agentCommunication.firstPendingJournalNotice("Dirac"))
+				await waitForOutcome(host, child.id)
+			} else {
+				assert.match(JSON.stringify(request.messages), /EXPLICIT_USER_FOLLOWUP/)
+				assert.doesNotMatch(JSON.stringify(request.messages), /UNREAD_NOTICE_MUST_NOT_REPLAY/)
+				assert.doesNotThrow(() => host.agentCommunication.snapshotRecipients("Dirac"))
+			}
+			return { name: "respond", args: { operation: "complete", text: "Complete this turn" } }
+		}
+		assert.equal((await root.startTask("Finish with an unread headline")).kind, "completed")
+		assert.equal(turn, 2)
+	})
+
+	for (const previouslyTimedOut of [false, true]) {
+		it(`observes real queued guidance before wait registration${previouslyTimedOut ? " while acceptance post-state is pending after a timeout" : ""} but not after consumption`, async () => {
+			expectLoggerErrors() // Release a controlled provider response after deliberate interruption.
+			sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+			const params = parameters()
+			let childEnvironment: import("../tools/interfaces/IToolEnvironment").IToolEnvironment | undefined
+			const root = create({
+				...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+				toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "wait_for_message"] },
+				toolEnvironmentFactory: {
+					create(config, name) {
+						const environment = new SurfaceAdapter(config, name)
+						if (config.executionProfile === "tasklet") childEnvironment = environment
+						return environment
+					},
+				},
+				updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			})
+			const host = root.taskletHost!
+			const firstEntered = deferred<void>()
+			const firstRelease = deferred<void>()
+			const secondEntered = deferred<void>()
+			const secondRelease = deferred<void>()
+			const postEntered = deferred<void>()
+			const postRelease = deferred<void>()
+			let turns = 0
+			nextTool = async (request) => {
+				if (++turns === 1) return { name: "respond", args: { operation: "progress", text: "Initialize the real tool environment" } }
+				if (turns === 2) {
+					firstEntered.resolve()
+					await firstRelease.promise
+					return { name: "respond", args: { operation: "progress", text: "Continue with guidance" } }
+				}
+				assert.match(JSON.stringify(request.messages), /QUEUED_BEFORE_WAIT_REGISTRATION/)
+				secondEntered.resolve()
+				await secondRelease.promise
+				return { name: "respond", args: { operation: "complete", text: "Done" } }
+			}
+			const starting = sandbox.spy(Task.prototype, "startTask")
+			const child = await host.start({ type: "default", title: "guided waiter", prompt: "Work under parent guidance" })
+			try {
+				await firstEntered.promise
+				const task = starting.firstCall.thisValue as Task
+				const waiting = childEnvironment!.orchestration.agentWait!
+				if (previouslyTimedOut) assert.deepEqual(await waiting.wait({ timeout_ms: 1000 }), { reason: "timeout" })
+				const postState = sandbox.stub(task as any, "postStateToWebview").callsFake(async () => {
+					postEntered.resolve()
+					await postRelease.promise
+				})
+				const guidance = host.steer(child.id, "QUEUED_BEFORE_WAIT_REGISTRATION")
+				await postEntered.promise
+				assert.deepEqual(await waiting.wait({ timeout_ms: 1000 }), { reason: "message" })
+				assert.equal(host.agentCommunication.isWaiting(child.id), false)
+				postRelease.resolve()
+				await guidance
+				postState.restore()
+				firstRelease.resolve()
+				await secondEntered.promise
+				const afterConsumption = waiting.wait({ timeout_ms: 1000 })
+				assert.equal(host.agentCommunication.isWaiting(child.id), true, "Consumed guidance must not wake a later wait")
+				const interrupting = host.interrupt(child.id)
+				assert.deepEqual(await afterConsumption, { reason: "cancelled" })
+				secondRelease.resolve()
+				await interrupting
+			} finally {
+				postRelease.resolve()
+				firstRelease.resolve()
+				secondRelease.resolve()
+				await host.shutdown()
+			}
+		})
+	}
+
+	it("rejects voluntary wait alongside a real pending owner question even though child presentation has no waiting card", async () => {
+		sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+		const params = parameters()
+		params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+			apiConfiguration: { actModeApiModelId: anthropicDefaultModelId },
+		})
+		let childEnvironment: import("../tools/interfaces/IToolEnvironment").IToolEnvironment | undefined
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "subagents", "wait_for_message", "send_message"] },
+			toolEnvironmentFactory: {
+				create(config, name) {
+					const environment = new SurfaceAdapter(config, name)
+					if (config.executionProfile === "tasklet") childEnvironment = environment
+					return environment
+				}
+			},
+			updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		Object.defineProperty(root, "waitForFollowUp", { value: async () => undefined })
+		const host = root.taskletHost!
+		let childTurn = 0
+		nextTool = async () => ++childTurn === 1
+			? { name: "respond", args: { operation: "question", text: "Need a structured answer" } }
+			: { name: "respond", args: { operation: "complete", text: "Child done" } }
+		const child = await host.start({ type: "default", title: "question", prompt: "Ask for a structured answer" })
+		try {
+			const pending = await waitForInteraction(host, child.id)
+			assert.ok(childEnvironment?.orchestration.agentWait)
+			assert.equal(childEnvironment.orchestration.getTaskState("lastWaitingCardId"), undefined)
+			await assert.rejects(childEnvironment.orchestration.agentWait.wait({ timeout_ms: 1000 }), /structured interaction/)
+			assert.equal(host.inspect(child.id).interactions.find((entry) => entry.id === pending.id)?.status, "pending")
+			await host.resolveInteraction(child.id, pending.id, { operation: "answer", response: { action: DiracAskResponse.MESSAGE, response: DiracAskResponse.MESSAGE, text: "Exact structured answer" } })
+			assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
+		} finally { await host.shutdown() }
+	})
+
+	for (const operation of ["interrupt", "shutdown"] as const) {
+		it(`settles a real child communication wait on ${operation} without another provider request`, async () => {
+			sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+			const params = parameters()
+			params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+				apiConfiguration: { actModeApiModelId: anthropicDefaultModelId },
+			})
+			const root = create({
+				...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+				toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "wait_for_message"] },
+				updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+			})
+			const host = root.taskletHost!
+			let turns = 0
+			nextTool = async () => {
+				turns++
+				return { name: "wait_for_message", args: { timeout_ms: 300000 } }
+			}
+			const child = await host.start({ type: "default", title: "wait", prompt: "Wait for incoming communication" })
+			const deadline = Date.now() + 5000
+			while (!host.agentCommunication.isWaiting(child.id)) {
+				assert.ok(Date.now() < deadline, "Child did not enter communication wait")
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			if (operation === "interrupt") await host.interrupt(child.id)
+			else await host.shutdown()
+			assert.equal(host.agentCommunication.isWaiting(child.id), false)
+			assert.equal(host.inspect(child.id).outcome?.kind, "interrupted")
+			assert.equal(turns, 1)
+		})
+	}
+
+	it("wakes a real child communication wait with a journal headline and reads the body only on demand", async () => {
+		sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+		requestLimit = 12
+		const params = parameters()
+		params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+			apiConfiguration: { actModeApiModelId: anthropicDefaultModelId },
+		})
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "subagents", "wait_for_message", "shared_journal"] },
+			updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		Object.defineProperty(root, "waitForFollowUp", { value: async () => undefined })
+		const host = root.taskletHost!
+		let rootTurn = 0
+		let childTurn = 0
+		nextTool = async (request) => {
+			const child = request.systemPrompt.includes("# CONTAINED TASKLET")
+			const serialized = JSON.stringify(request.messages)
+			if (!child) {
+				assert.ok(!request.tools.includes("wait_for_message"))
+				if (++rootTurn === 1) return { name: "subagents", args: { operation: "create", assignments: [{ type: "default", task_header: "waiting", task_description: "Wait for a publication" }] } }
+				if (rootTurn === 2) return { name: "subagents", args: { operation: "sleep", tasklet_ids: [host.list()[0].id], timeout_ms: 5000 } }
+				if (rootTurn === 3) {
+					assert.equal(host.inspect(host.list()[0].id).executionStatus, "waiting_for_message")
+					return { name: "shared_journal", args: { operation: "publish", headline: "JOURNAL_HEADLINE_ONLY", content: "JOURNAL_FULL_BODY_ON_DEMAND" } }
+				}
+				await waitForOutcome(host, host.list()[0].id)
+				return { name: "respond", args: { operation: "complete", text: "Root complete" } }
+			}
+			assert.ok(request.tools.includes("wait_for_message"))
+			if (++childTurn === 1) return { name: "wait_for_message", args: { timeout_ms: 5000 } }
+			if (childTurn === 2) {
+				assert.match(serialized, /JOURNAL_HEADLINE_ONLY/)
+				assert.doesNotMatch(serialized, /JOURNAL_FULL_BODY_ON_DEMAND|journalNotificationIds/)
+				const [file] = await fs.readdir(path.join(getTaskDirectoryPath("root"), "journal"))
+				const message_id = file.replace(/\.json$/, "")
+				assert.ok(serialized.includes(message_id))
+				return { name: "shared_journal", args: { operation: "read", message_id } }
+			}
+			assert.match(serialized, /JOURNAL_FULL_BODY_ON_DEMAND/)
+			return { name: "respond", args: { operation: "complete", text: "Read finding" } }
+		}
+		try {
+			assert.equal((await root.startTask("Coordinate journal exchange")).kind, "completed")
+			assert.equal(childTurn, 3)
+			assert.match(JSON.stringify((await host.readTranscript(host.list()[0].id)).conversation), /journalNotificationIds/)
+		} finally { await root.abortTask() }
+	})
+
+	it("delivers symmetric ordinary mail through real tools and serial Task boundaries without granting authority", async () => {
+		sandbox.stub(modelProviderPresets, "recordSuccessfulModelProviderPreset")
+		requestLimit = 20
+		const params = parameters()
+		params.workingConfiguration = buildTaskWorkingConfigurationUpdate(params.workingConfiguration, {
+			apiConfiguration: { actModeApiModelId: anthropicDefaultModelId },
+		})
+		const root = create({
+			...params, taskId: "root", executionProfile: "standalone", tasklet: undefined,
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "subagents", "send_message", "list_agents"] },
+			updateTaskHistory: async () => [], postStateToWebview: async () => { }, postPresentationToWebview: async () => { },
+		})
+		sandbox.stub(root as any, "waitForFollowUp").resolves(undefined)
+		const host = root.taskletHost!
+		const bStarted = deferred<void>()
+		const peerSent = deferred<void>()
+		const parentSent = deferred<void>()
+		const childCompletionRequest = deferred<void>()
+		const turns = { root: 0, a: 0, b: 0 }
+		const inputs = { root: [] as string[], a: [] as string[], b: [] as string[] }
+		nextTool = async (request) => {
+			const text = JSON.stringify(request.messages)
+			const child = request.systemPrompt.includes("# CONTAINED TASKLET")
+			const role = !child ? "root" : text.includes("MAIL_CHILD_A") ? "a" : "b"
+			inputs[role].push(text)
+			const turn = ++turns[role]
+			assert.ok(request.tools.includes("send_message") && request.tools.includes("list_agents"))
+			if (child) assert.ok(!request.tools.includes("tasklets") && !request.tools.includes("subagents"))
+			if (role === "root") {
+				if (turn === 1) return {
+					name: "subagents", args: {
+						operation: "create",
+						assignments: [
+							{ type: "default", task_header: "A", task_description: "MAIL_CHILD_A" },
+							{ type: "default", task_header: "B", task_description: "MAIL_CHILD_B" },
+						]
+					}
+				}
+				if (turn === 2) return { name: "list_agents", args: {} }
+				if (turn === 3) {
+					await childCompletionRequest.promise
+					return { name: "send_message", args: { to: host.list()[0].id, text: "ROOT_ORDINARY_MAIL" } }
+				}
+				parentSent.resolve()
+				await Promise.all(host.list().map(({ id }) => waitForOutcome(host, id)))
+				return { name: "respond", args: { operation: "complete", text: "Root complete" } }
+			}
+			if (role === "a") {
+				if (turn === 1) {
+					await bStarted.promise
+					return { name: "send_message", args: { to: host.list()[1].id, text: "PEER_ORDINARY_MAIL" } }
+				}
+				peerSent.resolve()
+				childCompletionRequest.resolve()
+				await parentSent.promise
+				return { name: "respond", args: { operation: "complete", text: "A complete" } }
+			}
+			if (turn === 1) {
+				bStarted.resolve()
+				await peerSent.promise
+				return { name: "send_message", args: { to: "Dirac", text: "CHILD_ORDINARY_MAIL" } }
+			}
+			return { name: "respond", args: { operation: "complete", text: "B complete" } }
+		}
+		try {
+			const result = await root.startTask("Coordinate two workers using ordinary mail")
+			assert.equal(result.kind, "completed")
+			assert.equal(turns.a, 3, "Queued mail rejects the in-flight completion until the next model input")
+			assert.ok(!inputs.a[1].includes("ROOT_ORDINARY_MAIL"))
+			assert.ok(inputs.a[2].includes("ROOT_ORDINARY_MAIL"))
+			assert.ok(inputs.b.some((text) => text.includes("PEER_ORDINARY_MAIL")))
+			assert.ok(inputs.root.some((text) => text.includes("CHILD_ORDINARY_MAIL")))
+			assert.equal(host.agentCommunication.hasPending("Dirac"), false)
+			assert.ok(host.list().every((entry) => entry.outcome?.kind === "completed"))
+			const transcript = await host.readTranscript(host.list()[0].id)
+			assert.match(JSON.stringify(transcript.conversation), /agentMessageIds/)
+			assert.doesNotMatch(JSON.stringify(transcript.presentation), /\"role\":\"user\"[^}]*ROOT_ORDINARY_MAIL/)
+			await assert.rejects(host.agentCommunication.forAgent("Dirac").send({ to: host.list()[0].id, text: "no resurrection" }), /closed|not active|cannot accept/)
+		} finally {
+			bStarted.resolve()
+			peerSent.resolve()
+			childCompletionRequest.resolve()
+			parentSent.resolve()
+			await root.abortTask()
+		}
+	})
+
 	for (const profile of ["standalone", "goal_coordinator", "goal_followup"] as const) {
 		for (const type of ["default", "reviewer"]) {
 			it(`inherits changed non-model preferences but retains creation selection, including resume (${profile}, ${type})`, async () => {
 				globalRoles = [{
 					name: "reviewer", description: "Review work.", enabled: true,
-					modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" }
+					modelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" }
 				}]
 				const root = createResolutionRoot(profile)
 				await root.applyWorkingConfigurationUpdate({
 					settings: {
 						backgroundEditEnabled: false,
 						preferredLanguage: "English",
-						utilityModelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+						utilityModelSelection: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
 					},
 				})
 				const host = root.taskletHost!
@@ -1343,7 +1761,7 @@ describe("Tasklet real Task execution", function () {
 				assert.equal(childTask.getWorkingConfiguration().workspaceConfiguration.localSkillsToggles?.disabledSkill, false)
 				assert.match(secondRequest.systemPrompt, /Speak in fr\./)
 				assert.equal(secondRequest.model,
-					type === "reviewer" ? "claude-sonnet-4-20250514" : "claude-opus-4-20250514",
+					type === "reviewer" ? "claude-sonnet-4-6" : "claude-opus-4-6",
 					"Role and default children retain creation-time model even when parent mode changes")
 				await root.applyWorkingConfigurationUpdate({ settings: { backgroundEditEnabled: false } })
 				nextTurn = async () => {
@@ -1401,7 +1819,7 @@ describe("Tasklet real Task execution", function () {
 				let role: number | undefined // Assign on execution, not selection-only getModel calls.
 				return {
 					getModel: () => ({
-						id: "claude-opus-4-20250514",
+						id: "claude-opus-4-6",
 						info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 					}),
 					async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
@@ -1523,7 +1941,7 @@ describe("Tasklet real Task execution", function () {
 										{
 											taskletId: childId,
 											type: "permission_decision",
-											replyTo: requestId,
+											requestId: requestId,
 											decision: "approve",
 										},
 									])
@@ -1580,7 +1998,7 @@ describe("Tasklet real Task execution", function () {
 											{
 												taskletId: childId,
 												type: "permission_decision",
-												replyTo: requestId,
+												requestId: requestId,
 												decision: "approve",
 											},
 										])
@@ -1599,7 +2017,7 @@ describe("Tasklet real Task execution", function () {
 										{
 											taskletId: childId,
 											type: "permission_decision",
-											replyTo: requestId,
+											requestId: requestId,
 											decision: "escalate",
 										},
 									])
@@ -1654,7 +2072,7 @@ describe("Tasklet real Task execution", function () {
 						await reopened.resumeTaskFromHistory(
 							() => {
 								assert.deepEqual(turns, [4, interrupt ? 1 : 2, 2, 0, 0])
-								assert.equal(handlerNumber, 4, "Root restoration constructs no child engines")
+								assert.equal(handlerNumber, 3, "Restoration executes neither a root request nor historical child requests")
 								assert.deepEqual(reopened.taskletHost!.listActive(), [])
 								assert.equal(
 									reopened.taskletHost!.inspect(childId).outcome?.kind,
@@ -1760,7 +2178,7 @@ describe("Tasklet real Task execution", function () {
 			let role: number | undefined
 			return {
 				getModel: () => ({
-					id: "claude-opus-4-20250514",
+					id: "claude-opus-4-6",
 					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 				}),
 				async *createMessage(_systemPrompt, messages, tools): ApiStream {
@@ -1775,12 +2193,13 @@ describe("Tasklet real Task execution", function () {
 					if (role === 0) {
 						assert.ok(turn <= 6, "Unexpected parent retry or request after completion")
 						parentInputs.push(serialized)
-						assert.ok(advertised.includes("subagents") && advertised.includes("tasklets"))
+						assert.ok(advertised.includes("subagents") && !advertised.includes("tasklets"))
 						assert.doesNotMatch(serialized, /PRIVATE_FILE_CONTENT|taskletEventIds/)
 						if (turn < 6) assert.doesNotMatch(serialized, /PUBLIC_RESULT_END/)
 						if (turn === 1) {
 							name = "subagents"
 							args = {
+								operation: "create",
 								assignments: [
 									{
 										type: "default",
@@ -1819,11 +2238,11 @@ describe("Tasklet real Task execution", function () {
 							assert.ok(communication.text.includes(childId))
 							questionId = JSON.parse(communication.text.slice(communication.text.indexOf("\n") + 1)).request.id
 							assert.ok(questionId)
-							name = "tasklets"
+							name = "subagents"
 							args = {
 								operation: "message",
 								messages: [
-									{ tasklet_id: childId, type: "reply", reply_to: questionId, text: "PUBLIC_PARENT_ANSWER" },
+									{ tasklet_id: childId, type: "reply", request_id: questionId, text: "PUBLIC_PARENT_ANSWER" },
 								],
 							}
 						} else if (turn === 4) {
@@ -1835,7 +2254,7 @@ describe("Tasklet real Task execution", function () {
 						} else if (turn === 5) {
 							assert.match(serialized, /PUBLIC_RESULT_START/)
 							assert.match(serialized, /preview only/)
-							name = "tasklets"
+							name = "subagents"
 							args = { operation: "inspect", tasklet_id: childId, view: "assignment" }
 						} else {
 							const inspection = JSON.parse(toolOutput(history, "public-0-5"))
@@ -1853,7 +2272,8 @@ describe("Tasklet real Task execution", function () {
 						assert.ok(turn <= 3, "Unexpected child request")
 						assert.ok(!advertised.includes("subagents") && !advertised.includes("tasklets"))
 						if (turn === 1) {
-							assert.match(serialized, /Supervise a worker through public tools/)
+							assert.doesNotMatch(serialized, /Supervise a worker through public tools/)
+							assert.match(serialized, /Read assignment.txt, ask PUBLIC_CHILD_QUESTION, then report fully/)
 							assert.ok(
 								!history.some((message) => Array.isArray(message.content) && message.content.some((block) => block.type === "tool_use")),
 								"The executing parent's unanswered spawn call must not enter the child's first provider request",
@@ -1888,7 +2308,7 @@ describe("Tasklet real Task execution", function () {
 			taskId: "root",
 			executionProfile: "standalone",
 			tasklet: undefined,
-			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "subagents", "tasklets"] },
+			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "read_file", "subagents"] },
 			releaseTaskLock: async () => { },
 			updateTaskHistory: async () => [],
 			postStateToWebview: async () => { },
@@ -1940,7 +2360,7 @@ describe("Tasklet real Task execution", function () {
 			let turn = 0
 			return {
 				getModel: () => ({
-					id: "claude-opus-4-20250514",
+					id: "claude-opus-4-6",
 					info: { contextWindow: 200_000, maxTokens: 8192, supportsTools: true, supportsPromptCache: false },
 				}),
 				async *createMessage(_systemPrompt: string, messages: unknown): ApiStream {
@@ -2057,7 +2477,7 @@ describe("Tasklet real Task execution", function () {
 							assert.equal(
 								(
 									await controls.message([
-										{ taskletId: childId, type: "reply", replyTo: questionId, text: "PARENT_ANSWER" },
+										{ taskletId: childId, type: "reply", requestId: questionId, text: "PARENT_ANSWER" },
 									])
 								)[0].status,
 								"resolved",
@@ -2616,7 +3036,7 @@ describe("Tasklet real Task execution", function () {
 		// The public mapping must preserve Retry's response classification, not only its action.
 		const executor = (root as any).toolExecutor
 		const coordinator = new ToolExecutorCoordinator()
-		coordinator.registerModularTool(new TaskletsTool())
+		coordinator.registerModularTool(new SubagentsTool())
 		executor.activeRequestRuntime = {
 			requestId: "public-resolution",
 			workingConfiguration: root.getWorkingConfiguration(),
@@ -2624,11 +3044,11 @@ describe("Tasklet real Task execution", function () {
 		}
 		const result = await coordinator.execute(executor.asToolConfig(coordinator), {
 			type: "tool_use",
-			name: "tasklets",
+			name: "subagents",
 			isComplete: true,
 			params: {
 				operation: "message",
-				messages: [{ tasklet_id: child.id, type: "reply", reply_to: request.id, action: "approve" }],
+				messages: [{ tasklet_id: child.id, type: "reply", request_id: request.id, action: "approve" }],
 			},
 		})
 		assert.equal(JSON.parse(result as string)[0].status, "resolved")
@@ -2665,7 +3085,7 @@ describe("Tasklet real Task execution", function () {
 			const params = parameters()
 			params.toolSelectionPolicy = { mode: "exact", toolIds: ["respond", "execute_command", "condense"] }
 			params.workingConfiguration = createTaskWorkingConfiguration({
-				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-20250514" },
+				apiConfiguration: { actModeApiProvider: "anthropic", actModeApiModelId: "claude-opus-4-6" },
 				workspaceConfiguration: {} as any,
 				executionOptions: {
 					terminalReuseEnabled: true,
@@ -2965,7 +3385,8 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(stopped.outcome?.kind, "interrupted", JSON.stringify(stopped))
 		assert.equal(stopped.outcomePersisted, true)
 		assert.equal(requests.length, 0)
-		assert.match(JSON.stringify(await host.readTranscript(record.id)), /Do not start this work/)
+		assert.equal(record.prompt, "Do not start this work")
+		assert.equal((await loadTaskletRecords("root")).find((child) => child.id === record.id)?.prompt, record.prompt)
 	})
 
 	it("retains the real root lock when cancelled escalation cannot finalize its card", async () => {
@@ -3298,6 +3719,8 @@ describe("Tasklet real Task execution", function () {
 				{ role: "user", content: "RETAINED_PLAINTEXT_SUMMARY" },
 				{ role: "assistant", content: "RETAINED_SUMMARY_ACKNOWLEDGEMENT" },
 			])
+			// Synthetic replacement history has not been submitted; old transcript hashes no longer apply.
+			await saveApiConversationProviderState(address, {})
 			const presentation = await getSavedPresentationHistory(address)
 			presentation.messages.at(-1)!.conversationHistoryDeletedRange = [2, 3]
 			await saveDiracMessages(address, presentation.messages)
@@ -3494,7 +3917,7 @@ describe("Tasklet real Task execution", function () {
 			const saved = await getSavedApiConversationState(address)
 			const checkpoint = {
 				providerId: "anthropic",
-				modelId: "claude-opus-4-20250514",
+				modelId: "claude-opus-4-6",
 				compactedThroughHistoryIndex: saved.messages.length - 1,
 				input: [{ type: "compaction", encrypted_content: "PRIVATE_OPAQUE_CHILD_CHECKPOINT" }],
 			}
@@ -3901,7 +4324,7 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(requests.length, 2)
 		assert.match(JSON.stringify(requests[1].messages), /PRIVATE_FILE_CONTENT/)
 		assert.equal(requests[0].mode, "act")
-		assert.equal(requests[0].model, "claude-opus-4-20250514")
+		assert.equal(requests[0].model, "claude-opus-4-6")
 		assert.match(JSON.stringify(requests[0]), /PINNED_PRIVATE_CONSTRAINT/)
 		assert.ok(requests[0].tools.includes("respond"))
 		assert.ok(requests[0].tools.includes("read_file"))
@@ -3928,13 +4351,13 @@ describe("Tasklet real Task execution", function () {
 		})
 		assert.deepEqual(
 			await getSavedApiConversationProviderState(address),
-			task.messageStateHandler.getApiConversationProviderState(),
+			JSON.parse(JSON.stringify(task.messageStateHandler.getApiConversationProviderState())),
 		)
 		assert.equal((await getSavedApiConversationProviderState(address)).deliveredSteeringMessageIds?.length, 1)
 		const base = getTaskDirectoryPath(address)
 		const metadata = JSON.parse(await fs.readFile(path.join(base, GlobalFileNames.taskMetadata), "utf8"))
 		assert.ok(metadata.model_usage.length > 0)
-		assert.equal(metadata.model_usage[0].model_id, "claude-opus-4-20250514")
+		assert.equal(metadata.model_usage[0].model_id, "claude-opus-4-6")
 		await fs.access(path.join(base, GlobalFileNames.apiConversationProviderState))
 		for (const { file, contents } of preserved) assert.equal(await fs.readFile(file, "utf8"), contents)
 		assert.deepEqual(await fs.readdir(path.join(directory, "storage", "tasks")), ["root"])
@@ -3974,7 +4397,7 @@ describe("Tasklet real Task execution", function () {
 			)
 			assert.deepEqual(
 				requests.map(({ model }) => model),
-				["claude-sonnet-4-20250514", "claude-sonnet-4-20250514"],
+				["claude-sonnet-4-6", "claude-sonnet-4-6"],
 			)
 			assert.deepEqual(params.workingConfiguration, original)
 		} finally {

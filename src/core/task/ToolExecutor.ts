@@ -126,6 +126,9 @@ export class ToolExecutor {
 		private getTaskletControls?: () => import("./tools/interfaces/IToolEnvironment").TaskletControls | undefined,
 		private onUtilityUsageRecorded?: () => void,
 		private getPermissionWorkingConfiguration?: () => TaskWorkingConfiguration,
+		private getAgentCommunication?: () => import("./AgentCommunication").AgentCommunicationCapability | undefined,
+		private getAgentWait?: () => import("./AgentCommunication").AgentWaitCapability | undefined,
+		private getSharedJournal?: () => import("./SharedJournalTypes").SharedJournalCapability | undefined,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -138,8 +141,7 @@ export class ToolExecutor {
 				const activeIds = new Set(this.taskState.activeSkillIds)
 				return this.taskState.availableSkills.filter((skill) => activeIds.has(skill.name))
 			},
-			isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(this.executionProfile, tool) &&
-				(tool.id !== DiracDefaultTool.SUBAGENTS || this.requestRuntime().workingConfiguration.settings.subagentsEnabled === true),
+			isToolAvailable: (tool) => isDiscoveredToolAvailableToTaskProfile(this.executionProfile, tool),
 			environmentFactory: this.environmentFactory,
 		})
 		this.hookRunner = new ToolHookRunner(
@@ -419,6 +421,9 @@ export class ToolExecutor {
 			},
 			callbacks: {
 				tasklets: this.executionProfile !== "tasklet" ? this.getTaskletControls?.() : undefined,
+				agentCommunication: this.getAgentCommunication?.(),
+				agentWait: this.executionProfile === "tasklet" ? this.getAgentWait?.() : undefined,
+				sharedJournal: this.getSharedJournal?.(),
 				assertMutationAuthorized: (toolName) => this.assertMutationAuthorized(toolName),
 				withMutationAuthorization: (toolName, mutation) => this.withMutationAuthorization(toolName, mutation),
 				transitionFromMutation: (transition) => this.transitionFromMutation(transition),

@@ -161,7 +161,7 @@ You can also mention Git changes, workspace diagnostics, terminal output, URLs, 
 <details>
 <summary><strong>Concurrent, first-class subagents</strong></summary>
 
-Subagents can research, edit, run commands, and validate work concurrently. Each can receive its own prompt, tools, timeout, and optional parent context. Dirac tracks source freshness and rejects stale edits at write time, allowing independent agents to work safely in the same codebase.
+Subagents can research, edit, run commands, and validate work concurrently. Each receives complete assignment instructions rather than a copy of the parent conversation, runs under the parent's authority, and has no automatic execution deadline. The main agent creates and supervises children through `subagents`; `send_message` provides ordinary peer communication, and `shared_journal` stores longer findings once for interested agents to read. Neither messages nor publications grant permissions or restart completed children. Dirac tracks source freshness and rejects stale edits at write time; agents still share workspace contents.
 
 Agents run in the background without streaming separate cards into the main chat. The status area shows the active count; `/agents` prints a frozen local snapshot without sending anything to the model. In the CLI, `/agent` opens a read-only transcript browser with explicit refresh and paging. Ask the main agent to guide, stop, or resume a child—there is no direct child chat or approval surface.
 

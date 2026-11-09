@@ -7,7 +7,7 @@ import { ApiConversationManager } from "../ApiConversationManager"
 import { materializeModelBoundInput } from "../TaskInputMaterialization"
 import { TaskState } from "../TaskState"
 
-type IdentityField = "steeringMessageIds" | "taskletEventIds"
+type IdentityField = "steeringMessageIds" | "taskletEventIds" | "agentMessageIds" | "journalNotificationIds"
 
 function fixture(identityField: IdentityField) {
 	const toolCall: DiracStorageMessage = {
@@ -84,7 +84,7 @@ function occurrences(value: unknown, text: string): number {
 }
 
 describe("Checkpoint-aware model input materialization", () => {
-	for (const identityField of ["steeringMessageIds", "taskletEventIds"] as const) {
+	for (const identityField of ["steeringMessageIds", "taskletEventIds", "agentMessageIds", "journalNotificationIds"] as const) {
 		describe(identityField, () => {
 			for (const projection of ["shared", "copied", "shallow"] as const) {
 				it(`puts retry-time input after an unchanged opaque checkpoint (${projection} projection)`, async () => {

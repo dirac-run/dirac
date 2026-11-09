@@ -68,7 +68,7 @@ export interface TaskletReceipt {
 	totalCount?: number
 	hasMore?: boolean
 	fragment?: boolean
-	wakeReason?: "event" | "timeout" | "user_message" | "cancelled"
+	wakeReason?: "event" | "mail" | "journal" | "timeout" | "user_message" | "cancelled"
 	/** The selected wake sources, not an indication of their completion. */
 	waitScope?: "any_tasklet" | "selected_tasklets" | "time_or_user"
 	waitSourceCount?: number
@@ -143,6 +143,8 @@ export function taskletReceiptNote(receipt: TaskletReceipt): string | undefined 
 		}
 		const reasons = {
 			event: "Agent communication",
+			mail: "Ordinary agent message",
+			journal: "Journal notification",
 			timeout: "Deadline reached",
 			user_message: "User input",
 			cancelled: "Wait cancelled",

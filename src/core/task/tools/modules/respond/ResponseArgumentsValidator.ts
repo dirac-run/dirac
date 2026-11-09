@@ -17,9 +17,6 @@ export function validateResponseArguments(args: unknown, env: IToolEnvironment):
 		throw error
 	}
 	validateMode(request.operation, env)
-	if (request.reply_to && env.config.executionProfile !== "tasklet") {
-		throw new ResponseArgumentsError("Only tasklets may reply to an addressed parent question.", env)
-	}
 
 	if (request.operation !== ResponseOperation.PROGRESS) env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 	return request

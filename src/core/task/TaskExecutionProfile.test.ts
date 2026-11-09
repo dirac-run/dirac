@@ -2,12 +2,12 @@ import { strict as assert } from "node:assert"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
 import { describe, it } from "mocha"
 import {
-    GOAL_TOOL_NAMES,
-    isDiscoveredToolAvailableToTaskProfile,
-    isSkillAvailableToTaskProfile,
-    isToolAvailableToTaskProfile,
-    type TaskExecutionProfile,
-    taskProfileSystemInstructions,
+	GOAL_TOOL_NAMES,
+	isDiscoveredToolAvailableToTaskProfile,
+	isSkillAvailableToTaskProfile,
+	isToolAvailableToTaskProfile,
+	type TaskExecutionProfile,
+	taskProfileSystemInstructions,
 } from "./TaskExecutionProfile"
 import type { DiscoveredTool } from "./tools/discovery/DiscoveredTool"
 
@@ -38,9 +38,8 @@ describe("Task execution profiles", () => {
 
 	it("permits shared delegation and supervision for every root, never for tasklets", () => {
 		for (const profile of profiles) {
-			for (const toolName of ["subagents", "tasklets"]) {
-				assert.equal(isToolAvailableToTaskProfile(profile, toolName), profile !== "tasklet")
-			}
+			assert.equal(isToolAvailableToTaskProfile(profile, "subagents"), profile !== "tasklet")
+			assert.equal(isToolAvailableToTaskProfile(profile, "tasklets"), false)
 			assert.equal(isToolAvailableToTaskProfile(profile, "read_file"), true)
 		}
 	})
@@ -73,7 +72,7 @@ describe("Task execution profiles", () => {
 	for (const profile of ["goal_coordinator", "goal_followup"] as const) {
 		it(`gives ${profile} shared tasklet controls rather than legacy Goal supervision`, () => {
 			const instructions = taskProfileSystemInstructions(profile) ?? ""
-			assert.match(instructions, /tasklets.*inspect/)
+			assert.match(instructions, /subagents.*inspect/)
 			assert.match(instructions, /under your current authority/)
 			assert.match(instructions, /interrupt or resume/)
 			assert.match(instructions, /sleep when no useful work remains/)

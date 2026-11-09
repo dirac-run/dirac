@@ -69,6 +69,17 @@ describe("response arguments validator", () => {
 		for (const args of invalid) assert.throws(() => validateResponseArguments(args, environment()))
 	})
 
+	it("rejects obsolete progress correlation for roots and children without repurposing it", () => {
+		for (const executionProfile of ["standalone", "tasklet"]) {
+			const env = environment()
+			env.config.executionProfile = executionProfile
+			for (const reply_to of ["old-question", null]) {
+				assert.throws(() => validateResponseArguments({ operation: ResponseOperation.PROGRESS, text: "Update", reply_to }, env), /Unsupported response parameter: reply_to/)
+			}
+			assert.deepEqual(validateResponseArguments({ operation: ResponseOperation.PROGRESS, text: "Update" }, env), { operation: ResponseOperation.PROGRESS, text: "Update" })
+		}
+	})
+
 	it("rejects tasklet Plan responses even with a stale Plan configuration", () => {
 		const env = environment("plan")
 		env.config.executionProfile = "tasklet"

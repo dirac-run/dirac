@@ -152,9 +152,14 @@ export type {
 export type ToolResponse = DiracToolResponseContent
 
 import type { TaskCounterparty, TaskInteractionRequest } from "./types/task-messenger"
+import { AgentCommunication, type AgentRosterEntry } from "./AgentCommunication"
+import { SharedJournal } from "./SharedJournal"
 
 /** Private owner bindings; a tasklet never falls back to foreground publication. */
 export interface TaskletExecutionBindings {
+	agentCommunication?: AgentCommunication
+	sharedJournal?: SharedJournal
+	hasPendingInteraction?: () => boolean
 	configuration?: TaskletConfiguration
 	/** Current immutable owner configuration; inherited only between model requests. */
 	getParentWorkingConfiguration?: () => TaskWorkingConfiguration
@@ -234,6 +239,28 @@ export class Task {
 	private readonly releaseTaskLock?: () => Promise<void>
 	private persistenceRetirementPromise?: Promise<void>
 	readonly taskletHost?: TaskletHost
+	private agentCommunicationClosed = false
+	private taskRunAdmitted = false
+
+	private get agentCommunication(): AgentCommunication | undefined {
+		return this.ownerBindings?.agentCommunication ?? this.taskletHost?.agentCommunication
+	}
+
+	private get agentAddress(): string {
+		return this.executionProfile === "tasklet" ? this.taskId : "Dirac"
+	}
+
+	getAgentCommunicationState(): Pick<AgentRosterEntry, "status" | "accepts_messages"> {
+		const state = this.taskState
+		return {
+			status: this.agentCommunication?.isWaiting(this.agentAddress) ? "waiting_for_message"
+				: this.taskRunAdmitted && state.status === TaskStatus.IDLE ? "starting" : state.status,
+			accepts_messages: !this.agentCommunicationClosed && !state.abort && !state.cancellationIntent &&
+				!state.completionCommitted && !state.runOutcome &&
+				(state.status !== TaskStatus.IDLE || this.taskRunAdmitted) &&
+				![TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.CANCELLING].includes(state.status),
+		}
+	}
 
 	// ONE mutex for ALL state modifications to prevent race conditions
 	private stateMutex = new Mutex()
@@ -256,14 +283,20 @@ export class Task {
 				this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup",
 			postStateToWebview: () => this.postStateToWebview(),
 			withStateLock: (fn) => this.withStateLock(fn),
-			onUserInputAccepted: () => this.taskletHost?.notifyUserMessage(),
+			onUserInputAccepted: () => {
+				this.agentCommunication?.notifyControl(this.agentAddress)
+				this.taskletHost?.notifyUserMessage()
+			},
 			onCompletionCommitted: () => {
+				this.agentCommunication?.discard(this.agentAddress)
 				if (this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup") {
 					this.taskletHost?.closeAdmissionIfIdle()
 				}
 			},
 			getCompletionBlocker: () => {
+				if (this.agentCommunicationClosed || this.taskState.abort || this.taskState.cancellationIntent) return "Task is closing; completion cannot be committed."
 				if (this.hasPendingChatInput()) return "Completion was superseded by pending user input."
+				if (this.agentCommunication?.hasPending(this.agentAddress)) return "Completion was superseded by queued agent mail."
 				return this.taskletHost?.getCompletionBlocker()
 			},
 		}
@@ -358,6 +391,7 @@ export class Task {
 			ulid: this.ulid,
 			conversationPersistenceHooks: this.conversationPersistenceHooks,
 			deliverTaskletEvents: (history) => this.deliverTaskletEvents(history),
+			deliverAgentMessages: (history) => this.deliverAgentMessages(history),
 		}
 	}
 
@@ -389,6 +423,20 @@ export class Task {
 
 	public async enqueueSteeringMessage(text: string): Promise<string> {
 		return enqueueSteeringMessage(this.steeringContext, text)
+	}
+
+	private async deliverAgentMessages(outboundHistory: DiracStorageMessage[]): Promise<void> {
+		if (!this.getAgentCommunicationState().accepts_messages) return
+		const communication = this.agentCommunication
+		if (!communication) return
+		const delivery = communication.prepareDelivery(this.agentAddress)
+		const notices = communication.prepareJournalDelivery(this.agentAddress, delivery?.remainingBytes)
+		if (delivery) {
+			await materializeModelBoundInput(this.messageStateHandler, outboundHistory, delivery.content, "agentMessageIds", delivery.acknowledge)
+		}
+		if (notices) {
+			await materializeModelBoundInput(this.messageStateHandler, outboundHistory, notices.content, "journalNotificationIds", notices.acknowledge)
+		}
 	}
 
 	/** Called only at the existing serial provider-dispatch boundary, never by event arrival. */
@@ -1007,6 +1055,13 @@ export class Task {
 			},
 			recordUsage,
 			contained?.getParentWorkingConfiguration,
+			() => this.agentCommunication?.forAgent(this.agentAddress),
+			() => this.executionProfile === "tasklet" ? this.agentCommunication?.forWaiter(this.agentAddress, {
+				signal: this.taskState.abortSignal,
+				hasPendingInteraction: () => this.ownerBindings?.hasPendingInteraction?.() ?? this.taskState.lastWaitingCardId !== undefined,
+				hasPendingGuidance: () => this.taskState.steeringMessages.some((message) => message.deliveryState === SteeringDeliveryState.QUEUED),
+			}) : undefined,
+			() => (this.ownerBindings?.sharedJournal ?? this.taskletHost?.sharedJournal)?.forAgent(this.agentAddress),
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1161,6 +1216,7 @@ export class Task {
 				{
 					taskId: this.taskId,
 					executionProfile: this.executionProfile,
+					getAgentCommunicationState: () => this.getAgentCommunicationState(),
 					recordTaskletUsage: async (id, usage) => {
 						await this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage))
 						void this.postPresentationToWebview().catch((error) =>
@@ -1587,12 +1643,15 @@ export class Task {
 	}
 
 	private async runTaskLifecycle(run: () => Promise<TaskRunOutcome | undefined>): Promise<TaskRunOutcome> {
+		// Admission precedes tool refresh and lifecycle initialization, while status is still IDLE.
+		this.taskRunAdmitted = true
 		let outcome: TaskRunOutcome
 		try {
 			outcome = (await run()) ?? this.taskRunOutcomeFromState()
 		} catch (error) {
 			outcome = { kind: "failed", error: serializeTaskError(error), failedAt: Date.now() }
 		}
+		this.taskRunAdmitted = false
 		return this.settleTaskRun(outcome)
 	}
 
@@ -1622,6 +1681,8 @@ export class Task {
 	}
 
 	private async settleTaskRun(candidate: TaskRunOutcome): Promise<TaskRunOutcome> {
+		this.agentCommunicationClosed = true
+		this.agentCommunication?.discard(this.agentAddress)
 		let outcome = candidate
 		const failures: unknown[] = []
 		if (this.executionProfile === "standalone") {
@@ -1667,6 +1728,8 @@ export class Task {
 	}
 
 	async abortTask(intent: TaskCancellationIntent = { kind: "cancelled" }): Promise<void> {
+		this.agentCommunicationClosed = true
+		this.agentCommunication?.discard(this.agentAddress)
 		await this.withStateLock(() => this.taskState.captureCancellationIntent(intent))
 		if (this.taskState.status !== TaskStatus.CANCELLED) {
 			this.taskState.status = TaskStatus.CANCELLING
@@ -1843,6 +1906,7 @@ export type TaskletTaskOptions = Pick<
 > & { getParentModel?: () => ApiHandlerModel }
 
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
+	getAgentCommunicationState?: () => Pick<AgentRosterEntry, "status" | "accepts_messages">
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
 	retainMutationUntil: TaskletExecutionBindings["retainMutationUntil"]
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
@@ -1886,6 +1950,40 @@ interface OwnedTasklet {
  * Explicit decisions are checked against the owner; communications persist until parent delivery.
  */
 export class TaskletHost {
+	readonly agentCommunication = new AgentCommunication(
+		() => this.agentRoster(),
+		() => this.sleepWaiter?.check(),
+		(id) => this.recordCommunicationWait(id),
+	)
+	readonly sharedJournal: SharedJournal
+
+	private recordCommunicationWait(id: string): void {
+		const child = this.requireChild(id)
+		child.events.push({
+			id: ulid(), taskletId: id, createdAt: Date.now(),
+			communication: { type: "waiting_for_message" },
+		})
+		this.sleepWaiter?.check()
+	}
+
+	private agentRoster(): AgentRosterEntry[] {
+		const root = this.owner.getAgentCommunicationState?.() ?? { status: "idle", accepts_messages: false }
+		const entries: AgentRosterEntry[] = [{ id: "Dirac", title_preview: "Dirac", ...root, accepts_messages: !this.closing && root.accepts_messages }]
+		const records = new Map([...this.children].map(([id, child]) => [id, child.record]))
+		for (const [id, { record }] of this.starting) records.set(id, record)
+		for (const [id, record] of records) {
+			const child = this.children.get(id)
+			const starting = this.starting.has(id) && !child?.task
+			const state = child?.task?.getAgentCommunicationState()
+			entries.push({
+				id,
+				title_preview: record.title.slice(0, 80),
+				status: starting ? "starting" : child?.settling && !child.outcomePersisted ? "settling" : record.outcome?.kind ?? state?.status ?? "reconstructed",
+				accepts_messages: !this.closing && !child?.settling && (starting || (!record.outcome && state?.accepts_messages === true)),
+			})
+		}
+		return entries
+	}
 	readonly observationSourceId = `live:${ulid()}`
 	private publishedActiveCount = 0
 	private readonly children = new Map<string, OwnedTasklet>()
@@ -1915,7 +2013,11 @@ export class TaskletHost {
 		) {
 			throw new Error("Only root Tasks may own tasklets")
 		}
-		getTaskDirectoryPath(owner.taskId)
+		this.sharedJournal = new SharedJournal(getTaskDirectoryPath(owner.taskId), {
+			assertActive: (author) => { this.agentCommunication.snapshotRecipients(author) },
+			recipients: (author) => this.agentCommunication.snapshotRecipients(author),
+			notify: (recipients, notice) => this.agentCommunication.enqueueJournalNotice(recipients, notice),
+		})
 		this.rootTaskId = owner.taskId
 	}
 
@@ -1957,6 +2059,10 @@ export class TaskletHost {
 				if (settled) return
 				if (this.closing || signal?.aborted) return cancel()
 				if (this.owner.hasPendingUserInput()) return finish({ reason: "user_message" })
+				const mail = this.agentCommunication.firstPending("Dirac", ids)
+				if (mail) return finish({ reason: "mail", from: mail.from, messageId: mail.id })
+				const notice = this.agentCommunication.firstPendingJournalNotice("Dirac", ids)
+				if (notice) return finish({ reason: "journal", from: notice.author, messageId: notice.message_id })
 				const failed = [...this.children.values()].find(
 					(child) => (!ids || ids.has(child.record.id)) && child.settlementError,
 				)
@@ -2080,11 +2186,16 @@ export class TaskletHost {
 		// Validate before clearing committed outcomes or appending a resumed event.
 		taskletWorkingConfiguration(this.options.workingConfiguration, child.record.configuration)
 		const record = { ...child.record, outcome: undefined }
+		// The newly admitted execution is starting even while its acceptance write is pending.
+		child.settling = false
 		const acceptance = this.acceptResume(child, record, message)
 		this.starting.set(id, { record, acceptance })
 		this.publishActivityIfChanged()
 		try {
 			return await acceptance
+		} catch (error) {
+			this.agentCommunication.discard(id)
+			throw error
 		} finally {
 			this.starting.delete(id)
 			this.publishActivityIfChanged()
@@ -2098,7 +2209,6 @@ export class TaskletHost {
 		child.failedTranscript = undefined
 		child.failedPresentationPosition = undefined
 		child.settlement = undefined
-		child.settling = false
 		child.interactions.clear()
 		child.interactionsClosed = false
 		child.events.push({
@@ -2141,6 +2251,9 @@ export class TaskletHost {
 		this.publishActivityIfChanged()
 		try {
 			return await acceptance
+		} catch (error) {
+			this.agentCommunication.discard(record.id)
+			throw error
 		} finally {
 			this.starting.delete(record.id)
 			this.publishActivityIfChanged()
@@ -2202,6 +2315,9 @@ export class TaskletHost {
 				reinitExistingTaskFromId: unavailableForegroundCallback,
 				cancelTask: unavailableForegroundCallback,
 				tasklet: {
+					agentCommunication: this.agentCommunication,
+					sharedJournal: this.sharedJournal,
+					hasPendingInteraction: () => [...child.interactions.values()].some(({ record }) => record.status === "pending"),
 					configuration: record.configuration,
 					getParentWorkingConfiguration: () => this.options.workingConfiguration,
 					withMutationAuthorization: (toolName, mutation) => this.owner.withMutationAuthorization(toolName, mutation),
@@ -2210,18 +2326,7 @@ export class TaskletHost {
 						recordResponse: async (response) => {
 							if (child.interactionsClosed || this.closing) throw new Error("Tasklet counterparty is closed")
 							if (response.operation !== "progress")
-								throw new Error("Only progress/replies may be observed before settlement")
-							if (
-								response.reply_to &&
-								!child.events.some(
-									(event) =>
-										event.id === response.reply_to &&
-										event.communication.type === "message" &&
-										event.communication.message.type === "question",
-								)
-							) {
-								throw new Error("Reply does not address a parent question for this tasklet")
-							}
+								throw new Error("Only progress may be observed before settlement")
 							child.events.push({
 								id: ulid(),
 								taskletId: record.id,
@@ -2306,7 +2411,7 @@ export class TaskletHost {
 			const full = JSON.stringify(event.communication)
 			const preview =
 				full.length > 1200
-					? `${full.slice(0, 1200)}… [preview only; tasklets inspect view=messages retrieves exact paged content]`
+					? `${full.slice(0, 1200)}… [preview only; subagents operation=inspect view=messages retrieves exact paged content]`
 					: full
 			return {
 				type: "text",
@@ -2468,11 +2573,13 @@ export class TaskletHost {
 		const blocker = this.getCompletionBlocker()
 		if (blocker) throw new Error(blocker)
 		this.closing = true
+		this.agentCommunication.close()
 	}
 
 	/** Close admission synchronously, then join every admitted writer and execution. */
 	shutdown(): Promise<void> {
 		this.closing = true
+		this.agentCommunication.close()
 		this.sleepWaiter?.finish({ reason: "cancelled" })
 		for (const child of this.children.values()) this.retireInteractions(child)
 		this.shutdownPromise ??= this.stopOwnedTasklets()
@@ -2480,6 +2587,7 @@ export class TaskletHost {
 	}
 
 	private async stopOwnedTasklets(): Promise<void> {
+		const journalResults = Promise.allSettled([this.sharedJournal.close()])
 		const reconstruction = await Promise.allSettled(this.reconstruction ? [this.reconstruction] : [])
 		const results = await Promise.allSettled([
 			...[...this.starting.values()].map(({ acceptance }) => acceptance),
@@ -2492,6 +2600,7 @@ export class TaskletHost {
 			[...this.children.values()].flatMap((child) => [child.eventWrites, child.recordWrites]),
 		)
 		const failures = [
+			...(await journalResults).flatMap((result) => result.status === "rejected" ? [result.reason] : []),
 			...reconstruction.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
 			...results.filter((result) => result.status === "rejected").map((result) => result.reason),
 			...this.interactionCleanupFailures,
@@ -2539,7 +2648,7 @@ export class TaskletHost {
 			interactions: child.events.flatMap((event) =>
 				event.communication.type === "interaction" ? [event.communication.request] : [],
 			),
-			executionStatus: child.task?.stateView.status,
+			executionStatus: this.agentCommunication.isWaiting(id) ? "waiting_for_message" : child.task?.stateView.status,
 			backgroundCommandRunning: child.backgroundCommandRunning,
 			lastActivityAt: child.task?.messageStateHandler.getDiracMessages().at(-1)?.ts ?? child.events.at(-1)?.createdAt,
 			outcomePersisted: child.outcomePersisted,
@@ -2576,16 +2685,16 @@ export class TaskletHost {
 			const text = (value: unknown) => typeof value === "string" && value.trim().length > 0 && value.length <= 8000
 			if (!identity(item.taskletId)) throw new Error("Message requires a bounded tasklet ID")
 			let fields: string[]
-			if (item.type === "guidance" || item.type === "question") {
+			if (item.type === "guidance") {
 				fields = ["taskletId", "type", "text"]
-				if (!text(item.text)) throw new Error("Guidance/question requires text of at most 8000 characters")
+				if (!text(item.text)) throw new Error("Guidance requires text of at most 8000 characters")
 			} else if (item.type === "reply" || item.type === "permission_decision") {
-				if (!identity(item.replyTo)) throw new Error("Reply requires the exact bounded request ID")
+				if (!identity(item.requestId)) throw new Error("Reply requires the exact bounded request ID")
 				if (item.type === "permission_decision") {
-					fields = ["taskletId", "type", "replyTo", "decision"]
+					fields = ["taskletId", "type", "requestId", "decision"]
 					if (!["approve", "reject", "escalate"].includes(item.decision)) throw new Error("Invalid permission decision")
 				} else {
-					fields = ["taskletId", "type", "replyTo", "text", "action"]
+					fields = ["taskletId", "type", "requestId", "text", "action"]
 					if (
 						(item.text === undefined && item.action === undefined) ||
 						(item.text !== undefined && !text(item.text)) ||
@@ -2598,7 +2707,7 @@ export class TaskletHost {
 			if (Object.keys(item).some((key) => !fields.includes(key))) throw new Error("Unexpected message field")
 			const target = JSON.stringify([
 				item.taskletId,
-				"replyTo" in item ? ["request", item.replyTo] : [item.type, item.text],
+				"requestId" in item ? ["request", item.requestId] : [item.type, item.text],
 			])
 			if (targets.has(target)) throw new Error("Duplicate or conflicting message targets in batch")
 			targets.add(target)
@@ -2618,16 +2727,13 @@ export class TaskletHost {
 			taskletId: item.taskletId,
 			title: child?.record.title,
 			role: child?.record.role,
-			...("replyTo" in item ? { replyTo: item.replyTo } : {}),
+			...("requestId" in item ? { requestId: item.requestId } : {}),
 		}
 		if (!child) return { ...base, status: "stale", error: "Tasklet does not belong to this root" }
 		try {
-			if (item.type === "guidance" || item.type === "question") {
+			if (item.type === "guidance") {
 				const id = ulid()
-				const text =
-					item.type === "question"
-						? `[Parent question; message ${id}]\n${item.text}\nReply using respond progress with reply_to: ${id}.`
-						: item.text
+				const text = item.text
 				child.events.push({
 					id,
 					taskletId: item.taskletId,
@@ -2638,10 +2744,10 @@ export class TaskletHost {
 				await this.steer(item.taskletId, text)
 				return { ...base, messageId: id, status: "queued" }
 			}
-			if (!("replyTo" in item)) throw new Error("Reply requires a request ID")
+			if (!("requestId" in item)) throw new Error("Reply requires a request ID")
 			const request = child.events
 				.flatMap((event) => (event.communication.type === "interaction" ? [event.communication.request] : []))
-				.find((request) => request.id === item.replyTo)
+				.find((request) => request.id === item.requestId)
 			const addressed = { ...base, request: request?.card.header.slice(0, 200) }
 			if (!request || request.status === "retired") return { ...addressed, status: "stale" }
 			if (item.type === "permission_decision" && !request.permissionOperation && !request.permissionRequestKind) {
@@ -2674,7 +2780,7 @@ export class TaskletHost {
 				await this.persistEvents(child)
 				return { ...addressed, status: "already_resolved" }
 			}
-			const result = await this.resolveInteraction(item.taskletId, item.replyTo, decision)
+			const result = await this.resolveInteraction(item.taskletId, item.requestId, decision)
 			return { ...addressed, status: result.status }
 		} catch (error) {
 			return { ...base, status: "failed", error: getErrorMessage(error).slice(0, 1000) }
@@ -2699,7 +2805,7 @@ export class TaskletHost {
 				id: child.record.id,
 				title: child.record.title.slice(0, 80),
 				role: child.record.role,
-				status: child.record.outcome?.kind ?? child.task?.stateView.status ?? "accepted",
+				status: child.record.outcome?.kind ?? (this.agentCommunication.isWaiting(child.record.id) ? "waiting_for_message" : child.task?.stateView.status ?? "accepted"),
 				pendingRequestCount: pending.length,
 				pendingRequests: pending.slice(0, 10).map((request) => ({
 					id: request.id,
@@ -2712,7 +2818,7 @@ export class TaskletHost {
 			totalOwned: children.length,
 			current: pageInspectionItems(entries, { limit: 20 }),
 			instruction:
-				"Authoritative supervision snapshot, not a message or acknowledgement. Use tasklets list/inspect for additional children, exact requests, or committed results. Completion requires no active children.",
+				"Authoritative supervision snapshot, not a message or acknowledgement. Use subagents list/inspect for additional children, exact requests, or committed results. Completion requires no active children.",
 		})
 	}
 
@@ -2794,6 +2900,7 @@ export class TaskletHost {
 		}
 		request.decision = structuredClone(decision)
 		interaction.resolve(result)
+		this.agentCommunication.notifyControl(child.record.id)
 		await this.persistEvents(child)
 		return { status: "resolved" }
 	}
@@ -2902,6 +3009,8 @@ export class TaskletHost {
 	}
 
 	private async persistOutcome(child: OwnedTasklet, outcome: TaskRunOutcome): Promise<void> {
+		child.settling = true
+		this.agentCommunication.discard(child.record.id)
 		this.retireInteractions(child)
 		child.record = { ...child.record, outcome }
 		try {

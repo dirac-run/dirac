@@ -212,6 +212,22 @@ describe("TaskRequestBuilder", () => {
 		})
 	}
 
+	for (const profile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
+		it(`provides ${profile} identity on every request without changing role/model instructions`, async () => {
+			const { context, requestRuntime } = createContext(undefined)
+			context.executionProfile = profile
+			context.taskId = "Feynman 2"
+			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0 })
+			await buildApiRequestParams(context, requestRuntime, { previousApiReqIndex: 0, shouldCompact: true })
+			const prepare = context.apiConversationManager.prepareTranscriptInstructions as sinon.SinonStub
+			for (const call of prepare.getCalls()) {
+				assert.match(call.args[1], profile === "tasklet" ? /"id":"Feynman 2","parent":"Dirac"/ : /"id":"Dirac","parent":null/)
+				assert.match(call.args[1], /list_agents/)
+				assert.equal(call.args[0], "built system prompt")
+			}
+		})
+	}
+
 	it("delivers changing supervision as tail context without changing system instructions", async () => {
 		const { context, requestRuntime } = createContext(undefined)
 		let current = JSON.stringify({ pending: [{ taskletId: "child", requestId: "exact-current-request" }] })

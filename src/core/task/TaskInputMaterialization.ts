@@ -1,7 +1,7 @@
 import type { DiracStorageMessage, DiracTextContentBlock } from "@shared/messages/content"
 import type { ApiConversationProviderState } from "@core/api/conversation"
 
-type InputIdentityField = "steeringMessageIds" | "taskletEventIds"
+type InputIdentityField = "steeringMessageIds" | "taskletEventIds" | "agentMessageIds" | "journalNotificationIds"
 interface InputMessageState {
 	getApiConversationHistory(): DiracStorageMessage[]
 	getApiConversationProviderState(): ApiConversationProviderState

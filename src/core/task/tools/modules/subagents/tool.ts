@@ -1,19 +1,11 @@
 import type { IDiracTool } from "../../interfaces/IDiracTool"
-import type { DiracToolSpec } from "@/shared/tools"
-import type { ToolExposure } from "../../discovery/DiscoveredTool"
-import { subagents_spec, SubagentsTool, tasklets_spec, TaskletsTool } from "./SubagentsTool"
+import type { ToolExposure } from "../../discovery/ToolExposure"
+import { subagents_spec, SubagentsTool } from "./SubagentsTool"
 
-export const spec: DiracToolSpec = subagents_spec
-// Running Tasks → Subagents is the sole setting; do not expose a second tool toggle.
-export const exposure: ToolExposure = { kind: "context_only" }
+export const spec = subagents_spec
+// Supervision remains available when creation is disabled; create checks the setting at execution.
+export const exposure: ToolExposure = { kind: "profile_only", profiles: ["standalone", "goal_coordinator", "goal_followup"] }
 
 export function create(): IDiracTool {
 	return new SubagentsTool()
-}
-
-export const secondarySpec: DiracToolSpec = tasklets_spec
-export const secondaryExposure: ToolExposure = { kind: "profile_only", profiles: ["standalone", "goal_coordinator", "goal_followup"] }
-
-export function createSecondary(): IDiracTool {
-	return new TaskletsTool()
 }

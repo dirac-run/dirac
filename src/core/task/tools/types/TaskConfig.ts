@@ -1,7 +1,6 @@
-import type { ApiHandlerModel } from "@core/api"
+import type { ToolConfig, ToolServices } from "./ToolConfig"
 import type { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import type { DiracIgnoreController } from "@core/ignore/DiracIgnoreController"
-import type { CommandPermissionController } from "@core/permissions"
 import type { PermissionDecisionServiceBinding } from "@core/permissions/UtilityPermissionDecisionService"
 import type { BuildUtilityModelRunnerOptions, UtilityModelRunner } from "@core/utility-model/UtilityModelRunner"
 import type { DiffViewProvider } from "@integrations/editor/DiffViewProvider"
@@ -13,57 +12,21 @@ import type { ModelProviderSelection } from "@shared/api"
 import type { BrowserSettings } from "@shared/BrowserSettings"
 import type { DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracContent } from "@shared/messages/content"
-import type { Mode } from "@shared/storage/types"
-import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
-import { WorkspaceRootManager } from "@/core/workspace"
 import type { ContextManager } from "../../../context/context-management/ContextManager"
 import type { MessageStateHandler } from "../../message-state"
 import { TaskMessenger } from "../../TaskMessenger"
 import type { TaskState } from "../../TaskState"
-import type { DeepReadonly } from "../../runtime/TaskWorkingConfiguration"
-import type { AutoApprove } from "../../tools/autoApprove"
 import type { HookExecution } from "../../types/HookExecution"
 import type { IDiracContext } from "../interfaces/IDiracContext"
 import type { ToolRequestSnapshot } from "../runtime/ToolSnapshot"
 import type { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
 import { TASK_CALLBACKS_KEYS, TASK_CONFIG_KEYS, TASK_SERVICES_KEYS } from "../utils/ToolConstants"
-import type { TaskExecutionProfile } from "../../TaskExecutionProfile"
 
 /**
  * Strongly-typed configuration object passed to tool handlers
  */
-export interface TaskConfig {
-	executionProfile: TaskExecutionProfile
-	// Core identifiers
-	taskId: string
-	storageAddress?: TaskStorageAddress
-	ulid: string
-	cwd: string
-	mode: Mode
-	strictPlanModeEnabled: boolean
-	yoloModeToggled: boolean
-	lowVerbosityEnabled: boolean
-	vscodeTerminalExecutionMode: "vscodeTerminal" | "backgroundExec"
-	enableParallelToolCalling: boolean
-	backgroundEditEnabled: boolean
-	/** Request-bound provider identity and secret-free operational settings. */
-	providerId: string
-	model: DeepReadonly<ApiHandlerModel>
-	supportsNativeWebSearch: boolean
-	customPrompt?: "compact"
-	hooksEnabled: boolean
-	subagentsEnabled: boolean
-	useAutoCondense: boolean
-	utilityModelEnabled: boolean
-	utilityModelUseCondense: boolean
-	utilityModelSelection?: ModelProviderSelection
-	globalSkillsToggles: Readonly<Record<string, boolean>>
-	localSkillsToggles: Readonly<Record<string, boolean>>
-
-	// Multi-workspace support
-	workspaceManager?: WorkspaceRootManager
-	isMultiRootEnabled?: boolean
+export interface TaskConfig extends ToolConfig {
 
 	// State management
 	taskState: TaskState
@@ -74,7 +37,6 @@ export interface TaskConfig {
 
 	// Settings
 	autoApprovalSettings: AutoApprovalSettings
-	autoApprover: AutoApprove
 	browserSettings: BrowserSettings
 	/** Present only when Utility-model permission handling is fully configured. */
 	permissionDecisionBinding?: PermissionDecisionServiceBinding
@@ -96,13 +58,12 @@ export interface TaskConfig {
 /**
  * All services available to tool handlers
  */
-export interface TaskServices {
+export interface TaskServices extends ToolServices {
 	browserSession: BrowserSession
 	urlContentFetcher: UrlContentFetcher
 	diffViewProvider: DiffViewProvider
 	fileContextTracker: FileContextTracker
 	diracIgnoreController: DiracIgnoreController
-	commandPermissionController: CommandPermissionController
 	contextManager: ContextManager
 }
 
@@ -114,6 +75,10 @@ export interface TaskServices {
 export interface TaskCallbacks {
 	/** Optional root-owned capability; absent for contained and Goal executions. */
 	tasklets?: import("../interfaces/IToolEnvironment").TaskletControls
+	/** Root-scoped ordinary communication; available to roots and contained children. */
+	agentCommunication?: import("../../AgentCommunication").AgentCommunicationCapability
+	agentWait?: import("../../AgentCommunication").AgentWaitCapability
+	sharedJournal?: import("../../SharedJournalTypes").SharedJournalCapability
 	/** Revalidates request-bound mutation consent against the Task's current mode. */
 	assertMutationAuthorized: (toolName?: DiracToolSpec["id"]) => void
 	/** Holds task mutation consent through the complete asynchronous write boundary. */
