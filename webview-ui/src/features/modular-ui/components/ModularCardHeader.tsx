@@ -132,7 +132,7 @@ export const ModularCardHeader: React.FC<ModularCardHeaderProps> = ({
 						variant={tasklet?.status === "waiting" ? "warning" : "outline"}>
 						{taskletStatus.label}
 					</Badge>
-				) : !isTaskletCard && status === CardStatus.WAITING_FOR_INPUT ? (
+				) : !card.communication && !isTaskletCard && status === CardStatus.WAITING_FOR_INPUT ? (
 					<Badge className="shrink-0 px-1.5 py-0 text-xs leading-4" variant="warning">
 						Awaiting Input
 					</Badge>

@@ -31,25 +31,26 @@ describe("SendMessageTool", () => {
 		assert.deepEqual(JSON.parse(output), { accepted: true, message_id: "message-1" })
 		sinon.assert.calledOnce(createCard)
 		const params = createCard.firstCall.args[0]
-		assert.equal(params.header, "Feynman is sending a message to  Schrödinger 2 ")
-		assert.equal(params.body, input.text)
+		assert.equal(params.header, "Feynman →  Schrödinger 2  · Message")
+		assert.equal(params.body, `${input.text}\n\nStatus: Sending`)
 		assert.deepEqual(params.communication, { actor: "Feynman" })
 		assert.equal(params.status, CardStatus.RUNNING)
-		assert.equal(params.collapsed, false)
-		assert.equal(params.do_not_auto_collapse, true)
+		assert.equal(params.collapsed, true)
+		assert.equal(params.do_not_auto_collapse, undefined)
 		assert.equal(params.taskletReceipt, undefined)
 		const update = card.update.firstCall.args[0]
-		assert.equal(update.header, "Feynman sent a message to  Schrödinger 2 ")
-		assert.equal(update.body, undefined)
-		assert.match(update.communication.detail, /Accepted.*volatile.*not confirmed/)
-		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS, true)
+		assert.equal(update.header, "Feynman →  Schrödinger 2  · Message")
+		assert.equal(update.body, `${input.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`)
+		assert.deepEqual(update.communication, { actor: "Feynman" })
+		assert.doesNotMatch(update.body, /message-1/)
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
 	})
 
 	it("always names the root Dirac rather than its task ID", async () => {
 		const { env, card, createCard } = fixture({ id: "root-task-id", parent: null })
 		await new SendMessageTool().processCall({ to: "Feynman", text: "hello" }, env)
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
-		assert.equal(card.update.firstCall.args[0].header, "Dirac sent a message to Feynman")
+		assert.equal(card.update.firstCall.args[0].header, "Dirac → Feynman · Message")
 	})
 
 	it("rejects invalid shapes, missing fields, blank content, and caller authority/correlation fields", async () => {
@@ -75,12 +76,26 @@ describe("SendMessageTool", () => {
 			send.rejects(error)
 			await assert.rejects(new SendMessageTool().processCall({ to: "Dirac", text: "hello" }, env), (caught) => caught === error)
 			sinon.assert.calledOnceWithExactly(card.update, {
-				header: "Feynman failed to send a message to Dirac",
-				communication: { actor: "Feynman", detail: message },
+				header: "Feynman → Dirac · Message",
+				body: "hello\n\nStatus: Message not accepted. See tool result for details.",
+				communication: { actor: "Feynman" },
 			})
-			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR, true)
+			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR)
 		}
 	})
+
+	for (const phase of ["update", "finalize"] as const) {
+		it(`does not report accepted mail as rejected when ${phase} fails`, async () => {
+			const { env, send, card } = fixture()
+			const error = new Error("Display failed for opaque-message-id")
+			card[phase].onFirstCall().rejects(error)
+			await assert.rejects(new SendMessageTool().processCall({ to: "Planck", text: "Authored source hash abc123" }, env), (caught) => caught === error)
+			sinon.assert.calledOnce(send)
+			assert.match(card.update.lastCall.args[0].body, /Message accepted, but display failed/)
+			assert.match(card.update.lastCall.args[0].body, /Authored source hash abc123/)
+			assert.doesNotMatch(card.update.lastCall.args[0].body, /opaque-message-id|Message not accepted/)
+		})
+	}
 
 	it("requires runtime capability without exposing supervision", async () => {
 		const { env, createCard } = fixture()

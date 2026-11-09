@@ -127,6 +127,8 @@ describe("TaskMessenger communication projection", () => {
 		assert.equal(projected.status, CardStatus.SUCCESS)
 		assert.equal(projected.header, "Feynman sent a message to Planck")
 		assert.equal(projected.communication.actor, "Feynman")
+		assert.equal(projected.collapsed, true)
+		assert.equal(projected.do_not_auto_collapse, undefined)
 		assert.equal(projected.requireFeedback, undefined)
 		assert.equal(projected.actions, undefined)
 		assert.equal(projected.rawInput, undefined)
@@ -207,7 +209,7 @@ describe("TaskMessenger tasklet escalation", () => {
 		assert.equal(result.action, DiracAskResponse.APPROVE)
 		assert.notEqual(card.id, input.card.id)
 		assert.notEqual(card.startTime, 1)
-		assert.match(card.header, /tasklet-private requested your approval.*Execute/)
+		assert.equal(card.header, "tasklet-private · Approved by you")
 		assert.deepEqual(card.rawInput, input.card.rawInput)
 		assert.deepEqual(card.actions, input.card.actions)
 		assert.equal(card.approvalScope, "once")
@@ -216,6 +218,56 @@ describe("TaskMessenger tasklet escalation", () => {
 		assert.equal(input.card.status, CardStatus.WAITING_FOR_INPUT)
 		assert.deepEqual(taskState.waitingCardIds, [])
 	})
+
+	for (const response of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
+		it(`shows actual user ${response} and prior Utility context without changing the operation`, async () => {
+			const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+			messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+				submitCardResponse({ taskState }, { cardId, response })
+			})
+			const input = { ...request(), utilityPermissionEscalation: "Policy does not cover this operation" }
+			await messenger.escalateTaskletInteraction(child, input, new AbortController().signal)
+			const card = messages[0].content.card
+			assert.equal(card.header, `tasklet-private · ${response === DiracAskResponse.APPROVE ? "Approved" : "Declined"} by you`)
+			assert.match(card.body, /Full operation/)
+			assert.match(card.body, /Utility escalated: Policy does not cover this operation/)
+			assert.equal(card.collapsed, true)
+			assert.deepEqual(card.rawInput, input.card.rawInput)
+		})
+	}
+
+	it("preserves the operation text of a header-only child request", async () => {
+		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
+		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.REJECT })
+		})
+		const original = request()
+		const input = { ...original, card: { ...original.card, body: "" } }
+		await messenger.escalateTaskletInteraction(child, input, new AbortController().signal)
+		assert.equal(messages[0].content.card.body, "Execute?")
+	})
+
+	for (const cancelled of [false, true]) {
+		it(`retains ${cancelled ? "cancelled" : "answered"} header persistence failures as escalation cleanup failures`, async () => {
+			const { messenger, taskState, messageStateHandler } = createMessenger()
+			const failure = new Error("header persistence failed")
+			const cancellation = new AbortController()
+			messageStateHandler.patchCardById.callsFake(async (id: string, update: Record<string, unknown>) => {
+				if (update.header === `tasklet-private · ${cancelled ? "Request cancelled" : "Approved by you"}`) throw failure
+				const message = messageStateHandler.getDiracMessages().find((candidate: any) => candidate.content.card?.id === id)
+				Object.assign(message.content.card, update)
+				return message.content.card
+			})
+			messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+				if (cancelled) cancellation.abort(new Error("child retired"))
+				else submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE })
+			})
+			await assert.rejects(
+				messenger.escalateTaskletInteraction(child, request(), cancellation.signal),
+				(error: unknown) => error instanceof TaskletEscalationCleanupError && error.cause === failure,
+			)
+		})
+	}
 
 	it("does not create a card for pre-aborted or owner-routed escalation", async () => {
 		const { messenger, messages } = createMessenger()

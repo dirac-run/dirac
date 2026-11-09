@@ -121,12 +121,30 @@ async function createTaskletPermissionCard(
 	params: CardParams,
 	tracker: CardHandle[],
 ): Promise<ICardHandle> {
-	if (config.toolUse?.name !== "execute_command" || params.permissionRequestKind !== "tool" ||
-		params.permissionOperation?.kind !== "commands" || params.operationalInput) {
+	if (params.operationalInput || (!params.requireApproval && params.permissionRequestKind === undefined)) {
 		return createOwnerCard(config, params, tracker)
 	}
+	if (config.toolUse?.name !== "execute_command" || params.permissionOperation?.kind !== "commands") {
+		return createOwnerCard(config, {
+			...params,
+			utilityPermissionSkipped: "This operation requires Dirac review before automatic approval.",
+		}, tracker)
+	}
+	if (params.permissionRequestKind === "manual_tool") {
+		return createOwnerCard(config, {
+			...params,
+			utilityPermissionSkipped: "Command restrictions require Dirac review; Utility cannot approve this request.",
+		}, tracker)
+	}
 	const binding = config.permissionDecisionBinding
-	if (!binding) return createOwnerCard(config, params, tracker)
+	if (!binding || params.permissionRequestKind !== "tool") {
+		return createOwnerCard(config, {
+			...params,
+			utilityPermissionSkipped: !binding
+				? "Utility permission handling is disabled or not fully configured."
+				: "This request was not classified for Utility approval.",
+		}, tracker)
+	}
 
 	const request = createUtilityPermissionRequest(config, params)
 	const decision = await binding.service.decide(request, config.taskState.abortSignal)
@@ -179,15 +197,17 @@ async function publishPermissionApprovalCard(
 	request: UtilityPermissionRequest,
 	reason: string,
 ): Promise<void> {
+	const actor = config.executionProfile === "tasklet" ? config.taskId : "Dirac"
 	await createDisplayedCardFromMessenger(
 		config,
 		{
-			header: `Auto Approved · ${params.header}`,
+			header: `${actor} · Auto-approved`,
 			toolName: "permission_approval",
 			icon: DiracIcon.PERMISSION_APPROVAL,
 			status: CardStatus.SUCCESS,
 			renderType: "markdown",
-			body: `**Result:** Auto Approved by permission agent\n\n**Reason:** ${reason}`,
+			body: `**Decision:** Approved\n\n**Source:** Utility permission policy\n\n**Reason:** ${reason}\n\n### Requested operation\n\n${params.body ?? params.header}`,
+			...(config.executionProfile === "tasklet" ? { communication: { actor } } : {}),
 			rawInput: { tool: request.toolCall.name },
 			rawOutput: { decision: "approve", reason, approvedTool: request.toolCall.name },
 			locations: params.locations,

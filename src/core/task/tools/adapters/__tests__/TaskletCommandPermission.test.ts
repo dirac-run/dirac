@@ -22,6 +22,7 @@ function fixture() {
 		mode: "act",
 		yoloModeToggled: true,
 		toolUse: { name: "execute_command", params: { script: "python tool.py", language: "bash" } },
+		taskId: "Feynman",
 		taskState: { abortSignal: cancellation.signal },
 		taskMessenger: { routesToOwner: true, createCard },
 		autoApprover: { isUnrestrictedAutoApprove: sinon.stub().returns(true) },
@@ -50,6 +51,10 @@ describe("Tasklet command Utility routing", () => {
 		sinon.assert.calledOnce(h.createCard)
 		assert.equal(h.createCard.firstCall.args[0].status, CardStatus.SUCCESS)
 		assert.equal(h.createCard.firstCall.args[0].requireApproval, undefined)
+		assert.equal(h.createCard.firstCall.args[0].header, "Feynman · Auto-approved")
+		assert.deepEqual(h.createCard.firstCall.args[0].communication, { actor: "Feynman" })
+		assert.equal(h.createCard.firstCall.args[0].collapsed, true)
+		assert.match(h.createCard.firstCall.args[0].body, /Source:\*\* Utility permission policy/)
 	})
 
 	it("routes Utility escalation to the owner with its reason, without YOLO bypass", async () => {
@@ -68,6 +73,8 @@ describe("Tasklet command Utility routing", () => {
 		await createCardFromMessenger(h.config, h.params, [])
 		sinon.assert.notCalled(h.decide)
 		assert.equal(h.createCard.firstCall.args[0].requireApproval, true)
+		assert.match(h.createCard.firstCall.args[0].utilityPermissionSkipped, /disabled or not fully configured/)
+		assert.equal(h.createCard.firstCall.args[0].utilityPermissionEscalation, undefined)
 	})
 
 	it("routes evaluator failures to the owner through the service's escalation result", async () => {
@@ -105,6 +112,7 @@ describe("Tasklet command Utility routing", () => {
 			await createCardFromMessenger(h.config, h.params, [])
 			sinon.assert.notCalled(h.decide)
 			assert.equal(h.createCard.firstCall.args[0].requireApproval, true)
+			assert.match(h.createCard.firstCall.args[0].utilityPermissionSkipped, /Dirac review/)
 		})
 	}
 

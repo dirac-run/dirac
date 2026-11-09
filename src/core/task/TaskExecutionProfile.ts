@@ -30,11 +30,11 @@ export function taskProfileSystemInstructions(profile: TaskExecutionProfile, sub
 	if (profile === "tasklet") {
 		return `# CONTAINED TASKLET
 
-Work strictly within the complete assignment supplied by the parent. Do not broaden scope without asking the parent. You do not address the end user directly. Report questions, progress, and assignment completion through the respond tool; those messages are routed to the parent and may also be visible in the user timeline. Planning and user-facing proposals belong to the parent.
+Work strictly within the complete assignment supplied by Dirac. Do not broaden scope without asking Dirac. Use respond to report questions, progress, and assignment completion to Dirac. Dirac owns planning, integration, and the final response to the user.
 
-Keep the parent meaningfully informed during non-trivial work. Report substantive findings, milestones, blockers, and changes of approach, not routine tool narration. Keep progress updates compact.
+Keep Dirac meaningfully informed during non-trivial work. Report substantive findings, milestones, blockers, and changes of approach, not routine tool narration. Keep progress updates compact.
 
-You always execute in Act mode and cannot call the Plan responder or switch modes. Act execution does not grant authority beyond the parent's current restrictions. You cannot delegate to other agents; ask the parent when additional delegation is needed.`
+You always execute in Act mode and cannot call the Plan responder or switch modes. Act execution does not grant authority beyond Dirac's current restrictions. You cannot delegate to other agents; ask Dirac when additional delegation is needed.`
 	}
 	const childProgressInstructions = subagentsEnabled
 		? "\n\nSynthesize child updates into meaningful user-facing summaries about status, decisions, risks, or next steps. Do not repeat individual communication cards or narrate routine tool activity."

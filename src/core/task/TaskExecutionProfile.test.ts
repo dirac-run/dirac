@@ -53,9 +53,11 @@ describe("Task execution profiles", () => {
 
 	it("keeps tasklet communication parent-directed in Act mode without Goal authority", () => {
 		const instructions = taskProfileSystemInstructions("tasklet") ?? ""
-		assert.match(instructions, /do not address the end user directly/)
-		assert.match(instructions, /routed to the parent and may also be visible in the user timeline/)
-		assert.doesNotMatch(instructions, /privately|private worker/)
+		assert.match(instructions, /Use respond to report questions, progress, and assignment completion to Dirac/)
+		assert.match(instructions, /Dirac owns planning, integration, and the final response to the user/)
+		assert.doesNotMatch(instructions, /do not address the end user|user timeline|privately|private worker/)
+		assert.match(instructions, /Act execution does not grant authority beyond Dirac's current restrictions/)
+		assert.match(instructions, /Do not broaden scope without asking Dirac/)
 		assert.match(instructions, /always execute in Act mode/)
 		assert.match(instructions, /cannot delegate/)
 		assert.doesNotMatch(instructions, /GOAL COORDINATOR/)

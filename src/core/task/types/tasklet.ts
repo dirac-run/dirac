@@ -13,6 +13,8 @@ export interface TaskInteractionRequest {
 	permissionOperation?: PermissionOperation
 	/** Reason the child's Utility permission evaluation escalated to its owner. */
 	utilityPermissionEscalation?: string
+	/** Display-only explanation when Utility was not consulted before the owner. */
+	utilityPermissionSkipped?: string
 	toolCall?: { name: string; arguments: Record<string, unknown> }
 }
 

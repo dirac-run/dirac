@@ -138,6 +138,17 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 		setHostCapabilities(undefined)
 	})
 
+	it("exposes child respond schemas addressed to Dirac without the Plan operation", async () => {
+		const { snapshot } = await createSnapshot("tasklet")
+		const respond = snapshot.nativeTools.find((tool) => "name" in tool && tool.name === "respond") as any
+		assert.ok(respond)
+		assert.match(respond.description, /Send a response to Dirac/)
+		assert.deepEqual(respond.input_schema.properties.operation.enum, ["progress", "complete", "question"])
+		assert.match(respond.input_schema.properties.operation.description, /required input from Dirac/)
+		assert.match(respond.input_schema.properties.text.description, /Address Dirac/)
+		assert.doesNotMatch(JSON.stringify(respond), /user-facing|user input|user's input|- plan:/)
+	})
+
 	for (const profile of nonDelegatingProfiles) {
 		for (const namedAgents of [false, true]) {
 			it(`${profile} excludes and rejects subagents with named configs ${namedAgents ? "present" : "absent"}`, async () => {
@@ -261,7 +272,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				const list = sinon.stub().returns({ items: [], totalItems: 0 })
 				const start = sinon.stub()
 				Object.assign(environment, {
-					orchestration: { tasklets: { list, start } },
+					orchestration: { agentIdentity: { id: "Dirac" }, tasklets: { list, start } },
 					ui: { createCard: async () => ({ id: "control-card", update: async () => undefined, finalize: async () => undefined }) },
 				})
 				const result = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments: [{ type: "default", task_header: "Blocked", task_description: "Blocked" }] }, isComplete: true })
@@ -288,7 +299,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 			const resume = sinon.stub().resolves(tasklet)
 			Object.assign(environment, {
 				toolName: "subagents",
-				orchestration: { tasklets: { start, list, resume } },
+				orchestration: { agentIdentity: { id: "Dirac" }, tasklets: { start, list, resume } },
 				ui: { createCard: async () => ({ id: "tool-card", update: async () => undefined, finalize: async () => undefined }) },
 			})
 			const spawnParams = { operation: "create", assignments: [{ type: "default", task_header: "Inspect", task_description: "Inspect it" }] }

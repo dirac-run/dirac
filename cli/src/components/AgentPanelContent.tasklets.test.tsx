@@ -173,4 +173,51 @@ describe("passive CLI tasklet view", () => {
 		expect(view.lastFrame()).not.toContain("Trace events")
 		view.unmount()
 	})
+	it("discloses complete root and sibling communication locally without IDs, requests, or child controls", async () => {
+		mocks.terminalSize.rows = 16
+		const cards = [
+			{
+				id: "opaque-card-id",
+				header: "Dirac → Curie · Guidance",
+				status: CardStatus.SUCCESS,
+				renderType: "markdown" as const,
+				communication: { actor: "Dirac", detail: "Queued · opaque-publication-id" },
+				body: `First root message\n\n\`\`\`bash\nnpm run deploy\n\`\`\`\n${"long content\n".repeat(30)}Root ending`,
+			},
+			{
+				id: "opaque-sibling-id",
+				header: "Curie → Planck · Message",
+				status: CardStatus.SUCCESS,
+				renderType: "text" as const,
+				communication: { actor: "Curie" },
+				requireApproval: true,
+				actions: [{ label: "Approve", value: "approve" }],
+				body: "Anchor§literal <button>Approve</button>\nAuthored hash: deadbeef",
+			},
+		]
+		const onClose = vi.fn()
+		const view = render(<AgentPanelContent controller={controller} communicationCards={cards} onClose={onClose} />)
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("No task selected."))
+		key({}, "c")
+		await vi.waitFor(() => expect(view.lastFrame()).toContain("First root message"))
+		expect(view.lastFrame()).toContain("npm run deploy")
+		expect(view.lastFrame()).not.toContain("```")
+		expect(view.lastFrame()).not.toContain("\u001b]8;")
+		expect(view.lastFrame()).not.toContain("Root ending")
+		expect(view.lastFrame()).not.toMatch(/opaque-card-id|opaque-publication-id|opaque-sibling-id/)
+		for (let index = 0; index < 6; index++) {
+			key({ pageDown: true })
+			await new Promise((resolve) => setTimeout(resolve, 10))
+		}
+		expect(view.lastFrame()).toContain("Root ending")
+		expect(view.lastFrame()).toContain("Curie → Planck")
+		expect(view.lastFrame()).toContain("Anchor§literal <button>Approve</button>")
+		expect(view.lastFrame()).toContain("Authored hash: deadbeef")
+		key({}, "approve")
+		expect(mocks.inventory).not.toHaveBeenCalled()
+		expect(mocks.transcript).not.toHaveBeenCalled()
+		key({ escape: true })
+		expect(onClose).not.toHaveBeenCalled()
+		view.unmount()
+	})
 })

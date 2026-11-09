@@ -200,6 +200,7 @@ function pendingRequest(request: TaskletInteraction) {
 		permissionRequestKind: request.permissionRequestKind,
 		permissionOperation: request.permissionOperation,
 		utilityPermissionEscalation: request.utilityPermissionEscalation,
+		utilityPermissionSkipped: request.utilityPermissionSkipped,
 		toolCall: request.toolCall,
 		header: request.card.header,
 		prompt: request.card.body,

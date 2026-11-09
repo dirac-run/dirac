@@ -19,6 +19,7 @@ interface CardBodyProps {
 	renderWidth?: number
 	stripLineAnchors?: boolean
 	previewFromStart?: boolean
+	literal?: boolean
 	receipt?: TaskletReceipt
 }
 
@@ -30,6 +31,7 @@ export const CardBody: React.FC<CardBodyProps> = ({
 	renderWidth,
 	stripLineAnchors = true,
 	previewFromStart = false,
+	literal = false,
 	receipt,
 }) => {
 	const displayBody = receipt
@@ -52,7 +54,11 @@ export const CardBody: React.FC<CardBodyProps> = ({
 	if (receipt && !maxLines) return <TaskletReceiptBody receipt={receipt} />
 	return (
 		<Box flexDirection="column">
-			{maxLines ? <Text {...styles.tool.body}>{visibleText}</Text> : renderContent(visibleText, renderType, columns)}
+			{maxLines || literal ? (
+				<Text {...styles.tool.body}>{visibleText}</Text>
+			) : (
+				renderContent(visibleText, renderType, columns)
+			)}
 			{(hasMoreAbove || hasMoreBelow) && (
 				<Box marginTop={0}>
 					<Text {...styles.tool.metadata}>

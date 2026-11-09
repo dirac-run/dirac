@@ -187,15 +187,11 @@ export class ToolSnapshotManager {
 				context.executionProfile === "tasklet" && spec.name === DiracDefaultTool.RESPOND
 					? {
 						...spec,
-						description:
-							"Report progress, ask the parent, or complete the assignment. Tasklets always execute in Act mode.",
 						parameters: spec.parameters?.map((parameter) =>
 							parameter.name === "operation"
 								? {
 									...parameter,
 									enum: parameter.enum.filter((operation: string) => operation !== "plan"),
-									instruction:
-										"progress = interim update; question = required parent input; complete = assignment result.",
 								}
 								: parameter,
 						),

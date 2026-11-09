@@ -3,7 +3,7 @@ import { readTaskletPresentation } from "@shared/taskletPresentation"
 import { Box } from "ink"
 import React from "react"
 import { useTerminalSize } from "../../hooks/useTerminalSize"
-import { cardDisplayBody } from "../../utils/card-body"
+import { cardDisplayBody, isCommunicationCardCollapsed } from "../../utils/card-body"
 import { getIconCategoryColor } from "../../utils/icon-mapping"
 import { CardBody } from "./CardBody"
 import { CardHeader } from "./CardHeader"
@@ -22,6 +22,7 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 	const tasklet = readTaskletPresentation(card)
 	const body = tasklet || card.taskletReceipt || card.communication ? cardDisplayBody(card) : card.body
 	const categoryColor = getIconCategoryColor(icon)
+	const isCollapsed = isCommunicationCardCollapsed(card)
 
 	return (
 		<Box
@@ -37,13 +38,13 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 				header={header}
 				communication={card.communication}
 				icon={icon}
-				isCollapsed={false}
+				isCollapsed={isCollapsed}
 				status={status}
 				receipt={card.taskletReceipt}
 				renderWidth={Math.max(1, columns - 2)}
 				tasklet={tasklet ? { ...tasklet, width: Math.max(1, columns - 2) } : undefined}
 			/>
-			{body && !suppressBody && (
+			{body && !suppressBody && !isCollapsed && (
 				<Box flexDirection="column" paddingLeft={4}>
 					<CardBody
 						body={body}
@@ -54,6 +55,7 @@ export const ModularCard: React.FC<ModularCardProps> = ({ card, maxBodyLines, sc
 						previewFromStart={!!card.communication}
 						renderWidth={card.communication ? Math.max(1, columns - 6) : undefined}
 						stripLineAnchors={!tasklet && !card.communication}
+						literal={!!card.communication}
 					/>
 				</Box>
 			)}

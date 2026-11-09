@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { cardDisplayBody, communicationBodyPreview } from "../../utils/card-body"
 import { estimateTimelineMessageBodyRows, estimateTimelineMessageRows } from "../../utils/timeline-rows"
 import { ChatMessage } from "../ChatMessage"
+import { CardBody } from "./CardBody"
 import { CardInteractions } from "./CardInteractions"
 import { ModularCard } from "./ModularCard"
 
@@ -33,70 +34,96 @@ beforeEach(() => {
 })
 
 describe("CLI communication cards", () => {
-	it("preserves the actual header and literal body even with receipt metadata", () => {
+	it.each([
+		undefined,
+		false,
+		true,
+	])("collapses communication including legacy collapsed:%s and preserves retrieval hints", (collapsed) => {
 		const card = communication({
+			collapsed,
 			status: CardStatus.WAITING_FOR_INPUT,
+			requireApproval: true,
 			requireFeedback: true,
-			taskletReceipt: {
-				operation: "message",
-				outcome: "queued",
-				rows: [
-					{ operation: "guidance", title: "Audit", taskletId: "Curie", outcome: "queued", message: "Receipt fallback" },
-				],
-			},
+			actions: [{ label: "Approve", value: "approve" }],
+			taskletReceipt: { operation: "message", outcome: "queued", rows: [] },
 		})
 		const view = render(<ModularCard card={card} />)
 		const frame = plain(view.lastFrame())
 		expect(frame).toContain(card.header)
-		expect(frame).toContain(card.body)
-		expect(frame).toContain("Queued · publication-123")
-		expect(frame).not.toContain("Receipt fallback")
+		expect(frame).toContain("/agent → c")
+		expect(frame).not.toContain(card.body)
+		expect(frame.split("\n")).toHaveLength(1)
 		expect(cardDisplayBody(card)).toBe(card.body)
 		expect(CardInteractions).not.toHaveBeenCalled()
 		view.unmount()
 	})
 
-	it("retains full archived communication content in terminal scrollback", () => {
-		const card = communication({ body: Array.from({ length: 30 }, (_, index) => `Line ${index}`).join("\n") })
+	it.each([false, true])("agrees on collapsed rows for normal and clipped timeline paths (quiet:%s)", (suppressCardBody) => {
+		const card = communication({ renderType: "markdown", body: "# First\n\nLast", requireFeedback: true })
+		const message = { id: card.id, ts: 1, content: { type: DiracMessageType.CARD as const, card } }
+		for (const tailOnly of [false, true]) {
+			const view = render(
+				<ChatMessage message={message} tailOnly={tailOnly} maxContentLines={4} suppressCardBody={suppressCardBody} />,
+			)
+			expect(plain(view.lastFrame())).toContain(card.header)
+			expect(plain(view.lastFrame()).split("\n")).toHaveLength(estimateTimelineMessageRows(message, 80, suppressCardBody))
+			expect(estimateTimelineMessageBodyRows(message, 80, suppressCardBody)).toBe(0)
+			view.unmount()
+		}
+	})
+
+	it("preserves escalation outcomes before disclosure hints at narrow widths", () => {
+		terminalSize.columns = 30
+		const card = communication({
+			header: "Dirac → Curie · Permission decision",
+			taskletReceipt: { operation: "permission_decision", outcome: "requires_user_approval", rows: [] },
+		})
 		const view = render(
-			<Box width={80}>
+			<Box width={30}>
 				<ModularCard card={card} />
 			</Box>,
 		)
 		const frame = plain(view.lastFrame())
-		expect(frame).toContain("Line 0")
-		expect(frame).toContain("Line 29")
-		expect(frame).not.toContain("scroll")
+		expect(frame).toContain("[User approval needed]")
+		expect(frame).not.toContain("/agent")
+		expect(frame.split("\n")).toHaveLength(1)
 		view.unmount()
 	})
 
-	it("bounds live previews at the beginning while preserving explicit scroll windows", () => {
-		const card = communication({ body: Array.from({ length: 30 }, (_, index) => `Line ${index}`).join("\n") })
+	it("also collapses sibling communication", () => {
+		const view = render(
+			<ModularCard card={communication({ header: "Curie messaged Planck", communication: { actor: "Curie" } })} />,
+		)
+		expect(plain(view.lastFrame())).toContain("Curie messaged Planck")
+		expect(plain(view.lastFrame())).not.toContain("Check Anchor")
+		view.unmount()
+	})
+
+	it("keeps literal body primitives free of path links or interpreted HTML", () => {
+		const body = "Anchor§literal <button>Approve</button> src/index.ts\n```bash\nnpm run deploy\n```"
 		const view = render(
 			<Box width={80}>
-				<ModularCard card={card} maxBodyLines={6} />
+				<CardBody body={body} renderType="text" literal stripLineAnchors={false} />
 			</Box>,
 		)
-		const frame = plain(view.lastFrame())
-		expect(frame).toContain("Line 0")
-		expect(frame).not.toContain("Line 29")
-		expect(frame.split("\n").length).toBeLessThanOrEqual(8)
-		view.rerender(
-			<Box width={80}>
-				<ModularCard card={card} maxBodyLines={3} scrollOffset={0} />
-			</Box>,
-		)
-		expect(plain(view.lastFrame())).toContain("Line 29")
+		expect(plain(view.lastFrame())).toContain(body)
+		expect(view.lastFrame()).not.toContain("\u001b]8;")
 		view.unmount()
 	})
 
-	it("retains communication headers in clipped timeline rows and literal row accounting", () => {
-		const card = communication({ renderType: "markdown", body: "# First\n\nLast", requireFeedback: true })
-		const message = { id: card.id, ts: 1, content: { type: DiracMessageType.CARD as const, card } }
-		const view = render(<ChatMessage message={message} tailOnly maxContentLines={4} />)
-		expect(plain(view.lastFrame())).toContain(card.header)
-		expect(estimateTimelineMessageBodyRows(message, 80)).toBe(3)
-		expect(estimateTimelineMessageRows(message, 80)).toBe(4)
+	it("does not change interactive root cards or unrelated tool disclosure", () => {
+		const view = render(
+			<ModularCard
+				card={communication({
+					communication: undefined,
+					collapsed: true,
+					status: CardStatus.WAITING_FOR_INPUT,
+					requireFeedback: true,
+				})}
+			/>,
+		)
+		expect(plain(view.lastFrame())).toContain("Check Anchor")
+		expect(CardInteractions).toHaveBeenCalled()
 		view.unmount()
 	})
 

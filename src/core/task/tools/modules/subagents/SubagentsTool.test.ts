@@ -106,7 +106,8 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		const [result] = await spawn(env, [{ type: "Reviewer", task_header: "Review code", task_description: "Review" }])
 		assert.equal(result.role, "Reviewer")
 		assert.equal(updates[0].taskletReceipt.rows[0].role, "Reviewer")
-		assert.match(updates[0].header, /Feynman \(Reviewer\) — Review code/)
+		assert.equal(updates[0].header, "Dirac → Feynman · Start agents")
+		assert.match(updates[0].body, /Feynman \(Reviewer\) — Review code/)
 	})
 
 	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {
@@ -141,9 +142,9 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		])
 		assert.equal(childCompleted, false)
 		assert.equal(createCard.callCount, 1, "The spawn tool must not create child cards")
-		assert.equal(createCard.firstCall.args[0].collapsed, false)
+		assert.equal(createCard.firstCall.args[0].collapsed, true)
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
-		assert.equal(updates[0].header, "Dirac started tasklet:live — Inspect code")
+		assert.equal(updates[0].header, "Dirac → tasklet:live · Start agents")
 		assert.deepEqual(finalized, [CardStatus.SUCCESS])
 		assert.match(updates[0].body, /Acceptance is not assignment completion/)
 		assert.equal(updates[0].taskletReceipt.operation, "spawn")
@@ -229,7 +230,7 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(updates[0].taskletReceipt.outcome, "partial_failure")
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "accepted").length, 2)
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "failed").length, 6)
-		assert.match(updates[0].body, /Role model is unavailable/)
+		assert.match(updates[0].body, /Operation failed/)
 	})
 
 	for (const outcome of [

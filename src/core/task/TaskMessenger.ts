@@ -29,6 +29,7 @@ interface TaskCardParams extends CardParams {
 	permissionRequestKind?: TaskInteractionRequest["permissionRequestKind"]
 	permissionOperation?: TaskInteractionRequest["permissionOperation"]
 	utilityPermissionEscalation?: TaskInteractionRequest["utilityPermissionEscalation"]
+	utilityPermissionSkipped?: TaskInteractionRequest["utilityPermissionSkipped"]
 	toolCall?: TaskInteractionRequest["toolCall"]
 	isAutoApproved?: () => boolean
 }
@@ -78,8 +79,7 @@ export class TaskMessenger implements ITaskMessenger {
 			body: card.body,
 			communication: { actor, detail: card.communication?.detail },
 			taskletReceipt: card.taskletReceipt ? structuredClone(card.taskletReceipt) : undefined,
-			collapsed: false,
-			do_not_auto_collapse: true,
+			collapsed: true,
 			startTime: card.startTime,
 			endTime: card.endTime,
 		}
@@ -133,12 +133,16 @@ export class TaskMessenger implements ITaskMessenger {
 			const card = structuredClone(request.card)
 			handle = await this.createCard({
 				kind: card.kind,
-				header: `${child.id} requested your ${card.requireApproval ? "approval" : "input"} — ${card.header}`,
+				header: `${child.id} · Your ${card.requireApproval ? "approval" : "input"} needed`,
 				toolName: card.toolName,
 				icon: card.icon,
 				status: CardStatus.WAITING_FOR_INPUT,
 				renderType: card.renderType,
-				body: card.body,
+				body: [
+					card.body || card.header,
+					request.utilityPermissionEscalation ? `Utility escalated: ${request.utilityPermissionEscalation}` : undefined,
+					request.utilityPermissionSkipped ? `Utility not consulted: ${request.utilityPermissionSkipped}` : undefined,
+				].filter(Boolean).join("\n\n"),
 				rawInput: card.rawInput,
 				architectureReference: card.architectureReference,
 				diffs: card.diffs,
@@ -161,11 +165,19 @@ export class TaskMessenger implements ITaskMessenger {
 			if ((request.permissionOperation || request.permissionRequestKind) && result.userEdits !== undefined) {
 				throw new Error("Tasklet permission approval cannot change the requested operation")
 			}
-			await finalize(result.action === DiracAskResponse.REJECT ? CardStatus.CANCELLED : CardStatus.SUCCESS)
+			const rejected = result.action === DiracAskResponse.REJECT || result.response === DiracAskResponse.REJECT
+			const approved = result.action === DiracAskResponse.APPROVE || result.response === DiracAskResponse.APPROVE
+			await handle.update({
+				header: `${child.id} · ${rejected ? "Declined by you" : card.requireApproval && approved ? "Approved by you" : "Your response recorded"}`,
+				collapsed: true,
+			}).catch((error) => { throw new TaskletEscalationCleanupError(error) })
+			await finalize(rejected ? CardStatus.CANCELLED : CardStatus.SUCCESS)
 			cancellation.throwIfAborted()
 			return result
 		} catch (error) {
 			await finalize(CardStatus.CANCELLED)
+			if (handle) await handle.update({ header: `${child.id} · Request cancelled`, collapsed: true })
+				.catch((updateError) => { throw new TaskletEscalationCleanupError(updateError) })
 			throw error
 		} finally {
 			cancellation.removeEventListener("abort", cancel)
@@ -402,6 +414,7 @@ export class TaskMessenger implements ITaskMessenger {
 							permissionRequestKind: params.permissionRequestKind,
 							permissionOperation: params.permissionOperation,
 							utilityPermissionEscalation: params.utilityPermissionEscalation,
+							utilityPermissionSkipped: params.utilityPermissionSkipped,
 							toolCall: params.toolCall,
 						},
 						AbortSignal.any([

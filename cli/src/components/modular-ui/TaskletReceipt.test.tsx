@@ -47,7 +47,7 @@ describe("CLI tasklet operation receipts", () => {
 				<ChatMessage message={{ id: card.id, ts: 1, content: { type: DiracMessageType.CARD, card } }} {...props} />,
 			)
 			const frame = plain(view.lastFrame())
-			expect(frame).toContain("Inspect pending requests · Planck 2 (Reviewer) — Audit protocol")
+			expect(frame).toContain("Inspect pending requests · Planck 2")
 			expect(frame).toContain("[Retrieved]")
 			expect(frame).not.toContain("Completed")
 			view.unmount()
@@ -79,6 +79,7 @@ describe("CLI tasklet operation receipts", () => {
 					title: "Build",
 					outcome: "failed",
 					request: "Run build",
+					requestId: "opaque-request-id",
 					decision: "approve",
 					error: "Authority changed",
 				},
@@ -99,6 +100,7 @@ describe("CLI tasklet operation receipts", () => {
 		expect(frame).toContain("this request only, within parent authority")
 		expect(frame).toContain("Authority changed")
 		expect(frame).toContain("consumption is not confirmed")
+		expect(frame).not.toContain("opaque-request-id")
 		expect(CardInteractions).not.toHaveBeenCalled()
 		view.unmount()
 	})

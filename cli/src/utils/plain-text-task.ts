@@ -120,7 +120,7 @@ export async function runPlainTextTask(options: PlainTextTaskOptions): Promise<b
 	// Subscription callbacks can reject completion while task initialization is
 	// still in progress. Attach a handler immediately so Node never reports that
 	// legitimate early failure as an unhandled rejection before we await it.
-	void completionPromise.catch(() => {})
+	void completionPromise.catch(() => { })
 	let completionSettled = false
 	const resolveCompletion = () => {
 		if (completionSettled) return
@@ -561,10 +561,6 @@ function handleMessageForPipeMode(
 					`${stderrStyle.toolBody(verbose ? card.body : communicationBodyPreview(card.body, process.stderr.columns || 80))}\n`,
 				)
 			}
-			if (card.communication.detail) {
-				const detail = card.communication.detail.replace(/\s+/g, " ").trim()
-				process.stderr.write(`${stderrStyle.metadata(detail.slice(0, process.stderr.columns || 80))}\n`)
-			}
 		} else if (verbose && card.body && !isTaskCompletionCard(card)) {
 			process.stderr.write(`${stderrStyle.toolBody(cardBodyForDisplay(card.body, card.renderType))}\n`)
 		}
@@ -596,9 +592,8 @@ function handleApiReqMessage(message: DiracMessage, statusPrefix: string, isUpda
 		const costStr = info.cost !== undefined ? `Cost: $${info.cost.toFixed(4)}` : ""
 		const tokensStr =
 			info.tokensIn !== undefined
-				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${
-						info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
-					}`
+				? `Tokens: ${info.tokensIn.toLocaleString()} in, ${(info.tokensOut || 0).toLocaleString()} out${info.reasoningTokens ? ` (+${info.reasoningTokens.toLocaleString()} thinking)` : ""
+				}`
 				: ""
 		const cacheStr =
 			info.cacheReads !== undefined || info.cacheWrites !== undefined

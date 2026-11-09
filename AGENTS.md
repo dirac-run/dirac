@@ -42,7 +42,7 @@ Tools are self-contained units dispatched by `ToolExecutorCoordinator`. Once cal
 - Setup: `npm run install:all`
 - Protobufs: `npm run protos` (Required before build)
 - Compile: `npm run compile` for backend, `npm run cli:build` for cli, `npm run build:webview` for webview
-- Test: `npm test` (do not run tests automatically, only if user asked)
+- Test: `npm test` (do not run full suite automatically, only focused tests)
 - CLI TUI harness: rebuild with `npm run cli:build`, then use `npm run cli:tui -- start` for persistent terminal control or `npm run test:e2e:cli:tui` for regression tests; see `tests/e2e/cli/README.md` (isolated canned provider by default; `--live` uses real credentials).
 - Lint: `npm run lint`
 - Architecture: Run `npm run check:arch` after code changes and before finishing a task. Fix new violations; do not regenerate architecture baselines just to make the check pass.

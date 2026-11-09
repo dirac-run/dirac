@@ -34,6 +34,8 @@ describe("PromptBuilder", () => {
 				expect(prompt).to.include("Your stable ID is Dirac")
 				expect(prompt.match(/operation=create/g)).to.have.lengthOf(1)
 				expect(prompt).to.include("You own supervision, integration of delegated work, and the final user outcome")
+				expect(prompt).to.include("Use `respond` to address the user")
+				expect(prompt).to.include("Tasks have two modes")
 				expect(prompt).to.include("`list_agents`")
 				expect(prompt).to.include("TASKLET DELEGATION")
 				expect(prompt).to.include("The `subagents` tool with `operation=create` starts a batch of assignments asynchronously")
@@ -58,9 +60,16 @@ describe("PromptBuilder", () => {
 				executionProfile: "tasklet",
 				taskId: "Feynman 2",
 				subagentsEnabled: true,
+				profileInstructions: taskProfileSystemInstructions("tasklet", true),
 			}).build()
 			expect(prompt).to.match(/^Your stable ID is Feynman 2; your parent's stable ID is Dirac\./)
 			expect(prompt).to.include("You are an assigned worker")
+			expect(prompt).to.include("assigned worker for Dirac")
+			expect(prompt).to.include("Use `respond` to report to Dirac")
+			expect(prompt).to.include("always execute in Act mode")
+			expect(prompt).to.include("does not grant authority beyond Dirac's current restrictions")
+			expect(prompt).not.to.match(/user-facing communication|Tasks have two modes|notified every time the mode switches|do not address the end user|user timeline/)
+			expect(prompt).not.to.include("`plan` for Plan-mode")
 			expect(prompt).not.to.include("You are Dirac")
 			expect(prompt).to.include("`list_agents`")
 			expect(prompt).to.not.include("TASKLET DELEGATION")
@@ -79,6 +88,8 @@ describe("PromptBuilder", () => {
 					expect(prompt).to.match(/^You are Dirac, an AI agent for software-engineering tasks\.\n/)
 					expect(prompt).to.not.match(/TASKLET DELEGATION|parent|subagents|tasklets?|child|list_agents|send_message/i)
 					expect(prompt).to.not.include("# Agent identity")
+					expect(prompt).to.include("Use `respond` to address the user")
+					expect(prompt).to.include("Tasks have two modes")
 				}
 			})
 		}

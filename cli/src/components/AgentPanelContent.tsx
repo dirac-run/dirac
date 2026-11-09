@@ -1,4 +1,5 @@
 import type { Controller } from "@/core/controller"
+import type { Card } from "@shared/ExtensionMessage"
 import { getTaskletInventory } from "@/core/controller/task/getTaskletInventory"
 import { getTaskletTranscript } from "@/core/controller/task/getTaskletTranscript"
 import { TaskletInventoryRequest, TaskletTranscriptRequest } from "@shared/proto/dirac/task"
@@ -12,6 +13,8 @@ import { formatTaskletLabel } from "@shared/taskletLabel"
 import { Box, Text, useInput } from "ink"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import stringWidth from "string-width"
+import stripAnsi from "strip-ansi"
+import { renderMarkdownLines } from "../utils/markdown"
 import { theme } from "../constants/theme"
 import { useStdinContext } from "../context/StdinContext"
 import { useTerminalSize } from "../hooks/useTerminalSize"
@@ -25,11 +28,18 @@ interface AgentPanelContentProps {
 	controller: Controller
 	scope?: TaskletActivitySummary | null
 	availableRows?: number
+	communicationCards?: readonly Card[]
 	onClose: () => void
 }
 
 /** Passive, bounded reads only. There are deliberately no card controls or child input handlers. */
-export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller, scope, availableRows, onClose }) => {
+export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({
+	controller,
+	scope,
+	availableRows,
+	communicationCards = [],
+	onClose,
+}) => {
 	const { isRawModeSupported } = useStdinContext()
 	const { columns, rows } = useTerminalSize()
 	const rootTaskId = scope?.rootTaskId
@@ -38,6 +48,7 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 	const [transcript, setTranscript] = useState<TaskletTranscriptPage>()
 	const [selectedIndex, setSelectedIndex] = useState(0)
 	const [openAgentId, setOpenAgentId] = useState<string>()
+	const [showCommunications, setShowCommunications] = useState(false)
 	const [scrollFromTop, setScrollFromTop] = useState(0)
 	const [error, setError] = useState<string>()
 	const [loading, setLoading] = useState(false)
@@ -101,6 +112,7 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 		setInventory(undefined)
 		setTranscript(undefined)
 		setOpenAgentId(undefined)
+		setShowCommunications(false)
 		setInventoryCursor(undefined)
 		setInventoryPrevious([])
 		setTranscriptPrevious([])
@@ -116,7 +128,21 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 	const contentColumns = Math.max(1, columns - 6)
 	const contentRows = Math.max(1, panelRows - 6)
 	const transcriptText = useMemo(() => (transcript ? formatAgentTranscript(transcript) : ""), [transcript])
-	const maxScrollOffset = Math.max(0, estimateVisualLineCount(transcriptText, contentColumns) - contentRows)
+	const communicationText = useMemo(
+		() =>
+			communicationCards
+				.map((card) => {
+					const body =
+						card.renderType === "markdown"
+							? stripAnsi(renderMarkdownLines(card.body ?? "", contentColumns).join("\n"))
+							: card.body
+					return [card.header, body].filter(Boolean).join("\n")
+				})
+				.join("\n\n") || "No recorded communications.",
+		[communicationCards, contentColumns],
+	)
+	const visibleText = showCommunications ? communicationText : transcriptText
+	const maxScrollOffset = Math.max(0, estimateVisualLineCount(visibleText, contentColumns) - contentRows)
 	const agents = inventory?.items ?? []
 	const { items: visibleAgents, startIndex } = getVisibleWindow(agents, selectedIndex, getAgentListRowLimit(panelRows))
 	const page = openAgentId ? transcript : inventory
@@ -126,6 +152,11 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 		(input, key) => {
 			if (shouldIgnoreTerminalInput(input, key)) return
 			if (key.escape) {
+				if (showCommunications) {
+					setShowCommunications(false)
+					setScrollFromTop(0)
+					return
+				}
 				requestSequence.current++
 				setLoading(false)
 				setError(undefined)
@@ -134,6 +165,18 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 					setTranscript(undefined)
 					setTranscriptPrevious([])
 				} else onClose()
+				return
+			}
+			if (input === "c") {
+				setShowCommunications((current) => !current)
+				setScrollFromTop(0)
+				return
+			}
+			if (showCommunications) {
+				if (key.upArrow) setScrollFromTop((current) => Math.max(0, current - 1))
+				if (key.downArrow) setScrollFromTop((current) => Math.min(maxScrollOffset, current + 1))
+				if (key.pageUp) setScrollFromTop((current) => Math.max(0, current - contentRows))
+				if (key.pageDown) setScrollFromTop((current) => Math.min(maxScrollOffset, current + contentRows))
 				return
 			}
 			if (loading) return
@@ -178,33 +221,44 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 
 	return (
 		<Panel
-			isSubpage={!!openAgentId}
+			isSubpage={showCommunications || !!openAgentId}
 			label={
-				openAgentId
-					? clipAgentTitle(formatTaskletLabel({ taskletId: openAgentId, title: transcript?.title ?? "Agent transcript", role: transcript?.role }), columns - 4 - stringWidth(" (Esc to go back)"))
-					: "Agents · read only"
+				showCommunications
+					? "Communications · read only"
+					: openAgentId
+						? clipAgentTitle(
+								formatTaskletLabel({
+									taskletId: openAgentId,
+									title: transcript?.title ?? "Agent transcript",
+									role: transcript?.role,
+								}),
+								columns - 4 - stringWidth(" (Esc to go back)"),
+							)
+						: "Agents · read only"
 			}>
 			<Text color={theme.muted} wrap="truncate">
-				{page?.availability === "saved" ? "Saved history" : "Recorded snapshot"}
-				{page ? ` · ${new Date(page.observedAt).toLocaleTimeString()}` : ""}
-				{transcript && openAgentId ? ` · ${TASKLET_STATE_LABELS[transcript.state]}` : ""}
+				{showCommunications ? (
+					`${communicationCards.length} communications · selected conversation`
+				) : (
+					<React.Fragment>
+						{page?.availability === "saved" ? "Saved history" : "Recorded snapshot"}
+						{page ? ` · ${new Date(page.observedAt).toLocaleTimeString()}` : ""}
+						{transcript && openAgentId ? ` · ${TASKLET_STATE_LABELS[transcript.state]}` : ""}
+					</React.Fragment>
+				)}
 			</Text>
-			{!rootTaskId && <Text>No task selected.</Text>}
-			{loading && <Text color={theme.muted}>Reading…</Text>}
-			{error && <Text color={theme.error}>{error} · r refresh</Text>}
-			{!loading && !error && openAgentId && transcript && (
+			{!showCommunications && !rootTaskId && <Text>No task selected.</Text>}
+			{!showCommunications && loading && <Text color={theme.muted}>Reading…</Text>}
+			{!showCommunications && error && <Text color={theme.error}>{error} · r refresh</Text>}
+			{(showCommunications || (!loading && !error && openAgentId && transcript)) && (
 				<Text>
 					{
-						clipTextToWindow(
-							transcriptText,
-							contentRows,
-							contentColumns,
-							Math.max(0, maxScrollOffset - scrollFromTop),
-						).visibleText
+						clipTextToWindow(visibleText, contentRows, contentColumns, Math.max(0, maxScrollOffset - scrollFromTop))
+							.visibleText
 					}
 				</Text>
 			)}
-			{!loading && !error && !openAgentId && inventory && (
+			{!showCommunications && !loading && !error && !openAgentId && inventory && (
 				<Box flexDirection="column">
 					{agents.length === 0 && <Text>No recorded agents.</Text>}
 					{visibleAgents.map((agent, index) => (
@@ -213,8 +267,11 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 							color={selectedIndex === startIndex + index ? theme.primary : theme.text}
 							wrap="truncate">
 							{selectedIndex === startIndex + index ? "❯ " : "  "}
-							{clipAgentTitle(formatTaskletLabel(agent), contentColumns - 3 - stringWidth(TASKLET_STATE_LABELS[agent.state]))} ·{" "}
-							{TASKLET_STATE_LABELS[agent.state]}
+							{clipAgentTitle(
+								formatTaskletLabel(agent),
+								contentColumns - 3 - stringWidth(TASKLET_STATE_LABELS[agent.state]),
+							)}{" "}
+							· {TASKLET_STATE_LABELS[agent.state]}
 						</Text>
 					))}
 					<Text color={theme.muted}>
@@ -224,8 +281,15 @@ export const AgentPanelContent: React.FC<AgentPanelContentProps> = ({ controller
 				</Box>
 			)}
 			<Text color={theme.muted} wrap="truncate">
-				{openAgentId ? "↑/↓ scroll" : "↑/↓ select · Enter inspect"} · r refresh{page?.nextCursor ? " · n next" : ""}
-				{previous.length ? " · p previous" : ""} · Esc {openAgentId ? "back" : "close"}
+				{showCommunications ? (
+					"↑/↓ scroll · PgUp/PgDn · c agents · Esc back"
+				) : (
+					<React.Fragment>
+						{openAgentId ? "↑/↓ scroll" : "↑/↓ select · Enter inspect"} · c communications · r refresh
+						{page?.nextCursor ? " · n next" : ""}
+						{previous.length ? " · p previous" : ""} · Esc {openAgentId ? "back" : "close"}
+					</React.Fragment>
+				)}
 			</Text>
 		</Panel>
 	)

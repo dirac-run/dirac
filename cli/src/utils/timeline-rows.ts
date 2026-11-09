@@ -1,7 +1,7 @@
 import { isTaskCompletionCard } from "@shared/cardIdentity"
 import { type DiracMessage, DiracMessageType, isFinalStatus } from "@shared/ExtensionMessage"
 import { readTaskletPresentation } from "@shared/taskletPresentation"
-import { cardDisplayBody } from "./card-body"
+import { cardDisplayBody, isCommunicationCardCollapsed } from "./card-body"
 import { renderMarkdownLines } from "./markdown"
 import { estimateVisualLineCount } from "./text-clipping"
 
@@ -21,7 +21,8 @@ export function estimateTimelineMessageRows(message: DiracMessage, terminalColum
 			!card.communication && !isFinalStatus(card.status) && (card.requireFeedback || (card.actions?.length ?? 0) > 0)
 				? 1
 				: 0
-		const taskCompletionChromeRows = !readTaskletPresentation(card) && isTaskCompletionCard(card) ? 4 : 1
+		const taskCompletionChromeRows =
+			!card.communication && !readTaskletPresentation(card) && isTaskCompletionCard(card) ? 4 : 1
 		return Math.max(1, taskCompletionChromeRows + bodyRows + interactionRows)
 	}
 
@@ -38,6 +39,7 @@ export function estimateTimelineMessageBodyRows(
 	}
 
 	if (message.content.type !== DiracMessageType.CARD || suppressCardBody) return 0
+	if (isCommunicationCardCollapsed(message.content.card)) return 0
 	const body = cardDisplayBody(message.content.card)
 	if (!body) return 0
 	const width = Math.max(1, terminalColumns - CARD_BODY_COLUMNS)

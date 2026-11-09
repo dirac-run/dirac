@@ -59,7 +59,7 @@ describe("respond provider schemas", () => {
 		expect(anthropicProperties.operation.enum).to.deep.equal(RESPONSE_OPERATIONS)
 		expect(anthropicProperties.operation.description).to.include("plan = Plan Mode response/proposal")
 		expect(anthropicProperties.operation.description).to.include("question = required user input")
-		expect(anthropicProperties.operation.description).to.include("complete = final Act Mode or subagent result")
+		expect(anthropicProperties.operation.description).to.include("complete = final Act Mode result")
 		expect(anthropicProperties.options).to.include({ type: "array", minItems: 2, maxItems: 5 })
 		expect(anthropicProperties.options.items).to.deep.equal({ type: "string" })
 		expect(openAIProperties.operation.enum).to.deep.equal(RESPONSE_OPERATIONS)
@@ -76,14 +76,16 @@ describe("respond provider schemas", () => {
 			(responses as any).parameters.properties.text.description,
 			geminiProperties.text.description,
 		]) {
-			expect(description).to.include("The user has explicitly asked for a low verbosity response")
+			expect(description).to.include("Keep responses concise")
+			expect(description).to.include("Address the user")
+			expect(description).not.to.include("explicitly asked")
 			expect(description).to.include("- progress:")
 			expect(description).to.include("- question:")
 			expect(description).to.include("- plan:")
 			expect(description).to.include("decisions requiring the user's input")
 			expect(description).to.include("- complete:")
 		}
-		expect((responses as any).description).to.include("The user has explicitly asked for a low verbosity response")
+		expect((responses as any).description).to.include("Keep responses concise")
 	})
 
 
@@ -107,17 +109,42 @@ describe("respond provider schemas", () => {
 		]
 
 		expect(descriptions).to.deep.equal([
-			"Send a user-facing response.",
-			"Response text.",
-			"Send a user-facing response.",
-			"Response text.",
-			"Response text.",
-			"Send a user-facing response.",
-			"Response text.",
-			"Send a user-facing response.",
-			"Response text.",
+			"Send a response to the user.",
+			"Response text for the user.",
+			"Send a response to the user.",
+			"Response text for the user.",
+			"Response text for the user.",
+			"Send a response to the user.",
+			"Response text for the user.",
+			"Send a response to the user.",
+			"Response text for the user.",
 		])
 	})
+	for (const lowVerbosityEnabled of [true, false]) {
+		it(`addresses child descriptions and parameter instructions to Dirac with low verbosity ${lowVerbosityEnabled}`, () => {
+			const context = { ...mockContext, executionProfile: "tasklet" as const, lowVerbosityEnabled }
+			const anthropic = toolSpecInputSchema(respondSpec, context)
+			const openAI = toolSpecFunctionDefinition(respondSpec, context) as any
+			const strictOpenAI = toolSpecFunctionDefinition(respondSpec, context, true) as any
+			const responses = toOpenAIResponsesAPITool(openAI) as any
+			const gemini = toolSpecFunctionDeclarations(respondSpec, context)
+			for (const schema of [
+				{ description: anthropic.description, properties: anthropic.input_schema.properties },
+				{ description: openAI.function.description, properties: openAI.function.parameters.properties },
+				{ description: strictOpenAI.function.description, properties: strictOpenAI.function.parameters.properties },
+				{ description: responses.description, properties: responses.parameters.properties },
+				{ description: gemini.description, properties: gemini.parameters?.properties },
+			]) {
+				const properties = schema.properties as Record<string, any>
+				expect(schema.description).to.include("Send a response to Dirac")
+				expect(properties.operation.description).to.include("required input from Dirac")
+				expect(properties.text.description).to.include("Dirac")
+				expect(`${schema.description} ${properties.operation.description} ${properties.text.description}`)
+					.not.to.match(/user-facing|user input|user's input|explicitly asked|- plan:/)
+				if (lowVerbosityEnabled) expect(properties.text.description).to.include("Keep responses concise")
+			}
+		})
+	}
 	it("keeps both fixed contracts within intentional schema-size bounds", () => {
 		const enabledAnthropicBytes = JSON.stringify(toolSpecInputSchema(respondSpec, mockContext)).length
 		const enabledOpenAIBytes = JSON.stringify(toolSpecFunctionDefinition(respondSpec, mockContext)).length

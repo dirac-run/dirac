@@ -42,6 +42,25 @@ describe("createCardBodySuppressionPolicy", () => {
 		expect(shouldSuppress(cardMessage("approval", true))).toBe(true)
 	})
 
+	it("keeps communication disclosure independent of quiet mode and ignores observational approval flags", () => {
+		let quietMode = false
+		const shouldSuppress = createCardBodySuppressionPolicy(() => quietMode)
+		const message = cardMessage("communication", true)
+		if (message.content.type !== DiracMessageType.CARD) throw new Error("Expected card")
+		message.content.card.communication = { actor: "Curie" }
+		message.content.card.collapsed = true
+		message.content.card.requireFeedback = true
+		expect(shouldSuppress(message)).toBe(false)
+		quietMode = true
+		expect(shouldSuppress(message)).toBe(false)
+		expect(
+			shouldSuppress({
+				...message,
+				content: { ...message.content, card: { ...message.content.card, id: "new-communication" } },
+			}),
+		).toBe(true)
+	})
+
 	it("never suppresses markdown messages", () => {
 		const shouldSuppress = createCardBodySuppressionPolicy(() => true)
 		const message: DiracMessage = {

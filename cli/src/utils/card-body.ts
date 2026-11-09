@@ -6,6 +6,11 @@ import { clipTextToWindow } from "./text-clipping"
 
 export const COMMUNICATION_PREVIEW_LINES = 6
 
+/** Legacy communication cards explicitly set collapsed:false. Read them in /agent → c instead. */
+export function isCommunicationCardCollapsed(card: Card): boolean {
+	return !!card.communication
+}
+
 /** Pipe mode has no scrollback control, so keep the beginning and mark omitted content. */
 export function communicationBodyPreview(body: string, columns: number): string {
 	const { visibleText, hasMoreBelow } = clipTextToWindow(

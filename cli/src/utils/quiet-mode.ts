@@ -20,6 +20,7 @@ export function createCardBodySuppressionPolicy(isQuietModeEnabled: () => boolea
 			quietDecisions.set(card.id, quietDecision)
 		}
 
-		return Boolean(card.requireApproval || card.requireFeedback || quietDecision)
+		// Observational metadata never creates a modal; disclosure is independent of quiet mode.
+		return Boolean((!card.communication && (card.requireApproval || card.requireFeedback)) || quietDecision)
 	}
 }

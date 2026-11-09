@@ -193,7 +193,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 					</React.Fragment>
 				)
 			case DiracMessageType.CARD:
-				if (!readTaskletPresentation(message.content.card) && isTaskCompletionCard(message.content.card)) {
+				if (
+					!message.content.card.communication &&
+					!readTaskletPresentation(message.content.card) &&
+					isTaskCompletionCard(message.content.card)
+				) {
 					return (
 						<TaskCompletionCard
 							card={message.content.card}

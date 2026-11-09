@@ -5,6 +5,7 @@ const SAFE_BASE_COMMANDS = [
 	"whoami",
 	"uname",
 	"cat",
+	"nl",
 	"grep",
 	"find",
 	"head",

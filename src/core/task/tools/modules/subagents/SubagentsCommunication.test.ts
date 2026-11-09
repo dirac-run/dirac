@@ -70,17 +70,18 @@ describe("Subagent supervision communication cards", () => {
 		assert.equal(output[0].messageId, "mail-one")
 		for (const [index, child] of ["Planck", "Curie"].entries()) {
 			for (const card of [cards[index].initial, ...cards[index].updates]) {
-				assert.match(card.header, new RegExp(`^Dirac (?:is sending|sent|failed to send) guidance to ${child}`))
+				assert.equal(card.header, `Dirac → ${child} · Guidance`)
 				assert.doesNotMatch(card.header, /Message agents/)
 				assert.equal(card.communication.actor, "Dirac")
-				assert.equal(card.collapsed, false)
+				assert.equal(card.collapsed, true)
 			}
 		}
-		assert.equal(cards[0].initial.body, guidance)
-		assert.equal(cards[0].updates[0].body, guidance)
+		assert.ok(cards[0].initial.body.startsWith(guidance))
+		assert.ok(cards[0].updates[0].body.startsWith(guidance))
 		assert.match(cards[0].updates[0].communication.detail, /Queued.*consumption is not confirmed/)
-		assert.equal(cards[1].updates[0].body, "Inspect renderer")
-		assert.match(cards[1].updates[0].communication.detail, /Recipient settled/)
+		assert.ok(cards[1].updates[0].body.startsWith("Inspect renderer"))
+		assert.match(cards[1].updates[0].body, /Operation failed/)
+		assert.doesNotMatch(cards[1].updates[0].communication.detail, /Recipient settled/)
 		assert.deepEqual(
 			cards.map((card) => card.finalized),
 			[[CardStatus.SUCCESS], [CardStatus.ERROR]],
@@ -103,12 +104,12 @@ describe("Subagent supervision communication cards", () => {
 			{ tasklet_id: "Bohr", type: "reply", request_id: "question-2", action: "Use exact choice ✓" },
 		])
 		assert.ok(received.every((item) => item.type === "reply"))
-		assert.equal(cards[0].updates[0].body, "  approve is just prose\n")
-		assert.equal(cards[1].updates[0].body, "Use exact choice ✓")
-		assert.equal(cards[0].updates[0].header, "Supervisor replied to Bohr — Agent")
-		assert.equal(cards[1].updates[0].header, "Supervisor replied to Bohr — Agent")
-		assert.match(cards[0].updates[0].communication.detail, /Request: question-1/)
-		assert.match(cards[1].updates[0].communication.detail, /Request: question-2/)
+		assert.ok(cards[0].updates[0].body.startsWith("  approve is just prose\n"))
+		assert.ok(cards[1].updates[0].body.startsWith("Choice: Use exact choice ✓"))
+		assert.equal(cards[0].updates[0].header, "Supervisor → Bohr · Answer")
+		assert.equal(cards[1].updates[0].header, "Supervisor → Bohr · Answer")
+		assert.doesNotMatch(cards[0].updates[0].communication.detail, /question-1/)
+		assert.doesNotMatch(cards[1].updates[0].communication.detail, /question-2/)
 		assert.equal(cards[0].updates[0].taskletReceipt.rows[0].decision, undefined)
 	})
 
@@ -126,10 +127,11 @@ describe("Subagent supervision communication cards", () => {
 				{ tasklet_id: "Planck", type: "permission_decision", request_id: "permission-1", decision },
 			])
 			const card = cards[0].updates[0]
-			assert.equal(card.header, "Dirac requested user approval for Planck's request")
+			assert.equal(card.header, "Dirac → Planck · Permission decision")
 			assert.doesNotMatch(card.header, /permission-1|approved/)
-			assert.match(card.communication.detail, /Request: permission-1/)
-			assert.match(card.body, new RegExp(`^Decision: ${decision}\\nRequest: permission-1\\n`))
+			assert.doesNotMatch(card.communication.detail, /permission-1/)
+			assert.match(card.body, new RegExp(`Decision: ${decision}`))
+			assert.doesNotMatch(card.body, /permission-1/)
 			assert.match(card.body, /User approval is required; this decision did not grant permission/)
 			assert.match(card.communication.detail, /User approval needed/)
 			assert.equal(card.taskletReceipt.rows[0].requestId, "permission-1")
@@ -175,9 +177,10 @@ describe("Subagent supervision communication cards", () => {
 			]),
 			(error) => error === failure,
 		)
-		assert.equal(cards[0].updates[0].body, "First\n")
-		assert.equal(cards[1].updates[0].body, "Second")
-		assert.match(cards[0].updates[0].communication.detail, /Planck and Curie admission failed/)
+		assert.ok(cards[0].updates[0].body.startsWith("First\n"))
+		assert.ok(cards[1].updates[0].body.startsWith("Choice: Second"))
+		assert.match(cards[0].updates[0].body, /Operation failed/)
+		assert.doesNotMatch(cards[0].updates[0].communication.detail, /Planck and Curie admission failed/)
 		assert.deepEqual(
 			cards.map((card) => card.finalized),
 			[[CardStatus.ERROR], [CardStatus.ERROR]],
@@ -196,11 +199,26 @@ describe("Subagent supervision communication cards", () => {
 		const { env, cards } = fixture({ list: () => page as ReturnType<TaskletControls["list"]> })
 		const output = await new SubagentsTool().processCall({ operation: "list" }, env)
 		assert.deepEqual(JSON.parse(output), page)
-		assert.equal(cards[0].updates[0].header, "Dirac listed subagents")
+		assert.equal(cards[0].updates[0].header, "Dirac · Agents")
 		assert.match(cards[0].updates[0].body, /Planck \(Reviewer\) — Review code — Running/)
 		assert.match(cards[0].updates[0].body, /Curie — Inspect UI — Waiting for parent/)
 		assert.match(cards[0].updates[0].body, /2 of 3 items · more available · passive read/)
 		assert.doesNotMatch(cards[0].updates[0].body, /"items"|"executionStatus"/)
+	})
+
+	it("keeps opaque inspection evidence in tool output, not the human card", async () => {
+		const page = {
+			view: "messages" as const, taskletId: "Planck", title: "Review code",
+			items: [{ id: "opaque-event-id", requestId: "opaque-request-id", text: "Evidence" }], totalItems: 1,
+		}
+		const { env, cards } = fixture({ inspect: async () => page as Awaited<ReturnType<TaskletControls["inspect"]>> })
+		const output = await new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "Planck", view: "messages" }, env)
+		assert.deepEqual(JSON.parse(output), page)
+		const value = cards[0].updates[0]
+		assert.equal(value.header, "Dirac → Planck · Inspect messages")
+		assert.match(value.body, /Review code/)
+		assert.match(value.body, /1 of 1 items/)
+		assert.doesNotMatch([value.header, value.body, value.communication.detail].join("\n"), /opaque-event-id|opaque-request-id/)
 	})
 
 	it("shows selected sleep sources without treating a wake as completion", async () => {
@@ -215,7 +233,7 @@ describe("Subagent supervision communication cards", () => {
 			env,
 		)
 		assert.deepEqual(JSON.parse(output), { reason: "mail", from: "Bohr", messageId: "m" })
-		assert.equal(cards[0].updates[0].header, "Dirac waited for Planck, Curie")
+		assert.equal(cards[0].updates[0].header, "Dirac · Wait ended")
 		assert.match(cards[0].updates[0].body, /Ordinary agent message\. A wake is not assignment completion/)
 	})
 })

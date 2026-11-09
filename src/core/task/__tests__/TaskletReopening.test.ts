@@ -561,7 +561,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 
 	it("forwards child communication using the owned identity and publishes progress and committed results once", async () => {
 		const publish = sandbox.stub().callsFake(async (_actor, card) => {
-			if (card.header.includes("reported a result")) {
+			if (card.header === `${record.id} · Result`) {
 				assert.equal(host.inspect(record.id).outcomePersisted, true)
 				assert.equal((await storage.loadTaskletRecords("root"))[0].outcome?.kind, "completed")
 			}
@@ -613,8 +613,9 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		const requestId = host.inspect(record.id).interactions[0].id
 		const question = publish.firstCall.args[1]
 		assert.equal(question.id, requestId)
-		assert.equal(question.header, `${record.id} asked Dirac a question`)
-		assert.equal(question.body, "Which actual implementation?\n\n- Minimal\n\n- Comprehensive")
+		assert.equal(question.header, `${record.id} · Question for Dirac`)
+		assert.equal(question.body, "Which actual implementation?\n\nChoices:\n- Minimal\n- Comprehensive\n\nStatus: Awaiting Dirac")
+		assert.equal(question.collapsed, true)
 		assert.equal(question.status, CardStatus.RUNNING)
 		assert.equal(question.requireFeedback, undefined)
 		assert.equal(question.actions, undefined)
@@ -639,7 +640,8 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		await host["children"].get(record.id)!.eventWrites
 		const permission = publish.firstCall.args[1]
 		assert.match(permission.body, /echo exact-command/)
-		assert.match(permission.body, /Permission request only/)
+		assert.match(permission.body, /Observation only/)
+		assert.equal(permission.collapsed, true)
 		assert.equal(permission.requireApproval, undefined)
 		assert.equal(permission.actions, undefined)
 		sinon.assert.notCalled(owner.authorizePermission as sinon.SinonStub)

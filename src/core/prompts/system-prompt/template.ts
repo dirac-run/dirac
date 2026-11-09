@@ -26,10 +26,16 @@ export const SYSTEM_PROMPT = (context: SystemPromptContext) => {
 			context.executionProfile === "goal_followup") &&
 		context.subagentsEnabled === true
 	const identity = isTasklet
-		? `Your stable ID is ${context.taskId}; your parent's stable ID is Dirac. You are an assigned worker: carry out your assigned work and report the result to your parent.`
+		? `Your stable ID is ${context.taskId}; your parent's stable ID is Dirac. You are an assigned worker for Dirac: carry out your assigned work and report the result to Dirac.`
 		: canDelegate
 			? "You are Dirac, the root AI agent for software-engineering tasks. Your stable ID is Dirac. You have no parent. You own supervision, integration of delegated work, and the final user outcome."
 			: "You are Dirac, an AI agent for software-engineering tasks."
+	const responseGuidance = isTasklet
+		? "- Use `respond` to report to Dirac: `progress` for meaningful updates during longer work, `question` when you need input from Dirac, and `complete` for the assignment result. Do not send plain assistant text; every response must include a tool call."
+		: "- Use `respond` to address the user: `progress` for meaningful updates during longer work, `question` when you need information from the user, `plan` for Plan-mode answers or proposals, and `complete` for final Act-mode results. Do not send plain assistant text; every response must include a tool call."
+	const modeGuidance = isTasklet
+		? ""
+		: "MODES\n\nTasks have two modes: PLAN MODE is for read-only research and proposals, while ACT MODE is for executing the task. The initial mode is provided at task start, and you will be notified every time the mode switches."
 	const agentCommunicationGuidance =
 		isTasklet || canDelegate
 			? "\n- Use `list_agents` for the current root-scoped roster. `send_message` is ordinary agent communication, not assignment, permission, structured reply, or completion. `respond` retains its structured counterparty semantics.\n"
@@ -58,12 +64,10 @@ OPERATING PRINCIPLES
 TOOL USE
 
 - Minimize round trips by grouping independent operations into one tool call whenever it accepts array inputs, such as multiple files, commands, edits, or targets, or by calling multiple independent tools in the same response.
-- Use \`respond\` for user-facing communication: \`progress\` for meaningful updates during longer work, \`question\` when you need information from the user, \`plan\` for Plan-mode answers or proposals, and \`complete\` for final Act-mode results. Do not send plain assistant text; every response must include a tool call.
+${responseGuidance}
 ${agentCommunicationGuidance}
 ${taskletParentGuidance}
-MODES
-
-Tasks have two modes: PLAN MODE is for read-only research and proposals, while ACT MODE is for executing the task. The initial mode is provided at task start, and you will be notified every time the mode switches.
+${modeGuidance}
 
 
 SYSTEM INFO

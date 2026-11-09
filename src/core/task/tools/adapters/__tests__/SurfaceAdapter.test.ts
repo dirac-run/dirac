@@ -146,7 +146,7 @@ describe("SurfaceAdapter", () => {
 		it("keeps architecture presentation root-owned without removing ordinary tasklet traits", () => {
 			setHostCapabilities({
 				architectureViewer: {
-					prepare: async () => {},
+					prepare: async () => { },
 					createPanel: async () => {
 						throw new Error("not used")
 					},
@@ -164,7 +164,7 @@ describe("SurfaceAdapter", () => {
 		it("resolves root architecture storage from the explicit address or legacy task identity", async () => {
 			setHostCapabilities({
 				architectureViewer: {
-					prepare: async () => {},
+					prepare: async () => { },
 					createPanel: async () => {
 						throw new Error("not used")
 					},
@@ -372,12 +372,12 @@ describe("SurfaceAdapter", () => {
 				runtime: { cwd: "/test", mode: "act", isSubagent: false },
 			})
 			sinon.assert.calledOnceWithExactly(config.taskMessenger.createCard, {
-				header: "Auto Approved · Permission",
+				header: "Dirac · Auto-approved",
 				toolName: "permission_approval",
 				icon: DiracIcon.PERMISSION_APPROVAL,
 				status: CardStatus.SUCCESS,
 				renderType: "markdown",
-				body: "**Result:** Auto Approved by permission agent\n\n**Reason:** Allowed by policy.",
+				body: "**Decision:** Approved\n\n**Source:** Utility permission policy\n\n**Reason:** Allowed by policy.\n\n### Requested operation\n\nPermission",
 				rawInput: { tool: "write_to_file" },
 				rawOutput: { decision: "approve", reason: "Allowed by policy.", approvedTool: "write_to_file" },
 				locations: [{ path: "src/index.ts" }],

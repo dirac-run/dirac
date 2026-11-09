@@ -45,6 +45,15 @@ describe("CommandSafetyChecker", () => {
 			isSafeCommand("type ls").should.equal(true)
 		})
 
+		it("allows numbered file reads without approving unsafe shell combinations", () => {
+			isSafeCommand("nl -ba src/index.ts").should.equal(true)
+			isSafeCommand("nl -ba src/index.ts | head -220").should.equal(true)
+			isSafeCommand("nl -ba src/index.ts | sed -n '115,250p'").should.equal(true)
+			isSafeCommand("nl -ba src/index.ts > numbered.txt").should.equal(false)
+			isSafeCommand("nl -ba $(touch marker)").should.equal(false)
+			isSafeCommand("nl -ba src/index.ts; rm marker").should.equal(false)
+		})
+
 		it("should allow safe sed commands (read-only)", () => {
 			isSafeCommand("sed -n '1p' file.txt").should.equal(true)
 			isSafeCommand("sed -n '1787,1790p' src/core/task/index.ts").should.equal(true)

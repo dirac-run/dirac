@@ -408,6 +408,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		return () => clearTimeout(timeout)
 	}, [activeTaskId, ctrl, isTaskActive, reportInteractionError, selectedGoal, timeoutSeconds])
 
+	const communicationCards = useMemo(
+		() =>
+			localDisplayMessages.flatMap((message) =>
+				message.content.type === DiracMessageType.CARD && message.content.card.communication
+					? [message.content.card]
+					: [],
+			),
+		[localDisplayMessages],
+	)
 	const isEmptyConversation = displayMessages.length === 0
 	const isWelcomeState = isEmptyConversation && !userScrolled && activePanel === null
 
@@ -419,6 +428,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 				(message) =>
 					message.id === activeCardId &&
 					message.content.type === DiracMessageType.CARD &&
+					!message.content.card.communication &&
 					!isFinalStatus(message.content.card.status),
 			) || null
 		)
@@ -1097,6 +1107,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					key={taskState.taskletActivity?.sourceId ?? "no-agent-source"}
 					availableRows={Math.max(1, terminalRows - layoutRows.liveViewportRows)}
 					controller={ctrl}
+					communicationCards={communicationCards}
 					scope={taskState.taskletActivity}
 					onClose={() => setActivePanel(null)}
 				/>

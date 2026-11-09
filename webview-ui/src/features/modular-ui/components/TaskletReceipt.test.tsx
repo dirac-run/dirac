@@ -27,7 +27,7 @@ const inspection: TaskletReceipt = {
 describe("tasklet operation receipts", () => {
 	it("labels the inspected subject independently from the operation outcome", () => {
 		render(<ModularCardHeader card={receiptCard(inspection)} contentId="body" isCollapsed onToggleCollapse={vi.fn()} />)
-		expect(screen.getByText("Inspect pending requests · Planck 2 (Reviewer) — Audit protocol")).toBeInTheDocument()
+		expect(screen.getByText("Inspect pending requests · Planck 2")).toBeInTheDocument()
 		expect(screen.getByText("Retrieved")).toBeInTheDocument()
 		expect(screen.queryByText("Completed")).not.toBeInTheDocument()
 		expect(screen.queryByText("Pending")).not.toBeInTheDocument()
@@ -44,6 +44,7 @@ describe("tasklet operation receipts", () => {
 					title: "Build",
 					outcome: "failed",
 					request: "Run build",
+					requestId: "opaque-request-id",
 					decision: "approve",
 					error: "Authority changed",
 				},
@@ -65,6 +66,7 @@ describe("tasklet operation receipts", () => {
 		expect(screen.getByText(/this request only, within parent authority/)).toBeInTheDocument()
 		expect(screen.getByText(/Authority changed/)).toBeInTheDocument()
 		expect(screen.getByText(/consumption is not confirmed/)).toBeInTheDocument()
+		expect(screen.queryByText(/opaque-request-id/)).not.toBeInTheDocument()
 		expect(screen.queryByRole("button")).not.toBeInTheDocument()
 		expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
 		expect(onAction).not.toHaveBeenCalled()

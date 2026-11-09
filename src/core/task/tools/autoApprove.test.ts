@@ -106,7 +106,7 @@ describe("resolveCommandApproval child static policy", () => {
 				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 				const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-				assert.deepEqual(resolveCommandApproval(["ls -la", "@backend:git status", "pwd && echo hello"], utilityEnabled, autoApprove, permissions as any), {
+				assert.deepEqual(resolveCommandApproval(["ls -la", "@backend:git status", "pwd && echo hello", "nl -ba src/index.ts | head -220"], utilityEnabled, autoApprove, permissions as any), {
 					required: false, utilityEligible: false,
 				})
 				for (const commands of [["ls", "curl https://example.com"], ["pwd && curl https://example.com"], ["ls > out.txt"]]) {

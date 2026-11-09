@@ -1,5 +1,4 @@
 import { CardStatus } from "@shared/ExtensionMessage"
-import { toError } from "@shared/errors"
 import { DiracIcon } from "@shared/icons"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
@@ -31,30 +30,34 @@ export class SendMessageTool implements IDiracTool {
 		if (!communication) throw new Error("Agent communication is unavailable for this execution")
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
+		const header = `${actor} → ${request.to} · Message`
 		const card = await env.ui.createCard({
-			header: `${actor} is sending a message to ${request.to}`,
-			body: request.text,
+			header,
+			body: `${request.text}\n\nStatus: Sending`,
 			communication: { actor },
 			icon: DiracIcon.CHAT,
 			status: CardStatus.RUNNING,
-			collapsed: false,
-			do_not_auto_collapse: true,
+			collapsed: true,
 			rawInput: request,
 		})
+		let accepted = false
 		try {
 			const receipt = await communication.send(request)
+			accepted = true
 			await card.update({
-				header: `${actor} sent a message to ${request.to}`,
-				communication: { actor, detail: "Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed." },
+				header,
+				body: `${request.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`,
+				communication: { actor },
 			})
-			await card.finalize(CardStatus.SUCCESS, true)
+			await card.finalize(CardStatus.SUCCESS)
 			return JSON.stringify(receipt)
 		} catch (error) {
 			await card.update({
-				header: `${actor} failed to send a message to ${request.to}`,
-				communication: { actor, detail: toError(error).message },
+				header,
+				body: `${request.text}\n\nStatus: ${accepted ? "Message accepted, but display failed; delivery, understanding, and action are not confirmed." : "Message not accepted."} See tool result for details.`,
+				communication: { actor },
 			})
-			await card.finalize(CardStatus.ERROR, true)
+			await card.finalize(CardStatus.ERROR)
 			throw error
 		}
 	}

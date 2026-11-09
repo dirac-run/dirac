@@ -330,7 +330,6 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 					? CardStatus.ERROR
 					: CardStatus.SUCCESS
 			const content = receiptCard(receipt, status, actor)
-			if (request.operation === "inspect") content.body = inspectionContent(result, receipt)
 			await cards[index].update(content)
 			await cards[index].finalize(status)
 		}
@@ -542,7 +541,7 @@ function compactMessageResults(items: TaskletMessage[], results: TaskletMessageR
 		512,
 		Math.floor(
 			(MAX_MESSAGE_RESULTS_BYTES - Buffer.byteLength(JSON.stringify(compact), "utf8") - results.length * 128) /
-				(results.length * 4),
+			(results.length * 4),
 		),
 	)
 	for (const [index, result] of results.entries()) {
@@ -591,26 +590,26 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 		rows:
 			"taskletId" in request
 				? [
-						{
-							operation: request.operation,
-							taskletId: request.taskletId,
-							title: "Agent",
-							outcome: "requested",
-							message: "message" in request ? request.message : undefined,
-						},
-					]
+					{
+						operation: request.operation,
+						taskletId: request.taskletId,
+						title: "Agent",
+						outcome: "requested",
+						message: "message" in request ? request.message : undefined,
+					},
+				]
 				: [],
 		...(request.operation === "sleep"
 			? {
-					waitScope:
-						request.options.taskletIds === undefined
-							? "any_tasklet"
-							: request.options.taskletIds.length
-								? "selected_tasklets"
-								: "time_or_user",
-					waitSourceCount: request.options.taskletIds?.length,
-					waitSourceIds: request.options.taskletIds,
-				}
+				waitScope:
+					request.options.taskletIds === undefined
+						? "any_tasklet"
+						: request.options.taskletIds.length
+							? "selected_tasklets"
+							: "time_or_user",
+				waitSourceCount: request.options.taskletIds?.length,
+				waitSourceIds: request.options.taskletIds,
+			}
 			: {}),
 	}
 }
@@ -619,8 +618,9 @@ function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: 
 	const detail = [
 		TASKLET_RECEIPT_OUTCOMES[taskletReceipt.outcome].label,
 		taskletReceiptNote(taskletReceipt),
-		...taskletReceipt.rows.flatMap((row) => [row.requestId ? `Request: ${row.requestId}` : undefined, row.error]),
-		taskletReceipt.error,
+		taskletReceipt.error || taskletReceipt.rows.some((row) => row.error)
+			? "Operation failed; see tool result for details."
+			: undefined,
 	]
 		.filter(Boolean)
 		.join(" · ")
@@ -629,7 +629,7 @@ function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: 
 		icon: TASKLET_RECEIPT_OPERATIONS[taskletReceipt.operation].icon,
 		body: formatTaskletReceipt(taskletReceipt, true),
 		communication: { actor, detail },
-		collapsed: false,
+		collapsed: true,
 		taskletReceipt,
 		status,
 	}
@@ -700,28 +700,28 @@ function controlReceiptResult(request: ControlRequest, value: unknown): TaskletR
 		rows:
 			request.operation === "inspect"
 				? [
-						{
-							...receipt.rows[0],
-							title,
-							role,
-							outcome: "retrieved",
-							observedState:
-								(request.query?.view ?? "status") === "status" && items.length === 1
-									? observedReceiptState(resultObject(items[0]))
-									: undefined,
-						},
-					]
+					{
+						...receipt.rows[0],
+						title,
+						role,
+						outcome: "retrieved",
+						observedState:
+							(request.query?.view ?? "status") === "status" && items.length === 1
+								? observedReceiptState(resultObject(items[0]))
+								: undefined,
+					},
+				]
 				: items.map((item) => {
-						const summary = resultObject(item)
-						return {
-							operation: "list",
-							taskletId: typeof summary.id === "string" ? summary.id : undefined,
-							title: resultTitle(summary),
-							role: typeof summary.role === "string" ? summary.role : undefined,
-							outcome: "retrieved",
-							observedState: observedReceiptState(summary),
-						}
-					}),
+					const summary = resultObject(item)
+					return {
+						operation: "list",
+						taskletId: typeof summary.id === "string" ? summary.id : undefined,
+						title: resultTitle(summary),
+						role: typeof summary.role === "string" ? summary.role : undefined,
+						outcome: "retrieved",
+						observedState: observedReceiptState(summary),
+					}
+				}),
 	}
 }
 
@@ -775,14 +775,4 @@ function batchReceiptOutcome(rows: TaskletReceiptRow[]): TaskletReceiptOutcome {
 function individualReceipts(receipt: TaskletReceipt): TaskletReceipt[] {
 	if (receipt.operation !== "message") return [receipt]
 	return receipt.rows.map((row) => ({ ...receipt, operation: row.operation, outcome: row.outcome, rows: [row] }))
-}
-
-function inspectionContent(value: unknown, receipt: TaskletReceipt): string {
-	const page = resultObject(value)
-	const evidence = page.fragment ?? page.items ?? value
-	const items = Array.isArray(evidence) ? evidence : [evidence]
-	const content = items
-		.map((item) => (typeof item === "string" ? item : `\`\`\`json\n${JSON.stringify(item, null, 2)}\n\`\`\``))
-		.join("\n\n")
-	return [content || "No recorded items.", taskletReceiptNote(receipt)].filter(Boolean).join("\n\n")
 }

@@ -60,6 +60,14 @@ describe("PermissionModal body rendering", () => {
 		expect(frame).not.toContain("**")
 	})
 
+	it("formats fenced bash in actionable command approval without showing delimiters", () => {
+		const frame = renderModal({ renderType: "markdown", body: "```bash\nnpm run deploy\n```", requireApproval: true })
+		expect(frame).toContain("npm run deploy")
+		expect(frame).not.toContain("```")
+		expect(frame).toContain("approve")
+		expect(frame).toContain("deny")
+	})
+
 	it("preserves plain text descriptions", () => {
 		const frame = renderModal({ renderType: "text", body: "Allow this command?" })
 		expect(frame).toContain("│ Allow this command?")

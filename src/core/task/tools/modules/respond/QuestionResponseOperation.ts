@@ -7,6 +7,8 @@ import { ResponseCardHeader, ResponseOperation, responseCardInput } from "@share
 import { formatResponse } from "@core/formatResponse"
 
 export async function requestQuestionResponse(question: string, options: string[], env: IToolEnvironment): Promise<any> {
+	const isTasklet = env.config.executionProfile === "tasklet"
+	const respondent = isTasklet ? "Dirac" : "The user"
 	// Show notification if enabled
 	if (env.config.executionProfile !== "tasklet" && env.config.autoApprovalSettings.enableNotifications) {
 		env.system.showNotification({
@@ -43,7 +45,7 @@ export async function requestQuestionResponse(question: string, options: string[
 		env.telemetry.captureCustomMetadata({ answerType: "declined" })
 		await cardHandle.update({
 			header: ResponseCardHeader.QUESTION_DECLINED,
-			body: `${question}\n\n*The user declined to answer.*`,
+			body: `${question}\n\n*${respondent} declined to answer.*`,
 			rawOutput: { declined: true },
 			requireFeedback: false,
 			actions: [],
@@ -51,14 +53,14 @@ export async function requestQuestionResponse(question: string, options: string[
 			outcome: "declined",
 		})
 		await cardHandle.finalize(CardStatus.SKIPPED)
-		return formatResponse.toolResult("The user declined to answer the follow-up question.")
+		return formatResponse.toolResult(`${respondent} declined to answer the follow-up question.`)
 	}
 
 	const selectedChoice = value && options.includes(value) ? value : undefined
 	const text = selectedChoice || interactionText || value
 	await cardHandle.update({
 		header: ResponseCardHeader.ANSWERED,
-		body: `${question}\n\n---\n\n**Answer:** ${text || "(no answer)"}`,
+		body: `${question}\n\n---\n\n**${isTasklet ? "Dirac's answer" : "Answer"}:** ${text || "(no answer)"}`,
 		rawOutput: { answer: text || "", selectedChoice },
 		requireFeedback: false,
 		actions: [],
@@ -67,7 +69,7 @@ export async function requestQuestionResponse(question: string, options: string[
 	})
 	await cardHandle.finalize(CardStatus.SUCCESS)
 
-	if (text) {
+	if (text && !isTasklet) {
 		await env.ui.upsertText(text, false, "user")
 	}
 
@@ -85,5 +87,6 @@ export async function requestQuestionResponse(question: string, options: string[
 		fileContentString = await env.workspace.formatAttachedFiles(followupFiles)
 	}
 
-	return formatResponse.toolResult(`<answer>\n${text ?? ""}\n</answer>`, images, fileContentString)
+	const answer = `<answer>\n${text ?? ""}\n</answer>`
+	return formatResponse.toolResult(isTasklet ? `Dirac answered:\n${answer}` : answer, images, fileContentString)
 }

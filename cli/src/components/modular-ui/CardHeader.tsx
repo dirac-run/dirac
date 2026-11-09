@@ -62,6 +62,7 @@ export const CardHeader: React.FC<CardHeaderProps> = ({
 	communication,
 	status,
 	icon,
+	isCollapsed,
 	compact,
 	statusLabel,
 	tasklet,
@@ -77,15 +78,39 @@ export const CardHeader: React.FC<CardHeaderProps> = ({
 	const headerColor = headerPresentation.color
 	const headerBold = "bold" in headerPresentation ? headerPresentation.bold : false
 	if (communication) {
+		const outcome = receipt ? TASKLET_RECEIPT_OUTCOMES[receipt.outcome] : undefined
+		const outcomeText = `[${outcome?.label ?? displayStatus}]`
+		const outcomeColor = outcome ? taskletReceiptColor(outcome.tone) : statusColor
+		const width = renderWidth ?? process.stdout.columns ?? 80
+		const communicationIcon = getIcon(icon)
+		let title = header.replace(/\s+/g, " ").trim()
+		const hint =
+			isCollapsed && stringWidth(`${communicationIcon} ${title} ${outcomeText} · /agent → c`) <= width
+				? " · /agent → c"
+				: ""
+		const titleWidth = width - stringWidth(communicationIcon) - stringWidth(outcomeText + hint) - 2
+		if (titleWidth < 2)
+			return (
+				<Text color={outcomeColor} wrap="truncate-end">
+					{outcomeText}
+				</Text>
+			)
+		if (stringWidth(title) > titleWidth) {
+			let clipped = ""
+			for (const character of title) {
+				if (stringWidth(`${clipped}${character}…`) > titleWidth) break
+				clipped += character
+			}
+			title = `${clipped}…`
+		}
 		return (
 			<Text wrap="truncate-end">
-				<Text color={categoryColor}>{getIcon(icon)}</Text>{" "}
+				<Text color={categoryColor}>{communicationIcon}</Text>{" "}
 				<Text bold={headerBold} color={headerColor}>
-					{header.replace(/\s+/g, " ").trim()}
-				</Text>
-				{communication.detail && (
-					<Text {...styles.tool.metadata}>{` · ${communication.detail.replace(/\s+/g, " ").trim()}`}</Text>
-				)}
+					{title}
+				</Text>{" "}
+				<Text color={outcomeColor}>{outcomeText}</Text>
+				{hint && <Text {...styles.tool.metadata}>{hint}</Text>}
 			</Text>
 		)
 	}

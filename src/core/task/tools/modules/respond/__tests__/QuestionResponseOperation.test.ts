@@ -14,7 +14,7 @@ function createEnvironment(
 		images?: string[]
 		files?: string[]
 	},
-	config: { enableNotifications?: boolean; yoloModeToggled?: boolean } = {},
+	config: { enableNotifications?: boolean; yoloModeToggled?: boolean; executionProfile?: "standalone" | "tasklet" } = {},
 ) {
 	const card = {
 		update: sinon.stub().resolves(),
@@ -35,6 +35,7 @@ function createEnvironment(
 		config: {
 			autoApprovalSettings: { enableNotifications: config.enableNotifications ?? false },
 			yoloModeToggled: config.yoloModeToggled ?? false,
+			executionProfile: config.executionProfile ?? "standalone",
 			mode: "act",
 			ulid: "test-task",
 			providerId: "anthropic",
@@ -138,6 +139,34 @@ describe("question response operation", () => {
 		assert.ok(env.telemetry.captureOptionSelected.calledOnceWithExactly(2, "act"))
 		assert.ok(env.telemetry.captureToolUsage.notCalled)
 		assert.ok(env.telemetry.captureCustomMetadata.calledWithExactly({ answerType: "choice" }))
+	})
+
+	it("attributes a child's accepted answer to Dirac without emitting a user-authored message", async () => {
+		const { env, card } = createEnvironment(
+			{ response: DiracAskResponse.APPROVE, value: "Option A", images: ["data:image/png;base64,AA=="], files: ["file.txt"] },
+			{ executionProfile: "tasklet", enableNotifications: true, yoloModeToggled: true },
+		)
+		const result = await requestQuestionResponse("Choose", ["Option A", "Option B"], env)
+
+		assert.match(JSON.stringify(result), /Dirac answered:/)
+		assert.ok(card.update.calledWithMatch({ body: "Choose\n\n---\n\n**Dirac's answer:** Option A" }))
+		assert.ok(card.finalize.calledOnceWith(CardStatus.SUCCESS))
+		sinon.assert.notCalled(env.ui.upsertText)
+		sinon.assert.notCalled(env.system.showNotification)
+		assert.ok(env.workspace.formatAttachedFiles.calledOnceWithExactly(["file.txt"]))
+	})
+
+	it("attributes a child's declined question to Dirac", async () => {
+		const { env, card } = createEnvironment(
+			{ response: DiracAskResponse.REJECT }, { executionProfile: "tasklet" },
+		)
+		const result = await requestQuestionResponse("Choose", [], env)
+
+		assert.match(String(result), /Dirac declined to answer/)
+		assert.doesNotMatch(String(result), /user/i)
+		assert.ok(card.update.calledWithMatch({ body: "Choose\n\n*Dirac declined to answer.*" }))
+		assert.ok(card.finalize.calledOnceWith(CardStatus.SKIPPED))
+		sinon.assert.notCalled(env.ui.upsertText)
 	})
 
 	it("returns attachment-only answers without inventing text", async () => {
