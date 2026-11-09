@@ -1,12 +1,34 @@
-import type { OpenAiCompatibleModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
+import type { OpenAiCompatibleModelInfo } from "./types"
 
 export type MoonshotModelId = keyof typeof moonshotModels
 export const moonshotDefaultModelId = "kimi-k3" satisfies MoonshotModelId
 
 export const moonshotModels = {
+	"kimi-k3.1-pro": {
+		...MODEL_CAPABILITIES["kimi-k3.1-pro"],
+		supportsPromptCache: true,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheReadsPrice: 0.2,
+		cacheWritesPrice: 2.0,
+		isR1FormatRequired: true,
+	},
+	"kimi-k3.1-pro-highspeed": {
+		...MODEL_CAPABILITIES["kimi-k3.1-pro-highspeed"],
+		supportsPromptCache: true,
+		inputPrice: 4.0,
+		outputPrice: 20.0,
+		cacheReadsPrice: 0.2,
+		cacheWritesPrice: 4.0,
+		isR1FormatRequired: true,
+	},
 	"kimi-k3": {
 		...MODEL_CAPABILITIES["kimi-k3"],
+		supportsReasoningEffort: true,
+		reasoningEffortOptions: ["max"],
+		defaultReasoningEffort: "max",
+		thinkingAlwaysOn: true,
 		supportsPromptCache: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,

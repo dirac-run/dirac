@@ -7,6 +7,27 @@ export type ClaudeCodeModelId = keyof typeof claudeCodeModels
 export const claudeCodeDefaultModelId: ClaudeCodeModelId = "claude-sonnet-5"
 
 export const claudeCodeModels = {
+	"claude-sonnet-5-5": {
+		...anthropicModels["claude-sonnet-5-5"],
+		supportsImages: false,
+		supportsPromptCache: false,
+		thinkingAlwaysOn: true,
+		supportsBetweenToolsThinking: false,
+		defaultReasoningEffort: "medium",
+		description: "Requires Claude Code 2.1.284 or later. Claude Code always uses adaptive thinking for this model.",
+	},
+	"claude-haiku-5-5": {
+		...anthropicModels["claude-haiku-5-5"],
+		supportsImages: false,
+		supportsPromptCache: false,
+		thinkingAlwaysOn: true,
+		description: "Requires Claude Code 2.1.293 or later. Claude Code always uses adaptive thinking for this model.",
+	},
+	"claude-fable-5-1": {
+		...anthropicModels["claude-fable-5-1"],
+		supportsImages: false,
+		supportsPromptCache: false,
+	},
 	"opus[1m]": {
 		...anthropicModels["claude-opus-4-6"],
 		contextWindow: 1_000_000,

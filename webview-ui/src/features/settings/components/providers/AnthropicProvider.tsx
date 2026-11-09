@@ -2,6 +2,7 @@ import { anthropicModels, modelSupportsInferenceSpeed } from "@shared/api"
 import type { Mode } from "@shared/ExtensionMessage"
 import { getModeSpecificFields, normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import AdaptiveThinkingToggle from "../AdaptiveThinkingToggle"
 import { ApiKeyField } from "../common/ApiKeyField"
 import InferenceSpeedSelector from "../InferenceSpeedSelector"
 import ReasoningEffortSelector from "../ReasoningEffortSelector"
@@ -80,12 +81,15 @@ export const AnthropicProvider = ({ showModelOptions, isPopup, currentMode }: An
 						selectedModelId={selectedModelId}
 					/>
 
-					{selectedModelInfo.thinkingAlwaysOn ? (
+					{selectedModelInfo.supportsReasoningEffort && !selectedModelInfo.thinkingAlwaysOn && (
+						<AdaptiveThinkingToggle currentMode={currentMode} supportsBetweenToolsThinking={selectedModelInfo.supportsBetweenToolsThinking} />
+					)}
+					{selectedModelInfo.supportsReasoningEffort ? (
 						<ReasoningEffortSelector
 							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
 							currentMode={currentMode}
 							defaultEffort={selectedModelInfo.defaultReasoningEffort || "medium"}
-							description="Thinking is always on for this model. Effort controls depth, latency, and cost."
+							description="Effort controls thinking depth, latency, and cost."
 						/>
 					) : SUPPORTED_ANTHROPIC_THINKING_MODELS.includes(selectedModelId) ? (
 						<ThinkingBudgetSlider currentMode={currentMode} maxBudget={selectedModelInfo.thinkingConfig?.maxBudget} />

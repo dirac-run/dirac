@@ -344,6 +344,7 @@ const PROVIDER_REGISTRY: Record<
 			disableRetries: cfg.disableRetries,
 			mistralApiKey: cfg.mistralApiKey,
 			apiModelId: mc.apiModelId,
+			reasoningEffort: mc.reasoningEffort,
 		}),
 	// vscode-lm lives in the hosts layer — only the VS Code host can create it.
 	"vscode-lm": (cfg, mc) => {
@@ -381,6 +382,7 @@ const PROVIDER_REGISTRY: Record<
 			moonshotApiKey: cfg.moonshotApiKey,
 			moonshotApiLine: cfg.moonshotApiLine,
 			apiModelId: mc.apiModelId,
+			reasoningEffort: mc.reasoningEffort,
 		}),
 	huggingface: (cfg, mc) =>
 		new HuggingFaceHandler({
@@ -444,6 +446,7 @@ const PROVIDER_REGISTRY: Record<
 			claudeCodePath: cfg.claudeCodePath,
 			apiModelId: mc.apiModelId,
 			thinkingBudgetTokens: mc.thinkingBudgetTokens,
+			reasoningEffort: mc.reasoningEffort,
 		}),
 	"huawei-cloud-maas": (cfg, mc) =>
 		new HuaweiCloudMaaSHandler({
@@ -491,6 +494,7 @@ const PROVIDER_REGISTRY: Record<
 			minimaxApiLine: cfg.minimaxApiLine,
 			apiModelId: mc.apiModelId,
 			thinkingBudgetTokens: mc.thinkingBudgetTokens,
+			reasoningEffort: mc.reasoningEffort,
 		}),
 	nousResearch: (cfg, mc) =>
 		new NousResearchHandler({

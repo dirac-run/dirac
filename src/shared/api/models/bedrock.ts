@@ -6,6 +6,18 @@ export type BedrockModelId = keyof typeof bedrockModels
 export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-5"
 
 export const bedrockModels = {
+	"anthropic.claude-sonnet-5-5": {
+		...MODEL_CAPABILITIES["claude-sonnet-5-5"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		description: "Requires a supported geographic or global inference profile. Bedrock pricing is not yet verified; cost estimates are unavailable.",
+	},
+	"anthropic.claude-haiku-5-5": {
+		...MODEL_CAPABILITIES["claude-haiku-5-5"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		description: "Requires a supported geographic or global inference profile. Bedrock pricing is not yet verified; cost estimates are unavailable.",
+	},
 	"anthropic.claude-sonnet-4-6": {
 		...MODEL_CAPABILITIES["claude-sonnet-4-6"],
 		supportsPromptCache: true,

@@ -5,6 +5,7 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { ModelInfoView } from "../common/ModelInfoView"
 import { ModelSelector } from "../common/ModelSelector"
+import ReasoningEffortSelector from "../ReasoningEffortSelector"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 
 /**
@@ -49,6 +50,14 @@ export const MistralProvider = ({ showModelOptions, isPopup, currentMode }: Mist
 						}
 						selectedModelId={selectedModelId}
 					/>
+
+					{selectedModelInfo?.supportsReasoningEffort && (
+						<ReasoningEffortSelector
+							currentMode={currentMode}
+							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
+							defaultEffort={selectedModelInfo.defaultReasoningEffort}
+						/>
+					)}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

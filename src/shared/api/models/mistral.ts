@@ -6,6 +6,14 @@ export type MistralModelId = keyof typeof mistralModels
 export const mistralDefaultModelId: MistralModelId = "devstral-2512"
 
 export const mistralModels = {
+	"mistral-large-4": {
+		...MODEL_CAPABILITIES["mistral-large-4"],
+		supportsPromptCache: true,
+		inputPrice: 0.7,
+		cacheReadsPrice: 0.07,
+		outputPrice: 2.1,
+		temperature: 1,
+	},
 	"devstral-2512": {
 		maxTokens: 256_000,
 		contextWindow: 256_000,

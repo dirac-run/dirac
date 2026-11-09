@@ -152,6 +152,21 @@ describe("buildResponseCreateParams", () => {
 		params.reasoning.context.should.equal("all_turns")
 	})
 
+	for (const reasoningContext of [undefined, "all_turns"] as const) {
+		it(`preserves explicit none effort with ${reasoningContext ?? "default"} reasoning context`, () => {
+			const params = buildResponseCreateParams({ ...baseArgs, reasoningEffort: "none", reasoningContext }) as any
+			params.reasoning.effort.should.equal("none")
+			expect(params.reasoning.context).to.equal(reasoningContext)
+			expect(params.reasoning.summary).to.equal(undefined)
+		})
+	}
+
+	it("preserves the existing default effort when effort is absent", () => {
+		const params = buildResponseCreateParams(baseArgs) as any
+		params.reasoning.effort.should.equal("high")
+		params.reasoning.summary.should.equal("auto")
+	})
+
 	it("stores a continued response when explicitly requested", () => {
 		const params = buildResponseCreateParams({ ...baseArgs, previousResponseId: "resp_123", store: true }) as any
 		params.store.should.equal(true)

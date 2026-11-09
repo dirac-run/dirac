@@ -22,6 +22,7 @@ import type { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 import { fromProtobufModelInfo } from "@shared/proto-conversions/models/typeConversion"
 import { ModelAutocomplete } from "./common/ModelAutocomplete"
 import { ReasoningEffortInput } from "./ReasoningEffortSelector"
+import { AdaptiveThinkingInput } from "./AdaptiveThinkingToggle"
 import { ThinkingBudgetInput } from "./ThinkingBudgetSlider"
 import { normalizeApiConfiguration } from "./utils/providerUtils"
 import { OpenAiModelInfoEditor } from "./OpenAiModelInfoEditor"
@@ -252,22 +253,31 @@ export function ModelSelectionEditor({
 		setDraft(next)
 		onChange(next)
 	}
+	const modelInfo = current ? {
+		...(current.provider === "bedrock" && current.awsBedrockCustomModelBaseId
+			? bedrockModels[current.awsBedrockCustomModelBaseId as keyof typeof bedrockModels]
+			: models[current.modelId]),
+		...current.modelInfo,
+	} : undefined
 	const hasKnownCapabilities =
 		!!current &&
 		(Object.hasOwn(models, current.modelId) ||
 			current.awsBedrockCustomSelected ||
 			current.modelInfo?.supportsReasoningEffort ||
 			current.modelInfo?.reasoningEffortOptions?.length)
-	const efforts = hasKnownCapabilities ? getReasoningEffortOptionsForModel(current?.modelId, current?.modelInfo) : []
+	const efforts = hasKnownCapabilities ? getReasoningEffortOptionsForModel(current?.modelId, modelInfo) : []
 	const hasThinkingBudget =
-		current?.modelInfo?.supportsReasoning &&
-		!current.modelInfo.thinkingAlwaysOn &&
-		(efforts.length === 0 || current.provider === "litellm" || current.provider === "minimax")
+		modelInfo?.supportsReasoning &&
+		!modelInfo.thinkingAlwaysOn &&
+		(efforts.length === 0 || current?.provider === "litellm" || current?.provider === "minimax")
+	const hasAdaptiveThinkingToggle = modelInfo?.supportsAdaptiveThinking &&
+		modelInfo.supportsReasoningEffort && !modelInfo.thinkingAlwaysOn
 	const extraOptions = current ? renderOptions?.(current) : null
 	const hasOptions =
 		current &&
 		(current.provider === "bedrock" ||
 			hasThinkingBudget ||
+			hasAdaptiveThinkingToggle ||
 			(current.provider === "openai" && current.modelId) ||
 			extraOptions)
 	return (
@@ -396,6 +406,14 @@ export function ModelSelectionEditor({
 										}}
 									/>
 								</>
+							)}
+							{hasAdaptiveThinkingToggle && (
+								<AdaptiveThinkingInput
+									budgetTokens={current.thinkingBudgetTokens}
+									effort={current.reasoningEffort}
+									supportsBetweenToolsThinking={modelInfo?.supportsBetweenToolsThinking}
+									onChange={(thinkingBudgetTokens) => commit({ ...current, thinkingBudgetTokens })}
+								/>
 							)}
 							{hasThinkingBudget && (
 								<ThinkingBudgetInput

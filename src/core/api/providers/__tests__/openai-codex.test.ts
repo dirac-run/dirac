@@ -122,6 +122,25 @@ describe("OpenAiCodexHandler persisted reasoning", () => {
 		requests[0].reasoning.effort.should.equal("medium")
 	})
 
+	for (const [reasoningEffort, expectedEffort] of [[undefined, "medium"], ["none", "none"], ["max", "max"], ["minimal", "medium"]]) {
+		it(`sends GPT-6.1 Terra through Codex Responses with ${reasoningEffort ?? "default"} effort`, async () => {
+			const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6.1-terra", reasoningEffort })
+			const requests: any[] = []
+			sinon.stub(handler as any, "createResponseStreamWebsocket").callsFake(async function* (request: any) {
+				requests.push(request)
+			})
+
+			await drain(handler.createMessage("system", [{ role: "user", content: "hello" }] as any, tools))
+
+			requests[0].model.should.equal("gpt-6.1-terra")
+			requests[0].reasoning.effort.should.equal(expectedEffort)
+			expect(requests[0].reasoning.summary).to.equal(expectedEffort === "none" ? undefined : "auto")
+			requests[0].reasoning.context.should.equal("all_turns")
+			requests[0].store.should.equal(false)
+			requests[0].tools.find((tool: any) => tool.type === "function").strict.should.equal(true)
+		})
+	}
+
 	it("advertises provider-native web search support", () => {
 		createHandler().supportsNativeWebSearch().should.equal(true)
 	})

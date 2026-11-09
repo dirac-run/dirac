@@ -1,21 +1,27 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
+import type { MessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/messages/messages"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { MinimaxModelId, ModelInfo, minimaxDefaultModelId, minimaxModels } from "@/shared/api"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { fetch } from "@/shared/net"
 import { DiracTool } from "@/shared/tools"
+import { resolveReasoningEffortForModel } from "@/shared/utils/reasoning-support"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
+
+// MiniMax accepts xhigh; the Anthropic SDK's effort union does not yet include it.
+type AnthropicEffort = NonNullable<MessageCreateParamsStreaming["output_config"]>["effort"]
 
 interface MinimaxHandlerOptions extends CommonApiHandlerOptions {
 	minimaxApiKey?: string
 	minimaxApiLine?: string
 	apiModelId?: string
 	thinkingBudgetTokens?: number
+	reasoningEffort?: string
 }
 
 export class MinimaxHandler implements ApiHandler {
@@ -75,9 +81,10 @@ export class MinimaxHandler implements ApiHandler {
 		const nativeToolsOn = (tools?.length ?? 0) > 0
 
 		const budget_tokens = this.options.thinkingBudgetTokens || 0
-		const reasoningOn = (model.info.supportsReasoning ?? false) && budget_tokens !== 0
+		const reasoningOn = (model.info.supportsReasoning ?? false) && (model.info.thinkingAlwaysOn || budget_tokens !== 0)
+		const reasoningEffort = resolveReasoningEffortForModel(model.id, model.info, this.options.reasoningEffort)
 
-		// MiniMax M2 uses Anthropic API format
+		// MiniMax uses the Anthropic API format with model-specific thinking controls.
 		const stream: AnthropicStream<Anthropic.RawMessageStreamEvent> = await client.messages.create(
 			{
 				model: model.id,
@@ -86,11 +93,20 @@ export class MinimaxHandler implements ApiHandler {
 				messages: sanitizeAnthropicMessages(messages, false),
 				stream: true,
 				tools: nativeToolsOn ? (tools as AnthropicTool[]) : undefined,
-				thinking: reasoningOn ? { type: "enabled", budget_tokens: budget_tokens } : undefined,
-				// "Thinking isn't compatible with temperature, top_p, or top_k modifications"
-				temperature: reasoningOn ? undefined : 1.0, // MiniMax recommends 1.0, range is (0.0, 1.0]
-				// NOTE: Forcing tool use when tools are provided will result in error when thinking is also enabled.
-				tool_choice: nativeToolsOn && !reasoningOn ? { type: "any" } : undefined,
+				thinking: reasoningOn
+					? model.info.supportsAdaptiveThinking
+						? { type: "adaptive" }
+						: { type: "enabled", budget_tokens }
+					: undefined,
+				output_config: reasoningOn && reasoningEffort ? { effort: reasoningEffort as AnthropicEffort } : undefined,
+				// Fixed-budget thinking isn't compatible with sampling modifications.
+				temperature: reasoningOn ? undefined : 1.0,
+				tool_choice:
+					nativeToolsOn && model.info.supportsForcedToolUse === false
+						? { type: "auto" }
+						: nativeToolsOn && !reasoningOn
+							? { type: "any" }
+							: undefined,
 			},
 			{ signal },
 		)
@@ -120,7 +136,11 @@ export class MinimaxHandler implements ApiHandler {
 type ToolCallState = { id: string; name: string; arguments: string }
 
 /** Dispatches a single Anthropic stream chunk to the appropriate handler. */
-async function* handleStreamChunk(chunk: Anthropic.RawMessageStreamEvent, state: ToolCallState, usage: ApiStreamUsageChunk): ApiStream {
+async function* handleStreamChunk(
+	chunk: Anthropic.RawMessageStreamEvent,
+	state: ToolCallState,
+	usage: ApiStreamUsageChunk,
+): ApiStream {
 	switch (chunk.type) {
 		case "message_start":
 			return yield* handleMessageStart(chunk, usage)

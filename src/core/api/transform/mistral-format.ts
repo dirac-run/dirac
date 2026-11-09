@@ -4,6 +4,10 @@ import { DiracImageContentBlock, DiracTextContentBlock, DiracUserToolResultConte
 
 export type MistralContentBlock = { type: "text"; text: string } | { type: "image_url"; imageUrl: { url: string } }
 
+type MistralAssistantContentBlock =
+	| { type: "text"; text: string }
+	| { type: "thinking"; thinking: { type: "text"; text: string }[]; closed: true }
+
 interface MistralToolCall {
 	id: string
 	type: "function"
@@ -17,7 +21,7 @@ interface MistralToolCall {
 export type MistralMessage =
 	| { role: "system"; content: string }
 	| { role: "user"; content: string | MistralContentBlock[] }
-	| { role: "assistant"; content: string | null; toolCalls?: MistralToolCall[] }
+	| { role: "assistant"; content: string | MistralAssistantContentBlock[] | null; toolCalls?: MistralToolCall[] }
 	| { role: "tool"; content: MistralContentBlock[]; toolCallId: string; name?: string }
 
 const MISTRAL_TOOL_CALL_ID_PATTERN = /^[A-Za-z0-9]{9}$/
@@ -111,6 +115,7 @@ function convertMistralUserMessages(
 function convertMistralAssistantMessage(
 	content: Anthropic.Messages.ContentBlockParam[],
 	toolCallIds: Map<string, string>,
+	includeReasoning: boolean,
 ): MistralMessage | null {
 	const text = content
 		.filter(isTextBlock)
@@ -127,10 +132,20 @@ function convertMistralAssistantMessage(
 				arguments: JSON.stringify(part.input),
 			},
 		}))
-	if (!text && toolCalls.length === 0) return null
+	const reasoningContent = includeReasoning
+		? content.flatMap((part): MistralAssistantContentBlock[] => {
+			if (part.type === "thinking") {
+				return [{ type: "thinking", thinking: [{ type: "text", text: part.thinking }], closed: true }]
+			}
+			if (isTextBlock(part)) return [{ type: "text", text: part.text }]
+			return []
+		})
+		: []
+	const hasReasoning = reasoningContent.some((part) => part.type === "thinking")
+	if (!text && !hasReasoning && toolCalls.length === 0) return null
 	return {
 		role: "assistant",
-		content: text || null,
+		content: hasReasoning ? reasoningContent : text || null,
 		...(toolCalls.length > 0 ? { toolCalls } : {}),
 	}
 }
@@ -138,6 +153,7 @@ function convertMistralAssistantMessage(
 export function convertToMistralMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
 	supportsImages = true,
+	includeReasoning = false,
 ): MistralMessage[] {
 	const toolUseIdToName = new Map<string, string>()
 	for (const message of anthropicMessages) {
@@ -159,7 +175,7 @@ export function convertToMistralMessages(
 			continue
 		}
 
-		const converted = convertMistralAssistantMessage(message.content, toolCallIds)
+		const converted = convertMistralAssistantMessage(message.content, toolCallIds, includeReasoning)
 		if (converted) mistralMessages.push(converted)
 	}
 	return mistralMessages

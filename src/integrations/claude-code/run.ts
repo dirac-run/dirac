@@ -15,6 +15,7 @@ type ClaudeCodeOptions = {
 	path?: string
 	modelId: string
 	thinkingBudgetTokens?: number
+	reasoningEffort?: string
 	shouldUseFile?: boolean
 	jsonSchema?: string
 }
@@ -181,7 +182,7 @@ const BUFFER_SIZE = 20_000_000 // 20 MB
 const CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000"
 
 function runProcess(
-	{ systemPrompt, messages, path, modelId, thinkingBudgetTokens, shouldUseFile, jsonSchema }: ClaudeCodeOptions,
+	{ systemPrompt, messages, path, modelId, thinkingBudgetTokens, reasoningEffort, shouldUseFile, jsonSchema }: ClaudeCodeOptions,
 	cwd: string,
 ) {
 	const claudePath = path?.trim() || "claude"
@@ -233,6 +234,7 @@ function runProcess(
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC || "1",
 		DISABLE_NON_ESSENTIAL_MODEL_CALLS: process.env.DISABLE_NON_ESSENTIAL_MODEL_CALLS || "1",
 		MAX_THINKING_TOKENS: (thinkingBudgetTokens || 0).toString(),
+		...(reasoningEffort !== undefined ? { CLAUDE_CODE_EFFORT_LEVEL: reasoningEffort } : {}),
 	}
 
 	// We don't want to consume the user's ANTHROPIC_API_KEY,

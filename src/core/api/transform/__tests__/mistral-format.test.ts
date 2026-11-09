@@ -88,8 +88,8 @@ describe("convertToMistralMessages", () => {
 		const toolCallId = (first[0] as any).toolCalls[0].id
 
 		toolCallId.should.match(/^[A-Za-z0-9]{9}$/)
-		;(first[1] as any).toolCallId.should.equal(toolCallId)
-		;(second[0] as any).toolCalls[0].id.should.equal(toolCallId)
+			; (first[1] as any).toolCallId.should.equal(toolCallId)
+			; (second[0] as any).toolCalls[0].id.should.equal(toolCallId)
 	})
 
 	it("emits native tool messages with matching call identity", () => {
@@ -168,6 +168,43 @@ describe("convertToMistralMessages", () => {
 			},
 			{ role: "user", content: [{ type: "text", text: "continue" }] },
 		])
+	})
+
+	it("replays reasoning in order alongside assistant text and tool calls when enabled", () => {
+		const result = convertToMistralMessages([
+			{
+				role: "assistant", content: [
+					{ type: "thinking", thinking: "first thought", signature: "" },
+					{ type: "text", text: "checking" },
+					{ type: "thinking", thinking: "second thought", signature: "" },
+					{ type: "tool_use", id: "Call00001", name: "lookup", input: {} },
+				]
+			},
+		], true, true)
+		result.should.deepEqual([{
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: [{ type: "text", text: "first thought" }], closed: true },
+				{ type: "text", text: "checking" },
+				{ type: "thinking", thinking: [{ type: "text", text: "second thought" }], closed: true },
+			],
+			toolCalls: [{ id: "Call00001", index: 0, type: "function", function: { name: "lookup", arguments: "{}" } }],
+		}])
+	})
+
+	it("retains reasoning-only assistant turns when replay is enabled", () => {
+		convertToMistralMessages([
+			{ role: "assistant", content: [{ type: "thinking", thinking: "continue thinking", signature: "" }] },
+		], true, true).should.deepEqual([{
+			role: "assistant",
+			content: [{ type: "thinking", thinking: [{ type: "text", text: "continue thinking" }], closed: true }],
+		}])
+	})
+
+	it("keeps legacy string content when reasoning replay is enabled without any thoughts", () => {
+		convertToMistralMessages([
+			{ role: "assistant", content: [{ type: "text", text: "first" }, { type: "text", text: "second" }] },
+		], true, true).should.deepEqual([{ role: "assistant", content: "first\nsecond" }])
 	})
 
 	it("skips assistant messages with no supported content", () => {

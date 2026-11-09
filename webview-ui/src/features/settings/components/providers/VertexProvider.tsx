@@ -5,6 +5,7 @@ import { VSCodeDropdown, VSCodeLink, VSCodeOption } from "@vscode/webview-ui-too
 
 import { normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import AdaptiveThinkingToggle from "../AdaptiveThinkingToggle"
 import { DROPDOWN_Z_INDEX, DropdownContainer } from "../ApiOptions"
 import { DebouncedTextField } from "../common/DebouncedTextField"
 import { ModelInfoView } from "../common/ModelInfoView"
@@ -141,12 +142,15 @@ export const VertexProvider = ({ showModelOptions, isPopup, currentMode }: Verte
 						zIndex={DROPDOWN_Z_INDEX - 2}
 					/>
 
-					{selectedModelInfo.thinkingAlwaysOn ? (
+					{selectedModelInfo.supportsReasoningEffort && !selectedModelInfo.thinkingAlwaysOn && (
+						<AdaptiveThinkingToggle currentMode={currentMode} supportsBetweenToolsThinking={selectedModelInfo.supportsBetweenToolsThinking} />
+					)}
+					{selectedModelInfo.supportsReasoningEffort ? (
 						<ReasoningEffortSelector
 							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
 							currentMode={currentMode}
 							defaultEffort={selectedModelInfo.defaultReasoningEffort}
-							description="Thinking is always on. Effort controls depth, latency, and cost."
+							description="Effort controls thinking depth, latency, and cost."
 						/>
 					) : (
 						<>

@@ -50,10 +50,12 @@ export const ModelSelectionEditor: React.FC<Props> = ({ value, controller, onSav
 	const [error, setError] = useState("")
 	const [busy, setBusy] = useState(false)
 	const profile = profiles.find((candidate) => candidate.name === selection?.openAiProfileName)
-	const info = selection?.modelInfo ?? (selection ? getModelInfoForProvider(selection.provider, selection.awsBedrockCustomModelBaseId ?? selection.modelId) : undefined)
+	const info = selection ? { ...getModelInfoForProvider(selection.provider, selection.awsBedrockCustomModelBaseId ?? selection.modelId), ...selection.modelInfo } : undefined
 	// Unknown custom IDs do not acquire reasoning capabilities merely from their spelling.
 	const efforts = info ? getReasoningEffortOptionsForModel(selection?.modelId, info) : []
 	const showBudget = !!(info?.thinkingConfig || info?.supportsReasoning) && !info?.thinkingAlwaysOn && !efforts.length && !info?.thinkingConfig?.supportsThinkingLevel
+	const showThinkingToggle = info?.supportsAdaptiveThinking && info.supportsReasoningEffort && !info.thinkingAlwaysOn
+	const requiresThinking = selection?.reasoningEffort === "xhigh" || selection?.reasoningEffort === "max"
 	const maxBudget = info?.thinkingConfig?.maxBudget ?? ANTHROPIC_MAX_THINKING_BUDGET
 	const save = async () => {
 		if (!selection?.modelId.trim() || selection.modelId === CUSTOM_MODEL_ID) { setError("Select a model"); return }
@@ -102,10 +104,15 @@ export const ModelSelectionEditor: React.FC<Props> = ({ value, controller, onSav
 			<SearchableList isActive={!busy} items={[
 				{ id: "provider", label: "Provider / endpoint" }, { id: "model", label: "Model" },
 				...efforts.map((effort) => ({ id: `effort:${effort}`, label: `Reasoning: ${effort}${selection.reasoningEffort === effort ? " ✓" : ""}` })),
+				...(showThinkingToggle ? [{ id: "thinking", label: `${info?.supportsBetweenToolsThinking ? "Up-front thinking" : "Thinking"}: ${requiresThinking || selection.thinkingBudgetTokens !== 0 ? "on" : "off"}${requiresThinking ? " (required at this effort)" : ""}` }] : []),
 				...(showBudget ? [{ id: "budget", label: `Thinking budget: ${selection.thinkingBudgetTokens ?? "default"}` }] : []),
 				{ id: "save", label: "Save selection" },
 			]} onSelect={(item) => {
 				if (item.id === "save") { void save(); return }
+				if (item.id === "thinking") {
+					if (!requiresThinking) setSelection({ ...selection, thinkingBudgetTokens: selection.thinkingBudgetTokens === 0 ? ANTHROPIC_MIN_THINKING_BUDGET : 0 })
+					return
+				}
 				if (item.id.startsWith("effort:")) { setSelection({ ...selection, reasoningEffort: item.id.slice(7) as ModelProviderSelection["reasoningEffort"] }); return }
 				setText(String(selection.thinkingBudgetTokens ?? 0)); setStep(item.id as "provider" | "model" | "budget")
 			}} />

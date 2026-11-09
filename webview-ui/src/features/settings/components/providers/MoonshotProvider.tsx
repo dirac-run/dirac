@@ -8,6 +8,7 @@ import { ModelsServiceClient } from "@/shared/api/grpc-client"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { ModelInfoView } from "../common/ModelInfoView"
 import { DropdownContainer, ModelSelector } from "../common/ModelSelector"
+import ReasoningEffortSelector from "../ReasoningEffortSelector"
 
 /**
  * Props for the MoonshotProvider component
@@ -92,18 +93,26 @@ export const MoonshotProvider = ({ showModelOptions, isPopup, currentMode }: Moo
 								UpdateApiConfigurationRequestNew.create(
 									currentMode === "plan"
 										? {
-												updates: { options: { planModeApiModelId: value } },
-												updateMask: ["options.planModeApiModelId"],
-											}
+											updates: { options: { planModeApiModelId: value } },
+											updateMask: ["options.planModeApiModelId"],
+										}
 										: {
-												updates: { options: { actModeApiModelId: value } },
-												updateMask: ["options.actModeApiModelId"],
-											},
+											updates: { options: { actModeApiModelId: value } },
+											updateMask: ["options.actModeApiModelId"],
+										},
 								),
 							)
 						}}
 						selectedModelId={selectedModelId}
 					/>
+
+					{selectedModelInfo?.supportsReasoningEffort && (
+						<ReasoningEffortSelector
+							currentMode={currentMode}
+							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
+							defaultEffort={selectedModelInfo.defaultReasoningEffort}
+						/>
+					)}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

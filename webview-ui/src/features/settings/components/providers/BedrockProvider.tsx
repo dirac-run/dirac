@@ -14,6 +14,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
 import { getModeSpecificFields, normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import AdaptiveThinkingToggle from "../AdaptiveThinkingToggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import { DebouncedTextField } from "../common/DebouncedTextField"
 import { ModelInfoView } from "../common/ModelInfoView"
@@ -522,12 +523,15 @@ export const BedrockProvider = ({ showModelOptions, isPopup, currentMode }: Bedr
 						</div>
 					)}
 
-					{selectedModelInfo.thinkingAlwaysOn ? (
+					{selectedModelInfo.supportsReasoningEffort && !selectedModelInfo.thinkingAlwaysOn && (
+						<AdaptiveThinkingToggle currentMode={currentMode} supportsBetweenToolsThinking={selectedModelInfo.supportsBetweenToolsThinking} />
+					)}
+					{selectedModelInfo.supportsReasoningEffort ? (
 						<ReasoningEffortSelector
 							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
 							currentMode={currentMode}
 							defaultEffort={selectedModelInfo.defaultReasoningEffort}
-							description="Thinking is always on. Effort controls depth, latency, and cost."
+							description="Effort controls thinking depth, latency, and cost."
 						/>
 					) : SUPPORTED_BEDROCK_THINKING_MODELS.includes(selectedModelId) ||
 						(modeFields.awsBedrockCustomSelected &&

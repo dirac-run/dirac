@@ -5,7 +5,7 @@ import {
 	extractStructuredToolCalls,
 	STRUCTURED_OUTPUT_TOOL_NAME,
 } from "@/integrations/claude-code/structured-output"
-import { ClaudeCodeModelId, claudeCodeDefaultModelId, claudeCodeModels } from "@/shared/api"
+import { ClaudeCodeModelId, claudeCodeDefaultModelId, claudeCodeModels, getAnthropicReasoningEffort } from "@/shared/api"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { type DiracTool } from "@/shared/tools"
 import { type ApiHandler, CommonApiHandlerOptions } from ".."
@@ -16,6 +16,7 @@ interface ClaudeCodeHandlerOptions extends CommonApiHandlerOptions {
 	claudeCodePath?: string
 	apiModelId?: string
 	thinkingBudgetTokens?: number
+	reasoningEffort?: string
 }
 
 export class ClaudeCodeHandler implements ApiHandler {
@@ -39,11 +40,15 @@ export class ClaudeCodeHandler implements ApiHandler {
 		// model fulfils by calling the injected StructuredOutput tool (unwrapped below).
 		const jsonSchema = tools && tools.length > 0 ? JSON.stringify(buildStructuredToolSchema(tools)) : undefined
 
+		const model = this.getModel()
 		const claudeProcess = runClaudeCode({
 			systemPrompt,
 			messages: filteredMessages,
 			path: this.options.claudeCodePath,
-			modelId: this.getModel().id,
+			modelId: model.id,
+			reasoningEffort: model.info.supportsReasoningEffort
+				? getAnthropicReasoningEffort(model.info, this.options.reasoningEffort)
+				: undefined,
 			thinkingBudgetTokens: this.options.thinkingBudgetTokens,
 			jsonSchema,
 		})
@@ -100,7 +105,7 @@ export class ClaudeCodeHandler implements ApiHandler {
 		if (error.error?.message?.includes("Invalid model name")) {
 			throw new Error(
 				content.text +
-					"\n\nAPI keys and subscription plans allow different models. Make sure the selected model is included in your plan.",
+				"\n\nAPI keys and subscription plans allow different models. Make sure the selected model is included in your plan.",
 			)
 		}
 		throw new Error(errorMessage)

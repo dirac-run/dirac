@@ -136,6 +136,28 @@ describe("OpenAiNativeHandler persisted reasoning", () => {
 		params.tools.find((tool: any) => tool.type === "function").strict.should.equal(true)
 	})
 
+	for (const [reasoningEffort, expectedEffort] of [[undefined, "medium"], ["none", "none"], ["max", "max"], ["minimal", "medium"]]) {
+		it(`sends GPT-6.1 Terra through Responses with ${reasoningEffort ?? "default"} effort`, async () => {
+			const createStub = sinon.stub().resolves(createAsyncIterable())
+			const handler = createHandler(createStub, { modelId: "gpt-6.1-terra", reasoningEffort, inferenceSpeed: "fast" })
+
+			await drain(handler.createMessage("system", [
+				{ role: "user", content: "old question" },
+				currentModelResponse("gpt-6.1-terra"),
+				{ role: "user", content: "new question" },
+			] as any, tools))
+
+			const params = createStub.firstCall.args[0]
+			params.model.should.equal("gpt-6.1-terra")
+			params.reasoning.effort.should.equal(expectedEffort)
+			expect(params.reasoning.summary).to.equal(expectedEffort === "none" ? undefined : "auto")
+			params.reasoning.context.should.equal("all_turns")
+			params.previous_response_id.should.equal("resp_123")
+			params.service_tier.should.equal("fast")
+			params.tools.find((tool: any) => tool.type === "function").strict.should.equal(true)
+		})
+	}
+
 	it("preserves Responses call IDs for persisted-reasoning tool results", async () => {
 		const createStub = sinon.stub().resolves(createAsyncIterable())
 		const handler = createHandler(createStub)

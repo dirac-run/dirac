@@ -12,7 +12,7 @@ import {
 	bedrockDefaultModelId,
 	bedrockModels,
 	getAnthropicReasoningEffort,
-	isAnthropicAdaptiveThinkingSupported,
+	getAnthropicThinkingConfig,
 	type ModelInfo,
 } from "@shared/api"
 import { calculateApiCostOpenAI, calculateApiCostQwen } from "@utils/cost"
@@ -504,10 +504,13 @@ export class AwsBedrockHandler implements ApiHandler {
 			!!this.options.awsBedrockUsePromptCache,
 		)
 
-		// Get thinking configuration
-		const budget_tokens = this.options.thinkingBudgetTokens || 0
-		const reasoningOn = model.info.supportsReasoning && (model.info.thinkingAlwaysOn || budget_tokens > 0)
-		const useAdaptive = isAnthropicAdaptiveThinkingSupported(modelId, model.info)
+		const thinking = getAnthropicThinkingConfig(
+			modelId,
+			model.info,
+			this.options.thinkingBudgetTokens,
+			this.options.reasoningEffort,
+		)
+		const useEffort = model.info.supportsReasoningEffort || thinking?.type === "adaptive"
 
 		// Prepare request for Anthropic model using Converse API
 		const command = new ConverseStreamCommand({
@@ -517,14 +520,8 @@ export class AwsBedrockHandler implements ApiHandler {
 			inferenceConfig: getInferenceConfig(model.info, "anthropic", this.options.thinkingBudgetTokens || 0),
 			...(toolConfig ? { toolConfig } : {}),
 			additionalModelRequestFields: {
-				// Add thinking configuration as per LangChain documentation
-				...(reasoningOn && {
-					thinking: useAdaptive
-						? { type: "adaptive", display: "summarized" }
-						: { type: "enabled", budget_tokens: budget_tokens },
-				}),
-				...(reasoningOn &&
-					useAdaptive && {
+				...(thinking && { thinking }),
+				...(useEffort && {
 					output_config: { effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) },
 				}),
 			},

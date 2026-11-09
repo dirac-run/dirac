@@ -173,6 +173,7 @@ function mapMessageContentBlock(item: DiracContent, supportsImages: boolean): Co
 		// Tool inputs are unvalidated JSON at the Converse boundary.
 		return { toolUse: { toolUseId: item.id, name: item.name, input: item.input as ToolUseBlock["input"] } }
 	}
+	// This Converse adapter does not replay Anthropic thinking blocks or their signatures.
 	if (item.type === "thinking" || item.type === "redacted_thinking") return null
 	if (item.type === "tool_result") {
 		return {
@@ -220,7 +221,7 @@ export function getInferenceConfig(
 		const reasoningOn = thinkingBudgetTokens > 0 && (modelInfo.supportsReasoning ?? false)
 		return {
 			maxTokens: modelInfo.maxTokens || 8192,
-			temperature: reasoningOn ? undefined : modelInfo.temperature,
+			temperature: reasoningOn || modelInfo.supportsReasoningEffort ? undefined : modelInfo.temperature,
 		}
 	}
 	return {

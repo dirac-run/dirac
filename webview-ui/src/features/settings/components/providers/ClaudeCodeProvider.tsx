@@ -6,6 +6,7 @@ import { DebouncedTextField } from "../common/DebouncedTextField"
 import { ModelInfoView } from "../common/ModelInfoView"
 import { ModelSelector } from "../common/ModelSelector"
 import ThinkingBudgetSlider from "../ThinkingBudgetSlider"
+import ReasoningEffortSelector from "../ReasoningEffortSelector"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 import { SUPPORTED_ANTHROPIC_THINKING_MODELS } from "./AnthropicProvider"
 
@@ -87,9 +88,16 @@ export const ClaudeCodeProvider = ({ showModelOptions, isPopup, currentMode }: C
 						</p>
 					)}
 
-					{SUPPORTED_CLAUDE_CODE_THINKING_MODELS.includes(selectedModelId) && (
+					{selectedModelInfo.supportsReasoningEffort ? (
+						<ReasoningEffortSelector
+							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
+							currentMode={currentMode}
+							defaultEffort={selectedModelInfo.defaultReasoningEffort}
+							description="Claude Code always uses adaptive thinking for this model. Effort controls depth, latency, and cost."
+						/>
+					) : SUPPORTED_CLAUDE_CODE_THINKING_MODELS.includes(selectedModelId) ? (
 						<ThinkingBudgetSlider currentMode={currentMode} maxBudget={selectedModelInfo.thinkingConfig?.maxBudget} />
-					)}
+					) : null}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

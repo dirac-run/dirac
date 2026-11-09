@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { ModelInfoView } from "../common/ModelInfoView"
 import { DropdownContainer, ModelSelector } from "../common/ModelSelector"
+import ReasoningEffortSelector from "../ReasoningEffortSelector"
 import ThinkingBudgetSlider from "../ThinkingBudgetSlider"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 
@@ -81,9 +82,15 @@ export const MinimaxProvider = ({ showModelOptions, isPopup, currentMode }: Mini
 						selectedModelId={selectedModelId}
 					/>
 
-					{selectedModelInfo?.supportsReasoning && (
+					{selectedModelInfo?.supportsReasoningEffort ? (
+						<ReasoningEffortSelector
+							currentMode={currentMode}
+							allowedEfforts={selectedModelInfo.reasoningEffortOptions}
+							defaultEffort={selectedModelInfo.defaultReasoningEffort}
+						/>
+					) : selectedModelInfo?.supportsReasoning ? (
 						<ThinkingBudgetSlider currentMode={currentMode} showEnableToggle={false} />
-					)}
+					) : null}
 
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

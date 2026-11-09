@@ -5,13 +5,12 @@ import type {
 } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
 import type { MessageCreateParamsStreaming as AnthropicMessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/messages/messages"
-import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import {
 	AnthropicModelId,
 	anthropicDefaultModelId,
 	anthropicModels,
 	getAnthropicReasoningEffort,
-	isAnthropicAdaptiveThinkingSupported,
+	getAnthropicThinkingConfig,
 	ModelInfo,
 } from "@shared/api"
 import { type InferenceSpeed, normalizeInferenceSpeed } from "@shared/storage/types"
@@ -22,6 +21,7 @@ import { getModelInfoForInferenceSpeed } from "@/utils/cost"
 import { ApiHandler, CommonApiHandlerOptions } from "../index"
 import { withRetry } from "../retry"
 import { sanitizeAnthropicMessages } from "../transform/anthropic-format"
+import { AnthropicThinkingRecovery } from "../transform/anthropic-thinking-recovery"
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 
 export const ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01"
@@ -42,6 +42,7 @@ export class AnthropicHandler implements ApiHandler {
 	private options: AnthropicHandlerOptions
 	private client: Anthropic | undefined
 	private deliveredInferenceSpeed: InferenceSpeed | undefined
+	private readonly thinkingRecovery = new AnthropicThinkingRecovery()
 
 	constructor(options: AnthropicHandlerOptions) {
 		this.options = options
@@ -82,8 +83,6 @@ export class AnthropicHandler implements ApiHandler {
 		const client = this.ensureClient()
 		this.deliveredInferenceSpeed = undefined
 		const model = this.getModel()
-		let stream: AnthropicStream<Anthropic.RawMessageStreamEvent> | AsyncIterable<BetaRawMessageStreamEvent>
-
 		const useFastMode = this.shouldUseFastMode(model.info)
 		const createFastModeMessage = (
 			body: AnthropicMessageCreateParamsStreaming,
@@ -92,82 +91,52 @@ export class AnthropicHandler implements ApiHandler {
 				client.beta.messages.create as unknown as (
 					params: BetaMessageCreateParamsStreaming & { speed: "fast" },
 				) => Promise<AsyncIterable<BetaRawMessageStreamEvent>>
-			)({
-				...body,
-				betas: [ANTHROPIC_FAST_MODE_BETA],
-				speed: "fast",
-			})
+			)({ ...body, betas: [ANTHROPIC_FAST_MODE_BETA], speed: "fast" })
 		}
 
-		const budget_tokens = this.options.thinkingBudgetTokens || 0
 		const nativeToolsOn = (tools?.length ?? 0) > 0
-		const reasoningOn = (model.info.supportsReasoning ?? false) && (model.info.thinkingAlwaysOn || budget_tokens !== 0)
-		const useAdaptive = isAnthropicAdaptiveThinkingSupported(model.id, model.info)
-
-		if (model.info.supportsPromptCache) {
-			const anthropicMessages = sanitizeAnthropicMessages(messages, true)
-			const requestBody: AnthropicMessageCreateParamsStreaming = {
-				model: model.id,
-				thinking: reasoningOn
-					? useAdaptive
-						? { type: "adaptive", display: "summarized" }
-						: { type: "enabled", budget_tokens }
-					: undefined,
-				...(reasoningOn && useAdaptive
-					? {
-							output_config: {
-								effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) as AnthropicEffort,
-							},
-						}
-					: {}),
-				max_tokens: model.info.maxTokens || 8192,
-				temperature: reasoningOn ? undefined : (model.info.temperature ?? undefined),
-				system: [
-					{
-						text: systemPrompt,
-						type: "text",
-						cache_control: { type: "ephemeral" },
-					},
-				],
-				messages: anthropicMessages,
-				stream: true,
-				tools: nativeToolsOn ? tools : undefined,
-				tool_choice:
-					nativeToolsOn && !reasoningOn && model.info.supportsForcedToolUse !== false ? { type: "any" } : undefined,
-			}
-
-			stream = useFastMode ? await createFastModeMessage(requestBody) : await client.messages.create(requestBody)
-		} else {
-			const requestBody: AnthropicMessageCreateParamsStreaming = {
-				model: model.id,
-				max_tokens: model.info.maxTokens || 8192,
-				thinking: reasoningOn
-					? useAdaptive
-						? { type: "adaptive", display: "summarized" }
-						: { type: "enabled", budget_tokens }
-					: undefined,
-				...(reasoningOn && useAdaptive
-					? {
-							output_config: {
-								effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) as AnthropicEffort,
-							},
-						}
-					: {}),
-				temperature: reasoningOn ? undefined : (model.info.temperature ?? undefined),
-				system: [{ text: systemPrompt, type: "text" }],
-				messages: sanitizeAnthropicMessages(messages, false),
-				tools: nativeToolsOn ? tools : undefined,
-				tool_choice: { type: "auto" },
-				stream: true,
-			}
-
-			stream = useFastMode ? await createFastModeMessage(requestBody) : await client.messages.create(requestBody)
+		const thinking = getAnthropicThinkingConfig(model.id, model.info, this.options.thinkingBudgetTokens, this.options.reasoningEffort)
+		const reasoningOn = thinking !== undefined && thinking.type !== "disabled"
+		const useEffort = model.info.supportsReasoningEffort || thinking?.type === "adaptive"
+		const requestBody: AnthropicMessageCreateParamsStreaming = {
+			model: model.id,
+			// The installed SDK predates Sonnet 5.5's between_tools mode.
+			thinking: thinking as AnthropicMessageCreateParamsStreaming["thinking"],
+			...(useEffort ? {
+				output_config: { effort: getAnthropicReasoningEffort(model.info, this.options.reasoningEffort) as AnthropicEffort },
+			} : {}),
+			max_tokens: model.info.maxTokens || 8192,
+			temperature: reasoningOn || model.info.supportsReasoningEffort ? undefined : model.info.temperature,
+			system: [{
+				text: systemPrompt,
+				type: "text",
+				...(model.info.supportsPromptCache ? { cache_control: { type: "ephemeral" as const } } : {}),
+			}],
+			messages: this.thinkingRecovery.prepareAnthropicMessages(sanitizeAnthropicMessages(messages, model.info.supportsPromptCache)),
+			stream: true,
+			tools: nativeToolsOn ? tools : undefined,
+			tool_choice: model.info.supportsPromptCache
+				? nativeToolsOn && !reasoningOn && model.info.supportsForcedToolUse !== false ? { type: "any" } : undefined
+				: { type: "auto" },
 		}
 
-		const lastStartedToolCall = { id: "", name: "", arguments: "" }
-		const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
-		for await (const chunk of stream) {
-			yield* this.parseAnthropicChunk(chunk, lastStartedToolCall, usage)
+		for (let attempt = 0; attempt < 2; attempt++) {
+			let didYield = false
+			try {
+				const stream = useFastMode ? await createFastModeMessage(requestBody) : await client.messages.create(requestBody)
+				const lastStartedToolCall = { id: "", name: "", arguments: "" }
+				const usage: ApiStreamUsageChunk = { type: "usage", inputTokens: 0, outputTokens: 0 }
+				for await (const chunk of stream) {
+					for (const parsed of this.parseAnthropicChunk(chunk, lastStartedToolCall, usage)) {
+						didYield = true
+						yield parsed
+					}
+				}
+				return
+			} catch (error) {
+				if (attempt !== 0 || didYield) throw error
+				requestBody.messages = this.thinkingRecovery.recoverAnthropicMessages(error, requestBody.messages)
+			}
 		}
 	}
 

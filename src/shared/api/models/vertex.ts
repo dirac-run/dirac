@@ -1,5 +1,6 @@
 import type { ModelInfo } from "./types"
 import { MODEL_CAPABILITIES } from "./capabilities"
+import { CLAUDE_HAIKU_5_5_TIERS } from "./anthropic"
 
 export type VertexModelId = keyof typeof vertexModels
 
@@ -127,6 +128,37 @@ export const vertexModels = {
 		cacheReadsPrice: 0.1,
 		cacheWritesPrice: 0.0,
 		description: "Google's Gemini 4 Argon model for agentic workflows and multimodal reasoning.",
+	},
+	"claude-sonnet-5-5": {
+		...MODEL_CAPABILITIES["claude-sonnet-5-5"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheReadsPrice: 0.1,
+		description: "Available through global, us, or eu endpoints. Listed prices are global; non-global endpoints cost 10% more.",
+	},
+	"claude-haiku-5-5": {
+		...MODEL_CAPABILITIES["claude-haiku-5-5"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 0.1,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0.125,
+		cacheReadsPrice: 0.01,
+		tiers: CLAUDE_HAIKU_5_5_TIERS,
+		description: "Available through global, us, or eu endpoints. Listed prices are global; non-global endpoints cost 10% more.",
+	},
+	"claude-fable-5-1": {
+		...MODEL_CAPABILITIES["claude-fable-5-1"],
+		supportsPromptCache: true,
+		supportsGlobalEndpoint: true,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 0.25,
+		description: "Available through global, us, or eu endpoints. Listed prices are global; non-global endpoints cost 10% more.",
 	},
 	"claude-sonnet-4-6": {
 		...MODEL_CAPABILITIES["claude-sonnet-4-6"],

@@ -359,7 +359,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 		options: CodexRequestBodyOptions,
 	): any {
 		const reasoningEffort = resolveReasoningEffortForModel(model.id, model.info, this.options.reasoningEffort)
-		const includeReasoning = reasoningEffort !== undefined && reasoningEffort !== "none"
+		const includeReasoning = reasoningEffort !== undefined
 		const includeReasoningConfig = includeReasoning || options.usePersistedReasoning
 		const serviceTier = options.includeInferenceSpeed ? this.resolveServiceTier(model.info) : undefined
 
@@ -381,7 +381,7 @@ export class OpenAiCodexHandler implements ApiHandler {
 				? {
 					reasoning: {
 						...(includeReasoning ? { effort: reasoningEffort } : {}),
-						summary: "auto",
+						...(reasoningEffort !== "none" ? { summary: "auto" } : {}),
 						...(options.usePersistedReasoning ? { context: "all_turns" } : {}),
 					},
 				}

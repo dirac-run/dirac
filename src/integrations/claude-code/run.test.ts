@@ -14,7 +14,7 @@ const createMockProcess = () => {
 			resume: sinon.fake(),
 		},
 		stderr: {
-			on: sinon.fake(() => {}),
+			on: sinon.fake(() => { }),
 		},
 		on: sinon.fake((event, callback) => {
 			if (event === "close") {
@@ -79,6 +79,13 @@ describe("Claude Code Integration", () => {
 
 	afterEach(() => {
 		sinon.restore()
+	})
+
+	it("passes configured effort through to Claude Code's adaptive reasoning control", async () => {
+		for await (const _chunk of runClaudeCode({ systemPrompt: "a", messages: [], modelId: "claude-sonnet-5-5", path: scriptPath, reasoningEffort: "xhigh" })) {
+			// Consume the invocation.
+		}
+		expect(mockExeca.lastCall.args[2].env.CLAUDE_CODE_EFFORT_LEVEL).to.equal("xhigh")
 	})
 
 	it("isolates the run from the user's ambient Claude Code environment", async () => {
@@ -190,7 +197,7 @@ describe("Claude Code Integration - one-turn cap", () => {
 	const maxTurnsProcess = () => ({
 		stdin: { write: sinon.fake(), end: sinon.fake() },
 		stdout: { on: sinon.fake(), resume: sinon.fake() },
-		stderr: { on: sinon.fake(() => {}) },
+		stderr: { on: sinon.fake(() => { }) },
 		on: sinon.fake((event: string, callback: (code: number) => void) => {
 			if (event === "close") {
 				setImmediate(() => callback(1))

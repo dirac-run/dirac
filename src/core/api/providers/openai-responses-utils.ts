@@ -123,14 +123,11 @@ export function buildResponseCreateParams(args: {
 	serviceTier?: OpenAIServiceTier
 }): OpenAI.Responses.ResponseCreateParamsStreaming {
 	const requestedEffort = normalizeOpenaiReasoningEffort(args.reasoningEffort)
-	const reasoning: { effort?: ChatCompletionReasoningEffort; summary: "auto"; context?: "all_turns" } | undefined =
-		requestedEffort === "none" && !args.reasoningContext
-			? undefined
-			: {
-					summary: "auto",
-					...(requestedEffort !== "none" ? { effort: requestedEffort as ChatCompletionReasoningEffort } : {}),
-					...(args.reasoningContext ? { context: args.reasoningContext } : {}),
-				}
+	const reasoning = {
+		...(requestedEffort !== "none" ? { summary: "auto" as const } : {}),
+		effort: requestedEffort as ChatCompletionReasoningEffort,
+		...(args.reasoningContext ? { context: args.reasoningContext } : {}),
+	}
 
 	return {
 		model: args.modelId,
@@ -144,7 +141,7 @@ export function buildResponseCreateParams(args: {
 			: {}),
 		...(args.store !== undefined ? { store: args.store } : { store: !args.previousResponseId }),
 		...(args.previousResponseId ? { previous_response_id: args.previousResponseId } : {}),
-		...(reasoning ? { reasoning: reasoning as any } : {}),
+		reasoning,
 	} as OpenAI.Responses.ResponseCreateParamsStreaming
 }
 
