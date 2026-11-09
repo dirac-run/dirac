@@ -405,7 +405,7 @@ describe("SubagentsTool public controls", () => {
 		assert.deepEqual(await loadTaskletEvents(address(id)), before, "Passive queries never acknowledge events")
 		sinon.assert.notCalled(child.task.enqueueSteeringMessage)
 		sinon.assert.calledOnce(constructed)
-		assert.match(cards.at(-1)!.header, /Inspect transcript.*Evidence/)
+		assert.match(cards.at(-1)!.header, /Feynman.*Inspect transcript/)
 	})
 
 	it("publishes only committed outcomes and recovers the record/event crash gap without duplication", async () => {
@@ -488,8 +488,10 @@ describe("SubagentsTool public controls", () => {
 		)
 		assert.equal((await question.waiting).text, "Continue")
 		assert.equal(host.inspect(sibling.id).interactions[0].status, "pending")
-		assert.equal(cards.at(-1)!.status, CardStatus.ERROR)
-		assert.match(cards.at(-1)!.body!, /User approval needed/)
+		const staleRequestCard = cards.at(-1)!
+		assert.equal(staleRequestCard.status, CardStatus.ERROR)
+		const approvalCard = cards.find((card) => /User approval needed/.test(card.body ?? ""))
+		assert.ok(approvalCard, "the permission decision should report that user approval is needed")
 		assert.equal(
 			(await message(first.id, { type: "reply", request_id: question.requestId, text: "Continue" })).status,
 			"already_resolved",

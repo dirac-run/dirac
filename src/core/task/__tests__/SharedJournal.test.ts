@@ -29,6 +29,105 @@ describe("SharedJournal root-owned storage", () => {
 		return { journal, agent: journal.forAgent("Feynman"), callbacks, notices }
 	}
 
+	async function seedPublications(count: number): Promise<void> {
+		const directory = path.join(root, "journal")
+		await fs.mkdir(directory, { recursive: true })
+		await Promise.all(Array.from({ length: count }, () => fs.writeFile(path.join(directory, `${ulid()}.json`), "")))
+	}
+
+	it("caps retained publications at 1024 while allowing reads at capacity", async () => {
+		await seedPublications(1023)
+		const { journal, agent, notices } = fixture()
+		const receipt = await agent.publish({ headline: "Last slot", content: "Readable at capacity" })
+		await assert.rejects(agent.publish({ headline: "Over limit", content: "Rejected" }), /publication limit of 1024/)
+		assert.equal((await agent.read({ message_id: receipt.message_id })).content, "Readable at capacity")
+		assert.equal((await fs.readdir(path.join(root, "journal"))).length, 1024)
+		assert.equal(notices.length, 1)
+		await journal.close()
+	})
+
+	it("counts retained files once on reopen without reading bodies or counting temporary files", async () => {
+		const { journal, agent, callbacks } = fixture()
+		const original = await agent.publish({ headline: "History", content: "Retained" })
+		await journal.close()
+		await seedPublications(1022)
+		const directory = path.join(root, "journal")
+		await fs.writeFile(path.join(directory, `${ulid()}.json.tmp.1.leftover.json`), "Incomplete")
+		await fs.mkdir(path.join(directory, `${ulid()}.json`))
+		const readdir = sinon.spy(fs, "readdir")
+		const readFile = sinon.spy(fs, "readFile")
+		const open = sinon.spy(fs, "open")
+		const reopened = new SharedJournal(root, callbacks)
+		const reopenedAgent = reopened.forAgent("Dirac")
+		await reopenedAgent.publish({ headline: "Last slot", content: "New" })
+		await assert.rejects(reopenedAgent.publish({ headline: "Over limit", content: "Rejected" }), /publication limit of 1024/)
+		assert.equal(readdir.callCount, 1)
+		assert.equal(readFile.callCount, 0)
+		assert.equal(open.callCount, 0)
+		assert.equal((await reopenedAgent.read({ message_id: original.message_id })).content, "Retained")
+		await reopened.close()
+		const full = new SharedJournal(root, callbacks)
+		await assert.rejects(full.forAgent("Dirac").publish({ headline: "Still full", content: "Rejected" }), /publication limit of 1024/)
+		assert.equal((await full.forAgent("Dirac").read({ message_id: original.message_id })).content, "Retained")
+		await full.close()
+	})
+
+	it("reserves the last slot across concurrent admissions before either write commits", async () => {
+		await seedPublications(1023)
+		let release!: () => void
+		let writing!: () => void
+		const gate = new Promise<void>((resolve) => { release = resolve })
+		const entered = new Promise<void>((resolve) => { writing = resolve })
+		const originalRename = fs.rename.bind(fs)
+		const rename = sinon.stub(fs, "rename").callsFake(async (...args: Parameters<typeof fs.rename>) => {
+			writing()
+			await gate
+			return originalRename(...args)
+		})
+		const { journal, agent, notices } = fixture()
+		const first = agent.publish({ headline: "Last slot", content: "Pending" })
+		const second = assert.rejects(agent.publish({ headline: "Concurrent excess", content: "Rejected" }), /publication limit of 1024/)
+		try {
+			await Promise.all([entered, second])
+			assert.equal(rename.callCount, 1)
+			assert.deepEqual(notices, [])
+		} finally {
+			release()
+		}
+		await first
+		assert.equal((await fs.readdir(path.join(root, "journal"))).length, 1024)
+		await journal.close()
+	})
+
+	it("releases a failed write reservation and preserves the original write error", async () => {
+		await seedPublications(1023)
+		const failure = new Error("Rename failed")
+		const originalRename = fs.rename.bind(fs)
+		const rename = sinon.stub(fs, "rename").callsFake(originalRename)
+		rename.onFirstCall().rejects(failure)
+		const { journal, agent, notices } = fixture()
+		await assert.rejects(agent.publish({ headline: "Failed", content: "Not committed" }), (error) => error === failure)
+		assert.deepEqual(notices, [])
+		const receipt = await agent.publish({ headline: "Retry", content: "Committed" })
+		await assert.rejects(agent.publish({ headline: "Over limit", content: "Rejected" }), /publication limit of 1024/)
+		assert.equal((await agent.read({ message_id: receipt.message_id })).content, "Committed")
+		assert.equal(notices.length, 1)
+		await journal.close()
+	})
+
+	it("retries failed count initialization without replacing its filesystem error", async () => {
+		const failure = new Error("Directory scan failed")
+		const originalReaddir = fs.readdir.bind(fs)
+		const readdir = sinon.stub(fs, "readdir").callsFake(originalReaddir)
+		readdir.onFirstCall().rejects(failure)
+		const { journal, agent } = fixture()
+		const publication = agent.publish({ headline: "Failed scan", content: "Not committed" })
+		await assert.rejects(publication, (error) => error === failure)
+		const receipt = await agent.publish({ headline: "Retry", content: "Committed" })
+		assert.equal((await agent.read({ message_id: receipt.message_id })).content, "Committed")
+		await journal.close()
+	})
+
 	it("commits one complete record before compact fanout and returns explicit partial counts", async () => {
 		const { journal, agent, callbacks, notices } = fixture()
 		let committed: JournalRecord | undefined
@@ -177,11 +276,31 @@ describe("SharedJournal root-owned storage", () => {
 		assert.deepEqual(notices, [])
 	})
 
-	it("keeps a saved entry readable when notification throws, without retrying fanout", async () => {
+	it("retains the last slot and original error when notification throws after commit", async () => {
+		await seedPublications(1023)
 		let savedId = ""
-		const { agent } = fixture({ notify: (_recipients, notice) => { savedId = notice.message_id; throw new Error("Fanout failed") } })
-		await assert.rejects(agent.publish({ headline: "x", content: "Stored" }), /Fanout failed/)
+		const failure = new Error("Fanout failed")
+		const notify = sinon.stub().callsFake((_recipients, notice) => { savedId = notice.message_id; throw failure })
+		const { journal, agent } = fixture({ notify })
+		const publication = agent.publish({ headline: "x", content: "Stored" })
+		await assert.rejects(publication, (error) => error === failure)
 		assert.equal((await agent.read({ message_id: savedId })).content, "Stored")
+		await assert.rejects(agent.publish({ headline: "Over limit", content: "Rejected" }), /publication limit of 1024/)
+		await journal.close()
+		const { journal: reopened, agent: reopenedAgent } = fixture({ notify })
+		assert.equal((await reopenedAgent.read({ message_id: savedId })).content, "Stored")
+		await assert.rejects(reopenedAgent.publish({ headline: "Over limit", content: "Rejected" }), /publication limit of 1024/)
+		assert.equal(notify.callCount, 1)
+		await reopened.close()
+	})
+
+	it("joins a committed publication whose notification fails during shutdown", async () => {
+		const failure = new Error("Fanout failed")
+		const { journal, agent } = fixture({ notify: () => { throw failure } })
+		const publication = agent.publish({ headline: "x", content: "Stored" })
+		const closing = journal.close()
+		await assert.rejects(publication, (error) => error === failure)
+		await assert.rejects(closing, (error: unknown) => error instanceof AggregateError && error.errors.includes(failure))
 	})
 
 	it("joins an admitted write and blocks new calls while closing", async () => {

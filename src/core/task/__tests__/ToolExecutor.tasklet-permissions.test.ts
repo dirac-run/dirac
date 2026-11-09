@@ -36,7 +36,7 @@ function harness(utility = false) {
 		getCurrentWorkingConfiguration: config,
 		commandPermissionController: permissions,
 		executionProfile: "standalone", cwd: "/workspace",
-		createPermissionDecisionBinding: () => utility ? { configurationRevision: revision, service: { decide } } : undefined,
+		createPermissionDecisionBinding: () => utility ? { configurationRevision: revision, authorityMode: settings.mode, commandPermissionRevision: permissions.revision, service: { decide } } : undefined,
 	}) as ToolExecutor
 	return { executor, settings, permissions, decide, change: () => { revision++ } }
 }
@@ -133,6 +133,33 @@ describe("ToolExecutor tasklet parent authority", () => {
 		assert.equal(h.decide.firstCall.args[0].runtime.isSubagent, true)
 	})
 
+	it("supplies the current Plan parent context to explicit command Utility authorization", async () => {
+		const h = harness(true)
+		h.settings.mode = "plan"
+		await h.executor.authorizeTaskletPermission(request(), signal())
+		assert.deepEqual(h.decide.firstCall.args[0].runtime, { cwd: "/workspace", mode: "plan", isSubagent: true })
+	})
+
+	it("rechecks every exact write path against changed parent edit policy and deny rules", async () => {
+		sinon.stub(HostProvider, "workspace").value({ getWorkspacePaths: async () => ({ paths: ["/workspace"] }) })
+		const h = harness()
+		const write = request("edit_ast", { kind: "paths", paths: ["src/a.ts", "src/private.ts"] })
+		assert.equal((await h.executor.authorizeTaskletPermission(write, signal())).approved, false)
+		h.settings.autoApprovalSettings.actions.editFiles = true
+		h.change()
+		const approved = await h.executor.authorizeTaskletPermission(write, signal())
+		assert.equal(approved.approved, true)
+		h.permissions.validateTool.withArgs("edit_ast", "src/private.ts").returns({ allowed: false, reason: "denied" })
+		h.permissions.revision++
+		assert.throws(approved.assertCurrent, /authority changed/)
+		// Explicit owner authorization retains the parent's established legacy semantics.
+		// With edit auto-approval removed, no broader path grant may authorize the denied file.
+		h.settings.autoApprovalSettings.actions.editFiles = false
+		h.change()
+		assert.equal((await h.executor.authorizeTaskletPermission(write, signal())).approved, false)
+		sinon.assert.calledWithExactly(h.permissions.validateTool, "edit_ast", "src/private.ts")
+	})
+
 	it("requires an actual Utility approval, not merely eligibility", async () => {
 		const h = harness(true)
 		h.decide.resolves({ decision: "escalate", reason: "ask user" })
@@ -210,7 +237,7 @@ describe("ToolExecutor tasklet parent authority", () => {
 				const ordinaryCard = await createCardFromMessenger({
 					autoApprover,
 					taskMessenger: { routesToOwner: false, createCard },
-					permissionDecisionBinding: { service: { decide: h.decide }, configurationRevision: 1 },
+					permissionDecisionBinding: { service: { decide: h.decide }, authorityMode: "act", configurationRevision: 1 },
 				} as unknown as TaskConfig, {
 					header: childRequest.card.header, requireApproval: true, permissionRequestKind: "manual_tool",
 				}, [])

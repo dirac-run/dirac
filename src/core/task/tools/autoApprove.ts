@@ -5,7 +5,7 @@ import { CommandPermissionController } from "@/core/permissions/CommandPermissio
 import { HostProvider } from "@/hosts/host-provider"
 import { getCwd, getDesktopDir, isLocatedInPath, isLocatedInWorkspace } from "@/utils/path"
 import type { DeepReadonly } from "../runtime/TaskWorkingConfiguration"
-import { isSafeCommand } from "./utils/CommandSafetyChecker"
+import { isSafeCommand, isSupportedShellSyntax } from "./utils/CommandSafetyChecker"
 import { areCommandSegmentsApproved, isUserApprovedCommandSegment } from "./utils/UserApprovedCommandMatcher"
 
 const WRITE_TOOLS: DiracDefaultTool[] = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
@@ -95,7 +95,7 @@ export class AutoApprove {
 	// Check if the tool should be auto-approved based on the settings
 	// Returns bool for most tools, and tuple for tools with nested settings
 	shouldAutoApproveTool(toolName: DiracDefaultTool): boolean | [boolean, boolean] {
-		if (this.requiresCounterpartyApproval) return WRITE_TOOLS.includes(toolName) ? [true, true] : false
+		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(toolName)) return false
 		if (this.setting("yoloModeToggled")) {
 			switch (toolName) {
 				case DiracDefaultTool.FILE_READ:
@@ -171,7 +171,7 @@ export class AutoApprove {
 		blockname: DiracDefaultTool,
 		autoApproveActionpath: string | undefined,
 	): Promise<ToolPermissionDisposition> {
-		if (this.requiresCounterpartyApproval) return WRITE_TOOLS.includes(blockname) ? "auto_approve" : "manual_only"
+		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(blockname)) return "manual_only"
 		let isLocal = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -210,7 +210,7 @@ export class AutoApprove {
 		blockname: DiracDefaultTool,
 		autoApproveActionpath: string | undefined,
 	): Promise<boolean> {
-		if (this.requiresCounterpartyApproval) return WRITE_TOOLS.includes(blockname)
+		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(blockname)) return false
 		let isLocalRead = false
 		if (autoApproveActionpath) {
 			const { isMultiRootScenario } = await this.getWorkspaceInfo()
@@ -226,6 +226,10 @@ export class AutoApprove {
 				) as string
 				isLocalRead = isLocatedInPath(cwd, absolutePath)
 			}
+		}
+
+		if (this.requiresCounterpartyApproval && !this.commandPermissionController.validateTool(blockname, autoApproveActionpath).allowed) {
+			return false
 		}
 
 		if (this.setting("yoloModeToggled")) return true
@@ -251,6 +255,7 @@ export class AutoApprove {
 			|| (Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult)
 
 		if (safeCommandAutoApprovalEnabled && isSafeCommand(command)) return true
+		if (!isSupportedShellSyntax(command)) return false
 
 		return areCommandSegmentsApproved(command, (segment) => {
 			if (isUserApprovedCommandSegment(segment, [...entries])) return true
@@ -271,7 +276,7 @@ export class AutoApprove {
 	 * Check if the tool should be auto-approved based on the permission rules.
 	 */
 	public shouldAutoApproveWithRules(toolName: DiracDefaultTool, path?: string): boolean {
-		if (this.requiresCounterpartyApproval) return false
+		if (this.requiresCounterpartyApproval && !WRITE_TOOLS.includes(toolName)) return false
 		const result = this.commandPermissionController.validateTool(toolName, path)
 		return result.allowed && result.reason === "allowed"
 	}

@@ -147,6 +147,29 @@ describe("tasklet reconstruction storage", () => {
 		assert.deepEqual(await fs.readFile(file), bytes)
 	})
 
+	it("roundtrips every communication variant without losing settlement or wait evidence", async () => {
+		type Communication = TaskletEvent["communication"]
+		const variants = {
+			waiting_for_message: { type: "waiting_for_message" },
+			response: { type: "response", response: { operation: ResponseOperation.PROGRESS, text: "Still working" } },
+			message: { type: "message", message: { taskletId: firstId, type: "guidance", text: "Continue" } },
+			lifecycle: { type: "lifecycle", state: "accepted" },
+			interaction: {
+				type: "interaction", request: {
+					id: "request", createdAt: 125, status: "pending",
+					card: { id: "card", kind: CardKind.GENERIC, header: "Question", body: "Full request", status: CardStatus.WAITING_FOR_INPUT, renderType: "text", requireApproval: true },
+				}
+			},
+			outcome: { type: "outcome", outcome: { kind: "completed", completedAt: 126, response: "Done" } },
+		} satisfies { [Type in Communication["type"]]: Extract<Communication, { type: Type }> }
+		const events: TaskletEvent[] = Object.values(variants).map((communication, index) => ({
+			id: `event-${index}`, taskletId: firstId, createdAt: 124 + index, deliveredAt: 150, communication,
+		}))
+		events.push({ id: "resumed", taskletId: firstId, createdAt: 151, communication: { type: "lifecycle", state: "resumed", assignment: "Next work" } })
+		await saveTaskletEvents(address(), events)
+		assert.deepEqual(await loadTaskletEvents(address()), events)
+	})
+
 	it("retains full events, delivery receipts and pending/resolved/retired request history unchanged", async () => {
 		const events: TaskletEvent[] = [
 			{
@@ -206,13 +229,13 @@ describe("tasklet reconstruction storage", () => {
 		}
 	})
 
-	it("propagates corrupt and missing records rather than publishing an incomplete inventory", async () => {
+	it("rejects malformed committed records but skips directories whose admission record is missing", async () => {
 		await saveTaskletRecord(record())
 		const file = path.join(getTaskDirectoryPath(address()), GlobalFileNames.taskletRecord)
 		await fs.writeFile(file, "{broken")
 		await assert.rejects(loadTaskletRecords("root"), SyntaxError)
 		await fs.rm(file)
-		await assert.rejects(loadTaskletRecords("root"), { code: "ENOENT" })
+		assert.deepEqual(await loadTaskletRecords("root"), [])
 	})
 
 	it("rejects malformed or cross-tasklet events without changing stored contents", async () => {
@@ -242,6 +265,15 @@ describe("tasklet reconstruction storage", () => {
 		await assert.rejects(loadTaskletEvents(address()), SyntaxError)
 	})
 
+	it("does not mistake a present dangling record symlink for an uncommitted directory", async () => {
+		await saveTaskletRecord(record())
+		const file = path.join(getTaskDirectoryPath(address()), GlobalFileNames.taskletRecord)
+		await fs.rm(file)
+		await fs.symlink(path.join(directory, "missing-record-target"), file)
+		await assert.rejects(loadTaskletRecords("root"), { code: "ENOENT" })
+		assert.equal((await fs.lstat(file)).isSymbolicLink(), true)
+	})
+
 	it("propagates non-absence filesystem errors from collection, record and event reads", async () => {
 		await fs.mkdir(getTaskDirectoryPath("root"), { recursive: true })
 		const collection = path.join(getTaskDirectoryPath("root"), "tasklets")
@@ -264,8 +296,15 @@ describe("tasklet reconstruction storage", () => {
 		assert.deepEqual(await fs.readdir(directory), [])
 	})
 
-	it("rejects a child directory without its record rather than omitting it", async () => {
-		await fs.mkdir(path.join(getTaskDirectoryPath("root"), "tasklets", "ordinary-task"), { recursive: true })
-		await assert.rejects(loadTaskletRecords("root"), { code: "ENOENT" })
+	it("ignores real partial child directories without deleting their files or hiding committed siblings", async () => {
+		await saveTaskletRecord(record())
+		const partial = getTaskDirectoryPath(address("root", "Partial"))
+		await fs.mkdir(partial, { recursive: true })
+		const temporaryRecord = path.join(partial, `${GlobalFileNames.taskletRecord}.tmp.crash.json`)
+		await fs.writeFile(temporaryRecord, "{interrupted atomic write")
+		await fs.writeFile(path.join(partial, "settings.json"), "{unfinished settings")
+		assert.deepEqual(await loadTaskletRecords("root"), [record()])
+		assert.equal(await fs.readFile(temporaryRecord, "utf8"), "{interrupted atomic write")
+		assert.equal(await fs.readFile(path.join(partial, "settings.json"), "utf8"), "{unfinished settings")
 	})
 })

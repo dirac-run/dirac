@@ -205,7 +205,7 @@ describe("EditAstTool", () => {
 
 	it("routes Utility-eligible paths through the approval card", async () => {
 		const { env, approvalCard } = makeEnv()
-			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			; (env.config.callbacks.resolveToolPathPermission as sinon.SinonStub).resolves("utility_eligible")
 			; (env.sourceAst.planRename as sinon.SinonStub).resolves(renamePlan)
 
@@ -273,7 +273,7 @@ describe("EditAstTool", () => {
 
 	it("sets approval cards to a terminal status before finalization", async () => {
 		const { env, approvalCard } = makeEnv()
-			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			; (env.config.callbacks.resolveToolPathPermission as sinon.SinonStub).resolves("manual_only")
 			; (env.sourceAst.planRename as sinon.SinonStub).resolves(renamePlan)
 			; (approvalCard.finalize as sinon.SinonStub).rejects(new Error("finalization unavailable"))

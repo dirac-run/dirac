@@ -160,6 +160,7 @@ import { SharedJournal } from "./SharedJournal"
 export interface TaskletExecutionBindings {
 	agentCommunication?: AgentCommunication
 	sharedJournal?: SharedJournal
+	getPermissionCommandController?: () => CommandPermissionController
 	hasPendingInteraction?: () => boolean
 	configuration?: TaskletConfiguration
 	/** Current immutable owner configuration; inherited only between model requests. */
@@ -1063,6 +1064,7 @@ export class Task {
 				hasPendingGuidance: () => this.taskState.steeringMessages.some((message) => message.deliveryState === SteeringDeliveryState.QUEUED),
 			}) : undefined,
 			() => (this.ownerBindings?.sharedJournal ?? this.taskletHost?.sharedJournal)?.forAgent(this.agentAddress),
+			contained?.getPermissionCommandController,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1218,6 +1220,7 @@ export class Task {
 					taskId: this.taskId,
 					executionProfile: this.executionProfile,
 					getAgentCommunicationState: () => this.getAgentCommunicationState(),
+					getPermissionCommandController: () => this.commandPermissionController,
 					recordTaskletUsage: async (id, usage) => {
 						await this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage))
 						void this.postPresentationToWebview().catch((error) =>
@@ -1909,6 +1912,7 @@ export type TaskletTaskOptions = Pick<
 
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
 	getAgentCommunicationState?: () => Pick<AgentRosterEntry, "status" | "accepts_messages">
+	getPermissionCommandController?: () => CommandPermissionController
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
 	retainMutationUntil: TaskletExecutionBindings["retainMutationUntil"]
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
@@ -1959,6 +1963,7 @@ export class TaskletHost {
 		() => this.agentRoster(),
 		() => this.sleepWaiter?.check(),
 		(id) => this.recordCommunicationWait(id),
+		() => ["Dirac", ...this.reservedIds],
 	)
 	readonly sharedJournal: SharedJournal
 
@@ -1974,10 +1979,10 @@ export class TaskletHost {
 	private agentRoster(): AgentRosterEntry[] {
 		const root = this.owner.getAgentCommunicationState?.() ?? { status: "idle", accepts_messages: false }
 		const entries: AgentRosterEntry[] = [{ id: "Dirac", title_preview: "Dirac", ...root, accepts_messages: !this.closing && root.accepts_messages }]
-		const records = new Map([...this.children].map(([id, child]) => [id, child.record]))
-		for (const [id, { record }] of this.starting) records.set(id, record)
-		for (const [id, record] of records) {
+		for (const id of this.reservedIds) {
 			const child = this.children.get(id)
+			const record = this.starting.get(id)?.record ?? child?.record
+			if (!record) continue
 			const starting = this.starting.has(id) && !child?.task
 			const state = child?.task?.getAgentCommunicationState()
 			entries.push({
@@ -2192,6 +2197,7 @@ export class TaskletHost {
 		if (this.starting.has(id) || child.task || !child.record.outcome || !child.outcomePersisted || child.settlementError) {
 			throw new Error(`Tasklet ${id} has not settled successfully for resumption`)
 		}
+		if (this.listActive().length >= 16) throw new Error("Tasklet active child limit of 16 reached")
 		// Validate before clearing committed outcomes or appending a resumed event.
 		taskletWorkingConfiguration(this.options.workingConfiguration, child.record.configuration)
 		const record = { ...child.record, outcome: undefined }
@@ -2243,6 +2249,8 @@ export class TaskletHost {
 		// Configuration loading may yield to reconstruction or root shutdown before admission.
 		if (this.reconstruction) await this.reconstruction
 		if (this.closing) throw new Error("Tasklet host is shutting down")
+		if (this.reservedIds.size >= 256) throw new Error("Tasklet retained identity limit of 256 reached")
+		if (this.listActive().length >= 16) throw new Error("Tasklet active child limit of 16 reached")
 		const id = createTaskletId(this.reservedIds)
 		this.reservedIds.add(id)
 		const record: TaskletRecord = {
@@ -2298,18 +2306,10 @@ export class TaskletHost {
 	): Promise<TaskletRecord> {
 		const record = child.record
 		// A start admitted before shutdown still owns its write, but must not launch late work.
-		if (this.closing) {
-			child.settlement = this.persistOutcome(child, {
-				kind: "interrupted",
-				reason: "Root Task closed during tasklet startup",
-				interruptedAt: Date.now(),
-			})
-			await child.settlement
-			return structuredClone(child.record)
-		}
 		try {
-			await this.persistEvents(child)
-			child.task = new this.TaskConstructor({
+			if (!this.closing) await this.persistEvents(child)
+			// Communication persistence can yield to shutdown; never construct late work.
+			child.task = this.closing ? undefined : new this.TaskConstructor({
 				...this.options,
 				workingConfiguration: taskletWorkingConfiguration(
 					this.options.workingConfiguration,
@@ -2329,6 +2329,7 @@ export class TaskletHost {
 					hasPendingInteraction: () => [...child.interactions.values()].some(({ record }) => record.status === "pending"),
 					configuration: record.configuration,
 					getParentWorkingConfiguration: () => this.options.workingConfiguration,
+					getPermissionCommandController: this.owner.getPermissionCommandController,
 					withMutationAuthorization: (toolName, mutation) => this.owner.withMutationAuthorization(toolName, mutation),
 					retainMutationUntil: (completion) => this.owner.retainMutationUntil(completion),
 					counterparty: {
@@ -2364,6 +2365,15 @@ export class TaskletHost {
 				kind: "failed",
 				error: serializeTaskError(error),
 				failedAt: Date.now(),
+			})
+			await child.settlement
+			return structuredClone(child.record)
+		}
+		if (!child.task) {
+			child.settlement = this.persistOutcome(child, {
+				kind: "interrupted",
+				reason: "Root Task closed during tasklet startup",
+				interruptedAt: Date.now(),
 			})
 			await child.settlement
 			return structuredClone(child.record)

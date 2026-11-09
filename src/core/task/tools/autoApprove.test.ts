@@ -64,25 +64,75 @@ describe("AutoApprove condensation policy", () => {
 })
 
 describe("AutoApprove child static policy", () => {
-	it("auto-approves only writes before settings, rules or workspace lookup", async () => {
+	afterEach(() => sinon.restore())
+
+	it("keeps non-write paths owner-routed without reading settings or rules", async () => {
 		const permissions = commandPermissionController({ allowed: false, reason: "denied" })
 		const settingsSource = sinon.stub().returns(settings())
 		const autoApprove = new AutoApprove(permissions as any, settingsSource, false, true)
 		const writes = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
 
-		for (const tool of Object.values(DiracDefaultTool)) {
-			const isWrite = writes.includes(tool)
-			assert.deepEqual(autoApprove.shouldAutoApproveTool(tool), isWrite ? [true, true] : false)
-			for (const filePath of [undefined, "/workspace/file.ts", "/outside/file.ts"]) {
-				assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, filePath), isWrite)
-				assert.equal(await autoApprove.resolveToolPathPermission(tool, filePath), isWrite ? "auto_approve" : "manual_only")
-			}
+		for (const tool of Object.values(DiracDefaultTool).filter((tool) => !writes.includes(tool))) {
+			assert.equal(autoApprove.shouldAutoApproveTool(tool), false)
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/file.ts"), "manual_only")
 			assert.equal(autoApprove.shouldAutoApproveWithRules(tool, "/workspace/file.ts"), false)
 		}
 		assert.equal(autoApprove.isUnrestrictedAutoApprove(), false)
 		sinon.assert.notCalled(settingsSource)
 		sinon.assert.notCalled(permissions.validateTool)
 	})
+
+	for (const tool of [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]) {
+		it(`uses current parent edit settings and exact path rules for child ${tool}`, async () => {
+			stubWorkspace()
+			const currentSettings = settings()
+			currentSettings.autoApprovalSettings.actions.editFiles = false
+			currentSettings.autoApprovalSettings.actions.editFilesExternally = false
+			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+			const autoApprove = new AutoApprove(permissions as any, () => currentSettings, false, true)
+
+			assert.deepEqual(autoApprove.shouldAutoApproveTool(tool), [false, false])
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/file.ts"), "utility_eligible")
+			currentSettings.autoApprovalSettings.actions.editFiles = true
+			assert.deepEqual(autoApprove.shouldAutoApproveTool(tool), [true, false])
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), true)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/file.ts"), "auto_approve")
+
+			permissions.validateTool.withArgs(tool, "/workspace/private.ts").returns({ allowed: false, reason: "denied" })
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/private.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/private.ts"), "manual_only")
+			sinon.assert.calledWithExactly(permissions.validateTool, tool, "/workspace/private.ts")
+			currentSettings.autoApprovalSettings.actions.editFiles = false
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), false)
+		})
+
+		it(`honors external-write policy and explicit allow rules for child ${tool}`, async () => {
+			stubWorkspace()
+			const currentSettings = settings()
+			currentSettings.autoApprovalSettings.actions.editFiles = false
+			const permissions = commandPermissionController({ allowed: true, reason: "allowed", matchedPattern: "src/**" })
+			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "src/file.ts"), true)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "src/file.ts"), "auto_approve")
+			currentSettings.autoApprovalSettings.actions.editFiles = true
+			currentSettings.autoApprovalSettings.actions.editFilesExternally = true
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/outside/file.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/outside/file.ts"), "manual_only")
+		})
+
+		it(`does not let child unrestricted flags bypass a denied ${tool} path`, async () => {
+			stubWorkspace()
+			const currentSettings = settings()
+			currentSettings.yoloModeToggled = true
+			currentSettings.autoApproveAllToggled = true
+			const permissions = commandPermissionController({ allowed: false, reason: "denied" })
+			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(tool, "/workspace/private.ts"), false)
+			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/private.ts"), "manual_only")
+		})
+	}
 
 	it("keeps browser launches manual-only despite unrestricted settings and allow rules", () => {
 		const currentSettings = settings()
@@ -189,6 +239,21 @@ describe("resolveCommandApproval child static policy", () => {
 			sinon.assert.notCalled(permissions.validateTool)
 		})
 	}
+
+	it("does not widen exact command entries through shell expansion or parser normalization", () => {
+		const currentSettings = settings()
+		currentSettings.userApprovedCommands = [
+			{ command: "ls", match: "exact" },
+			{ command: "npm test", match: "exact" },
+		]
+		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+		const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
+		for (const command of ["ls $OPTIONS", 'ls "$OPTIONS"', "npm test $OPTIONS", "ls *.ts", "(ls)", "ls `pwd`", "ls $(pwd)"]) {
+			assert.equal(autoApprove.isCommandAutoApproved(command), false, command)
+		}
+		assert.equal(autoApprove.isCommandAutoApproved("npm test"), true)
+		assert.equal(autoApprove.isCommandAutoApproved("pwd && npm test"), true)
+	})
 
 	it("preserves root safe-command settings and legacy unrestricted precedence", () => {
 		const currentSettings = settings()

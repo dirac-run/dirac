@@ -31,6 +31,8 @@ export interface PermissionDecisionService {
 export interface PermissionDecisionServiceBinding {
 	service: PermissionDecisionService
 	configurationRevision: number
+	/** Mode of the current permission authority, not necessarily the contained execution mode. */
+	authorityMode: "plan" | "act"
 	commandPermissionRevision?: number
 }
 

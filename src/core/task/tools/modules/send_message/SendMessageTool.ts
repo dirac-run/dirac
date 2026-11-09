@@ -2,7 +2,9 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
-import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { toError } from "@/shared/errors"
+import type { CardParams, ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 
 export const send_message_spec: DiracToolSpec = {
 	id: "send_message",
@@ -31,35 +33,73 @@ export class SendMessageTool implements IDiracTool {
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
 		const header = `${actor} → ${request.to} · Message`
-		const card = await env.ui.createCard({
-			header,
-			body: `${request.text}\n\nStatus: Sending`,
-			communication: { actor },
-			icon: DiracIcon.CHAT,
-			status: CardStatus.RUNNING,
-			collapsed: true,
-			rawInput: request,
-		})
-		let accepted = false
+		const card = await createMessageCard(
+			{
+				header,
+				body: `${request.text}\n\nStatus: Sending`,
+				communication: { actor },
+				icon: DiracIcon.CHAT,
+				status: CardStatus.RUNNING,
+				collapsed: true,
+				rawInput: request,
+			},
+			env,
+		)
+		let receipt: Awaited<ReturnType<typeof communication.send>>
 		try {
-			const receipt = await communication.send(request)
-			accepted = true
-			await card.update({
-				header,
-				body: `${request.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`,
-				communication: { actor },
-			})
-			await card.finalize(CardStatus.SUCCESS)
-			return JSON.stringify(receipt)
+			receipt = await communication.send(request)
 		} catch (error) {
-			await card.update({
-				header,
-				body: `${request.text}\n\nStatus: ${accepted ? "Message accepted, but display failed; delivery, understanding, and action are not confirmed." : "Message not accepted."} See tool result for details.`,
-				communication: { actor },
-			})
-			await card.finalize(CardStatus.ERROR)
+			if (card) {
+				await present(
+					() =>
+						card.update({
+							header,
+							body: `${request.text}\n\nStatus: Message not accepted. See tool result for details.`,
+							communication: { actor },
+						}),
+					env,
+				)
+				await present(() => card.finalize(CardStatus.ERROR), env)
+			}
 			throw error
 		}
+		if (card) {
+			await present(
+				() =>
+					card.update({
+						header,
+						body: `${request.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`,
+						communication: { actor },
+					}),
+				env,
+			)
+			await present(() => card.finalize(CardStatus.SUCCESS), env)
+		}
+		return JSON.stringify(receipt)
+	}
+}
+
+async function createMessageCard(params: CardParams, env: IToolEnvironment): Promise<ICardHandle | undefined> {
+	try {
+		const creation = env.ui.createCard(params)
+		const result = await waitForPresentationOperation(creation)
+		if (!result.timedOut) return result.value
+		env.logging.warn("[SendMessageTool] Card creation timed out")
+		void creation
+			.then((card) => present(() => card.finalize(CardStatus.ABANDONED), env))
+			.catch((error) => env.logging.warn("[SendMessageTool] Late card creation failed", toError(error)))
+	} catch (error) {
+		env.logging.warn("[SendMessageTool] Card creation failed", toError(error))
+	}
+	return undefined
+}
+
+async function present(operation: () => Promise<void>, env: IToolEnvironment): Promise<void> {
+	try {
+		const result = await waitForPresentationOperation(operation())
+		if (result.timedOut) env.logging.warn("[SendMessageTool] Card presentation timed out")
+	} catch (error) {
+		env.logging.warn("[SendMessageTool] Card presentation failed", toError(error))
 	}
 }
 

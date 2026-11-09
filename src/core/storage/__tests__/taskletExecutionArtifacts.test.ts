@@ -269,7 +269,7 @@ describe("tasklet execution artifacts", () => {
 			].map((file) => fs.mkdir(file)),
 		)
 		await saveTaskMetadata(firstTasklet, metadata("cannot-save"))
-		await assert.rejects(updateTaskMetadata(firstTasklet, () => {}))
+		await assert.rejects(updateTaskMetadata(firstTasklet, () => { }))
 		await assert.rejects(readTaskSettingsFromStorage(firstTasklet))
 		await assert.rejects(writeTaskSettingsToStorage(firstTasklet, { mode: "plan" }))
 		await assert.rejects(writeConversationHistoryJson(firstTasklet, [], 99))
@@ -291,6 +291,15 @@ describe("tasklet execution artifacts", () => {
 		assert.deepEqual(await getTaskMetadata(firstTasklet), metadata("lock-released"))
 	})
 
+	it("accepts arbitrary safe opaque child IDs for root-contained execution artifacts", async () => {
+		const address: TaskStorageAddress = { ...firstTasklet, taskletId: "ordinary-task" }
+		assert.equal(getTaskDirectoryPath(address), path.join(getTaskDirectoryPath(rootTaskId), "tasklets", "ordinary-task"))
+		await saveTaskMetadata(address, metadata("safe opaque identity"))
+		await writeTaskSettingsToStorage(address, { preferredLanguage: "opaque child" })
+		assert.deepEqual(await getTaskMetadata(address), metadata("safe opaque identity"))
+		assert.deepEqual(await readTaskSettingsFromStorage(address), { preferredLanguage: "opaque child" })
+	})
+
 	it("rejects invalid addresses before creating any directory, preserving best-effort metadata saves", async () => {
 		expectLoggerErrors()
 		const invalidAddresses: (string | TaskStorageAddress)[] = [
@@ -298,7 +307,7 @@ describe("tasklet execution artifacts", () => {
 			{ kind: "task", taskId: firstTasklet.taskletId },
 			{ ...firstTasklet, rootTaskId: "../escape" },
 			{ ...firstTasklet, taskletId: "../escape" },
-			{ ...firstTasklet, taskletId: "ordinary-task" },
+			{ ...firstTasklet, taskletId: "ordinary/task" },
 		]
 		for (const address of invalidAddresses) {
 			await saveTaskMetadata(address, metadata("invalid"))

@@ -62,24 +62,24 @@ describe("Task persistence ownership", () => {
 
 	for (const executionProfile of ["tasklet", "goal_coordinator", "goal_followup"] as const) {
 		it(`retires ${executionProfile} writers and contained work when their run finishes`, async () => {
-		const task = taskWithPersistenceOwner()
+			const task = taskWithPersistenceOwner()
 			task.executionProfile = executionProfile
 			task.taskletHost = executionProfile === "tasklet" ? undefined : { shutdown: sinon.stub().resolves() }
-		await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
-		sinon.assert.callOrder(task.lifecycleManager.finalizeTaskRun, task.releaseTaskLock)
-		sinon.assert.calledOnce(task.messageStateHandler.retirePersistence)
-		sinon.assert.calledOnce(task.releaseTaskLock)
+			await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
+			sinon.assert.callOrder(task.lifecycleManager.finalizeTaskRun, task.releaseTaskLock)
+			sinon.assert.calledOnce(task.messageStateHandler.retirePersistence)
+			sinon.assert.calledOnce(task.releaseTaskLock)
 			if (task.taskletHost) sinon.assert.callOrder(task.taskletHost.shutdown, task.releaseTaskLock)
-	})
+		})
 
 		it(`retires ${executionProfile} writers even if resource cleanup fails`, async () => {
-		const task = taskWithPersistenceOwner()
+			const task = taskWithPersistenceOwner()
 			task.executionProfile = executionProfile
-		task.lifecycleManager.finalizeTaskRun.rejects(new Error("cleanup failed"))
-		const outcome = await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
-		assert.equal(outcome.kind, "failed")
-		sinon.assert.calledOnce(task.releaseTaskLock)
-	})
+			task.lifecycleManager.finalizeTaskRun.rejects(new Error("cleanup failed"))
+			const outcome = await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
+			assert.equal(outcome.kind, "failed")
+			sinon.assert.calledOnce(task.releaseTaskLock)
+		})
 	}
 	it("joins tasklet shutdown before retiring the root writer or releasing its lock", async () => {
 		const task = taskWithPersistenceOwner()
@@ -134,7 +134,7 @@ describe("Task persistence ownership", () => {
 		const task = taskWithPersistenceOwner()
 		task.taskState = new TaskState()
 		task.taskletHost = {
-			listActive: sinon.stub().returns([{ id: "tasklet-active", title: "waiting for input" }]),
+			getCompletionBlocker: sinon.stub().returns("Active tasklets: tasklet-active (waiting for input)"),
 			shutdown: sinon.stub().resolves(),
 		}
 		const result = await task.commitAttemptCompletion("premature")
@@ -143,7 +143,7 @@ describe("Task persistence ownership", () => {
 		assert.equal(task.taskState.completionCommitted, false)
 		assert.equal(task.taskState.completionResponse, undefined)
 		sinon.assert.notCalled(task.taskletHost.shutdown)
-		task.taskletHost.listActive.returns([])
+		task.taskletHost.getCompletionBlocker.returns(undefined)
 		assert.deepEqual(await task.commitAttemptCompletion("finished"), { committed: true })
 		assert.equal(task.taskState.completionResponse, "finished")
 	})

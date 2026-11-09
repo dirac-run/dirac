@@ -5,11 +5,14 @@ import { atomicWriteFile } from "../storage/atomicWrite"
 import type { JournalPublicationReceipt, JournalRecipient, JournalRecord, SharedJournalCallbacks, SharedJournalCapability } from "./SharedJournalTypes"
 
 const MAX_RECORD_BYTES = 32 * 1024
+const MAX_PUBLICATIONS = 1024
 const RECORD_KEYS = ["version", "id", "author", "created_at", "headline", "content"]
 
 /** One root-owned immutable journal. Notices are volatile and belong to the runtime, not storage. */
 export class SharedJournal {
 	private readonly pending = new Set<Promise<unknown>>()
+	private publicationCount = 0
+	private publicationCountInitialization?: Promise<void>
 	private closed = false
 	private closing?: Promise<void>
 
@@ -40,10 +43,28 @@ export class SharedJournal {
 
 	private async storeAndNotify(record: JournalRecord, serialized: string, recipients: readonly JournalRecipient[]): Promise<JournalPublicationReceipt> {
 		const directory = path.join(this.rootDirectory, "journal")
-		await fs.mkdir(directory, { recursive: true })
-		await atomicWriteFile(path.join(directory, `${record.id}.json`), serialized)
+		await (this.publicationCountInitialization ??= this.initializePublicationCount(directory).catch((error) => {
+			this.publicationCountInitialization = undefined
+			throw error
+		}))
+		if (this.publicationCount >= MAX_PUBLICATIONS) throw new Error(`Shared journal publication limit of ${MAX_PUBLICATIONS} reached`)
+		// Reserve before the write yields, so concurrent publications cannot exceed the cap.
+		this.publicationCount++
+		try {
+			await atomicWriteFile(path.join(directory, `${record.id}.json`), serialized)
+		} catch (error) {
+			this.publicationCount--
+			throw error
+		}
 		const notifications = this.callbacks.notify(recipients, { author: record.author, message_id: record.id, headline: record.headline })
 		return { published: true, message_id: record.id, notifications }
+	}
+
+	private async initializePublicationCount(directory: string): Promise<void> {
+		await fs.mkdir(directory, { recursive: true })
+		const entries = await fs.readdir(directory, { withFileTypes: true })
+		// Atomic-write temporary files are not retained publications, even though they end in .json.
+		this.publicationCount = entries.filter((entry) => entry.isFile() && /^[0-7][0-9A-HJKMNP-TV-Z]{25}\.json$/.test(entry.name)).length
 	}
 
 	private async read(author: string, input: { message_id: string }): Promise<JournalRecord> {

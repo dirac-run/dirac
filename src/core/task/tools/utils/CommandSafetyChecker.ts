@@ -1,223 +1,172 @@
-const SAFE_BASE_COMMANDS = [
+// These programs have no command-execution or persistent-output options.
+const SAFE_BASE_COMMANDS = new Set([
 	"ls",
 	"pwd",
-	"date",
 	"whoami",
-	"uname",
 	"cat",
 	"nl",
 	"grep",
-	"find",
 	"head",
 	"tail",
 	"cd",
 	"clear",
 	"echo",
-	"hostname",
 	"df",
 	"du",
 	"ps",
 	"free",
 	"uptime",
 	"wc",
-	"sort",
-	"uniq",
-	"file",
 	"stat",
 	"diff",
-	"rg",
 	"cut",
 	"which",
 	"type",
-	"sed",
-	"awk",
-]
+])
 
-const SAFE_GIT_SUBCOMMANDS = ["status", "log", "diff", "branch", "show", "remote"]
+// Positive option lists deliberately exclude abbreviations and unknown platform-specific options.
+const SAFE_OPTIONS: Record<string, RegExp> = {
+	find: /^(?:-[HLP]|-(?:name|iname|path|ipath|regex|iregex|type|xtype|size|mtime|mmin|atime|amin|ctime|cmin|newer|newermt|maxdepth|mindepth|depth|mount|xdev|follow|print|print0|printf|ls|prune|empty|readable|writable|executable|true|false|a|and|o|or|not))$/,
+	sort: /^(?:-[bdfghinMrsuVz]+|-[kt].+|--(?:ignore-leading-blanks|dictionary-order|ignore-case|general-numeric-sort|human-numeric-sort|ignore-nonprinting|month-sort|numeric-sort|reverse|stable|unique|version-sort|zero-terminated)|--(?:key|field-separator)=.+)$/,
+	rg: /^(?:-[ivwxFnNlLcoqsSUPauHI0]+|-[ABCm]\d+|-[egftTr]|--(?:files|hidden|no-ignore|no-ignore-vcs|no-ignore-parent|follow|line-number|no-line-number|files-with-matches|files-without-match|count|count-matches|only-matching|quiet|fixed-strings|ignore-case|case-sensitive|smart-case|word-regexp|line-regexp|multiline|multiline-dotall|pcre2|text|json|null|null-data|no-heading|heading|with-filename|no-filename|no-config|no-messages|stats|passthru)|--(?:glob|iglob|type|type-not|regexp|file|context|before-context|after-context|max-count|max-depth|encoding|replace|sort|sortr)(?:=.+)?)$/,
+	file: /^(?:-[biLh]+|--(?:brief|mime|mime-type|mime-encoding|dereference|no-dereference))$/,
+	uname: /^(?:-[amnprsvio]+|--(?:all|kernel-name|nodename|kernel-release|kernel-version|machine|processor|hardware-platform|operating-system))$/,
+}
 
-/**
- * Splits a command string by shell operators (|, ||, &&, ;, newline) while
- * respecting single and double quotes. This prevents characters inside quoted
- * strings (e.g. regex alternation `\|` in grep patterns) from being treated
- * as shell pipe operators.
- */
-function splitByShellOperators(command: string): string[] {
-	const segments: string[] = []
-	let current = ""
-	let inSingleQuote = false
-	let inDoubleQuote = false
+/** Tokenize only a small, literal shell subset; unsupported syntax needs approval. */
+function splitByShellOperators(command: string): string[][] | undefined {
+	const segments: string[][] = []
+	let words: string[] = []
+	let word = ""
+	let started = false
+	let quote = ""
 
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i]
-
-		// Backslash escapes the next character outside single quotes
-		if (ch === "\\" && !inSingleQuote) {
-			current += ch
-			if (i + 1 < command.length) {
-				i++
-				current += command[i]
-			}
+		if (ch === "\\" && quote !== "'") {
+			const next = command[++i]
+			if (next === undefined || next === "\n" || next === "\r") return undefined
+			// In double quotes, backslashes only escape these shell-special characters.
+			if (quote === '"' && !'\\$`"'.includes(next)) word += "\\"
+			word += next
+			started = true
 			continue
 		}
-
-		if (ch === "'" && !inDoubleQuote) {
-			inSingleQuote = !inSingleQuote
-			current += ch
-		} else if (ch === '"' && !inSingleQuote) {
-			inDoubleQuote = !inDoubleQuote
-			current += ch
-		} else if (!inSingleQuote && !inDoubleQuote) {
-			// Check multi-char operators first
-			if (ch === "|" && i + 1 < command.length && command[i + 1] === "|") {
-				segments.push(current)
-				current = ""
-				i++ // skip second |
-			} else if (ch === "&" && i + 1 < command.length && command[i + 1] === "&") {
-				segments.push(current)
-				current = ""
-				i++ // skip second &
-			} else if (ch === "|" || ch === ";" || ch === "\n") {
-				segments.push(current)
-				current = ""
-			} else {
-				current += ch
-			}
-		} else {
-			current += ch
+		if (ch === quote) {
+			quote = ""
+			continue
 		}
+		if (quote) {
+			if (quote === '"' && (ch === "$" || ch === "`")) return undefined
+			word += ch
+			continue
+		}
+		if (ch === "'" || ch === '"') {
+			quote = ch
+			started = true
+			continue
+		}
+		if (ch === " " || ch === "\t") {
+			if (started) words.push(word)
+			word = ""
+			started = false
+			continue
+		}
+		// Only these exact, standalone stderr redirects are harmless. Never strip quoted text
+		// or prefixes such as 2>/dev/null.backup or 2>&10.
+		if (!started && ch === "2") {
+			const redirect = command.slice(i).match(/^2(?:>\/dev\/null|>&1)(?=$|[ \t|&;])/)
+			if (redirect) {
+				i += redirect[0].length - 1
+				continue
+			}
+		}
+		if (ch === "|" || ch === "&" || ch === ";") {
+			if (ch === "&" && command[i + 1] !== "&") return undefined
+			if ((ch === "&" || ch === "|") && command[i + 1] === ch) i++
+			if (started) words.push(word)
+			if (words.length === 0) return undefined
+			segments.push(words)
+			words = []
+			word = ""
+			started = false
+			continue
+		}
+		// No expansions, comments, subshells, globbing, newlines, or other redirects.
+		if ("$`<>(){}[]*?~!#\n\r".includes(ch) || ch.charCodeAt(0) < 32) return undefined
+		word += ch
+		started = true
 	}
-
-	if (current) {
-		segments.push(current)
-	}
-
+	if (quote) return undefined
+	if (started) words.push(word)
+	if (words.length === 0) return undefined
+	segments.push(words)
 	return segments
 }
 
-/**
- * Returns true if the string contains a shell redirection operator (`>` or `<`)
- * outside of quoted contexts. Rejects commands with unmatched quotes as a
- * defensive measure (they are either syntax errors or potential bypass attempts).
- */
-function containsRedirectionOutsideQuotes(str: string): boolean {
-	let inSingleQuote = false
-	let inDoubleQuote = false
-
-	for (let i = 0; i < str.length; i++) {
-		const ch = str[i]
-
-		// Backslash escapes the next character outside single quotes
-		if (ch === "\\" && !inSingleQuote) {
-			i++ // skip escaped char
-			continue
-		}
-
-		if (ch === "'" && !inDoubleQuote) {
-			inSingleQuote = !inSingleQuote
-		} else if (ch === '"' && !inSingleQuote) {
-			inDoubleQuote = !inDoubleQuote
-		} else if (!inSingleQuote && !inDoubleQuote) {
-			if (ch === ">" || ch === "<") {
-				return true
-			}
-		}
-	}
-
-	// Unmatched quotes → reject as suspicious
-	if (inSingleQuote || inDoubleQuote) {
-		return true
-	}
-
-	return false
+function hasOnlySafeOptions(args: string[], options: RegExp): boolean {
+	return args.every((arg) => !arg.startsWith("-") || arg === "-" || arg === "--" || options.test(arg))
 }
 
-/**
- * Checks if a CLI command is considered "harmless" and safe for auto-approval.
- * This function handles piped commands and rejects output redirection to disk.
- *
- * @param command The CLI command to check
- * @returns true if the command is deemed safe, false otherwise
- */
+function isSafeGitCommand(args: string[]): boolean {
+	const [subcommand, ...options] = args
+	if (subcommand === "branch" || subcommand === "remote") {
+		return options.every((option) => ["-a", "-r", "-v", "--list", "--get-url", "--show-current"].includes(option))
+	}
+	if (!["status", "log", "diff", "show"].includes(subcommand)) return false
+	// Do not permit arbitrary git flags: output files, external diff/textconv helpers,
+	// config overrides, and abbreviated long options all require approval.
+	return hasOnlySafeOptions(
+		options,
+		/^(?:-\d+|-[purbw]+|-[UM]\d*|--(?:short|branch|porcelain|long|untracked-files|ignored|oneline|all|graph|decorate|no-decorate|name-only|name-status|stat|numstat|shortstat|summary|check|patch|no-patch|raw|relative|no-color|color|no-ext-diff|no-textconv|no-renames|no-index|exit-code|quiet|cached|staged|reverse|date-order|topo-order|first-parent|merges|no-merges)|--(?:format|pretty|date|since|until|after|before|author|committer|grep|max-count|diff-filter|untracked-files|porcelain|color|decorate)=.+)$/,
+	)
+}
+
+function isSafeSedCommand(args: string[]): boolean {
+	// A tiny read-only subset, not a sed-program parser. All other scripts (including
+	// substitution, e/w/r commands, script files and in-place edits) need approval.
+	let index = 0
+	if (args[index] === "-n") index++
+	if (args[index] === "-e") index++
+	if (!/^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(args[index] ?? "")) return false
+	return args.slice(index + 1).every((arg) => !arg.startsWith("-"))
+}
+
+/** Keep lossy permission-parser normalization from approving unsupported raw syntax. */
+export function isSupportedShellSyntax(command: string): boolean {
+	const segments = splitByShellOperators(command.trim())
+	return segments !== undefined && segments.every(([program]) => program.length > 0 && !/\s/.test(program))
+}
+
+/** Shared main/child auto-approval classifier; false means approval is required. */
 export function isSafeCommand(command: string): boolean {
-	let normalized = command.trim()
+	const segments = splitByShellOperators(command.trim())
+	if (!segments) return false
 
-	// Strip stderr redirections globally (safe: they don't write to disk)
-	// Must happen before the > / < check to avoid false positives
-	normalized = normalized.replace(/\b2>\/dev\/null/g, "").trim()
-	normalized = normalized.replace(/\b2>&1/g, "").trim()
-
-	// 1. Reject output redirection (avoids disk writes) and input redirection
-	if (containsRedirectionOutsideQuotes(normalized)) {
-		return false
-	}
-
-	// 2. Reject command substitution
-	if (normalized.includes("$(") || normalized.includes("`")) {
-		return false
-	}
-
-	// 3. Split by common shell operators to check each part
-	// Handles |, &&, ||, ;
-	const segments = splitByShellOperators(normalized)
-
-	for (const segment of segments) {
-		const trimmed = segment.trim()
-		if (!trimmed) {
-			continue
+	return segments.every(([program, ...args]) => {
+		if (program === "git") return isSafeGitCommand(args)
+		if (program === "sed") return isSafeSedCommand(args)
+		if (program === "date")
+			return args.every((arg) => ["-u", "--utc", "--universal", "-R", "--rfc-email"].includes(arg) || arg.startsWith("+"))
+		if (program === "hostname")
+			return args.every((arg) =>
+				/^(?:-[aAdfiIs]+|--(?:alias|all-fqdns|domain|fqdn|ip-address|all-ip-addresses|short))$/.test(arg),
+			)
+		if (program === "uniq") {
+			// uniq's second file operand is an output file. Only attached numeric option
+			// values are supported. The sole input operand must be last, since option
+			// parsing may stop at it (BSD or POSIXLY_CORRECT).
+			const inputIndex = args.findIndex((arg) => !arg.startsWith("-") || arg === "-")
+			return (
+				hasOnlySafeOptions(
+					args,
+					/^(?:-[cduiz]+|-[fsw]\d+|--(?:count|repeated|unique|ignore-case|zero-terminated)|--(?:skip-fields|skip-chars|check-chars)=\d+)$/,
+				) &&
+				(inputIndex === -1 || inputIndex === args.length - 1) &&
+				!args.includes("--")
+			)
 		}
-
-		const parts = trimmed.split(/\s+/)
-		const baseCommand = parts[0].toLowerCase()
-
-		// 4. Special handling for git to only allow read-only operations
-		if (baseCommand === "git") {
-			if (parts.length < 2) {
-				return false
-			}
-			const subcommand = parts[1].toLowerCase()
-			if (!SAFE_GIT_SUBCOMMANDS.includes(subcommand)) {
-				return false
-			}
-
-			// Restrict branch and remote to listing only
-			if (subcommand === "branch" || subcommand === "remote") {
-				const allowedFlags = ["-a", "-r", "-v", "--list", "--get-url"]
-				for (let i = 2; i < parts.length; i++) {
-					if (!allowedFlags.includes(parts[i])) {
-						return false
-					}
-				}
-			}
-		} else if (baseCommand === "find") {
-			// 5. Special handling for find to block dangerous flags
-			const dangerousFlags = ["-delete", "-exec", "-execdir", "-ok", "-okdir"]
-			if (parts.some((part) => dangerousFlags.some((flag) => part.toLowerCase().startsWith(flag)))) {
-				return false
-			}
-		} else if (baseCommand === "sed") {
-			// 6. Special handling for sed to block in-place edit flags
-			if (
-				parts.some((part) => {
-					return /^--in-place/.test(part) || /^-[^-]*i/.test(part)
-				})
-			) {
-				return false
-			}
-		} else if (baseCommand === "sort") {
-			// 7. Special handling for sort to block output flag
-			if (
-				parts.some((part) => {
-					const lowerPart = part.toLowerCase()
-					return lowerPart === "-o" || lowerPart.startsWith("-o") || lowerPart.startsWith("--output")
-				})
-			) {
-				return false
-			}
-		} else if (!SAFE_BASE_COMMANDS.includes(baseCommand)) {
-			// 8. Check against general safe list
-			return false
-		}
-	}
-
-	return true
+		if (Object.hasOwn(SAFE_OPTIONS, program)) return hasOnlySafeOptions(args, SAFE_OPTIONS[program])
+		return SAFE_BASE_COMMANDS.has(program)
+	})
 }

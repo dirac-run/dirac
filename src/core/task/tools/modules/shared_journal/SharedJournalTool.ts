@@ -2,7 +2,9 @@ import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
-import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { toError } from "@/shared/errors"
+import type { CardParams, ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 
 export const shared_journal_spec: DiracToolSpec = {
 	id: "shared_journal",
@@ -29,53 +31,87 @@ export class SharedJournalTool implements IDiracTool {
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
 		const header = `${actor} · Journal ${request.operation === "publish" ? "publication" : "read"}`
-		let authoredContent = request.operation === "publish" ? `${request.headline}\n\n${request.content}` : undefined
-		const card = await env.ui.createCard({
-			header,
-			body: authoredContent ? `${authoredContent}\n\nStatus: Publishing` : "Status: Reading journal publication",
-			renderType: "markdown",
-			communication: { actor },
-			icon: DiracIcon.SUMMARIZE,
-			status: CardStatus.RUNNING,
-			collapsed: true,
-			rawInput: request,
-		})
-		let completed = false
+		const authoredContent = request.operation === "publish" ? `${request.headline}\n\n${request.content}` : undefined
+		const card = await createJournalCard(
+			{
+				header,
+				body: authoredContent ? `${authoredContent}\n\nStatus: Publishing` : "Status: Reading journal publication",
+				renderType: "markdown",
+				communication: { actor },
+				icon: DiracIcon.SUMMARIZE,
+				status: CardStatus.RUNNING,
+				collapsed: true,
+				rawInput: request,
+			},
+			env,
+		)
+		let result: Awaited<ReturnType<typeof journal.publish | typeof journal.read>>
 		try {
-			if (request.operation === "publish") {
-				const receipt = await journal.publish({ headline: request.headline, content: request.content })
-				completed = true
-				const notices = receipt.notifications
-				await card.update({
-					header,
-					body: `${authoredContent}\n\nStatus: Published\nAuthor: ${actor}\nNotices: ${notices.enqueued} accepted, ${notices.skipped_inactive} skipped inactive, ${notices.rejected_capacity} rejected for capacity. Notification delivery and action are not confirmed.`,
-					communication: { actor },
-				})
-				await card.finalize(CardStatus.SUCCESS)
-				return JSON.stringify(receipt)
-			}
-			const record = await journal.read({ message_id: request.message_id })
-			authoredContent = `${record.headline}\n\n${record.content}`
-			completed = true
-			await card.update({
-				header,
-				body: `${record.headline}\n\n${record.content}\n\nStatus: Retrieved\nAuthor: ${record.author}\nVersion: ${record.version}\nCreated: ${new Date(record.created_at).toISOString()}`,
-				communication: { actor },
-			})
-			await card.finalize(CardStatus.SUCCESS)
-			return JSON.stringify(record)
+			result =
+				request.operation === "publish"
+					? await journal.publish({ headline: request.headline, content: request.content })
+					: await journal.read({ message_id: request.message_id })
 		} catch (error) {
-			const state = completed
-				? `${request.operation === "publish" ? "Published" : "Retrieved"}, but display failed`
-				: `${request.operation === "publish" ? "Publication" : "Read"} failed`
-			await card.update({
-				header,
-				body: [authoredContent, `Status: ${state}. See tool result for details.`].filter((value) => value !== undefined).join("\n\n"),
-				communication: { actor },
-			})
-			await card.finalize(CardStatus.ERROR)
+			if (card) {
+				const state = request.operation === "publish" ? "Publication failed" : "Read failed"
+				await present(
+					() =>
+						card.update({
+							header,
+							body: [authoredContent, `Status: ${state}. See tool result for details.`]
+								.filter((value) => value !== undefined)
+								.join("\n\n"),
+							communication: { actor },
+						}),
+					env,
+				)
+				await present(() => card.finalize(CardStatus.ERROR), env)
+			}
 			throw error
 		}
+		if (card) {
+			await present(() => {
+				if ("published" in result) {
+					const notices = result.notifications
+					return card.update({
+						header,
+						body: `${authoredContent}\n\nStatus: Published\nAuthor: ${actor}\nNotices: ${notices.enqueued} accepted, ${notices.skipped_inactive} skipped inactive, ${notices.rejected_capacity} rejected for capacity. Notification delivery and action are not confirmed.`,
+						communication: { actor },
+					})
+				}
+				return card.update({
+					header,
+					body: `${result.headline}\n\n${result.content}\n\nStatus: Retrieved\nAuthor: ${result.author}\nVersion: ${result.version}\nCreated: ${new Date(result.created_at).toISOString()}`,
+					communication: { actor },
+				})
+			}, env)
+			await present(() => card.finalize(CardStatus.SUCCESS), env)
+		}
+		return JSON.stringify(result)
+	}
+}
+
+async function createJournalCard(params: CardParams, env: IToolEnvironment): Promise<ICardHandle | undefined> {
+	try {
+		const creation = env.ui.createCard(params)
+		const result = await waitForPresentationOperation(creation)
+		if (!result.timedOut) return result.value
+		env.logging.warn("[SharedJournalTool] Card creation timed out")
+		void creation
+			.then((card) => present(() => card.finalize(CardStatus.ABANDONED), env))
+			.catch((error) => env.logging.warn("[SharedJournalTool] Late card creation failed", toError(error)))
+	} catch (error) {
+		env.logging.warn("[SharedJournalTool] Card creation failed", toError(error))
+	}
+	return undefined
+}
+
+async function present(operation: () => Promise<void>, env: IToolEnvironment): Promise<void> {
+	try {
+		const result = await waitForPresentationOperation(operation())
+		if (result.timedOut) env.logging.warn("[SharedJournalTool] Card presentation timed out")
+	} catch (error) {
+		env.logging.warn("[SharedJournalTool] Card presentation failed", toError(error))
 	}
 }
 

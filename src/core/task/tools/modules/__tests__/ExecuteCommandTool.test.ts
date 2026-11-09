@@ -74,7 +74,7 @@ describe("ExecuteCommandTool", () => {
 				; (autoApprover as any).requiresCounterpartyApproval = true
 			autoApprover.isUnrestrictedAutoApprove.returns(true)
 			commandPermissionController.validateTool.returns({ allowed: true, reason: "allowed", matchedPattern: "**" })
-			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 
 			await tool.processCall({ commands: ["ls"] }, env as any)
 
@@ -89,7 +89,7 @@ describe("ExecuteCommandTool", () => {
 				; (autoApprover as any).requiresCounterpartyApproval = true
 			autoApprover.isUnrestrictedAutoApprove.returns(true)
 			autoApprover.isCommandAutoApproved.callsFake((command: string) => command === "ls")
-			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			if (utilityEnabled) (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			mockCard.waitForInteraction.resolves({ action: DiracAskResponse.REJECT })
 
 			await tool.processCall({ commands: ["ls", "curl https://example.com"] }, env as any)
@@ -208,7 +208,7 @@ describe("ExecuteCommandTool", () => {
 		it(`auto-approves safe commands without a prompt (Utility enabled: ${utilityEnabled})`, async () => {
 			const { tool, env, mockCard } = createMocks()
 			if (utilityEnabled) {
-				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			}
 
 			await tool.processCall({ commands: ["ls -la"] }, env as any)
@@ -222,7 +222,7 @@ describe("ExecuteCommandTool", () => {
 
 	it("does not let Utility bypass a deterministic command restriction", async () => {
 		const { tool, env, commandPermissionController, mockCard } = createMocks()
-			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 		commandPermissionController.validateTool.returns({ allowed: false, reason: "denied" })
 
 		await tool.processCall({ commands: ["curl https://example.com"] }, env as any)
@@ -236,7 +236,7 @@ describe("ExecuteCommandTool", () => {
 		it(`auto-approves static whitelist matches (Utility enabled: ${utilityEnabled})`, async () => {
 			const { tool, env, commandPermissionController, autoApprover, mockCard } = createMocks()
 			if (utilityEnabled) {
-				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			}
 			autoApprover.isCommandAutoApproved.returns(false)
 			commandPermissionController.validateTool.returns({
@@ -258,7 +258,7 @@ describe("ExecuteCommandTool", () => {
 		it(`keeps deterministic restrictions manual-only (Utility enabled: ${utilityEnabled})`, async () => {
 			const { tool, env, commandPermissionController, autoApprover, mockCard } = createMocks()
 			if (utilityEnabled) {
-				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 			}
 			autoApprover.isCommandAutoApproved.returns(false)
 			commandPermissionController.validateTool.returns({ allowed: false, reason: "denied" })
@@ -275,7 +275,7 @@ describe("ExecuteCommandTool", () => {
 
 	it("routes unconfigured commands through Utility-eligible approval", async () => {
 		const { tool, env, commandPermissionController, autoApprover, mockCard } = createMocks()
-			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, configurationRevision: 1 }
+			; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
 		autoApprover.isCommandAutoApproved.returns(false)
 		commandPermissionController.validateTool.returns({ allowed: true, reason: "no_config" })
 

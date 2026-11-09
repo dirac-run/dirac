@@ -42,6 +42,7 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 			outcome,
 			task: {
 				stateView: { status: TaskStatus.WAITING_FOR_API },
+				getAgentCommunicationState: () => ({ status: "running", accepts_messages: true }),
 				startTask: sandbox.stub().returns(outcome.promise),
 				resumeTaskFromHistory: sandbox.stub().returns(outcome.promise),
 				abortTask: sandbox.stub().callsFake(async () => {
@@ -166,6 +167,26 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		sandbox.restore()
 		HostProvider.reset()
 		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("reconstructs a child that voluntarily waited before settlement without dropping its event history", async () => {
+		const original = newHost()
+		const record = await original.start({ type: "default", title: "Waiting child", prompt: "Work" })
+		const waiting = original.agentCommunication.forWaiter(record.id, {
+			signal: new AbortController().signal, hasPendingInteraction: () => false, hasPendingGuidance: () => false,
+		}).wait()
+		children[0].outcome.resolve(completed)
+		await original.interrupt(record.id)
+		assert.deepEqual(await waiting, { reason: "cancelled" })
+		const savedEvents = await storage.loadTaskletEvents(address(record.id))
+		assert.ok(savedEvents.some((event) => event.communication.type === "waiting_for_message"))
+		assert.ok(savedEvents.some((event) => event.communication.type === "outcome"))
+		await original.shutdown()
+		const reopened = newHost()
+		await reopened.reconstruct()
+		assert.equal(constructed.callCount, 1)
+		assert.deepEqual(reopened.inspect(record.id).outcome, completed)
+		assert.deepEqual(await storage.loadTaskletEvents(address(record.id)), savedEvents)
 	})
 
 	for (const acknowledge of [false, true]) {

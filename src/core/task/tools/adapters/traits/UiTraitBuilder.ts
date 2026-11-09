@@ -98,14 +98,15 @@ export async function createCardFromMessenger(
 	const binding = config.permissionDecisionBinding
 	if (!binding) return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 
-	const request = createUtilityPermissionRequest(config, cardParams)
+	const request = createUtilityPermissionRequest(config, cardParams, binding.authorityMode)
 	const decision = await binding.service.decide(request, config.taskState.abortSignal)
 	if (isAutoApproved()) {
 		return new ApprovedPermissionCardHandle(cardParams)
 	}
 
 	const currentBinding = config.permissionDecisionBinding
-	if (!currentBinding || currentBinding.configurationRevision !== binding.configurationRevision) {
+	if (!currentBinding || currentBinding.configurationRevision !== binding.configurationRevision ||
+		currentBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
 		return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 	}
 	if (decision.decision === "escalate") {
@@ -146,7 +147,7 @@ async function createTaskletPermissionCard(
 		}, tracker)
 	}
 
-	const request = createUtilityPermissionRequest(config, params)
+	const request = createUtilityPermissionRequest(config, params, binding.authorityMode)
 	const decision = await binding.service.decide(request, config.taskState.abortSignal)
 	config.taskState.abortSignal.throwIfAborted()
 	const currentBinding = config.permissionDecisionBinding
@@ -161,6 +162,15 @@ async function createTaskletPermissionCard(
 		return createOwnerCard(config, { ...params, utilityPermissionEscalation: decision.reason }, tracker)
 	}
 	await publishPermissionApprovalCard(config, params, tracker, request, decision.reason)
+	config.taskState.abortSignal.throwIfAborted()
+	const publishedBinding = config.permissionDecisionBinding
+	if (!publishedBinding || publishedBinding.configurationRevision !== binding.configurationRevision ||
+		publishedBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
+		return createOwnerCard(config, {
+			...params,
+			utilityPermissionEscalation: "Permission settings changed during approval publication; approval requires a new authority check.",
+		}, tracker)
+	}
 	return new ApprovedPermissionCardHandle(params)
 }
 
@@ -168,7 +178,11 @@ function isUnrestrictedToolApproval(config: TaskConfig): boolean {
 	return config.autoApprover.isUnrestrictedAutoApprove()
 }
 
-function createUtilityPermissionRequest(config: TaskConfig, params: CardParams): UtilityPermissionRequest {
+function createUtilityPermissionRequest(
+	config: TaskConfig,
+	params: CardParams,
+	authorityMode: UtilityPermissionRequest["runtime"]["mode"],
+): UtilityPermissionRequest {
 	const toolName = config.toolUse?.name ?? params.toolName ?? "unknown"
 	const includesResolvedDiffs = toolName === "edit_file" || toolName === "edit_ast"
 	return {
@@ -184,7 +198,7 @@ function createUtilityPermissionRequest(config: TaskConfig, params: CardParams):
 		},
 		runtime: {
 			cwd: config.cwd,
-			mode: config.mode,
+			mode: authorityMode,
 			isSubagent: config.executionProfile === "tasklet",
 		},
 	}

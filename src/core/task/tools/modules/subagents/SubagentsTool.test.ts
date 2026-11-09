@@ -74,6 +74,31 @@ const assignment = { type: "default", task_header: "Inspect code", task_descript
 describe("SubagentsTool asynchronous tasklet startup", () => {
 	afterEach(() => sinon.restore())
 
+	it("caps assignment batches at 16 in schema and before creating cards or starting children", async () => {
+		assert.equal(subagents_spec.parameters!.find((parameter) => parameter.name === "assignments")!.maxItems, 16)
+		const start = sinon.stub().resolves(record("Planck"))
+		const { env, createCard } = fixture(start)
+		await assert.rejects(
+			spawn(
+				env,
+				Array.from({ length: 17 }, () => assignment),
+			),
+			/no more than 16/,
+		)
+		sinon.assert.notCalled(start)
+		sinon.assert.notCalled(createCard)
+		assert.equal(
+			(
+				await spawn(
+					env,
+					Array.from({ length: 16 }, () => assignment),
+				)
+			).length,
+			16,
+		)
+		assert.equal(start.callCount, 16)
+	})
+
 	it("requires every assignment field and rejects all retired options without starting children", async () => {
 		const start = sinon.stub()
 		const { env } = fixture(start)

@@ -1,11 +1,12 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { taskletReceiptNote } from "@shared/taskletReceipt"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { isDiscoveredToolAvailableToTaskProfile } from "../../../TaskExecutionProfile"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
 import { SendMessageTool, send_message_spec } from "./SendMessageTool"
 import { exposure } from "./tool"
 
@@ -13,11 +14,18 @@ function fixture(identity = { id: "Feynman", parent: "Dirac" as string | null })
 	const send = sinon.stub().resolves({ accepted: true, message_id: "message-1" })
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentIdentity: identity, agentCommunication: { send } }, ui: { createCard } } as unknown as IToolEnvironment
-	return { env, send, card, createCard }
+	const warn = sinon.stub()
+	const env = {
+		orchestration: { agentIdentity: identity, agentCommunication: { send } },
+		ui: { createCard },
+		logging: { warn },
+	} as unknown as IToolEnvironment
+	return { env, send, card, createCard, warn }
 }
 
 describe("SendMessageTool", () => {
+	afterEach(() => sinon.restore())
+
 	it("renders the existing parent sleep mail-wake receipt without implying completion", () => {
 		assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "woke", rows: [], wakeReason: "mail" }),
 			"Ordinary agent message. A wake is not assignment completion.")
@@ -84,16 +92,66 @@ describe("SendMessageTool", () => {
 		}
 	})
 
-	for (const phase of ["update", "finalize"] as const) {
-		it(`does not report accepted mail as rejected when ${phase} fails`, async () => {
-			const { env, send, card } = fixture()
+	for (const phase of ["create", "update", "finalize"] as const) {
+		it(`preserves the accepted receipt when card ${phase} fails`, async () => {
+			const { env, send, card, createCard, warn } = fixture()
 			const error = new Error("Display failed for opaque-message-id")
-			card[phase].onFirstCall().rejects(error)
-			await assert.rejects(new SendMessageTool().processCall({ to: "Planck", text: "Authored source hash abc123" }, env), (caught) => caught === error)
+			const operation = phase === "create" ? createCard : card[phase]
+			operation.rejects(error)
+			const output = await new SendMessageTool().processCall({ to: "Planck", text: "Authored source hash abc123" }, env)
+			assert.deepEqual(JSON.parse(output), { accepted: true, message_id: "message-1" })
 			sinon.assert.calledOnce(send)
-			assert.match(card.update.lastCall.args[0].body, /Message accepted, but display failed/)
-			assert.match(card.update.lastCall.args[0].body, /Authored source hash abc123/)
-			assert.doesNotMatch(card.update.lastCall.args[0].body, /opaque-message-id|Message not accepted/)
+			sinon.assert.calledOnce(warn)
+			assert.equal(warn.firstCall.args[1], error)
+			if (phase !== "create") {
+				sinon.assert.calledOnce(card.update)
+				sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
+				assert.match(card.update.firstCall.args[0].body, /Status: Accepted into the volatile mailbox/)
+			}
+		})
+
+		for (const lateOutcome of ["resolve", "reject"] as const) {
+			it(`bounds stalled card ${phase} with late ${lateOutcome} without losing accepted mail`, async () => {
+				const clock = sinon.useFakeTimers()
+				const { env, send, card, createCard, warn } = fixture()
+				let settle!: (value: any) => void
+				let reject!: (reason: Error) => void
+				const stalled = new Promise<any>((resolve, fail) => {
+					settle = resolve
+					reject = fail
+				})
+				const operation = phase === "create" ? createCard : card[phase]
+				operation.returns(stalled)
+				const pending = new SendMessageTool().processCall({ to: "Planck", text: "Finding" }, env)
+				await clock.tickAsync(PRESENTATION_OPERATION_TIMEOUT_MS + 1)
+				assert.deepEqual(JSON.parse(await pending), { accepted: true, message_id: "message-1" })
+				sinon.assert.calledOnce(send)
+				sinon.assert.calledOnce(warn)
+				const lateError = new Error("Late display failure")
+				if (lateOutcome === "reject") reject(lateError)
+				else settle(phase === "create" ? card : undefined)
+				await clock.tickAsync(0)
+				if (phase === "create" && lateOutcome === "resolve")
+					sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED)
+				if (phase === "create" && lateOutcome === "reject")
+					assert.equal(warn.lastCall.args[1], lateError)
+			})
+		}
+	}
+
+	for (const phase of ["create", "update", "finalize"] as const) {
+		it(`preserves the original admission error even if card ${phase} fails`, async () => {
+			const { env, send, card, createCard, warn } = fixture()
+			const error = new Error("Mailbox full")
+			send.rejects(error)
+			const operation = phase === "create" ? createCard : card[phase]
+			operation.rejects(new Error("Display failed"))
+			await assert.rejects(
+				new SendMessageTool().processCall({ to: "Planck", text: "Finding" }, env),
+				(caught) => caught === error,
+			)
+			sinon.assert.calledOnce(send)
+			sinon.assert.calledOnce(warn)
 		})
 	}
 

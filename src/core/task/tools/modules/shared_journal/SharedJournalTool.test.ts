@@ -1,27 +1,42 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { ulid } from "ulid"
 import { isDiscoveredToolAvailableToTaskProfile } from "../../../TaskExecutionProfile"
 import type { DiscoveredTool } from "../../discovery/DiscoveredTool"
 import type { IToolEnvironment } from "../../interfaces/IToolEnvironment"
+import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
 import { SharedJournalTool, shared_journal_spec } from "./SharedJournalTool"
 import { exposure } from "./tool"
 
 function fixture(identity = { id: "Curie", parent: "Dirac" as string | null }) {
 	const id = ulid()
 	const receipt = { published: true, message_id: id, notifications: { enqueued: 1, skipped_inactive: 1, rejected_capacity: 2 } }
-	const record = { version: 1, id, author: "Feynman", created_at: 1, headline: "Finding", content: "Complete body\nwith all details" }
+	const record = {
+		version: 1,
+		id,
+		author: "Feynman",
+		created_at: 1,
+		headline: "Finding",
+		content: "Complete body\nwith all details",
+	}
 	const publish = sinon.stub().resolves(receipt)
 	const read = sinon.stub().resolves(record)
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
-	const env = { orchestration: { agentIdentity: identity, sharedJournal: { publish, read } }, ui: { createCard } } as unknown as IToolEnvironment
-	return { env, publish, read, receipt, record, card, createCard }
+	const warn = sinon.stub()
+	const env = {
+		orchestration: { agentIdentity: identity, sharedJournal: { publish, read } },
+		ui: { createCard },
+		logging: { warn },
+	} as unknown as IToolEnvironment
+	return { env, publish, read, receipt, record, card, createCard, warn }
 }
 
 describe("SharedJournalTool", () => {
+	afterEach(() => sinon.restore())
+
 	it("shows the full finding and secondary notification counts without receipt JSON", async () => {
 		const { env, publish, receipt, card, createCard } = fixture()
 		const input = { headline: " Finding ", content: " Complete body\n " }
@@ -99,18 +114,81 @@ describe("SharedJournalTool", () => {
 		assert.equal(card.update.lastCall.args[0].communication.detail, undefined)
 		assert.equal(card.finalize.lastCall.args[0], CardStatus.ERROR)
 	})
-	for (const phase of ["update", "finalize"] as const) {
-		it(`does not report a stored publication as failed when ${phase} fails`, async () => {
-			const { env, publish, card, createCard, receipt } = fixture()
-			const error = new Error("Display failed for opaque-publication-id")
-			card[phase].onFirstCall().rejects(error)
-			await assert.rejects(new SharedJournalTool().processCall({ operation: "publish", headline: "Finding", content: "Authored source hash abc123" }, env), (caught) => caught === error)
-			sinon.assert.calledOnce(publish)
-			assert.equal(createCard.firstCall.args[0].renderType, "markdown")
-			assert.match(card.update.lastCall.args[0].body, /Published, but display failed/)
-			assert.match(card.update.lastCall.args[0].body, /Authored source hash abc123/)
-			assert.doesNotMatch(card.update.lastCall.args[0].body, new RegExp(`opaque-publication-id|${receipt.message_id}|Publication failed`))
-		})
+	for (const operation of ["publish", "read"] as const) {
+		for (const phase of ["create", "update", "finalize"] as const) {
+			it(`preserves the ${operation} result when card ${phase} fails`, async () => {
+				const { env, publish, read, card, createCard, receipt, record, warn } = fixture()
+				const error = new Error("Display failed for opaque-publication-id")
+				const presentation = phase === "create" ? createCard : card[phase]
+				presentation.rejects(error)
+				const input =
+					operation === "publish"
+						? { operation, headline: "Finding", content: "Authored source hash abc123" }
+						: { operation, message_id: record.id }
+				assert.deepEqual(
+					JSON.parse(await new SharedJournalTool().processCall(input, env)),
+					operation === "publish" ? receipt : record,
+				)
+				sinon.assert.calledOnce(operation === "publish" ? publish : read)
+				sinon.assert.calledOnce(warn)
+				assert.equal(warn.firstCall.args[1], error)
+				if (phase !== "create") {
+					sinon.assert.calledOnce(card.update)
+					sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
+					assert.match(
+						card.update.firstCall.args[0].body,
+						operation === "publish" ? /Status: Published/ : /Status: Retrieved/,
+					)
+				}
+			})
+
+			for (const lateOutcome of ["resolve", "reject"] as const) {
+				it(`bounds stalled card ${phase} with late ${lateOutcome} without losing the ${operation} result`, async () => {
+					const clock = sinon.useFakeTimers()
+					const { env, publish, read, card, createCard, receipt, record, warn } = fixture()
+					let settle!: (value: any) => void
+					let reject!: (reason: Error) => void
+					const stalled = new Promise<any>((resolve, fail) => {
+						settle = resolve
+						reject = fail
+					})
+					const presentation = phase === "create" ? createCard : card[phase]
+					presentation.returns(stalled)
+					const input = operation === "publish"
+						? { operation, headline: "Finding", content: "Complete body" }
+						: { operation, message_id: record.id }
+					const pending = new SharedJournalTool().processCall(input, env)
+					await clock.tickAsync(PRESENTATION_OPERATION_TIMEOUT_MS + 1)
+					assert.deepEqual(JSON.parse(await pending), operation === "publish" ? receipt : record)
+					sinon.assert.calledOnce(operation === "publish" ? publish : read)
+					sinon.assert.calledOnce(warn)
+					const lateError = new Error("Late display failure")
+					if (lateOutcome === "reject") reject(lateError)
+					else settle(phase === "create" ? card : undefined)
+					await clock.tickAsync(0)
+					if (phase === "create" && lateOutcome === "resolve")
+						sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED)
+					if (phase === "create" && lateOutcome === "reject")
+						assert.equal(warn.lastCall.args[1], lateError)
+				})
+			}
+
+			it(`preserves the original ${operation} error even if card ${phase} fails`, async () => {
+				const { env, publish, read, card, createCard, record, warn } = fixture()
+				const error = new Error("Storage unavailable")
+				const action = operation === "publish" ? publish : read
+				action.rejects(error)
+				const presentation = phase === "create" ? createCard : card[phase]
+				presentation.rejects(new Error("Display failed"))
+				const input =
+					operation === "publish"
+						? { operation, headline: "Finding", content: "Complete body" }
+						: { operation, message_id: record.id }
+				await assert.rejects(new SharedJournalTool().processCall(input, env), (caught) => caught === error)
+				sinon.assert.calledOnce(action)
+				sinon.assert.calledOnce(warn)
+			})
+		}
 	}
 	it("requires a bound capability and is available on all root and child profiles", async () => {
 		const { env, createCard } = fixture()

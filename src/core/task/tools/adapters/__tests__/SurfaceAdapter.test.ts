@@ -38,7 +38,7 @@ describe("SurfaceAdapter", () => {
 					config.yoloModeToggled = true
 					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
 					config.permissionDecisionBinding = {
-						configurationRevision: 1,
+						authorityMode: "act", configurationRevision: 1,
 						service: { decide: sinon.stub().resolves({ decision: "approve" }) },
 					}
 					config.toolUse = { name: "execute_command", params: { commands: ["echo retained"] } }
@@ -292,7 +292,7 @@ describe("SurfaceAdapter", () => {
 			const decide = sinon.stub().resolves({ decision: "approve", reason: "Allowed by policy." })
 			config.yoloModeToggled = true
 			config.autoApprover.isUnrestrictedAutoApprove.returns(true)
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.permissionDecisionBinding = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 			config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
 
 			const card = await adapter.ui.createManualInteractionCard({
@@ -351,7 +351,7 @@ describe("SurfaceAdapter", () => {
 				waitForInteraction: sinon.stub(),
 			}
 			const decide = sinon.stub().resolves({ decision: "approve", reason: "Allowed by policy." })
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.permissionDecisionBinding = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 			config.toolUse = { name: "write_to_file", params: { path: "src/index.ts", content: "export {}\n" } }
 			config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(auditCardHandle))
 
@@ -396,7 +396,7 @@ describe("SurfaceAdapter", () => {
 				waitForInteraction: sinon.stub().resolves({ action: DiracAskResponse.APPROVE }),
 			}
 			const decide = sinon.stub().resolves({ decision: "escalate", reason: "User choice." })
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.permissionDecisionBinding = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 			config.taskMessenger.createCard = sinon.stub().resolves(attachCardState(fakeHandle))
 
 			const handle = await adapter.ui.createCard({
@@ -479,7 +479,7 @@ describe("SurfaceAdapter", () => {
 			config.autoApprover.isUnrestrictedAutoApprove.returns(true)
 			config.permissionDecisionBinding = {
 				service: { decide: sinon.stub().resolves({ decision: "escalate", reason: "User decision required." }) },
-				configurationRevision: 1,
+				authorityMode: "act", configurationRevision: 1,
 			}
 
 			const result = await (
@@ -497,7 +497,7 @@ describe("SurfaceAdapter", () => {
 
 		it("resolves unrestricted auto-approval before Utility", async () => {
 			const decide = sinon.stub().resolves({ decision: "escalate", reason: "Escalate." })
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.permissionDecisionBinding = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 			config.autoApprover.isUnrestrictedAutoApprove.returns(true)
 
 			const handle = await adapter.ui.createCard({
@@ -519,7 +519,7 @@ describe("SurfaceAdapter", () => {
 					resolveDecision = resolve
 				}),
 			)
-			let binding: any = { service: { decide }, configurationRevision: 1 }
+			let binding: any = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 			Object.defineProperty(config, "permissionDecisionBinding", {
 				configurable: true,
 				get: () => binding,
@@ -554,7 +554,7 @@ describe("SurfaceAdapter", () => {
 					resolveDecision = resolve
 				}),
 			)
-			config.permissionDecisionBinding = { service: { decide }, configurationRevision: 1 }
+			config.permissionDecisionBinding = { service: { decide }, authorityMode: "act", configurationRevision: 1 }
 
 			const pendingHandle = adapter.ui.createCard({
 				header: "Permission",
@@ -572,7 +572,7 @@ describe("SurfaceAdapter", () => {
 
 		it("never routes an unmarked control-flow approval through Utility or Auto-Approve All", async () => {
 			const decide = sinon.stub().resolves({ decision: "approve", reason: "Must not be called." })
-			const readBinding = sinon.stub().returns({ service: { decide }, configurationRevision: 1 })
+			const readBinding = sinon.stub().returns({ service: { decide }, authorityMode: "act", configurationRevision: 1 })
 			Object.defineProperty(config, "permissionDecisionBinding", { configurable: true, get: readBinding })
 			config.autoApprover.isUnrestrictedAutoApprove.returns(true)
 			const fakeHandle = {

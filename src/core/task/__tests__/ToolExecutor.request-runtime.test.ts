@@ -150,6 +150,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 			requestRuntime: () => runtime,
 			getCurrentWorkingConfiguration: () => current,
 			commandPermissionController: {},
+			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
 		}
 		const autoApprover = (ToolExecutor.prototype as any).requestAutoApprover.call(harness)
 
@@ -158,20 +159,23 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
 	})
 
-	it("allows tasklet writes without enabling unrestricted approval across live permission changes", async () => {
+	it("uses live write policy without enabling unrestricted child approval", async () => {
 		let current = configuration("act", 1, false)
 		const harness = {
 			executionProfile: "tasklet",
 			getCurrentWorkingConfiguration: () => current,
-			commandPermissionController: { validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) },
+			commandPermissionController: { validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) },
+			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
 		}
 		const autoApprover = (ToolExecutor.prototype as any).requestAutoApprover.call(harness)
 		assert.equal(autoApprover.requiresCounterpartyApproval, true)
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
+		assert.equal(autoApprover.shouldAutoApproveWithRules(DiracDefaultTool.EDIT_FILE, "src/index.ts"), false)
 		current = configuration("act", 2, true)
 		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
-		assert.equal(await autoApprover.resolveToolPathPermission(DiracDefaultTool.EDIT_FILE, "src/index.ts"), "auto_approve")
-		sinon.assert.notCalled(harness.commandPermissionController.validateTool)
+		harness.commandPermissionController.validateTool.returns({ allowed: true, reason: "allowed" })
+		assert.equal(autoApprover.shouldAutoApproveWithRules(DiracDefaultTool.EDIT_FILE, "src/index.ts"), true)
+		sinon.assert.alwaysCalledWithExactly(harness.commandPermissionController.validateTool, DiracDefaultTool.EDIT_FILE, "src/index.ts")
 	})
 
 	it("exposes Utility permission evaluation to tasklets without enabling YOLO interactions", () => {
@@ -223,6 +227,49 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(config.mode, "act")
 	})
 
+	it("binds child Utility to current parent mode and rules without changing child execution", () => {
+		const child = configuration("act", 1)
+		let parent = configuration("plan", 7)
+		const childRules = { revision: 1, validateTool: sinon.stub().returns({ allowed: true, reason: "allowed" }) }
+		const parentRules = { revision: 4, validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }) }
+		const executor = Object.assign(Object.create(ToolExecutor.prototype), {
+			executionProfile: "tasklet",
+			requestRuntime: () => createTaskRequestRuntime(child, { getModel: () => ({ id: "test", info: {} }) } as any, "child"),
+			getCurrentWorkingConfiguration: () => child,
+			getPermissionWorkingConfiguration: () => parent,
+			commandPermissionController: childRules,
+			getPermissionCommandController: () => parentRules,
+			createUtilityRunner: sinon.stub().returns({ run: sinon.stub() }),
+		})
+		for (const key of TASK_CALLBACKS_KEYS) {
+			if (typeof executor[key] !== "function") executor[key] = sinon.stub()
+		}
+		const config = executor.asToolConfig()
+		const enableUtility = (current: typeof parent) => ({
+			...current,
+			settings: {
+				...current.settings, utilityModelUsePermissionHandling: true,
+				utilityModelPermissionPolicy: "Allow commands only in Act.",
+				utilityModelSelection: { provider: "openai" as const, modelId: "utility-model" }
+			},
+		})
+		parent = enableUtility(parent)
+		assert.equal(config.mode, "act")
+		assert.equal(config.permissionDecisionBinding.authorityMode, "plan")
+		assert.equal(config.permissionDecisionBinding.configurationRevision, 7)
+		assert.equal(config.permissionDecisionBinding.commandPermissionRevision, 4)
+		assert.equal(config.services.commandPermissionController, parentRules)
+		const autoApprover = executor.requestAutoApprover()
+		assert.equal(autoApprover.shouldAutoApproveWithRules(DiracDefaultTool.EDIT_FILE, "private.ts"), false)
+		sinon.assert.calledOnceWithExactly(parentRules.validateTool, DiracDefaultTool.EDIT_FILE, "private.ts")
+		sinon.assert.notCalled(childRules.validateTool)
+		parent = enableUtility(configuration("act", 8))
+		parentRules.revision++
+		assert.equal(config.permissionDecisionBinding.authorityMode, "act")
+		assert.equal(config.permissionDecisionBinding.configurationRevision, 8)
+		assert.equal(config.permissionDecisionBinding.commandPermissionRevision, 5)
+	})
+
 	it("builds permission handling from the supplied current configuration", () => {
 		const enabled = createTaskWorkingConfiguration({
 			revision: 2,
@@ -245,12 +292,17 @@ describe("ToolExecutor request-runtime authorization", () => {
 			revision: 3,
 			settings: { ...enabled.settings, utilityModelUsePermissionHandling: false },
 		}
-		const harness = { createUtilityRunner: sinon.stub().returns({ run: sinon.stub() }), commandPermissionController: { revision: 4 } }
+		const harness = {
+			createUtilityRunner: sinon.stub().returns({ run: sinon.stub() }),
+			commandPermissionController: { revision: 4 },
+			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
+		}
 		const createBinding = (ToolExecutor.prototype as any).createPermissionDecisionBinding
 
 		const binding = createBinding.call(harness, enabled)
 		assert.ok(binding)
 		assert.equal(binding.configurationRevision, enabled.revision)
+		assert.equal(binding.authorityMode, "act")
 		assert.equal(binding.commandPermissionRevision, 4)
 		sinon.assert.calledOnceWithExactly(harness.createUtilityRunner, enabled.settings.utilityModelSelection, {}, enabled.apiConfiguration)
 		assert.equal(createBinding.call(harness, disabled), undefined)
@@ -296,6 +348,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 			ulid: "utility-accounting-test",
 			onUtilityUsageRecorded: notified,
 			commandPermissionController: { revision: 1 },
+			permissionCommandController: (ToolExecutor.prototype as any).permissionCommandController,
 			requestRuntime: () => ({ workingConfiguration: current }),
 			createUtilityRunner: (ToolExecutor.prototype as any).createUtilityRunner,
 		}

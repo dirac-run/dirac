@@ -80,6 +80,8 @@ export class AgentCommunication {
 		private readonly roster: () => AgentRosterEntry[],
 		private readonly onArrival: () => void,
 		private readonly onWaitStarted: (id: string) => void = () => { },
+		// Retained identity slots keep numeric cursors stable when an initial acceptance fails.
+		private readonly rosterIds: (entries: readonly AgentRosterEntry[]) => readonly string[] = (entries) => entries.map(({ id }) => id),
 	) { }
 
 	forAgent(from: string): AgentCommunicationCapability {
@@ -219,17 +221,23 @@ export class AgentCommunication {
 		if (input.cursor !== undefined && !/^(0|[1-9]\d*)$/.test(input.cursor)) throw new Error("Invalid agent roster cursor")
 		const offset = Number(input.cursor ?? 0)
 		const entries = this.currentRoster()
-		if (!Number.isSafeInteger(offset) || offset > entries.length) throw new Error("Invalid agent roster cursor")
+		const ids = this.rosterIds(entries)
+		if (!Number.isSafeInteger(offset) || offset > ids.length) throw new Error("Invalid agent roster cursor")
+		const byId = new Map(entries.map((entry) => [entry.id, entry]))
 		const page: AgentRosterPage = { agents: [] }
-		for (let index = offset; index < entries.length && page.agents.length < limit; index++) {
-			const entry = entries[index]
+		let next = offset
+		while (next < ids.length && page.agents.length < limit) {
+			const entry = byId.get(ids[next])
+			if (!entry) { next++; continue }
 			const agents = [...page.agents, { ...entry, title_preview: entry.title_preview.slice(0, 80), accepts_messages: !this.closed && entry.accepts_messages }]
-			const candidate: AgentRosterPage = { agents, ...(index + 1 < entries.length ? { next_cursor: String(index + 1) } : {}) }
+			let following = next + 1
+			while (following < ids.length && !byId.has(ids[following])) following++
+			const candidate: AgentRosterPage = { agents, ...(following < ids.length ? { next_cursor: String(following) } : {}) }
 			if (Buffer.byteLength(JSON.stringify(candidate), "utf8") > DELIVERY_BYTES) break
 			page.agents = agents
+			next = following
 		}
-		const next = offset + page.agents.length
-		if (next < entries.length) page.next_cursor = String(next)
+		if (next < ids.length) page.next_cursor = String(next)
 		return page
 	}
 

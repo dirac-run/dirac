@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert"
 import { CardStatus } from "@shared/ExtensionMessage"
 import type { TaskletReceipt } from "@shared/taskletReceipt"
-import { describe, it } from "mocha"
+import { afterEach, describe, it } from "mocha"
+import sinon from "sinon"
 import type { IToolEnvironment, TaskletControls, TaskletMessage } from "../../interfaces/IToolEnvironment"
+import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDeadline"
 import { SubagentsTool } from "./SubagentsTool"
 
 type CommunicationCard = {
@@ -16,24 +18,28 @@ type CommunicationCard = {
 
 function fixture(controls: Partial<TaskletControls>, actor = "Dirac") {
 	const cards: { initial: CommunicationCard; updates: CommunicationCard[]; finalized: CardStatus[] }[] = []
+	const handles: { update: sinon.SinonStub; finalize: sinon.SinonStub }[] = []
+	const createCard = sinon.stub().callsFake(async (initial: CommunicationCard) => {
+		const card = { initial, updates: [] as CommunicationCard[], finalized: [] as CardStatus[] }
+		cards.push(card)
+		const handle = {
+			update: sinon.stub().callsFake(async (patch: CommunicationCard) => {
+				card.updates.push(patch)
+			}),
+			finalize: sinon.stub().callsFake(async (status: CardStatus) => {
+				card.finalized.push(status)
+			}),
+		}
+		handles.push(handle)
+		return handle
+	})
+	const warn = sinon.stub()
 	const env = {
 		orchestration: { tasklets: controls, agentIdentity: { id: actor } },
-		ui: {
-			createCard: async (initial: CommunicationCard) => {
-				const card = { initial, updates: [] as CommunicationCard[], finalized: [] as CardStatus[] }
-				cards.push(card)
-				return {
-					update: async (patch: CommunicationCard) => {
-						card.updates.push(patch)
-					},
-					finalize: async (status: CardStatus) => {
-						card.finalized.push(status)
-					},
-				}
-			},
-		},
+		ui: { createCard },
+		logging: { warn },
 	} as unknown as IToolEnvironment
-	return { env, cards }
+	return { env, cards, handles, createCard, warn }
 }
 
 async function message(env: IToolEnvironment, messages: unknown[]) {
@@ -41,6 +47,132 @@ async function message(env: IToolEnvironment, messages: unknown[]) {
 }
 
 describe("Subagent supervision communication cards", () => {
+	afterEach(() => sinon.restore())
+
+	const cases = [
+		...[
+			{ type: "guidance", text: "Keep the source hash" },
+			{ type: "reply", request_id: "question-1", text: "Keep the source hash" },
+			{ type: "permission_decision", request_id: "permission-1", decision: "approve" },
+		].map((item) => {
+			const status = item.type === "guidance" ? "queued" : "resolved"
+			const result = [{ taskletId: "Planck", status, ...(item.request_id ? { requestId: item.request_id } : {}) }]
+			return {
+				name: item.type,
+				operation: "message",
+				input: { operation: "message", messages: [{ tasklet_id: "Planck", ...item }] },
+				hostResult: result,
+				expected: result,
+			}
+		}),
+		{
+			name: "interrupt",
+			operation: "interrupt",
+			input: { operation: "interrupt", tasklet_id: "Planck" },
+			hostResult: { id: "Planck", title: "Review code", outcomePersisted: true, outcome: { kind: "interrupted" } },
+			expected: { id: "Planck", title: "Review code", outcomePersisted: true, outcome: { kind: "interrupted" } },
+		},
+		{
+			name: "resume",
+			operation: "resume",
+			input: { operation: "resume", tasklet_id: "Planck", message: "Follow up" },
+			hostResult: { id: "Planck", title: "Review code" },
+			expected: { id: "Planck", title: "Review code", accepted: true },
+		},
+	]
+	for (const scenario of cases) {
+		for (const phase of ["create", "update", "finalize"] as const) {
+			it(`preserves ${scenario.name} results when card ${phase} rejects`, async () => {
+				const action = sinon.stub().resolves(scenario.hostResult)
+				const { env, createCard, warn } = fixture({ [scenario.operation]: action })
+				const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
+				createCard.resolves(card)
+				const presentation = phase === "create" ? createCard : card[phase]
+				const error = new Error("Display failed")
+				presentation.rejects(error)
+				const output = await new SubagentsTool().processCall(scenario.input, env)
+				assert.deepEqual(JSON.parse(output), scenario.expected)
+				sinon.assert.calledOnce(action)
+				sinon.assert.calledOnce(warn)
+				assert.equal(warn.firstCall.args[1], error)
+				if (phase !== "create") {
+					sinon.assert.calledOnce(card.update)
+					sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
+				}
+			})
+
+			for (const lateOutcome of ["resolve", "reject"] as const) {
+				it(`bounds stalled card ${phase} with late ${lateOutcome} without losing ${scenario.name} results`, async () => {
+					const clock = sinon.useFakeTimers()
+					const action = sinon.stub().resolves(scenario.hostResult)
+					const { env, createCard, warn } = fixture({ [scenario.operation]: action })
+					const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
+					createCard.resolves(card)
+					let settle!: (value: any) => void
+					let reject!: (reason: Error) => void
+					const stalled = new Promise<any>((resolve, fail) => {
+						settle = resolve
+						reject = fail
+					})
+					const presentation = phase === "create" ? createCard : card[phase]
+					presentation.returns(stalled)
+					const pending = new SubagentsTool().processCall(scenario.input, env)
+					await clock.tickAsync(PRESENTATION_OPERATION_TIMEOUT_MS + 1)
+					assert.deepEqual(JSON.parse(await pending), scenario.expected)
+					sinon.assert.calledOnce(action)
+					sinon.assert.calledOnce(warn)
+					const lateError = new Error("Late display failure")
+					if (lateOutcome === "reject") reject(lateError)
+					else settle(phase === "create" ? card : undefined)
+					await clock.tickAsync(0)
+					if (phase === "create" && lateOutcome === "resolve")
+						sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ABANDONED)
+					if (phase === "create" && lateOutcome === "reject")
+						assert.equal(warn.lastCall.args[1], lateError)
+				})
+			}
+
+			it(`preserves the ${scenario.name} operation error when card ${phase} rejects`, async () => {
+				const error = new Error("Host operation failed")
+				const action = sinon.stub().rejects(error)
+				const { env, createCard, warn } = fixture({ [scenario.operation]: action })
+				const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
+				createCard.resolves(card)
+				const presentation = phase === "create" ? createCard : card[phase]
+				presentation.rejects(new Error("Display failed"))
+				await assert.rejects(new SubagentsTool().processCall(scenario.input, env), (caught) => caught === error)
+				sinon.assert.calledOnce(action)
+				sinon.assert.calledOnce(warn)
+			})
+		}
+	}
+
+	it("keeps every batch receipt and finishes other cards after one card update fails", async () => {
+		const result = [
+			{ taskletId: "Planck", status: "queued" as const, messageId: "mail-1" },
+			{ taskletId: "Curie", status: "queued" as const, messageId: "mail-2" },
+		]
+		const { env, handles, cards, warn } = fixture({
+			message: async () => {
+				handles[0].update.rejects(new Error("Display failed"))
+				return result
+			},
+		})
+		assert.deepEqual(
+			await message(env, [
+				{ tasklet_id: "Planck", type: "guidance", text: "First" },
+				{ tasklet_id: "Curie", type: "guidance", text: "Second" },
+			]),
+			result,
+		)
+		assert.deepEqual(
+			cards.map((card) => card.finalized),
+			[[CardStatus.SUCCESS], [CardStatus.SUCCESS]],
+		)
+		assert.equal(cards[1].updates[0].taskletReceipt.outcome, "queued")
+		sinon.assert.calledOnce(warn)
+	})
+
 	it("retains exact guidance and identifies each item before and after host admission", async () => {
 		const guidance = "  Keep the original spacing.\n\nCheck café ☕ first.\n"
 		let calls = 0

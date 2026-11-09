@@ -24,11 +24,14 @@ import type {
 import type { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { waitForPresentationOperation } from "../../subagent/PresentationDeadline"
 
+const MAX_ASSIGNMENTS = 16
+
 const assignmentParameter: NonNullable<DiracToolSpec["parameters"]>[number] = {
 	name: "assignments",
 	type: "array",
 	required: false,
 	minItems: 1,
+	maxItems: MAX_ASSIGNMENTS,
 	instruction:
 		"Assignments to start concurrently; one assignment still uses a one-element array. Acceptance is not completion.",
 	items: {
@@ -84,8 +87,10 @@ export class SubagentsTool implements IDiracTool {
 			)
 			return formatResponse.toolError("assignments must be a non-empty array")
 		}
+		if (assignments.length > MAX_ASSIGNMENTS)
+			throw new Error(`assignments must contain no more than ${MAX_ASSIGNMENTS} items`)
 
-		const card = await this.createSpawnCard(env)
+		const card = await createReceiptCard({ operation: "spawn", outcome: "requested", rows: [] }, env)
 		const instructions: (string | undefined)[] = []
 		const results = await Promise.all(
 			assignments.map(async (assignment, index) => {
@@ -132,8 +137,8 @@ export class SubagentsTool implements IDiracTool {
 					error: result.error,
 				})),
 			}
-			await this.present(card.update(receiptCard(receipt, status, env.orchestration.agentIdentity.id)), env)
-			await this.present(card.finalize(status), env)
+			await present(() => card.update(receiptCard(receipt, status, env.orchestration.agentIdentity.id)), env)
+			await present(() => card.finalize(status), env)
 		}
 		return JSON.stringify({ subagents: results }, null, 2)
 	}
@@ -152,37 +157,36 @@ export class SubagentsTool implements IDiracTool {
 			throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`)
 		return { title, prompt, type }
 	}
+}
 
-	private async createSpawnCard(env: IToolEnvironment): Promise<ICardHandle | undefined> {
+async function createReceiptCard(
+	receipt: TaskletReceipt,
+	env: IToolEnvironment,
+	rawInput?: Record<string, unknown>,
+): Promise<ICardHandle | undefined> {
+	try {
 		const creation = env.ui.createCard({
-			...receiptCard(
-				{ operation: "spawn", outcome: "requested", rows: [] },
-				CardStatus.RUNNING,
-				env.orchestration.agentIdentity.id,
-			),
+			...receiptCard(receipt, CardStatus.RUNNING, env.orchestration.agentIdentity.id),
+			rawInput,
 		})
-		try {
-			const result = await waitForPresentationOperation(creation)
-			if (!result.timedOut) return result.value
-			env.logging.warn("[SubagentsTool] Spawn card creation timed out")
-			void creation
-				.then((card) => this.present(card.finalize(CardStatus.ABANDONED), env))
-				.catch((error) => {
-					env.logging.warn("[SubagentsTool] Late spawn card creation failed", toError(error))
-				})
-		} catch (error) {
-			env.logging.warn("[SubagentsTool] Spawn card creation failed", toError(error))
-		}
-		return undefined
+		const result = await waitForPresentationOperation(creation)
+		if (!result.timedOut) return result.value
+		env.logging.warn("[SubagentsTool] Card creation timed out")
+		void creation
+			.then((card) => present(() => card.finalize(CardStatus.ABANDONED), env))
+			.catch((error) => env.logging.warn("[SubagentsTool] Late card creation failed", toError(error)))
+	} catch (error) {
+		env.logging.warn("[SubagentsTool] Card creation failed", toError(error))
 	}
+	return undefined
+}
 
-	private async present(operation: Promise<void>, env: IToolEnvironment): Promise<void> {
-		try {
-			const result = await waitForPresentationOperation(operation)
-			if (result.timedOut) env.logging.warn("[SubagentsTool] Spawn card presentation timed out")
-		} catch (error) {
-			env.logging.warn("[SubagentsTool] Spawn card presentation failed", toError(error))
-		}
+async function present(operation: () => Promise<void>, env: IToolEnvironment): Promise<void> {
+	try {
+		const result = await waitForPresentationOperation(operation())
+		if (result.timedOut) env.logging.warn("[SubagentsTool] Card presentation timed out")
+	} catch (error) {
+		env.logging.warn("[SubagentsTool] Card presentation failed", toError(error))
 	}
 }
 
@@ -310,48 +314,49 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 	const request = parseControlRequest(args)
 	const actor = env.orchestration.agentIdentity.id
 	const initialReceipts = individualReceipts(controlReceipt(request))
-	const cards = await Promise.all(
-		initialReceipts.map((receipt) =>
-			env.ui.createCard({
-				...receiptCard(receipt, CardStatus.RUNNING, actor),
-				rawInput: args,
-			}),
-		),
-	)
+	const cards = await Promise.all(initialReceipts.map((receipt) => createReceiptCard(receipt, env, args)))
+	let result: unknown
 	try {
-		const result = await executeOperation(controls, request)
-		const output = JSON.stringify(result)
-		if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
-			throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
-		const receipts = individualReceipts(controlReceiptResult(request, result))
-		for (const [index, receipt] of receipts.entries()) {
-			const status =
-				receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
-					? CardStatus.ERROR
-					: CardStatus.SUCCESS
-			const content = receiptCard(receipt, status, actor)
-			await cards[index].update(content)
-			await cards[index].finalize(status)
-		}
-		return output
+		result = await executeOperation(controls, request)
 	} catch (error) {
 		for (const [index, receipt] of initialReceipts.entries()) {
-			await cards[index].update(
-				receiptCard(
-					{
-						...receipt,
-						outcome: "failed",
-						rows: receipt.rows.map((row) => ({ ...row, outcome: "failed" })),
-						error: clipText(toError(error).message, 2000),
-					},
-					CardStatus.ERROR,
-					actor,
-				),
+			const card = cards[index]
+			if (!card) continue
+			await present(
+				() =>
+					card.update(
+						receiptCard(
+							{
+								...receipt,
+								outcome: "failed",
+								rows: receipt.rows.map((row) => ({ ...row, outcome: "failed" })),
+								error: clipText(toError(error).message, 2000),
+							},
+							CardStatus.ERROR,
+							actor,
+						),
+					),
+				env,
 			)
-			await cards[index].finalize(CardStatus.ERROR)
+			await present(() => card.finalize(CardStatus.ERROR), env)
 		}
 		throw error
 	}
+	const output = JSON.stringify(result)
+	if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
+		throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
+	const receipts = individualReceipts(controlReceiptResult(request, result))
+	for (const [index, receipt] of receipts.entries()) {
+		const card = cards[index]
+		if (!card) continue
+		const status =
+			receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
+				? CardStatus.ERROR
+				: CardStatus.SUCCESS
+		await present(() => card.update(receiptCard(receipt, status, actor)), env)
+		await present(() => card.finalize(status), env)
+	}
+	return output
 }
 
 function requireArguments(input: unknown): Record<string, unknown> {

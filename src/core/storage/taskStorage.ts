@@ -38,9 +38,18 @@ async function readTaskletRecords(rootTaskId: string, recordRootTaskId: string):
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
 		throw error
 	}
-	return Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) =>
-		loadTaskletRecord({ kind: "tasklet", rootTaskId, taskletId: entry.name }, recordRootTaskId),
-	))
+	const records = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+		const address = { kind: "tasklet" as const, rootTaskId, taskletId: entry.name }
+		// Only the atomically committed record admits a child; interrupted initial writes may leave a directory.
+		try {
+			await fs.lstat(path.join(getTaskDirectoryPath(address), GlobalFileNames.taskletRecord))
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+			throw error
+		}
+		return loadTaskletRecord(address, recordRootTaskId)
+	}))
+	return records.filter((record): record is TaskletRecord => record !== undefined)
 }
 
 /** Read one root-qualified child without loading its siblings or creating directories. */
@@ -100,7 +109,7 @@ export async function loadTaskletEvents(address: Extract<TaskStorageAddress, { k
 					: event.communication.type === "outcome"
 						? !event.communication.outcome ||
 						!["completed", "failed", "cancelled", "interrupted"].includes(event.communication.outcome.kind)
-						: event.communication.type === "message"
+						: event.communication.type === "message" || event.communication.type === "waiting_for_message"
 							? false
 							: event.communication.type === "lifecycle"
 								? !["accepted", "resumed"].includes(event.communication.state)

@@ -74,7 +74,7 @@ function makeEnvironment(
 	const env = {
 		config: {
 			backgroundEditEnabled,
-			permissionDecisionBinding: { service: { decide: sinon.stub() }, configurationRevision: 1 },
+			permissionDecisionBinding: { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 },
 			callbacks: { resolveToolPathPermission },
 		},
 		ui: { createCard, upsertText: sinon.stub().resolves() },

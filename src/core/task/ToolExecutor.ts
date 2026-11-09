@@ -129,6 +129,7 @@ export class ToolExecutor {
 		private getAgentCommunication?: () => import("./AgentCommunication").AgentCommunicationCapability | undefined,
 		private getAgentWait?: () => import("./AgentCommunication").AgentWaitCapability | undefined,
 		private getSharedJournal?: () => import("./SharedJournalTypes").SharedJournalCapability | undefined,
+		private getPermissionCommandController?: () => CommandPermissionController,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -160,11 +161,15 @@ export class ToolExecutor {
 		this.api = api
 	}
 
+	private permissionCommandController(): CommandPermissionController {
+		return this.getPermissionCommandController?.() ?? this.commandPermissionController
+	}
+
 	private requestAutoApprover(): AutoApprove {
 		return new AutoApprove(
-			this.commandPermissionController,
+			this.permissionCommandController(),
 			() => (this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)().settings,
-			this.getCurrentWorkingConfiguration().executionOptions.multiRootEnabled,
+			(this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)().executionOptions.multiRootEnabled,
 			this.executionProfile === "tasklet",
 		)
 	}
@@ -184,12 +189,12 @@ export class ToolExecutor {
 		signal: AbortSignal,
 	): Promise<{ approved: boolean; assertCurrent: () => void }> {
 		const configuration = this.getCurrentWorkingConfiguration()
-		const permissionRevision = this.commandPermissionController.revision
+		const permissionRevision = this.permissionCommandController().revision
 		const assertCurrent = () => {
 			signal.throwIfAborted()
 			this.assertTaskletPermissionAllowed(request)
 			if (this.getCurrentWorkingConfiguration().revision !== configuration.revision ||
-				this.commandPermissionController.revision !== permissionRevision) {
+				this.permissionCommandController().revision !== permissionRevision) {
 				throw new Error("Parent authority changed while resolving tasklet permission")
 			}
 		}
@@ -212,7 +217,7 @@ export class ToolExecutor {
 				...(request.card.locations ? { locations: structuredClone(request.card.locations) } : {}),
 				...(request.card.diffs ? { diffs: structuredClone(request.card.diffs) } : {}),
 			},
-			runtime: { cwd: this.cwd, mode: configuration.settings.mode, isSubagent: true },
+			runtime: { cwd: this.cwd, mode: binding.authorityMode, isSubagent: true },
 		}, signal)
 		assertCurrent()
 		return { approved: decision.decision === "approve", assertCurrent }
@@ -233,14 +238,14 @@ export class ToolExecutor {
 				// Classified permission cards apply the shared unrestricted override even when
 				// the tool's initial disposition is manual-only (including Utility restrictions).
 				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
-				const approval = resolveCommandApproval(operation.commands, utilityEnabled, autoApprover, this.commandPermissionController)
+				const approval = resolveCommandApproval(operation.commands, utilityEnabled, autoApprover, this.permissionCommandController())
 				return !approval.required ? "auto_approve" : approval.utilityEligible ? "utility_eligible" : "manual_only"
 			}
 			case "browser":
 				if (tool !== DiracDefaultTool.BROWSER) return "manual_only"
 				if (autoApprover.isUnrestrictedAutoApprove()) return "auto_approve"
 				return utilityEnabled
-					? resolveBrowserLaunchPermission(operation.url, autoApprover, this.commandPermissionController)
+					? resolveBrowserLaunchPermission(operation.url, autoApprover, this.permissionCommandController())
 					: autoApprover.isUnrestrictedAutoApprove() ? "auto_approve" : "manual_only"
 			case "paths": {
 				if (!ToolExecutor.PLAN_MODE_RESTRICTED_TOOLS.includes(tool) || !operation.paths.length) return "manual_only"
@@ -356,7 +361,8 @@ export class ToolExecutor {
 				(error) => Logger.warn("Utility permission decision failed; escalating the request", error),
 			),
 			configurationRevision: configuration.revision,
-			commandPermissionRevision: this.commandPermissionController.revision,
+			authorityMode: settings.mode,
+			commandPermissionRevision: this.permissionCommandController().revision,
 		}
 	}
 
@@ -368,6 +374,7 @@ export class ToolExecutor {
 		const currentSettings = () => permissionConfiguration().settings
 		const currentPermissionDecisionBinding = () => this.createPermissionDecisionBinding(permissionConfiguration())
 		const autoApprover = this.requestAutoApprover()
+		const permissionCommandController = () => this.permissionCommandController()
 		const config: TaskConfig = {
 			executionProfile: this.executionProfile,
 			taskId: this.taskId,
@@ -416,7 +423,9 @@ export class ToolExecutor {
 				diffViewProvider: this.diffViewProvider,
 				fileContextTracker: this.fileContextTracker,
 				diracIgnoreController: this.diracIgnoreController,
-				commandPermissionController: this.commandPermissionController,
+				get commandPermissionController() {
+					return permissionCommandController()
+				},
 				contextManager: this.contextManager,
 			},
 			callbacks: {

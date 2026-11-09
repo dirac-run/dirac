@@ -1638,6 +1638,8 @@ describe("Tasklet real Task execution", function () {
 		const peerSent = deferred<void>()
 		const parentSent = deferred<void>()
 		const childCompletionRequest = deferred<void>()
+
+		const taskletId = (title: string) => host.list().find((record) => record.title === title)!.id
 		const turns = { root: 0, a: 0, b: 0 }
 		const inputs = { root: [] as string[], a: [] as string[], b: [] as string[] }
 		nextTool = async (request) => {
@@ -1661,7 +1663,7 @@ describe("Tasklet real Task execution", function () {
 				if (turn === 2) return { name: "list_agents", args: {} }
 				if (turn === 3) {
 					await childCompletionRequest.promise
-					return { name: "send_message", args: { to: host.list()[0].id, text: "ROOT_ORDINARY_MAIL" } }
+					return { name: "send_message", args: { to: taskletId("A"), text: "ROOT_ORDINARY_MAIL" } }
 				}
 				parentSent.resolve()
 				await Promise.all(host.list().map(({ id }) => waitForOutcome(host, id)))
@@ -1670,7 +1672,7 @@ describe("Tasklet real Task execution", function () {
 			if (role === "a") {
 				if (turn === 1) {
 					await bStarted.promise
-					return { name: "send_message", args: { to: host.list()[1].id, text: "PEER_ORDINARY_MAIL" } }
+					return { name: "send_message", args: { to: taskletId("B"), text: "PEER_ORDINARY_MAIL" } }
 				}
 				peerSent.resolve()
 				childCompletionRequest.resolve()
@@ -1694,10 +1696,10 @@ describe("Tasklet real Task execution", function () {
 			assert.ok(inputs.root.some((text) => text.includes("CHILD_ORDINARY_MAIL")))
 			assert.equal(host.agentCommunication.hasPending("Dirac"), false)
 			assert.ok(host.list().every((entry) => entry.outcome?.kind === "completed"))
-			const transcript = await host.readTranscript(host.list()[0].id)
+			const transcript = await host.readTranscript(taskletId("A"))
 			assert.match(JSON.stringify(transcript.conversation), /agentMessageIds/)
 			assert.doesNotMatch(JSON.stringify(transcript.presentation), /\"role\":\"user\"[^}]*ROOT_ORDINARY_MAIL/)
-			await assert.rejects(host.agentCommunication.forAgent("Dirac").send({ to: host.list()[0].id, text: "no resurrection" }), /closed|not active|cannot accept/)
+			await assert.rejects(host.agentCommunication.forAgent("Dirac").send({ to: taskletId("A"), text: "no resurrection" }), /closed|not active|cannot accept/)
 		} finally {
 			bStarted.resolve()
 			peerSent.resolve()
@@ -2982,7 +2984,7 @@ describe("Tasklet real Task execution", function () {
 		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
 		const card = await waitForRootCard(root)
 		assert.notEqual(card.id, request.card.id)
-		assert.match(card.header, /command/)
+		assert.match(card.header, /Feynman.*Your approval needed/)
 		assert.deepEqual(card.rawInput, request.card.rawInput)
 		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
 		await root.submitCardResponse(card.id, DiracAskResponse.APPROVE)

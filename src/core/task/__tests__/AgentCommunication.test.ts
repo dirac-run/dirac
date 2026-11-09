@@ -121,6 +121,43 @@ describe("Volatile agent communication", () => {
 		assert.ok(root.list().agents.every((agent) => !agent.accepts_messages))
 	})
 
+	it("advances roster cursors through retained identity slots after visible admissions disappear", () => {
+		const ids = ["Dirac", "Failed", "Retained", "Failed later", "Last", "Failed tail"]
+		let entries: AgentRosterEntry[] = ids.map((id) => ({ id, title_preview: id, status: "starting", accepts_messages: true }))
+		const group = new AgentCommunication(() => entries, () => { }, undefined, () => ids)
+		const root = group.forAgent("Dirac")
+		const first = root.list({ limit: 2 })
+		assert.deepEqual(first.agents.map(({ id }) => id), ["Dirac", "Failed"])
+		assert.equal(first.next_cursor, "2")
+		entries = entries.filter(({ id }) => !id.startsWith("Failed"))
+		const next = root.list({ cursor: first.next_cursor, limit: 1 })
+		assert.deepEqual(next.agents.map(({ id }) => id), ["Retained"])
+		assert.equal(next.next_cursor, "4")
+		const last = root.list({ cursor: next.next_cursor })
+		assert.deepEqual(last.agents.map(({ id }) => id), ["Last"])
+		assert.equal(last.next_cursor, undefined)
+		assert.deepEqual(root.list({ cursor: "6" }), { agents: [] })
+		assert.throws(() => root.list({ cursor: "7" }), /Invalid agent roster cursor/)
+	})
+
+	it("includes the next visible identity slot's full cursor width in the roster byte budget", () => {
+		const ids = Array.from({ length: 101 }, (_, index) => `missing-${index}`)
+		ids[0] = "Dirac"
+		ids[8] = "First"
+		ids[100] = "Last"
+		const entries: AgentRosterEntry[] = ["Dirac", "First", "Last"].map((id) => ({ id, title_preview: id, status: "running", accepts_messages: true }))
+		const initialBytes = Buffer.byteLength(JSON.stringify({ agents: entries.slice(0, 2), next_cursor: "9" }))
+		entries[1].status += "x".repeat(16384 - initialBytes)
+		const group = new AgentCommunication(() => entries, () => { }, undefined, () => ids)
+		const first = group.forAgent("Dirac").list()
+		assert.deepEqual(first.agents.map(({ id }) => id), ["Dirac"])
+		assert.equal(first.next_cursor, "8")
+		assert.ok(Buffer.byteLength(JSON.stringify(first)) <= 16384)
+		const second = group.forAgent("Dirac").list({ cursor: first.next_cursor })
+		assert.equal(second.agents[0].id, "First")
+		assert.ok(Buffer.byteLength(JSON.stringify(second)) <= 16384)
+	})
+
 	it("returns bounded passive roster pages and rejects invalid page arguments", async () => {
 		const { root, group } = fixture(65)
 		const first = root.list()

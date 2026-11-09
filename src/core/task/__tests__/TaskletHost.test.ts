@@ -241,6 +241,195 @@ describe("TaskletHost asynchronous ownership", () => {
 		await assert.rejects(host.agentCommunication.forAgent(first.id).send({ to: "Dirac", text: "late" }), /closed/)
 	})
 
+	it("keeps roster pagination in admission order when later acceptance finishes first", async () => {
+		const originalSave = storage.saveTaskletRecord
+		const firstGate = deferred<void>()
+		const secondGate = deferred<void>()
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (!record.outcome) await (record.title === "first" ? firstGate : secondGate).promise
+			return originalSave(record)
+		})
+		const first = host.start({ type: "default", title: "first", prompt: "work" })
+		while (save.callCount < 1) await new Promise((resolve) => setImmediate(resolve))
+		const second = host.start({ type: "default", title: "second", prompt: "work" })
+		while (save.callCount < 2) await new Promise((resolve) => setImmediate(resolve))
+		try {
+			const discovery = host.agentCommunication.forAgent("Dirac")
+			const page = discovery.list({ limit: 2 })
+			assert.deepEqual(page.agents.map((entry) => entry.title_preview), ["Dirac", "first"])
+			secondGate.resolve()
+			await second
+			assert.deepEqual(discovery.list({ cursor: page.next_cursor }).agents.map((entry) => entry.title_preview), ["second"])
+			firstGate.resolve()
+			await first
+			assert.deepEqual(discovery.list().agents.map((entry) => entry.title_preview), ["Dirac", "first", "second"])
+		} finally {
+			firstGate.resolve()
+			secondGate.resolve()
+			await Promise.all([first, second])
+		}
+	})
+
+	it("limits concurrent initial acceptance to 16 active children and does not let resume bypass it", async () => {
+		const settled = await host.start({ type: "default", title: "settled", prompt: "work" })
+		await host.interrupt(settled.id)
+		const originalSave = storage.saveTaskletRecord
+		const gate = deferred<void>()
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (!record.outcome) await gate.promise
+			return originalSave(record)
+		})
+		const starting = Array.from({ length: 16 }, (_, index) => host.start({ type: "default", title: `child ${index}`, prompt: "work" }))
+		while (save.callCount < 16) await new Promise((resolve) => setImmediate(resolve))
+		try {
+			assert.equal(host.listActive().length, 16)
+			await assert.rejects(host.start({ type: "default", title: "overflow", prompt: "work" }), { message: "Tasklet active child limit of 16 reached" })
+			await assert.rejects(host.resume(settled.id), { message: "Tasklet active child limit of 16 reached" })
+			assert.equal(save.callCount, 16)
+			assert.equal(constructed.callCount, 1)
+			assert.equal(host["reservedIds"].size, 17)
+			assert.equal(host.inspect(settled.id).outcome?.kind, "interrupted")
+		} finally {
+			gate.resolve()
+			await Promise.all(starting)
+		}
+		assert.equal(constructed.callCount, 17)
+	})
+
+	it("counts pending resumption against active admission before its record write completes", async () => {
+		const settled = await host.start({ type: "default", title: "resume me", prompt: "work" })
+		await host.interrupt(settled.id)
+		await Promise.all(Array.from({ length: 15 }, (_, index) => host.start({ type: "default", title: `child ${index}`, prompt: "work" })))
+		const originalSave = storage.saveTaskletRecord
+		const entered = deferred<void>()
+		const gate = deferred<void>()
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (record.id === settled.id && !record.outcome) { entered.resolve(); await gate.promise }
+			return originalSave(record)
+		})
+		const resuming = host.resume(settled.id)
+		await entered.promise
+		try {
+			assert.equal(host.listActive().length, 16)
+			await assert.rejects(host.start({ type: "default", title: "overflow", prompt: "work" }), /active child limit of 16/)
+			await assert.rejects(host.resume(settled.id), /not settled/)
+			assert.equal(save.callCount, 1)
+		} finally {
+			gate.resolve()
+			await resuming
+		}
+	})
+
+	it("bounds lifetime identity reservations at 256 even after rejected initial writes", async () => {
+		const save = sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("initial record rejected"))
+		for (let index = 0; index < 256; index++) {
+			await assert.rejects(host.start({ type: "default", title: `rejected ${index}`, prompt: "work" }), /initial record rejected/)
+		}
+		await assert.rejects(host.start({ type: "default", title: "overflow", prompt: "work" }), { message: "Tasklet retained identity limit of 256 reached" })
+		assert.equal(host["reservedIds"].size, 256)
+		assert.equal(host.listActive().length, 0)
+		assert.equal(save.callCount, 256)
+		sinon.assert.notCalled(constructed)
+	})
+
+	it("counts 256 reconstructed retained identities while allowing an existing identity to resume", async function () {
+		this.timeout(10000)
+		await Promise.all(Array.from({ length: 256 }, async (_, index) => {
+			const record: storage.TaskletRecord = {
+				id: `Retained ${index}`, rootTaskId: "root", conversationUlid: `conversation-${index}`,
+				configuration: { name: "default", modelSelection: { provider: "anthropic", modelId: anthropicDefaultModelId } },
+				title: `retained ${index}`, prompt: "Original work", createdAt: index, outcome: completed,
+			}
+			await storage.saveTaskletRecord(record)
+			await storage.saveTaskletEvents({ kind: "tasklet", rootTaskId: "root", taskletId: record.id }, [
+				{ id: `outcome-${index}`, taskletId: record.id, createdAt: 123, communication: { type: "outcome", outcome: completed } },
+			])
+		}))
+		await host.reconstruct()
+		assert.equal(host.list().length, 256)
+		const save = sandbox.spy(storage, "saveTaskletRecord")
+		await assert.rejects(host.start({ type: "default", title: "overflow", prompt: "work" }), /retained identity limit of 256/)
+		sinon.assert.notCalled(save)
+		sinon.assert.notCalled(constructed)
+		const resumed = await host.resume("Retained 0", "New assignment")
+		assert.equal(resumed.id, "Retained 0")
+		assert.equal(host["reservedIds"].size, 256)
+		assert.equal(constructed.callCount, 1)
+	})
+
+	it("ignores a failed initial atomic record write's directory during subsequent reconstruction", async () => {
+		const atomic = await import("@core/storage/atomicWrite")
+		const write = sandbox.stub(atomic, "atomicWriteFile").rejects(new Error("initial atomic write failed"))
+		await assert.rejects(host.start({ type: "default", title: "uncommitted", prompt: "work" }), /initial atomic write failed/)
+		sinon.assert.notCalled(constructed)
+		const [partial] = await fs.readdir(path.join(getTaskDirectoryPath("root"), "tasklets"))
+		assert.deepEqual(await fs.readdir(getTaskDirectoryPath({ kind: "tasklet", rootTaskId: "root", taskletId: partial })), [])
+		write.restore()
+		host = new TaskletHost(owner, taskOptions(), constructed as unknown as typeof taskModule.Task)
+		await host.reconstruct()
+		assert.deepEqual(host.list(), [])
+		await host.start({ type: "default", title: "committed", prompt: "work" })
+		assert.equal((await storage.loadTaskletRecords("root")).length, 1)
+	})
+
+	for (const operation of ["start", "resume"] as const) {
+		it(`does not construct a child when shutdown begins during ${operation} event persistence`, async () => {
+			const settled = operation === "resume" ? await host.start({ type: "default", title: "resume", prompt: "work" }) : undefined
+			if (settled) await host.interrupt(settled.id)
+			constructed.resetHistory()
+			const originalSave = storage.saveTaskletEvents
+			const entered = deferred<void>()
+			const gate = deferred<void>()
+			let paused = false
+			sandbox.stub(storage, "saveTaskletEvents").callsFake(async (...args) => {
+				if (!paused) { paused = true; entered.resolve(); await gate.promise }
+				return originalSave(...args)
+			})
+			const accepting = settled ? host.resume(settled.id) : host.start({ type: "default", title: "late", prompt: "work" })
+			await entered.promise
+			const shuttingDown = host.shutdown()
+			gate.resolve()
+			const [record] = await Promise.all([accepting, shuttingDown])
+			sinon.assert.notCalled(constructed)
+			assert.equal(record.outcome?.kind, "interrupted")
+			assert.equal(host.inspect(record.id).outcomePersisted, true)
+		})
+	}
+
+	it("does not skip a later child when an earlier admission fails between roster pages", async () => {
+		const originalSave = storage.saveTaskletRecord
+		const firstGate = deferred<void>()
+		const secondGate = deferred<void>()
+		const save = sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
+			if (record.title === "failed") {
+				await firstGate.promise
+				throw new Error("initial acceptance failed")
+			}
+			if (!record.outcome) await secondGate.promise
+			return originalSave(record)
+		})
+		const rejected = assert.rejects(host.start({ type: "default", title: "failed", prompt: "work" }), /initial acceptance failed/)
+		while (save.callCount < 1) await new Promise((resolve) => setImmediate(resolve))
+		const second = host.start({ type: "default", title: "retained", prompt: "work" })
+		while (save.callCount < 2) await new Promise((resolve) => setImmediate(resolve))
+		try {
+			const discovery = host.agentCommunication.forAgent("Dirac")
+			const page = discovery.list({ limit: 2 })
+			assert.deepEqual(page.agents.map((entry) => entry.title_preview), ["Dirac", "failed"])
+			firstGate.resolve()
+			await rejected
+			secondGate.resolve()
+			await second
+			const next = discovery.list({ cursor: page.next_cursor })
+			assert.deepEqual(next.agents.map((entry) => entry.title_preview), ["retained"])
+			assert.equal(next.next_cursor, undefined)
+		} finally {
+			firstGate.resolve()
+			secondGate.resolve()
+			await Promise.all([rejected, second])
+		}
+	})
+
 	it("admits mail during initial acceptance but never starts work because mail arrives", async () => {
 		const originalSave = storage.saveTaskletRecord
 		const gate = deferred<void>()
