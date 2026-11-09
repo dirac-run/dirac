@@ -207,7 +207,7 @@ function createApprovalItems(props: UseSettingsItemsProps): ListItem[] {
 	addPair(
 		"readFiles",
 		"Read files in the workspace",
-		"Read and analyze files under the active workspace without asking.",
+		"Read and analyze files under the active workspace without asking. Also permits model-requested conversation condensing; automatic threshold-triggered condensing is controlled separately by Auto-condense conversations.",
 		"readFilesExternally",
 		"Read files outside the workspace",
 		"Also read files outside the active workspace without asking.",

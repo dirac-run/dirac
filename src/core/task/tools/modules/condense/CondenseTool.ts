@@ -60,7 +60,8 @@ export class CondenseTool implements IDiracTool {
 		this.consumeSource(env)
 		env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 
-		const approval = source === "user" ? await this.requestUserApproval(context, env) : undefined
+		const requiresApproval = source === "user" && env.config.autoApprover.shouldAutoApproveTool(DiracDefaultTool.CONDENSE) !== true
+		const approval = requiresApproval ? await this.requestUserApproval(context, env) : undefined
 		this.throwIfCancelled(signal)
 		if (approval && !approval.approved) {
 			this.captureToolUsage(false, env)
@@ -105,7 +106,7 @@ export class CondenseTool implements IDiracTool {
 		}
 
 		try {
-			await this.displayCompletedSummary(context, source, approval, env)
+			await this.displayCompletedSummary(context, approval, env)
 		} catch (error) {
 			env.logging.warn("Failed to present completed conversation compaction", error)
 		}
@@ -200,12 +201,10 @@ export class CondenseTool implements IDiracTool {
 
 	private async displayCompletedSummary(
 		context: string,
-		source: CondenseSource,
 		approval: ApprovalResult | undefined,
 		env: IToolEnvironment,
 	): Promise<void> {
-		if (source === "user") {
-			if (!approval?.approved) throw new Error("Approved user condense is missing its approval card.")
+		if (approval?.approved) {
 			await approval.card.update({ header: "Conversation Condensed", collapsed: true })
 			await approval.card.finalize(CardStatus.SUCCESS)
 			return

@@ -134,6 +134,7 @@ export class AutoApprove {
 
 				case DiracDefaultTool.EXECUTE_COMMAND:
 				case DiracDefaultTool.BROWSER:
+				case DiracDefaultTool.CONDENSE:
 					return true
 			}
 		}
@@ -149,6 +150,9 @@ export class AutoApprove {
 			case DiracDefaultTool.SUBAGENTS:
 			case DiracDefaultTool.USE_SKILL:
 				return [autoApprovalSettings.actions.readFiles, autoApprovalSettings.actions.readFilesExternally ?? false]
+
+			case DiracDefaultTool.CONDENSE:
+				return autoApprovalSettings.actions.readFiles
 
 			case DiracDefaultTool.FILE_NEW:
 			case DiracDefaultTool.EDIT_FILE:

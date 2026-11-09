@@ -20,6 +20,49 @@ function stubWorkspace(workspacePath = "/workspace"): void {
 	})
 }
 
+describe("AutoApprove condensation policy", () => {
+	for (const readFiles of [false, true]) {
+		for (const readFilesExternally of [false, true]) {
+			it(`uses workspace read approval independently of external reads (read: ${readFiles}, external: ${readFilesExternally})`, () => {
+				const currentSettings = settings()
+				currentSettings.yoloModeToggled = false
+				currentSettings.autoApproveAllToggled = false
+				currentSettings.autoApprovalSettings.actions.readFiles = readFiles
+				currentSettings.autoApprovalSettings.actions.readFilesExternally = readFilesExternally
+				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+				const autoApprove = new AutoApprove(permissions as any, currentSettings, false)
+
+				assert.equal(autoApprove.shouldAutoApproveTool(DiracDefaultTool.CONDENSE), readFiles)
+			})
+		}
+	}
+
+	for (const setting of ["yoloModeToggled", "autoApproveAllToggled"] as const) {
+		it(`allows condensation with ${setting} even when read approval is disabled`, () => {
+			const currentSettings = settings()
+			currentSettings.yoloModeToggled = false
+			currentSettings.autoApproveAllToggled = false
+			currentSettings[setting] = true
+			currentSettings.autoApprovalSettings.actions.readFiles = false
+			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+			const autoApprove = new AutoApprove(permissions as any, currentSettings, false)
+
+			assert.equal(autoApprove.shouldAutoApproveTool(DiracDefaultTool.CONDENSE), true)
+		})
+	}
+
+	it("keeps child condensation owner-routed despite read and unrestricted approval settings", () => {
+		const currentSettings = settings()
+		currentSettings.yoloModeToggled = true
+		currentSettings.autoApproveAllToggled = true
+		currentSettings.autoApprovalSettings.actions.readFiles = true
+		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+		const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
+
+		assert.equal(autoApprove.shouldAutoApproveTool(DiracDefaultTool.CONDENSE), false)
+	})
+})
+
 describe("AutoApprove child static policy", () => {
 	it("auto-approves only writes before settings, rules or workspace lookup", async () => {
 		const permissions = commandPermissionController({ allowed: false, reason: "denied" })

@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { DiracDefaultTool } from "@shared/tools"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { CondenseTool } from "../condense/CondenseTool"
@@ -46,6 +47,7 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 		config: {
 			isSubagentExecution: false,
 			autoApprovalSettings: { enableNotifications: false },
+			autoApprover: { shouldAutoApproveTool: sinon.stub().returns(false) },
 			ulid: "ulid-1",
 			mode: "act",
 			model: { id: "model-1", info: { contextWindow: 1_000 } },
@@ -70,6 +72,41 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 
 describe("CondenseTool", () => {
 	afterEach(() => sinon.restore())
+
+	for (const mode of ["plan", "act"]) {
+		it(`condenses without prompting when the approval policy allows it in ${mode} mode`, async () => {
+			const { env, card, state } = createMocks("user")
+			env.config.mode = mode
+			env.config.autoApprover.shouldAutoApproveTool.returns(true)
+			env.config.autoApprovalSettings.enableNotifications = true
+
+			const result = await new CondenseTool().processCall({ context: "summary" }, env as any)
+
+			sinon.assert.calledOnceWithExactly(env.config.autoApprover.shouldAutoApproveTool, DiracDefaultTool.CONDENSE)
+			sinon.assert.notCalled(card.waitForInteraction)
+			sinon.assert.notCalled(env.system.showNotification)
+			sinon.assert.calledOnceWithMatch(env.ui.createCard, { header: "Conversation Condensed", collapsed: true })
+			assert.equal(env.ui.createCard.firstCall.args[0].requireApproval, undefined)
+			sinon.assert.calledWithMatch(card.update, { body: "summary" })
+			sinon.assert.calledWithExactly(card.finalize, "success")
+			assert.deepEqual(state.conversationHistoryDeletedRange, [1, 6])
+			sinon.assert.calledWithMatch(env.orchestration.runHook, "PreCompact", { compactionStrategy: "user-condense" })
+			assert.match(result, /Please continue the conversation/)
+		})
+	}
+
+	it("still honors PreCompact cancellation when condensation is auto-approved", async () => {
+		const { env, card } = createMocks("user")
+		env.config.autoApprover.shouldAutoApproveTool.returns(true)
+		env.orchestration.runHook.resolves({ cancel: true })
+
+		const result = await new CondenseTool().processCall({ context: "summary" }, env as any)
+
+		sinon.assert.notCalled(card.waitForInteraction)
+		sinon.assert.notCalled(env.orchestration.setTruncationRange)
+		sinon.assert.notCalled(env.orchestration.notifyContextCompacted)
+		assert.match(result, /cancelled by PreCompact hook/)
+	})
 
 	it("requests condensation notifications through the environment when enabled", async () => {
 		const { env } = createMocks("user")

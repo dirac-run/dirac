@@ -115,7 +115,7 @@ export const TOOL_SOURCE_HELP = {
 
 export const SETTINGS_HELP = {
 	approveAll:
-		"Approve All automatically approves every tool action, including all terminal commands—even commands Dirac considers unsafe. It does not switch between Plan and Act modes, create new tasks, or automatically condense conversations.",
+		"Approve All automatically approves every tool action, including all terminal commands—even commands Dirac considers unsafe—and permits model-requested conversation condensing. It does not switch between Plan and Act modes, create new tasks, or enable automatic threshold-triggered condensing; that is controlled separately by Auto-condense conversations.",
 	yolo: "YOLO Mode runs with maximum autonomy and bypasses confirmation prompts. It may switch from Plan to Act and disables the ask-question tool. It also permits autonomous task creation and conversation condensing. Use with extreme caution.",
 	yoloPrecedence:
 		"YOLO Mode takes precedence while enabled. Your Approve All setting is preserved and becomes effective again when YOLO Mode is disabled.",

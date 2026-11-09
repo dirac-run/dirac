@@ -45,6 +45,9 @@ const AutoApproveModal = ({ isVisible, setIsVisible, buttonRef }: AutoApproveMod
 			<p className="mb-2.5 mt-0 text-xs text-muted-foreground">
 				Let Dirac take these actions without asking for approval.
 			</p>
+			<p className="mb-2.5 mt-0 text-xs text-muted-foreground">
+				Read project files also permits model-requested conversation condensing. Automatic threshold-triggered condensing is controlled separately by Auto-condense conversations.
+			</p>
 
 			<div className="grid grid-cols-1 gap-x-1 min-[500px]:grid-cols-2">
 				{ACTION_METADATA.map((action) => (
