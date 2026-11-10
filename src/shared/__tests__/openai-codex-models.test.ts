@@ -19,6 +19,7 @@ describe("openAiCodexModels", () => {
 			"gpt-6-astra",
 			"gpt-6-sol",
 			"gpt-6.1-sol",
+			"gpt-6.1-terra",
 			"gpt-6-luna",
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
@@ -105,5 +106,17 @@ describe("openAiCodexModels", () => {
 		codexSol.supportsPersistedReasoning.should.equal(true)
 		codexSol.inputPrice.should.equal(0)
 		codexSol.outputPrice.should.equal(0)
+	})
+
+	it("defines GPT-6.1 Terra as a Codex-only model mirroring GPT-6.1 Sol reasoning", () => {
+		const codexSol = openAiCodexModels["gpt-6.1-sol"]
+		const codexTerra = openAiCodexModels["gpt-6.1-terra"]
+		codexTerra.maxTokens!.should.equal(codexSol.maxTokens!)
+		codexTerra.contextWindow!.should.equal(codexSol.contextWindow!)
+		codexTerra.reasoningEffortOptions!.should.deepEqual(codexSol.reasoningEffortOptions!)
+		codexTerra.supportsPersistedReasoning.should.equal(true)
+		codexTerra.supportsFastMode.should.equal(true)
+		codexTerra.inputPrice.should.equal(0)
+		codexTerra.outputPrice.should.equal(0)
 	})
 })
