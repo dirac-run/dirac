@@ -49,7 +49,7 @@ export function buildWorkspaceTrait(config: TaskConfig): IWorkspaceTrait {
 				return { size: 0, isFile: false, exists: false }
 			}
 		},
-		listFiles: async (path, recursive, limit) => await listFiles(path, recursive, limit),
+		listFiles: async (path, recursive, limit, signal) => await listFiles(path, recursive, limit, signal),
 		writeFile: async (path, content) =>
 			await config.callbacks.withMutationAuthorization(config.toolUse?.name, () => fs.writeFile(path, content, "utf8")),
 		saveOpenDocumentIfDirty: async (options) => {

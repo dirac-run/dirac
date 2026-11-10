@@ -3,11 +3,10 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { TaskState } from "@core/task/TaskState"
 import { EditAstTool } from "@core/task/tools/modules/edit_ast/EditAstTool"
 import { InspectAstTool } from "@core/task/tools/modules/inspect_ast/InspectAstTool"
 import { ToolExecutorCoordinator } from "@core/task/tools/ToolExecutorCoordinator"
-import { createMockContext } from "@core/task/tools/__tests__/helpers/mockTaskConfig"
+import { createMockTaskConfig } from "@core/task/tools/__tests__/helpers/mockTaskConfig"
 import { HostProvider } from "@/hosts/host-provider"
 import * as diagnosticsProvidersModule from "@/integrations/diagnostics/getDiagnosticsProviders"
 import { SymbolIndexService } from "@/services/symbol-index/SymbolIndexService"
@@ -328,88 +327,20 @@ async function assertReplacementSnapshot(
 		assert.equal(after, before, `${context}: failed replacement mutated the fixture`)
 		return
 	}
-	assert.match(actual, /Replacement completed/i, `${context}: successful replacement was not reported`)
+	assert.match(actual, /Replacement completed/i, `${context}: successful replacement was not reported: ${actual}`)
 	assert.notEqual(after, before, `${context}: successful replacement did not mutate the fixture`)
 	assert.ok(after.includes(replacement), `${context}: complete replacement text was not saved`)
 }
 
 function createMockConfig(cwd: string) {
-	const taskState = new TaskState()
-	const callbacks = {
-		say: sinon.stub().resolves(undefined),
-		ask: sinon.stub().resolves(undefined),
-		askStatus: sinon.stub().resolves(undefined),
-		askCompletion: sinon.stub().resolves(undefined),
-		askProgress: sinon.stub().resolves(undefined),
-		askError: sinon.stub().resolves(undefined),
-		askWarning: sinon.stub().resolves(undefined),
-		askInfo: sinon.stub().resolves(undefined),
-		shouldAutoApproveToolWithPath: sinon.stub().resolves(true),
-		resolveToolPathPermission: sinon.stub().resolves("auto_approve"),
-		removeLastPartialMessageIfExistsWithType: sinon.stub().resolves(),
-		sayAndCreateMissingParamError: sinon.stub().resolves("missing_param_error"),
-		cancelTask: sinon.stub().resolves(),
-		setActiveHookExecution: sinon.stub().resolves(),
-		clearActiveHookExecution: sinon.stub().resolves(),
-	}
-
-	return {
-		taskId: "test-task",
-		ulid: "test-ulid",
-		cwd,
-		taskState,
-		callbacks,
-		autoApprover: { isUnrestrictedAutoApprove: () => true },
-		messageState: { getApiConversationHistory: sinon.stub().returns([]) },
-		api: { getModel: () => ({ id: "test-model", info: { supportsImages: false } }) },
-		services: {
-			stateManager: {
-				getApiConfiguration: () => ({ planModeApiProvider: "openai", actModeApiProvider: "openai" }),
-				getGlobalSettingsKey: (key: string) => {
-					if (key === "mode") return "act"
-					if (key === "hooksEnabled") return false
-					return undefined
-				},
-			},
-			fileContextTracker: {
-				markFileAsEditedByDirac: sinon.stub(),
-				trackFileContext: sinon.stub().resolves(),
-			},
-			diracIgnoreController: {
-				validateAccess: () => true,
-				filterPaths: (paths: string[]) => paths,
-			},
-			diffViewProvider: {
-				editType: undefined,
-				open: sinon.stub().resolves(),
-				update: sinon.stub().resolves(),
-				reset: sinon.stub().resolves(),
-				saveChanges: sinon.stub().resolves({ finalContent: "" }),
-				applyAndSaveSilently: sinon.stub().callsFake(async (absolutePath: string, content: string) => {
-					await fs.writeFile(absolutePath, content, "utf-8")
-					return { finalContent: content, content, userEdits: false, autoFormatting: false }
-				}),
-				applyAndSaveBatchSilently: sinon.stub().resolves(new Map()),
-				showReview: sinon.stub().resolves(),
-				hideReview: sinon.stub().resolves(),
-				scrollToFirstDiff: sinon.stub().resolves(),
-				undoUserEdits: sinon.stub().resolves(),
-				format: sinon.stub().callsFake(async (absolutePath: string) => fs.readFile(absolutePath, "utf-8")),
-			} as any,
-		},
-		context: createMockContext(),
-		taskMessenger: {
-			createCard: sinon.stub().resolves({
-				id: "mock-card-id",
-				update: sinon.stub().resolves(),
-				finalize: sinon.stub().resolves(),
-				waitForInteraction: sinon.stub().resolves({ action: "approve" }),
-				appendBody: sinon.stub().resolves(),
-			}),
-			upsertText: sinon.stub().resolves(),
-			streamText: sinon.stub().resolves({ write: sinon.stub(), end: sinon.stub() }),
-		},
-	} as any
+	const { config } = createMockTaskConfig({ cwd })
+	Object.assign(config.autoApprover, { isUnrestrictedAutoApprove: () => true })
+	config.services.diffViewProvider.readText = sinon.stub().callsFake(async (absolutePath: string) => fs.readFile(absolutePath, "utf-8"))
+	config.services.diffViewProvider.applyAndSaveSilently = sinon.stub().callsFake(async (absolutePath: string, content: string) => {
+		await fs.writeFile(absolutePath, content, "utf-8")
+		return { finalContent: content, content, userEdits: false, autoFormatting: false }
+	})
+	return config
 }
 
 async function executeInspection(
@@ -420,14 +351,14 @@ async function executeInspection(
 ): Promise<string> {
 	const coordinator = new ToolExecutorCoordinator()
 	coordinator.registerModularTool(new InspectAstTool())
-	return String(await coordinator.execute(createMockConfig(cwd), {
+	return String((await coordinator.execute(createMockConfig(cwd), {
 		name: DiracDefaultTool.INSPECT_AST,
 		params: {
 			operation,
 			paths: [`sample.${extension}`],
 			...(symbols ? { symbols } : {}),
 		},
-	} as any))
+	} as any)).content)
 }
 
 describe("Source AST language compatibility", () => {
@@ -548,10 +479,10 @@ describe("Source AST language compatibility", () => {
 		try {
 			const coordinator = new ToolExecutorCoordinator()
 			coordinator.registerModularTool(new EditAstTool())
-			const actual = String(await coordinator.execute(createMockConfig(typescriptDirectory), {
+			const actual = String((await coordinator.execute(createMockConfig(typescriptDirectory), {
 				name: DiracDefaultTool.EDIT_AST,
 				params: { operation: "replace", targets: [{ path: "sample.ts", symbol: replacement.symbol, replacement: replacement.replacement }] },
-			} as any))
+			} as any)).content)
 			assert.match(actual, /Replacement completed/i)
 			assert.ok((await fs.readFile(samplePath, "utf-8")).includes(replacement.replacement))
 		} finally {
@@ -614,7 +545,7 @@ describe("Source AST language compatibility", () => {
 					for (const testCase of cases.replace) {
 						const coordinator = new ToolExecutorCoordinator()
 						coordinator.registerModularTool(new EditAstTool())
-						const actual = String(await coordinator.execute(createMockConfig(languageDirectory), {
+						const actual = String((await coordinator.execute(createMockConfig(languageDirectory), {
 							name: DiracDefaultTool.EDIT_AST,
 							params: {
 								operation: "replace",
@@ -624,7 +555,7 @@ describe("Source AST language compatibility", () => {
 									replacement: testCase.replacement,
 								}],
 							},
-						} as any))
+						} as any)).content)
 						const after = await fs.readFile(samplePath, "utf-8")
 						await assertReplacementSnapshot(
 							path.join(FIXTURES_DIR, language.name, `replace_${testCase.name}.txt`),

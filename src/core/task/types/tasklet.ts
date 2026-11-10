@@ -101,7 +101,14 @@ export type TaskletResolution = { status: "resolved" | "requires_user_approval" 
 export type TaskletMessage =
 	| { taskletId: string; type: "guidance"; text: string }
 	| { taskletId: string; type: "reply"; requestId: string; text?: string; action?: string }
-	| { taskletId: string; type: "permission_decision"; requestId: string; decision: "approve" | "reject" | "escalate" }
+	| {
+			taskletId: string
+			type: "permission_decision"
+			requestId: string
+			decision: "approve" | "reject" | "escalate"
+			/** Optional explanation, never permission authority or an expansion of the addressed request. */
+			text?: string
+	  }
 
 export interface TaskletMessageResult {
 	taskletId: string

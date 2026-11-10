@@ -28,7 +28,7 @@ function environment() {
 		fetchDiagram: sinon.stub().resolves({ name: "example", version: 3, diagram: graph }),
 	}
 	const ui = { createCard: sinon.stub().resolves(card) }
-	return { env: { ui, architecture } as unknown as IToolEnvironment, card, architecture, ui }
+	return { env: { ui, architecture, orchestration: { reportFailure: sinon.spy() } } as unknown as IToolEnvironment, card, architecture, ui }
 }
 
 async function invoke(input: unknown, fixture = environment()) {
@@ -119,7 +119,7 @@ describe("architecture_diagram isolated tool implementation", () => {
 			const tool = require('./src/core/task/tools/modules/architecture_diagram/tool').create();
 			const statuses = [];
 			const card = { update: async () => {}, finalize: async status => statuses.push(status) };
-			tool.processCall({ operation: 'list_diagrams' }, { ui: { createCard: async () => card } }).then(text => {
+			tool.processCall({ operation: 'list_diagrams' }, { ui: { createCard: async () => card }, orchestration: { reportFailure() {} } }).then(text => {
 				const result = JSON.parse(text);
 				assert.equal(result.operation, 'list_diagrams');
 				assert.equal(result.outcome, 'unavailable');
@@ -141,6 +141,7 @@ describe("architecture_diagram isolated tool implementation", () => {
 			};
 			const tool = require('./src/core/task/tools/modules/architecture_diagram/tool').create();
 			const env = {
+				orchestration: { reportFailure() {} },
 				ui: { createCard: async () => ({ update: async () => {}, finalize: async () => {} }) },
 				architecture: {
 					upsertDiagram: async () => ({ name: 'example', version: 1 }),
@@ -287,12 +288,17 @@ describe("architecture_diagram isolated tool implementation", () => {
 		})
 	}
 
-	it("bounds stalled publication and warns that timeout does not prove an uncommitted write", async () => {
+	it("retains publication ownership after timeout and warns that the write may have committed", async () => {
 		const clock = sinon.useFakeTimers()
 		const fixture = environment()
-		fixture.architecture.upsertDiagram.returns(new Promise(() => {}))
+		let finishPublication!: (result: { name: string; version: number }) => void
+		fixture.architecture.upsertDiagram.returns(new Promise((resolve) => { finishPublication = resolve }))
+		let settled = false
 		const pending = invoke({ operation: "upsert_diagram", name: "example", diagram: "{}" }, fixture)
+			.then((result) => { settled = true; return result })
 		await clock.tickAsync(DEFAULT_BOUNDED_TOOL_EXECUTION_MS + 1)
+		assert.equal(settled, false)
+		finishPublication({ name: "example", version: 4 })
 		const { result } = await pending
 		assert.equal(result.outcome, "timeout")
 		assert.match(result.error, /List\/fetch before deciding whether to retry/)

@@ -7,7 +7,7 @@ import type { IToolEnvironment } from "../interfaces/IToolEnvironment"
 import { createMockTaskConfig } from "./helpers/mockTaskConfig"
 
 class InvalidResultTool implements IDiracTool<unknown, any> {
-	constructor(private readonly result: unknown) {}
+	constructor(private readonly result: unknown) { }
 
 	spec(): DiracToolSpec {
 		return { id: DiracDefaultTool.RESPOND, name: DiracDefaultTool.RESPOND, description: "test", parameters: [] }
@@ -43,8 +43,9 @@ describe("ToolExecutorCoordinator result contract", () => {
 
 			const result = await coordinator.execute(config, block())
 
-			assert.match(result as string, /returned an invalid result/)
-			assert.equal(taskState.consecutiveMistakeCount, 1)
+			assert.match(result.content as string, /returned an invalid result/)
+			assert.deepEqual(result.effects, { mistake: "increment" })
+			assert.equal(taskState.consecutiveMistakeCount, 0)
 		})
 	}
 })

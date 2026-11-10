@@ -37,7 +37,26 @@ export class ToolExecutionDeadline {
 		this.clock = options.clock ?? Date.now
 	}
 
-	async run<T>(operationName: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+	/** Abort owned work on expiry/cancellation, then join its resource cleanup before returning. */
+	run<T>(operationName: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+		return this.awaitOperation(operationName, operation, "join")
+	}
+
+	/**
+	 * Bound observation of a service-owned read query, not the lifetime of its underlying work.
+	 * The service may continue after timeout/cancellation; this does not report its resources settled.
+	 * Queries must not own execution resources (processes, streams, writes), and late results must
+	 * not commit tool context, cards, or effects. Keep such commits after awaiting this method.
+	 */
+	observe<T>(operationName: string, query: (signal: AbortSignal) => Promise<T>): Promise<T> {
+		return this.awaitOperation(operationName, query, "service-owned")
+	}
+
+	private async awaitOperation<T>(
+		operationName: string,
+		operation: (signal: AbortSignal) => Promise<T>,
+		cleanup: "join" | "service-owned",
+	): Promise<T> {
 		const timeoutError = new ToolTimeoutError(this.toolName, operationName, this.timeoutMs)
 		this.expiresAt ??= this.clock() + this.timeoutMs
 		const remainingMs = this.expiresAt - this.clock()
@@ -53,14 +72,32 @@ export class ToolExecutionDeadline {
 		}
 		this.cancellationSignal?.addEventListener("abort", cancelOperation, { once: true })
 		try {
-			return await pTimeout(operation(abortController.signal), {
-				milliseconds: remainingMs,
-				message: timeoutError,
-				signal: this.cancellationSignal,
-			})
-		} catch (error) {
-			if (error === timeoutError) abortController.abort(timeoutError)
-			throw error
+			const execution = operation(abortController.signal)
+			try {
+				return await pTimeout(execution, {
+					milliseconds: remainingMs,
+					message: timeoutError,
+					signal: this.cancellationSignal,
+				})
+			} catch (error) {
+				if (error !== timeoutError && !this.cancellationSignal?.aborted) throw error
+				if (error === timeoutError) abortController.abort(timeoutError)
+				// pTimeout observes late rejection even when the service outlives this observer.
+				if (cleanup === "service-owned") throw error
+
+				// Cancellation requests a stop; only actual settlement releases cleanup ownership.
+				try {
+					await execution
+				} catch (cleanupError) {
+					if (cleanupError !== error) {
+						if (!(error instanceof Error)) {
+							throw new AggregateError([error, cleanupError], "Tool cancellation and cleanup failed")
+						}
+						error.cause = cleanupError
+					}
+				}
+				throw error
+			}
 		} finally {
 			this.cancellationSignal?.removeEventListener("abort", cancelOperation)
 		}

@@ -28,7 +28,7 @@ describe("SendMessageTool", () => {
 
 	it("renders the existing parent sleep mail-wake receipt without implying completion", () => {
 		assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "woke", rows: [], wakeReason: "mail" }),
-			"Ordinary agent message. A wake is not assignment completion.")
+			"Agent message received.")
 	})
 
 	it("shows the actor, recipient and verbatim text without replacing it with a receipt", async () => {
@@ -40,7 +40,7 @@ describe("SendMessageTool", () => {
 		sinon.assert.calledOnce(createCard)
 		const params = createCard.firstCall.args[0]
 		assert.equal(params.header, "Feynman →  Schrödinger 2  · Message")
-		assert.equal(params.body, `${input.text}\n\nStatus: Sending`)
+		assert.equal(params.body, `${input.text}\n\nSending...`)
 		assert.deepEqual(params.communication, { actor: "Feynman" })
 		assert.equal(params.status, CardStatus.RUNNING)
 		assert.equal(params.collapsed, true)
@@ -48,7 +48,7 @@ describe("SendMessageTool", () => {
 		assert.equal(params.taskletReceipt, undefined)
 		const update = card.update.firstCall.args[0]
 		assert.equal(update.header, "Feynman →  Schrödinger 2  · Message")
-		assert.equal(update.body, `${input.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`)
+		assert.equal(update.body, `${input.text}\n\nMessage accepted.`)
 		assert.deepEqual(update.communication, { actor: "Feynman" })
 		assert.doesNotMatch(update.body, /message-1/)
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
@@ -85,7 +85,7 @@ describe("SendMessageTool", () => {
 			await assert.rejects(new SendMessageTool().processCall({ to: "Dirac", text: "hello" }, env), (caught) => caught === error)
 			sinon.assert.calledOnceWithExactly(card.update, {
 				header: "Feynman → Dirac · Message",
-				body: "hello\n\nStatus: Message not accepted. See tool result for details.",
+				body: "hello\n\nMessage not accepted.",
 				communication: { actor: "Feynman" },
 			})
 			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR)
@@ -106,7 +106,7 @@ describe("SendMessageTool", () => {
 			if (phase !== "create") {
 				sinon.assert.calledOnce(card.update)
 				sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
-				assert.match(card.update.firstCall.args[0].body, /Status: Accepted into the volatile mailbox/)
+				assert.equal(card.update.firstCall.args[0].body, "Authored source hash abc123\n\nMessage accepted.")
 			}
 		})
 

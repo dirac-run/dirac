@@ -131,11 +131,12 @@ export class ExecuteCommandTool implements IDiracTool {
 			}
 		}
 
-		const { results, usedWorkspaceHint, resolvedToNonPrimary } = await this.executeCommands(
+		const { results, failed, usedWorkspaceHint, resolvedToNonPrimary } = await this.executeCommands(
 			commands,
 			env,
 			new Set(requiresApproval),
 		)
+		if (failed) env.orchestration.reportFailure()
 		env.telemetry.captureCustomMetadata({
 			commandCount: commands.length,
 			usedWorkspaceHint,
@@ -292,8 +293,9 @@ export class ExecuteCommandTool implements IDiracTool {
 		commands: PreparedCommand[],
 		env: IToolEnvironment,
 		requiresApproval: ReadonlySet<PreparedCommand>,
-	): Promise<{ results: string[]; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
+	): Promise<{ results: string[]; failed: boolean; usedWorkspaceHint: boolean; resolvedToNonPrimary: boolean }> {
 		const results: string[] = []
+		let failures = 0
 		for (let i = 0; i < commands.length; i++) {
 			const cmd = commands[i]
 			const assertAuthorized = () => {
@@ -304,11 +306,13 @@ export class ExecuteCommandTool implements IDiracTool {
 				}
 			}
 			assertAuthorized()
-			const { result } = await this.executeSingleCommand(cmd, i + 1, commands.length, env, assertAuthorized)
+			const { result, failed } = await this.executeSingleCommand(cmd, i + 1, commands.length, env, assertAuthorized)
 			results.push(result)
+			if (failed) failures++
 		}
 		return {
 			results,
+			failed: failures === commands.length,
 			usedWorkspaceHint: commands.some((command) => command.usedWorkspaceHint),
 			resolvedToNonPrimary: commands.some((command) => command.resolvedToNonPrimary),
 		}
@@ -320,7 +324,7 @@ export class ExecuteCommandTool implements IDiracTool {
 		total: number,
 		env: IToolEnvironment,
 		assertAuthorized: () => void,
-	): Promise<{ result: string }> {
+	): Promise<{ result: string; failed: boolean }> {
 		const header = `Executing ${index} of ${total}: ${shortenCommandForDisplay(cmd.displayName, env.config.cwd)}`
 		const activeCard = await env.ui.createCard({
 			header,
@@ -358,11 +362,15 @@ export class ExecuteCommandTool implements IDiracTool {
 				},
 			})
 			await activeCard.finalize(commandFailed ? CardStatus.ERROR : CardStatus.SUCCESS)
-			return { result: `--- Output for '${cmd.displayName}' ---\n${truncatedOutput}` }
+			return { result: `--- Output for '${cmd.displayName}' ---\n${truncatedOutput}`, failed: commandFailed && !commandResult.userRejected }
 		} catch (error: any) {
+			if (env.orchestration.getTaskState("abortSignal").aborted) {
+				await activeCard.finalize(CardStatus.CANCELLED)
+				throw error
+			}
 			await activeCard.update({ body: `Error: ${error.message}`, rawOutput: { error: error.message } })
 			await activeCard.finalize(CardStatus.ERROR)
-			return { result: `--- Output for '${cmd.displayName}' ---\nError: ${error.message}` }
+			return { result: `--- Output for '${cmd.displayName}' ---\nError: ${error.message}`, failed: true }
 		}
 	}
 

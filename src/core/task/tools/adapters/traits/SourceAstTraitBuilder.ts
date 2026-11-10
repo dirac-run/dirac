@@ -7,36 +7,47 @@ import type { TaskConfig } from "../../types/TaskConfig"
 
 export function buildSourceAstTrait(config: TaskConfig): ISourceAstTrait {
 	const anchorStateKey = getTaskScopedStateKey(config.ulid, config.storageAddress)
-	const reconcileAnchors = (absolutePath: string, lines: string[]): string[] => {
-		const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, anchorStateKey)
-		if (result.changed) config.context.markAnchorStateDirty(absolutePath)
-		return result.anchors
-	}
-	const service = new SourceAstService({
+	// Facades are query-scoped so late service callbacks cannot commit this tool's anchor context.
+	// The symbol index and parser caches remain shared, service-owned resources.
+	const createService = (signal?: AbortSignal) => new SourceAstService({
 		root: config.cwd,
 		resolvePath: async (requestedPath) => {
+			signal?.throwIfAborted()
 			const resolved = resolveWorkspacePath(config, requestedPath, "SourceAstTraitBuilder.resolvePath")
 			return typeof resolved === "string"
 				? { absolutePath: resolved, displayPath: requestedPath }
 				: { absolutePath: resolved.absolutePath, displayPath: resolved.displayPath }
 		},
 		validateAccess: (absolutePath) => config.services.diracIgnoreController.validateAccess(absolutePath),
-		reconcileAnchors,
+		reconcileAnchors: (absolutePath, lines) => {
+			signal?.throwIfAborted()
+			const result = AnchorStateManager.reconcileWithChanges(absolutePath, lines, anchorStateKey)
+			if (result.changed) config.context.markAnchorStateDirty(absolutePath)
+			return result.anchors
+		},
 		getAnchorFingerprint: (absolutePath) => AnchorStateManager.getDocumentFingerprint(absolutePath, anchorStateKey),
 	})
 
+	const service = createService()
+
 	return {
-		outline: async (request) => {
+		outline: async (request, signal) => {
+			signal?.throwIfAborted()
 			if (request.includeAnchors) await config.context.ensureAnchorState()
-			return service.outline(request)
+			signal?.throwIfAborted()
+			return createService(signal).outline(request)
 		},
-		implementations: async (request) => {
+		implementations: async (request, signal) => {
+			signal?.throwIfAborted()
 			if (request.includeAnchors) await config.context.ensureAnchorState()
-			return service.implementations(request)
+			signal?.throwIfAborted()
+			return createService(signal).implementations(request)
 		},
-		occurrences: async (request) => {
+		occurrences: async (request, signal) => {
+			signal?.throwIfAborted()
 			if (request.includeAnchors) await config.context.ensureAnchorState()
-			return service.occurrences(request)
+			signal?.throwIfAborted()
+			return createService(signal).occurrences(request)
 		},
 		planRename: (request) => service.planRename(request),
 		planReplacements: (request) => service.planReplacements(request),

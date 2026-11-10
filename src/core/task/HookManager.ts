@@ -11,7 +11,7 @@ import { HookExecution } from "./types/HookExecution"
 import { HookManagerDependencies, UserPromptHookResult } from "./types/hook-manager"
 
 export class HookManager {
-	constructor(private dependencies: HookManagerDependencies) {}
+	constructor(private dependencies: HookManagerDependencies) { }
 
 	public setApi(api: ApiHandler) {
 		this.dependencies.api = api
@@ -21,31 +21,37 @@ export class HookManager {
 		this.dependencies.ulid = ulid
 	}
 
-	public async setActiveHookExecution(hookExecution: HookExecution | undefined): Promise<void> {
+	public async setActiveHookExecution(hookExecution: HookExecution): Promise<void> {
 		await this.dependencies.withStateLock(() => {
-			// Hook discovery and card creation may finish after cancellation has already settled.
-			if (hookExecution && this.dependencies.taskState.abort) {
-				hookExecution.abortController.abort()
-				return
-			}
-			this.dependencies.taskState.activeHookExecution = hookExecution
+			this.dependencies.taskState.activeHookExecutions.set(hookExecution.runId, hookExecution)
+			// Ordinary work cannot start after cancellation. TaskCancel is owned teardown
+			// started by abort itself, and must be allowed to finish before resource release.
+			if (this.dependencies.taskState.abort && hookExecution.hookName !== "TaskCancel") hookExecution.abortController.abort()
 		})
 	}
 
-	public async clearActiveHookExecution(): Promise<void> {
+	public async clearActiveHookExecution(runId: string): Promise<void> {
 		await this.dependencies.withStateLock(() => {
-			this.dependencies.taskState.activeHookExecution = undefined
+			this.dependencies.taskState.activeHookExecutions.delete(runId)
 		})
 	}
 
-	public async getActiveHookExecution(): Promise<HookExecution | undefined> {
-		return await this.dependencies.withStateLock(() => {
-			return this.dependencies.taskState.activeHookExecution
-		})
+	public async getActiveHookExecution(runId: string): Promise<HookExecution | undefined> {
+		return this.dependencies.withStateLock(() => this.dependencies.taskState.activeHookExecutions.get(runId))
 	}
 
-	public async cancelHookExecution(): Promise<boolean> {
-		const activeHook = await this.getActiveHookExecution()
+	public async cancelAllHookExecutions(): Promise<void> {
+		const executions = await this.dependencies.withStateLock(() => [...this.dependencies.taskState.activeHookExecutions.values()])
+		// Signal every sibling before awaiting any hook's asynchronous cleanup.
+		for (const execution of executions) execution.abortController.abort()
+		await Promise.all(executions.map((execution) => this.cancelHookExecution(execution.runId)))
+		const settlements = await Promise.allSettled(executions.map((execution) => execution.completion))
+		const failures = settlements.flatMap((settlement) => settlement.status === "rejected" ? [settlement.reason] : [])
+		if (failures.length > 0) throw new AggregateError(failures, "Hook cleanup failed")
+	}
+
+	public async cancelHookExecution(runId: string): Promise<boolean> {
+		const activeHook = await this.getActiveHookExecution(runId)
 		if (!activeHook) {
 			return false
 		}
@@ -57,7 +63,7 @@ export class HookManager {
 			abortController.abort()
 
 			// Update hook message status to "cancelled"
-			const hookMessageIndex = this.dependencies.messageStateHandler.findMessageIndexById(messageId)
+			const hookMessageIndex = messageId === undefined ? -1 : this.dependencies.messageStateHandler.findMessageIndexById(messageId)
 			if (hookMessageIndex !== -1) {
 				const cancelledMetadata = {
 					hookName,
@@ -82,9 +88,8 @@ export class HookManager {
 	}
 
 	public async shouldRunTaskCancelHook(): Promise<boolean> {
-		// Atomically check for active hook execution (work happening now)
-		const activeHook = await this.getActiveHookExecution()
-		if (activeHook) {
+		const hasActiveHooks = await this.dependencies.withStateLock(() => this.dependencies.taskState.activeHookExecutions.size > 0)
+		if (hasActiveHooks) {
 			return true
 		}
 

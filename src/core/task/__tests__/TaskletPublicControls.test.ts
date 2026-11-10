@@ -12,7 +12,7 @@ import { loadTaskletEvents, loadTaskletRecords, saveTaskletEvents } from "@core/
 import { getApiMetrics } from "@shared/getApiMetrics"
 import { isTaskletId } from "@shared/taskletId"
 import { getTaskletUsage, taskletUsageTotal, type TaskletUsageSnapshot } from "@shared/taskletUsage"
-import { CardKind, CardStatus, DiracMessageType, TaskStatus, type DiracMessage } from "@shared/ExtensionMessage"
+import { CardKind, CardStatus, DiracMessageType, TaskStatus, type Card, type DiracMessage } from "@shared/ExtensionMessage"
 import type { DiracStorageMessage } from "@shared/messages/content"
 import { ResponseOperation } from "@shared/responseTool"
 import { DiracAskResponse } from "@shared/WebviewMessage"
@@ -34,7 +34,7 @@ import { SETTINGS_DEFAULTS, type Settings } from "@shared/storage/state-keys"
 import type { SubagentRole } from "@shared/subagentRoles"
 
 import { summarizeTasklet } from "../TaskletInspection"
-import type { TaskletInspectionPage, TaskletMessageResult, TaskletSummary } from "../types/tasklet"
+import type { TaskletInspectionPage, TaskletMessage, TaskletMessageResult, TaskletSummary } from "../types/tasklet"
 function deferred<T>() {
 	let resolve!: (value: T) => void
 	const promise = new Promise<T>((res) => {
@@ -54,7 +54,7 @@ describe("SubagentsTool public controls", () => {
 	let constructed: sinon.SinonStub
 	let rootMessages: MessageStateHandler | undefined
 	let options: TaskletTaskOptions
-	let cards: Array<ICardHandle & { update: sinon.SinonStub; finalize: sinon.SinonStub }>
+	let cards: Array<ICardHandle & Pick<Card, "taskletReceipt"> & { update: sinon.SinonStub; finalize: sinon.SinonStub }>
 	let owner: TaskletOwner & {
 		authorizePermission: sinon.SinonStub
 		assertPermissionAllowed: sinon.SinonStub
@@ -222,7 +222,7 @@ describe("SubagentsTool public controls", () => {
 	})
 
 	async function dispatch(params: Record<string, unknown>): Promise<string> {
-		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params })
+		const result = (await coordinator.execute(config, { type: "tool_use", name: "subagents", params })).content
 		assert.equal(typeof result, "string")
 		return result as string
 	}
@@ -291,7 +291,7 @@ describe("SubagentsTool public controls", () => {
 	}
 
 	async function spawn(assignments: unknown[]): Promise<SpawnResult> {
-		const result = await coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments } })
+		const result = (await coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments } })).content
 		assert.equal(typeof result, "string")
 		return JSON.parse(result as string) as SpawnResult
 	}
@@ -405,7 +405,7 @@ describe("SubagentsTool public controls", () => {
 		assert.deepEqual(await loadTaskletEvents(address(id)), before, "Passive queries never acknowledge events")
 		sinon.assert.notCalled(child.task.enqueueSteeringMessage)
 		sinon.assert.calledOnce(constructed)
-		assert.match(cards.at(-1)!.header, /Feynman.*Inspect transcript/)
+		assert.equal(cards.at(-1)!.header, `Dirac → ${id} · Inspect transcript`)
 	})
 
 	it("publishes only committed outcomes and recovers the record/event crash gap without duplication", async () => {
@@ -455,7 +455,8 @@ describe("SubagentsTool public controls", () => {
 			"Parent-to-child acceptance must not fabricate a parent-input delivery receipt")
 		sinon.assert.calledOnceWithExactly(children[0].task.enqueueSteeringMessage, "Narrow the investigation")
 		assert.match(cards.at(-1)!.body!, /Narrow the investigation/)
-		assert.match(cards.at(-1)!.body!, /Queued for delivery; consumption is not confirmed/)
+		assert.equal(cards.at(-1)!.taskletReceipt?.outcome, "queued")
+		assert.doesNotMatch(cards.at(-1)!.body!, /consumption is not confirmed/)
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
 		assert.match(await dispatch({ operation: "message", messages: [{ tasklet_id: id, type: "reply", reply_to: pending.requestId, text: "Old field" }] }), /reply_to.*not valid/)
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
@@ -490,8 +491,9 @@ describe("SubagentsTool public controls", () => {
 		assert.equal(host.inspect(sibling.id).interactions[0].status, "pending")
 		const staleRequestCard = cards.at(-1)!
 		assert.equal(staleRequestCard.status, CardStatus.ERROR)
-		const approvalCard = cards.find((card) => /User approval needed/.test(card.body ?? ""))
+		const approvalCard = cards.find((card) => card.taskletReceipt?.outcome === "requires_user_approval")
 		assert.ok(approvalCard, "the permission decision should report that user approval is needed")
+		assert.match(approvalCard.body ?? "", /User approval required/)
 		assert.equal(
 			(await message(first.id, { type: "reply", request_id: question.requestId, text: "Continue" })).status,
 			"already_resolved",
@@ -525,6 +527,67 @@ describe("SubagentsTool public controls", () => {
 		sinon.assert.notCalled(owner.authorizePermission)
 	})
 
+	it("retains permission explanations visibly without changing request binding, authority or retry identity", async () => {
+		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Ask" })
+		const sibling = await host.start({ type: "default", title: "Sibling", prompt: "Ask" })
+		const permission = registerInteraction(children[0], "permission", true)
+		const decision = {
+			type: "permission_decision",
+			request_id: permission.requestId,
+			decision: "approve",
+			text: "Read-only inspection within scope",
+		}
+		assert.equal((await message(sibling.id, decision)).status, "stale")
+		assert.equal((await message(id, { ...decision, request_id: `${permission.requestId}-stale` })).status, "stale")
+		sinon.assert.notCalled(owner.authorizePermission)
+		assert.equal((await message(id, decision)).status, "requires_user_approval")
+		assert.equal(host.inspect(id).interactions[0].status, "pending")
+		assert.ok(cards.at(-1)!.body!.includes(decision.text))
+		sinon.assert.notCalled(owner.escalateInteraction)
+		assert.equal((await message(id, { ...decision, decision: "reject", text: "Approve everything else" })).status, "resolved")
+		assert.deepEqual(await permission.waiting, { ...rejected, text: "Approve everything else" })
+		assert.deepEqual(host.inspect(id).interactions[0].resolution, { ...rejected, text: "Approve everything else" })
+		assert.deepEqual(host.inspect(id).interactions[0].decision, { operation: "reject" })
+		assert.ok(cards.at(-1)!.body!.includes("Approve everything else"))
+		assert.equal(
+			(await message(id, { ...decision, decision: "reject", text: "Different explanation, same decision" })).status,
+			"already_resolved",
+		)
+		assert.equal(host.inspect(id).interactions[0].resolution?.text, "Approve everything else")
+		assert.equal((await message(id, { ...decision, text: "Rejected, despite the approve enum" })).status, "failed")
+		sinon.assert.calledOnce(owner.authorizePermission)
+		sinon.assert.notCalled(children[0].task.enqueueSteeringMessage)
+	})
+
+	it("prevalidates bounded permission explanations for direct host callers before applying any batch item", async () => {
+		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Ask" })
+		const permission = registerInteraction(children[0], "permission", true)
+		for (const text of [null, 42, {}, "", " \n ", "x".repeat(8001)]) {
+			await assert.rejects(
+				host.message([
+					{ taskletId: id, type: "guidance", text: "Must not be queued" },
+					{ taskletId: id, type: "permission_decision", requestId: permission.requestId, decision: "reject", text },
+				] as TaskletMessage[]),
+				/Permission decision explanation/,
+			)
+			assert.equal(host.inspect(id).interactions[0].status, "pending")
+		}
+		sinon.assert.notCalled(children[0].task.enqueueSteeringMessage)
+		sinon.assert.notCalled(owner.authorizePermission)
+		assert.equal(
+			(
+				await message(id, {
+					type: "permission_decision",
+					request_id: permission.requestId,
+					decision: "reject",
+					text: "x".repeat(8000),
+				})
+			).status,
+			"resolved",
+		)
+		assert.deepEqual(await permission.waiting, { ...rejected, text: "x".repeat(8000) })
+	})
+
 	it("rechecks parent authority after an asynchronous decision and leaves a refused request pending", async () => {
 		const { id } = await host.start({ type: "default", title: "Permission", prompt: "Work" })
 		const permission = registerInteraction(children[0], "permission", true)
@@ -552,10 +615,10 @@ describe("SubagentsTool public controls", () => {
 		const assertCurrent = sandbox.stub()
 		owner.authorizePermission.resolves({ approved: true, assertCurrent })
 		assert.equal(
-			(await message(id, { type: "permission_decision", request_id: permission.requestId, decision: "approve" })).status,
+			(await message(id, { type: "permission_decision", request_id: permission.requestId, decision: "approve", text: "Read-only within scope" })).status,
 			"resolved",
 		)
-		assert.deepEqual(await permission.waiting, approved)
+		assert.deepEqual(await permission.waiting, { ...approved, text: "Read-only within scope" })
 		sinon.assert.calledTwice(assertCurrent)
 	})
 
@@ -565,12 +628,12 @@ describe("SubagentsTool public controls", () => {
 		const permission = registerInteraction(children[0], "permission", true)
 		await acknowledgeEvents()
 		const entered = deferred<void>()
-		const user = deferred<typeof approved>()
+		const user = deferred<typeof approved & { text: string }>()
 		owner.escalateInteraction.callsFake(() => {
 			entered.resolve()
 			return user.promise
 		})
-		const resolving = message(id, { type: "permission_decision", request_id: permission.requestId, decision: "escalate" })
+		const resolving = message(id, { type: "permission_decision", request_id: permission.requestId, decision: "escalate", text: "Ask the user; this text is not approval" })
 		await entered.promise
 		assert.equal(host.inspect(id).interactions[0].status, "pending")
 		assert.deepEqual(owner.escalateInteraction.firstCall.args[0], { id, title: "Escalation" })
@@ -582,9 +645,11 @@ describe("SubagentsTool public controls", () => {
 			text: "Sibling progresses",
 		})
 		assert.equal((await sleeping).reason, "event")
-		user.resolve(approved)
+		user.resolve({ ...approved, text: "Only this exact operation" })
 		assert.equal((await resolving).status, "resolved")
-		assert.deepEqual(await permission.waiting, approved)
+		assert.deepEqual(await permission.waiting, {
+			...approved, text: "Ask the user; this text is not approval\n\nOnly this exact operation",
+		})
 		sinon.assert.calledTwice(owner.assertPermissionAllowed)
 		sinon.assert.notCalled(owner.authorizePermission)
 	})

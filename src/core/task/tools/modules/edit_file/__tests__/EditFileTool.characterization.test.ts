@@ -188,7 +188,7 @@ describe("EditFileTool – characterization edge cases", () => {
 		})
 
 		assert.ok(typeof result === "string")
-		assert.ok(result.includes(`${MAX_ANCHORED_FILE_LINES + 1} lines`))
+		assert.ok(result.includes(`${(MAX_ANCHORED_FILE_LINES + 1).toLocaleString()} lines`))
 		assert.ok(result.includes("use execute_command"))
 		assert.equal(await fs.readFile(filePath, "utf8"), content)
 		sinon.assert.notCalled(diffViewProvider.readText)
@@ -229,12 +229,13 @@ describe("EditFileTool – characterization edge cases", () => {
 
 		sinon.assert.notCalled(saveDirtyDocument)
 		assert.equal(await fs.readFile(filePath, "utf8"), diskContent)
-		assert.ok(typeof result === "string" && result.includes(`${MAX_ANCHORED_FILE_LINES + 1} lines`))
+		assert.ok(typeof result === "string" && result.includes(`${(MAX_ANCHORED_FILE_LINES + 1).toLocaleString()} lines`))
 	})
 
 	for (const action of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
 		it(`prepares unsaved buffer edits without saving before ${action}`, async () => {
 			const { config, callbacks, diffViewProvider, taskMessenger } = createConfig()
+			config.yoloModeToggled = false
 			const fileName = "dirty-approval.txt"
 			const filePath = path.join(tmpDir, fileName)
 			const diskContent = "saved line 1\nsaved line 2"
@@ -676,9 +677,10 @@ describe("EditFileTool – characterization edge cases", () => {
 			await assert.rejects(handler.execute(config, block.params), /batch save failed/)
 
 			assert.equal(taskMessenger.createCard.callCount, 2)
-			const protocolCard = await taskMessenger.createCard.firstCall.returnValue
-			assert.equal(protocolCard.finalize.callCount, 2)
-			sinon.assert.alwaysCalledWith(protocolCard.finalize, CardStatus.ERROR)
+			for (const call of taskMessenger.createCard.getCalls()) {
+				const protocolCard = await call.returnValue
+				sinon.assert.calledOnceWithExactly(protocolCard.finalize, CardStatus.ERROR, undefined)
+			}
 		})
 
 		it("continues processing other files when one is diracignored", async () => {

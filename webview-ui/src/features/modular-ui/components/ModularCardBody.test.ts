@@ -4,10 +4,35 @@ import {
 	createSubagentCardOutput,
 	SubagentTrajectoryEventType,
 } from "@shared/subagents"
+import { createTaskletPresentationCard } from "@shared/taskletPresentation"
 import { describe, expect, it } from "vitest"
 import { resolveCardBodyPresentation, SUBAGENT_CARD_MAX_HEIGHT_PX } from "./ModularCardBody"
 
 describe("resolveCardBodyPresentation", () => {
+	it("uses concise tasklet labels and preserves every projected content field", () => {
+		const card = createTaskletPresentationCard({
+			taskletId: "Pauli",
+			title: "Audit",
+			createdAt: 1,
+			status: "waiting",
+			prompt: "Inspect the implementation\nKeep authored context",
+			result: "Retained result\nLiteral§value",
+			communications: ["First message\nKeep both lines", "Second message"],
+			activity: ["Read source files", "Ran focused tests"],
+		})
+
+		expect(resolveCardBodyPresentation(card)).toEqual({
+			body: [
+				"Assignment\nInspect the implementation\nKeep authored context",
+				"Result preview\nRetained result\nLiteral§value",
+				"Waiting for Dirac.",
+				"Messages\nFirst message\nKeep both lines\n\nSecond message",
+				"Activity\nRead source files\n\nRan focused tests",
+			].join("\n\n"),
+			maxHeight: SUBAGENT_CARD_MAX_HEIGHT_PX,
+		})
+	})
+
 	it("shows subagent tool calls without tool outputs and applies a fixed scroll height", () => {
 		const identity = { id: 2, name: "Pauli" }
 		const card: Card = {

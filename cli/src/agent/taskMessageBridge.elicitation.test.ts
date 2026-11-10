@@ -442,7 +442,11 @@ describe("TaskMessageBridge form elicitation", () => {
 			taskState.lastWaitingCardId = message.id;
 			await (bridge as any).processMessageWithDelta("session-1", sessionState(), message);
 
-			expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.APPROVE, undefined, undefined, undefined, createCard === questionCard ? "option-a" : undefined);
+			if (createCard === questionCard) {
+				expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.APPROVE, undefined, undefined, undefined, "option-a");
+			} else {
+				expect(submitCardResponse).toHaveBeenCalledWith(message.id, DiracAskResponse.APPROVE, undefined);
+			}
 		});
 
 		it(`does not request input for ${createCard.name} that becomes terminal before activation`, async () => {

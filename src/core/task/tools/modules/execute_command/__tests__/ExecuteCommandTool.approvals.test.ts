@@ -36,7 +36,7 @@ function fixture(options: { utility?: boolean; multiRoot?: boolean; initial?: Co
 	const config = { cwd: path.resolve("/work/primary"), permissionDecisionBinding: options.utility ? {} : undefined }
 	const env = {
 		config,
-		orchestration: { commandApprovals: approvals },
+		orchestration: { commandApprovals: approvals, reportFailure: sinon.stub(), getTaskState: () => new AbortController().signal },
 		ui: { createCard, upsertText: sinon.stub().resolves() },
 		system: { executeCommand },
 		telemetry: { captureCustomMetadata: sinon.stub() },

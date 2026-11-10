@@ -9,8 +9,9 @@ function makeEnv(): { env: IToolEnvironment; mistakes: () => number } {
 	const env = {
 		config: { taskState },
 		orchestration: {
+			getTaskState: (key: string) => (taskState as Record<string, unknown>)[key],
 			setTaskState: (key: string, value: unknown) => {
-				;(taskState as Record<string, unknown>)[key] = value
+				; (taskState as Record<string, unknown>)[key] = value
 			},
 		},
 	} as unknown as IToolEnvironment

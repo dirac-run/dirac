@@ -31,6 +31,22 @@ describe("SurfaceAdapter", () => {
 	})
 
 	describe("owner-routed permission cards", () => {
+		for (const action of [DiracAskResponse.APPROVE, DiracAskResponse.REJECT]) {
+			it(`preserves ${action} authority when the owner includes an explanation`, async () => {
+				config.taskMessenger.routesToOwner = true
+				const text = "Use the read-only alternative"
+				config.taskMessenger.createCard.resolves({
+					getCard: () => ({ id: "owner-card", status: CardStatus.WAITING_FOR_INPUT, requireApproval: true }),
+					waitForInteraction: sinon.stub().resolves({ action, response: action, text }),
+				})
+				const card = await adapter.ui.createCard({ header: "Owner decision", requireApproval: true })
+				const answer = await card.waitForInteraction()
+				expect(answer.action).to.equal(action)
+				expect(answer.response).to.equal(action)
+				expect(answer.text).to.equal(text)
+				expect(answer.value).to.equal(undefined)
+			})
+		}
 		for (const permissionRequestKind of [undefined, "tool", "manual_tool"] as const) {
 			for (const manual of [false, true]) {
 				it(`bypasses every approval shortcut for ${permissionRequestKind ?? "unclassified"} (${manual ? "manual" : "ordinary"} card)`, async () => {

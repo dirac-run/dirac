@@ -55,7 +55,7 @@ function interactionContent(request: Readonly<TaskletInteraction>, permission: b
 	const answer = request.status === "resolved" ? request.resolution : undefined
 	const source = request.decision?.operation === "escalate" ? "User via Dirac" : "Dirac"
 	const declined = answer?.response === "reject" || answer?.action === "reject"
-	let status = "Retired without an answer"
+	let status = "Closed without an answer"
 	if (request.status === "pending") status = "Awaiting Dirac"
 	if (request.status === "resolved") status = answer ? "Answered" : "Resolved; answer unavailable"
 	if (request.status === "resolved" && declined) status = `${source} declined`
@@ -87,8 +87,8 @@ function permissionContent(request: Readonly<TaskletInteraction>, text: string):
 	if (request.utilityPermissionSkipped) source = "Dirac review (Utility not consulted)"
 	if (request.utilityPermissionEscalation) source = "Utility escalation to Dirac"
 	if (resolution) source = decision === "escalate" ? "User via Dirac" : "Dirac"
-	let status = "Awaiting Dirac; permission not granted"
-	if (request.status === "retired") status = "Retired; permission not granted"
+	let status = "Awaiting Dirac approval"
+	if (request.status === "retired") status = "Closed without approval"
 	if (request.status === "resolved") status = "Resolved; outcome unavailable"
 	if (resolution) status = "Resolved"
 	if (resolution?.response === "approve") status = "Approved"
@@ -102,12 +102,11 @@ function permissionContent(request: Readonly<TaskletInteraction>, text: string):
 		request.utilityPermissionSkipped ? `Utility not consulted: ${request.utilityPermissionSkipped}` : undefined,
 		decision ? `Decision: ${decision}` : undefined,
 		resolution?.text,
-		"Observation only; approval remains with Dirac or the existing user escalation controls.",
 	].filter((value) => value !== undefined).join("\n\n")
 }
 
 function outcomeContent(outcome: TaskRunOutcome): string {
 	if (outcome.kind === "completed") return outcome.response
 	if (outcome.kind === "failed") return "Assignment failed. See tool result for details."
-	return outcome.reason ?? "Tasklet cancelled"
+	return outcome.reason ?? "Assignment cancelled"
 }

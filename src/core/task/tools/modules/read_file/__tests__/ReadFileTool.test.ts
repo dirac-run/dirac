@@ -123,6 +123,65 @@ function makeBlock(relPath?: string, params: Record<string, unknown> = {}) {
 }
 
 describe("ReadFileToolHandler.execute – file not found", () => {
+	it("cancels streamed reads but joins their cleanup before finalizing", async () => {
+		const { config, taskState } = createConfig()
+		const controller = new AbortController()
+		Object.defineProperty(taskState, "abortSignal", { value: controller.signal })
+		const env = new SurfaceAdapter(config)
+		let started!: () => void
+		const streaming = new Promise<void>((resolve) => { started = resolve })
+		let finishCleanup!: () => void
+		const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve })
+		let streamSignal!: AbortSignal
+		sandbox.stub(env.workspace, "readTextFileWindow").callsFake(async (_path, options) => {
+			streamSignal = options.signal!
+			started()
+			try {
+				return await new Promise<any>((_resolve, reject) => {
+					streamSignal.addEventListener("abort", () => reject(streamSignal.reason), { once: true })
+				})
+			} finally {
+				await cleanup
+			}
+		})
+		const contextWrites = sandbox.spy(env.context.task, "updateEntries")
+		let settled = false
+		const reason = new Error("cancelled stream")
+		const rejection = assert.rejects(new ReadFileTool().processCall({ paths: ["a.ts"] }, env), (error) => error === reason).then(() => { settled = true })
+		await streaming
+		controller.abort(reason)
+		await new Promise<void>((resolve) => setImmediate(resolve))
+		assert.equal(streamSignal.aborted, true)
+		assert.equal(settled, false)
+		finishCleanup()
+		await rejection
+		const card = await (config.taskMessenger.createCard as sinon.SinonStub).returnValues[0]
+		assert.equal(card.getCard().status, CardStatus.CANCELLED)
+		sinon.assert.notCalled(contextWrites)
+	})
+
+	it("bounds cancellation of path observation and ignores a late resolution", async () => {
+		const { config, taskState } = createConfig()
+		const controller = new AbortController()
+		Object.defineProperty(taskState, "abortSignal", { value: controller.signal })
+		const env = new SurfaceAdapter(config)
+		let finishQuery!: (value: { absolutePath: string; displayPath: string }) => void
+		const query = new Promise<{ absolutePath: string; displayPath: string }>((resolve) => { finishQuery = resolve })
+		sandbox.stub(env.workspace, "resolvePath").returns(query)
+		const read = sandbox.spy(env.workspace, "readTextFileWindow")
+		const contextWrites = sandbox.spy(env.context.task, "updateEntries")
+		const reason = new Error("cancelled path query")
+		const pending = new ReadFileTool().processCall({ paths: ["a.ts"] }, env)
+		const rejection = assert.rejects(pending, (error) => error === reason)
+		controller.abort(reason)
+		await rejection
+		finishQuery({ absolutePath: path.join(tmpDir, "a.ts"), displayPath: "a.ts" })
+		await new Promise<void>((resolve) => setImmediate(resolve))
+		sinon.assert.notCalled(read)
+		sinon.assert.notCalled(contextWrites)
+		sinon.assert.notCalled(config.taskMessenger.createCard as sinon.SinonStub)
+	})
+
 	let sandbox: sinon.SinonSandbox
 
 	beforeEach(async () => {

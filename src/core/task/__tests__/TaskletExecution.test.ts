@@ -3044,7 +3044,7 @@ describe("Tasklet real Task execution", function () {
 			workingConfiguration: root.getWorkingConfiguration(),
 			api: root.api,
 		}
-		const result = await coordinator.execute(executor.asToolConfig(coordinator), {
+		const result = (await coordinator.execute(executor.asToolConfig(coordinator), {
 			type: "tool_use",
 			name: "subagents",
 			isComplete: true,
@@ -3052,7 +3052,7 @@ describe("Tasklet real Task execution", function () {
 				operation: "message",
 				messages: [{ tasklet_id: child.id, type: "reply", request_id: request.id, action: "approve" }],
 			},
-		})
+		})).content
 		assert.equal(JSON.parse(result as string)[0].status, "resolved")
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
 		assert.equal(requests.length, 2)

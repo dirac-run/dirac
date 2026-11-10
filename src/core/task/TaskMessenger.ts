@@ -1,6 +1,7 @@
 import { ApiHandler } from "@core/api"
 
 import { executeHook } from "@core/hooks/hook-executor"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import {
 	Card,
@@ -21,7 +22,8 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { clearAskResponse } from "./TaskUserInput"
-import { TaskMessengerDependencies, type TaskInteractionRequest } from "./types/task-messenger"
+import type { PendingCardInteraction } from "./TaskState"
+import { TaskMessengerDependencies, type TaskInteractionRequest, type TaskMessengerInvocationContext } from "./types/task-messenger"
 import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
 import Mutex from "p-mutex"
 
@@ -52,9 +54,21 @@ export class TaskMessenger implements ITaskMessenger {
 	private lastMessageId = 0
 	private ownerWaitCount = 0
 	private statusBeforeOwnerWait?: TaskStatus
+	private statusBeforeRootWait?: TaskStatus
 	private communicationProjectionMutex = new Mutex()
 
 	constructor(private dependencies: TaskMessengerDependencies) { }
+
+	forInvocation(invocation: TaskMessengerInvocationContext): ITaskMessenger {
+		return {
+			createCard: (params) => this.createCard(params, invocation),
+			streamText: (type) => this.streamText(type, invocation),
+			createCheckpoint: () => this.createCheckpoint(invocation),
+			upsertApiStatus: (status) => this.upsertApiStatus(status),
+			upsertText: (text, isReasoning, images, files, role, agentIdentity) =>
+				this.upsertText(text, isReasoning, images, files, role, agentIdentity, invocation),
+		}
+	}
 
 	get routesToOwner(): boolean {
 		return this.dependencies.counterparty !== undefined
@@ -196,7 +210,9 @@ export class TaskMessenger implements ITaskMessenger {
 			return await this.dependencies.counterparty!.requestInteraction(request, signal)
 		} finally {
 			if (--this.ownerWaitCount === 0) {
-				if (!state.abort && this.statusBeforeOwnerWait !== undefined) state.status = this.statusBeforeOwnerWait
+				if (!state.abort && state.status === TaskStatus.AWAITING_USER_INPUT && this.statusBeforeOwnerWait !== undefined) {
+					state.status = this.statusBeforeOwnerWait
+				}
 				this.statusBeforeOwnerWait = undefined
 			}
 		}
@@ -214,9 +230,9 @@ export class TaskMessenger implements ITaskMessenger {
 		return `${Date.now()}-${++this.lastMessageId}`
 	}
 
-	async streamText(type: "markdown" | "reasoning"): Promise<ITextStreamHandle> {
-		// Auto-close any active stream
-		if (this.activeVoiceStream) {
+	async streamText(type: "markdown" | "reasoning", invocation?: TaskMessengerInvocationContext): Promise<ITextStreamHandle> {
+		// Model-stream ownership is task-local; invocation output must not replace it.
+		if (!invocation && this.activeVoiceStream) {
 			await this.activeVoiceStream.close()
 		}
 
@@ -234,7 +250,7 @@ export class TaskMessenger implements ITaskMessenger {
 				role: "assistant",
 			},
 		}
-		this.dependencies.taskState.attachVoiceStream(id)
+		if (!invocation) this.dependencies.taskState.attachVoiceStream(id)
 		await this.dependencies.messageStateHandler.addToDiracMessages(message)
 		await this.postPresentationToWebview()
 
@@ -257,14 +273,14 @@ export class TaskMessenger implements ITaskMessenger {
 				await this.postPresentationToWebview()
 			},
 			close: async () => {
-				if (this.dependencies.taskState.activeVoiceStreamId === id) {
+				if (invocation || this.dependencies.taskState.activeVoiceStreamId === id) {
 					const current = this.dependencies.messageStateHandler.getMessageById(id)
 					if (current?.content.type === DiracMessageType.MARKDOWN) {
 						await this.dependencies.messageStateHandler.patchMessageById(id, {
 							content: { ...current.content },
 						})
 					}
-					this.dependencies.taskState.detachVoiceStream(id)
+					if (!invocation) this.dependencies.taskState.detachVoiceStream(id)
 					await this.postPresentationToWebview()
 				}
 
@@ -274,7 +290,7 @@ export class TaskMessenger implements ITaskMessenger {
 			},
 		}
 
-		this.activeVoiceStream = handle
+		if (!invocation) this.activeVoiceStream = handle
 		return handle
 	}
 
@@ -284,8 +300,8 @@ export class TaskMessenger implements ITaskMessenger {
 		})
 	}
 
-	async createCard(params: TaskCardParams): Promise<TaskCardHandle> {
-		if (this.activeVoiceStream) {
+	async createCard(params: TaskCardParams, invocation?: TaskMessengerInvocationContext): Promise<TaskCardHandle> {
+		if (!invocation && this.activeVoiceStream) {
 			await this.activeVoiceStream.close()
 		}
 
@@ -301,6 +317,7 @@ export class TaskMessenger implements ITaskMessenger {
 			header: params.header,
 			toolName: params.toolName,
 			icon: params.icon,
+			executionId: invocation?.executionId ?? params.executionId,
 			status,
 			renderType: params.renderType || "text",
 			body: params.body || "",
@@ -377,7 +394,7 @@ export class TaskMessenger implements ITaskMessenger {
 			const updated = await this.dependencies.messageStateHandler.patchCardById(id, recordedPatch)
 			await this.publishCommunicationCard(updated)
 			if (isFinalStatus(updated.status)) {
-				removeWaitingCard()
+				if (!this.dependencies.taskState.pendingCardInteractions.has(id)) removeWaitingCard()
 				ownerWaitCancellation.abort(new Error(`Card ${id} became terminal while waiting for interaction`))
 			}
 			this.scheduleStatePublication()
@@ -403,6 +420,7 @@ export class TaskMessenger implements ITaskMessenger {
 			},
 			waitForInteraction: async (signal?: AbortSignal) => {
 				signal?.throwIfAborted()
+				invocation?.signal.throwIfAborted()
 				if (this.routesToOwner) {
 					const card = getCard()
 					if (!(card.requireApproval || card.requireFeedback) || isFinalStatus(card.status)) {
@@ -421,6 +439,7 @@ export class TaskMessenger implements ITaskMessenger {
 							this.dependencies.taskState.abortSignal,
 							ownerWaitCancellation.signal,
 							...(signal ? [signal] : []),
+							...(invocation ? [invocation.signal] : []),
 						]),
 					)
 				}
@@ -430,12 +449,37 @@ export class TaskMessenger implements ITaskMessenger {
 				const isFinal = isFinalStatus(card.status)
 
 				if (isAsk && !isFinal) {
-					let previousStatus: TaskStatus | undefined
+					const state = this.dependencies.taskState
+					if (state.pendingCardInteractions.has(id)) throw new Error(`Card ${id} already has a pending interaction`)
+					const cancellation = AbortSignal.any([
+						state.abortSignal, ownerWaitCancellation.signal,
+						...(signal ? [signal] : []), ...(invocation ? [invocation.signal] : []),
+					])
+					cancellation.throwIfAborted()
+					if (state.pendingCardInteractions.size === 0) {
+						this.statusBeforeRootWait = state.status
+						if (state.askResponseCardId !== id) clearAskResponse(state)
+					}
+					const pending: PendingCardInteraction = { signal: cancellation }
+					state.pendingCardInteractions.set(id, pending)
+					state.waitingCardIds.push(id)
+					const readResponse = () => {
+						if (pending.response) return pending.response
+						// Legacy non-card input belongs only to the displayed FIFO head.
+						if (state.lastWaitingCardId !== id || (state.askResponseCardId && state.askResponseCardId !== id)) return
+						if (state.askResponse === undefined && state.askResponseAction === undefined) return
+						return {
+							response: state.askResponse,
+							action: state.askResponseAction || state.askResponse!,
+							value: state.askResponseValue,
+							text: state.askResponseText,
+							images: state.askResponseImages,
+							files: state.askResponseFiles,
+							userEdits: state.askResponseUserEdits,
+						}
+					}
 
 					try {
-						if (!this.dependencies.taskState.waitingCardIds.includes(id)) {
-							this.dependencies.taskState.waitingCardIds.push(id)
-						}
 						try {
 							await this.dependencies.messageStateHandler.flushPendingWrites()
 							await this.postPresentationToWebview()
@@ -443,91 +487,31 @@ export class TaskMessenger implements ITaskMessenger {
 							if (signal) throw new TaskletEscalationCleanupError(error)
 							throw error
 						}
-						await pWaitFor(
-							() =>
-								this.dependencies.taskState.lastWaitingCardId === id ||
-								this.dependencies.taskState.abort ||
-								signal?.aborted ||
-								isFinalStatus(getCard().status) ||
-								params.isAutoApproved?.() === true,
-							{ interval: 100 },
-						)
-						signal?.throwIfAborted()
-						if (this.dependencies.taskState.abort) {
-							throw new Error("Task aborted while waiting for card interaction")
-						}
-						if (isFinalStatus(getCard().status)) {
-							throw new Error(`Card ${id} became terminal while waiting for interaction`)
-						}
-						if (params.isAutoApproved?.() === true) return autoApprovedInteraction()
+						cancellation.throwIfAborted()
+						if (params.isAutoApproved?.() === true && !readResponse()) return autoApprovedInteraction()
 
-						const index = this.dependencies.messageStateHandler.findMessageIndexByCardId(id)
-						if (index === -1) throw new Error(`Card with id ${id} not found`)
-						const activeMessage = this.dependencies.messageStateHandler.getDiracMessages()[index]
-						const messageTs = activeMessage.ts
-						// Registration exposes this card to clients before setup finishes. Keep any
-						// response already submitted for it, including an immediate FIFO handoff.
-						if (this.dependencies.taskState.askResponseCardId !== id) {
-							clearAskResponse(this.dependencies.taskState)
-						}
-						this.dependencies.taskState.lastMessageTs = messageTs
-
-						previousStatus = this.dependencies.taskState.status
+						const messageTs = getCardMessageTimestamp()
+						if (state.lastWaitingCardId === id) state.lastMessageTs = messageTs
 						await this.runNotificationHook({
 							event: "user_attention",
 							source: "card_interaction",
 							message: card.header,
 							waitingForUserInput: true,
-						})
-
-						signal?.throwIfAborted()
-						this.dependencies.taskState.status = TaskStatus.AWAITING_USER_INPUT
+						}, cancellation, invocation)
+						cancellation.throwIfAborted()
+						if (state.status === this.statusBeforeRootWait) state.status = TaskStatus.AWAITING_USER_INPUT
 						this.dependencies.messageStateHandler.publishCardInteractionReady(id)
 
 						await pWaitFor(
-							() => {
-								const response = this.dependencies.taskState.askResponse
-								return !!(
-									response !== undefined ||
-									this.dependencies.taskState.lastMessageTs !== messageTs ||
-									this.dependencies.taskState.abort ||
-									signal?.aborted ||
-									isFinalStatus(getCard().status) ||
-									params.isAutoApproved?.()
-								)
-							},
+							() => cancellation.aborted || readResponse() !== undefined || params.isAutoApproved?.() === true,
 							{ interval: 100 },
 						)
-
-						signal?.throwIfAborted()
-						if (this.dependencies.taskState.abort) {
-							throw new Error("Task aborted while waiting for card interaction")
-						}
-						if (isFinalStatus(getCard().status)) {
-							throw new Error(`Card ${id} became terminal while waiting for interaction`)
-						}
-
-						if (this.dependencies.taskState.lastMessageTs !== messageTs) {
-							throw new Error("Current card interaction promise was ignored")
-						}
-
-						const autoApproved =
-							this.dependencies.taskState.askResponse === undefined && params.isAutoApproved?.() === true
-						const response = autoApproved ? DiracAskResponse.APPROVE : this.dependencies.taskState.askResponse!
-						const result = {
-							response,
-							action: autoApproved
-								? DiracAskResponse.APPROVE
-								: this.dependencies.taskState.askResponseAction || response,
-							value: autoApproved ? DiracAskResponse.APPROVE : this.dependencies.taskState.askResponseValue,
-
-							text: this.dependencies.taskState.askResponseText,
-							images: this.dependencies.taskState.askResponseImages,
-							files: this.dependencies.taskState.askResponseFiles,
-							userEdits: this.dependencies.taskState.askResponseUserEdits,
-							askTs: messageTs,
-						}
-						clearAskResponse(this.dependencies.taskState)
+						cancellation.throwIfAborted()
+						const submitted = readResponse()
+						const result: Awaited<ReturnType<ICardHandle["waitForInteraction"]>> = submitted
+							? { ...submitted, response: submitted.response!, askTs: messageTs }
+							: autoApprovedInteraction()
+						if (submitted && !pending.response) clearAskResponse(state)
 
 						// If the user sent a chat message instead of responding to the card,
 						// this signals the tool should be skipped. Throw a typed error so the
@@ -539,20 +523,29 @@ export class TaskMessenger implements ITaskMessenger {
 							!!responseText || (responseImages?.length ?? 0) > 0 || (responseFiles?.length ?? 0) > 0
 						if (result.response === DiracAskResponse.MESSAGE && hasUserMessageContent) {
 							// Echo the user's message in the chat UI
-							await this.upsertText(responseText ?? "", false, responseImages, responseFiles, "user")
+							await this.upsertText(responseText ?? "", false, responseImages, responseFiles, "user", undefined, invocation)
 							const { ToolSkippedByUserMessage } = await import("./tools/types/ToolSkippedByUserMessage")
 							throw new ToolSkippedByUserMessage(responseText ?? "", responseImages, responseFiles)
 						}
 
 						return result
 					} finally {
-						if (this.dependencies.taskState.askResponseCardId === id) {
-							clearAskResponse(this.dependencies.taskState)
-						}
-						if (!this.dependencies.taskState.abort && previousStatus !== undefined) {
-							this.dependencies.taskState.status = previousStatus
-						}
+						const wasHead = state.lastWaitingCardId === id
+						if (state.lastWaitingCardId === id || state.askResponseCardId === id) clearAskResponse(state)
+						state.pendingCardInteractions.delete(id)
 						removeWaitingCard()
+						const nextCardId = state.lastWaitingCardId
+						const nextInteraction = nextCardId ? state.pendingCardInteractions.get(nextCardId) : undefined
+						// FIFO clients may have ignored this card's earlier readiness while it was queued.
+						if (wasHead && nextCardId && nextInteraction && !nextInteraction.signal.aborted && !nextInteraction.response) {
+							this.dependencies.messageStateHandler.publishCardInteractionReady(nextCardId)
+						}
+						if (state.pendingCardInteractions.size === 0) {
+							if (!state.abort && state.status === TaskStatus.AWAITING_USER_INPUT && this.statusBeforeRootWait !== undefined) {
+								state.status = this.statusBeforeRootWait
+							}
+							this.statusBeforeRootWait = undefined
+						}
 						await this.postPresentationToWebview().catch((error) => {
 							if (signal) throw new TaskletEscalationCleanupError(error)
 							throw error
@@ -567,8 +560,8 @@ export class TaskMessenger implements ITaskMessenger {
 		return handle
 	}
 
-	async createCheckpoint(): Promise<ICardHandle> {
-		if (this.activeVoiceStream) {
+	async createCheckpoint(invocation?: TaskMessengerInvocationContext): Promise<ICardHandle> {
+		if (!invocation && this.activeVoiceStream) {
 			await this.activeVoiceStream.close()
 		}
 
@@ -628,14 +621,15 @@ export class TaskMessenger implements ITaskMessenger {
 		files?: string[],
 		role: "user" | "assistant" = "assistant",
 		agentIdentity?: { id: number; name: string },
+		invocation?: TaskMessengerInvocationContext,
 	): Promise<void> {
-		if (this.activeVoiceStream) {
+		if (!invocation && this.activeVoiceStream) {
 			await this.activeVoiceStream.close()
 		}
 
 		// If this is a reasoning block and we already have an active stream, update it instead of creating a new message
 		const activeVoiceStreamId = this.dependencies.taskState.activeVoiceStreamId
-		if (isReasoning && activeVoiceStreamId) {
+		if (!invocation && isReasoning && activeVoiceStreamId) {
 			const message = this.dependencies.messageStateHandler.getMessageById(activeVoiceStreamId)
 			if (message?.content.type === DiracMessageType.MARKDOWN && message.content.isReasoning) {
 				if (text.startsWith(message.content.content)) {
@@ -668,7 +662,7 @@ export class TaskMessenger implements ITaskMessenger {
 			},
 		}
 
-		if (isReasoning) {
+		if (!invocation && isReasoning) {
 			this.dependencies.taskState.attachVoiceStream(id)
 		}
 
@@ -681,8 +675,8 @@ export class TaskMessenger implements ITaskMessenger {
 		source: string
 		message: string
 		waitingForUserInput: boolean
-	}): Promise<void> {
-		const hooksEnabled = getHooksEnabledSafe(this.dependencies.getWorkingConfiguration().settings.hooksEnabled)
+	}, signal?: AbortSignal, invocation?: TaskMessengerInvocationContext): Promise<void> {
+		const hooksEnabled = invocation?.hooksEnabled ?? getHooksEnabledSafe(this.dependencies.getWorkingConfiguration().settings.hooksEnabled)
 		if (!hooksEnabled) {
 			return
 		}
@@ -694,17 +688,21 @@ export class TaskMessenger implements ITaskMessenger {
 					notification,
 				},
 				isCancellable: false,
-				messenger: this,
+				signal,
+				setActiveHookExecution: this.dependencies.setActiveHookExecution,
+				clearActiveHookExecution: this.dependencies.clearActiveHookExecution,
+				messenger: invocation ? this.forInvocation(invocation) : this,
 
 				messageStateHandler: this.dependencies.messageStateHandler,
 				taskId: this.dependencies.taskId,
 				hooksEnabled,
-				model: getTaskHookModelContext(
+				model: invocation?.hookModel ?? getTaskHookModelContext(
 					this.dependencies.getRequestRuntime?.()?.api ?? this.dependencies.api!,
 					this.dependencies.getWorkingConfiguration(),
 				),
 			})
 		} catch (error) {
+			if (error instanceof HookCleanupError) throw error
 			Logger.error("[Notification Hook] Failed (non-fatal):", error)
 		}
 	}

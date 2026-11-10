@@ -1,3 +1,4 @@
+import { executeToolInvocation } from "../../../__tests__/helpers/executeToolInvocation"
 import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -69,7 +70,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("no-such-dir", "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("no-such-dir", "needle"))
 
 		assert.equal(typeof result, "string")
 		assert.equal(taskState.consecutiveMistakeCount, 0)
@@ -81,7 +82,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock())
+		const result = await executeToolInvocation(coordinator, config, makeBlock())
 
 		assert.ok((result as string).includes("Missing required parameter"))
 		assert.equal(taskState.consecutiveMistakeCount, 1)
@@ -93,7 +94,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("some-dir"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("some-dir"))
 
 		assert.ok((result as string).includes("Missing required parameter"))
 		assert.equal(taskState.consecutiveMistakeCount, 1)
@@ -105,9 +106,9 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
 		assert.equal(taskState.consecutiveMistakeCount, 3)
 	})
 
@@ -117,8 +118,8 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
 		assert.equal(taskState.consecutiveMistakeCount, 2)
 
 		// Create a real file to search
@@ -129,7 +130,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 		// Override stub to return results
 		searchStub.resolves("Found 1 results.\nfile.txt:1:needle content\n")
 
-		const result = await coordinator.execute(config, makeBlock(dirName, "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(dirName, "needle"))
 		assert.equal(typeof result, "string")
 		assert.equal(taskState.consecutiveMistakeCount, 0)
 	})
@@ -144,7 +145,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("some-dir", "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("some-dir", "needle"))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("failed"))
@@ -163,9 +164,9 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock("dir-1", "needle"))
-		await coordinator.execute(config, makeBlock("dir-2", "needle"))
-		await coordinator.execute(config, makeBlock("dir-3", "needle"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-1", "needle"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-2", "needle"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-3", "needle"))
 		assert.equal(taskState.consecutiveMistakeCount, 3)
 	})
 
@@ -179,7 +180,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("some-dir", "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("some-dir", "needle"))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("failed"))
@@ -200,10 +201,10 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock("dir-1", "needle"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-1", "needle"))
 		assert.equal(taskState.consecutiveMistakeCount, 1)
 
-		await coordinator.execute(config, makeBlock("search-root", "needle"))
+		await executeToolInvocation(coordinator, config, makeBlock("search-root", "needle"))
 		assert.equal(taskState.consecutiveMistakeCount, 0)
 	})
 
@@ -229,7 +230,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock(["blocked-dir", dirName], "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(["blocked-dir", dirName], "needle"))
 
 		assert.equal(typeof result, "string")
 		assert.equal(taskState.consecutiveMistakeCount, 0)
@@ -238,14 +239,18 @@ describe("SearchFilesTool.execute – error recovery", () => {
 	it("reports a typed timeout and terminalizes its card", async () => {
 		const clock = sinon.useFakeTimers()
 		try {
-			const { config, taskMessenger } = createMockTaskConfig({
-			})
+			const { config, taskMessenger } = createMockTaskConfig({ cwd: tmpDir })
 			await fs.mkdir(path.join(tmpDir, "search-root"))
-			searchStub.callsFake(async () => await new Promise<string>(() => { }))
+			searchStub.callsFake(async (...args: unknown[]) => {
+				const signal = args.at(-1) as AbortSignal
+				return await new Promise<string>((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+				})
+			})
 			const coordinator = new ToolExecutorCoordinator()
 			coordinator.registerModularTool(new SearchFilesTool())
 
-			const pending = coordinator.execute(config, makeBlock("search-root", "needle"))
+			const pending = executeToolInvocation(coordinator, config, makeBlock("search-root", "needle"))
 			while (!searchStub.called) await clock.tickAsync(1)
 			await clock.tickAsync(30_000)
 			const result = await pending
@@ -260,28 +265,41 @@ describe("SearchFilesTool.execute – error recovery", () => {
 		}
 	})
 
-	it("cancels the active search card when the task is stopped", async () => {
-		const { config, taskState, taskMessenger } = createMockTaskConfig({
-		})
+	it("joins every search cleanup before cancelling the card when the task is stopped", async () => {
+		const { config, taskState, taskMessenger } = createMockTaskConfig({ cwd: tmpDir })
 		await fs.mkdir(path.join(tmpDir, "search-root"))
-		let markSearchStarted: (() => void) | undefined
-		const searchStarted = new Promise<void>((resolve) => {
-			markSearchStarted = resolve
-		})
-		searchStub.callsFake(async (...args: any[]) => {
+		await fs.mkdir(path.join(tmpDir, "slow-root"))
+		let markSearchStarted!: () => void
+		const searchStarted = new Promise<void>((resolve) => { markSearchStarted = resolve })
+		let finishCleanup!: () => void
+		const slowCleanup = new Promise<void>((resolve) => { finishCleanup = resolve })
+		searchStub.callsFake(async (...args: unknown[]) => {
 			const signal = args.at(-1) as AbortSignal
-			markSearchStarted?.()
-			return await new Promise<string>((_resolve, reject) => {
-				signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-			})
+			const isSlow = searchStub.callCount === 2
+			if (isSlow) markSearchStarted()
+			try {
+				return await new Promise<string>((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+				})
+			} finally {
+				if (isSlow) await slowCleanup
+			}
 		})
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(new SearchFilesTool())
-		const pending = coordinator.execute(config, makeBlock("search-root", "needle"))
+		let settled = false
+		const pending = executeToolInvocation(coordinator, config, makeBlock(["search-root", "slow-root"], "needle"))
+			.finally(() => { settled = true })
 		await searchStarted
 
 		taskState.abort = true
-		await pending
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(settled, false, "The invocation must retain ownership of the slow search cleanup")
+		} finally {
+			finishCleanup()
+			await pending
+		}
 
 		const cardHandle = await taskMessenger.createCard.firstCall.returnValue
 		assert.equal(cardHandle.getCard().status, CardStatus.CANCELLED)
@@ -301,7 +319,7 @@ describe("SearchFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock([dirName], "needle"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock([dirName], "needle"))
 
 		assert.equal(typeof result, "string")
 		assert.equal(taskState.consecutiveMistakeCount, 0)

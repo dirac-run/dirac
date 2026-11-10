@@ -52,6 +52,15 @@ describe("Historical tasklet presentation and passive saved reads", () => {
 		}
 	})
 
+	it("keeps authored preview content and uses a concise waiting status", () => {
+		const text = "  Detailed finding\n```ts\nconst answer = 42\n```\n"
+		const card = createTaskletPresentationCard({ ...data, status: "waiting", result: text, communications: [text] })
+		assert.match(card.body!, /Waiting for Dirac\./)
+		assert.doesNotMatch(card.body!, /no user approval/)
+		assert.equal(readTaskletPresentation(card)?.result, text)
+		assert.deepEqual(readTaskletPresentation(card)?.communications, [text])
+	})
+
 	it("reads legacy cards without restoring a live projector or double-counting their usage", async () => {
 		const root = handler()
 		const card = createTaskletPresentationCard(data)

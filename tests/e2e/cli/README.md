@@ -222,14 +222,14 @@ node --test tests/e2e/cli/tasklets.test.mjs
 ```
 
 The opt-in `tasklets` fixture enables subagents only in its private configuration.
-It uses public native `subagents`, `tasklets`, and child `respond` calls through
+It uses the unified public native `subagents` tool (`operation: create` and supervision operations), plus child `respond` calls through
 the real built CLI. Root/child requests are distinguished by tool availability and
 assignment markers, not global request ordering. Two siblings report progress and
 ask private parent-directed questions; the parent inspects them and voluntarily
 sleeps. The test opens `/agent` (singular), inspects/reopens previews without
 answering the questions, then submits user messages to wake the parent. It checks
-one completed sibling while the other remains waiting, addressed `message` replies,
-bounded selected assignment/transcript evidence, same-ID resume, and title/status-only
+one completed sibling while the other remains waiting, addressed `message` replies using exact `request_id` values,
+bounded selected assignment/transcript evidence, same-ID resume, and stable agent-name/title/status
 completed previews after reopening
 the persisted root in a new CLI process with the provider stopped.
 The Goal variant starts through `/goal`, stays `working` during private child
@@ -238,7 +238,7 @@ verification gate. Both variants assert root-only top-level storage/history and
 byte-preserved child records, events and transcripts during restored browsing;
 the Goal record also stays unchanged on selection/reopening.
 It also reproduces the 80×24 case with two waiting children: displaced parent control
-output remains accessible in scrollback and accounting-only cards/UUID headings
+receipts remain accessible in scrollback with named agent targets, while accounting-only cards/legacy UUID headings
 never become conversation rows. Activity-only changes do not create transcript revisions.
 
 No live credentials, command execution, or workspace edits are requested by the

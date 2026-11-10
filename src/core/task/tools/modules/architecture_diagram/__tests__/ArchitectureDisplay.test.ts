@@ -27,6 +27,7 @@ function fixture() {
 		.callsFake(async (selection) => ({ available: true, selection: { ...selection, taskId: "owner" }, waitForInput: true }))
 	const upsert = sinon.stub().resolves({ name: "tools", version: 3 })
 	const env = {
+		orchestration: { reportFailure: sinon.spy() },
 		ui: { createCard: async () => card },
 		architecture: { openDisplay: prepare, upsertDiagram: upsert },
 	} as unknown as ArchitectureDiagramEnvironment

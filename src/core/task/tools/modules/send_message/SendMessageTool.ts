@@ -36,7 +36,7 @@ export class SendMessageTool implements IDiracTool {
 		const card = await createMessageCard(
 			{
 				header,
-				body: `${request.text}\n\nStatus: Sending`,
+				body: `${request.text}\n\nSending...`,
 				communication: { actor },
 				icon: DiracIcon.CHAT,
 				status: CardStatus.RUNNING,
@@ -54,7 +54,7 @@ export class SendMessageTool implements IDiracTool {
 					() =>
 						card.update({
 							header,
-							body: `${request.text}\n\nStatus: Message not accepted. See tool result for details.`,
+							body: `${request.text}\n\nMessage not accepted.`,
 							communication: { actor },
 						}),
 					env,
@@ -68,7 +68,7 @@ export class SendMessageTool implements IDiracTool {
 				() =>
 					card.update({
 						header,
-						body: `${request.text}\n\nStatus: Accepted into the volatile mailbox; delivery, understanding, and action are not confirmed.`,
+						body: `${request.text}\n\nMessage accepted.`,
 						communication: { actor },
 					}),
 				env,

@@ -2,6 +2,7 @@ import { extendTranscriptPrefix, transcriptHash } from "@core/api/TranscriptPref
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/hooks/precompact-executor"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import { autoCondensePrompt } from "@core/prompts/contextManagement"
 import type { SlashCommandDirectAction } from "@core/slash-commands"
 import type { ApiConversationCheckpoint, ApiConversationRequestOptions } from "@core/api/conversation"
@@ -108,8 +109,8 @@ export class ApiConversationManager {
 					hooksEnabled,
 				})
 			} catch (error) {
-				// If hook was cancelled, re-throw to stop compaction
-				if (error instanceof HookCancellationError) {
+				// Cancellation and unconfirmed hook cleanup must stop compaction.
+				if (error instanceof HookCancellationError || error instanceof HookCleanupError) {
 					throw error
 				}
 

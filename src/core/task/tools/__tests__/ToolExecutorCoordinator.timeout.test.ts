@@ -39,10 +39,11 @@ describe("ToolExecutorCoordinator timeout handling", () => {
 			params: {},
 		})
 
-		assert.match(result as string, /<timeout>/)
-		assert.match(result as string, /Tool: timed_tool/)
-		assert.match(result as string, /Operation: reading data/)
-		assert.equal(taskState.consecutiveMistakeCount, 1)
+		assert.match(result.content as string, /<timeout>/)
+		assert.match(result.content as string, /Tool: timed_tool/)
+		assert.match(result.content as string, /Operation: reading data/)
+		assert.deepEqual(result.effects, { mistake: "increment" })
+		assert.equal(taskState.consecutiveMistakeCount, 0)
 		const cardHandle = await taskMessenger.createCard.firstCall.returnValue
 		assert.equal(cardHandle.getCard().status, "error")
 		assert.equal(cardHandle.getCard().outcome, "timeout")

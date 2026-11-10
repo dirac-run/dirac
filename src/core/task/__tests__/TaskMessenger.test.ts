@@ -9,9 +9,11 @@ import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../TaskState"
 import { submitCardResponse } from "../TaskUserInput"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
-import type { TaskCounterparty, TaskInteractionRequest } from "../types/task-messenger"
+import type { TaskCounterparty, TaskInteractionRequest, TaskMessengerInvocationContext } from "../types/task-messenger"
+import * as hookExecutor from "@core/hooks/hook-executor"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 
-function createMessenger(postStateToWebview = sinon.stub().resolves(), counterparty?: TaskCounterparty) {
+function createMessenger(postStateToWebview = sinon.stub().resolves(), counterparty?: TaskCounterparty, hooksEnabled = false) {
 	const messages: any[] = []
 	const messageStateHandler = {
 		addToDiracMessages: sinon.stub().callsFake(async (message) => {
@@ -24,6 +26,12 @@ function createMessenger(postStateToWebview = sinon.stub().resolves(), counterpa
 				messages.findIndex((message) => message.content.type === DiracMessageType.CARD && message.content.card.id === id),
 			),
 		getDiracMessages: sinon.stub().callsFake(() => messages),
+		getMessageById: sinon.stub().callsFake((id: string) => messages.find((message) => message.id === id)),
+		patchMessageById: sinon.stub().callsFake(async (id: string, patch: Record<string, unknown>) => {
+			const message = messages.find((candidate) => candidate.id === id)
+			if (!message) throw new Error(`Message ${id} not found`)
+			Object.assign(message, patch)
+		}),
 		updateDiracMessage: sinon.stub().resolves(),
 		appendMarkdownById: sinon.stub().callsFake(async (id: string, text: string) => {
 			const message = messages.find((candidate) => candidate.id === id)
@@ -67,16 +75,20 @@ function createMessenger(postStateToWebview = sinon.stub().resolves(), counterpa
 		publishCardInteractionReady: sinon.stub(),
 	}
 	const taskState = new TaskState()
+	const setActiveHookExecution = sinon.stub().resolves()
+	const clearActiveHookExecution = sinon.stub().resolves()
 	const messenger = new TaskMessenger({
 		taskState,
 		messageStateHandler,
 		postStateToWebview,
 		counterparty,
-		getWorkingConfiguration: () => ({ settings: { hooksEnabled: false }, apiConfiguration: {} }) as any,
+		getWorkingConfiguration: () => ({ settings: { hooksEnabled }, apiConfiguration: { actModeApiModelId: "test-model" } }) as any,
+		setActiveHookExecution,
+		clearActiveHookExecution,
 		taskId: "task-1",
 		getCurrentProviderInfo: sinon.stub(),
 	} as any)
-	return { messenger, messages, taskState, messageStateHandler, postStateToWebview }
+	return { messenger, messages, taskState, messageStateHandler, postStateToWebview, setActiveHookExecution, clearActiveHookExecution }
 }
 
 async function withInteractionTimeout<T>(taskState: TaskState, interaction: Promise<T>): Promise<T> {
@@ -100,6 +112,107 @@ const responseFields = [
 	"askResponseAction",
 	"askResponseValue",
 ] as const
+
+function invocationContext(hooksEnabled = false): TaskMessengerInvocationContext {
+	return {
+		executionId: "origin-execution",
+		signal: new AbortController().signal,
+		hooksEnabled,
+		hookModel: { provider: "anthropic", slug: "origin-model" },
+	}
+}
+
+describe("TaskMessenger invocation output isolation", () => {
+	it("keeps late invocation cards, text, streams and checkpoints off the current model stream", async () => {
+		const { messenger, taskState, messages } = createMessenger()
+		const scoped = messenger.forInvocation(invocationContext())
+		const current = await messenger.streamText("reasoning")
+		await current.append("Current model")
+
+		const card = await scoped.createCard({ header: "Late execution", status: CardStatus.SUCCESS })
+		await scoped.upsertText("Old reasoning", true)
+		const oldStream = await scoped.streamText("markdown")
+		await oldStream.append("Old execution text")
+		await oldStream.close()
+		await scoped.createCheckpoint()
+		assert.equal(taskState.activeVoiceStreamId, current.id)
+		assert.equal(messages.find((message) => message.id === card.id).content.card.executionId, "origin-execution")
+		assert.equal(messages.find((message) => message.id === current.id).content.content, "Current model")
+		await current.append(" continues")
+		assert.equal(messages.find((message) => message.id === current.id).content.content, "Current model continues")
+		await current.close()
+		assert.equal(taskState.activeVoiceStreamId, undefined)
+	})
+
+	it("preserves the legacy unscoped card stream handoff", async () => {
+		const { messenger, taskState } = createMessenger()
+		await messenger.streamText("markdown")
+		await messenger.createCard({ header: "Legacy card" })
+		assert.equal(taskState.activeVoiceStreamId, undefined)
+	})
+
+	it("uses originating notification model/settings and scopes nested hook output", async () => {
+		const { messenger, taskState, messages, messageStateHandler } = createMessenger()
+		const invocation = invocationContext(true)
+		const scoped = messenger.forInvocation(invocation)
+		const card = await scoped.createCard({ header: "Origin permission", requireApproval: true })
+		const current = await messenger.streamText("reasoning")
+		await current.append("Current model")
+		const execute = sinon.stub(hookExecutor, "executeHook").callsFake(async (options) => {
+			assert.deepEqual(options.model, invocation.hookModel)
+			assert.equal(options.hooksEnabled, true, "origin settings win even though current hooks are disabled")
+			await options.messenger.createCard({ header: "Origin hook", status: CardStatus.SUCCESS })
+			await options.messenger.upsertText("Origin hook output", true)
+			const hookStream = await options.messenger.streamText("reasoning")
+			await hookStream.append("Origin hook stream")
+			await hookStream.close()
+			await options.messenger.createCheckpoint()
+			return {} as any
+		})
+		try {
+			messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) =>
+				submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE }))
+			assert.equal((await withInteractionTimeout(taskState, card.waitForInteraction())).response, DiracAskResponse.APPROVE)
+			sinon.assert.calledOnce(execute)
+			assert.equal(taskState.activeVoiceStreamId, current.id)
+			assert.equal(messages.find((message) => message.content.card?.header === "Origin hook").content.card.executionId, invocation.executionId)
+			assert.equal(messages.find((message) => message.id === current.id).content.content, "Current model")
+		} finally {
+			execute.restore()
+			await current.close()
+		}
+	})
+
+	it("keeps originating hooks disabled after the current settings enable them", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger(undefined, undefined, true)
+		const card = await messenger.createCard({ header: "Origin permission", requireApproval: true }, invocationContext(false))
+		const execute = sinon.stub(hookExecutor, "executeHook").resolves({} as any)
+		try {
+			messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) =>
+				submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE }))
+			await withInteractionTimeout(taskState, card.waitForInteraction())
+			sinon.assert.notCalled(execute)
+		} finally {
+			execute.restore()
+		}
+	})
+})
+
+describe("TaskMessenger notification cleanup failures", () => {
+	it("propagates hook cleanup failures instead of logging a nonfatal notification error", async () => {
+		const { messenger, taskState } = createMessenger()
+		const card = await messenger.createCard({ header: "Origin permission", requireApproval: true }, invocationContext(true))
+		const failure = new HookCleanupError([new Error("termination failed")], "Hook cleanup failed")
+		const execute = sinon.stub(hookExecutor, "executeHook").rejects(failure)
+		try {
+			await assert.rejects(withInteractionTimeout(taskState, card.waitForInteraction()), (error) => error === failure)
+			assert.equal(taskState.pendingCardInteractions.size, 0)
+			assert.deepEqual(taskState.waitingCardIds, [])
+		} finally {
+			execute.restore()
+		}
+	})
+})
 
 describe("TaskMessenger communication projection", () => {
 	it("updates one observational card across the child card lifecycle", async () => {
@@ -420,8 +533,9 @@ describe("TaskMessenger tasklet escalation", () => {
 	it("rejects operation-changing permission edits and closes the card", async () => {
 		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
 		messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
-			submitCardResponse({ taskState }, { cardId, response: DiracAskResponse.APPROVE })
-			taskState.askResponseUserEdits = { "file.ts": "changed" }
+			submitCardResponse({ taskState }, {
+				cardId, response: DiracAskResponse.APPROVE, userEdits: { "file.ts": "changed" },
+			})
 		})
 		await assert.rejects(
 			messenger.escalateTaskletInteraction(child, request(), new AbortController().signal),
@@ -516,6 +630,40 @@ describe("TaskMessenger owner interactions", () => {
 		release()
 		await rejected
 		sinon.assert.notCalled(counterparty.requestInteraction)
+	})
+
+	it("preserves newer task status when an owner response resolves", async () => {
+		const counterparty = owner()
+		let respond!: () => void
+		counterparty.requestInteraction.callsFake(() => new Promise<{ action: string }>((resolve) => {
+			respond = () => resolve({ action: DiracAskResponse.APPROVE })
+		}))
+		const { messenger, taskState } = createMessenger(undefined, counterparty)
+		taskState.status = TaskStatus.IDLE
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		const waiting = card.waitForInteraction()
+		await pWaitFor(() => counterparty.requestInteraction.calledOnce, { interval: 1 })
+		taskState.status = TaskStatus.WAITING_FOR_API
+		respond()
+		assert.equal((await waiting).action, DiracAskResponse.APPROVE)
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+	})
+
+	it("preserves newer task status when the last of overlapping owner waits is cancelled", async () => {
+		const counterparty = owner()
+		const { messenger, taskState } = createMessenger(undefined, counterparty)
+		taskState.status = TaskStatus.IDLE
+		const first = await messenger.createCard({ header: "First", requireFeedback: true })
+		const second = await messenger.createCard({ header: "Second", requireFeedback: true })
+		const firstRejected = assert.rejects(first.waitForInteraction(), /became terminal/)
+		const secondRejected = assert.rejects(second.waitForInteraction(), /became terminal/)
+		await pWaitFor(() => counterparty.requestInteraction.calledTwice, { interval: 1 })
+		await first.finalize(CardStatus.CANCELLED)
+		await firstRejected
+		taskState.status = TaskStatus.WAITING_FOR_API
+		await second.finalize(CardStatus.CANCELLED)
+		await secondRejected
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
 	})
 
 	it("retires terminal-card waits independently and restores status only after the last owner wait", async () => {
@@ -624,6 +772,7 @@ describe("TaskMessenger text authorship", () => {
 			const operation = create().processCall(
 				{ operation: "display_diagram", name: "tools" },
 				{
+					orchestration: { reportFailure: sinon.spy() },
 					ui: { createCard: async (params) => new CardHandle(await messenger.createCard(params)) },
 					architecture: {
 						openDisplay: async (selection) => ({
@@ -652,7 +801,7 @@ describe("TaskMessenger text authorship", () => {
 		}
 	})
 
-	it("services concurrent card waits in FIFO order", async () => {
+	it("routes legacy response input only to the FIFO head", async () => {
 		const { messenger, taskState } = createMessenger()
 		const first = await messenger.createCard({ header: "First", requireApproval: true })
 		const second = await messenger.createCard({ header: "Second", requireApproval: true })
@@ -669,6 +818,186 @@ describe("TaskMessenger text authorship", () => {
 		const secondResult = await secondInteraction
 		assert.equal(secondResult.response, DiracAskResponse.REJECT)
 		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+
+	it("resolves addressed simultaneous cards out of order without crossing response fields", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		taskState.status = TaskStatus.WAITING_FOR_API
+		const first = await messenger.createCard({ header: "First", requireApproval: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+		let firstSettled = false
+		const firstInteraction = first.waitForInteraction().then((result) => { firstSettled = true; return result })
+		const secondInteraction = second.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledTwice, { interval: 1 })
+
+		assert.equal(taskState.lastWaitingCardId, first.id)
+		await submitCardResponse({ taskState }, {
+			cardId: second.id, response: DiracAskResponse.REJECT, text: "Second response",
+			images: ["second.png"], files: ["second.txt"], value: "second-value", userEdits: { second: "edit" },
+		})
+		const secondResult = await withInteractionTimeout(taskState, secondInteraction)
+		assert.equal(firstSettled, false)
+		assert.equal(secondResult.response, DiracAskResponse.REJECT)
+		assert.equal(secondResult.text, "Second response")
+		assert.deepEqual(secondResult.images, ["second.png"])
+		assert.deepEqual(secondResult.files, ["second.txt"])
+		assert.deepEqual(secondResult.userEdits, { second: "edit" })
+		assert.equal(secondResult.value, "second-value")
+		assert.deepEqual(taskState.waitingCardIds, [first.id])
+		assert.equal(taskState.status, TaskStatus.AWAITING_USER_INPUT)
+
+		await submitCardResponse({ taskState }, { cardId: first.id, response: DiracAskResponse.APPROVE, value: "first-value" })
+		const firstResult = await withInteractionTimeout(taskState, firstInteraction)
+		assert.equal(firstResult.response, DiracAskResponse.APPROVE)
+		assert.equal(firstResult.value, "first-value")
+		assert.equal(firstResult.text, undefined)
+		assert.equal(firstResult.images, undefined)
+		assert.equal(firstResult.files, undefined)
+		assert.equal(firstResult.userEdits, undefined)
+		assert.equal(taskState.pendingCardInteractions.size, 0)
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+	})
+
+	it("keeps an addressed response to the second card before either waiter finishes setup", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const first = await messenger.createCard({ header: "First", requireApproval: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+		let release!: () => void
+		messageStateHandler.flushPendingWrites.returns(new Promise<void>((resolve) => { release = resolve }))
+		const firstInteraction = first.waitForInteraction()
+		const secondInteraction = second.waitForInteraction()
+		await submitCardResponse({ taskState }, { cardId: second.id, response: DiracAskResponse.REJECT, value: "early" })
+		release()
+		assert.equal((await withInteractionTimeout(taskState, secondInteraction)).value, "early")
+		assert.deepEqual(taskState.waitingCardIds, [first.id])
+		await submitCardResponse({ taskState }, { cardId: first.id, response: DiracAskResponse.APPROVE })
+		assert.equal((await withInteractionTimeout(taskState, firstInteraction)).response, DiracAskResponse.APPROVE)
+		assert.equal(taskState.pendingCardInteractions.size, 0)
+	})
+
+	for (const cancelledIndex of [0, 1]) {
+		it(`cancels only simultaneous waiter ${cancelledIndex + 1}`, async () => {
+			const { messenger, taskState, messageStateHandler } = createMessenger()
+			const cards = await Promise.all([
+				messenger.createCard({ header: "First", requireApproval: true }),
+				messenger.createCard({ header: "Second", requireApproval: true }),
+			])
+			const controllers = [new AbortController(), new AbortController()]
+			const waits = cards.map((card, index) => card.waitForInteraction(controllers[index].signal))
+			const cancelled = assert.rejects(waits[cancelledIndex], /cancel just one/)
+			await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledTwice, { interval: 1 })
+			controllers[cancelledIndex].abort(new Error("cancel just one"))
+			await withInteractionTimeout(taskState, cancelled)
+			const survivorIndex = 1 - cancelledIndex
+			assert.deepEqual(taskState.waitingCardIds, [cards[survivorIndex].id])
+			assert.equal(taskState.pendingCardInteractions.size, 1)
+			assert.equal(taskState.status, TaskStatus.AWAITING_USER_INPUT)
+			await submitCardResponse({ taskState }, { cardId: cards[survivorIndex].id, response: DiracAskResponse.APPROVE })
+			assert.equal((await withInteractionTimeout(taskState, waits[survivorIndex])).response, DiracAskResponse.APPROVE)
+			assert.equal(taskState.pendingCardInteractions.size, 0)
+			assert.equal(taskState.status, TaskStatus.IDLE)
+		})
+	}
+
+	it("routes addressed chat interruption only to its card without rejecting the current turn", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const first = await messenger.createCard({ header: "First", requireApproval: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+		const firstWait = first.waitForInteraction()
+		const secondRejected = assert.rejects(second.waitForInteraction(), (error: unknown) =>
+			error instanceof ToolSkippedByUserMessage && error.userMessage === "Change the second operation")
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledTwice, { interval: 1 })
+		await submitCardResponse({ taskState }, {
+			cardId: second.id, response: DiracAskResponse.MESSAGE, text: "Change the second operation",
+		})
+		await withInteractionTimeout(taskState, secondRejected)
+		assert.equal(taskState.didRejectTool, false)
+		assert.deepEqual(taskState.waitingCardIds, [first.id])
+		await submitCardResponse({ taskState }, { cardId: first.id, response: DiracAskResponse.APPROVE })
+		assert.equal((await withInteractionTimeout(taskState, firstWait)).response, DiracAskResponse.APPROVE)
+	})
+
+	it("task abort ends all simultaneous waits and discards their pending responses", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const first = await messenger.createCard({ header: "First", requireApproval: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+		const rejected = Promise.all([
+			assert.rejects(first.waitForInteraction(), /abort/i),
+			assert.rejects(second.waitForInteraction(), /abort/i),
+		])
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledTwice, { interval: 1 })
+		await submitCardResponse({ taskState }, { cardId: second.id, response: DiracAskResponse.REJECT })
+		taskState.abort = true
+		await withInteractionTimeout(taskState, rejected)
+		assert.deepEqual(taskState.waitingCardIds, [])
+		assert.equal(taskState.pendingCardInteractions.size, 0)
+		for (const field of responseFields) assert.equal(taskState[field], undefined, field)
+	})
+
+	it("does not replace a concurrent model status when card wait setup finishes", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		let release!: () => void
+		messageStateHandler.flushPendingWrites.returns(new Promise<void>((resolve) => { release = resolve }))
+		const wait = card.waitForInteraction()
+		taskState.status = TaskStatus.WAITING_FOR_API
+		release()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.APPROVE })
+		await withInteractionTimeout(taskState, wait)
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+	})
+
+	it("does not restore stale status over concurrent model streaming", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		const wait = card.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+		taskState.status = TaskStatus.WAITING_FOR_API
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.APPROVE })
+		await withInteractionTimeout(taskState, wait)
+		assert.equal(taskState.status, TaskStatus.WAITING_FOR_API)
+	})
+
+	it("cancels and joins only the matching notification hook before unregistering its wait", async () => {
+		const fixture = createMessenger(undefined, undefined, true)
+		const { messenger, taskState, messageStateHandler } = fixture
+		const hooks: any[] = []
+		const finishHooks: (() => void)[] = []
+		const execute = sinon.stub(hookExecutor, "executeHook").callsFake(async (options) => {
+			hooks.push(options)
+			return new Promise<any>((resolve) => { finishHooks.push(() => resolve(undefined)) })
+		})
+		try {
+			const first = await messenger.createCard({ header: "First", requireApproval: true })
+			const second = await messenger.createCard({ header: "Second", requireApproval: true })
+			const controller = new AbortController()
+			let firstSettled = false
+			const firstWait = first.waitForInteraction(controller.signal).finally(() => { firstSettled = true })
+			const firstRejected = assert.rejects(firstWait, /cancel notification/)
+			const secondWait = second.waitForInteraction()
+			await pWaitFor(() => hooks.length === 2, { interval: 1 })
+			assert.equal(hooks[0].setActiveHookExecution, fixture.setActiveHookExecution)
+			assert.equal(hooks[0].clearActiveHookExecution, fixture.clearActiveHookExecution)
+			controller.abort(new Error("cancel notification"))
+			assert.equal(hooks[0].signal.aborted, true)
+			assert.equal(hooks[1].signal.aborted, false)
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			assert.equal(firstSettled, false, "wait must join hook cleanup, not abandon it")
+			assert.equal(taskState.pendingCardInteractions.size, 2)
+			finishHooks[0]()
+			await withInteractionTimeout(taskState, firstRejected)
+			assert.deepEqual(taskState.waitingCardIds, [second.id])
+			assert.equal(hooks[1].signal.aborted, false)
+			finishHooks[1]()
+			await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+			await submitCardResponse({ taskState }, { cardId: second.id, response: DiracAskResponse.APPROVE })
+			assert.equal((await withInteractionTimeout(taskState, secondWait)).response, DiracAskResponse.APPROVE)
+			assert.equal(taskState.pendingCardInteractions.size, 0)
+		} finally {
+			execute.restore()
+		}
 	})
 
 	for (const stage of ["persistence", "presentation"]) {
@@ -736,7 +1065,7 @@ describe("TaskMessenger text authorship", () => {
 
 		assert.equal(answered, true)
 		assert.deepEqual(taskState.waitingCardIds, [])
-		assert.equal(taskState.didRejectTool, true)
+		assert.equal(taskState.didRejectTool, false)
 		assert.equal(messages.at(-1).content.role, "user")
 		assert.equal(messages.at(-1).content.content, "Use another command")
 		assert.deepEqual(messages.at(-1).content.images, ["preview.png"])

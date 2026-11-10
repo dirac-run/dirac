@@ -159,30 +159,28 @@ function taskletActionTitle(receipt: TaskletReceipt, actor: string): string {
 }
 
 export function taskletReceiptNote(receipt: TaskletReceipt): string | undefined {
-	if (receipt.operation === "spawn" || receipt.operation === "resume") return "Acceptance is not assignment completion."
-	if (receipt.rows.some((row) => row.outcome === "queued")) return "Queued for delivery; consumption is not confirmed."
 	if (receipt.operation === "sleep") {
-		if (receipt.outcome === "failed") return "Wait failed; no wake or assignment completion is confirmed."
-		if (receipt.outcome === "cancelled") return "Wait cancelled; a cancellation is not assignment completion."
+		if (receipt.outcome === "failed") return "Wait failed."
+		if (receipt.outcome === "cancelled") return "Wait cancelled."
 		if (!receipt.wakeReason) {
-			if (receipt.waitScope === "time_or_user") return "Waiting for a deadline or user input."
+			if (receipt.waitScope === "time_or_user") return "Waiting for timeout or user input."
 			return receipt.waitScope === "selected_tasklets"
-				? `Waiting for communication from ${receipt.waitSourceCount} selected agents, a deadline, or user input.`
-				: "Waiting for agent communication, a deadline, or user input."
+				? `Waiting for messages from ${receipt.waitSourceCount} agents.`
+				: "Waiting for agent messages."
 		}
 		const reasons = {
-			event: "Agent communication",
-			mail: "Ordinary agent message",
-			journal: "Journal notification",
+			event: "Agent update received",
+			mail: "Agent message received",
+			journal: "Journal notification received",
 			timeout: "Deadline reached",
-			user_message: "User input",
+			user_message: "User input received",
 			cancelled: "Wait cancelled",
 		}
-		return `${reasons[receipt.wakeReason]}. A wake is not assignment completion.`
+		return `${reasons[receipt.wakeReason]}.`
 	}
 	if (receipt.operation === "inspect" || receipt.operation === "list") {
 		const count = receipt.fragment ? "Evidence fragment" : `${receipt.returnedCount ?? 0} of ${receipt.totalCount ?? 0} items`
-		return `${count}${receipt.hasMore ? " · more available" : ""} · passive read`
+		return `${count}${receipt.hasMore ? " · more available" : ""}`
 	}
 	return undefined
 }
@@ -200,30 +198,30 @@ export function formatTaskletReceipt(receipt: TaskletReceipt, communicationConte
 		].filter(Boolean).join("\n\n")
 	}
 	const rows = receipt.rows.map((row) => {
-		const authority = row.operation !== "permission_decision" ? undefined
+		const permissionNotice = row.operation !== "permission_decision" ? undefined
 			: row.outcome === "requires_user_approval"
-				? "User approval is required; this decision did not grant permission or initiate user escalation."
-				: row.outcome === "resolved"
-					? row.decision === "escalate"
-						? "User escalation resolved; the outcome is retained by the addressed request."
-						: "This request only, within parent authority."
-					: "A decision attempt is not a permission grant."
+				? "User approval required; permission not granted."
+				: row.outcome === "resolved" && row.decision === "escalate"
+					? "User escalation resolved."
+					: undefined
 		return [
 			row.message,
 			row.choice !== undefined ? `Choice: ${row.choice}` : undefined,
-			`${TASKLET_RECEIPT_OPERATIONS[row.operation].label} · ${taskletReceiptRowTitle(row)}`,
-			`Status: ${TASKLET_RECEIPT_OUTCOMES[row.outcome].label}`,
+			communicationContent
+				? ["spawn", "resume", "interrupt", "inspect"].includes(row.operation) ? taskletReceiptRowTitle(row) : undefined
+				: `${TASKLET_RECEIPT_OPERATIONS[row.operation].label} · ${taskletReceiptRowTitle(row)}`,
+			communicationContent ? undefined : `Status: ${TASKLET_RECEIPT_OUTCOMES[row.outcome].label}`,
 			row.observedState ? `Observed: ${TASKLET_STATE_LABELS[row.observedState]}` : undefined,
 			row.request ? `Request: ${row.request}` : undefined,
-			row.decision ? `Decision: ${row.decision}` : undefined,
-			authority,
+			row.decision ? `Requested decision: ${row.decision}` : undefined,
+			permissionNotice,
 			row.error ? "Error: Operation failed. See tool result for details." : undefined,
 		].filter((value) => value !== undefined).join("\n\n")
 	})
 	return [
 		...rows,
 		taskletReceiptNote(receipt),
-		receipt.operation === "sleep" && receipt.waitSourceIds?.length ? `Selected sources: ${receipt.waitSourceIds.join(", ")}` : undefined,
-		receipt.error ? "Error: Operation failed. See tool result for details." : undefined,
+		receipt.operation === "sleep" && receipt.waitSourceIds?.length ? `Agents: ${receipt.waitSourceIds.join(", ")}` : undefined,
+		receipt.error && !receipt.rows.some((row) => row.error) ? "Error: Operation failed. See tool result for details." : undefined,
 	].filter(Boolean).join("\n\n")
 }

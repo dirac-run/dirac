@@ -41,8 +41,9 @@ export class HookProcessRegistry {
 		const processes = Array.from(HookProcessRegistry.activeProcesses)
 		if (processes.length > 0) {
 			Logger.log(`[HookProcessRegistry] Terminating ${processes.length} active hook process(es)`)
-			await Promise.all(processes.map((p) => p.terminate()))
-			HookProcessRegistry.activeProcesses.clear()
+			const settlements = await Promise.allSettled(processes.map((p) => p.terminate()))
+			const failures = settlements.flatMap((settlement) => settlement.status === "rejected" ? [settlement.reason] : [])
+			if (failures.length > 0) throw new AggregateError(failures, "Hook process cleanup failed")
 		}
 	}
 

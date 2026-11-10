@@ -53,7 +53,7 @@ export class EditFileValidator {
 	}
 
 	private fail(env: IToolEnvironment, message: string): string {
-		env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+		env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 		return message
 	}
 }

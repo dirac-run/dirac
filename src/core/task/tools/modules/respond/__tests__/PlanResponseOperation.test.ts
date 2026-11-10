@@ -28,6 +28,7 @@ function createMocks(mode: "plan" | "act") {
 		},
 		workspace: { formatAttachedFiles: sinon.stub().resolves("attached plan files") },
 		orchestration: {
+			reportFailure: sinon.stub(),
 			getTaskState: sinon.stub().callsFake((key: string) => state[key]),
 			setTaskState: sinon.stub().callsFake((key: string, value: unknown) => {
 				state[key] = value
@@ -48,6 +49,15 @@ function createMocks(mode: "plan" | "act") {
 
 describe("plan response operation", () => {
 	afterEach(() => sinon.restore())
+
+	it("marks a failed mode switch without presenting plan acceptance", async () => {
+		const { env, card } = createMocks("plan")
+		env.config.yoloModeToggled = true
+		env.orchestration.switchToActMode.resolves(false)
+		assert.match(await presentPlanForApproval("Plan", env as any), /Failed to switch/)
+		sinon.assert.calledOnce(env.orchestration.reportFailure)
+		sinon.assert.calledWith(card.finalize, CardStatus.ERROR, true)
+	})
 
 	it("renders and accepts the plan before switching from plan mode in YOLO mode", async () => {
 		const { card, env } = createMocks("plan")

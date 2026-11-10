@@ -36,7 +36,9 @@ export class UseSkillTool implements IDiracTool {
 		if (!skill_name) {
 			throw new Error("Missing required parameter 'skill_name'. Please provide the name of the skill to activate.")
 		}
-		const deadline = new ToolExecutionDeadline(this.spec().name)
+		const deadline = new ToolExecutionDeadline(this.spec().name, {
+			cancellationSignal: env.orchestration.getTaskState("abortSignal"),
+		})
 
 		const card = await env.ui.createCard({
 			icon: DiracIcon.SKILL,
@@ -45,9 +47,9 @@ export class UseSkillTool implements IDiracTool {
 		})
 
 		try {
-			const availableSkills = await deadline.run("discovering available skills", async () =>
+			const availableSkills = await deadline.observe("discovering available skills", async () =>
 				await env.skills.getAvailableSkills())
-			const skillContent = await deadline.run(`loading skill ${skill_name}`, async () =>
+			const skillContent = await deadline.observe(`loading skill ${skill_name}`, async () =>
 				await env.skills.getSkillContent(skill_name, availableSkills))
 
 			if (!skillContent) {
@@ -55,9 +57,10 @@ export class UseSkillTool implements IDiracTool {
 				const errorMsg = `Error: Skill "${skill_name}" not found. Available skills: ${availableNames || "none"}`
 				await card.update({ status: CardStatus.ERROR, body: errorMsg })
 				await card.finalize(CardStatus.ERROR)
+				env.orchestration.reportFailure()
 				return errorMsg
 			}
-			const { docs, scripts } = await deadline.run(`listing support files for ${skill_name}`, async () =>
+			const { docs, scripts } = await deadline.observe(`listing support files for ${skill_name}`, async () =>
 				await env.skills.listSupportingFiles(skillContent.path))
 
 			const activeSkillIds = env.orchestration.getTaskState("activeSkillIds")

@@ -1,5 +1,6 @@
 import { formatResponse } from "@core/formatResponse"
 import { executeHook } from "@core/hooks/hook-executor"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import {
 	ensureTaskDirectoryExists,
@@ -600,16 +601,7 @@ export class LifecycleManager {
 			this.getOperationalApi().abort?.()
 			const shouldRunTaskCancelHook = await this.dependencies.hookManager.shouldRunTaskCancelHook()
 
-			const activeHook = await this.dependencies.hookManager.getActiveHookExecution()
-			if (activeHook) {
-				try {
-					await this.dependencies.hookManager.cancelHookExecution()
-					await this.dependencies.hookManager.clearActiveHookExecution()
-				} catch (error) {
-					Logger.error("Failed to cancel hook during task abort", error)
-					await this.dependencies.hookManager.clearActiveHookExecution()
-				}
-			}
+			await this.dependencies.hookManager.cancelAllHookExecutions()
 
 			// Terminal acquisition may itself be running a manager-owned CWD command.
 			// Stop both owners before joining either; executor-first draining can deadlock.
@@ -637,6 +629,8 @@ export class LifecycleManager {
 						},
 						isCancellable: false,
 						messenger: this.dependencies.taskMessenger,
+						setActiveHookExecution: this.dependencies.hookManager.setActiveHookExecution.bind(this.dependencies.hookManager),
+						clearActiveHookExecution: this.dependencies.hookManager.clearActiveHookExecution.bind(this.dependencies.hookManager),
 						messageStateHandler: this.dependencies.messageStateHandler,
 						taskId: this.dependencies.taskId,
 						hooksEnabled,
@@ -647,6 +641,7 @@ export class LifecycleManager {
 						),
 					})
 				} catch (error) {
+					if (error instanceof HookCleanupError) throw error
 					Logger.error("[TaskCancel Hook] Failed (non-fatal):", error)
 				}
 			}
@@ -740,6 +735,7 @@ export class LifecycleManager {
 		}
 
 		await Promise.all([
+			attempt(() => this.dependencies.hookManager.cancelAllHookExecutions()),
 			attempt(() => this.dependencies.commandExecutor.dispose()),
 			attempt(() => this.dependencies.terminalManager.disposeAll()),
 		])

@@ -35,7 +35,7 @@ export class SharedJournalTool implements IDiracTool {
 		const card = await createJournalCard(
 			{
 				header,
-				body: authoredContent ? `${authoredContent}\n\nStatus: Publishing` : "Status: Reading journal publication",
+				body: authoredContent ? `${authoredContent}\n\nPublishing...` : "Reading publication...",
 				renderType: "markdown",
 				communication: { actor },
 				icon: DiracIcon.SUMMARIZE,
@@ -58,7 +58,7 @@ export class SharedJournalTool implements IDiracTool {
 					() =>
 						card.update({
 							header,
-							body: [authoredContent, `Status: ${state}. See tool result for details.`]
+							body: [authoredContent, `${state}.`]
 								.filter((value) => value !== undefined)
 								.join("\n\n"),
 							communication: { actor },
@@ -72,16 +72,17 @@ export class SharedJournalTool implements IDiracTool {
 		if (card) {
 			await present(() => {
 				if ("published" in result) {
-					const notices = result.notifications
+					const rejected = result.notifications.rejected_capacity
+					const warning = rejected > 0 ? `\n\nWarning: ${rejected} notifications rejected for capacity.` : ""
 					return card.update({
 						header,
-						body: `${authoredContent}\n\nStatus: Published\nAuthor: ${actor}\nNotices: ${notices.enqueued} accepted, ${notices.skipped_inactive} skipped inactive, ${notices.rejected_capacity} rejected for capacity. Notification delivery and action are not confirmed.`,
+						body: `${authoredContent}\n\nPublished.${warning}`,
 						communication: { actor },
 					})
 				}
 				return card.update({
 					header,
-					body: `${result.headline}\n\n${result.content}\n\nStatus: Retrieved\nAuthor: ${result.author}\nVersion: ${result.version}\nCreated: ${new Date(result.created_at).toISOString()}`,
+					body: `${result.headline}\n\n${result.content}\n\nAuthor: ${result.author}`,
 					communication: { actor },
 				})
 			}, env)

@@ -59,8 +59,8 @@ export function TaskletReceiptBody({ receipt }: { receipt: TaskletReceipt }) {
 					)}
 					{row.decision && (
 						<div className="text-xs">
+							<span className="text-muted-foreground">Requested decision: </span>
 							<strong className="capitalize">{row.decision}</strong>
-							<span className="text-muted-foreground"> · this request only, within parent authority</span>
 						</div>
 					)}
 					{row.error && <div className="whitespace-pre-wrap break-words text-error">Error: {row.error}</div>}

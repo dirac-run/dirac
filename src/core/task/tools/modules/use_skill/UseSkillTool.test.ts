@@ -23,7 +23,8 @@ function createEnvironment(activeSkillIds: string[]) {
 			listSupportingFiles: sinon.stub().resolves({ docs: [], scripts: [] }),
 		},
 		orchestration: {
-			getTaskState: sinon.stub().withArgs("activeSkillIds").returns(activeSkillIds),
+			getTaskState: (key: string) => key === "activeSkillIds" ? activeSkillIds : undefined,
+			reportFailure: sinon.stub(),
 			activateSkill,
 		},
 		telemetry: { captureCustomMetadata: sinon.stub() },

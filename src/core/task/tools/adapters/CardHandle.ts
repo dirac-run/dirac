@@ -2,6 +2,7 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { Card, CardStatus } from "../../../../shared/ExtensionMessage"
 import type { TaskCardHandle } from "../../TaskMessenger"
 import { ICardHandle } from "../interfaces/IToolEnvironment"
+import type { ToolExecutionScope } from "../interfaces/ToolExecutionScope"
 
 export class CardHandle implements ICardHandle {
 	constructor(
@@ -9,7 +10,8 @@ export class CardHandle implements ICardHandle {
 		private readonly autoApprovedAction?: string,
 		private readonly liveAutoApprovedAction?: () => string | undefined,
 		private readonly routesToOwner = false,
-	) {}
+		private readonly execution?: ToolExecutionScope,
+	) { }
 
 	private get card(): Readonly<Card> {
 		return this.protocolHandle.getCard()
@@ -109,7 +111,7 @@ export class CardHandle implements ICardHandle {
 		await this.protocolHandle.finalize(status, doNotAutoCollapse)
 	}
 
-	public async waitForInteraction(): Promise<{
+	public async waitForInteraction(signal?: AbortSignal): Promise<{
 		action: string
 		response: DiracAskResponse
 		value?: string
@@ -118,6 +120,9 @@ export class CardHandle implements ICardHandle {
 		files?: string[]
 		userEdits?: Record<string, string>
 	}> {
+		const signals = [this.execution?.signal, signal].filter((candidate): candidate is AbortSignal => candidate !== undefined)
+		const waitSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined
+		waitSignal?.throwIfAborted()
 		const approvedAction = this.approvedAction()
 		if (approvedAction !== undefined) {
 			return {
@@ -127,12 +132,28 @@ export class CardHandle implements ICardHandle {
 			}
 		}
 
-		const result = await this.protocolHandle.waitForInteraction()
+		const lease = await this.execution?.beginWait(this.requireApproval
+			? { kind: "waiting_permission", permissionRequestId: this.id }
+			: { kind: "waiting_input", inputRequestId: this.id })
+		let result: Awaited<ReturnType<TaskCardHandle["waitForInteraction"]>>
+		try {
+			waitSignal?.throwIfAborted()
+			result = await this.protocolHandle.waitForInteraction(waitSignal)
+			waitSignal?.throwIfAborted()
+		} catch (error) {
+			try {
+				await lease?.release()
+			} catch (releaseError) {
+				throw new AggregateError([error, releaseError], "Card interaction and execution wait release failed")
+			}
+			throw error
+		}
+		await lease?.release()
 
 		let action = result.action || (result.response as string)
 		let value = result.value
 
-		if (result.text && !value) {
+		if (result.text && !value && action !== DiracAskResponse.APPROVE && action !== DiracAskResponse.REJECT) {
 			const actionValue = result.text
 			const isAction = this.actions?.some((a) => a.value === actionValue)
 			if (isAction) {

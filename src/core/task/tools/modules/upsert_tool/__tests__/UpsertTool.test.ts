@@ -77,6 +77,7 @@ describe("UpsertTool deterministic installation", () => {
 			const result = await new UpsertTool().processCall({ tools: [toolDefinition()] }, fixture.env)
 			assert.match(result, /❌.*example_tool.*failed/)
 			assert.match(result, failure.error)
+			sinon.assert.calledOnce(fixture.env.orchestration.reportFailure as sinon.SinonStub)
 			assert.doesNotMatch(result, /✓|is ready/)
 			sinon.assert.calledOnce(fixture.executeCommand)
 			sinon.assert.notCalled(fixture.runSubagent)

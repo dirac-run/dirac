@@ -48,6 +48,11 @@ export interface TaskConfig extends ToolConfig {
 	coordinator: ToolExecutorCoordinator
 	taskMessenger: TaskMessenger
 	context: IDiracContext
+	/** Absent during tool discovery; bound once for an admitted invocation. */
+	readonly execution?: import("../interfaces/ToolExecutionScope").ToolExecutionScope
+	readonly messengerContext?: import("../../types/task-messenger").TaskMessengerInvocationContext
+	/** Mutable invocation-local state, never a shared TaskState counter. */
+	invocationEffects?: import("../interfaces/ToolInvocationResult").ToolInvocationEffectsAccumulator
 	/** The model tool call currently being executed, used for observable metadata. */
 	toolUse?: { name: string; params: Record<string, unknown> }
 
@@ -121,8 +126,8 @@ export interface TaskCallbacks {
 
 	// Hook execution callbacks
 	setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
-	clearActiveHookExecution: () => Promise<void>
-	getActiveHookExecution: () => Promise<HookExecution | undefined>
+	clearActiveHookExecution: (runId: string) => Promise<void>
+	getActiveHookExecution: (runId: string) => Promise<HookExecution | undefined>
 
 	// User prompt hook callback
 	runUserPromptSubmitHook: (

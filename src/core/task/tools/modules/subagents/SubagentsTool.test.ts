@@ -49,6 +49,7 @@ function fixture(start: TaskletControls["start"] = async (input) => record("task
 		toolName: "subagents",
 		config: { subagentsEnabled: true },
 		orchestration: {
+			reportFailure: sinon.stub(),
 			agentIdentity: { id: "Dirac" },
 			tasklets: { start },
 			getHistory: unexpectedBatchAccounting,
@@ -171,7 +172,8 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
 		assert.equal(updates[0].header, "Dirac → tasklet:live · Start agents")
 		assert.deepEqual(finalized, [CardStatus.SUCCESS])
-		assert.match(updates[0].body, /Acceptance is not assignment completion/)
+		assert.equal(updates[0].communication.detail, "Accepted")
+		assert.equal(updates[0].body, "Inspect\n\ntasklet:live — Inspect code")
 		assert.equal(updates[0].taskletReceipt.operation, "spawn")
 		assert.equal(updates[0].taskletReceipt.outcome, "accepted")
 		assert.deepEqual(
@@ -253,6 +255,7 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(start.callCount, 3)
 		assert.deepEqual(finalized, [CardStatus.ERROR])
 		assert.equal(updates[0].taskletReceipt.outcome, "partial_failure")
+		sinon.assert.notCalled(env.orchestration.reportFailure as sinon.SinonStub)
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "accepted").length, 2)
 		assert.equal(updates[0].taskletReceipt.rows.filter((row: { outcome: string }) => row.outcome === "failed").length, 6)
 		assert.match(updates[0].body, /Operation failed/)
@@ -267,6 +270,7 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		it(`preserves a known ID and ${outcome!.kind} outcome returned during startup`, async () => {
 			const { env } = fixture(async () => record("tasklet:known", "Host title", outcome))
 			const [result] = await spawn(env, [assignment])
+			assert.equal((env.orchestration.reportFailure as sinon.SinonStub).callCount, outcome?.kind === "failed" ? 1 : 0)
 			assert.equal(result.id, "tasklet:known")
 			assert.equal(result.title, "Host title")
 			assert.deepEqual(result.outcome, outcome)

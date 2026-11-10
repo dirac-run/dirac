@@ -31,16 +31,16 @@ export async function displayArchitecture(
 	try {
 		opened = env.architecture?.openDisplay
 			? await new ToolExecutionDeadline("architecture_diagram").run("opening architecture display", () =>
-					env.architecture!.openDisplay!(selection),
-				)
+				env.architecture!.openDisplay!(selection),
+			)
 			: {
-					available: false,
-					reason: "Architecture viewer is unavailable in this execution. Use fetch_diagram and continue in chat.",
-				}
+				available: false,
+				reason: "Architecture viewer is unavailable in this execution. Use fetch_diagram and continue in chat.",
+			}
 	} catch (error) {
-		return failDisplay(card, result, description, "error", error instanceof Error ? error.message : String(error), saved)
+		return failDisplay(env, card, result, description, "error", error instanceof Error ? error.message : String(error), saved)
 	}
-	if (!opened.available) return failDisplay(card, result, description, "unavailable", opened.reason, saved)
+	if (!opened.available) return failDisplay(env, card, result, description, "unavailable", opened.reason, saved)
 
 	await card.update({
 		architectureReference: opened.selection,
@@ -82,6 +82,7 @@ export async function displayArchitecture(
 }
 
 async function failDisplay(
+	env: ArchitectureDiagramEnvironment,
 	card: ICardHandle,
 	result: { operation: string; selection: unknown },
 	description: string,
@@ -89,6 +90,7 @@ async function failDisplay(
 	error: string,
 	saved?: SavedDiagram,
 ): Promise<string> {
+	env.orchestration.reportFailure()
 	const recovery = saved
 		? ` Version ${saved.version} is saved. Retry display_diagram with name "${saved.name}" and version ${saved.version}, not upsert_diagram; do not create a duplicate version.`
 		: ""

@@ -42,8 +42,9 @@ describe("architecture_diagram through the real architecture trait and storage",
 			return panel
 		})
 		openSelection = sinon.spy((selection: unknown) => boards.open(selection))
-		setHostCapabilities({ architectureViewer: { prepare: async () => {}, createPanel, openSelection } })
+		setHostCapabilities({ architectureViewer: { prepare: async () => { }, createPanel, openSelection } })
 		env = {
+			orchestration: { reportFailure: sinon.spy() },
 			architecture: buildArchitectureTrait({
 				taskId: path.basename(taskDirectory),
 				foreground: true,

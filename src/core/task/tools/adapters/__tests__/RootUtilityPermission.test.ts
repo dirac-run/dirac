@@ -132,4 +132,43 @@ describe("Root Utility approval publication", () => {
 		sinon.assert.calledOnce(h.createCard)
 		sinon.assert.notCalled(h.waitForInteraction)
 	})
+	for (const child of [false, true]) {
+		for (const phase of ["evaluation", "publication"] as const) {
+			it(`uses execution cancellation during ${phase} in ${child ? "child" : "root"} Utility approval`, async () => {
+				const h = fixture(child)
+				const executionAbort = new AbortController()
+				Object.assign(h.config, {
+					execution: {
+						identity: {
+							executionId: "execution",
+							owner: { rootTaskId: "root", taskId: "task", runId: "run" },
+							requestId: "request", nativeToolCallId: "call", toolName: "execute_command",
+							toolSnapshot: { requestId: "request", inventoryVersion: 1 },
+						},
+						signal: executionAbort.signal,
+						appendOutput: async () => { },
+						beginWait: async () => ({ release: async () => {} }),
+					}
+				})
+				if (phase === "evaluation") {
+					h.decide.callsFake(async (_request, signal: AbortSignal) => {
+						executionAbort.abort()
+						assert.equal(signal.aborted, true)
+						return { decision: "approve", reason: "Allowed" }
+					})
+				}
+				const pending = createCardFromMessenger(h.config, h.params, [])
+				if (phase === "publication") {
+					await h.publicationStarted
+					executionAbort.abort()
+					h.finishPublication()
+				}
+				await assert.rejects(pending, /abort/i)
+				assert.equal(h.cancellation.signal.aborted, false)
+				sinon.assert.notCalled(h.waitForInteraction)
+				if (phase === "evaluation") sinon.assert.notCalled(h.createCard)
+				else assert.equal(h.createCard.firstCall.args[0].executionId, "execution")
+			})
+		}
+	}
 })

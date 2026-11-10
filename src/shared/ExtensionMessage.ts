@@ -491,6 +491,8 @@ export enum CardKind {
 
 export interface Card {
 	id: string
+	/** Optional execution owner correlation; legacy cards may omit it. */
+	executionId?: string
 	kind?: CardKind
 	header: string
 	/** Programmatic name of the tool that created this card. */
@@ -555,6 +557,7 @@ export function isFinalStatus(status: CardStatus): boolean {
 }
 
 export interface CardParams {
+	executionId?: string
 	header: string
 	kind?: CardKind
 	toolName?: string

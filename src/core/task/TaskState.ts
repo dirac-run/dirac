@@ -8,6 +8,21 @@ import type { SteeringMessage } from "./steering"
 import type { SerializedTaskError, TaskCancellationIntent, TaskRunOutcome } from "./TaskRunOutcome"
 import type { HookExecution } from "./types/HookExecution"
 
+export interface CardInteractionResponse {
+	response?: DiracAskResponse
+	action: string
+	value?: string
+	text?: string
+	images?: string[]
+	files?: string[]
+	userEdits?: Record<string, string>
+}
+
+export interface PendingCardInteraction {
+	signal: AbortSignal
+	response?: CardInteractionResponse
+}
+
 export class TaskState {
 	status: TaskStatus = TaskStatus.IDLE
 
@@ -94,6 +109,7 @@ export class TaskState {
 	lastMessageTs?: number
 	waitingForFollowUp = false
 	waitingCardIds: string[] = []
+	pendingCardInteractions = new Map<string, PendingCardInteraction>()
 	get lastWaitingCardId(): string | undefined {
 		return this.waitingCardIds[0]
 	}
@@ -201,7 +217,7 @@ export class TaskState {
 	abandoned = false
 
 	// Hook execution tracking for cancellation
-	activeHookExecution?: HookExecution
+	readonly activeHookExecutions = new Map<string, HookExecution>()
 
 	// Conversation compaction
 	skipNextAutoCondenseCheck = false

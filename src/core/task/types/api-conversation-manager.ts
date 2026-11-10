@@ -57,8 +57,8 @@ export interface ApiConversationManagerDependencies {
 	getPinnedContext?: () => string | undefined
 	onContextCompacted?: () => void
 	runLocalConversationCompaction: (source: LocalConversationCompactionSource) => Promise<string | undefined>
-	setActiveHookExecution: (hookExecution: HookExecution | undefined) => Promise<void>
-	clearActiveHookExecution: () => Promise<void>
+	setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
+	clearActiveHookExecution: (runId: string) => Promise<void>
 
 	taskInitializationStartTime: number
 }

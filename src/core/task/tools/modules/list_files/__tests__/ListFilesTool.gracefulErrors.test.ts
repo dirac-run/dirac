@@ -1,3 +1,4 @@
+import { executeToolInvocation } from "../../../__tests__/helpers/executeToolInvocation"
 import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -56,7 +57,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("no-such-dir"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("no-such-dir"))
 
 		// listFiles returns empty for non-existent directories, so the handler
 		// should succeed rather than throw.
@@ -70,7 +71,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock())
+		const result = await executeToolInvocation(coordinator, config, makeBlock())
 
 		assert.ok((result as string).includes("Missing required parameter"))
 		assert.equal(taskState.consecutiveMistakeCount, 1)
@@ -82,9 +83,9 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
 		assert.equal(taskState.consecutiveMistakeCount, 3)
 	})
 
@@ -95,8 +96,8 @@ describe("ListFilesTool.execute – error recovery", () => {
 		// Accumulate failures
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock())
-		await coordinator.execute(config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
+		await executeToolInvocation(coordinator, config, makeBlock())
 		assert.equal(taskState.consecutiveMistakeCount, 2)
 
 		// Create a real directory with a file
@@ -104,7 +105,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 		await fs.mkdir(path.join(tmpDir, dirName))
 		await fs.writeFile(path.join(tmpDir, dirName, "file.txt"), "content")
 
-		const result = await coordinator.execute(config, makeBlock(dirName))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(dirName))
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("file.txt"))
 		assert.equal(taskState.consecutiveMistakeCount, 0)
@@ -120,7 +121,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("some-dir"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("some-dir"))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("Error"))
@@ -137,9 +138,9 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock("dir-1"))
-		await coordinator.execute(config, makeBlock("dir-2"))
-		await coordinator.execute(config, makeBlock("dir-3"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-1"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-2"))
+		await executeToolInvocation(coordinator, config, makeBlock("dir-3"))
 		assert.equal(taskState.consecutiveMistakeCount, 3)
 	})
 
@@ -150,7 +151,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock("blocked-dir"))
+		const result = await executeToolInvocation(coordinator, config, makeBlock("blocked-dir"))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("diracignore"))
@@ -164,9 +165,9 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		await coordinator.execute(config, makeBlock("blocked-1"))
-		await coordinator.execute(config, makeBlock("blocked-2"))
-		await coordinator.execute(config, makeBlock("blocked-3"))
+		await executeToolInvocation(coordinator, config, makeBlock("blocked-1"))
+		await executeToolInvocation(coordinator, config, makeBlock("blocked-2"))
+		await executeToolInvocation(coordinator, config, makeBlock("blocked-3"))
 		assert.equal(taskState.consecutiveMistakeCount, 0)
 	})
 
@@ -176,7 +177,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock(["blocked-1", "blocked-2"]))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(["blocked-1", "blocked-2"]))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("blocked-1"))
@@ -205,7 +206,7 @@ describe("ListFilesTool.execute – error recovery", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock(["blocked-dir", dirName]))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(["blocked-dir", dirName]))
 
 		assert.equal(typeof result, "string")
 		assert.ok((result as string).includes("blocked-dir"))
@@ -256,7 +257,7 @@ describe("ListFilesTool.execute – path deduplication", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock(["subdir", "subdir", "subdir"]))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(["subdir", "subdir", "subdir"]))
 
 		assert.equal(typeof result, "string")
 		// listFiles should be called exactly once, not three times
@@ -272,7 +273,7 @@ describe("ListFilesTool.execute – path deduplication", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock([".", "./"]))
+		const result = await executeToolInvocation(coordinator, config, makeBlock([".", "./"]))
 
 		assert.equal(typeof result, "string")
 		assert.equal(listFilesSpy.callCount, 1)
@@ -286,7 +287,7 @@ describe("ListFilesTool.execute – path deduplication", () => {
 
 		const coordinator = new ToolExecutorCoordinator()
 		coordinator.registerModularTool(handler)
-		const result = await coordinator.execute(config, makeBlock(["dir-a", "dir-b"]))
+		const result = await executeToolInvocation(coordinator, config, makeBlock(["dir-a", "dir-b"]))
 
 		assert.equal(typeof result, "string")
 		assert.equal(listFilesSpy.callCount, 2)

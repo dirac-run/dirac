@@ -127,13 +127,17 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 		}
 
 		const args = validation.args
-		const deadline = new ToolExecutionDeadline(this.spec().name)
+		const cancellationSignal = env.orchestration.getTaskState("abortSignal")
+		const deadline = new ToolExecutionDeadline(this.spec().name, { cancellationSignal })
 		let execution: InspectionExecution
 		try {
 			execution = await this.executeOperation(args, env, deadline)
 		} catch (error) {
 			if (error instanceof ToolTimeoutError) return await presentToolTimeout(env, error)
 			throw error
+		}
+		if (execution.groups.length > 0 && execution.groups.every((group) => group.status === "failure")) {
+			env.orchestration.reportFailure()
 		}
 		const cards: InspectCardRecord[] = []
 		const observabilityFailures: string[] = [...(execution.warnings ?? [])]
@@ -162,12 +166,12 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 		deadline: ToolExecutionDeadline,
 	): Promise<InspectionExecution> {
 		if (args.operation === "outline") {
-			const result = await deadline.run("inspecting source outlines", async () =>
+			const result = await deadline.observe("inspecting source outlines", async (signal) =>
 				await env.sourceAst.outline({
 					paths: args.paths,
 					includeAnchors: args.includeAnchors,
 					showCallGraph: true,
-				}))
+				}, signal))
 			const groups = this.reducer.reduceOutline(args.paths, result)
 			return {
 				operation: args.operation,
@@ -178,12 +182,12 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 		}
 
 		if (args.operation === "implementation") {
-			const result = await deadline.run("inspecting symbol implementations", async () =>
+			const result = await deadline.observe("inspecting symbol implementations", async (signal) =>
 				await env.sourceAst.implementations({
 					paths: args.paths,
 					symbols: args.symbols,
 					includeAnchors: args.includeAnchors,
-				}))
+				}, signal))
 			const groups = this.reducer.reduceImplementations(args.paths, args.symbols, result)
 			const cacheKeys = groups.flatMap((group) =>
 				group.status === "success" ? group.matches.map(implementationCacheKey) : [],
@@ -192,10 +196,10 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 			let cache: Record<string, ImplementationCacheRecord | string> = {}
 			if (cacheKeys.length > 0) {
 				try {
-					cache = await deadline.run("loading implementation cache entries", async () =>
+					cache = await deadline.observe("loading implementation cache entries", async () =>
 						await env.context.task.getEntries<ImplementationCacheRecord | string>(IMPLEMENTATION_CACHE_KEY, cacheKeys))
 				} catch (error) {
-					if (error instanceof ToolTimeoutError) throw error
+					if (error instanceof ToolTimeoutError || env.orchestration.getTaskState("abortSignal")?.aborted) throw error
 					warnings.push(`implementation cache load failed: ${this.errorMessage(error)}.`)
 				}
 			}
@@ -214,7 +218,7 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 					await deadline.run("saving the implementation cache", async () =>
 						await env.context.task.updateEntries(IMPLEMENTATION_CACHE_KEY, cacheUpdates))
 				} catch (error) {
-					if (error instanceof ToolTimeoutError) throw error
+					if (error instanceof ToolTimeoutError || env.orchestration.getTaskState("abortSignal")?.aborted) throw error
 					warnings.push(`implementation cache save failed: ${this.errorMessage(error)}.`)
 				}
 			}
@@ -226,13 +230,13 @@ export class InspectAstTool implements IDiracTool<InspectAstArgs, string> {
 			: args.operation === "references"
 				? "reference"
 				: "both"
-		const result = await deadline.run(`finding symbol ${args.operation}`, async () =>
+		const result = await deadline.observe(`finding symbol ${args.operation}`, async (signal) =>
 			await env.sourceAst.occurrences({
 				paths: args.paths,
 				symbols: args.symbols,
 				kind,
 				includeAnchors: args.includeAnchors,
-			}))
+			}, signal))
 		const groups = this.reducer.reduceOccurrences(args.operation, args.paths, args.symbols, result)
 		return {
 			operation: args.operation,

@@ -1,3 +1,4 @@
+import { HookCleanupError } from "./HookCleanupError"
 import { Logger } from "@/shared/services/Logger"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -130,7 +131,27 @@ export type HookStreamCallback = (
 		source: "global" | "workspace"
 		scriptPath: string
 	},
-) => void
+) => void | Promise<void>
+
+async function drainHookPublicationsAndRemoveSnapshot(
+	publications: Promise<void>,
+	publicationErrors: unknown[],
+	snapshotDir: string | undefined,
+	executionFailure: unknown,
+): Promise<void> {
+	await publications
+	if (snapshotDir) {
+		try {
+			await fs.rm(snapshotDir, { recursive: true, force: true })
+		} catch (error) {
+			publicationErrors.push(error)
+		}
+	}
+	if (publicationErrors.length > 0) {
+		if (executionFailure) publicationErrors.unshift(executionFailure)
+		throw new HookCleanupError(publicationErrors, "Hook output publication or snapshot cleanup failed")
+	}
+}
 
 /** Executes a hook script as a child process with real-time output streaming. Delegates parsing to HookResponseParser, telemetry to HookTelemetryRecorder. Fail-open: only explicit JSON cancel:true blocks execution. */
 class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
@@ -180,11 +201,20 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 
 		// Create HookProcess for execution with streaming
 		const hookProcess = new HookProcess(launchPath, HOOK_EXECUTION_TIMEOUT_MS, this.abortSignal, this.cwd)
+		let publications = Promise.resolve()
+		const publicationErrors: unknown[] = []
+		let executionFailure: unknown
 		if (this.streamCallback) {
 			const callback = this.streamCallback
 			hookProcess.on("line", (line: string, stream: "stdout" | "stderr") => {
 				// NOTE: HookProcess emits a synthetic empty line ("") as a "start of output" marker — preserve it
-				callback(line, stream, { source: this.source, scriptPath: this.scriptPath })
+				publications = publications.then(async () => {
+					try {
+						await callback(line, stream, { source: this.source, scriptPath: this.scriptPath })
+					} catch (error) {
+						publicationErrors.push(error)
+					}
+				})
 			})
 		}
 
@@ -225,6 +255,8 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 			// Hook failed with non-zero exit — include hook name in error
 			throw HookExecutionError.execution(this.scriptPath, exitCode ?? 1, stderr, this.hookName)
 		} catch (error) {
+			executionFailure = error
+			if (error instanceof HookCleanupError) throw error
 			const durationMs = performance.now() - startTime
 
 			// If it's already a HookExecutionError, capture telemetry and re-throw
@@ -253,7 +285,7 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 			if (taskId) HookTelemetryRecorder.captureGenericError(taskId, telemetryCtx, durationMs, exitCode, error)
 			throw HookExecutionError.execution(this.scriptPath, exitCode ?? 1, stderr, this.hookName)
 		} finally {
-			if (snapshotDir) await fs.rm(snapshotDir, { recursive: true, force: true })
+			await drainHookPublicationsAndRemoveSnapshot(publications, publicationErrors, snapshotDir, executionFailure)
 		}
 	}
 }
@@ -269,7 +301,16 @@ class CombinedHookRunner<Name extends HookName> extends HookRunner<Name> {
 
 	override async [exec](input: HookInput): Promise<HookOutput> {
 		// Run all hooks in parallel
-		const results = await Promise.all(this.runners.map((runner) => runner[exec](input)))
+		const settlements = await Promise.allSettled(this.runners.map((runner) => runner[exec](input)))
+		const failures = settlements.flatMap((settlement) => settlement.status === "rejected" ? [settlement.reason] : [])
+		if (failures.some((error) => error instanceof HookCleanupError)) {
+			throw new HookCleanupError(failures, "Parallel hook cleanup failed")
+		}
+		const results: HookOutput[] = []
+		for (const settlement of settlements) {
+			if (settlement.status === "rejected") throw settlement.reason
+			results.push(settlement.value)
+		}
 
 		// Merge results: any cancel wins, combine context and errors
 		const cancel = results.some((result) => result.cancel === true)

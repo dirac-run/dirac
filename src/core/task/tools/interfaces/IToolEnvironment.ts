@@ -9,6 +9,7 @@ import type {
 	TaskletSummary,
 } from "../../types/tasklet"
 import type { CardParams, ICardHandle } from "./ICardHandle"
+import type { ToolExecutionScope } from "./ToolExecutionScope"
 import type { IArchitectureTrait } from "./IArchitectureTrait"
 import type { TextCondensationTemplateId } from "@core/text-condensation/TextCondenser"
 import type {
@@ -176,7 +177,7 @@ export interface IWorkspaceTrait {
 	/**
 	 * Lists files in the specified directory.
 	 */
-	listFiles(path: string, recursive: boolean, limit: number): Promise<[FileInfo[], boolean]>
+	listFiles(path: string, recursive: boolean, limit: number, signal?: AbortSignal): Promise<[FileInfo[], boolean]>
 	/**
 	 * Reads the content of a file.
 	 */
@@ -245,9 +246,10 @@ export interface IEditorTrait {
 }
 
 export interface ISourceAstTrait {
-	outline(request: AstOutlineRequest): Promise<AstOutlineResult>
-	implementations(request: AstImplementationRequest): Promise<AstImplementationResult>
-	occurrences(request: AstOccurrenceRequest): Promise<AstOccurrenceResult>
+	/** Service-owned read queries; cancellation stops observation, not shared service resource ownership. */
+	outline(request: AstOutlineRequest, signal?: AbortSignal): Promise<AstOutlineResult>
+	implementations(request: AstImplementationRequest, signal?: AbortSignal): Promise<AstImplementationResult>
+	occurrences(request: AstOccurrenceRequest, signal?: AbortSignal): Promise<AstOccurrenceResult>
 	planRename(request: AstRenameRequest): Promise<SourceMutationPlan>
 	planReplacements(request: AstReplacementRequest): Promise<SourceMutationPlan>
 	getAnchorFingerprint(path: string): string | null
@@ -285,6 +287,8 @@ export interface TaskletControls {
 }
 
 export interface IOrchestrationTrait {
+	/** Report a returned semantic failure without changing the model-mistake counter. */
+	reportFailure(): void
 	/** Stable runtime identity; roots are always Dirac. */
 	readonly agentIdentity: { readonly id: string; readonly parent: string | null }
 	/** Available only to an owning ordinary root; never exposes a live Task or host. */
@@ -438,6 +442,8 @@ export interface IConversationCondensationTrait {
 }
 
 export interface IToolEnvironment {
+	/** Absent only for discovery and unadmitted test environments. */
+	readonly execution?: ToolExecutionScope
 	readonly telemetry: ITelemetryTrait
 	readonly ui: IUITrait
 	readonly interaction: IInteractionTrait

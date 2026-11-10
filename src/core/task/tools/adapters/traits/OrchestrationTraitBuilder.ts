@@ -6,7 +6,13 @@ import type { IOrchestrationTrait } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 // Builds the orchestration trait — tasklet supervision, hooks, mode switching, state management.
 export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait {
+	const abortSignal = config.execution
+		? AbortSignal.any([config.execution.signal, config.taskState.abortSignal])
+		: config.taskState.abortSignal
 	return {
+		reportFailure: () => {
+			if (config.invocationEffects) config.invocationEffects.failed = true
+		},
 		agentIdentity: config.executionProfile === "tasklet"
 			? { id: config.taskId, parent: "Dirac" }
 			: { id: "Dirac", parent: null },
@@ -20,8 +26,9 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 			return await executeHook({
 				hookName: name as keyof Hooks,
 				hookInput: input,
-				messenger: config.taskMessenger,
+				messenger: config.messengerContext ? config.taskMessenger.forInvocation(config.messengerContext) : config.taskMessenger,
 				isCancellable: options?.isCancellable ?? false,
+				signal: abortSignal,
 				setActiveHookExecution: config.callbacks.setActiveHookExecution,
 				clearActiveHookExecution: config.callbacks.clearActiveHookExecution,
 				messageStateHandler: config.messageState,
@@ -44,8 +51,18 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 				config.taskState.conversationHistoryDeletedRange,
 				strategy,
 			),
-		getTaskState: (key) => config.taskState[key],
+		getTaskState: (key) => {
+			if (key === "abortSignal") return abortSignal as (typeof config.taskState)[typeof key]
+			if (key === "consecutiveMistakeCount" && config.invocationEffects) {
+				return config.invocationEffects.consecutiveMistakeCount as (typeof config.taskState)[typeof key]
+			}
+			return config.taskState[key]
+		},
 		setTaskState: (key, value) => {
+			if (key === "consecutiveMistakeCount" && config.invocationEffects) {
+				config.invocationEffects.consecutiveMistakeCount = value as number
+				return
+			}
 			config.taskState[key] = value
 		},
 		commitCompletionResponse: (response) => config.taskState.commitCompletionResponse(response),

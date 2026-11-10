@@ -75,7 +75,7 @@ describe("Tasklet communication cards", () => {
 	it("keeps retired questions distinct from resolved answers", () => {
 		const value = card(interaction({ status: "retired", retiredAt: 3 }))
 		assert.equal(value.status, CardStatus.CANCELLED)
-		assert.match(value.body!, /Retired without an answer/)
+		assert.match(value.body!, /Closed without an answer/)
 		assert.doesNotMatch(value.body!, /Answer from/)
 		assertObservation(value)
 	})
@@ -90,7 +90,8 @@ describe("Tasklet communication cards", () => {
 		assert.equal(value.header, "Feynman · Permission for Dirac")
 		assert.ok(value.body!.startsWith(original))
 		assert.equal(value.body!.split("git status").length - 1, 1)
-		assert.match(value.body!, /Awaiting Dirac; permission not granted/)
+		assert.match(value.body!, /Awaiting Dirac approval/)
+		assert.doesNotMatch(value.body!, /Observation only|permission not granted/)
 		assert.match(value.body!, /Source: Utility escalation to Dirac/)
 		assert.match(value.body!, /Reason: Policy is silent/)
 		assert.doesNotMatch(value.body!, /requested user approval/)
@@ -122,8 +123,22 @@ describe("Tasklet communication cards", () => {
 		assertObservation(value)
 	})
 
+	it("keeps permission explanations intact and closed requests distinct from approval", () => {
+		const text = "  Explanation\n```bash\necho details\n```\n"
+		const value = card(interaction({
+			kind: "permission", status: "resolved", resolvedAt: 4,
+			resolution: { action: DiracAskResponse.APPROVE, response: DiracAskResponse.APPROVE, text },
+		}))
+		assert.ok(value.body!.endsWith(text))
+		assert.match(value.body!, /Status: Approved/)
+		assert.doesNotMatch(value.body!, /Observation only/)
+		const closed = card(interaction({ kind: "permission", status: "retired", retiredAt: 5 }))
+		assert.match(closed.body!, /Status: Closed without approval/)
+		assertObservation(closed)
+	})
+
 	it("keeps progress and committed results concise and preserves exact authored content", () => {
-		const text = "  Original content\nsource hash abcd012345\n"
+		const text = `  Original content\nsource hash abcd012345\n${"Detailed finding\n".repeat(200)}Ending\n`
 		const update = taskletCommunicationCard(event({ type: "response", response: { operation: ResponseOperation.PROGRESS, text } }))!
 		assert.equal(update.header, "Feynman · Update")
 		assert.equal(update.body, text)

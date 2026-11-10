@@ -45,6 +45,7 @@ export class CondenseTool implements IDiracTool {
 		const context = await this.resolveContext(args.context, currentTurnUserRequests, signal, env)
 		this.throwIfCancelled(signal)
 		if (context === null) {
+			env.orchestration.reportFailure()
 			return formatResponse.toolResult(
 				"Utility condensation failed. Generate the comprehensive continuation summary from the current conversation yourself and call `condense` again with the complete `context` parameter. Do not call it again without context.",
 			)

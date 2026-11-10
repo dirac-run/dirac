@@ -36,12 +36,7 @@ export function TaskletReceiptBody({ receipt }: { receipt: TaskletReceipt }) {
 					{row.message && `\n${row.message}`}
 					{row.choice && `\nChoice: ${row.choice}`}
 					{row.request && `\nRequest: ${row.request}`}
-					{row.decision && (
-						<Text
-							color={
-								theme.muted
-							}>{`\nDecision: ${row.decision} · this request only, within parent authority`}</Text>
-					)}
+					{row.decision && <Text color={theme.muted}>{`\nRequested decision: ${row.decision}`}</Text>}
 					{row.error && <Text color={theme.error}>{`\nError: ${row.error}`}</Text>}
 				</React.Fragment>
 			))}

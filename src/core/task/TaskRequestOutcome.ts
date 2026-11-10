@@ -35,7 +35,7 @@ export interface TaskRequestOutcomeContext {
 	handleContextWindowExceededError: () => Promise<void>
 	reinitExistingTaskFromId: () => Promise<void>
 	attemptApiRequest: (previousApiReqIndex: number, lastApiReqIndex: number, shouldCompact?: boolean) => ApiStream
-	recursivelyMakeDiracRequests: (userContent: DiracContent[], includeFileDetails?: boolean) => Promise<boolean>
+	recursivelyMakeDiracRequests: (userContent: DiracContent[], includeFileDetails?: boolean, onUserContentPersisted?: () => void) => Promise<boolean>
 	handleEmptyAssistantResponse: (params: {
 		modelInfo: DiracMessageModelInfo
 		taskMetrics: {

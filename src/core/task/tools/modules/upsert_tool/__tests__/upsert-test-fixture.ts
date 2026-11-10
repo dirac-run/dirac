@@ -52,7 +52,7 @@ export async function createUpsertFixture() {
 	const withMutationAuthorization = sandbox.stub().callsFake(async (_name: string, mutation: () => Promise<unknown>) => mutation())
 	const transitionFromMutation = sandbox.stub().callsFake(async (transition: () => Promise<unknown>) => transition())
 	const commitEnabledToolToggles = sandbox.stub().callsFake(async (_ids: string[], commit: () => Promise<void>) => commit())
-	const getTaskState = sandbox.stub().returns([])
+	const getTaskState = sandbox.stub().callsFake((key: string) => key === "abortSignal" ? new AbortController().signal : [])
 	const setTaskState = sandbox.stub()
 	const env = {
 		config: {
@@ -64,7 +64,7 @@ export async function createUpsertFixture() {
 		},
 		ui: { createCard, upsertText: sandbox.stub().resolves() },
 		system: { executeCommand },
-		orchestration: { runSubagent, getHistory: () => [], getTaskState, setTaskState },
+		orchestration: { reportFailure: sandbox.stub(), runSubagent, getHistory: () => [], getTaskState, setTaskState },
 	} as unknown as IToolEnvironment
 
 	return {

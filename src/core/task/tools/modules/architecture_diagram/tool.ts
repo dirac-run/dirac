@@ -80,6 +80,7 @@ export function create() {
 					input && typeof input === "object" && "operation" in input && typeof input.operation === "string"
 						? input.operation
 						: "unknown"
+				env.orchestration.reportFailure()
 				const message = `${operation}: architecture diagram implementation unavailable. Continue with ordinary tools and chat; no diagram operation was performed.`
 				try {
 					await card.update({ status: CardStatus.ERROR, body: message })

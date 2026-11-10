@@ -59,6 +59,7 @@ export class ToolHookUtils {
 		// Execute the PreToolUse hook
 		const preToolResult = await executeHook({
 			hookName: "PreToolUse",
+			signal: config.execution?.signal ?? config.taskState.abortSignal,
 			hookInput: {
 				preToolUse: {
 					toolName: block.name,
@@ -66,7 +67,7 @@ export class ToolHookUtils {
 				},
 			},
 			isCancellable: true,
-			messenger: config.taskMessenger,
+			messenger: config.messengerContext ? config.taskMessenger.forInvocation(config.messengerContext) : config.taskMessenger,
 			setActiveHookExecution: config.callbacks.setActiveHookExecution,
 			clearActiveHookExecution: config.callbacks.clearActiveHookExecution,
 			messageStateHandler: config.messageState,
@@ -79,12 +80,13 @@ export class ToolHookUtils {
 
 		// Handle cancellation from hook
 		if (preToolResult.cancel === true) {
-			// Clear the active hook execution state BEFORE calling cancelTask
-			// This prevents abortTask from trying to "cancel" an already-completed hook
-			await config.callbacks.clearActiveHookExecution()
+			// executeHook has already released only this run's ownership.
 
-			// Abort the entire task (consistent with PostToolUse and other hook cancellations)
-			await config.callbacks.cancelTask()
+			// Let the task owner commit explicit hook cancellation after this invocation settles.
+			if (!preToolResult.wasCancelled) {
+				if (!config.invocationEffects) throw new Error("Hook cancellation requires an invocation effects accumulator")
+				config.invocationEffects.cancelTask = true
+			}
 			throw new PreToolUseHookCancellationError(preToolResult.errorMessage || "PreToolUse hook requested cancellation")
 		}
 
@@ -95,7 +97,7 @@ export class ToolHookUtils {
 
 		// Add context modification to the conversation if provided by the hook
 		if (preToolResult.contextModification) {
-			ToolHookUtils.addHookContextToConversation(config, preToolResult.contextModification, "PreToolUse")
+			ToolHookUtils.appendHookContextEffect(config, preToolResult.contextModification, "PreToolUse")
 		}
 
 		return true // Hook succeeded, continue execution
@@ -109,7 +111,7 @@ export class ToolHookUtils {
 	 * @param contextModification The context string from the hook output
 	 * @param source The hook source name ("PreToolUse" or "PostToolUse")
 	 */
-	private static addHookContextToConversation(
+	private static appendHookContextEffect(
 		config: TaskConfig,
 		contextModification: string | undefined,
 		source: string,
@@ -138,7 +140,9 @@ export class ToolHookUtils {
 			content = typeMatch[2] ? [typeMatch[2], ...remainingLines].join("\n") : remainingLines.join("\n")
 		}
 
-		config.taskState.userMessageContent.push({
+		if (!config.invocationEffects) throw new Error("Hook context requires an invocation effects accumulator")
+		const context = (config.invocationEffects.context ??= [])
+		context.push({
 			type: "text",
 			text: `<hook_context source="${source}" type="${contextType}">\n${content}\n</hook_context>`,
 		})

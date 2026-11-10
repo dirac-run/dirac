@@ -60,7 +60,10 @@ export class UpsertTool implements IDiracTool {
 	async processCall(args: any, env: IToolEnvironment): Promise<any> {
 		const { tools } = args ?? {}
 		const validationError = validateToolDefinitions(tools)
-		if (validationError) return validationError
+		if (validationError) {
+			env.orchestration.reportFailure()
+			return validationError
+		}
 
 		const progressLines: string[] = []
 		const progressCard = await env.ui.createCard({
@@ -135,6 +138,7 @@ export class UpsertTool implements IDiracTool {
 			const paramHint = result.parameters.map((parameter) => parameter.name).join(", ")
 			return `✓ Tool '${result.name}' is ready. Invoke it by calling '${result.name}' as a tool function with: ${paramHint}`
 		})
+		if (outcome.hasFailure && activatedTools.length === 0) env.orchestration.reportFailure()
 		const finalStatus = outcome.hasFailure ? CardStatus.ERROR : CardStatus.SUCCESS
 		await updateProgress("Complete", `${activatedTools.length}/${tools.length} tools installed`, finalStatus)
 		await progressCard.finalize(finalStatus)

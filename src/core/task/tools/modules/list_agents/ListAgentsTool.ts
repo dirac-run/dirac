@@ -59,7 +59,7 @@ export class ListAgentsTool implements IDiracTool {
 			await present(() => card.update({
 				header: `${actor} listed agents`,
 				body: roster.length ? roster.join("\n\n") : "No agents on this page.",
-				communication: { actor, detail: `Availability is a snapshot, not a reservation.${page.next_cursor ? ` More agents available; next cursor: ${page.next_cursor}` : ""}` },
+				communication: { actor, detail: page.next_cursor ? "More agents available." : undefined },
 			}), env)
 			await present(() => card.finalize(CardStatus.SUCCESS, true), env)
 		}

@@ -3,6 +3,7 @@ import type { ContextManager } from "@core/context/context-management/ContextMan
 import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import { executePreCompactHookWithCleanup, HookCancellationError } from "@core/hooks/precompact-executor"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { continuationPrompt } from "@core/prompts/contextManagement"
 import type { TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
@@ -50,8 +51,8 @@ interface LocalConversationCompactionDependencies {
 	getApi: () => ApiHandler
 	postStateToWebview: () => Promise<void>
 	cancelTask: () => Promise<void>
-	setActiveHookExecution: (hookExecution: HookExecution | undefined) => Promise<void>
-	clearActiveHookExecution: () => Promise<void>
+	setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
+	clearActiveHookExecution: (runId: string) => Promise<void>
 	onContextCompacted?: () => void
 	onUtilityUsageRecorded?: () => void
 }
@@ -160,15 +161,23 @@ export class LocalConversationCompaction {
 				error instanceof HookCancellationError
 			const status = cancelled ? CardStatus.CANCELLED : CardStatus.ERROR
 			const state = cancelled ? "Cancelled" : "Failed"
-			await card.update({
-				header: `Conversation Condensation ${state} · ${this.formatIdentity(identity)}`,
-				status,
-				body: cancelled
-					? "Conversation condensation was cancelled. The conversation was not compacted."
-					: this.buildFailureBody(error),
-				collapsed: false,
-			})
-			await card.finalize(status, true)
+			try {
+				await card.update({
+					header: `Conversation Condensation ${state} · ${this.formatIdentity(identity)}`,
+					status,
+					body: cancelled
+						? "Conversation condensation was cancelled. The conversation was not compacted."
+						: this.buildFailureBody(error),
+					collapsed: false,
+				})
+				await card.finalize(status, true)
+			} catch (presentationError) {
+				if (error instanceof HookCleanupError) {
+					throw new HookCleanupError([error, presentationError], "Hook cleanup and failure presentation failed")
+				}
+				throw presentationError
+			}
+			if (error instanceof HookCleanupError) throw error
 			if (!cancelled) Logger.error("Local Utility conversation condensation failed", error)
 			return undefined
 		}

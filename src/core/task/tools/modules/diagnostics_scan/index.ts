@@ -67,7 +67,7 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 		try {
 			this.throwIfAborted(cancellationSignal)
 
-			const fileInfos = await deadline.run("reading files for diagnostics", () =>
+			const fileInfos = await deadline.observe("reading files for diagnostics", () =>
 				Promise.all(relPaths.map((relPath) => this.readFileInfo(relPath, env.workspace))),
 			)
 
@@ -86,7 +86,8 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 			}
 
 			// Prepare diagnostics
-			await deadline.run("preparing diagnostics", () => diagnostics.prepare(validFiles.map((f) => f.absolutePath)))
+			// Host language services own preparation; their transport has no cancellation contract.
+			await deadline.observe("preparing diagnostics", () => diagnostics.prepare(validFiles.map((f) => f.absolutePath)))
 
 			// Polling logic
 			const totalLines = validFiles.reduce((sum, f) => sum + f.content.split(/\r?\n/).length, 0)
@@ -95,7 +96,7 @@ export class DiagnosticsScanTool implements IDiracTool<DiagnosticsScanArgs, stri
 			let allDiagnostics: FileDiagnostics[] = []
 
 			while (Date.now() - startTime < timeoutMs && !cancellationSignal?.aborted) {
-				allDiagnostics = await deadline.run("collecting diagnostics", () =>
+				allDiagnostics = await deadline.observe("collecting diagnostics", () =>
 					diagnostics.getRaw(validFiles.map((f) => f.absolutePath)),
 				)
 

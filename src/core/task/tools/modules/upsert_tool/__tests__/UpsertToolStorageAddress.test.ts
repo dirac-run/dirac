@@ -58,7 +58,7 @@ describe("UpsertTool storage address forwarding", () => {
 				},
 				system: { executeCommand: validate },
 				ui: { createCard: async () => ({ update: async () => undefined, finalize: async () => undefined }) },
-				orchestration: { getTaskState: () => [], setTaskState: () => undefined, runSubagent },
+				orchestration: { reportFailure: sandbox.stub(), getTaskState: (key: string) => key === "abortSignal" ? new AbortController().signal : [], setTaskState: () => undefined, runSubagent },
 			} as unknown as IToolEnvironment
 			const result = await new UpsertTool().processCall({ tools: [toolDefinition({ scope: "task" })] }, env)
 			assert.match(result, /rejected/i)

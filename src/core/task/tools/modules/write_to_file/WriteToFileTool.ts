@@ -89,16 +89,16 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		const toolId = this.spec().id
 
 		if (!relPath) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 			await env.ui.upsertText("Missing value for required parameter 'path'.")
 			return { error: formatResponse.missingToolParameterError("path") }
 		}
 
 		if (!rawContent) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 			if (toolId === DiracDefaultTool.FILE_NEW) {
 				return {
-					error: formatResponse.writeToFileMissingContentError(relPath, env.config.taskState.consecutiveMistakeCount),
+					error: formatResponse.writeToFileMissingContentError(relPath, env.orchestration.getTaskState("consecutiveMistakeCount")),
 				}
 			}
 			await env.ui.upsertText("Missing value for required parameter 'content'.")
@@ -108,14 +108,14 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 		const { absolutePath, displayPath } = await env.workspace.resolvePath(relPath)
 
 		if (!env.config.services.diracIgnoreController.validateAccess(relPath)) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 			await env.ui.upsertText(`Access to '${relPath}' is blocked by .diracignore`)
 			return { error: formatResponse.toolError(formatResponse.diracIgnoreError(relPath)) }
 		}
 
 		const fileInfo = await env.workspace.getFileInfo(absolutePath)
 		if (fileInfo.exists && !fileInfo.isFile) {
-			env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+			env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 			const errorMsg = `Cannot write to '${relPath}' because it is a directory.`
 			await env.ui.upsertText(`Dirac tried to write to '${relPath}', but it is a directory.`)
 			return { error: formatResponse.toolError(errorMsg) }
@@ -325,7 +325,7 @@ export abstract class BaseWriteFileTool implements IDiracTool<WriteFileArgs> {
 	}
 
 	private async finalizeCardWithError(error: any, env: IToolEnvironment, card?: any): Promise<string> {
-		env.orchestration.setTaskState("consecutiveMistakeCount", env.config.taskState.consecutiveMistakeCount + 1)
+		env.orchestration.setTaskState("consecutiveMistakeCount", env.orchestration.getTaskState("consecutiveMistakeCount") + 1)
 
 		if (card) {
 			await card.update({

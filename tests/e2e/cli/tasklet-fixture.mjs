@@ -11,7 +11,7 @@ export const ALPHA_REOPENED = "ALPHA_REOPENED_PRIVATE"
 export const BETA_RESULT = "BETA_RESULT_PRIVATE"
 
 const respond = (operation, text) => ({ name: "respond", args: { operation, text } })
-const control = (operation, args = {}) => ({ name: "tasklets", args: { operation, ...args } })
+const control = (operation, args = {}) => ({ name: "subagents", args: { operation, ...args } })
 
 function parseResult(completion) {
 	const message = completion.messages.findLast((message) => message.role === "tool")
@@ -43,7 +43,7 @@ function* pendingQuestion(id) {
 }
 
 function* answer(id, request, text) {
-	const results = yield control("message", { messages: [{ tasklet_id: id, type: "reply", reply_to: request.id, text }] })
+	const results = yield control("message", { messages: [{ tasklet_id: id, type: "reply", request_id: request.id, text }] })
 	assert.equal(results[0].status, "resolved")
 }
 
@@ -51,6 +51,7 @@ function* parentScenario() {
 	const spawned = yield {
 		name: "subagents",
 		args: {
+			operation: "create",
 			assignments: ["ALPHA", "BETA"].map((name) => ({
 				type: "default",
 				task_header: `Fixture ${name}`,
@@ -119,13 +120,13 @@ export function createTaskletFixture(workspace) {
 		const result = parseResult(completion)
 		try {
 			if (root) {
-				assert.ok(names.includes("tasklets"))
+				assert.ok(!names.includes("tasklets"), "Supervision uses the unified subagents tool")
 				const count = (requestCounts.get(actor) ?? 0) + 1
 				requestCounts.set(actor, count)
 				assert.ok(count <= 100, "Root fixture exceeded its bounded tool-control sequence")
 				call = parent.next(result).value
 			} else {
-				assert.ok(!names.includes("tasklets"), "Contained children cannot supervise siblings")
+				assert.ok(!names.includes("subagents") && !names.includes("tasklets"), "Contained children cannot supervise siblings")
 				assert.ok(messages.includes("# CONTAINED TASKLET"))
 				actor = messages.includes("TASKLET_FIXTURE_ALPHA") ? "alpha" : "beta"
 				assert.ok(messages.includes(`TASKLET_FIXTURE_${actor.toUpperCase()}`))

@@ -661,7 +661,8 @@ describe("TaskletHost reconstruction and explicit reopening", () => {
 		await host["children"].get(record.id)!.eventWrites
 		const permission = publish.firstCall.args[1]
 		assert.match(permission.body, /echo exact-command/)
-		assert.match(permission.body, /Observation only/)
+		assert.match(permission.body, /Awaiting Dirac approval/)
+		assert.doesNotMatch(permission.body, /Observation only/)
 		assert.equal(permission.collapsed, true)
 		assert.equal(permission.requireApproval, undefined)
 		assert.equal(permission.actions, undefined)

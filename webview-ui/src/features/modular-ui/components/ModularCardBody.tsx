@@ -25,14 +25,9 @@ export function resolveCardBodyPresentation(card: Card): { body?: string; maxHei
 				? [
 						`Assignment\n${tasklet.prompt}`,
 						tasklet.result === undefined ? undefined : `Result preview\n${tasklet.result}`,
-						tasklet.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
-						tasklet.communications.length
-							? `Parent-directed communication\n${tasklet.communications.join("\n\n")}`
-							: undefined,
-						tasklet.activity.length
-							? `Diagnostic activity (not parent requests)\n${tasklet.activity.join("\n\n")}`
-							: undefined,
-						"Display preview only; the parent can inspect selected calls, results, messages, and child-only excerpts with tasklets.",
+						tasklet.status === "waiting" ? "Waiting for Dirac." : undefined,
+						tasklet.communications.length ? `Messages\n${tasklet.communications.join("\n\n")}` : undefined,
+						tasklet.activity.length ? `Activity\n${tasklet.activity.join("\n\n")}` : undefined,
 					]
 						.filter(Boolean)
 						.join("\n\n")

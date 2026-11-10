@@ -1,6 +1,7 @@
 import { getTaskDirectoryPath } from "@core/storage/taskDirectory"
 import { getTaskScopedStateKey } from "@shared/taskletId"
 import { IDiracContext } from "../interfaces/IDiracContext"
+import type { ToolExecutionScope } from "../interfaces/ToolExecutionScope"
 import {
 	CardParams,
 	IAnchorTrait,
@@ -51,6 +52,7 @@ import { AnchorStateManager } from "@utils/AnchorStateManager"
  * Trait wiring is delegated to builder functions in ./traits/ for maintainability.
  */
 export class SurfaceAdapter implements ToolExecutionEnvironment {
+	public readonly execution?: ToolExecutionScope
 	public readonly ui: IUITrait
 	public readonly interaction: IInteractionTrait
 	public readonly system: ISystemTrait
@@ -76,6 +78,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		public readonly config: TaskConfig,
 		public readonly toolName: string = "",
 	) {
+		this.execution = config.execution
 		this.logging = buildLoggingTrait()
 		this.ui = buildUiTrait(
 			config,

@@ -1,4 +1,6 @@
 import { strict as assert } from "node:assert"
+import { HookFactory } from "@core/hooks/hook-factory"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import { ConversationCondensationService } from "@core/text-condensation/ConversationCondensationService"
 import { CardKind, CardStatus, DiracMessageType } from "@shared/ExtensionMessage"
 import { afterEach, describe, it } from "mocha"
@@ -72,6 +74,56 @@ function createMocks() {
 }
 
 describe("LocalConversationCompaction", () => {
+	for (const fatal of [false, true]) {
+		it(`${fatal ? "propagates fatal cleanup" : "fails open on ordinary errors"} through the real PreCompact hook caller`, async () => {
+			if (!fatal) expectLoggerErrors()
+			const { card, compaction, dependencies, messageStateHandler, taskState } = createMocks()
+			dependencies.getWorkingConfiguration().settings.hooksEnabled = true
+			dependencies.getApi.returns({ getModel: () => ({ id: "model" }) })
+			Object.assign(dependencies.contextManager, { getTruncatedMessages: (messages: any[]) => messages })
+			Object.assign(messageStateHandler, { findMessageIndexById: () => -1 })
+			sinon.stub(compaction as any, "generateSummary").resolves("summary")
+			const disk = require("@core/storage/disk")
+			sinon.stub(disk, "writeConversationHistoryJson").resolves("context.json")
+			sinon.stub(disk, "writeConversationHistoryText").resolves("context.txt")
+			const cleanup = sinon.stub(disk, "cleanupConversationHistoryFile").resolves()
+			sinon.stub(HookFactory.prototype, "hasHook").resolves(true)
+			sinon.stub(HookFactory.prototype, "getHookInfo").resolves({ scriptPaths: ["PreCompact"] })
+			const failure = fatal ? new HookCleanupError([new Error("termination failed")], "hook cleanup failed") : new Error("ordinary hook failure")
+			sinon.stub(HookFactory.prototype, "createWithStreaming").resolves({ run: async () => { throw failure } } as any)
+
+			if (fatal) {
+				await assert.rejects(compaction.run({ source: "user" }), (error) => error === failure)
+				assert.equal(taskState.conversationHistoryDeletedRange, undefined)
+				sinon.assert.notCalled(messageStateHandler.overwriteApiConversationProviderState)
+				sinon.assert.calledWith(card.finalize, CardStatus.ERROR, true)
+			} else {
+				assert.match((await compaction.run({ source: "user" }))!, /summary/)
+				assert.deepEqual(taskState.conversationHistoryDeletedRange, [0, 1])
+			}
+			sinon.assert.calledOnce(dependencies.setActiveHookExecution)
+			sinon.assert.calledOnce(dependencies.clearActiveHookExecution)
+			sinon.assert.calledTwice(cleanup)
+		})
+	}
+
+	for (const operation of ["update", "finalize"] as const) {
+		it(`preserves fatal hook cleanup when failure-card ${operation} also fails`, async () => {
+			const { card, compaction, messageStateHandler } = createMocks()
+			const failure = new HookCleanupError([new Error("termination failed")], "hook cleanup failed")
+			const presentation = new Error("failure-card publication failed")
+			sinon.stub(compaction as any, "generateSummary").resolves("summary")
+			sinon.stub(compaction as any, "runPreCompactHook").rejects(failure)
+			card[operation].rejects(presentation)
+			await assert.rejects(compaction.run({ source: "user" }), (error) => {
+				assert.ok(error instanceof HookCleanupError)
+				assert.deepEqual(error.errors, [failure, presentation])
+				return true
+			})
+			sinon.assert.notCalled(messageStateHandler.overwriteApiConversationProviderState)
+		})
+	}
+
 	for (const contained of [false, true]) {
 		it(`forwards ${contained ? "contained" : "legacy"} storage to PreCompact while retaining payload identity`, async () => {
 			const { compaction, dependencies } = createMocks()

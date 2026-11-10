@@ -39,7 +39,7 @@ describe("TaskMessageBridge immediate permission responses", () => {
 			findMessageIndexByCardId: (id: string) =>
 				messages.findIndex((message) => message.content.type === DiracMessageType.CARD && message.content.card.id === id),
 			getDiracMessages: () => messages,
-			flushPendingWrites: async () => {},
+			flushPendingWrites: async () => { },
 			publishCardInteractionReady: vi.fn((id: string) => {
 				messageStateHandler.emit(
 					"cardInteractionReady",
@@ -72,7 +72,7 @@ describe("TaskMessageBridge immediate permission responses", () => {
 		const messenger = new TaskMessenger({
 			taskState,
 			messageStateHandler,
-			postStateToWebview: async () => {},
+			postStateToWebview: async () => { },
 			getWorkingConfiguration: () => ({ settings: { hooksEnabled: false }, apiConfiguration: {} }),
 			getCurrentProviderInfo: vi.fn(),
 			taskId: "task-1",
@@ -149,6 +149,103 @@ describe("TaskMessageBridge immediate permission responses", () => {
 			await bridge.waitForMessageWork()
 			await prompt.catch(() => undefined)
 			cleanupFunctions.forEach((cleanup) => cleanup())
+		}
+	})
+	it.each([false, true])("promotes simultaneous approvals after head cancellation=%s", async (cancelHead) => {
+		const taskState = new TaskState()
+		const messages: DiracMessage[] = []
+		const messageStateHandler = Object.assign(new EventEmitter(), {
+			addToDiracMessages: async (message: DiracMessage) => {
+				messages.push(message)
+				messageStateHandler.emit("diracMessagesChanged", { type: "add", message, messages })
+			},
+			getMessageById: (id: string) => messages.find((message) => message.id === id),
+			findMessageIndexByCardId: (id: string) => messages.findIndex((message) => message.id === id),
+			getDiracMessages: () => messages,
+			flushPendingWrites: async () => { },
+			publishCardInteractionReady: vi.fn((id: string) => {
+				messageStateHandler.emit("cardInteractionReady", messages.find((message) => message.id === id))
+			}),
+			patchCardById: async (id: string, patch: Record<string, unknown>) => {
+				const message = messages.find((candidate) => candidate.id === id)!
+				if (message.content.type !== DiracMessageType.CARD) throw new Error("Expected a card")
+				Object.assign(message.content.card, patch)
+				messageStateHandler.emit("diracMessagesChanged", { type: "update", message, messages })
+				return message.content.card
+			},
+		})
+		const task = {
+			taskState,
+			messageStateHandler,
+			submitCardResponse: vi.fn(async (cardId: string, response: DiracAskResponse | string) =>
+				submitCardResponse({ taskState }, { cardId, response })),
+		}
+		const controller = { task } as any
+		const messenger = new TaskMessenger({
+			taskState, messageStateHandler, taskId: "task-1",
+			postStateToWebview: async () => { },
+			getWorkingConfiguration: () => ({ settings: { hooksEnabled: false }, apiConfiguration: {} }),
+		} as any)
+		const requestPermission = vi.fn(async (): Promise<acp.RequestPermissionResponse> => ({
+			outcome: { outcome: "selected", optionId: "allow_once" },
+		}))
+		let releaseHead!: (response: acp.RequestPermissionResponse) => void
+		if (cancelHead) requestPermission.mockImplementationOnce(() => new Promise((resolve) => { releaseHead = resolve }))
+		const bridge = new TaskMessageBridge({
+			getSession: () => ({}) as any, getController: () => controller, requestPermission,
+			emitSessionUpdate: vi.fn().mockResolvedValue(undefined), getClientCapabilities: () => ({}),
+			requestElicitation: vi.fn(), persistPermissionRule: vi.fn(),
+		})
+		const cleanup: Array<() => void> = []
+		let finishTask!: () => void
+		const taskRun = new Promise<void>((resolve) => { finishTask = resolve })
+		const prompt = new Promise<acp.PromptResponse>((resolve, reject) => {
+			bridge.subscribeToTaskMessages(controller, "session-1", {
+				sessionId: "session-1", status: AcpSessionStatus.Processing, pendingToolCalls: new Map(),
+			}, resolve, reject, { value: false }, cleanup, taskRun)
+		})
+		const headCancellation = new AbortController()
+		let waits: Array<Promise<unknown>> = []
+		try {
+			const first = await messenger.createCard({ header: "First approval", requireApproval: true })
+			const second = await messenger.createCard({ header: "Second approval", requireApproval: true })
+			const firstWait = first.waitForInteraction(headCancellation.signal).then(
+				async (answer) => { await first.finalize(CardStatus.SUCCESS); return answer },
+				async (error) => { await first.finalize(CardStatus.CANCELLED); return error },
+			)
+			const secondWait = second.waitForInteraction().then(async (answer) => {
+				await second.finalize(CardStatus.SUCCESS)
+				return answer
+			})
+			waits = [firstWait, secondWait]
+			if (cancelHead) {
+				await vi.waitFor(() => expect(requestPermission).toHaveBeenCalledTimes(1))
+				releaseHead({ outcome: { outcome: "selected", optionId: "allow_once" } })
+				await bridge.waitForMessageWork()
+				// The second ready event was consumed while the first card was still the head.
+				expect(requestPermission).toHaveBeenCalledTimes(1)
+				expect(taskState.lastWaitingCardId).toBe(first.id)
+				headCancellation.abort(new Error("Head cancelled before its response was consumed"))
+				await firstWait
+			}
+			await vi.waitFor(() => expect(second.getCard().status).toBe(CardStatus.SUCCESS))
+			expect((await secondWait).response).toBe(DiracAskResponse.APPROVE)
+			await firstWait
+			await bridge.waitForMessageWork()
+			expect(requestPermission).toHaveBeenCalledTimes(2)
+			expect(task.submitCardResponse.mock.calls.map(([id]) => id)).toEqual([first.id, second.id])
+			expect(first.getCard().status).toBe(cancelHead ? CardStatus.CANCELLED : CardStatus.SUCCESS)
+			expect(taskState.waitingCardIds).toEqual([])
+			finishTask()
+			await expect(prompt).resolves.toEqual({ stopReason: "end_turn" })
+		} finally {
+			taskState.abort = true
+			releaseHead?.({ outcome: { outcome: "cancelled" } })
+			await Promise.allSettled(waits)
+			finishTask()
+			await bridge.waitForMessageWork()
+			await prompt.catch(() => undefined)
+			cleanup.forEach((dispose) => dispose())
 		}
 	})
 })

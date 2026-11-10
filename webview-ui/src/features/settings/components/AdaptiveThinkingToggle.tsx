@@ -19,7 +19,7 @@ export function AdaptiveThinkingInput({ budgetTokens, effort, supportsBetweenToo
 		<VSCodeCheckbox
 			checked={requiresThinking || budgetTokens !== 0}
 			disabled={requiresThinking}
-			onChange={(event: any) => onChange(event.target.checked ? ANTHROPIC_MIN_THINKING_BUDGET : 0)}>
+			onChange={(event) => onChange((event.currentTarget as HTMLInputElement).checked ? ANTHROPIC_MIN_THINKING_BUDGET : 0)}>
 			{supportsBetweenToolsThinking ? "Enable up-front thinking" : "Enable thinking"}
 			{requiresThinking ? " (required at this effort)" : ""}
 		</VSCodeCheckbox>

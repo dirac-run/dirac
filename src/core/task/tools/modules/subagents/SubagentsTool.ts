@@ -4,7 +4,6 @@ import {
 	formatTaskletReceipt,
 	TASKLET_RECEIPT_OPERATIONS,
 	TASKLET_RECEIPT_OUTCOMES,
-	taskletReceiptNote,
 	taskletReceiptTitle,
 	type TaskletReceipt,
 	type TaskletReceiptOutcome,
@@ -121,6 +120,9 @@ export class SubagentsTool implements IDiracTool {
 				}
 			}),
 		)
+		if (results.every((result) => !result.accepted) && results.some((result) => !("outcome" in result) || !result.outcome || result.outcome.kind === "failed")) {
+			env.orchestration.reportFailure()
+		}
 		if (card) {
 			const accepted = results.filter((result) => result.accepted).length
 			const status = accepted === results.length ? CardStatus.SUCCESS : CardStatus.ERROR
@@ -264,7 +266,8 @@ export const subagents_spec: DiracToolSpec = {
 						type: "string",
 						minLength: 1,
 						maxLength: 8000,
-						description: "Guidance or reply text; never permission authority.",
+						description:
+							"Guidance or reply text, or optional explanation for permission_decision; never permission authority.",
 					},
 					request_id: {
 						type: "string",
@@ -346,6 +349,9 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 	if (Buffer.byteLength(output, "utf8") > MAX_MESSAGE_RESULTS_BYTES)
 		throw new Error("Tasklet control output exceeded its aggregate bound; use a bounded inspection view")
 	const receipts = individualReceipts(controlReceiptResult(request, result))
+	if (receipts.length > 0 && receipts.every((receipt) => receipt.outcome === "failed" || receipt.outcome === "stale")) {
+		env.orchestration.reportFailure()
+	}
 	for (const [index, receipt] of receipts.entries()) {
 		const card = cards[index]
 		if (!card) continue
@@ -475,7 +481,7 @@ function parseMessageBatch(input: unknown): TaskletMessage[] {
 				...(args.action === undefined ? {} : { action: requireMessageText({ text: args.action }) }),
 			}
 		} else if (type === "permission_decision") {
-			rejectUnknownFields(args, ["tasklet_id", "type", "request_id", "decision"], type)
+			rejectUnknownFields(args, ["tasklet_id", "type", "request_id", "decision", "text"], type)
 			if (!permissionDecisions.includes(args.decision as (typeof permissionDecisions)[number]))
 				throw new Error("Invalid permission decision")
 			item = {
@@ -483,6 +489,7 @@ function parseMessageBatch(input: unknown): TaskletMessage[] {
 				type,
 				requestId: requireRoutingIdentity(args, "request_id"),
 				decision: args.decision as "approve" | "reject" | "escalate",
+				...(args.text === undefined ? {} : { text: requireMessageText(args) }),
 			}
 		} else throw new Error("Unknown tasklet message type")
 		const target = JSON.stringify([taskletId, "requestId" in item ? ["request", item.requestId] : [type, item.text]])
@@ -620,15 +627,7 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 }
 
 function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: string) {
-	const detail = [
-		TASKLET_RECEIPT_OUTCOMES[taskletReceipt.outcome].label,
-		taskletReceiptNote(taskletReceipt),
-		taskletReceipt.error || taskletReceipt.rows.some((row) => row.error)
-			? "Operation failed; see tool result for details."
-			: undefined,
-	]
-		.filter(Boolean)
-		.join(" · ")
+	const detail = TASKLET_RECEIPT_OUTCOMES[taskletReceipt.outcome].label
 	return {
 		header: taskletReceiptTitle(taskletReceipt, actor),
 		icon: TASKLET_RECEIPT_OPERATIONS[taskletReceipt.operation].icon,

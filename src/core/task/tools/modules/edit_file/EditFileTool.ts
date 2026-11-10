@@ -134,6 +134,7 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
 				await this.batchPreparer.prepare(files, env, cards)
 
 			if (preparedBatches.length === 0) {
+				if (totalFailedEdits > 0) env.orchestration.reportFailure()
 				env.telemetry.captureCustomMetadata({
 					filesCount: files.length,
 					requestedEdits: totalRequestedEdits,
@@ -177,7 +178,7 @@ export class EditFileTool implements IDiracTool<EditFileArgs> {
 			// Text typed on the waiting card: the coordinator skips the cards and forwards the text.
 			if (error instanceof ToolSkippedByUserMessage) {
 				// A failing cleanup must not replace the skip, or the typed text is lost.
-				await env.editor.hideReview().catch(() => {})
+				await env.editor.hideReview().catch(() => { })
 				throw error
 			}
 			const executionError = toError(error)

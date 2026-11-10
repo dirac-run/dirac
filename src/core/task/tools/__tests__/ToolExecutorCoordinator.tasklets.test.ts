@@ -29,7 +29,7 @@ function fixture(strict = true) {
 	const createCard = sinon.stub().resolves(card)
 	const save = sinon.stub().resolves()
 	const environment = {
-		orchestration: { tasklets: controls as unknown as TaskletControls },
+		orchestration: { tasklets: controls as unknown as TaskletControls, agentIdentity: { id: "Dirac", parent: null } },
 		ui: { createCard },
 		context: { ...context, save },
 		telemetry: { captureCustomMetadata: sinon.stub() },
@@ -55,7 +55,7 @@ function fixture(strict = true) {
 			name: "subagents",
 			params: parameters,
 			isNativeToolCall: true,
-		})
+		}).then((result) => result.content)
 	return { controls, card, createCard, save, create, config, execute }
 }
 
@@ -104,6 +104,35 @@ describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
 		sinon.assert.notCalled(createCard)
 		sinon.assert.notCalled(save)
 	})
+
+	for (const strict of [true, false]) {
+		for (const text of [undefined, "Read-only inspection within scope"]) {
+			it(`accepts a permission decision ${text === undefined ? "without" : "with"} explanation through ${strict ? "strict" : "non-strict"} dispatch`, async () => {
+				const { controls, createCard, execute } = fixture(strict)
+				const item = {
+					tasklet_id: "child-1",
+					type: "permission_decision",
+					request_id: "request-1",
+					decision: "approve",
+					...(strict ? { text: null, action: null } : {}),
+					...(text === undefined ? {} : { text }),
+				}
+				const parameters = { operation: "message", messages: [item] }
+				const result = await execute(strict ? strictArguments("message", parameters) : parameters)
+				assert.equal(JSON.parse(result as string)[0].status, "resolved")
+				sinon.assert.calledOnceWithExactly(controls.message, [
+					{
+						taskletId: "child-1",
+						type: "permission_decision",
+						requestId: "request-1",
+						decision: "approve",
+						...(text === undefined ? {} : { text }),
+					},
+				])
+				assert.equal(createCard.firstCall.args[0].taskletReceipt.rows[0].message, text)
+			})
+		}
+	}
 
 	for (const { name, input } of [
 		{

@@ -102,7 +102,9 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 
 		const lineRange = this.parseLineRange(args.start_line, args.end_line)
 		const includeAnchors = args.include_anchors === true
-		const deadline = new ToolExecutionDeadline(this.spec().name)
+		const deadline = new ToolExecutionDeadline(this.spec().name, {
+			cancellationSignal: env.orchestration.getTaskState("abortSignal"),
+		})
 		const results: string[] = []
 		const contentBlocks: any[] = []
 		const cacheUpdates: FileReadCache = {}
@@ -112,7 +114,7 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 
 		const getFileHash = async (cacheKey: string): Promise<FileReadCache[string] | undefined> => {
 			if (loadedCache.has(cacheKey)) return loadedCache.get(cacheKey)
-			const value = await deadline.run("loading the file-read cache entry", async () =>
+			const value = await deadline.observe("loading the file-read cache entry", async () =>
 				await env.context.task.getEntry<FileReadCache[string]>("fileHashes", cacheKey))
 			loadedCache.set(cacheKey, value)
 			return value
@@ -170,7 +172,7 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 		let card: any | undefined
 
 		try {
-			const resolved = await deadline.run(`resolving ${relPath}`, async () => await env.workspace.resolvePath(relPath))
+			const resolved = await deadline.observe(`resolving ${relPath}`, async () => await env.workspace.resolvePath(relPath))
 			absolutePath = resolved.absolutePath
 			displayPath = resolved.displayPath
 			usedWorkspaceHint = displayPath !== relPath
@@ -225,6 +227,13 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 			this.captureReadTelemetry(relPath, usedWorkspaceHint, env)
 			return { success: true, ...readResult }
 		} catch (error: any) {
+			if (env.orchestration.getTaskState("abortSignal")?.aborted) {
+				if (card) {
+					await card.update({ status: CardStatus.CANCELLED, body: "File read cancelled." })
+					await card.finalize(CardStatus.CANCELLED)
+				}
+				throw error
+			}
 			if (error instanceof ToolTimeoutError) return await presentToolTimeout(env, error, card ? [card] : [])
 			const errorMessage = getErrorMessage(error)
 			const normalizedMessage = errorMessage.startsWith("Error reading file:")
@@ -355,7 +364,8 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 		env: IToolEnvironment,
 		deadline: ToolExecutionDeadline,
 	): Promise<{ result: string; contentBlock?: any }> {
-		const fileContent = await deadline.run(`extracting ${displayPath}`, async () =>
+		// The extraction service owns parser/file-loading internals; late text never updates tool context.
+		const fileContent = await deadline.observe(`extracting ${displayPath}`, async () =>
 			await env.workspace.readRichFile(absolutePath))
 		if (fileContent.imageBlock) {
 			return { result: `${header}${fileContent.text}`, contentBlock: fileContent.imageBlock }
@@ -465,5 +475,6 @@ export class ReadFileTool implements IDiracTool<ReadFileArgs> {
 
 	private updateTaskState(anySucceeded: boolean, env: IToolEnvironment): void {
 		if (anySucceeded) env.orchestration.setTaskState("consecutiveMistakeCount", 0)
+		else env.orchestration.reportFailure()
 	}
 }

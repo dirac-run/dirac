@@ -56,11 +56,11 @@ describe("CLI tasklet cards", () => {
 		expect(frame).toContain(data.prompt)
 		expect(frame).toContain("Result")
 		expect(frame).toContain("Retained result")
-		expect(frame).toContain("Communications (parent-directed)")
+		expect(frame).toContain("Messages")
 		expect(frame).toContain(data.communications[0])
-		expect(frame).toContain("Activity (diagnostic)")
+		expect(frame).toContain("Activity")
 		expect(frame).toContain(data.activity[0])
-		if (status === "waiting") expect(frame).toContain("Waiting for the parent")
+		if (status === "waiting") expect(frame).toContain("Waiting for Dirac.")
 		view.unmount()
 	})
 
@@ -146,7 +146,7 @@ describe("CLI tasklet cards", () => {
 		expect(card.actions).toBeUndefined()
 		const view = render(<ModularCard card={card} />)
 		expect(CardInteractions).not.toHaveBeenCalled()
-		expect(plain(view.lastFrame())).toContain("Waiting for the parent")
+		expect(plain(view.lastFrame())).toContain("Waiting for Dirac.")
 		view.unmount()
 	})
 
@@ -198,7 +198,7 @@ describe("CLI tasklet cards", () => {
 			/>,
 		)
 		expect(plain(view.lastFrame())).toContain("Legacy retained result")
-		expect(plain(view.lastFrame())).not.toContain("Communications (parent-directed)")
+		expect(plain(view.lastFrame())).not.toContain("Messages")
 		view.unmount()
 	})
 })

@@ -249,9 +249,9 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				assert.ok(snapshot.executableToolNames.has(name), name)
 			}
 			const params = { paths: ["fixture.txt"] }
-			assert.equal(await snapshot.coordinator.execute(config, {
+			assert.equal((await snapshot.coordinator.execute(config, {
 				type: "tool_use", name: "read_file", params, isComplete: true,
-			}), "fixture read")
+			})).content, "fixture read")
 			sinon.assert.calledOnceWithExactly(readCall, params, environment)
 			for (const name of subagentToolNames) {
 				await assert.rejects(snapshot.coordinator.execute(config, {
@@ -275,7 +275,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 					orchestration: { agentIdentity: { id: "Dirac" }, tasklets: { list, start } },
 					ui: { createCard: async () => ({ id: "control-card", update: async () => undefined, finalize: async () => undefined }) },
 				})
-				const result = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments: [{ type: "default", task_header: "Blocked", task_description: "Blocked" }] }, isComplete: true })
+				const result = (await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments: [{ type: "default", task_header: "Blocked", task_description: "Blocked" }] }, isComplete: true })).content
 				assert.match(result as string, /Subagent creation is disabled/)
 				sinon.assert.notCalled(start)
 				await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "list" }, isComplete: true })
@@ -303,12 +303,12 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				ui: { createCard: async () => ({ id: "tool-card", update: async () => undefined, finalize: async () => undefined }) },
 			})
 			const spawnParams = { operation: "create", assignments: [{ type: "default", task_header: "Inspect", task_description: "Inspect it" }] }
-			const spawned = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: spawnParams, isComplete: true })
+			const spawned = (await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: spawnParams, isComplete: true })).content
 			assert.deepEqual(JSON.parse(spawned as string).subagents, [{ index: 0, id: tasklet.id, title: "Inspect", accepted: true }])
 			sinon.assert.calledOnceWithExactly(start, { title: "Inspect", prompt: "Inspect it", type: "default" })
-			const listed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "list" }, isComplete: true })
+			const listed = (await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "list" }, isComplete: true })).content
 			assert.equal(JSON.parse(listed as string)[0].id, tasklet.id)
-			const resumed = await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "resume", tasklet_id: tasklet.id, message: "Continue" }, isComplete: true })
+			const resumed = (await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "resume", tasklet_id: tasklet.id, message: "Continue" }, isComplete: true })).content
 			assert.equal(JSON.parse(resumed as string).id, tasklet.id)
 			sinon.assert.calledOnceWithExactly(resume, tasklet.id, "Continue")
 			for (const name of retiredGoalTools) {
@@ -344,7 +344,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 					assert.ok(snapshot.coordinator.has(name), name)
 					const params = { operation: "create", assignments: [{ type: "default", task_header: "Fixture task", task_description: "Do the fixture task" }] }
 					assert.equal(
-						await snapshot.coordinator.execute(config, { type: "tool_use", name, params, isComplete: true }),
+						(await snapshot.coordinator.execute(config, { type: "tool_use", name, params, isComplete: true })).content,
 						"fixture dispatched",
 					)
 					sinon.assert.calledWithExactly(processCall, params, environment)

@@ -50,6 +50,7 @@ export async function recursivelyMakeDiracRequests(
 	ctx: TaskRequestLoopContext,
 	userContent: DiracContent[],
 	includeFileDetails = false,
+	onUserContentPersisted?: () => void,
 ): Promise<boolean> {
 	ctx.taskState.status = TaskStatus.PREPARING
 
@@ -139,6 +140,10 @@ export async function recursivelyMakeDiracRequests(
 			requestId: ctx.requestRuntime.requestId,
 			afterUserContentPersisted: async () => {
 				await conversationPersistence.persist(() => ctx.messageStateHandler.flushPendingWrites())
+				if (onUserContentPersisted) {
+					await ctx.messageStateHandler.flushPendingWrites()
+					onUserContentPersisted()
+				}
 				steeringClaimConsumed = true
 				if (!steeringClaim) return
 				await settleConsumedSteeringClaim(ctx.steeringContext, steeringClaim)
@@ -172,6 +177,41 @@ export async function recursivelyMakeDiracRequests(
 			await ctx.taskMessenger.upsertText(apiRequestData.directResponseText)
 		}
 		return true
+	}
+
+	// Retain this request's results until the next request acknowledges their
+	// durable inclusion. Early preparation failures must not lose this tail.
+	let pendingToolCalls: ReturnType<StreamResponseHandler["getOrderedBlocks"]> = []
+	let handedOffContent: DiracContent[] | undefined
+	let toolResultsPersistenceFailed = false
+	const persistFinalToolResults = async () => {
+		if (pendingToolCalls.length === 0 || (!handedOffContent && !ctx.taskState.didCompleteReadingStream)) return
+		const calls = pendingToolCalls
+		pendingToolCalls = [] // An append may succeed before its flush throws; never append it twice.
+		const content = handedOffContent ?? [...ctx.taskState.userMessageContent]
+		const completed = new Set(content.flatMap((block) => block.type === "tool_result" ? [block.tool_use_id] : []))
+		for (const call of calls) {
+			if (call.type !== "tool_use" || completed.has(call.id)) continue
+			content.push({
+				type: "tool_result", tool_use_id: call.id, call_id: call.call_id, is_error: true,
+				content: "Execution interrupted before a result was recorded. Effects may have occurred; inspect current state before retrying.",
+			})
+		}
+		try {
+			// Preparation may have staged this exact batch before its flush failed.
+			// In that case retry the existing write, not another native response.
+			const tail = handedOffContent ? ctx.messageStateHandler.getApiConversationHistory().at(-1) : undefined
+			const stagedResults = new Set(tail?.role === "user" && Array.isArray(tail.content)
+				? tail.content.flatMap((block) => block.type === "tool_result" ? [block.tool_use_id] : []) : [])
+			if (!calls.every((call) => call.type === "tool_use" && stagedResults.has(call.id))) {
+				await ctx.messageStateHandler.addToApiConversationHistory({ role: "user", content, ts: Date.now() })
+			}
+			await ctx.messageStateHandler.flushPendingWrites()
+			if (!handedOffContent) ctx.taskState.userMessageContent = []
+		} catch (error) {
+			toolResultsPersistenceFailed = true
+			throw error
+		}
 	}
 
 	try {
@@ -429,6 +469,7 @@ export async function recursivelyMakeDiracRequests(
 			throw new Error("Dirac instance aborted")
 		}
 
+		pendingToolCalls = ctx.streamHandler.getOrderedBlocks().filter((block) => block.type === "tool_use")
 		const assistantHasContent = await ctx.responseProcessor.routeAssistantResponse({
 			assistantMessage,
 			assistantTextOnly,
@@ -442,7 +483,16 @@ export async function recursivelyMakeDiracRequests(
 			toolUseHandler,
 		})
 
-		return await processStreamResult(ctx, {
+		// Completion may publish terminal task status without making another request.
+		if (ctx.taskState.didAttemptCompletion) await persistFinalToolResults()
+		const ended = await processStreamResult({
+			...ctx,
+			recursivelyMakeDiracRequests: (content, includeDetails) => {
+				if (pendingToolCalls.length === 0) return ctx.recursivelyMakeDiracRequests(content, includeDetails)
+				handedOffContent = structuredClone(content)
+				return ctx.recursivelyMakeDiracRequests(content, includeDetails, () => { pendingToolCalls = [] })
+			},
+		}, {
 			assistantHasContent,
 			stopReason,
 			userContent,
@@ -451,7 +501,15 @@ export async function recursivelyMakeDiracRequests(
 			providerId,
 			model,
 		})
+		await persistFinalToolResults()
+		return ended
 	} catch (error) {
+		try {
+			await persistFinalToolResults()
+		} catch (persistenceError) {
+			throw new AggregateError([error, persistenceError], "Tool execution stopped and its results could not be persisted")
+		}
+		if (toolResultsPersistenceFailed) throw error
 		if (ctx.taskState.abort) {
 			// User-initiated abort — not a fatal error, no card needed
 			return true

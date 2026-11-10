@@ -19,6 +19,7 @@ function makeEnvironment(legacySettings: Record<string, unknown>, subagentsEnabl
 			mode: "act",
 		},
 		orchestration: {
+			reportFailure: sinon.stub(),
 			setTaskState: (key: string, value: unknown) => {
 				; (state as unknown as Record<string, unknown>)[key] = value
 			},

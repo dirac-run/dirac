@@ -39,7 +39,7 @@ export interface ICardHandle {
 	 * Blocks until the user interacts with the card (approval, feedback, or custom action).
 	 * Returns the action value (e.g., 'approve', 'reject', 'submit', or custom button value).
 	 */
-	waitForInteraction(): Promise<{
+	waitForInteraction(signal?: AbortSignal): Promise<{
 		action: DiracAskResponse | string
 		response: DiracAskResponse
 		value?: string

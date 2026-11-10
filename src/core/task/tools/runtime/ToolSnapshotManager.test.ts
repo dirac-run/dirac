@@ -303,9 +303,9 @@ describe("ToolSnapshotManager task isolation", () => {
 			const snapshot = await managers[index].getSnapshotForRequest(context, { requestId, configurationRevision: 1 })
 			assert.equal(snapshot.inventoryEnabledTools.find((tool) => tool.id === "fork-tool")?.ownerTaskId, owners[index])
 			config.activeToolSnapshot = snapshot
-			return snapshot.coordinator.execute(config, {
+			return (await snapshot.coordinator.execute(config, {
 				type: "tool_use", id: requestId, name: "fork-tool", params: {}, isNativeToolCall: true,
-			})
+			})).content
 		}
 		assert.equal(await execute(0, "source-request"), "source version")
 		assert.equal(await execute(1, "fork-request"), "fork version")

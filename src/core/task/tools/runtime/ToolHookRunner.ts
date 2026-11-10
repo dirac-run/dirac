@@ -7,30 +7,30 @@ import type { MessageStateHandler } from "../../message-state"
 import type { TaskMessenger } from "../../TaskMessenger"
 import type { TaskState } from "../../TaskState"
 
-// Runs PostToolUse hooks and handles context modification + cancellation.
+import type { HookExecution } from "../../types/HookExecution"
+/** Runs a post-tool hook and returns its effects without writing into a model turn. */
 export class ToolHookRunner {
 	constructor(
-		private taskState: TaskState,
 		private messageStateHandler: MessageStateHandler,
 		private taskMessenger: TaskMessenger,
 		private taskId: string,
-		private setActiveHookExecution: (hookExecution: any) => Promise<void>,
-		private clearActiveHookExecution: () => Promise<void>,
+		private setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>,
+		private clearActiveHookExecution: (runId: string) => Promise<void>,
 	) { }
 
-
-	// Runs PostToolUse hook; returns true if hook requested cancellation.
 	async runPostToolUseHook(
 		block: ToolUse,
-		toolResult: any,
+		toolResult: import("../types/ToolResponse").ToolResponse,
 		executionSuccess: boolean,
 		executionStartTime: number,
 		hooksEnabled: boolean,
 		api: ApiHandler,
 		providerId: string,
-	): Promise<boolean> {
+		signal?: AbortSignal,
+		invocationContext?: import("../../types/task-messenger").TaskMessengerInvocationContext,
+	): Promise<{ cancelled: boolean; context?: import("@shared/messages/content").DiracUserContent }> {
 		const { executeHook } = await import("../../../hooks/hook-executor")
-		const executionTimeMs = Date.now() - executionStartTime
+		const messenger = invocationContext ? this.taskMessenger.forInvocation(invocationContext) : this.taskMessenger
 		const postToolResult = await executeHook({
 			hookName: "PostToolUse",
 			hookInput: {
@@ -39,11 +39,11 @@ export class ToolHookRunner {
 					parameters: block.params,
 					result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult),
 					success: executionSuccess,
-					executionTimeMs,
+					executionTimeMs: Date.now() - executionStartTime,
 				},
 			},
 			isCancellable: true,
-			messenger: this.taskMessenger,
+			messenger,
 			setActiveHookExecution: this.setActiveHookExecution,
 			clearActiveHookExecution: this.clearActiveHookExecution,
 			messageStateHandler: this.messageStateHandler,
@@ -51,41 +51,35 @@ export class ToolHookRunner {
 			hooksEnabled,
 			model: getHookModelContext(api, { providerId }),
 			toolName: block.name,
+			signal,
 		})
+		// An execution abort is local; it must not request cancellation of sibling work.
+		signal?.throwIfAborted()
 		if (postToolResult.cancel === true) {
-			const errorMessage = postToolResult.errorMessage || "Hook requested task cancellation"
-			const card = await this.taskMessenger.createCard({
+			const card = await messenger.createCard({
 				header: "Hook Error",
-				body: errorMessage,
+				body: postToolResult.errorMessage || "Hook requested task cancellation",
 				status: CardStatus.ERROR,
 			})
 			await card.finalize(CardStatus.ERROR)
-			return true
+			return { cancelled: true }
 		}
-		if (postToolResult.contextModification)
-			this.addHookContextToConversation(postToolResult.contextModification, "PostToolUse")
-		return false
+		return { cancelled: false, context: this.formatHookContext(postToolResult.contextModification, "PostToolUse") }
 	}
 
-	// Adds hook context modification to the conversation if provided.
-	addHookContextToConversation(contextModification: string | undefined, source: string): void {
-		if (!contextModification) return
-		const contextText = contextModification.trim()
-		if (!contextText) return
+	formatHookContext(contextModification: string | undefined, source: string): import("@shared/messages/content").DiracUserContent | undefined {
+		const contextText = contextModification?.trim()
+		if (!contextText) return undefined
 		const lines = contextText.split("\n")
-		const firstLine = lines[0]
 		let contextType = "general"
 		let content = contextText
-		const typeMatch = /^([A-Z_]+):\s*(.*)/.exec(firstLine)
+		const typeMatch = /^([A-Z_]+):\s*(.*)/.exec(lines[0])
 		if (typeMatch) {
 			contextType = typeMatch[1].toLowerCase()
-			const remainingLines = lines.slice(1).filter((l: string) => l.trim())
+			const remainingLines = lines.slice(1).filter((line) => line.trim())
 			content = typeMatch[2] ? [typeMatch[2], ...remainingLines].join("\n") : remainingLines.join("\n")
 		}
-		this.taskState.userMessageContent.push({
-			type: "text",
-			text: `<hook_context source="${source}" type="${contextType}">\n${content}\n</hook_context>`,
-		})
+		return { type: "text", text: `<hook_context source="${source}" type="${contextType}">\n${content}\n</hook_context>` }
 	}
 }
 

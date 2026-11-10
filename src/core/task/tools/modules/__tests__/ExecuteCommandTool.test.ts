@@ -53,7 +53,7 @@ function createMocks() {
 		interaction: {
 			askPermission: sinon.stub().resolves({ approved: true }),
 		},
-		orchestration: {},
+		orchestration: { reportFailure: sinon.stub(), getTaskState: sinon.stub().returns(new AbortController().signal) },
 		system: {
 			executeCommand: callbacks.executeCommand,
 		},
@@ -368,6 +368,34 @@ describe("ExecuteCommandTool", () => {
 			mockCard.update.calledWithMatch({ rawOutput: { output: sinon.match.string, exitCode: 0, userRejected: false } }),
 		)
 	})
+	for (const outcomes of [[1], [1, 2], [1, 0], [0, 1], [0]]) {
+		it(`reports total command failure for exit codes ${outcomes.join(",")}`, async () => {
+			const { tool, env } = createMocks()
+			outcomes.forEach((exitCode, index) => env.system.executeCommand.onCall(index).resolves({ output: "ordinary output", exitCode }))
+			await tool.processCall({ commands: outcomes.map(() => "echo test") }, env as any)
+			assert.equal(env.orchestration.reportFailure.callCount, outcomes.every((code) => code !== 0) ? 1 : 0)
+		})
+	}
+
+	it("reports a launch failure but propagates task cancellation", async () => {
+		const { tool, env, mockCard } = createMocks()
+		env.system.executeCommand.rejects(new Error("launch failed"))
+		await tool.processCall({ commands: ["echo test"] }, env as any)
+		sinon.assert.calledOnce(env.orchestration.reportFailure)
+		env.orchestration.reportFailure.resetHistory()
+		env.orchestration.getTaskState.returns(AbortSignal.abort())
+		await assert.rejects(tool.processCall({ commands: ["echo test"] }, env as any), /launch failed/)
+		assert.equal(mockCard.finalize.lastCall.args[0], CardStatus.CANCELLED)
+		sinon.assert.notCalled(env.orchestration.reportFailure)
+	})
+
+	it("does not label a rejected command as an operational failure", async () => {
+		const { tool, env } = createMocks()
+		env.system.executeCommand.resolves({ output: "rejected", userRejected: true })
+		await tool.processCall({ commands: ["echo test"] }, env as any)
+		sinon.assert.notCalled(env.orchestration.reportFailure)
+	})
+
 	it("does not infer failure from command-controlled output text", async () => {
 		const { tool, env, mockCard } = createMocks()
 			; (env.system.executeCommand as sinon.SinonStub).resolves({

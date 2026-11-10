@@ -1,5 +1,4 @@
 import type { FileInfo } from "./FileInfo"
-export type { FileInfo } from "./FileInfo"
 import { createReadStream, promises as fs } from "node:fs"
 import { workspaceResolver } from "@core/workspace"
 import { arePathsEqual } from "@utils/path"
@@ -9,6 +8,7 @@ import * as os from "os"
 import * as path from "path"
 import picomatch from "picomatch"
 import { Logger } from "@/shared/services/Logger"
+export type { FileInfo } from "./FileInfo"
 
 const DEFAULT_IGNORE_DIRECTORIES = [
 	"node_modules",
@@ -56,30 +56,34 @@ async function describeFile(absolutePath: string, signal: AbortSignal, followSym
 	}
 }
 
-export async function listFiles(dirPath: string, recursive: boolean, limit: number): Promise<[FileInfo[], boolean]> {
+export async function listFiles(dirPath: string, recursive: boolean, limit: number, cancellationSignal?: AbortSignal): Promise<[FileInfo[], boolean]> {
+	cancellationSignal?.throwIfAborted()
 	const resolved = workspaceResolver.resolveWorkspacePath(dirPath, "", "Services.glob.listFiles")
 	const absolutePath = typeof resolved === "string" ? resolved : resolved.absolutePath
 	if (isRestrictedPath(absolutePath)) return [[], false]
 	if (limit <= 0) return [[], true]
 
 	const controller = new AbortController()
+	const signal = cancellationSignal ? AbortSignal.any([controller.signal, cancellationSignal]) : controller.signal
 	const timeout = setTimeout(() => controller.abort(new Error("File listing timed out")), 10_000)
 	const results: FileInfo[] = []
 	try {
 		const stats = await fs.stat(absolutePath)
-		if (!stats.isDirectory()) return [[await describeFile(absolutePath, controller.signal, true)], false]
+		if (!stats.isDirectory()) return [[await describeFile(absolutePath, signal, true)], false]
 		const isIgnored = picomatch(buildIgnorePatterns(absolutePath), { dot: true })
 		for await (const entry of walkWorkspace(absolutePath, {
-			signal: controller.signal,
+			signal,
 			allowIgnoredRoot: true,
 			recursive,
 			excludes: (entry) => isIgnored(entry.relativePath.split(path.sep).join("/")),
 		})) {
-			results.push(await describeFile(entry.absolutePath, controller.signal))
+			results.push(await describeFile(entry.absolutePath, signal))
 			if (results.length >= limit) return [results, true]
 		}
 		return [results, false]
 	} catch (error) {
+		// External cancellation is not a successful partial listing; streams/traversal have settled here.
+		cancellationSignal?.throwIfAborted()
 		if (controller.signal.aborted) {
 			Logger.warn("File listing timed out; traversal stopped, returning partial results")
 			return [results, true]

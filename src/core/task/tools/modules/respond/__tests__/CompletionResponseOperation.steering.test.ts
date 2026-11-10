@@ -21,6 +21,7 @@ describe("completion response operation steering arbitration", () => {
 			},
 			ui: { createCard },
 			orchestration: {
+				reportFailure: sinon.stub(),
 				getTaskState: (key: keyof typeof state) => state[key],
 				setTaskState: (key: keyof typeof state, value: number | boolean) => {
 					state[key] = value as never
@@ -37,6 +38,7 @@ describe("completion response operation steering arbitration", () => {
 		const result = await new CompletionResponseOperation().execute("Done", env)
 
 		assert.equal(result, "Completion rejected: steered")
+		sinon.assert.calledOnce(env.orchestration.reportFailure as sinon.SinonStub)
 		assert.equal(commitAttemptCompletion.calledOnce, true)
 		assert.equal(createCard.notCalled, true)
 		assert.equal(saveCheckpoint.notCalled, true)

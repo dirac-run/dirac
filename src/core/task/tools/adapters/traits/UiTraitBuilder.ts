@@ -13,14 +13,15 @@ export function buildUiTrait(
 	createCardFn: (params: CardParams) => Promise<ICardHandle>,
 	createManualInteractionCardFn: (params: CardParams) => Promise<ICardHandle>,
 ): IUITrait {
+	const messenger = config.messengerContext ? config.taskMessenger.forInvocation(config.messengerContext) : config.taskMessenger
 	return {
 		createCard: createCardFn,
 		createManualInteractionCard: createManualInteractionCardFn,
 		upsertText: async (text: string, isReasoning?: boolean, role?: "user" | "assistant") => {
-			await config.taskMessenger.upsertText(text, isReasoning, undefined, undefined, role)
+			await messenger.upsertText(text, isReasoning, undefined, undefined, role)
 		},
 		streamText: async (type: "markdown" | "reasoning") => {
-			return await config.taskMessenger.streamText(type)
+			return await messenger.streamText(type)
 		},
 		publishState: async () => await config.callbacks.postStateToWebview(),
 	}
@@ -99,8 +100,10 @@ export async function createCardFromMessenger(
 	if (!binding) return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 
 	const request = createUtilityPermissionRequest(config, cardParams, binding.authorityMode)
-	const decision = await binding.service.decide(request, config.taskState.abortSignal)
-	config.taskState.abortSignal.throwIfAborted()
+	const signal = permissionSignal(config)
+	signal.throwIfAborted()
+	const decision = await binding.service.decide(request, signal)
+	signal.throwIfAborted()
 	if (isAutoApproved()) {
 		return new ApprovedPermissionCardHandle(cardParams)
 	}
@@ -114,7 +117,7 @@ export async function createCardFromMessenger(
 		return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 	}
 	await publishPermissionApprovalCard(config, cardParams, tracker, request, decision.reason)
-	config.taskState.abortSignal.throwIfAborted()
+	signal.throwIfAborted()
 	const publishedBinding = config.permissionDecisionBinding
 	if (!publishedBinding || publishedBinding.configurationRevision !== binding.configurationRevision ||
 		publishedBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
@@ -155,8 +158,10 @@ async function createTaskletPermissionCard(
 	}
 
 	const request = createUtilityPermissionRequest(config, params, binding.authorityMode)
-	const decision = await binding.service.decide(request, config.taskState.abortSignal)
-	config.taskState.abortSignal.throwIfAborted()
+	const signal = permissionSignal(config)
+	signal.throwIfAborted()
+	const decision = await binding.service.decide(request, signal)
+	signal.throwIfAborted()
 	const currentBinding = config.permissionDecisionBinding
 	if (!currentBinding || currentBinding.configurationRevision !== binding.configurationRevision ||
 		currentBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
@@ -169,7 +174,7 @@ async function createTaskletPermissionCard(
 		return createOwnerCard(config, { ...params, utilityPermissionEscalation: decision.reason }, tracker)
 	}
 	await publishPermissionApprovalCard(config, params, tracker, request, decision.reason)
-	config.taskState.abortSignal.throwIfAborted()
+	signal.throwIfAborted()
 	const publishedBinding = config.permissionDecisionBinding
 	if (!publishedBinding || publishedBinding.configurationRevision !== binding.configurationRevision ||
 		publishedBinding.commandPermissionRevision !== binding.commandPermissionRevision) {
@@ -179,6 +184,12 @@ async function createTaskletPermissionCard(
 		}, tracker)
 	}
 	return new ApprovedPermissionCardHandle(params)
+}
+
+function permissionSignal(config: TaskConfig): AbortSignal {
+	return config.execution
+		? AbortSignal.any([config.execution.signal, config.taskState.abortSignal])
+		: config.taskState.abortSignal
 }
 
 function isUnrestrictedToolApproval(config: TaskConfig): boolean {
@@ -250,8 +261,9 @@ export async function createManualInteractionCardFromMessenger(
 }
 
 async function createOwnerCard(config: TaskConfig, params: CardParams, tracker: CardHandle[]): Promise<ICardHandle> {
-	const handle = await config.taskMessenger.createCard({
+	const cardParams: Parameters<TaskConfig["taskMessenger"]["createCard"]>[0] = {
 		...params,
+		...(config.execution ? { executionId: config.execution.identity.executionId } : {}),
 		isAutoApproved: undefined,
 		permissionOperation:
 			params.permissionOperation ??
@@ -259,8 +271,11 @@ async function createOwnerCard(config: TaskConfig, params: CardParams, tracker: 
 				? { kind: "tool", manualOnly: params.permissionRequestKind === "manual_tool" }
 				: undefined),
 		toolCall: config.toolUse ? { name: config.toolUse.name, arguments: structuredClone(config.toolUse.params) } : undefined,
-	})
-	const adapterHandle = new CardHandle(handle, undefined, undefined, true)
+	}
+	const handle = config.messengerContext
+		? await config.taskMessenger.createCard(cardParams, config.messengerContext)
+		: await config.taskMessenger.createCard(cardParams)
+	const adapterHandle = new CardHandle(handle, undefined, undefined, true, config.execution)
 	tracker.push(adapterHandle)
 	return adapterHandle
 }
@@ -294,8 +309,14 @@ async function createDisplayedCardFromMessenger(
 		}
 		: params
 	const messengerParams = !autoApprovedAction && isAutoApproved ? { ...displayedParams, isAutoApproved } : displayedParams
-	const handle = await config.taskMessenger.createCard(messengerParams)
-	const adapterHandle = new CardHandle(handle, autoApprovedAction, liveAutoApprovedAction)
+	const cardParams: Parameters<TaskConfig["taskMessenger"]["createCard"]>[0] = {
+		...messengerParams,
+		...(config.execution ? { executionId: config.execution.identity.executionId } : {}),
+	}
+	const handle = config.messengerContext
+		? await config.taskMessenger.createCard(cardParams, config.messengerContext)
+		: await config.taskMessenger.createCard(cardParams)
+	const adapterHandle = new CardHandle(handle, autoApprovedAction, liveAutoApprovedAction, false, config.execution)
 	tracker.push(adapterHandle)
 	return adapterHandle
 }

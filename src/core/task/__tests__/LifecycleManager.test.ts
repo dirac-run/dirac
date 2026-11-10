@@ -1,3 +1,6 @@
+import assert from "node:assert/strict"
+import { HookFactory } from "@core/hooks/hook-factory"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import "should"
 import { CardStatus, DiracMessageType, TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
@@ -5,6 +8,7 @@ import pWaitFor from "p-wait-for"
 import sinon from "sinon"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { LifecycleManager } from "../LifecycleManager"
+import { HookManager } from "../HookManager"
 import { TaskState } from "../TaskState"
 
 // Characterization tests for LifecycleManager — verifies task lifecycle:
@@ -702,6 +706,50 @@ describe("LifecycleManager", () => {
 	})
 
 	describe("abortTask", () => {
+		for (const fatal of [false, true]) {
+			it(`LifecycleManager joins TaskCancel ownership and ${fatal ? "propagates cleanup failure" : "fails open for ordinary hook errors"}`, async () => {
+				if (!fatal) expectLoggerErrors()
+				deps.getWorkingConfiguration = () => ({ settings: { hooksEnabled: true }, apiConfiguration: {} })
+				deps.messageStateHandler.findMessageIndexById = () => -1
+				deps.taskMessenger.createCard = sinon.stub().resolves({ id: "cancel-hook" })
+				deps.hookManager = new HookManager({
+					...deps, withStateLock: async (operation: () => unknown) => operation(),
+				} as any)
+				deps.taskState.beginApiRequest()
+				sinon.stub(HookFactory.prototype, "hasHook").resolves(true)
+				sinon.stub(HookFactory.prototype, "getHookInfo").resolves({ scriptPaths: ["TaskCancel"] })
+				let release!: () => void
+				const cleanup = new Promise<void>((resolve) => { release = resolve })
+				const failure = fatal
+					? new HookCleanupError([new Error("termination failed")], "cancel hook cleanup failed")
+					: new Error("ordinary hook failure")
+				const run = sinon.stub().callsFake(async () => { await cleanup; throw failure })
+				const factory = sinon.stub(HookFactory.prototype, "createWithStreaming").resolves({ run } as any)
+				let settled = false
+				const pending = manager.abortTask().finally(() => { settled = true })
+				const rejected = fatal ? assert.rejects(pending, (error) => error === failure) : undefined
+				await pWaitFor(() => run.calledOnce, { interval: 1 })
+				assert.equal(settled, false)
+				assert.equal(deps.taskState.activeHookExecutions.size, 1)
+				const execution = [...deps.taskState.activeHookExecutions.values()][0] as any
+				assert.equal(execution.hookName, "TaskCancel")
+				assert.equal(execution.abortController.signal.aborted, false)
+				assert.equal(factory.firstCall.args[2], execution.abortController.signal)
+				sinon.assert.notCalled(deps.browserSession.dispose)
+				const finalization = manager.finalizeTaskRun()
+				const finalizationRejected = fatal ? assert.rejects(finalization, (error) => error === failure) : undefined
+				release()
+				if (rejected) await rejected
+				else await pending
+				if (finalizationRejected) await finalizationRejected
+				else await finalization
+				assert.equal(deps.taskState.activeHookExecutions.size, 0)
+				sinon.assert.calledOnce(deps.browserSession.dispose)
+				if (fatal) sinon.assert.notCalled(deps.messageStateHandler.saveDiracMessagesAndUpdateHistory)
+				else sinon.assert.calledOnce(deps.messageStateHandler.saveDiracMessagesAndUpdateHistory)
+			})
+		}
+
 		it("sets abort flag to true", async () => {
 			await manager.abortTask()
 			deps.taskState.abort.should.equal(true)
@@ -757,12 +805,41 @@ describe("LifecycleManager", () => {
 			deps.taskState.status.should.equal(TaskStatus.CANCELLED)
 		})
 
-		it("cancels active hook if present", async () => {
-			deps.hookManager.getActiveHookExecution = sinon.stub().resolves({ id: "hook1" })
-			await manager.abortTask()
-			sinon.assert.calledOnce(deps.hookManager.cancelHookExecution)
-			sinon.assert.calledOnce(deps.hookManager.clearActiveHookExecution)
-		})
+		for (const shutdown of ["abortTask", "finalizeTaskRun"] as const) {
+			it(`${shutdown} cancels every hook and waits for each cleanup`, async () => {
+				deps.messageStateHandler.findMessageIndexById = () => -1
+				const hooks = new HookManager({
+					...deps,
+					withStateLock: async (operation: () => unknown) => operation(),
+				} as any)
+				deps.hookManager = hooks
+				let finishFirst!: () => void
+				let finishSecond!: () => void
+				const first = {
+					runId: "first", hookName: "PreToolUse", messageId: "first", abortController: new AbortController(),
+					completion: new Promise<void>((resolve) => { finishFirst = resolve }),
+				}
+				const second = {
+					runId: "second", hookName: "PostToolUse", messageId: "second", abortController: new AbortController(),
+					completion: new Promise<void>((resolve) => { finishSecond = resolve }),
+				}
+				await hooks.setActiveHookExecution(first)
+				await hooks.setActiveHookExecution(second)
+				let finished = false
+				const pending = manager[shutdown]().then(() => { finished = true })
+				await pWaitFor(() => first.abortController.signal.aborted && second.abortController.signal.aborted, { interval: 1 })
+				finished.should.equal(false)
+				await hooks.clearActiveHookExecution("first")
+				finishFirst()
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				finished.should.equal(false)
+				await hooks.clearActiveHookExecution("second")
+				finishSecond()
+				await pending
+				finished.should.equal(true)
+				deps.taskState.activeHookExecutions.size.should.equal(0)
+			})
+		}
 
 		it("stops the command executor even without an active background command", async () => {
 			await manager.abortTask()
@@ -989,6 +1066,7 @@ function createMockDeps(): any {
 			clearActiveHookExecution: sinon.stub(),
 			getActiveHookExecution: sinon.stub().resolves(undefined),
 			cancelHookExecution: sinon.stub().resolves(),
+			cancelAllHookExecutions: sinon.stub().resolves(),
 			handleHookCancellation: sinon.stub().resolves(),
 			runUserPromptSubmitHook: sinon.stub().resolves({}),
 			shouldRunTaskCancelHook: sinon.stub().resolves(false),

@@ -5,4 +5,5 @@ import type { CardParams, ICardHandle } from "../../interfaces/ICardHandle"
 export interface ArchitectureDiagramEnvironment {
 	readonly architecture?: IArchitectureTrait
 	readonly ui: { createCard(params: CardParams): Promise<ICardHandle> }
+	readonly orchestration: { reportFailure(): void }
 }

@@ -370,8 +370,8 @@ export class Task {
 			reinitExistingTaskFromId: () => this.reinitExistingTaskFromId(this.taskId),
 			attemptApiRequest: (previousApiReqIndex, lastApiReqIndex, shouldCompact) =>
 				this.attemptApiRequest(previousApiReqIndex, lastApiReqIndex, shouldCompact),
-			recursivelyMakeDiracRequests: (userContent, includeFileDetails) =>
-				this.recursivelyMakeDiracRequests(userContent, includeFileDetails),
+			recursivelyMakeDiracRequests: (userContent, includeFileDetails, onUserContentPersisted) =>
+				this.recursivelyMakeDiracRequests(userContent, includeFileDetails, onUserContentPersisted),
 			handleEmptyAssistantResponse: (params) => this.responseProcessor.handleEmptyAssistantResponse(params),
 		}
 	}
@@ -486,12 +486,12 @@ export class Task {
 		return commitAttemptCompletion(this.steeringContext, response)
 	}
 
-	public async setActiveHookExecution(hookExecution: NonNullable<typeof this.taskState.activeHookExecution>): Promise<void> {
+	public async setActiveHookExecution(hookExecution: import("./types/HookExecution").HookExecution): Promise<void> {
 		return this.hookManager.setActiveHookExecution(hookExecution)
 	}
 
-	public async clearActiveHookExecution(): Promise<void> {
-		return this.hookManager.clearActiveHookExecution()
+	public async clearActiveHookExecution(runId: string): Promise<void> {
+		return this.hookManager.clearActiveHookExecution(runId)
 	}
 
 	/** Observe automatic and recovery context compaction for the owning ACP session. */
@@ -507,8 +507,8 @@ export class Task {
 		}
 	}
 
-	public async getActiveHookExecution(): Promise<typeof this.taskState.activeHookExecution> {
-		return this.hookManager.getActiveHookExecution()
+	public async getActiveHookExecution(runId: string): Promise<import("./types/HookExecution").HookExecution | undefined> {
+		return this.hookManager.getActiveHookExecution(runId)
 	}
 
 	// Core dependencies
@@ -790,6 +790,8 @@ export class Task {
 		this.taskMessenger = new TaskMessenger({
 			taskState: this.taskState,
 			messageStateHandler: this.messageStateHandler,
+			setActiveHookExecution: this.setActiveHookExecution.bind(this),
+			clearActiveHookExecution: this.clearActiveHookExecution.bind(this),
 			postStateToWebview: this.postStateToWebview,
 			postPresentationToWebview: this.postPresentationToWebview,
 			counterparty: contained?.counterparty,
@@ -1815,8 +1817,11 @@ export class Task {
 		return this.commandExecutor.cancelBackgroundCommand()
 	}
 
-	public async cancelHookExecution(): Promise<boolean> {
-		return this.hookManager.cancelHookExecution()
+	public async cancelHookExecution(runId?: string): Promise<boolean> {
+		if (runId !== undefined) return this.hookManager.cancelHookExecution(runId)
+		const hadActiveHooks = this.taskState.activeHookExecutions.size > 0
+		await this.hookManager.cancelAllHookExecutions()
+		return hadActiveHooks
 	}
 
 	private getCurrentProviderInfo(requestRuntime = this.activeRequestRuntime): ApiProviderInfo {
@@ -1893,12 +1898,12 @@ export class Task {
 		return this.responseProcessor.presentAssistantMessage()
 	}
 
-	async recursivelyMakeDiracRequests(userContent: DiracContent[], includeFileDetails = false): Promise<boolean> {
+	async recursivelyMakeDiracRequests(userContent: DiracContent[], includeFileDetails = false, onUserContentPersisted?: () => void): Promise<boolean> {
 		await this.inheritParentWorkingConfiguration()
 		const runtime = createTaskRequestRuntime(this.workingConfiguration, this.api)
 		this.activeRequestRuntime = runtime
 		try {
-			return await recursivelyMakeDiracRequests(this.requestLoopContext(runtime), userContent, includeFileDetails)
+			return await recursivelyMakeDiracRequests(this.requestLoopContext(runtime), userContent, includeFileDetails, onUserContentPersisted)
 		} finally {
 			if (this.activeRequestRuntime === runtime) this.activeRequestRuntime = undefined
 		}
@@ -2784,8 +2789,10 @@ export class TaskletHost {
 			} else if (item.type === "reply" || item.type === "permission_decision") {
 				if (!identity(item.requestId)) throw new Error("Reply requires the exact bounded request ID")
 				if (item.type === "permission_decision") {
-					fields = ["taskletId", "type", "requestId", "decision"]
+					fields = ["taskletId", "type", "requestId", "decision", "text"]
 					if (!["approve", "reject", "escalate"].includes(item.decision)) throw new Error("Invalid permission decision")
+					if (item.text !== undefined && !text(item.text))
+						throw new Error("Permission decision explanation requires text of at most 8000 characters")
 				} else {
 					fields = ["taskletId", "type", "requestId", "text", "action"]
 					if (
@@ -2873,7 +2880,9 @@ export class TaskletHost {
 				await this.persistEvents(child)
 				return { ...addressed, status: "already_resolved" }
 			}
-			const result = await this.resolveInteraction(item.taskletId, item.requestId, decision)
+			const result = await this.resolveInteraction(
+				item.taskletId, item.requestId, decision, item.type === "permission_decision" ? item.text : undefined,
+			)
 			return { ...addressed, status: result.status }
 		} catch (error) {
 			return { ...base, status: "failed", error: getErrorMessage(error).slice(0, 1000) }
@@ -2924,7 +2933,7 @@ export class TaskletHost {
 	}
 
 	/** Explicit parent decisions only. An approval outside current authority leaves the request pending. */
-	async resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision): Promise<TaskletResolution> {
+	async resolveInteraction(id: string, requestId: string, decision: TaskletInteractionDecision, explanation?: string): Promise<TaskletResolution> {
 		const child = this.requireChild(id)
 		const interaction = child.interactions.get(requestId)
 		if (!interaction || interaction.record.status !== "pending" || this.closing || child.interactionsClosed) {
@@ -2932,7 +2941,7 @@ export class TaskletHost {
 		}
 		if (interaction.resolving) throw new Error(`Tasklet interaction ${requestId} is already being resolved`)
 		interaction.resolving = true
-		const resolution = this.applyInteractionDecision(child, interaction, structuredClone(decision))
+		const resolution = this.applyInteractionDecision(child, interaction, structuredClone(decision), explanation)
 		this.resolutions.add(resolution)
 		try {
 			return await resolution
@@ -2949,6 +2958,7 @@ export class TaskletHost {
 		child: OwnedTasklet,
 		interaction: PendingTaskletInteraction,
 		decision: TaskletInteractionDecision,
+		explanation?: string,
 	): Promise<TaskletResolution> {
 		const request = interaction.record
 		const signal = interaction.cancellation.signal
@@ -2990,6 +3000,10 @@ export class TaskletHost {
 		if (permission && (result.action === DiracAskResponse.APPROVE || result.response === DiracAskResponse.APPROVE)) {
 			this.owner.assertPermissionAllowed(request)
 			assertAuthorityCurrent?.()
+		}
+		// Commentary is delivered to the child, never used as authority or retry identity.
+		if (explanation !== undefined) {
+			result = { ...result, text: [explanation, result.text].filter((text) => text !== undefined).join("\n\n") }
 		}
 		request.decision = structuredClone(decision)
 		interaction.resolve(result)

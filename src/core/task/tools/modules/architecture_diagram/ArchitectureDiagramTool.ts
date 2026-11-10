@@ -12,7 +12,8 @@ interface OperationOutcome {
 	saved?: { name: string; version: number }
 }
 
-function failedOperation(operation: string, outcome: "error" | "unavailable" | "timeout", error: unknown): OperationOutcome {
+function failedOperation(env: ArchitectureDiagramEnvironment, operation: string, outcome: "error" | "unavailable" | "timeout", error: unknown): OperationOutcome {
+	env.orchestration.reportFailure()
 	const message = `${operation}: ${error instanceof Error ? error.message : String(error)}`
 	return { status: CardStatus.ERROR, body: message, result: { operation, outcome, error: message } }
 }
@@ -24,7 +25,7 @@ async function executeSemanticOperation(
 ): Promise<OperationOutcome> {
 	const architecture = env.architecture
 	if (!architecture)
-		return failedOperation(args.operation, "unavailable", "Architecture storage is unavailable in this execution.")
+		return failedOperation(env, args.operation, "unavailable", "Architecture storage is unavailable in this execution.")
 	const deadline = new ToolExecutionDeadline("architecture_diagram")
 	try {
 		switch (args.operation) {
@@ -33,7 +34,7 @@ async function executeSemanticOperation(
 				return { status: CardStatus.SUCCESS, body: `Saved diagram "${result.name}", version ${result.version}.`, result, saved: result }
 			}
 			case "list_diagrams": {
-				const result = await deadline.run("listing diagrams", () => architecture.listDiagrams())
+				const result = await deadline.observe("listing diagrams", () => architecture.listDiagrams())
 				return {
 					status: CardStatus.SUCCESS,
 					body: `Listed ${result.length} task-local diagram(s). Names and versions returned to the model.`,
@@ -41,7 +42,7 @@ async function executeSemanticOperation(
 				}
 			}
 			case "fetch_diagram": {
-				const result = await deadline.run("fetching diagram", () => architecture.fetchDiagram(args.name, args.version))
+				const result = await deadline.observe("fetching diagram", () => architecture.fetchDiagram(args.name, args.version))
 				return {
 					status: CardStatus.SUCCESS,
 					body: `Fetched diagram "${result.name}", version ${result.version}. Semantic content returned to the model.`,
@@ -53,11 +54,11 @@ async function executeSemanticOperation(
 		if (error instanceof ToolTimeoutError) {
 			const writeWarning =
 				args.operation === "upsert_diagram"
-					? " Publication may still settle; this is not confirmation of a committed version. List/fetch before deciding whether to retry."
+					? " Publication has settled but may have committed; timeout is not confirmation of an uncommitted version. List/fetch before deciding whether to retry."
 					: ""
-			return failedOperation(args.operation, "timeout", error.message + writeWarning)
+			return failedOperation(env, args.operation, "timeout", error.message + writeWarning)
 		}
-		return failedOperation(args.operation, "error", error)
+		return failedOperation(env, args.operation, "error", error)
 	}
 }
 
@@ -75,7 +76,7 @@ export async function executeArchitectureDiagram(
 			input && typeof input === "object" && "operation" in input && typeof input.operation === "string"
 				? input.operation
 				: "unknown"
-		return completeCard(card, failedOperation(operation, "error", error))
+		return completeCard(card, failedOperation(env, operation, "error", error))
 	}
 	if (args.operation === "display_diagram" || args.operation === "display_comparison") return displayArchitecture(args, env, card)
 	const outcome = await executeSemanticOperation(args, env)

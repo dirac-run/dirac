@@ -11,7 +11,44 @@ import { buildSourceAstTrait } from "../SourceAstTraitBuilder"
 afterEach(() => sinon.restore())
 
 describe("SourceAstTraitBuilder", () => {
-	it("forwards every source-AST request to one service facade", async () => {
+	for (const method of ["outline", "implementations", "occurrences"] as const) {
+		it(`does not start ${method} after cancellation during anchor preparation`, async () => {
+			const { config } = createMockTaskConfig({ cwd: path.join(path.sep, "workspace") })
+			let finishPreparation!: () => void
+			const preparing = new Promise<void>((resolve) => { finishPreparation = resolve })
+			sinon.stub(config.context, "ensureAnchorState").returns(preparing)
+			const query = sinon.stub(SourceAstService.prototype, method).resolves({} as any)
+			const controller = new AbortController()
+			const pending = buildSourceAstTrait(config)[method]({ paths: ["a.ts"], symbols: ["run"], kind: "both", includeAnchors: true }, controller.signal)
+			controller.abort(new Error("cancelled"))
+			finishPreparation()
+			await assert.rejects(pending, /cancelled/)
+			sinon.assert.notCalled(query)
+		})
+	}
+
+	it("prevents late anchor reconciliation from committing tool context", async () => {
+		const { config } = createMockTaskConfig({ cwd: path.join(path.sep, "workspace") })
+		let finishRead!: () => void
+		const reading = new Promise<void>((resolve) => { finishRead = resolve })
+		const reconcile = sinon.stub(AnchorStateManager, "reconcileWithChanges")
+		const markDirty = sinon.spy(config.context, "markAnchorStateDirty")
+		sinon.stub(SourceAstService.prototype, "outline").callsFake(async function (this: SourceAstService) {
+			await reading
+			const dependencies = (this as any).dependencies
+			dependencies.reconcileAnchors("/workspace/a.ts", ["late"])
+			return { files: [] }
+		})
+		const controller = new AbortController()
+		const pending = buildSourceAstTrait(config).outline({ paths: ["a.ts"] }, controller.signal)
+		controller.abort(new Error("cancelled"))
+		finishRead()
+		await assert.rejects(pending, /cancelled/)
+		sinon.assert.notCalled(reconcile)
+		sinon.assert.notCalled(markDirty)
+	})
+
+	it("forwards every source-AST request to its service facade", async () => {
 		const cwd = path.join(path.sep, "workspace")
 		const { config } = createMockTaskConfig({ cwd })
 		const outlineRequest = { paths: ["src/a.ts"], includeAnchors: true }

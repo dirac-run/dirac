@@ -109,6 +109,80 @@ describe("SubagentsTool input and result contracts", () => {
 		assert.equal(JSON.parse(output)[0].status, "resolved")
 	})
 
+	for (const decision of ["approve", "reject", "escalate"] as const) {
+		for (const text of [undefined, "  Read-only inspection within scope.\n", "x".repeat(8000)]) {
+			it(`accepts ${decision} with ${text === undefined ? "omitted" : `${text.length}-character`} explanatory text`, async () => {
+				const explanation = text === undefined ? {} : { text }
+				const { environment, updates } = fixture({
+					message: async (items) => {
+						assert.deepEqual(items, [
+							{
+								taskletId: "child",
+								type: "permission_decision",
+								requestId: "exact-request",
+								decision,
+								...explanation,
+							},
+						])
+						return [{ taskletId: "child", requestId: "exact-request", status: "resolved" }]
+					},
+				})
+				await new SubagentsTool().processCall(
+					{
+						operation: "message",
+						messages: [
+							{
+								tasklet_id: "child",
+								type: "permission_decision",
+								request_id: "exact-request",
+								decision,
+								...explanation,
+							},
+						],
+					},
+					environment,
+				)
+				const receipt = updates[0].taskletReceipt as TaskletReceipt
+				assert.equal(receipt.rows[0].message, text)
+				assert.equal(receipt.rows[0].requestId, "exact-request")
+				assert.equal(receipt.rows[0].decision, decision)
+				if (text !== undefined) assert.ok(String(updates[0].body).startsWith(text))
+			})
+		}
+	}
+
+	for (const text of [null, 42, {}, "", " \n ", "x".repeat(8001)]) {
+		it(`rejects invalid permission explanation (${typeof text}, length ${typeof text === "string" ? text.length : "n/a"}) before dispatch`, async () => {
+			let called = false
+			const { environment, finalized } = fixture({
+				message: async () => {
+					called = true
+					return []
+				},
+			})
+			await assert.rejects(
+				new SubagentsTool().processCall(
+					{
+						operation: "message",
+						messages: [
+							{
+								tasklet_id: "child",
+								type: "permission_decision",
+								request_id: "exact-request",
+								decision: "approve",
+								text,
+							},
+						],
+					},
+					environment,
+				),
+				/non-empty string|at most 8000/,
+			)
+			assert.equal(called, false)
+			assert.deepEqual(finalized, [])
+		})
+	}
+
 	it("passes exact view/call/cursor parameters without loading another view", async () => {
 		const page = { title: "Review storage", items: [{ callId: "call", result: "exact result" }], totalItems: 1 }
 		const { environment, updates } = fixture({
@@ -127,8 +201,8 @@ describe("SubagentsTool input and result contracts", () => {
 			),
 			page,
 		)
-		assert.equal(updates[0].header, "Dirac inspected tool result of a — Review storage")
-		assert.match(String(updates[0].body), /exact result/)
+		assert.equal(updates[0].header, "Dirac → a · Inspect tool result")
+		assert.equal(updates[0].body, "a — Review storage\n\n1 of 1 items")
 		assert.equal((updates[0].taskletReceipt as TaskletReceipt).outcome, "retrieved")
 	})
 
@@ -176,13 +250,14 @@ describe("SubagentsTool input and result contracts", () => {
 		assert.equal(reply.rows[0].choice, "choice-2")
 		assert.equal(permission.rows[0].decision, "approve")
 		assert.equal(permission.rows[0].requestId, "s")
-		assert.equal(updates[0].header, "Dirac replied to a — Review storage")
-		assert.equal(updates[0].body, "Use option two\nchoice-2")
-		assert.equal(updates[1].header, "Dirac failed to approve b's request")
-		assert.match(String(updates[1].body), /This request only, within parent authority/)
-		assert.match((updates[1].communication as { detail: string }).detail, /Authority changed/)
-		assert.equal(updates[0].collapsed, false)
-		assert.equal(updates[1].collapsed, false)
+		assert.equal(updates[0].header, "Dirac → a · Answer")
+		assert.equal(updates[0].body, "Use option two\n\nChoice: choice-2\n\nRequest: Which format?")
+		assert.equal(updates[1].header, "Dirac → b · Permission decision")
+		assert.match(String(updates[1].body), /Requested decision: approve/)
+		assert.match(String(updates[1].body), /Operation failed/)
+		assert.equal((updates[1].communication as { detail: string }).detail, "Failed")
+		assert.equal(updates[0].collapsed, true)
+		assert.equal(updates[1].collapsed, true)
 	})
 
 	it("bounds the entire serialized message batch while retaining every addressed outcome", async () => {
@@ -211,7 +286,7 @@ describe("SubagentsTool input and result contracts", () => {
 		})
 		await new SubagentsTool().processCall({ operation: "inspect", tasklet_id: "child", view: "pending" }, environment)
 		const receipt = updates[0].taskletReceipt as TaskletReceipt
-		assert.equal(updates[0].header, "Dirac inspected pending requests of child — Audit protocol")
+		assert.equal(updates[0].header, "Dirac → child · Inspect pending requests")
 		assert.equal(receipt.outcome, "retrieved")
 		assert.equal(receipt.returnedCount, 0)
 		assert.equal(receipt.rows[0].observedState, undefined)
@@ -253,13 +328,14 @@ describe("SubagentsTool input and result contracts", () => {
 		assert.equal(guidance.outcome, "queued")
 		assert.equal(guidance.rows[0].message, "Check persistence first")
 		assert.equal(updates[0].body, "Check persistence first")
-		assert.equal(updates[0].header, "Dirac sent guidance to child — Audit")
-		assert.match((updates[0].communication as { detail: string }).detail, /consumption is not confirmed/)
+		assert.equal(updates[0].header, "Dirac → child · Guidance")
+		assert.equal((updates[0].communication as { detail: string }).detail, "Queued")
 		await new SubagentsTool().processCall({ operation: "sleep" }, environment)
 		const wake = updates[1].taskletReceipt as TaskletReceipt
 		assert.equal(wake.outcome, "woke")
 		assert.equal(wake.wakeReason, "event")
-		assert.match(String(updates[1].body), /wake is not assignment completion/)
+		assert.equal(updates[1].body, "Agent update received.")
+		assert.equal((updates[1].communication as { detail: string }).detail, "Awake")
 	})
 
 	it("fails rather than returning an accidentally unbounded control result", async () => {

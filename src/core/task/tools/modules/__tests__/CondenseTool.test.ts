@@ -31,6 +31,7 @@ function createMocks(source: "automatic" | "user" = "automatic") {
 		conversationCondensation,
 		logging: { warn: sinon.stub() },
 		orchestration: {
+			reportFailure: sinon.stub(),
 			getCurrentTurnUserRequests: sinon.stub().returns([]),
 			getTaskState: sinon.stub().callsFake((key: string) => state[key]),
 			setTaskState: sinon.stub().callsFake((key: string, value: unknown) => {
@@ -197,6 +198,8 @@ describe("CondenseTool", () => {
 		conversationCondensation.condenseConversation.rejects(new Error("utility unavailable"))
 
 		const fallback = await new CondenseTool().processCall({}, env as any)
+		sinon.assert.calledOnce(env.orchestration.reportFailure)
+		env.orchestration.reportFailure.resetHistory()
 
 		assert.equal(state.pendingCondenseSource, "automatic")
 		assert.equal(env.orchestration.setTruncationRange.callCount, 0)
@@ -205,6 +208,7 @@ describe("CondenseTool", () => {
 		assert.equal(env.orchestration.notifyContextCompacted.callCount, 0)
 
 		await new CondenseTool().processCall({ context: "active model summary" }, env as any)
+		sinon.assert.notCalled(env.orchestration.reportFailure)
 		assert.equal(card.waitForInteraction.callCount, 0)
 		assert.equal(state.pendingCondenseSource, undefined)
 		assert.equal(env.orchestration.notifyContextCompacted.callCount, 1)
@@ -220,6 +224,7 @@ describe("CondenseTool", () => {
 		})
 
 		await assert.rejects(new CondenseTool().processCall({}, env as any), /cancelled/)
+		sinon.assert.notCalled(env.orchestration.reportFailure)
 
 		assert.equal(state.pendingCondenseSource, "automatic")
 		assert.equal(env.logging.warn.callCount, 0)

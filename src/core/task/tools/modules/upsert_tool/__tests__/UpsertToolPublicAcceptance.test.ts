@@ -1,3 +1,4 @@
+import { executeToolInvocation } from "../../../__tests__/helpers/executeToolInvocation"
 import { strict as assert } from "node:assert"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -58,7 +59,7 @@ describe("upsert_tool public coordinator acceptance (controlled smoke-command re
 		const coordinator = new ToolExecutorCoordinator(environmentFactory)
 		coordinator.registerModularTool(create())
 		config.coordinator = coordinator
-		const parentUpsert = (definition: ReturnType<typeof toolDefinition>) => coordinator.execute(config, {
+		const parentUpsert = (definition: ReturnType<typeof toolDefinition>) => executeToolInvocation(coordinator, config, {
 			// ToolUse's legacy parameter union does not yet include upsert_tool's tools field.
 			type: "tool_use", name: "upsert_tool", params: { tools: [definition] } as ToolUse["params"], isNativeToolCall: true,
 		})
@@ -69,7 +70,7 @@ describe("upsert_tool public coordinator acceptance (controlled smoke-command re
 				nextRequest.registerModularTool(tool.factory(config))
 			}
 			assert.equal(nextRequest.has("example_tool"), true)
-			return nextRequest.execute(config, {
+			return executeToolInvocation(nextRequest, config, {
 				type: "tool_use", name: "example_tool", params: { message }, isNativeToolCall: true,
 			})
 		}

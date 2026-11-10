@@ -11,6 +11,7 @@ export class CompletionResponseOperation {
 			? await env.goal.commitCompletion(result)
 			: await env.orchestration.commitAttemptCompletion(result)
 		if (!completion.committed) {
+			env.orchestration.reportFailure()
 			return `Completion rejected: ${completion.error}`
 		}
 		env.orchestration.setTaskState("completionCommitted", true)

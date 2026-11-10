@@ -221,7 +221,7 @@ describe("architecture-board skill integration", () => {
 		assert.equal(slash, null)
 		const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves(), appendBody: sinon.stub().resolves() }
 		const activateSkill = sinon.stub().rejects(new Error("must not activate"))
-		const env = { config, skills: buildSkillsTrait(config), ui: { createCard: async () => card }, orchestration: { activateSkill } } as unknown as IToolEnvironment
+		const env = { config, skills: buildSkillsTrait(config), ui: { createCard: async () => card }, orchestration: { activateSkill, getTaskState: () => undefined, reportFailure: sinon.stub() } } as unknown as IToolEnvironment
 		assert.match(await new UseSkillTool().processCall({ skill_name: skill.name }, env), /not found/)
 		assert.equal((await new ListSkillsTool().processCall({}, env)).includes(skill.name), false)
 		sinon.assert.notCalled(activateSkill)
@@ -269,7 +269,8 @@ describe("architecture-board skill integration", () => {
 			ui: { createCard: sinon.stub().resolves(card) },
 			skills: { ...buildSkillsTrait(config), listSupportingFiles: async () => ({ docs: [], scripts: [] }) },
 			orchestration: {
-				getTaskState: () => config.taskState.activeSkillIds,
+				getTaskState: (key: string) => key === "activeSkillIds" ? config.taskState.activeSkillIds : undefined,
+				reportFailure: sinon.stub(),
 				activateSkill: (id: string) => activateTaskSkill(config.taskId, config.taskState, id),
 			},
 			telemetry: { captureCustomMetadata: sinon.stub() },

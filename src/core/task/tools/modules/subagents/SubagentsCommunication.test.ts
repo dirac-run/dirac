@@ -35,7 +35,7 @@ function fixture(controls: Partial<TaskletControls>, actor = "Dirac") {
 	})
 	const warn = sinon.stub()
 	const env = {
-		orchestration: { tasklets: controls, agentIdentity: { id: actor } },
+		orchestration: { reportFailure: sinon.stub(), tasklets: controls, agentIdentity: { id: actor } },
 		ui: { createCard },
 		logging: { warn },
 	} as unknown as IToolEnvironment
@@ -48,6 +48,15 @@ async function message(env: IToolEnvironment, messages: unknown[]) {
 
 describe("Subagent supervision communication cards", () => {
 	afterEach(() => sinon.restore())
+
+	for (const statuses of [["failed"], ["stale", "failed"], ["queued", "failed"], ["resolved"], ["requires_user_approval"]] as const) {
+		it(`marks only total operational message failures: ${statuses.join(",")}`, async () => {
+			const { env } = fixture({ message: async () => statuses.map((status, index) => ({ taskletId: `agent-${index}`, status })) })
+			await message(env, statuses.map((_, index) => ({ tasklet_id: `agent-${index}`, type: "guidance", text: "Check" })))
+			assert.equal((env.orchestration.reportFailure as sinon.SinonStub).callCount,
+				statuses.every((status) => status === "failed" || status === "stale") ? 1 : 0)
+		})
+	}
 
 	const cases = [
 		...[
@@ -210,7 +219,8 @@ describe("Subagent supervision communication cards", () => {
 		}
 		assert.ok(cards[0].initial.body.startsWith(guidance))
 		assert.ok(cards[0].updates[0].body.startsWith(guidance))
-		assert.match(cards[0].updates[0].communication.detail, /Queued.*consumption is not confirmed/)
+		assert.equal(cards[0].updates[0].communication.detail, "Queued")
+		assert.equal(cards[0].updates[0].body, guidance)
 		assert.ok(cards[1].updates[0].body.startsWith("Inspect renderer"))
 		assert.match(cards[1].updates[0].body, /Operation failed/)
 		assert.doesNotMatch(cards[1].updates[0].communication.detail, /Recipient settled/)
@@ -262,9 +272,9 @@ describe("Subagent supervision communication cards", () => {
 			assert.equal(card.header, "Dirac → Planck · Permission decision")
 			assert.doesNotMatch(card.header, /permission-1|approved/)
 			assert.doesNotMatch(card.communication.detail, /permission-1/)
-			assert.match(card.body, new RegExp(`Decision: ${decision}`))
+			assert.match(card.body, new RegExp(`Requested decision: ${decision}`))
 			assert.doesNotMatch(card.body, /permission-1/)
-			assert.match(card.body, /User approval is required; this decision did not grant permission/)
+			assert.match(card.body, /User approval required; permission not granted\./)
 			assert.match(card.communication.detail, /User approval needed/)
 			assert.equal(card.taskletReceipt.rows[0].requestId, "permission-1")
 			assert.equal(card.taskletReceipt.outcome, result[0].status)
@@ -334,7 +344,8 @@ describe("Subagent supervision communication cards", () => {
 		assert.equal(cards[0].updates[0].header, "Dirac · Agents")
 		assert.match(cards[0].updates[0].body, /Planck \(Reviewer\) — Review code — Running/)
 		assert.match(cards[0].updates[0].body, /Curie — Inspect UI — Waiting for parent/)
-		assert.match(cards[0].updates[0].body, /2 of 3 items · more available · passive read/)
+		assert.match(cards[0].updates[0].body, /2 of 3 items · more available/)
+		assert.doesNotMatch(cards[0].updates[0].body, /passive read/)
 		assert.doesNotMatch(cards[0].updates[0].body, /"items"|"executionStatus"/)
 	})
 
@@ -366,6 +377,7 @@ describe("Subagent supervision communication cards", () => {
 		)
 		assert.deepEqual(JSON.parse(output), { reason: "mail", from: "Bohr", messageId: "m" })
 		assert.equal(cards[0].updates[0].header, "Dirac · Wait ended")
-		assert.match(cards[0].updates[0].body, /Ordinary agent message\. A wake is not assignment completion/)
+		assert.equal(cards[0].updates[0].body, "Agent message received.\n\nAgents: Planck, Curie")
+		assert.equal(cards[0].updates[0].communication.detail, "Awake")
 	})
 })

@@ -1,11 +1,12 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
 import {
-    formatTaskletReceipt,
-    taskletReceiptTitle,
-    type TaskletReceipt,
-    type TaskletReceiptOperation,
-    type TaskletReceiptOutcome,
+	formatTaskletReceipt,
+	taskletReceiptNote,
+	taskletReceiptTitle,
+	type TaskletReceipt,
+	type TaskletReceiptOperation,
+	type TaskletReceiptOutcome,
 } from "./taskletReceipt"
 
 function receipt(operation: TaskletReceiptOperation, outcome: TaskletReceiptOutcome = "resolved"): TaskletReceipt {
@@ -20,11 +21,12 @@ describe("Tasklet communication receipts", () => {
 		assert.equal(taskletReceiptTitle(receipt("list", "retrieved"), "Dirac"), "Dirac · Agents")
 	})
 
-	it("puts requested, failed and stale state in the body rather than claiming completion", () => {
+	it("retains outcome status in exports without duplicating communication metadata", () => {
 		for (const outcome of ["requested", "failed", "stale", "already_resolved"] as const) {
 			const item = receipt("reply", outcome)
 			assert.equal(taskletReceiptTitle(item, "Dirac"), "Dirac → Planck · Answer")
-			assert.match(formatTaskletReceipt(item, true), new RegExp(`Status: ${outcome === "already_resolved" ? "Already resolved" : outcome === "stale" ? "Stale request" : outcome[0].toUpperCase() + outcome.slice(1)}`))
+			assert.match(formatTaskletReceipt(item), new RegExp(`Status: ${outcome === "already_resolved" ? "Already resolved" : outcome === "stale" ? "Stale request" : outcome[0].toUpperCase() + outcome.slice(1)}`))
+			assert.equal(formatTaskletReceipt(item, true), "")
 		}
 	})
 
@@ -35,8 +37,8 @@ describe("Tasklet communication receipts", () => {
 		guidance.error = "Batch failed"
 		const body = formatTaskletReceipt(guidance, true)
 		assert.ok(body.startsWith(guidance.rows[0].message))
-		assert.match(body, /Status: Failed/)
-		assert.match(body, /Error: Operation failed/)
+		assert.doesNotMatch(body, /Status:|Send guidance/)
+		assert.equal(body.match(/Error: Operation failed/g)?.length, 1)
 		assert.doesNotMatch(body, /Admission failed|Batch failed/)
 		const reply = receipt("reply")
 		reply.rows[0].message = "The exact response."
@@ -53,16 +55,17 @@ describe("Tasklet communication receipts", () => {
 			permission.rows[0].requestId = "opaque-permission-id"
 			assert.equal(taskletReceiptTitle(permission, "Dirac"), "Dirac → Planck · Permission decision")
 			let content = formatTaskletReceipt(permission, true)
-			assert.match(content, new RegExp(`Decision: ${decision}`))
+			assert.match(content, new RegExp(`Requested decision: ${decision}`))
 			assert.doesNotMatch(content, /opaque-permission-id/)
-			assert.match(content, /did not grant permission or initiate user escalation/)
+			assert.match(content, /User approval required; permission not granted\./)
 			permission.outcome = permission.rows[0].outcome = "requested"
-			assert.match(formatTaskletReceipt(permission, true), /decision attempt is not a permission grant/)
+			assert.equal(formatTaskletReceipt(permission, true), `Requested decision: ${decision}`)
 			permission.outcome = permission.rows[0].outcome = "resolved"
 			content = formatTaskletReceipt(permission, true)
-			assert.match(content, decision === "escalate" ? /User escalation resolved/ : /This request only, within parent authority/)
+			assert.equal(content, `Requested decision: ${decision}${decision === "escalate" ? "\n\nUser escalation resolved." : ""}`)
+			assert.doesNotMatch(content, /Approved|Rejected|permission granted/)
 			permission.outcome = permission.rows[0].outcome = "already_resolved"
-			assert.match(formatTaskletReceipt(permission, true), /Status: Already resolved/)
+			assert.match(formatTaskletReceipt(permission), /Status: Already resolved/)
 		})
 	}
 
@@ -70,10 +73,13 @@ describe("Tasklet communication receipts", () => {
 		const list = receipt("list", "retrieved")
 		list.returnedCount = list.totalCount = 1
 		list.rows[0].observedState = "waiting_for_parent"
-		assert.equal(formatTaskletReceipt(list, true), "Planck (Reviewer) — Review code — Waiting for parent\n\n1 of 1 items · passive read")
+		assert.equal(formatTaskletReceipt(list, true), "Planck (Reviewer) — Review code — Waiting for parent\n\n1 of 1 items")
+		list.hasMore = true
+		assert.match(formatTaskletReceipt(list, true), /1 of 1 items · more available/)
+		list.hasMore = false
 		list.rows = []
 		list.returnedCount = list.totalCount = 0
-		assert.equal(formatTaskletReceipt(list, true), "No subagents found.\n\n0 of 0 items · passive read")
+		assert.equal(formatTaskletReceipt(list, true), "No subagents found.\n\n0 of 0 items")
 	})
 
 	it("describes sleep scope, wake and cancellation without child completion claims", () => {
@@ -81,12 +87,31 @@ describe("Tasklet communication receipts", () => {
 			operation: "sleep", outcome: "requested", rows: [], waitScope: "selected_tasklets", waitSourceIds: ["Planck", "Curie"], waitSourceCount: 2,
 		}
 		assert.equal(taskletReceiptTitle(sleep, "Dirac"), "Dirac · Awaiting agents")
-		assert.match(formatTaskletReceipt(sleep, true), /Waiting for communication from 2 selected agents/)
+		assert.equal(formatTaskletReceipt(sleep, true), "Waiting for messages from 2 agents.\n\nAgents: Planck, Curie")
 		sleep.outcome = "woke"
 		sleep.wakeReason = "event"
 		assert.equal(taskletReceiptTitle(sleep, "Dirac"), "Dirac · Wait ended")
-		assert.match(formatTaskletReceipt(sleep, true), /A wake is not assignment completion/)
+		assert.equal(formatTaskletReceipt(sleep, true), "Agent update received.\n\nAgents: Planck, Curie")
 		sleep.outcome = "cancelled"
 		assert.equal(taskletReceiptTitle(sleep, "Dirac"), "Dirac · Wait ended")
+		assert.equal(taskletReceiptNote(sleep), "Wait cancelled.")
+	})
+
+	it("uses concise wake reasons and leaves ordinary acceptance to the status label", () => {
+		for (const [wakeReason, note] of [
+			["mail", "Agent message received."],
+			["journal", "Journal notification received."],
+			["timeout", "Deadline reached."],
+			["user_message", "User input received."],
+			["cancelled", "Wait cancelled."],
+		] as const) {
+			assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "woke", rows: [], wakeReason }), note)
+		}
+		for (const operation of ["spawn", "resume", "guidance"] as const) {
+			assert.equal(taskletReceiptNote(receipt(operation, operation === "guidance" ? "queued" : "accepted")), undefined)
+		}
+		assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "failed", rows: [] }), "Wait failed.")
+		assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "requested", rows: [], waitScope: "any_tasklet" }), "Waiting for agent messages.")
+		assert.equal(taskletReceiptNote({ operation: "sleep", outcome: "requested", rows: [], waitScope: "time_or_user" }), "Waiting for timeout or user input.")
 	})
 })

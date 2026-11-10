@@ -72,6 +72,7 @@ function createConfig() {
 	}
 
 	const callbacks = {
+		withMutationAuthorization: async (_tool: string, mutation: () => Promise<unknown>) => mutation(),
 		say: sinon.stub().resolves(undefined),
 		ask: sinon.stub().resolves({ response: DiracAskResponse.APPROVE }),
 		saveCheckpoint: sinon.stub().resolves(),
@@ -104,6 +105,7 @@ function createConfig() {
 	const persistenceStateManager = { flushPendingState: sinon.stub().resolves() }
 
 	const config = {
+		invocationEffects: { failed: false, consecutiveMistakeCount: 0 },
 		taskId: "task-1",
 		ulid: "ulid-1",
 		cwd: tmpDir,
@@ -123,6 +125,7 @@ function createConfig() {
 			actions: { executeCommands: false },
 		},
 		autoApprover: {
+			isUnrestrictedAutoApprove: sinon.stub().returns(true),
 			shouldAutoApproveTool: sinon.stub().returns([true, true]),
 		},
 		browserSettings: {},
@@ -236,6 +239,7 @@ describe("EditFileTool.execute – partial success", () => {
 		taskState.assistantMessageContent = [block]
 
 		const result = await handler.execute(config, block)
+		assert.equal(config.invocationEffects?.failed, false)
 		// Verify disk content
 		const finalContent = await fs.readFile(filePath, "utf8")
 		assert.equal(finalContent, "line 1\nnew line 2\nline 3\nnew line 4\nline 5")
@@ -275,6 +279,7 @@ describe("EditFileTool.execute – partial success", () => {
 		taskState.assistantMessageContent = [block]
 
 		const result = await handler.execute(config, block)
+		assert.equal(config.invocationEffects?.failed, true)
 		// Verify disk content is UNCHANGED
 		const finalContent = await fs.readFile(filePath, "utf8")
 		assert.equal(finalContent, originalContent)

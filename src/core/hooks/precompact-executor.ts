@@ -145,9 +145,9 @@ export interface PreCompactHookParams {
 
 	// Hook management callbacks
 	/** Callback to set active hook execution */
-	setActiveHookExecution: (hookExecution: HookExecution | undefined) => Promise<void>
+	setActiveHookExecution: (hookExecution: HookExecution) => Promise<void>
 	/** Callback to clear active hook execution */
-	clearActiveHookExecution: () => Promise<void>
+	clearActiveHookExecution: (runId: string) => Promise<void>
 
 	// Cancellation dependencies
 	/** Task state object for setting abort flag */

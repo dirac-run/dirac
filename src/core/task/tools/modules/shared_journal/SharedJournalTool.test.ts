@@ -37,29 +37,36 @@ function fixture(identity = { id: "Curie", parent: "Dirac" as string | null }) {
 describe("SharedJournalTool", () => {
 	afterEach(() => sinon.restore())
 
-	it("shows the full finding and secondary notification counts without receipt JSON", async () => {
+	it("shows the verbatim finding with only a capacity warning beyond publication status", async () => {
 		const { env, publish, receipt, card, createCard } = fixture()
 		const input = { headline: " Finding ", content: " Complete body\n " }
 		assert.deepEqual(JSON.parse(await new SharedJournalTool().processCall({ operation: "publish", ...input }, env)), receipt)
 		sinon.assert.calledOnceWithExactly(publish, input)
 		const params = createCard.firstCall.args[0]
 		assert.equal(params.header, "Curie · Journal publication")
-		assert.equal(params.body, `${input.headline}\n\n${input.content}\n\nStatus: Publishing`)
+		assert.equal(params.body, `${input.headline}\n\n${input.content}\n\nPublishing...`)
 		assert.deepEqual(params.communication, { actor: "Curie" })
 		assert.equal(params.status, CardStatus.RUNNING)
 		assert.equal(params.collapsed, true)
 		assert.equal(params.do_not_auto_collapse, undefined)
 		const update = card.update.firstCall.args[0]
 		assert.equal(update.header, "Curie · Journal publication")
-		assert.ok(update.body.startsWith(`${input.headline}\n\n${input.content}`))
+		assert.equal(update.body, `${input.headline}\n\n${input.content}\n\nPublished.\n\nWarning: 2 notifications rejected for capacity.`)
 		assert.doesNotMatch(update.body, new RegExp(receipt.message_id))
 		assert.deepEqual(update.communication, { actor: "Curie" })
-		assert.match(update.body, /1 accepted, 1 skipped inactive, 2 rejected for capacity/)
-		assert.match(update.body, /delivery and action are not confirmed/)
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
 	})
-	it("reads the full finding with author and publication ID while preserving its machine return", async () => {
+	it("omits routine notification counts and warnings when none are rejected", async () => {
+		const { env, receipt, card } = fixture()
+		receipt.notifications.rejected_capacity = 0
+		const input = { operation: "publish", headline: " Finding ", content: " Complete body\n " }
+		assert.deepEqual(JSON.parse(await new SharedJournalTool().processCall(input, env)), receipt)
+		assert.equal(card.update.firstCall.args[0].body, `${input.headline}\n\n${input.content}\n\nPublished.`)
+	})
+	it("reads the verbatim finding with author while preserving its machine return", async () => {
 		const { env, read, record, card, createCard } = fixture()
+		record.headline = " Finding \n "
+		record.content = " Complete body\nwith all details\n "
 		assert.deepEqual(JSON.parse(await new SharedJournalTool().processCall({ operation: "read", message_id: record.id }, env)), record)
 		sinon.assert.calledOnceWithExactly(read, { message_id: record.id })
 		assert.equal(createCard.firstCall.args[0].header, "Curie · Journal read")
@@ -67,7 +74,7 @@ describe("SharedJournalTool", () => {
 		assert.doesNotMatch(createCard.firstCall.args[0].body, new RegExp(record.id))
 		sinon.assert.calledOnceWithExactly(card.update, {
 			header: "Curie · Journal read",
-			body: `${record.headline}\n\n${record.content}\n\nStatus: Retrieved\nAuthor: ${record.author}\nVersion: ${record.version}\nCreated: ${new Date(record.created_at).toISOString()}`,
+			body: `${record.headline}\n\n${record.content}\n\nAuthor: ${record.author}`,
 			communication: { actor: "Curie" },
 		})
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
@@ -87,7 +94,7 @@ describe("SharedJournalTool", () => {
 		await assert.rejects(new SharedJournalTool().processCall({ operation: "read", message_id: record.id }, env), (caught) => caught === error)
 		sinon.assert.calledOnceWithExactly(card.update, {
 			header: "Curie · Journal read",
-			body: "Status: Read failed. See tool result for details.",
+			body: "Read failed.",
 			communication: { actor: "Curie" },
 		})
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.ERROR)
@@ -110,7 +117,7 @@ describe("SharedJournalTool", () => {
 		publish.rejects(new Error("Serialized journal record exceeds 32 KiB"))
 		await assert.rejects(new SharedJournalTool().processCall({ operation: "publish", headline: "x", content: "x" }, env), /32 KiB/)
 		assert.equal(card.update.lastCall.args[0].header, "Curie · Journal publication")
-		assert.equal(card.update.lastCall.args[0].body, "x\n\nx\n\nStatus: Publication failed. See tool result for details.")
+		assert.equal(card.update.lastCall.args[0].body, "x\n\nx\n\nPublication failed.")
 		assert.equal(card.update.lastCall.args[0].communication.detail, undefined)
 		assert.equal(card.finalize.lastCall.args[0], CardStatus.ERROR)
 	})
@@ -137,7 +144,7 @@ describe("SharedJournalTool", () => {
 					sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
 					assert.match(
 						card.update.firstCall.args[0].body,
-						operation === "publish" ? /Status: Published/ : /Status: Retrieved/,
+						operation === "publish" ? /Published\./ : /Author: Feynman/,
 					)
 				}
 			})

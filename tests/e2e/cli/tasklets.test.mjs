@@ -54,25 +54,26 @@ async function submit(session, text) {
 
 async function openAgents(session) {
 	await submit(session, "/agent")
-	return requestSession(session, { operation: "wait", text: "3 total", timeoutMs: 30000 })
+	return requestSession(session, { operation: "wait", text: "2 total", timeoutMs: 30000 })
 }
 
 function agentPanelLines(snapshot) {
-	const start = snapshot.lines.findLastIndex((line) => line.includes("Agents (Esc to close)"))
+	const start = snapshot.lines.findLastIndex((line) => line.includes("Agents · read only (Esc to close)"))
 	assert.notEqual(start, -1, snapshot.screen)
 	return snapshot.lines.slice(start)
 }
 
 function assertAgents(snapshot, ids, statuses) {
 	const lines = agentPanelLines(snapshot)
-	assert.match(snapshot.screen, /3 visible · 3 total/, snapshot.screen)
+	assert.match(snapshot.screen, /2 total · 1–2 on this page/, snapshot.screen)
+	const labels = { waiting: "Waiting for parent", completed: "Completed" }
 	for (let index = 0; index < ids.length; index++) {
-		assert.ok(!snapshot.screen.includes(ids[index]), "Normal UI must not expose routing identities")
+		assert.ok(snapshot.screen.includes(ids[index]), "Agents display their stable public names")
 		assert.ok(
 			lines.some(
 				(line) =>
 					line.includes(`Fixture ${index ? "BETA" : "ALPHA"}`) &&
-					line.includes(`· ${statuses[index]}`),
+					line.includes(`· ${labels[statuses[index]]}`),
 			),
 			snapshot.screen,
 		)
@@ -91,10 +92,10 @@ async function inspectTasklet(session, title, expected) {
 	assert.notEqual(index, -1, snapshot.screen)
 	// Concurrent startup does not promise list order; select the requested assignment title.
 	await requestSession(session, { operation: "key", key: "Up", count: 2 })
-	await requestSession(session, { operation: "key", key: "Down", count: index + 1 })
+	if (index > 0) await requestSession(session, { operation: "key", key: "Down", count: index })
 	await requestSession(session, { operation: "key", key: "Enter" })
 	const inspected = await requestSession(session, { operation: "wait", text: expected })
-	assert.match(inspected.screen, new RegExp(`${title} ·`))
+	assert.ok(inspected.screen.includes(`${title} (Esc to go back)`), inspected.screen)
 	await requestSession(session, { operation: "key", key: "Escape" })
 	return inspected
 }
@@ -156,13 +157,14 @@ for (const rootKind of ["standalone", "goal"]) {
 			await requestSession(session, { operation: "resize", cols: 80, rows: 24 })
 			const narrow = await requestSession(session, { operation: "screen", scrollback: true })
 			const accessible = [...narrow.scrollback, ...narrow.lines].join("\n")
-			assert.match(accessible, /Tasklets|Inspect/)
+			assert.match(accessible, /Start agents|Inspect/)
 			assert.doesNotMatch(accessible, /Tasklet usage/)
-			for (const id of ids) assert.ok(!accessible.includes(id), "Routing identity leaked into transcript")
+			for (const id of ids) assert.ok(accessible.includes(id), "Receipts identify their named agent targets")
+			assert.doesNotMatch(accessible, /tasklet_[0-9a-f]{8}-[0-9a-f-]{27,}/i, "Legacy UUID routing identity leaked into transcript")
 			await requestSession(session, { operation: "resize", cols: 180, rows: 46 })
 			const waiting = await openAgents(session)
 			assertAgents(waiting, ids, ["waiting", "waiting"])
-			const preview = await inspectTasklet(session, "Fixture ALPHA", "Waiting for the parent")
+			const preview = await inspectTasklet(session, "Fixture ALPHA", "Waiting for parent")
 			assert.match(preview.screen, /ALPHA_QUESTION_PRIVATE/)
 			await requestSession(session, { operation: "key", key: "Escape" })
 			const reopenedWaiting = await openAgents(session)

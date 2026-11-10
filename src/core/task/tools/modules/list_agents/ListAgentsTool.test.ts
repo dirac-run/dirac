@@ -38,7 +38,7 @@ describe("ListAgentsTool", () => {
 		sinon.assert.calledOnceWithExactly(card.update, {
 			header: "Dirac listed agents",
 			body: "Dirac — Root task\nStatus: running; messages: available\n\nFeynman — Inspect\nStatus: completed; messages: unavailable",
-			communication: { actor: "Dirac", detail: "Availability is a snapshot, not a reservation. More agents available; next cursor: next" },
+			communication: { actor: "Dirac", detail: "More agents available." },
 		})
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS, true)
 	})
@@ -50,7 +50,7 @@ describe("ListAgentsTool", () => {
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Curie")
 		assert.equal(card.update.firstCall.args[0].header, "Curie listed agents")
 		assert.equal(card.update.firstCall.args[0].body, "No agents on this page.")
-		assert.equal(card.update.firstCall.args[0].communication.detail, "Availability is a snapshot, not a reservation.")
+		assert.equal(card.update.firstCall.args[0].communication.detail, undefined)
 	})
 
 	it("forwards opaque cursors and maximum limit without consuming or filtering the roster", async () => {
@@ -157,7 +157,7 @@ describe("ListAgentsTool", () => {
 		const agentCommunication = { send: sinon.stub(), list: sinon.stub() }
 		const tasklets = {}
 		for (const executionProfile of ["standalone", "goal_coordinator", "goal_followup", "tasklet"] as const) {
-			const trait = buildOrchestrationTrait({ executionProfile, callbacks: { agentCommunication, tasklets } } as unknown as TaskConfig)
+			const trait = buildOrchestrationTrait({ executionProfile, taskState: { abortSignal: new AbortController().signal }, callbacks: { agentCommunication, tasklets } } as unknown as TaskConfig)
 			assert.equal(trait.agentCommunication, agentCommunication)
 			assert.equal(trait.tasklets, executionProfile === "tasklet" ? undefined : tasklets)
 			assert.equal(isDiscoveredToolAvailableToTaskProfile(executionProfile, { exposure, spec: list_agents_spec } as DiscoveredTool), true)

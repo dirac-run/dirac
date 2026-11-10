@@ -51,7 +51,8 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 	async processCall(args: ListFilesArgs, env: IToolEnvironment): Promise<string> {
 		const paths = Array.isArray(args.paths) ? args.paths : args.paths ? [args.paths] : []
 		const recursive = String(args.recursive ?? "").toLowerCase() === "true"
-		const deadline = new ToolExecutionDeadline(this.spec().name)
+		const cancellationSignal = env.orchestration.getTaskState("abortSignal")
+		const deadline = new ToolExecutionDeadline(this.spec().name, { cancellationSignal })
 
 		if (paths.length === 0) {
 			env.orchestration.setTaskState(
@@ -68,7 +69,7 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 		for (const relPath of paths) {
 			let resolved: Awaited<ReturnType<IToolEnvironment["workspace"]["resolvePath"]>>
 			try {
-				resolved = await deadline.run(`resolving ${relPath}`, async () => await env.workspace.resolvePath(relPath))
+				resolved = await deadline.observe(`resolving ${relPath}`, async () => await env.workspace.resolvePath(relPath))
 			} catch (error) {
 				if (error instanceof ToolTimeoutError) return await presentToolTimeout(env, error)
 				throw error
@@ -83,7 +84,6 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 		const results: string[] = []
 		const displayPaths: string[] = []
 		let hasError = false
-		let totalFilesFound = 0
 		let anyHitLimit = false
 		let anyUsedWorkspaceHint = false
 		let anyResolvedToNonPrimary = false
@@ -107,11 +107,12 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 			try {
 				const [fileInfos, didHitLimit] = await deadline.run(
 					`listing ${displayPath}`,
-					async () =>
+					async (signal) =>
 						await env.workspace.listFiles(
 							absolutePath,
 							recursive,
 							ListFilesTool.MAX_FILES_LIMIT,
+							signal,
 						),
 				)
 
@@ -129,8 +130,11 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 				)
 
 				results.push(`Contents of ${relPath}:\n${formattedList}`)
-				totalFilesFound += fileInfos.length
 			} catch (error) {
+				if (cancellationSignal?.aborted) {
+					for (const { card: fileCard } of card.values()) await fileCard.finalize(CardStatus.CANCELLED)
+					throw error
+				}
 				if (error instanceof ToolTimeoutError) {
 					return await presentToolTimeout(env, error, card ? [...card.values()].map((entry) => entry.card) : [])
 				}
@@ -147,7 +151,7 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 		// Only reset on success. Do NOT increment on errors here —
 		// path-not-found or diracignore denials are valid outcomes.
 		// Missing-parameter mistakes are handled above.
-		if (!hasError || totalFilesFound > 0) {
+		if (!hasError || displayPaths.length > 0) {
 			env.orchestration.setTaskState("consecutiveMistakeCount", 0)
 		}
 
@@ -173,6 +177,7 @@ export class ListFilesTool implements IDiracTool<ListFilesArgs, string> {
 			}
 		}
 
+		if (hasError && displayPaths.length === 0) env.orchestration.reportFailure()
 		return finalResult
 	}
 }

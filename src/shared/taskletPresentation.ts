@@ -24,7 +24,7 @@ const PREVIEW_ITEMS = 40
 function preview(text: string): string {
 	return text.length <= PREVIEW_CHARACTERS
 		? text
-		: `${text.slice(0, PREVIEW_CHARACTERS)}… [preview; inspect tasklet for full contents]`
+		: `${text.slice(0, PREVIEW_CHARACTERS)}… [preview]`
 }
 
 /** Routine child activity is diagnostic; it never becomes a parent-directed request. */
@@ -95,7 +95,7 @@ export function createTaskletPresentationCard(data: TaskletPresentationData): Ca
 		body: [
 			`${formatTaskletLabel(data)} · ${data.status}`,
 			bounded.result,
-			data.status === "waiting" ? "Waiting for the parent; no user approval is requested here." : undefined,
+			data.status === "waiting" ? "Waiting for Dirac." : undefined,
 		]
 			.filter(Boolean)
 			.join("\n\n"),
@@ -110,7 +110,7 @@ export function readTaskletPresentation(card: Card): TaskletPresentationData | u
 	return {
 		...data,
 		communications: data.communications.map((text) =>
-			text.startsWith('{"type":') ? "Historical communication; the parent can inspect its exact messages." : text,
+			text.startsWith('{"type":') ? "Historical communication unavailable in this preview." : text,
 		),
 	}
 }

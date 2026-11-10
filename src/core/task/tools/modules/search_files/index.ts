@@ -193,6 +193,7 @@ export class SearchFilesTool implements IDiracTool<SearchFilesArgs, string> {
 				})
 				await card.finalize(CardStatus.ERROR)
 			}
+			env.orchestration.reportFailure()
 			return `Error: ${errorMessage}`
 		}
 	}
@@ -230,7 +231,7 @@ export class SearchFilesTool implements IDiracTool<SearchFilesArgs, string> {
 					})
 				}
 			} else {
-				const { absolutePath } = await deadline.run(`resolving ${relPath}`, async () =>
+				const { absolutePath } = await deadline.observe(`resolving ${relPath}`, async () =>
 					await env.workspace.resolvePath(relPath))
 				allSearchPaths.push({ absolutePath, workspaceRoot: env.config.cwd })
 			}
@@ -273,7 +274,7 @@ export class SearchFilesTool implements IDiracTool<SearchFilesArgs, string> {
 			// Check if directory exists before searching.
 			// Non-existent paths are a valid user input, not a tool error.
 			try {
-				await deadline.run(`checking ${absolutePath}`, async () => await fs.access(absolutePath))
+				await deadline.observe(`checking ${absolutePath}`, async () => await fs.access(absolutePath))
 			} catch (error) {
 				if (error instanceof ToolTimeoutError || cancellationSignal.aborted) throw error
 				return {
@@ -329,7 +330,12 @@ export class SearchFilesTool implements IDiracTool<SearchFilesArgs, string> {
 			}
 		})
 
-		const searchResults = await Promise.all(searchPromises)
+		// A failed/cancelled path must not release ownership while sibling searches still clean up.
+		const settlements = await Promise.allSettled(searchPromises)
+		const searchResults = settlements.map((settlement) => {
+			if (settlement.status === "rejected") throw settlement.reason
+			return settlement.value
+		})
 		const searchDurationMs = Date.now() - searchStartTime
 		return { searchResults, searchDurationMs }
 	}

@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto"
+import type { HookExecution } from "../task/types/HookExecution"
 import type { HookExecutionResult } from "./HookExecutionResult"
-export type { HookExecutionResult } from "./HookExecutionResult"
 import { CardStatus, DiracMessageType, type HookOutputStreamMeta } from "@shared/ExtensionMessage"
 import type { HookOutput } from "@shared/proto/dirac/hooks"
 import { Logger } from "@/shared/services/Logger"
 import { MessageStateHandler } from "../task/message-state"
 import { HookExecutionError } from "./HookError"
+import { HookCleanupError } from "./HookCleanupError"
 import type { HookModelInputContext, Hooks } from "./hook-factory"
+export type { HookExecutionResult } from "./HookExecutionResult"
 
 import { HookFactory } from "./hook-factory"
 
@@ -15,16 +18,12 @@ export interface HookExecutionOptions<Name extends keyof Hooks = any> {
 	hookName: Name
 	hookInput: Hooks[Name]
 	isCancellable: boolean
+	/** Cancellation of the operation that owns this hook run. */
+	signal?: AbortSignal
 	messenger: ITaskMessenger
 
-	setActiveHookExecution?: (execution: {
-		hookName: string
-		toolName: string | undefined
-		messageId: string
-
-		abortController: AbortController
-	}) => Promise<void>
-	clearActiveHookExecution?: () => Promise<void>
+	setActiveHookExecution?: (execution: HookExecution) => Promise<void>
+	clearActiveHookExecution?: (runId: string) => Promise<void>
 	messageStateHandler: MessageStateHandler
 	taskId: string
 	hooksEnabled: boolean
@@ -72,190 +71,207 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 		}
 	}
 
-	// Check if the hook exists
 	const hookFactory = new HookFactory()
-	const hasHook = await hookFactory.hasHook(hookName)
-
-	if (!hasHook) {
-		return { wasCancelled: false }
-	}
-
+	const runId = randomUUID()
 	let hookMessageId: string | undefined
 	const abortController = new AbortController()
+	const cancelFromOwner = () => abortController.abort(options.signal?.reason)
+	if (options.signal?.aborted) cancelFromOwner()
+	else options.signal?.addEventListener("abort", cancelFromOwner, { once: true })
+	let complete!: () => void
+	let failCompletion!: (error: unknown) => void
+	let cleanupFailure: unknown
+	const completion = new Promise<void>((resolve, reject) => { complete = resolve; failCompletion = reject })
+	// A shutdown owner may observe completion after the execution itself rejects.
+	void completion.catch(() => { })
+	const execution: HookExecution = { runId, hookName, toolName: options.toolName, abortController, completion }
 
 	// Declare hookInfo with empty default - populated inside try block.
 	// If getHookInfo throws, error handlers will use the empty default.
 	let hookInfo: { scriptPaths: string[] } = { scriptPaths: [] }
 
-	try {
-		// Get hook info including script paths
-		hookInfo = await hookFactory.getHookInfo(hookName)
+	const run = async (): Promise<HookExecutionResult> => {
+		try {
+			// Own discovery and card creation too: shutdown must join hooks still starting.
+			if (setActiveHookExecution) await setActiveHookExecution(execution)
+			const hasHook = await hookFactory.hasHook(hookName)
+			if (!hasHook) return { wasCancelled: false }
+			// Get hook info including script paths
+			hookInfo = await hookFactory.getHookInfo(hookName)
 
-		// Show hook execution indicator and capture timestamp
-		const hookMetadata = {
-			hookName,
-			...(options.toolName && { toolName: options.toolName }),
-			status: "running",
-			scriptPaths: hookInfo.scriptPaths,
-			...(options.pendingToolInfo && { pendingToolInfo: options.pendingToolInfo }),
-		}
-		const cardHandle = await messenger.createCard({
-			header: `${hookName} Hook`,
-			status: CardStatus.RUNNING,
-			body: JSON.stringify(hookMetadata),
-		})
-		hookMessageId = cardHandle.id
-
-		// Reorder messages immediately so hook UI appears above tool UI
-		// This must happen right after creating the hook message, before the hook runs
-		if (hookName === "PreToolUse") {
-			await reorderHookAndToolMessages(messageStateHandler)
-		}
-
-		// Track active hook execution for cancellation (only if cancellable and message was created)
-		if (isCancellable && hookMessageId !== undefined && setActiveHookExecution) {
-			await setActiveHookExecution({
+			// Show hook execution indicator and capture timestamp
+			const hookMetadata = {
 				hookName,
-				toolName: options.toolName,
-				messageId: hookMessageId,
-				abortController,
-			})
-		}
-
-		// Create streaming callback
-		const streamCallback = async (line: string, stream: "stdout" | "stderr", meta?: HookOutputStreamMeta) => {
-			// Preserve script identity for multi-hook (global + workspace) scenarios.
-			// Without this, concurrent hooks interleave output and it's hard to tell which
-			// script produced which line (and can look like only one hook is printing).
-			//
-			// NOTE: We keep backward compatibility by encoding metadata into the string.
-			// The CLI prints this as-is in verbose mode.
-			const prefixParts: string[] = []
-			if (meta?.source) prefixParts.push(meta.source)
-			prefixParts.push(stream)
-			// Use a shortened path for readability; full path is still available in hook_status.
-			if (meta?.scriptPath) {
-				const parts = meta.scriptPath.split(/[/\\]/).filter(Boolean)
-				prefixParts.push(parts.slice(-3).join("/"))
+				...(options.toolName && { toolName: options.toolName }),
+				status: "running",
+				scriptPaths: hookInfo.scriptPaths,
+				...(options.pendingToolInfo && { pendingToolInfo: options.pendingToolInfo }),
 			}
-			const prefix = prefixParts.length ? `[${prefixParts.join(" ")}] ` : ""
-			await messenger.upsertText(prefix + line)
-		}
+			const cardHandle = await messenger.createCard({
+				header: `${hookName} Hook`,
+				status: CardStatus.RUNNING,
+				body: JSON.stringify(hookMetadata),
+			})
+			hookMessageId = cardHandle.id
+			execution.messageId = hookMessageId
 
-		// Create and execute hook
-		const hook = await hookFactory.createWithStreaming(
-			hookName,
-			streamCallback,
-			isCancellable ? abortController.signal : undefined,
-			taskId,
-			options.toolName,
-		)
+			// Reorder messages immediately so hook UI appears above tool UI
+			// This must happen right after creating the hook message, before the hook runs
+			if (hookName === "PreToolUse") {
+				await reorderHookAndToolMessages(messageStateHandler)
+			}
 
-		const result = await hook.run({
-			taskId,
-			...hookInput,
-			model: options.model,
-		})
 
-		Logger.log(`[${hookName} Hook]`, result)
+			// Create streaming callback
+			const streamCallback = async (line: string, stream: "stdout" | "stderr", meta?: HookOutputStreamMeta) => {
+				// Preserve script identity for multi-hook (global + workspace) scenarios.
+				// Without this, concurrent hooks interleave output and it's hard to tell which
+				// script produced which line (and can look like only one hook is printing).
+				//
+				// NOTE: We keep backward compatibility by encoding metadata into the string.
+				// The CLI prints this as-is in verbose mode.
+				const prefixParts: string[] = []
+				if (meta?.source) prefixParts.push(meta.source)
+				prefixParts.push(stream)
+				// Use a shortened path for readability; full path is still available in hook_status.
+				if (meta?.scriptPath) {
+					const parts = meta.scriptPath.split(/[/\\]/).filter(Boolean)
+					prefixParts.push(parts.slice(-3).join("/"))
+				}
+				const prefix = prefixParts.length ? `[${prefixParts.join(" ")}] ` : ""
+				await messenger.upsertText(prefix + line)
+			}
 
-		// NoOp hooks return proto defaults; preserve the minimal legacy return shape.
-		if (result.cancel === false && result.contextModification === "" && result.errorMessage === "") {
-			return { wasCancelled: false }
-		}
+			// Create and execute hook
+			const hook = await hookFactory.createWithStreaming(
+				hookName,
+				streamCallback,
+				isCancellable || setActiveHookExecution || options.signal ? abortController.signal : undefined,
+				taskId,
+				options.toolName,
+			)
 
-		// Check if hook wants to cancel
-		if (result.cancel === true) {
-			// Update hook status to cancelled
+			const result = await hook.run({
+				taskId,
+				...hookInput,
+				model: options.model,
+			})
+
+			Logger.log(`[${hookName} Hook]`, result)
+
+			// NoOp hooks return proto defaults; preserve the minimal legacy return shape.
+			if (result.cancel === false && result.contextModification === "" && result.errorMessage === "") {
+				return { wasCancelled: false }
+			}
+
+			// Check if hook wants to cancel
+			if (result.cancel === true) {
+				// Update hook status to cancelled
+				if (hookMessageId !== undefined) {
+					await updateHookMessage(messageStateHandler, hookMessageId, {
+						hookName,
+						...(options.toolName && { toolName: options.toolName }),
+						status: "cancelled",
+						exitCode: 130,
+						hasJsonResponse: true,
+						scriptPaths: hookInfo.scriptPaths,
+					})
+				}
+
+				return fromHookOutput(result)
+			}
+			// Update hook status to completed (only if not cancelled)
 			if (hookMessageId !== undefined) {
 				await updateHookMessage(messageStateHandler, hookMessageId, {
 					hookName,
 					...(options.toolName && { toolName: options.toolName }),
-					status: "cancelled",
-					exitCode: 130,
+					status: "completed",
+					exitCode: 0,
 					hasJsonResponse: true,
 					scriptPaths: hookInfo.scriptPaths,
 				})
 			}
 
 			return fromHookOutput(result)
-		}
+		} catch (hookError) {
+			// Structured hook errors describe settled execution, including a sibling failure
+			// returned after a combined runner has joined cancellation of the remaining hooks.
+			if (hookError instanceof HookCleanupError || (abortController.signal.aborted && !HookExecutionError.isHookError(hookError))) {
+				cleanupFailure = hookError
+				throw hookError
+			}
+			// Check if this was a user cancellation via abort controller
+			if (abortController.signal.aborted) {
+				// Update hook status to cancelled
+				if (hookMessageId !== undefined) {
+					await updateHookMessage(messageStateHandler, hookMessageId, {
+						hookName,
+						status: "cancelled",
+						exitCode: 130,
+						scriptPaths: hookInfo.scriptPaths,
+					})
+				}
 
-		// Clear active hook execution after successful completion (only if cancellable)
-		if (isCancellable && clearActiveHookExecution) {
-			await clearActiveHookExecution()
-		}
+				return {
+					cancel: true,
+					wasCancelled: true,
+				}
+			}
 
-		// Update hook status to completed (only if not cancelled)
-		if (hookMessageId !== undefined) {
-			await updateHookMessage(messageStateHandler, hookMessageId, {
-				hookName,
-				...(options.toolName && { toolName: options.toolName }),
-				status: "completed",
-				exitCode: 0,
-				hasJsonResponse: true,
-				scriptPaths: hookInfo.scriptPaths,
-			})
-		}
+			// Update hook status to failed for actual errors
+			// Extract structured error info if available
+			const isStructuredError = HookExecutionError.isHookError(hookError)
+			const errorInfo = isStructuredError ? hookError.errorInfo : null
 
-		return fromHookOutput(result)
-	} catch (hookError) {
-		// Clear active hook execution (only if cancellable)
-		if (isCancellable && clearActiveHookExecution) {
-			await clearActiveHookExecution()
-		}
-
-		// Check if this was a user cancellation via abort controller
-		if (abortController.signal.aborted) {
-			// Update hook status to cancelled
 			if (hookMessageId !== undefined) {
 				await updateHookMessage(messageStateHandler, hookMessageId, {
 					hookName,
-					status: "cancelled",
-					exitCode: 130,
+					status: "failed",
+					exitCode: errorInfo?.exitCode ?? 1,
 					scriptPaths: hookInfo.scriptPaths,
+					...(errorInfo && {
+						error: {
+							type: errorInfo.type,
+							message: errorInfo.message,
+							details: errorInfo.details,
+							scriptPath: errorInfo.scriptPath,
+						},
+					}),
 				})
 			}
 
+			// Log error for non-cancellable hooks or unexpected errors
+			Logger.error(`${hookName} hook failed:`, hookError)
+
+			// Return safe defaults for all fields to avoid undefined property access
 			return {
-				cancel: true,
-				wasCancelled: true,
+				cancel: false,
+				contextModification: undefined,
+				errorMessage: undefined,
+				wasCancelled: false,
 			}
 		}
-
-		// Update hook status to failed for actual errors
-		// Extract structured error info if available
-		const isStructuredError = HookExecutionError.isHookError(hookError)
-		const errorInfo = isStructuredError ? hookError.errorInfo : null
-
-		if (hookMessageId !== undefined) {
-			await updateHookMessage(messageStateHandler, hookMessageId, {
-				hookName,
-				status: "failed",
-				exitCode: errorInfo?.exitCode ?? 1,
-				scriptPaths: hookInfo.scriptPaths,
-				...(errorInfo && {
-					error: {
-						type: errorInfo.type,
-						message: errorInfo.message,
-						details: errorInfo.details,
-						scriptPath: errorInfo.scriptPath,
-					},
-				}),
-			})
-		}
-
-		// Log error for non-cancellable hooks or unexpected errors
-		Logger.error(`${hookName} hook failed:`, hookError)
-
-		// Return safe defaults for all fields to avoid undefined property access
-		return {
-			cancel: false,
-			contextModification: undefined,
-			errorMessage: undefined,
-			wasCancelled: false,
-		}
 	}
+	let result: HookExecutionResult = { wasCancelled: false }
+	try {
+		result = await run()
+	} catch (error) {
+		cleanupFailure = error
+	}
+	options.signal?.removeEventListener("abort", cancelFromOwner)
+	try {
+		if (clearActiveHookExecution) await clearActiveHookExecution(runId)
+	} catch (error) {
+		cleanupFailure = cleanupFailure
+			? new HookCleanupError([cleanupFailure, error], "Hook ownership cleanup failed")
+			: error
+	}
+	if (cleanupFailure) {
+		failCompletion(cleanupFailure)
+		throw cleanupFailure
+	}
+	complete()
+	return result
 }
 
 /**

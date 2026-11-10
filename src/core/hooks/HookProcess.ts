@@ -1,34 +1,34 @@
-import { ChildProcess, spawn } from "child_process"
+import { ChildProcess, execFile, spawn } from "child_process"
 import { EventEmitter } from "events"
-import { Logger } from "@/shared/services/Logger"
+import { runWindowsOwnedProcess, WindowsProcessOwnershipError } from "@/integrations/terminal/windows/WindowsOwnedProcess"
+import type { HookLaunchConfig } from "./HookLaunchConfig"
+import { HookCleanupError } from "./HookCleanupError"
 import { getHookLaunchConfig, resetHookLaunchConfigCacheForTesting } from "./HookLaunchConfig"
 import { HookOutputParser } from "./HookOutputParser"
 import { HookProcessRegistry } from "./HookProcessRegistry"
 
-// Re-export so existing imports from HookProcess keep working.
 export { getHookLaunchConfig, resetHookLaunchConfigCacheForTesting }
 
-/**
- * HookProcess manages the execution of a hook script with streaming output capabilities.
- * Similar to StandaloneTerminalProcess but specialized for hook execution.
- *
- * Key features:
- * - Real-time stdout/stderr streaming via line events
- * - Separate handling of visual output vs. JSON response
- * - 30-second execution timeout
- * - 1MB output size limit (prevents memory issues)
- * - Process lifecycle management with abort support
- */
+/** Runs a hook and retains ownership until its process, streams and termination settle. */
 export class HookProcess extends EventEmitter {
 	private childProcess: ChildProcess | null = null
 	private exitCode: number | null = null
 	private isCompleted = false
-	private timeoutHandle: NodeJS.Timeout | null = null // 30-second execution timeout
-
+	private timeoutHandle: NodeJS.Timeout | null = null
 	private readonly outputParser: HookOutputParser
-
-	// Track registration state to prevent leaks and ensure cleanup
-	private isRegistered = false
+	private execution?: Promise<void>
+	private settlement?: Promise<void>
+	private closed?: Promise<void>
+	private executionSettled = false
+	private cleanupFinished?: () => void
+	private retryingCleanup?: Promise<void>
+	private processGroupTerminated = false
+	private processGroupTerminationAttempted = false
+	private stopping?: Promise<void>
+	private stopError?: unknown
+	private cancellation?: Error
+	private readonly stopController = new AbortController()
+	private didEmitEmptyLine = false
 
 	constructor(
 		private readonly scriptPath: string,
@@ -40,274 +40,264 @@ export class HookProcess extends EventEmitter {
 		this.outputParser = new HookOutputParser(this.emit.bind(this))
 	}
 
-	/**
-	 * Execute the hook script with the given JSON input
-	 * @param inputJson The JSON string to pass to the hook via stdin
-	 */
-	async run(inputJson: string): Promise<void> {
-		// Wrap in try/finally to guarantee cleanup even if errors occur
+	run(inputJson: string): Promise<void> {
+		if (this.execution) throw new Error("Hook process has already been started")
+		this.execution = this.execute(inputJson)
+		// Termination joins cleanup without consuming the caller's execution error.
+		this.settlement = this.execution.then(() => { }, (error: unknown) => {
+			if (error instanceof HookCleanupError) throw error
+		})
+		// A registry shutdown may join later; keep early failure observed meanwhile.
+		void this.settlement.catch(() => { })
+		return this.execution
+	}
+
+	private async execute(inputJson: string): Promise<void> {
+		HookProcessRegistry.register(this)
+		const abort = () => this.requestStop(new Error("Hook execution cancelled by user"))
+		this.abortSignal?.addEventListener("abort", abort, { once: true })
 		try {
-			return await new Promise((resolve, reject) => {
-				// Register this process for tracking
-				HookProcessRegistry.register(this)
-				this.isRegistered = true
-
-				// Check if already aborted
-				if (this.abortSignal?.aborted) {
-					this.safeUnregister()
-					reject(new Error("Hook execution cancelled"))
-					return
-				}
-
-				// Set up abort handler
-				const abortHandler = () => {
-					if (this.childProcess && !this.isCompleted) {
-						this.isCompleted = true // Mark as completed immediately
-
-						// Remove abort listener immediately to prevent double-rejection
-						if (this.abortSignal) {
-							this.abortSignal.removeEventListener("abort", abortHandler)
-						}
-
-						// Clean up execution timeout timer
-						if (this.timeoutHandle) {
-							clearTimeout(this.timeoutHandle)
-							this.timeoutHandle = null
-						}
-
-						// Unregister from active processes
-						this.safeUnregister()
-
-						// Kill the process (async, fire-and-forget)
-						if (this.childProcess.pid) {
-							this.childProcess.kill("SIGTERM")
-						}
-
-						// Reject immediately - don't wait for process to die
-						reject(new Error("Hook execution cancelled by user"))
-					}
-				}
-
-				if (this.abortSignal) {
-					this.abortSignal.addEventListener("abort", abortHandler, { once: true })
-				}
-
-				// Windows executes hooks with PowerShell directly.
-				// Unix executes hook files through the shell for shebang support.
-				void (async () => {
-					try {
-						const launchConfig = await getHookLaunchConfig(this.scriptPath)
-						this.childProcess = spawn(launchConfig.command, launchConfig.args, {
-							stdio: ["pipe", "pipe", "pipe"],
-							shell: launchConfig.shell,
-							detached: launchConfig.detached,
-							cwd: this.cwd, // Execute from the determined workspace root
-							windowsHide: true,
-						})
-
-						let didEmitEmptyLine = false
-
-						// Set up timeout
-						this.timeoutHandle = setTimeout(() => {
-							if (this.childProcess && !this.isCompleted) {
-								this.childProcess.kill("SIGTERM")
-								reject(
-									new Error(
-										`Hook execution timed out after ${this.timeoutMs}ms. The hook script at '${this.scriptPath}' took too long to complete.`,
-									),
-								)
-							}
-						}, this.timeoutMs)
-
-						// Handle stdout
-						this.childProcess.stdout?.on("data", (data) => {
-							const output = data.toString()
-							this.outputParser.parseOutput(output, "stdout")
-							if (!didEmitEmptyLine && output) {
-								this.emit("line", "", "stdout") // Signal start of output
-								didEmitEmptyLine = true
-							}
-						})
-
-						// Handle stderr
-						this.childProcess.stderr?.on("data", (data) => {
-							const output = data.toString()
-							this.outputParser.parseOutput(output, "stderr")
-							if (!didEmitEmptyLine && output) {
-								this.emit("line", "", "stderr") // Signal start of output
-								didEmitEmptyLine = true
-							}
-						})
-
-						// Handle process completion
-						this.childProcess.on("close", (code, signal) => {
-							this.exitCode = code
-							this.isCompleted = true
-							this.outputParser.emitRemainingBuffer()
-
-							// Unregister from active processes
-							this.safeUnregister()
-
-							// Clear execution timeout timer
-							if (this.timeoutHandle) {
-								clearTimeout(this.timeoutHandle)
-								this.timeoutHandle = null
-							}
-
-							// Remove abort listener
-							if (this.abortSignal) {
-								this.abortSignal.removeEventListener("abort", abortHandler)
-							}
-
-							this.emit("completed", code, signal)
-
-							if (code === 0) {
-								resolve()
-							} else {
-								reject(new Error(`Hook exited with code ${code}${signal ? `, signal ${signal}` : ""}`))
-							}
-						})
-
-						// Handle process errors
-						this.childProcess.on("error", (error) => {
-							// Unregister from active processes
-							this.safeUnregister()
-
-							if (this.timeoutHandle) {
-								clearTimeout(this.timeoutHandle)
-								this.timeoutHandle = null
-							}
-							// Remove abort listener
-							if (this.abortSignal) {
-								this.abortSignal.removeEventListener("abort", abortHandler)
-							}
-							this.emit("error", error)
-							reject(error)
-						})
-
-						// Send input to the process
-						try {
-							this.childProcess.stdin?.write(inputJson)
-							this.childProcess.stdin?.end()
-						} catch (error) {
-							reject(new Error(`Failed to write input to hook: ${error}`))
-						}
-					} catch (error) {
-						this.safeUnregister()
-						if (this.abortSignal) {
-							this.abortSignal.removeEventListener("abort", abortHandler)
-						}
-						reject(error)
-					}
-				})()
+			if (this.abortSignal?.aborted) abort()
+			if (this.cancellation) throw this.cancellation
+			const launchConfig = await getHookLaunchConfig(this.scriptPath)
+			// Launcher discovery can await PowerShell resolution. Cancellation owns that
+			// startup interval too, and must never launch a process after it was stopped.
+			if (this.cancellation) throw this.cancellation
+			if (process.platform === "win32") {
+				await this.executeWindowsOwnedProcess(launchConfig, inputJson)
+				return
+			}
+			const child = spawn(launchConfig.command, launchConfig.args, {
+				stdio: ["pipe", "pipe", "pipe"],
+				shell: launchConfig.shell,
+				detached: launchConfig.detached,
+				cwd: this.cwd,
+				windowsHide: true,
 			})
+			this.childProcess = child
+			const cleanupFinished = new Promise<void>((resolve) => { this.cleanupFinished = resolve })
+			let processError: Error | undefined
+			let exitSignal: NodeJS.Signals | null = null
+			this.closed = new Promise<void>((resolve) => {
+				child.once("error", (error) => { processError = error })
+				// Unlike exit, close also joins inherited stdout/stderr pipes.
+				child.once("close", (code, signal) => {
+					this.exitCode = code
+					exitSignal = signal
+					resolve()
+				})
+			})
+			// Descendants can inherit pipes and keep close pending after the leader exits.
+			// Start teardown on exit, then join both streams and process-group settlement.
+			child.once("exit", () => this.startProcessTreeCleanup())
+			child.stdout?.on("data", (data: Buffer) => this.publishOutput(data.toString(), "stdout"))
+			child.stderr?.on("data", (data: Buffer) => this.publishOutput(data.toString(), "stderr"))
+			child.stdin?.on("error", (error: Error) => this.requestStop(error))
+			this.startExecutionTimeout()
+			try {
+				child.stdin?.end(inputJson)
+			} catch (error) {
+				this.requestStop(new Error(`Failed to write input to hook: ${error}`))
+			}
+			// Escaped descendants may retain pipes after the owned group has exited.
+			// Cleanup has its own deadline and must be able to report uncertainty.
+			await Promise.race([this.closed, cleanupFinished])
+			// Spawn failures may emit close without exit; cleanup still owns any PID.
+			this.startProcessTreeCleanup()
+			await this.stopping
+			if (this.stopError) throw new HookCleanupError([this.stopError], "Hook process-tree termination could not be confirmed")
+			this.outputParser.emitRemainingBuffer()
+			this.emit("completed", this.exitCode, exitSignal)
+			if (this.cancellation) throw this.cancellation
+			if (processError) throw processError
+			if (this.exitCode !== 0) throw new Error(`Hook exited with code ${this.exitCode}${exitSignal ? `, signal ${exitSignal}` : ""}`)
 		} finally {
-			// Guaranteed cleanup even if process setup fails or throws
-			this.safeUnregister()
+			if (this.timeoutHandle) clearTimeout(this.timeoutHandle)
+			this.timeoutHandle = null
+			this.abortSignal?.removeEventListener("abort", abort)
+			this.executionSettled = true
+			this.isCompleted = !this.stopError
+			if (this.isCompleted) HookProcessRegistry.unregister(this)
 		}
 	}
 
-	/**
-	 * Safely unregister from the process registry.
-	 * This is idempotent and prevents double-unregistration issues.
-	 */
-	private safeUnregister(): void {
-		if (this.isRegistered) {
+	private publishOutput(text: string, stream: "stdout" | "stderr"): void {
+		// On uncertain cleanup keep draining the pipes, but never publish into an
+		// operation whose execution/publication barrier has already rejected.
+		if (this.executionSettled) return
+		this.outputParser.parseOutput(text, stream)
+		if (!this.didEmitEmptyLine && text) {
+			this.emit("line", "", stream)
+			this.didEmitEmptyLine = true
+		}
+	}
+
+	private startExecutionTimeout(): void {
+		this.timeoutHandle = setTimeout(() => this.requestStop(new Error(
+			`Hook execution timed out after ${this.timeoutMs}ms. The hook script at '${this.scriptPath}' took too long to complete.`,
+		)), this.timeoutMs)
+	}
+
+	private async executeWindowsOwnedProcess(launchConfig: HookLaunchConfig, inputJson: string): Promise<void> {
+		this.startExecutionTimeout()
+		let result: Awaited<ReturnType<typeof runWindowsOwnedProcess>>
+		try {
+			result = await runWindowsOwnedProcess({
+				launcher: launchConfig.command,
+				executable: launchConfig.command,
+				args: launchConfig.args,
+				cwd: this.cwd,
+				input: inputJson,
+				signal: this.stopController.signal,
+				onOutput: (stream, text) => this.publishOutput(text, stream),
+			})
+		} catch (error) {
+			if (error instanceof WindowsProcessOwnershipError) {
+				this.stopError = error
+				throw new HookCleanupError([error], "Windows hook job settlement could not be confirmed")
+			}
+			throw error
+		}
+		this.exitCode = result.exitCode
+		this.outputParser.emitRemainingBuffer()
+		this.emit("completed", result.exitCode, null)
+		if (result.failure) throw new Error(result.failure)
+		if (this.cancellation) throw this.cancellation
+		if (result.cancelled) throw new Error("Hook execution cancelled by user")
+		if (result.exitCode !== 0) throw new Error(`Hook exited with code ${result.exitCode}`)
+	}
+
+	private requestStop(reason: Error): void {
+		if (this.isCompleted) return
+		this.cancellation ??= reason
+		this.stopController.abort(reason)
+		this.startProcessTreeCleanup()
+	}
+
+	private startProcessTreeCleanup(): void {
+		const pid = this.childProcess?.pid
+		if (!pid || this.stopping) return
+		this.stopping = this.stopProcessTree(pid)
+			.catch((error: unknown) => { this.stopError = error })
+			.finally(() => this.cleanupFinished?.())
+	}
+
+	private signalProcessGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+		try {
+			process.kill(-pid, signal)
+			return true
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ESRCH") return false
+			throw error
+		}
+	}
+
+	private async waitForProcessGroupExit(pid: number, deadline: number): Promise<boolean> {
+		while (this.signalProcessGroup(pid, 0)) {
+			const remaining = deadline - Date.now()
+			if (remaining <= 0) return false
+			// /bin/ps is available on supported Linux/macOS hosts independently of
+			// the user's PATH. Bound each inspection and scan at most four times/sec,
+			// not once per 20ms tick. Missing/broken ps is uncertainty, not success.
+			const members = await new Promise<string>((resolve, reject) => {
+				execFile("/bin/ps", ["-A", "-o", "pgid=,stat="], { timeout: Math.min(remaining, 1000) }, (error, stdout) => {
+					if (error) reject(error)
+					else resolve(stdout)
+				})
+			})
+			// Zombies are dead; only their parent can reap them.
+			const running = members.split("\n").some((line) => {
+				const [group, state] = line.trim().split(/\s+/)
+				return Number(group) === pid && !state.startsWith("Z")
+			})
+			if (!running) return true
+			await new Promise<void>((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, deadline - Date.now()))))
+		}
+		return true
+	}
+
+	private async waitForPipeClosure(): Promise<void> {
+		let timer: NodeJS.Timeout | undefined
+		try {
+			await Promise.race([
+				this.closed,
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error("Hook pipes did not close; a descendant may have escaped the process group")), 2000)
+				}),
+			])
+		} finally {
+			clearTimeout(timer)
+		}
+	}
+
+	private async stopProcessTree(pid: number): Promise<void> {
+		// Retrying is verification-only. After the initial bounded termination
+		// attempt, numeric PGIDs may have been reused; never signal them again.
+		if (!this.processGroupTerminationAttempted) {
+			this.processGroupTerminationAttempted = true
+			if (this.signalProcessGroup(pid, "SIGTERM")) {
+				try {
+					this.processGroupTerminated = await this.waitForProcessGroupExit(pid, Date.now() + 2000)
+				} finally {
+					// Escalate only while unconfirmed, never after observing the group dead.
+					if (!this.processGroupTerminated) this.signalProcessGroup(pid, "SIGKILL")
+				}
+			}
+		}
+		if (!this.processGroupTerminated) {
+			if (!await this.waitForProcessGroupExit(pid, Date.now() + 2000)) {
+				throw new Error("Hook process-group termination could not be confirmed")
+			}
+			this.processGroupTerminated = true
+		}
+		await this.waitForPipeClosure()
+	}
+
+	private async retryProcessTreeCleanup(pid: number): Promise<void> {
+		try {
+			await this.stopProcessTree(pid)
+			this.stopError = undefined
+			this.isCompleted = true
 			HookProcessRegistry.unregister(this)
-			this.isRegistered = false
+		} catch (error) {
+			this.stopError = error
+			throw new HookCleanupError([error], "Hook process-tree termination could not be confirmed")
+		} finally {
+			this.retryingCleanup = undefined
 		}
 	}
 
-	/**
-	 * Get unretrieved output (for compatibility with terminal process interface)
-	 */
 	getUnretrievedOutput(): string {
 		return this.outputParser.getUnretrievedOutput()
 	}
 
-	/**
-	 * Get the complete stdout buffer (for JSON parsing)
-	 */
 	getStdout(): string {
 		return this.outputParser.getStdout()
 	}
 
-	/**
-	 * Get the complete stderr buffer (for error reporting)
-	 */
 	getStderr(): string {
 		return this.outputParser.getStderr()
 	}
 
-	/**
-	 * Get the exit code
-	 */
 	getExitCode(): number | null {
 		return this.exitCode
 	}
 
-	/**
-	 * Check if process has completed
-	 */
 	hasCompleted(): boolean {
 		return this.isCompleted
 	}
 
-	/**
-	 * Terminate the process and its entire process tree.
-	 * Uses process groups on Unix to kill child processes.
-	 * Implements graceful shutdown with 2-second timeout before force kill.
-	 */
+	/** Stop startup or the running process tree, then join the execution cleanup. */
 	async terminate(): Promise<void> {
-		if (!this.childProcess || this.isCompleted) {
-			// Still ensure unregistration even if process already completed
-			this.safeUnregister()
+		if (this.isCompleted) return
+		// Only POSIX cleanup can be reverified here. A missing Windows supervisor
+		// proof remains fatal: do not replace native ownership with PID guessing.
+		if (this.executionSettled && this.stopError && this.childProcess?.pid) {
+			this.retryingCleanup ??= this.retryProcessTreeCleanup(this.childProcess.pid)
+			await this.retryingCleanup
 			return
 		}
-
-		const pid = this.childProcess.pid
-		if (!pid) {
-			return
-		}
-
-		try {
-			// On Unix, kill process group (negative PID kills all children)
-			// On Windows, just kill the process (tree-kill would be better but adds dependency)
-			if (process.platform !== "win32") {
-				// Kill process group with SIGTERM for graceful shutdown
-				process.kill(-pid, "SIGTERM")
-			} else {
-				// On Windows, just kill the process
-				this.childProcess.kill("SIGTERM")
-			}
-
-			// Wait up to 2 seconds for graceful shutdown
-			const gracefulTimeout = new Promise((resolve) => setTimeout(resolve, 2000))
-			const processExit = new Promise((resolve) => {
-				this.childProcess?.once("exit", resolve)
-			})
-
-			await Promise.race([processExit, gracefulTimeout])
-
-			// Force kill if still running
-			if (!this.isCompleted) {
-				if (process.platform !== "win32") {
-					process.kill(-pid, "SIGKILL")
-				} else {
-					this.childProcess?.kill("SIGKILL")
-				}
-			}
-		} catch (error) {
-			// Process might already be dead, which is fine
-			Logger.debug(`[HookProcess] Error during termination: ${error}`)
-		} finally {
-			// Clear timeout regardless
-			if (this.timeoutHandle) {
-				clearTimeout(this.timeoutHandle)
-				this.timeoutHandle = null
-			}
-			// Ensure unregistration even if termination fails
-			this.safeUnregister()
-		}
+		this.requestStop(new Error("Hook execution cancelled by user"))
+		await this.settlement
 	}
 }

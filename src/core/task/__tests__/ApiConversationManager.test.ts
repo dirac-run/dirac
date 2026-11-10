@@ -1,4 +1,6 @@
 import { strict as assert } from "node:assert"
+import { HookFactory } from "@core/hooks/hook-factory"
+import { HookCleanupError } from "@core/hooks/HookCleanupError"
 import { describe, it } from "mocha"
 import sinon from "sinon"
 import { ApiConversationManager } from "../ApiConversationManager"
@@ -490,6 +492,47 @@ describe("ApiConversationManager steering delivery", () => {
 				getCurrentProviderInfo: () => ({ providerId: "openai-codex" }),
 			}
 			return { dependencies, history, compactConversation, getProviderState: () => providerState }
+		}
+
+		for (const fatal of [false, true]) {
+			it(`${fatal ? "propagates fatal cleanup" : "fails open for ordinary errors"} through emergency truncation's real PreCompact caller`, async () => {
+				if (!fatal) expectLoggerErrors()
+				const { dependencies } = createCompactionDependencies()
+				Object.assign(dependencies, {
+					taskId: "task", ulid: "ulid",
+					taskMessenger: { createCard: sinon.stub().resolves({ id: "hook" }) },
+					setActiveHookExecution: sinon.stub().resolves(), clearActiveHookExecution: sinon.stub().resolves(),
+					postStateToWebview: sinon.stub().resolves(), cancelTask: sinon.stub().resolves(),
+				})
+				dependencies.api.getModel = () => ({ id: "model" })
+				dependencies.messageStateHandler.findMessageIndexById = () => -1
+				dependencies.stateManager.getGlobalSettingsKey.withArgs("hooksEnabled").returns(true)
+				const disk = require("@core/storage/disk")
+				sinon.stub(disk, "writeConversationHistoryJson").resolves("context.json")
+				sinon.stub(disk, "writeConversationHistoryText").resolves("context.txt")
+				const cleanup = sinon.stub(disk, "cleanupConversationHistoryFile").resolves()
+				sinon.stub(HookFactory.prototype, "hasHook").resolves(true)
+				sinon.stub(HookFactory.prototype, "getHookInfo").resolves({ scriptPaths: ["PreCompact"] })
+				const failure = fatal ? new HookCleanupError([new Error("termination failed")], "hook cleanup failed") : new Error("ordinary hook failure")
+				sinon.stub(HookFactory.prototype, "createWithStreaming").resolves({ run: async () => { throw failure } } as any)
+				try {
+					const pending = new ApiConversationManager(dependencies).handleContextWindowExceededError()
+					if (fatal) {
+						await assert.rejects(pending, (error) => error === failure)
+						assert.equal(dependencies.taskState.conversationHistoryDeletedRange, undefined)
+						sinon.assert.notCalled(dependencies.messageStateHandler.overwriteApiConversationProviderState)
+						sinon.assert.notCalled(dependencies.messageStateHandler.saveDiracMessagesAndUpdateHistory)
+					} else {
+						await pending
+						assert.deepEqual(dependencies.taskState.conversationHistoryDeletedRange, [0, 1])
+					}
+					sinon.assert.calledOnce(dependencies.setActiveHookExecution)
+					sinon.assert.calledOnce(dependencies.clearActiveHookExecution)
+					sinon.assert.calledTwice(cleanup)
+				} finally {
+					sinon.restore()
+				}
+			})
 		}
 
 		for (const contained of [false, true]) {
