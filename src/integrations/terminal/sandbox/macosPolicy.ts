@@ -17,7 +17,7 @@ const expanded = (value: string) =>
 
 function assertWritableRoot(value: string): void {
 	const original = expanded(value)
-	if (original === "/") return invalid("Writable filesystem-root grants are unsupported.")
+	if (original === "/") invalid("Writable filesystem-root grants are unsupported.")
 	let current = "/"
 	for (const component of original.split("/").filter(Boolean)) {
 		current = path.posix.join(current, component)
@@ -25,7 +25,7 @@ function assertWritableRoot(value: string): void {
 		const trustedAlias =
 			(current === "/tmp" && realpathSync(current) === "/private/tmp") ||
 			(current === "/var" && realpathSync(current) === "/private/var")
-		if (!trustedAlias) return invalid("Writable roots cannot contain mutable symlink components.")
+		if (!trustedAlias) invalid("Writable roots cannot contain mutable symlink components.")
 	}
 }
 
