@@ -78,6 +78,8 @@ export interface TaskServices extends ToolServices {
  * All callback functions available to tool handlers
  */
 export interface TaskCallbacks {
+	/** Captures global user-controlled policy before command approval; absent only in test/discovery environments. */
+	captureCommandSandbox?: () => import("@shared/SandboxExecution").SandboxExecutionContext
 	/** Optional root-owned capability; absent for contained and Goal executions. */
 	tasklets?: import("../interfaces/IToolEnvironment").TaskletControls
 	/** Root-scoped ordinary communication; available to roots and contained children. */

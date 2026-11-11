@@ -6,15 +6,16 @@ import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
 import { DiracDefaultTool } from "@/shared/tools"
 import { getTaskScopedStateKey } from "@shared/taskletId"
-import type { ISystemTrait, SystemCommandResult } from "../../interfaces/IToolEnvironment"
+import type { ISystemTrait } from "../../interfaces/IToolEnvironment"
 import type { TaskConfig } from "../../types/TaskConfig"
 
 // Builds the system trait — command execution, file search, system info, URL opening.
 export function buildSystemTrait(
 	config: TaskConfig,
-	executeCommandFn: (command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }) => Promise<SystemCommandResult>,
+	executeCommandFn: ISystemTrait["executeCommand"],
 ): ISystemTrait {
 	return {
+		captureCommandSandbox: config.callbacks.captureCommandSandbox,
 		executeCommand: async (command, options) => {
 			if (config.mode !== "act") return executeCommandFn(command, options)
 			return config.callbacks.withMutationAuthorization(DiracDefaultTool.EXECUTE_COMMAND, async () => {

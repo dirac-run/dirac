@@ -1,4 +1,5 @@
 import * as path from "node:path"
+import { describeSandboxExecution } from "@shared/SandboxExecution"
 import { WorkspacePathAdapter } from "../../../../workspace/WorkspacePathAdapter"
 import type { CommandApprovalRequest } from "../../interfaces/CommandApprovals"
 import { formatResponse } from "@core/formatResponse"
@@ -32,6 +33,7 @@ export interface NormalizedCommand {
 }
 
 interface PreparedCommand extends NormalizedCommand {
+	sandboxContext?: import("@shared/SandboxExecution").SandboxExecutionContext
 	approvalRequest: CommandApprovalRequest
 	usedWorkspaceHint: boolean
 	resolvedToNonPrimary: boolean
@@ -99,7 +101,8 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	public async processCall(args: any, env: IToolEnvironment): Promise<any> {
-		const commands = this.normalizeCommands(args).map((command) => this.prepareCommand(command, env))
+		const sandboxContext = env.system.captureCommandSandbox?.()
+		const commands = this.normalizeCommands(args).map((command) => ({ ...this.prepareCommand(command, env), sandboxContext }))
 		if (commands.length === 0) {
 			throw new Error("Missing required parameter: 'commands' or 'script' must be provided and non-empty.")
 		}
@@ -221,6 +224,7 @@ export class ExecuteCommandTool implements IDiracTool {
 				kind: "commands",
 				commands: commands.map(({ command }) => command),
 				executionContexts: commands.map(({ command, approvalRequest }) => ({ command, cwd: approvalRequest.identity.cwd })),
+				...(commands[0].sandboxContext ? { sandbox: commands[0].sandboxContext } : {}),
 			},
 			permissionRequestKind: utilityPermissionHandlingEnabled ? (!utilityEligible ? "manual_tool" : "tool") : undefined,
 			renderType: "markdown",
@@ -237,7 +241,8 @@ export class ExecuteCommandTool implements IDiracTool {
 				.map((command) => {
 					const language = command.language || "bash"
 					const header = command.displayName !== command.command ? `**${command.displayName}**\n` : ""
-					return `${header}Working directory: ${JSON.stringify(command.approvalRequest.identity.cwd)}\n\`\`\`${language}\n${shortenCommandForDisplay(command.command, env.config.cwd)}\n\`\`\``
+					const sandbox = command.sandboxContext ? `${describeSandboxExecution(command.sandboxContext)}\n` : ""
+					return `${header}${sandbox}Working directory: ${JSON.stringify(command.approvalRequest.identity.cwd)}\n\`\`\`${language}\n${shortenCommandForDisplay(command.command, env.config.cwd)}\n\`\`\``
 				})
 				.join("\n"),
 			collapsed: false,
@@ -344,6 +349,7 @@ export class ExecuteCommandTool implements IDiracTool {
 				timeout: timeoutSeconds,
 				cwd: cmd.approvalRequest.identity.cwd,
 				assertAuthorized,
+				sandboxContext: cmd.sandboxContext,
 			})
 			const output = typeof commandResult.output === "string" ? commandResult.output : JSON.stringify(commandResult.output)
 			const truncatedOutput = truncateHeadTail(output, MAX_COMMAND_OUTPUT_SIZE)
@@ -351,18 +357,20 @@ export class ExecuteCommandTool implements IDiracTool {
 				commandResult.userRejected ||
 				(commandResult.signal !== undefined && commandResult.signal !== null) ||
 				(typeof commandResult.exitCode === "number" && commandResult.exitCode !== 0)
+			const sandboxIndicator = commandResult.sandbox?.effective === "unsandboxed-fallback" ? " · Unsandboxed fallback" : ""
 			await activeCard.update({
-				header: `${commandFailed ? "Failed" : "Executed"}: ${cmd.displayName}`,
+				header: `${commandFailed ? "Failed" : "Executed"}: ${cmd.displayName}${sandboxIndicator}`,
 				body: [commandFailed ? "Error:" : "Executed:", "```", truncatedOutput, "```"].join("\n"),
 				rawOutput: {
 					output: truncatedOutput,
 					userRejected: commandResult.userRejected,
+					...(commandResult.sandbox ? { sandbox: commandResult.sandbox } : {}),
 					...(commandResult.exitCode === undefined ? {} : { exitCode: commandResult.exitCode }),
 					...(commandResult.signal === undefined ? {} : { signal: commandResult.signal }),
 				},
 			})
 			await activeCard.finalize(commandFailed ? CardStatus.ERROR : CardStatus.SUCCESS)
-			return { result: `--- Output for '${cmd.displayName}' ---\n${truncatedOutput}`, failed: commandFailed && !commandResult.userRejected }
+			return { result: `--- Output for '${cmd.displayName}' ---${sandboxIndicator}\n${truncatedOutput}`, failed: commandFailed && !commandResult.userRejected }
 		} catch (error: any) {
 			if (env.orchestration.getTaskState("abortSignal").aborted) {
 				await activeCard.finalize(CardStatus.CANCELLED)

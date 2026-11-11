@@ -1,7 +1,14 @@
 import { ApiConfiguration } from "@shared/api"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+beforeAll(() => Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() }))
+afterAll(() => {
+	if (originalScrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", originalScrollIntoView)
+	else Reflect.deleteProperty(Element.prototype, "scrollIntoView")
+})
 
 const { handleFieldsChange, handleModeFieldChange } = vi.hoisted(() => ({
 	handleFieldsChange: vi.fn(),
@@ -43,6 +50,9 @@ const mockExtensionState = (apiConfiguration: Partial<ApiConfiguration>) => {
 	useSettingsStore.setState({
 		apiConfiguration,
 		requestyModels: {},
+		configuredApiProviders: [],
+		apiConfigurationError: undefined,
+		remoteConfigSettings: {},
 		planActSeparateModelsSetting: false,
 	} as any)
 }
@@ -87,7 +97,7 @@ describe("OpenRouter provider selection", () => {
 		})
 	})
 
-	it("browses setup without activation and adds a keyless provider only explicitly", () => {
+	it("browses setup without activation and adds a keyless provider only explicitly", async () => {
 		render(<ApiOptions currentMode="plan" intent="setup" showModelOptions={true} />)
 		fireEvent.focus(screen.getByTestId("provider-selector-input"))
 		fireEvent.click(screen.getByTestId("provider-option-openrouter"))
@@ -95,6 +105,8 @@ describe("OpenRouter provider selection", () => {
 		expect(useSettingsStore.getState().apiConfiguration.planModeApiProvider).toBe("requesty")
 		fireEvent.click(screen.getByRole("button", { name: "Add provider" }))
 		expect(handleFieldsChange).toHaveBeenCalledWith({}, "openrouter")
+		await screen.findByRole("status")
+		expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument()
 	})
 
 	it("discards a first-time OpenRouter selection without persisting an invalid provider", () => {
@@ -126,6 +138,101 @@ describe("OpenRouter provider selection", () => {
 				actModeInferenceSpeed: "default",
 			})
 		})
+	})
+})
+
+describe("Provider setup", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		handleFieldsChange.mockResolvedValue(true)
+		mockExtensionState({ planModeApiProvider: "requesty", actModeApiProvider: "requesty" })
+	})
+
+	it("starts with an empty picker rather than the active provider's settings", () => {
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		expect(screen.getByTestId("provider-selector-input")).toHaveValue("")
+		expect(screen.queryByPlaceholderText("Enter API Key...")).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument()
+		expect(handleFieldsChange).not.toHaveBeenCalled()
+	})
+
+	it("edits a configured provider without a picker or duplicate add action", () => {
+		useSettingsStore.setState({ configuredApiProviders: ["requesty"] })
+		render(<ApiOptions currentMode="act" intent="setup" initialSetupProvider="requesty" showModelOptions={false} />)
+		expect(screen.getByPlaceholderText("Enter API Key...")).toBeInTheDocument()
+		expect(screen.queryByTestId("provider-selector-input")).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument()
+		expect(screen.getByText(/settings save automatically/)).toBeInTheDocument()
+	})
+
+	it("identifies an already-added provider when selected from the add picker", () => {
+		useSettingsStore.setState({ configuredApiProviders: ["openrouter"] })
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		fireEvent.focus(screen.getByTestId("provider-selector-input"))
+		fireEvent.click(screen.getByTestId("provider-option-openrouter"))
+		expect(screen.getByRole("status")).toHaveTextContent("This provider is added")
+		expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument()
+		expect(handleFieldsChange).not.toHaveBeenCalled()
+	})
+
+	it("disables duplicate submissions until addition finishes", async () => {
+		let finish!: (saved: boolean) => void
+		handleFieldsChange.mockReturnValueOnce(new Promise<boolean>((resolve) => { finish = resolve }))
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		fireEvent.focus(screen.getByTestId("provider-selector-input"))
+		fireEvent.click(screen.getByTestId("provider-option-openrouter"))
+		fireEvent.click(screen.getByRole("button", { name: "Add provider" }))
+		expect(screen.getByRole("button", { name: "Adding provider…" })).toBeDisabled()
+		expect(screen.getByTestId("provider-selector-input")).toHaveProperty("disabled", true)
+		await act(async () => finish(true))
+		expect(screen.getByRole("status")).toHaveTextContent("This provider is added")
+		expect(useSettingsStore.getState().apiConfiguration).toMatchObject({
+			planModeApiProvider: "requesty", actModeApiProvider: "requesty",
+		})
+	})
+
+	it("keeps a failed addition retryable and displays the persistence error", async () => {
+		handleFieldsChange.mockImplementationOnce(async () => {
+			useSettingsStore.setState({ apiConfigurationError: "Provider setup could not be saved" })
+			return false
+		})
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		fireEvent.focus(screen.getByTestId("provider-selector-input"))
+		fireEvent.click(screen.getByTestId("provider-option-openrouter"))
+		fireEvent.click(screen.getByRole("button", { name: "Add provider" }))
+		await waitFor(() => expect(screen.getByRole("button", { name: "Add provider" })).toBeEnabled())
+		expect(screen.getByText(/Could not save API configuration:/)).toHaveTextContent("Provider setup could not be saved")
+		expect(screen.queryByRole("status")).not.toBeInTheDocument()
+	})
+
+	it("supports keyboard selection, Escape and reopening without activation", () => {
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		const picker = screen.getByTestId("provider-selector-input") as HTMLInputElement
+		fireEvent.focus(picker)
+		picker.value = "OpenRouter"
+		fireEvent.input(picker)
+		fireEvent.keyDown(picker, { key: "Escape" })
+		expect(picker).toHaveAttribute("aria-expanded", "false")
+		fireEvent.keyDown(picker, { key: "ArrowDown" })
+		expect(picker).toHaveAttribute("aria-expanded", "true")
+		picker.value = "OpenRouter"
+		fireEvent.input(picker)
+		fireEvent.keyDown(picker, { key: "ArrowDown" })
+		fireEvent.keyDown(picker, { key: "Enter" })
+		expect(picker).toHaveValue("OpenRouter")
+		expect(picker).toHaveAttribute("aria-expanded", "false")
+		expect(handleFieldsChange).not.toHaveBeenCalled()
+	})
+
+	it("shows an empty search result and dismisses on keyboard focus leaving", () => {
+		render(<ApiOptions currentMode="act" intent="setup" showModelOptions={false} />)
+		const picker = screen.getByTestId("provider-selector-input") as HTMLInputElement
+		fireEvent.focus(picker)
+		picker.value = "zzzzzzzzzzzzzz"
+		fireEvent.input(picker)
+		expect(screen.getByRole("status")).toHaveTextContent("No providers found")
+		fireEvent.blur(picker, { relatedTarget: document.body })
+		expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
 	})
 })
 
@@ -222,7 +329,7 @@ describe("OpenApiInfoOptions", () => {
 		expect(modelInput).toBeInTheDocument()
 	})
 
-	it("auto-fetches OpenAI-compatible models on mount when openAiBaseUrl is configured", () => {
+	it("auto-fetches OpenAI-compatible models on mount when openAiBaseUrl is configured", async () => {
 		const refreshOpenAiModels = vi.fn()
 		useSettingsStore.setState({
 			apiConfiguration: {
@@ -234,7 +341,7 @@ describe("OpenApiInfoOptions", () => {
 		} as any)
 
 		render(<ApiOptions currentMode="plan" showModelOptions={true} />)
-		expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", undefined, undefined)
+		await waitFor(() => expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", undefined, {}))
 	})
 
 	it("refreshes OpenAI-compatible models when switching saved profiles", async () => {
@@ -261,7 +368,7 @@ describe("OpenApiInfoOptions", () => {
 		fireEvent(dropdown, new Event("change", { bubbles: true }))
 
 		await waitFor(() => {
-			expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", "", undefined)
+			expect(refreshOpenAiModels).toHaveBeenCalledWith("http://localhost:11434/v1", "", {})
 		})
 	})
 })

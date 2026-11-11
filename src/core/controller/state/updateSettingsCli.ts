@@ -1,3 +1,4 @@
+import { prepareSandboxSettingsUpdate } from "@shared/SandboxSettings"
 import { convertProtoToSubagentRoles } from "@shared/proto-conversions/subagent-roles"
 import type { TaskWorkingConfiguration, TaskWorkingConfigurationPatch } from "@core/task/runtime/TaskWorkingConfiguration"
 import type { ApiConfiguration } from "@shared/api"
@@ -58,10 +59,12 @@ function buildCliSettingsPersistencePatch(
 		utilityModelUsePermissionHandling,
 		utilityModelPermissionPolicy,
 		subagentRoles,
+		sandboxSettings,
 		...simpleSettings
 	} = settings
 	const globalSettings = filterSimpleSettingsBatch(simpleSettings)
 	if (subagentRoles !== undefined) globalSettings.subagentRoles = convertProtoToSubagentRoles(subagentRoles)
+	if (sandboxSettings !== undefined) globalSettings.sandboxSettings = prepareSandboxSettingsUpdate(controller.stateManager.getSystemDefaultSettingsKey("sandboxSettings"), sandboxSettings)
 
 	Logger.log("autoApprovalSettings", controller.stateManager.getGlobalSettingsKey("autoApprovalSettings"))
 	if (autoApprovalSettings) {
@@ -228,6 +231,7 @@ function buildActiveTaskPatch(
 			utilityModelUsePermissionHandling,
 			utilityModelPermissionPolicy,
 			subagentRoles: _subagentRoles,
+			sandboxSettings: _sandboxSettings,
 			...simpleSettings
 		} = settings
 

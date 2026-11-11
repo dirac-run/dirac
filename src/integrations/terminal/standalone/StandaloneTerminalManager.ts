@@ -9,6 +9,7 @@
  */
 
 import { DEFAULT_TERMINAL_OUTPUT_LINE_LIMIT } from "../constants"
+import type { PreparedSandboxLaunch } from "../sandbox"
 import type {
 	BackgroundCommand,
 	ITerminalManager,
@@ -37,6 +38,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	private terminalIds: Set<number> = new Set()
 	private reservations = new Set<number>()
 	private disposed = false
+	private disposal?: Promise<void>
 
 	/** Timeout for shell integration (kept for interface compatibility, not used in standalone) */
 	private shellIntegrationTimeout = 4000
@@ -56,9 +58,9 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	// --- Process Spawning (delegated to TerminalProcessManager) ---
 
 	/** Run a command in the specified terminal. */
-	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+	runCommand(terminalInfo: TerminalInfo, command: string, sandbox?: PreparedSandboxLaunch): TerminalProcessResultPromise {
 		if (this.disposed) throw new Error("Terminal manager is disposed")
-		const process = this.processManager.runCommand(terminalInfo, command)
+		const process = this.processManager.runCommand(terminalInfo, command, sandbox)
 		this.reservations.delete(terminalInfo.id)
 		return process
 	}
@@ -133,26 +135,21 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	// --- Cleanup ---
 
 	/** Dispose of all terminals and clean up resources. */
-	disposeAll(): void {
-		if (this.disposed) return
+	disposeAll(): Promise<void> {
+		if (this.disposal) return this.disposal
 		this.disposed = true
-		// Dispose background commands first
-		this.processManager.disposeBackgroundCommands()
-
-		// Terminate all processes
-		this.processManager.terminateAll()
-
-		// Clear all tracking
-		this.terminalIds.clear()
-		this.reservations.clear()
-		this.processManager.clearProcesses()
-
-		// Dispose all terminals
-		for (const terminalInfo of this.registry.getAllTerminals()) {
-			terminalInfo.terminal.dispose()
-		}
-
-		this.registry.clear()
+		this.disposal = (async () => {
+			this.processManager.disposeBackgroundCommands()
+			try {
+				await this.processManager.terminateAll()
+			} finally {
+				this.terminalIds.clear()
+				this.reservations.clear()
+				this.processManager.clearProcesses()
+				this.registry.clear()
+			}
+		})()
+		return this.disposal
 	}
 
 	// --- Configuration Setters ---
@@ -278,7 +275,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	}
 
 	/** Cancel/terminate a specific background command. */
-	cancelBackgroundCommand(id: string): boolean {
+	cancelBackgroundCommand(id: string): Promise<boolean> {
 		return this.processManager.cancelBackgroundCommand(id)
 	}
 

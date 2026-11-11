@@ -8,6 +8,7 @@ export enum SettingsTab {
 	RUNNING_TASKS = "running-tasks",
 	TOOLS = "tools",
 	TERMINAL = "terminal",
+	SANDBOX = "sandbox",
 	GENERAL = "general",
 }
 

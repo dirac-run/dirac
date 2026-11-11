@@ -63,7 +63,7 @@ export function getSettingWithOverride<K extends keyof Settings>(
 	key: K,
 	caches: Pick<StateManagerSettingsCaches, "sessionOverrideCache" | "taskStateCache" | "globalStateCache">,
 ): Settings[K] {
-	if (key === "subagentRoles" || key === "addedApiProviders") return caches.globalStateCache[key]
+	if (key === "subagentRoles" || key === "addedApiProviders" || key === "sandboxSettings") return caches.globalStateCache[key]
 	if (Object.hasOwn(caches.sessionOverrideCache, key)) return caches.sessionOverrideCache[key] as Settings[K]
 	const taskValue = caches.taskStateCache[key]
 	if (taskValue !== undefined) return taskValue

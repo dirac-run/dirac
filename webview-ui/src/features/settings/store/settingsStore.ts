@@ -1,5 +1,6 @@
 import { DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import { DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettings"
+import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from "@shared/SandboxSettings"
 import { Environment } from "@shared/config-types"
 import type { DiracMessage, ExtensionState } from "@shared/ExtensionMessage"
 import type { OpenAiCodexUsageSnapshot } from "@shared/openai-codex-usage"
@@ -90,6 +91,7 @@ interface SettingsState {
 	autoApprovalSettings: ExtensionState["autoApprovalSettings"]
 	userApprovedCommands: ExtensionState["userApprovedCommands"]
 	browserSettings: ExtensionState["browserSettings"]
+	sandboxSettings: SandboxSettings
 	preferredLanguage: string
 	mode: string
 	platform: string
@@ -202,6 +204,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 	autoApprovalSettings: DEFAULT_AUTO_APPROVAL_SETTINGS,
 	userApprovedCommands: [],
 	browserSettings: DEFAULT_BROWSER_SETTINGS,
+	sandboxSettings: DEFAULT_SANDBOX_SETTINGS,
 	preferredLanguage: "English",
 	mode: "act",
 	platform: DEFAULT_PLATFORM,

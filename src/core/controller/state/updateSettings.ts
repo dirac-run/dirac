@@ -1,3 +1,4 @@
+import { prepareSandboxSettingsUpdate } from "@shared/SandboxSettings"
 import type { ApiConfiguration } from "@shared/api"
 import { Empty } from "@shared/proto/dirac/common"
 import { UpdateSettingsRequest } from "@shared/proto/dirac/state"
@@ -60,6 +61,7 @@ function persistCombinedWebviewUpdate(
 	previousRegistryToggles?: Record<string, boolean>,
 ): TerminalProfileChangeResult | undefined {
 	let terminalProfileChange: TerminalProfileChangeResult | undefined
+	if (settingsPatch.sandboxSettings !== undefined) settingsPatch.sandboxSettings = prepareSandboxSettingsUpdate(previousSettings.sandboxSettings, settingsPatch.sandboxSettings)
 	try {
 		if (settingsPatch.toolToggles && registry) registry.loadToggles(settingsPatch.toolToggles)
 		for (const [key, value] of Object.entries(settingsPatch))
@@ -116,6 +118,7 @@ function buildCombinedWebviewPatches(
 
 	const activeSettings: Partial<Settings> = { ...persistedSettings }
 	delete activeSettings.subagentRoles
+	delete activeSettings.sandboxSettings
 	if (request.browserSettings !== undefined && activeConfiguration) {
 		activeSettings.browserSettings = buildBrowserSettingsWebview(
 			activeConfiguration.settings.browserSettings as Settings["browserSettings"],
@@ -161,6 +164,7 @@ function requestAddressesActiveTask(
 ): boolean {
 	const activeSettings = buildWebviewSettingsPatch(request)
 	delete activeSettings.subagentRoles
+	delete activeSettings.sandboxSettings
 	delete activeSettings.shellIntegrationTimeout
 	delete activeSettings.terminalOutputLineLimit
 	return (

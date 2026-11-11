@@ -574,10 +574,19 @@ vscode-dropdown::part(control) {
 	overflow-x: hidden;
 	overflow-y: auto;
 	scrollbar-width: none;
-	background: var(--vscode-editor-background, var(--dirac-surface));
+	/* Theme surfaces may include alpha; composite them onto an opaque theme-aware base. */
+	background-color: light-dark(#ffffff, #1e1e1e);
+	background-image: linear-gradient(var(--vscode-editor-background, var(--dirac-surface)), var(--vscode-editor-background, var(--dirac-surface)));
+	color-scheme: dark;
 	border-right: 1px solid var(--dirac-border-subtle);
 	box-sizing: border-box;
-	transition: width 140ms ease, box-shadow 140ms ease;
+	/* Keep the visible surface and pointer hit region identical, including on rapid entry. */
+	transition: box-shadow 140ms ease;
+}
+
+body.vscode-light .settings-nav-overlay,
+body.vscode-high-contrast-light .settings-nav-overlay {
+	color-scheme: light;
 }
 
 .settings-nav-overlay[data-expanded="true"] {

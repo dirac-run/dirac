@@ -1,5 +1,7 @@
 import { Box, Text } from "ink"
 import React from "react"
+import wrapAnsi from "wrap-ansi"
+import { useTerminalSize } from "../../hooks/useTerminalSize"
 import { theme } from "../../constants/theme"
 import { Checkbox } from "../Checkbox"
 import { SettingsItemType, type ListItem } from "./types"
@@ -19,20 +21,26 @@ const HelpText = ({ item }: { item: ListItem }) => {
 	)
 }
 
-const estimateItemRows = (item: ListItem, isSelected: boolean): number => {
-	let rows = 1
-	if (isSelected && item.description) rows += 1
-	if (item.persistentHelp && (item.alwaysShowHelp || isSelected || Boolean(item.value))) rows += 2
+export const estimateItemRows = (item: ListItem, isSelected: boolean, width: number): number => {
+	const textRows = (text: string, indent = 0) => wrapAnsi(text, Math.max(1, width - indent), { hard: true, trim: false }).split("\n").length
+	if ([SettingsItemType.SPACER, SettingsItemType.SEPARATOR].includes(item.type)) return 1
+	if (item.type === SettingsItemType.HEADER) return textRows(item.label)
+	const value = item.type === SettingsItemType.OBJECT ? "{...}" : String(item.value)
+	const content = item.type === SettingsItemType.CHECKBOX ? `  [ ] ${item.label}` : `  ${item.label}${item.label && value !== "" ? ": " : ""}${value}`
+	let rows = textRows(content, item.type === SettingsItemType.CHECKBOX && item.isSubItem ? 2 : 0)
+	const helpIndent = item.isSubItem ? 8 : 6
+	if (isSelected && item.description) rows += textRows(item.description, helpIndent)
+	if (item.persistentHelp && (item.alwaysShowHelp || isSelected || Boolean(item.value))) rows += textRows(item.persistentHelp, helpIndent)
 	return rows
 }
 
-const getVisibleSettingsWindow = (items: ListItem[], selectedIndex: number, maxRows: number) => {
+const getVisibleSettingsWindow = (items: ListItem[], selectedIndex: number, maxRows: number, width: number) => {
 	let start = selectedIndex
 	let end = selectedIndex + 1
-	let usedRows = estimateItemRows(items[selectedIndex]!, true)
+	let usedRows = estimateItemRows(items[selectedIndex]!, true, width)
 	while (start > 0 || end < items.length) {
 		if (end < items.length) {
-			const rows = estimateItemRows(items[end]!, false)
+			const rows = estimateItemRows(items[end]!, false, width)
 			if (usedRows + rows <= maxRows) {
 				usedRows += rows
 				end += 1
@@ -40,7 +48,7 @@ const getVisibleSettingsWindow = (items: ListItem[], selectedIndex: number, maxR
 			}
 		}
 		if (start > 0) {
-			const rows = estimateItemRows(items[start - 1]!, false)
+			const rows = estimateItemRows(items[start - 1]!, false, width)
 			if (usedRows + rows <= maxRows) {
 				usedRows += rows
 				start -= 1
@@ -52,13 +60,14 @@ const getVisibleSettingsWindow = (items: ListItem[], selectedIndex: number, maxR
 	return { start, end }
 }
 export const SettingsListView: React.FC<SettingsListViewProps> = ({ items, selectedIndex, maxRows }) => {
-	const { start: visibleStart, end: visibleEnd } = getVisibleSettingsWindow(items, selectedIndex, Math.max(1, maxRows - 2))
+	const { columns } = useTerminalSize()
+	const { start: visibleStart, end: visibleEnd } = getVisibleSettingsWindow(items, selectedIndex, Math.max(1, maxRows - 2), columns - 4)
 	const visibleCount = visibleEnd - visibleStart
 	const showTopIndicator = visibleStart > 0
 	const showBottomIndicator = visibleEnd < items.length
 	const visibleItems = items.slice(visibleStart, visibleEnd)
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" flexShrink={0}>
 			{showTopIndicator && <Text color={theme.muted}>… {visibleStart} more above</Text>}
 			{visibleItems.map((item, visibleIndex) => {
 				const idx = visibleStart + visibleIndex
@@ -143,7 +152,7 @@ export const SettingsListView: React.FC<SettingsListViewProps> = ({ items, selec
 				const showSelectedHelp = isSelected && item.description
 				const showPersistentHelp = item.persistentHelp && (item.alwaysShowHelp || isSelected || Boolean(item.value))
 				return (
-					<Box flexDirection="column" key={item.key}>
+					<Box flexDirection="column" flexShrink={0} key={item.key}>
 						{row}
 						{showSelectedHelp && <HelpText item={item} />}
 						{showPersistentHelp && (

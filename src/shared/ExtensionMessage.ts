@@ -10,6 +10,7 @@ import { ApiConfiguration, ModelProviderPreset, ModelProviderSelection } from ".
 import type { ApiProvider } from "./api/providerNames"
 import { SkillMetadata } from "./skills"
 import type { SubagentRole } from "./subagentRoles"
+import type { SandboxSettings } from "./SandboxSettings"
 import { BrowserSettings } from "./BrowserSettings"
 import { DiracFeatureSetting } from "./DiracFeatureSetting"
 import { BannerCardData } from "./dirac/banner"
@@ -94,6 +95,7 @@ export interface ExtensionState {
 	configuredApiProviders?: ApiProvider[]
 	modelProviderPresets: ModelProviderPreset[]
 	subagentRoles?: SubagentRole[]
+	sandboxSettings?: SandboxSettings
 	utilityModelEnabled: boolean
 	utilityModelSelection?: ModelProviderSelection
 	utilityModelUseCondense: boolean

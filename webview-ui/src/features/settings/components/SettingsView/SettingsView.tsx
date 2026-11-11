@@ -28,6 +28,7 @@ import BrowserSettingsSection from "../sections/BrowserSettingsSection"
 import GeneralSettingsSection from "../sections/GeneralSettingsSection"
 import ResponsesContextSection from "../sections/ResponsesContextSection"
 import RunningTasksSection from "../sections/RunningTasksSection"
+import SandboxSettingsSection from "../sections/SandboxSettingsSection"
 import TerminalSettingsSection from "../sections/TerminalSettingsSection"
 import ToolsSettingsSection from "../sections/ToolsSettingsSection"
 import UtilityModelSection from "../sections/UtilityModelSection"
@@ -48,6 +49,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
 	{ id: "running-tasks", icon: ListChecks },
 	{ id: "tools", icon: Puzzle },
 	{ id: "terminal", icon: SquareTerminal },
+	{ id: "sandbox", icon: ShieldCheck },
 	{ id: "browser", icon: Globe2 },
 	{ id: "general", icon: Settings2 },
 ]
@@ -100,6 +102,7 @@ const TAB_CONTENT_MAP: Record<SettingsTabID, React.FC<any>> = {
 	"running-tasks": RunningTasksSection,
 	tools: ToolsSettingsSection,
 	terminal: TerminalSettingsSection,
+	sandbox: SandboxSettingsSection,
 	browser: BrowserSettingsSection,
 	general: GeneralSettingsSection,
 }
@@ -118,22 +121,57 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 	const [navigationExpanded, setNavigationExpanded] = useState(false)
 	const inputModality = useRef<"keyboard" | "pointer">("keyboard")
 	const navigationHasKeyboardFocus = useRef(false)
+	const navigationRef = useRef<HTMLElement>(null)
+	const pointerPosition = useRef<{ x: number; y: number } | null>(null)
+	const containmentFrame = useRef<number>()
+
+	const confirmNavigationExit = useCallback(() => {
+		if (containmentFrame.current !== undefined) return
+		containmentFrame.current = requestAnimationFrame(() => {
+			containmentFrame.current = undefined
+			const navigation = navigationRef.current
+			if (!navigation) return
+			const focusInside = navigation.contains(document.activeElement)
+			// Touch has no hovering pointer; its focused destination keeps the menu open until blur.
+			if (focusInside && (navigationHasKeyboardFocus.current || pointerPosition.current === null)) return
+			if (!focusInside) navigationHasKeyboardFocus.current = false
+			const point = pointerPosition.current
+			const bounds = navigation.getBoundingClientRect()
+			if (point && point.x >= bounds.left && point.x < bounds.right && point.y >= bounds.top && point.y < bounds.bottom) {
+				return
+			}
+			setNavigationExpanded(false)
+		})
+	}, [])
 
 	useEffect(() => {
-		const recordKeyboardInput = () => {
+		const recordKeyboardInput = (event: KeyboardEvent) => {
 			inputModality.current = "keyboard"
+			if (event.key !== "Escape" && navigationRef.current?.contains(document.activeElement)) {
+				navigationHasKeyboardFocus.current = true
+			}
 		}
-		const recordPointerInput = () => {
+		const recordPointerInput = (event: PointerEvent) => {
 			inputModality.current = "pointer"
 			navigationHasKeyboardFocus.current = false
+			pointerPosition.current = event.pointerType === "touch" ? null : { x: event.clientX, y: event.clientY }
+			confirmNavigationExit()
+		}
+		const recordPointerPosition = (event: PointerEvent) => {
+			if (event.pointerType === "touch") return
+			pointerPosition.current = { x: event.clientX, y: event.clientY }
+			confirmNavigationExit()
 		}
 		document.addEventListener("keydown", recordKeyboardInput, true)
 		document.addEventListener("pointerdown", recordPointerInput, true)
+		document.addEventListener("pointermove", recordPointerPosition, true)
 		return () => {
 			document.removeEventListener("keydown", recordKeyboardInput, true)
 			document.removeEventListener("pointerdown", recordPointerInput, true)
+			document.removeEventListener("pointermove", recordPointerPosition, true)
+			if (containmentFrame.current !== undefined) cancelAnimationFrame(containmentFrame.current)
 		}
-	}, [])
+	}, [confirmNavigationExit])
 
 	const selectTarget = useCallback((target?: string) => {
 		const resolved = resolveSettingsTarget(target)
@@ -207,8 +245,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 						data-expanded={navigationExpanded}
 						onBlur={(event) => {
 							if (event.currentTarget.contains(event.relatedTarget)) return
-							navigationHasKeyboardFocus.current = false
-							setNavigationExpanded(false)
+							confirmNavigationExit()
 						}}
 						onFocus={() => {
 							if (inputModality.current !== "keyboard") return
@@ -219,6 +256,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 							if (event.key === "Escape") {
 								event.preventDefault()
 								event.stopPropagation()
+								navigationHasKeyboardFocus.current = false
 								setNavigationExpanded(false)
 							} else if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
 								navigationHasKeyboardFocus.current = true
@@ -229,12 +267,17 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 							if (event.pointerType === "touch") setNavigationExpanded(true)
 						}}
 						onPointerEnter={(event) => {
-							if (event.pointerType === "mouse" || event.pointerType === "pen") setNavigationExpanded(true)
+							if (event.pointerType !== "mouse" && event.pointerType !== "pen") return
+							pointerPosition.current = { x: event.clientX, y: event.clientY }
+							setNavigationExpanded(true)
 						}}
 						onPointerLeave={(event) => {
-							if (event.pointerType === "touch" || navigationHasKeyboardFocus.current) return
-							setNavigationExpanded(false)
-						}}>
+							if (event.pointerType === "touch") return
+							// Child/retargeted leave events are not proof that the pointer left the visible menu.
+							pointerPosition.current = { x: event.clientX, y: event.clientY }
+							confirmNavigationExit()
+						}}
+						ref={navigationRef}>
 						<TabList
 							aria-label="Settings destinations"
 							aria-orientation="vertical"

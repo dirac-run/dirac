@@ -17,6 +17,9 @@ import { findLastIndex } from "@shared/array"
 import { Logger } from "@/shared/services/Logger"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
+import { StandaloneTerminalProcess } from "./standalone/StandaloneTerminalProcess"
+import { NativeSandboxError, type PreparedSandboxLaunch } from "./sandbox"
+import type { SandboxExecutionStatus } from "@shared/SandboxExecution"
 import type {
 	CommandExecutionMetadata,
 	CommandExecutionOptions,
@@ -122,26 +125,52 @@ export class CommandExecutor {
 			command = command.substring(workspaceCdPrefix.length)
 		}
 
-		const useStandalone = options?.useBackgroundExecution || this.terminalExecutionMode === "backgroundExec"
-		const manager: ITerminalManager = useStandalone ? this.standaloneManager : this.terminalManager
+		const normalStandalone = options?.useBackgroundExecution || this.terminalExecutionMode === "backgroundExec"
+		let useStandalone = !!options?.sandbox || normalStandalone
+		let manager: ITerminalManager = useStandalone ? this.standaloneManager : this.terminalManager
+		let sandboxStatus: SandboxExecutionStatus | undefined = options?.sandboxContext
+			? { requested: options.sandboxContext, effective: "off" } : undefined
 
 		const env = await this.callbacks.getEnvironmentVariables(cwd)
 		if (execution.cancelled) return [true, "Command was cancelled before terminal acquisition."]
 		Logger.info(`Executing command in ${useStandalone ? "standalone" : "VSCode"} terminal: ${command}`)
 
-		const terminalInfo = await manager.getOrCreateTerminal(cwd, env)
+		let terminalInfo = await manager.getOrCreateTerminal(cwd, env)
 		if (execution.cancelled) {
 			manager.releaseTerminalReservation?.(terminalInfo)
 			return [true, "Command was cancelled before startup."]
 		}
 		let process: TerminalProcessResultPromise
+		let sandbox: PreparedSandboxLaunch | undefined
 		try {
+			if (options?.sandbox) {
+				try {
+					sandbox = await StandaloneTerminalProcess.prepareSandbox(
+						terminalInfo.terminal, command, options.sandboxContext?.profile ?? { id: options.sandbox.profile }, options.sandbox.context,
+					)
+					if (sandboxStatus) sandboxStatus = { ...sandboxStatus, effective: "native", backend: sandbox.backend }
+				} catch (error) {
+					if (!(error instanceof NativeSandboxError) || error.stage !== "before-launch" || !error.fallbackEligible || !options.sandbox.allowUnsandboxedFallback) throw error
+					if (sandboxStatus) sandboxStatus = { ...sandboxStatus, effective: "unsandboxed-fallback", reason: error.message }
+					manager.releaseTerminalReservation?.(terminalInfo)
+					useStandalone = !!normalStandalone
+					manager = useStandalone ? this.standaloneManager : this.terminalManager
+					if (execution.cancelled) return [true, "Command was cancelled before fallback startup."]
+					terminalInfo = await manager.getOrCreateTerminal(cwd, env)
+				}
+			}
+			if (execution.cancelled) {
+				manager.releaseTerminalReservation?.(terminalInfo)
+				return [true, "Command was cancelled before startup."]
+			}
 			terminalInfo.terminal.show()
 			options?.assertAuthorized?.()
-			process = manager.runCommand(terminalInfo, command)
+			process = sandbox ? manager.runCommand(terminalInfo, command, sandbox) : manager.runCommand(terminalInfo, command)
 		} catch (error) {
 			manager.releaseTerminalReservation?.(terminalInfo)
 			throw error
+		} finally {
+			sandbox?.dispose()
 		}
 
 		execution.process = process
@@ -182,6 +211,7 @@ export class CommandExecutor {
 			signal: result.signal,
 			logFilePath: result.logFilePath,
 			backgroundCompletion: result.backgroundCompletion,
+			...(sandboxStatus ? { sandbox: sandboxStatus } : {}),
 		}
 
 		if (execution.cancelled) {

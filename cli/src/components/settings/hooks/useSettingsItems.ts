@@ -1,4 +1,7 @@
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
+import type { SandboxSettings } from "@shared/SandboxSettings"
+import type { SandboxStatus } from "@shared/proto/dirac/state"
+import { createSandboxSettingsItems } from "../sandboxSettingsItems"
 import { type ModelProviderSelection } from "@shared/api"
 import type { SubagentRole } from "@shared/subagentRoles"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
@@ -13,6 +16,10 @@ import { FEATURE_SETTINGS, type FeatureKey } from "../constants"
 import { type ListItem, SettingsItemType, SettingsTab } from "../types"
 
 export interface UseSettingsItemsProps {
+	sandboxSettings?: SandboxSettings
+	sandboxStatus?: SandboxStatus
+	sandboxStatusError?: string
+	sandboxAdvanced?: boolean
 	currentTab: SettingsTab
 	provider: string
 	planProvider?: string
@@ -447,6 +454,8 @@ export function createSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 			return createToolItems(props)
 		case SettingsTab.TERMINAL:
 			return createTerminalItems(props)
+		case SettingsTab.SANDBOX:
+			return createSandboxSettingsItems(props.sandboxSettings, props.sandboxStatus, props.sandboxStatusError, props.sandboxAdvanced)
 		case SettingsTab.GENERAL:
 			return createGeneralItems(props)
 		default:
@@ -459,6 +468,10 @@ export function useSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 		() => createSettingsItems(props),
 		[
 			props.currentTab,
+			props.sandboxSettings,
+			props.sandboxStatus,
+			props.sandboxStatusError,
+			props.sandboxAdvanced,
 			props.provider,
 			props.planProvider,
 			props.actModelId,

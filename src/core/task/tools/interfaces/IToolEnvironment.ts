@@ -111,13 +111,16 @@ export interface SystemCommandResult {
 	signal?: NodeJS.Signals | null
 	logFilePath?: string
 	backgroundCompletion?: Promise<void>
+	sandbox?: import("@shared/SandboxExecution").SandboxExecutionStatus
 }
 
 export interface ISystemTrait {
+	/** Host-captured immutable context, not model-controlled launch options. */
+	captureCommandSandbox?(): import("@shared/SandboxExecution").SandboxExecutionContext
 	/**
 	 * Executes a shell command.
 	 */
-	executeCommand(command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }): Promise<SystemCommandResult>
+	executeCommand(command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void; sandboxContext?: import("@shared/SandboxExecution").SandboxExecutionContext }): Promise<SystemCommandResult>
 
 	/**
 	 * Performs a regex search across files.
@@ -273,6 +276,8 @@ export type {
 
 /** Parent-only controls. Implementations expose data and operations, never the live Task/host. */
 export interface TaskletControls {
+	/** Read-only user catalog and authority ceiling; no settings mutation capability. */
+	sandboxCatalog?(): unknown
 	/** Acceptance only: does not wait for or assert successful completion of the assignment. */
 	start(input: { title: string; prompt: string } & import("../../TaskletConfiguration").TaskletStartOptions): Promise<TaskletRecord>
 	/** Explicit follow-up under the same handle/conversation; returns acceptance, not a result. */

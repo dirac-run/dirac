@@ -182,12 +182,13 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 		return undefined
 	}
 
-	public async executeCommand(command: string, options?: { timeout?: number; cwd?: string; assertAuthorized?: () => void }): Promise<SystemCommandResult> {
+	public async executeCommand(command: string, options?: Parameters<ISystemTrait["executeCommand"]>[1]): Promise<SystemCommandResult> {
 		const [userRejected, output, metadata] = await this.config.callbacks.executeCommandTool(command, options?.timeout, {
 			suppressUserInteraction: true,
 			useBackgroundExecution: true,
 			cwd: options?.cwd,
 			assertAuthorized: options?.assertAuthorized,
+			sandboxContext: options?.sandboxContext,
 		})
 		return {
 			userRejected,
@@ -197,6 +198,7 @@ export class SurfaceAdapter implements ToolExecutionEnvironment {
 			signal: metadata?.signal,
 			logFilePath: metadata?.logFilePath,
 			backgroundCompletion: metadata?.backgroundCompletion,
+			...(metadata?.sandbox ? { sandbox: metadata.sandbox } : {}),
 		}
 	}
 

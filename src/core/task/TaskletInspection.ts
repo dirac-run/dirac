@@ -9,6 +9,7 @@ import type {
 } from "./types/tasklet"
 import type { DiracAssistantToolUseBlock, DiracStorageMessage, DiracUserToolResultContentBlock } from "@shared/messages/content"
 import { taskletUsageTotal } from "@shared/taskletUsage"
+import { describeSandboxTaskProfile } from "@shared/SandboxTaskPolicy"
 import type { TaskRunOutcome } from "./TaskRunOutcome"
 export type { TaskletInspectionQuery, TaskletInspectionPage, TaskletSummary } from "./types/tasklet"
 
@@ -47,6 +48,7 @@ export function summarizeTasklet(inspection: TaskletInspection): TaskletSummary 
 		id: inspection.id,
 		title: preview(inspection.title, 300),
 		...(inspection.role === undefined ? {} : { role: inspection.role }),
+		...(inspection.configuration?.sandboxPolicy ? { sandboxPolicy: describeSandboxTaskProfile(inspection.configuration.sandboxPolicy.profile) } : {}),
 		createdAt: inspection.createdAt,
 		executionStatus: inspection.executionStatus,
 		pendingRequestCount: inspection.interactions.filter((request) => request.status === "pending").length,

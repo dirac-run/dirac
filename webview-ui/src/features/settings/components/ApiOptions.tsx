@@ -3,11 +3,13 @@ import { Mode } from "@shared/ExtensionMessage"
 import PROVIDERS from "@shared/providers/providers.json"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import Fuse from "fuse.js"
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
+import { ChevronDown } from "lucide-react"
+import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
 import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
 import { getModeSpecificFields, normalizeApiConfiguration } from "@/features/settings/components/utils/providerUtils"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
+import { Button } from "@/shared/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import { OPENROUTER_MODEL_PICKER_Z_INDEX } from "./OpenRouterModelPicker"
 import { AIhubmixProvider } from "./providers/AihubmixProvider"
@@ -92,11 +94,14 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 	const planActSeparateModelsSetting = useSettingsStore((state) => state.planActSeparateModelsSetting)
 	const { selectedProvider: configuredProvider } = normalizeApiConfiguration(apiConfiguration, currentMode)
 	const [setupProvider, setSetupProvider] = useState<string | undefined>(initialSetupProvider)
-	const selectedProvider = intent === "setup" ? setupProvider || configuredProvider : configuredProvider
+	const selectedProvider = intent === "setup" ? setupProvider ?? "" : configuredProvider
+	const configuredApiProviders = useSettingsStore((state) => state.configuredApiProviders)
+	const [isAddingProvider, setIsAddingProvider] = useState(false)
+	const [addedProvider, setAddedProvider] = useState<string>()
+	const isEditingSetup = intent === "setup" && initialSetupProvider !== undefined
+	const providerListId = useId()
 	const modeFields = getModeSpecificFields(apiConfiguration, currentMode)
 	const { handleFieldsChange, handleModeFieldsChange } = useApiConfigurationHandlers()
-
-	// Poll vscode-lm models
 
 	// Provider search state
 	const [searchTerm, setSearchTerm] = useState("")
@@ -107,6 +112,7 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 	const itemRefs = useRef<(HTMLDivElement | null)[]>([])
 	const dropdownListRef = useRef<HTMLDivElement>(null)
 	const activeProvider = pendingProvider || selectedProvider
+	const isProviderAdded = configuredApiProviders.some((provider) => provider === activeProvider) || addedProvider === activeProvider
 	const selectedModeProvider = modeFields.apiProvider || selectedProvider
 	const isSwitchingToOpenRouter = pendingProvider === "openrouter" && selectedModeProvider !== "openrouter"
 
@@ -187,6 +193,15 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 		)
 	}
 
+	const addProvider = async () => {
+		setIsAddingProvider(true)
+		try {
+			if (await handleFieldsChange({}, activeProvider)) setAddedProvider(activeProvider)
+		} finally {
+			setIsAddingProvider(false)
+		}
+	}
+
 	const handlePendingOpenRouterModelSelected = async (modelId: string, modelInfo: ModelInfo | undefined): Promise<boolean> => {
 		const updates: Partial<ApiConfiguration> = planActSeparateModelsSetting
 			? currentMode === "plan"
@@ -219,6 +234,11 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 
 	const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
 		if (!isDropdownVisible) {
+			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+				event.preventDefault()
+				setIsDropdownVisible(true)
+				setSelectedIndex(0)
+			}
 			return
 		}
 
@@ -238,6 +258,8 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 				}
 				break
 			case "Escape":
+				event.preventDefault()
+				event.stopPropagation()
 				setIsDropdownVisible(false)
 				setSelectedIndex(-1)
 				setSearchTerm(currentProviderLabel)
@@ -297,87 +319,105 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 				}
 				`}
 				</style>
-				<DropdownContainer className="dropdown-container">
-					{remoteConfigSettings?.remoteConfiguredProviders && remoteConfigSettings.remoteConfiguredProviders.length > 0 ? (
-						<Tooltip>
-							<TooltipTrigger>
-								<div className="flex items-center gap-2 mb-1">
-									<label htmlFor="api-provider">
-										<span style={{ fontWeight: 500 }}>API Provider</span>
-									</label>
-									<i className="codicon codicon-lock text-description text-sm" />
-								</div>
-							</TooltipTrigger>
-							<TooltipContent>Provider options are managed by your organization's remote configuration</TooltipContent>
-						</Tooltip>
-					) : (
-						<label htmlFor="api-provider">
-							<span style={{ fontWeight: 500 }}>API Provider</span>
-						</label>
-					)}
-					<ProviderDropdownWrapper ref={dropdownRef}>
-						<VSCodeTextField
-							data-testid="provider-selector-input"
-							id="api-provider"
-							onFocus={() => {
-								setIsDropdownVisible(true)
-								setSearchTerm("")
-							}}
-							onInput={(e) => {
-								setSearchTerm((e.target as HTMLInputElement)?.value || "")
-								setIsDropdownVisible(true)
-							}}
-							onKeyDown={handleKeyDown}
-							placeholder="Search and select provider..."
-							role="combobox"
-							style={{
-								width: "100%",
-								zIndex: DROPDOWN_Z_INDEX,
-								position: "relative",
-								minWidth: 130,
-							}}
-							value={searchTerm}>
-							{searchTerm && searchTerm !== currentProviderLabel && (
-								<div
-									aria-label="Clear search"
-									className="input-icon-button codicon codicon-close"
-									onClick={() => {
+				{!isEditingSetup && (
+					<DropdownContainer className="dropdown-container">
+						{remoteConfigSettings?.remoteConfiguredProviders && remoteConfigSettings.remoteConfiguredProviders.length > 0 ? (
+							<Tooltip>
+								<TooltipTrigger>
+									<div className="flex items-center gap-2 mb-1">
+										<label htmlFor="api-provider">
+											<span style={{ fontWeight: 500 }}>{intent === "setup" ? "Choose a provider" : "API Provider"}</span>
+										</label>
+										<i className="codicon codicon-lock text-description text-sm" />
+									</div>
+								</TooltipTrigger>
+								<TooltipContent>Provider options are managed by your organization's remote configuration</TooltipContent>
+							</Tooltip>
+						) : (
+							<label htmlFor="api-provider">
+								<span style={{ fontWeight: 500 }}>{intent === "setup" ? "Choose a provider" : "API Provider"}</span>
+							</label>
+						)}
+						<ProviderDropdownWrapper
+							ref={dropdownRef}
+							onBlur={(event) => {
+								if (!event.currentTarget.contains(event.relatedTarget)) {
+									setIsDropdownVisible(false)
+									setSelectedIndex(-1)
+								}
+							}}>
+							<VSCodeTextField
+								data-testid="provider-selector-input"
+								id="api-provider"
+								disabled={isAddingProvider}
+								aria-label={intent === "setup" ? "Choose a provider" : "API Provider"}
+								aria-expanded={isDropdownVisible}
+								aria-controls={providerListId}
+								aria-autocomplete="list"
+								aria-activedescendant={isDropdownVisible && selectedIndex >= 0 ? `${providerListId}-${selectedIndex}` : undefined}
+								onClick={() => {
+									if (!isDropdownVisible) {
 										setSearchTerm("")
 										setIsDropdownVisible(true)
-									}}
-									slot="end"
-									style={{
-										display: "flex",
-										justifyContent: "center",
-										alignItems: "center",
-										height: "100%",
-									}}
-								/>
+									}
+								}}
+								onFocus={() => {
+									setIsDropdownVisible(true)
+									setSearchTerm("")
+								}}
+								onInput={(e) => {
+									setSearchTerm((e.target as HTMLInputElement)?.value || "")
+									setIsDropdownVisible(true)
+								}}
+								onKeyDown={handleKeyDown}
+								placeholder="Search and select provider..."
+								role="combobox"
+								style={{
+									width: "100%",
+									zIndex: DROPDOWN_Z_INDEX,
+									position: "relative",
+									minWidth: 130,
+								}}
+								value={searchTerm}>
+								<span slot="end" className="pointer-events-none flex items-center px-1" aria-hidden="true">
+									<ChevronDown size={14} />
+								</span>
+							</VSCodeTextField>
+							{isDropdownVisible && (
+								<ProviderDropdownList ref={dropdownListRef} id={providerListId} role="listbox" aria-label="API providers">
+									{providerSearchResults.length === 0 && <div className="p-2 text-description" role="status">No providers found.</div>}
+									{providerSearchResults.map((item, index) => (
+										<ProviderDropdownItem
+											data-testid={`provider-option-${item.value}`}
+											id={`${providerListId}-${index}`}
+											aria-selected={item.value === activeProvider}
+											onMouseDown={(event) => event.preventDefault()}
+											$isSelected={index === selectedIndex}
+											key={item.value}
+											onClick={() => handleProviderChange(item.value)}
+											onMouseEnter={() => setSelectedIndex(index)}
+											ref={(el) => {
+												itemRefs.current[index] = el
+											}}
+											role="option">
+											<span>{item.html}</span>
+										</ProviderDropdownItem>
+									))}
+								</ProviderDropdownList>
 							)}
-						</VSCodeTextField>
-						{isDropdownVisible && (
-							<ProviderDropdownList ref={dropdownListRef} role="listbox">
-								{providerSearchResults.map((item, index) => (
-									<ProviderDropdownItem
-										data-testid={`provider-option-${item.value}`}
-										isSelected={index === selectedIndex}
-										key={item.value}
-										onClick={() => handleProviderChange(item.value)}
-										onMouseEnter={() => setSelectedIndex(index)}
-										ref={(el) => {
-											itemRefs.current[index] = el
-										}}
-										role="option">
-										<span>{item.html}</span>
-									</ProviderDropdownItem>
-								))}
-							</ProviderDropdownList>
-						)}
-					</ProviderDropdownWrapper>
-				</DropdownContainer>
+						</ProviderDropdownWrapper>
+					</DropdownContainer>
+				)}
 
-				{intent === "setup" && activeProvider !== "openai" && (
-					<button type="button" onClick={() => void handleFieldsChange({}, activeProvider)}>Add provider</button>
+				{intent === "setup" && activeProvider && (
+					<div className="my-2 text-xs text-description">
+						{!isEditingSetup && isProviderAdded && <p className="m-0 mb-1" role="status">This provider is added. You can edit its setup below.</p>}
+						<p className="m-0">
+							{activeProvider === "openai"
+								? "Use the save button below to save your endpoint configuration."
+								: "Credential and connection settings save automatically. Complete any sign-in steps below if required."}
+						</p>
+					</div>
 				)}
 
 				{apiConfiguration && selectedProvider === "anthropic" && (
@@ -535,6 +575,15 @@ const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, is
 					<AIhubmixProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
 				)}
 
+				{intent === "setup" && activeProvider && activeProvider !== "openai" && !isEditingSetup && !isProviderAdded && (
+					<div className="mt-3 flex flex-col items-start gap-2">
+						<Button type="button" disabled={isAddingProvider} onClick={() => void addProvider()}>
+							{isAddingProvider ? "Adding provider…" : "Add provider"}
+						</Button>
+						<p className="m-0 text-xs text-description">You can also add a provider without saved credentials, such as a local service. Adding it does not verify connectivity.</p>
+					</div>
+				)}
+
 				{apiConfigurationError && (
 					<p aria-live="polite" className="m-0 text-xs text-error">
 						Could not save API configuration: {apiConfigurationError}
@@ -587,13 +636,13 @@ const ProviderDropdownList = styled.div`
 	border-bottom-right-radius: 3px;
 `
 
-const ProviderDropdownItem = styled.div<{ isSelected: boolean }>`
+const ProviderDropdownItem = styled.div<{ $isSelected: boolean }>`
 	padding: 5px 10px;
 	cursor: pointer;
 	word-break: break-all;
 	white-space: normal;
 
-	background-color: ${({ isSelected }) => (isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
+	background-color: ${({ $isSelected }) => ($isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
 
 	&:hover {
 		background-color: var(--vscode-list-activeSelectionBackground);

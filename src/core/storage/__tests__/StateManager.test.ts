@@ -75,6 +75,7 @@ describe("StateManager", () => {
 			secrets: createMockFileStorage({}),
 			workspaceState: createMockFileStorage({}),
 			dataDir: tempDir,
+			diracDir: tempDir,
 			workspaceStoragePath: tempDir,
 		}
 

@@ -31,6 +31,9 @@ export interface StorageContext {
 	/** Workspace-scoped state — per-project toggles, rules, etc. */
 	readonly workspaceState: DiracFileStorage
 
+	/** Actual resolved user-controlled configuration root, including DIRAC_DIR overrides. */
+	readonly diracDir: string
+
 	/** The resolved path to the data directory (~/.dirac/data) */
 	readonly dataDir: string
 
@@ -120,6 +123,7 @@ export function createStorageContext(opts: StorageContextOptions = {}): StorageC
 			fileMode: 0o600, // Owner read/write only — protects API keys
 		}),
 		workspaceState: new DiracFileStorage(path.join(workspaceDir, "workspaceState.json"), "WorkspaceState"),
+		diracDir,
 		dataDir,
 		workspaceStoragePath: workspaceDir,
 	}

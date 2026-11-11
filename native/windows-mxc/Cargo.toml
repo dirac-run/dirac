@@ -1,0 +1,21 @@
+[package]
+name = "dirac-windows-mxc"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2", default-features = false }
+flatbuffers = "25"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+panic = "abort"
+strip = "symbols"

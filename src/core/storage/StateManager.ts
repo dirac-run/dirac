@@ -133,6 +133,12 @@ export class StateManager {
 		})
 	}
 
+	/** Resolved execution-host storage locations, including installation and workspace overrides. */
+	getStorageDirectories(): Pick<StorageContext, "diracDir" | "dataDir" | "workspaceStoragePath"> {
+		const { diracDir, dataDir, workspaceStoragePath } = this.storage
+		return { diracDir, dataDir, workspaceStoragePath }
+	}
+
 	private get settingsCaches(): StateManagerSettingsCaches {
 		return {
 			sessionOverrideCache: this.sessionOverrideCache,

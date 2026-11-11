@@ -80,7 +80,7 @@ describe("StandaloneTerminalManager", () => {
 			assert.equal(first.busy, false)
 			assert.equal(second.busy, true)
 			assert.equal((await manager.getOrCreateTerminal("/different")).id, first.id)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("creates a terminal for a given cwd", async () => {
@@ -88,7 +88,7 @@ describe("StandaloneTerminalManager", () => {
 			const terminal = await manager.getOrCreateTerminal("/tmp")
 			assert.ok(terminal.id >= 1)
 			assert.equal((terminal.terminal as any)._cwd, "/tmp")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("reuses an idle terminal with matching cwd", async () => {
@@ -97,7 +97,7 @@ describe("StandaloneTerminalManager", () => {
 			manager.releaseTerminalReservation(t1)
 			const t2 = await manager.getOrCreateTerminal("/tmp")
 			assert.equal(t1.id, t2.id, "should reuse same terminal for same cwd")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("creates separate terminals for different cwds", async () => {
@@ -106,7 +106,7 @@ describe("StandaloneTerminalManager", () => {
 			t1.busy = true // prevent reuse
 			const t2 = await manager.getOrCreateTerminal("/usr")
 			assert.notEqual(t1.id, t2.id, "should create different terminals for different cwds")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("reuses idle terminals by updating spawn cwd without running a shell command", async () => {
@@ -118,7 +118,7 @@ describe("StandaloneTerminalManager", () => {
 			const t2 = await manager.getOrCreateTerminal("/usr")
 			assert.equal(t1.id, t2.id, "should reuse idle terminal")
 			assert.equal((t2.terminal as any)._cwd, "/usr")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("does not reuse terminals when reuse disabled", async () => {
@@ -128,14 +128,14 @@ describe("StandaloneTerminalManager", () => {
 			t1.busy = false
 			const t2 = await manager.getOrCreateTerminal("/usr")
 			assert.notEqual(t1.id, t2.id, "should not reuse when reuse disabled")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("disposeAll clears all terminals", async () => {
 			const manager = new StandaloneTerminalManager()
 			await manager.getOrCreateTerminal("/tmp")
 			await manager.getOrCreateTerminal("/usr")
-			manager.disposeAll()
+			await manager.disposeAll()
 			assert.equal(manager.getTerminals(false).length, 0)
 		})
 	})
@@ -148,7 +148,7 @@ describe("StandaloneTerminalManager", () => {
 			const idle = manager.getTerminals(false)
 			assert.equal(idle.length, 1)
 			assert.equal(idle[0].id, 1)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("returns busy terminals when busy=true", async () => {
@@ -159,19 +159,19 @@ describe("StandaloneTerminalManager", () => {
 			const busy = manager.getTerminals(true)
 			assert.equal(busy.length, 1)
 			assert.equal(busy[0].lastCommand, "test-cmd")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
 	describe("processOutput", () => {
-		it("joins lines without truncation under limit", () => {
+		it("joins lines without truncation under limit", async () => {
 			const manager = new StandaloneTerminalManager()
 			const result = manager.processOutput(["line1", "line2", "line3"])
 			assert.equal(result, "line1\nline2\nline3")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("truncates output exceeding limit", () => {
+		it("truncates output exceeding limit", async () => {
 			const manager = new StandaloneTerminalManager()
 			manager.setTerminalOutputLineLimit(4)
 			const lines = ["a", "b", "c", "d", "e", "f"]
@@ -179,15 +179,15 @@ describe("StandaloneTerminalManager", () => {
 			assert.ok(result.includes("output truncated"))
 			assert.ok(result.includes("a"))
 			assert.ok(result.includes("f"))
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("uses override limit when provided", () => {
+		it("uses override limit when provided", async () => {
 			const manager = new StandaloneTerminalManager()
 			const lines = ["a", "b", "c"]
 			const result = manager.processOutput(lines, 2)
 			assert.ok(result.includes("output truncated"))
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
@@ -198,7 +198,7 @@ describe("StandaloneTerminalManager", () => {
 			const found = manager.findTerminalInfoByTerminal(t.terminal)
 			assert.ok(found)
 			assert.equal(found?.id, t.id)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("filterTerminals returns matching terminals", async () => {
@@ -206,7 +206,7 @@ describe("StandaloneTerminalManager", () => {
 			await manager.getOrCreateTerminal("/tmp")
 			const filtered = manager.filterTerminals((t) => t.id === 1)
 			assert.equal(filtered.length, 1)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("closeTerminals closes idle terminals matching filter", async () => {
@@ -216,7 +216,7 @@ describe("StandaloneTerminalManager", () => {
 			const closed = manager.closeTerminals((t) => t.id === 1)
 			assert.equal(closed, 1)
 			assert.equal(manager.getTerminals(false).length, 0)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("closeTerminals skips busy terminals without force", async () => {
@@ -225,7 +225,7 @@ describe("StandaloneTerminalManager", () => {
 			t.busy = true
 			const closed = manager.closeTerminals(() => true, false)
 			assert.equal(closed, 0)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("closeTerminals closes busy terminals with force", async () => {
@@ -234,7 +234,7 @@ describe("StandaloneTerminalManager", () => {
 			t.busy = true
 			const closed = manager.closeTerminals(() => true, true)
 			assert.equal(closed, 1)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("closeAllTerminals closes everything", async () => {
@@ -244,14 +244,14 @@ describe("StandaloneTerminalManager", () => {
 			await manager.getOrCreateTerminal("/usr")
 			const closed = manager.closeAllTerminals()
 			assert.equal(closed, 2)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("isCwdMatchingExpected returns false when no pendingCwdChange", async () => {
 			const manager = new StandaloneTerminalManager()
 			const t = await manager.getOrCreateTerminal("/tmp")
 			assert.equal(manager.isCwdMatchingExpected(t), false)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("isCwdMatchingExpected returns true when cwd matches pending", async () => {
@@ -259,17 +259,17 @@ describe("StandaloneTerminalManager", () => {
 			const t = await manager.getOrCreateTerminal("/tmp")
 				; (t as any).pendingCwdChange = "/tmp"
 			assert.equal(manager.isCwdMatchingExpected(t), true)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
 	describe("setDefaultTerminalProfile", () => {
-		it("returns zero closed when profile unchanged", () => {
+		it("returns zero closed when profile unchanged", async () => {
 			const manager = new StandaloneTerminalManager()
 			const result = manager.setDefaultTerminalProfile("default")
 			assert.equal(result.closedCount, 0)
 			assert.equal(result.busyTerminals.length, 0)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("closes idle terminals when profile changes", async () => {
@@ -277,7 +277,7 @@ describe("StandaloneTerminalManager", () => {
 			await manager.getOrCreateTerminal("/tmp")
 			const result = manager.setDefaultTerminalProfile("zsh")
 			assert.ok(result.closedCount >= 0)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
@@ -296,20 +296,20 @@ describe("StandaloneTerminalManager", () => {
 			assert.ok(fs.existsSync(cmd.logFilePath))
 			const content = fs.readFileSync(cmd.logFilePath, "utf-8")
 			assert.ok(content.includes("existing output"))
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("getBackgroundCommand returns tracked command", () => {
+		it("getBackgroundCommand returns tracked command", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const cmd = manager.trackBackgroundCommand(process, "test")
 			const found = manager.getBackgroundCommand(cmd.id)
 			assert.ok(found)
 			assert.equal(found?.id, cmd.id)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("getAllBackgroundCommands returns all tracked commands", () => {
+		it("getAllBackgroundCommands returns all tracked commands", async () => {
 			const manager = new StandaloneTerminalManager()
 			const p1 = createFakeProcess()
 			const p2 = createFakeProcess()
@@ -317,78 +317,78 @@ describe("StandaloneTerminalManager", () => {
 			manager.trackBackgroundCommand(p2, "cmd2")
 			const all = manager.getAllBackgroundCommands()
 			assert.equal(all.length, 2)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("getRunningBackgroundCommands filters by running status", () => {
+		it("getRunningBackgroundCommands filters by running status", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const cmd = manager.trackBackgroundCommand(process, "test")
 			const running = manager.getRunningBackgroundCommands()
 			assert.equal(running.length, 1)
 			assert.equal(running[0].id, cmd.id)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("hasActiveBackgroundCommands returns true when running", () => {
+		it("hasActiveBackgroundCommands returns true when running", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			manager.trackBackgroundCommand(process, "test")
 			assert.equal(manager.hasActiveBackgroundCommands(), true)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("hasActiveBackgroundCommands returns false when none running", () => {
+		it("hasActiveBackgroundCommands returns false when none running", async () => {
 			const manager = new StandaloneTerminalManager()
 			assert.equal(manager.hasActiveBackgroundCommands(), false)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("cancelBackgroundCommand terminates and marks as error", () => {
+		it("cancelBackgroundCommand terminates and marks as error", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const cmd = manager.trackBackgroundCommand(process, "test")
-			const cancelled = manager.cancelBackgroundCommand(cmd.id)
+			const cancelled = await manager.cancelBackgroundCommand(cmd.id)
 			assert.equal(cancelled, true)
 			const updated = manager.getBackgroundCommand(cmd.id)
 			assert.equal(updated?.status, "error")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("cancelBackgroundCommand returns false for unknown id", () => {
+		it("cancelBackgroundCommand returns false for unknown id", async () => {
 			const manager = new StandaloneTerminalManager()
-			assert.equal(manager.cancelBackgroundCommand("nonexistent"), false)
-			manager.disposeAll()
+			assert.equal(await manager.cancelBackgroundCommand("nonexistent"), false)
+			await manager.disposeAll()
 		})
 
-		it("cancelBackgroundCommand returns false for already completed", () => {
+		it("cancelBackgroundCommand returns false for already completed", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const cmd = manager.trackBackgroundCommand(process, "test")
 			// Simulate completion
 			const updated = manager.getBackgroundCommand(cmd.id)!
 			updated.status = "completed"
-			assert.equal(manager.cancelBackgroundCommand(cmd.id), false)
-			manager.disposeAll()
+			assert.equal(await manager.cancelBackgroundCommand(cmd.id), false)
+			await manager.disposeAll()
 		})
 
-		it("getBackgroundCommandsSummary returns empty when no running commands", () => {
+		it("getBackgroundCommandsSummary returns empty when no running commands", async () => {
 			const manager = new StandaloneTerminalManager()
 			assert.equal(manager.getBackgroundCommandsSummary(), "")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("getBackgroundCommandsSummary returns summary for running commands", () => {
+		it("getBackgroundCommandsSummary returns summary for running commands", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			manager.trackBackgroundCommand(process, "echo hello")
 			const summary = manager.getBackgroundCommandsSummary()
 			assert.ok(summary.includes("Background Commands"))
 			assert.ok(summary.includes("echo hello"))
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("marks command as completed when process emits completed with exit code 0", () => {
+		it("marks command as completed when process emits completed with exit code 0", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const fakeProcess = process as unknown as FakeProcess
@@ -396,10 +396,10 @@ describe("StandaloneTerminalManager", () => {
 			fakeProcess.emitCompleted({ exitCode: 0 })
 			const updated = manager.getBackgroundCommand(cmd.id)
 			assert.equal(updated?.status, "completed")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("marks command as error when process exits with non-zero code", () => {
+		it("marks command as error when process exits with non-zero code", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const fakeProcess = process as unknown as FakeProcess
@@ -408,10 +408,10 @@ describe("StandaloneTerminalManager", () => {
 			const updated = manager.getBackgroundCommand(cmd.id)
 			assert.equal(updated?.status, "error")
 			assert.equal(updated?.exitCode, 1)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("marks command as error when process emits error", () => {
+		it("marks command as error when process emits error", async () => {
 			const manager = new StandaloneTerminalManager()
 			const process = createFakeProcess()
 			const fakeProcess = process as unknown as FakeProcess
@@ -420,7 +420,7 @@ describe("StandaloneTerminalManager", () => {
 			const updated = manager.getBackgroundCommand(cmd.id)
 			assert.equal(updated?.status, "error")
 			assert.equal(updated?.exitCode, 127)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
 		it("pipes line events to log file", async () => {
@@ -436,10 +436,10 @@ describe("StandaloneTerminalManager", () => {
 			const content = fs.readFileSync(cmd.logFilePath, "utf-8")
 			assert.ok(content.includes("output line 1"))
 			assert.ok(content.includes("output line 2"))
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 
-		it("disposeBackgroundCommands cleans up all resources", () => {
+		it("disposeBackgroundCommands cleans up all resources", async () => {
 			const manager = new StandaloneTerminalManager()
 			const p1 = createFakeProcess()
 			const p2 = createFakeProcess()
@@ -447,23 +447,23 @@ describe("StandaloneTerminalManager", () => {
 			manager.trackBackgroundCommand(p2, "cmd2")
 			manager.disposeBackgroundCommands()
 			assert.equal(manager.getAllBackgroundCommands().length, 0)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
 	describe("isProcessHot", () => {
-		it("returns false for unknown terminal id", () => {
+		it("returns false for unknown terminal id", async () => {
 			const manager = new StandaloneTerminalManager()
 			assert.equal(manager.isProcessHot(999), false)
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 
 	describe("getUnretrievedOutput", () => {
-		it("returns empty string for unknown terminal id", () => {
+		it("returns empty string for unknown terminal id", async () => {
 			const manager = new StandaloneTerminalManager()
 			assert.equal(manager.getUnretrievedOutput(999), "")
-			manager.disposeAll()
+			await manager.disposeAll()
 		})
 	})
 })

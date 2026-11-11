@@ -79,6 +79,26 @@ describe("ExecuteCommandTool child approval integration", () => {
 		})
 	}
 
+	it("captures sandbox context before approval, displays it, and marks fallback including background results", async () => {
+		const test = fixture({ utility: true })
+		const { captureSandboxExecution } = await import("@shared/SandboxExecution")
+		const { DEFAULT_SANDBOX_SETTINGS } = await import("@shared/SandboxSettings")
+		const requested = captureSandboxExecution({ ...DEFAULT_SANDBOX_SETTINGS, enabled: true, allowUnsandboxedFallback: true }, true)
+		test.env.system.captureCommandSandbox = () => requested
+		test.waitForInteraction.callsFake(async () => {
+			assert.equal(test.approvalCards[0].permissionOperation?.kind, "commands")
+			assert.match(test.approvalCards[0].body!, /no meaningful isolation.*fallback: authorized/)
+			return { action: DiracAskResponse.APPROVE }
+		})
+		test.executeCommand.resolves({ output: "Running in background", completed: false, sandbox: { requested, effective: "unsandboxed-fallback", reason: "helper unavailable" } })
+		const output = await test.run(["command-A"])
+		assert.equal(test.executeCommand.firstCall.args[1].sandboxContext, requested)
+		assert.match(output, /Unsandboxed fallback/)
+		const card = await (test.env.ui.createCard as sinon.SinonStub).secondCall.returnValue
+		assert.match((card.update as sinon.SinonStub).firstCall.args[0].header, /Unsandboxed fallback/)
+		assert.equal((card.update as sinon.SinonStub).firstCall.args[0].rawOutput.sandbox.effective, "unsandboxed-fallback")
+	})
+
 	it("reuses a restored durable grant but not an unrelated child's empty grants", async () => {
 		const original = fixture()
 		await original.run(["command-A"])

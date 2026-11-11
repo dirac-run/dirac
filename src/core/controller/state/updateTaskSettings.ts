@@ -76,6 +76,7 @@ function prepareTaskSettings(
 	activeSettings?: DeepReadonly<Settings>,
 ): PreparedTaskSettings {
 	if (settings.subagentRoles !== undefined) throw new Error("Subagent roles are user-global settings")
+	if (settings.sandboxSettings !== undefined) throw new Error("Sandbox settings are user-global settings")
 	const {
 		autoApprovalSettings: incomingAutoApprovalSettings,
 		planModeReasoningEffort,

@@ -14,6 +14,7 @@ service StateService {
   rpc updateTerminalConnectionTimeout(UpdateTerminalConnectionTimeoutRequest) returns (UpdateTerminalConnectionTimeoutResponse);
   rpc updateTerminalReuseEnabled(BooleanRequest) returns (Empty);
   rpc getAvailableTerminalProfiles(EmptyRequest) returns (TerminalProfiles);
+  rpc getSandboxStatus(EmptyRequest) returns (SandboxStatus);
   rpc subscribeToState(EmptyRequest) returns (stream State);
   rpc toggleFavoriteModel(StringRequest) returns (Empty);
   rpc activateModelProviderPreset(StringRequest) returns (Empty);
@@ -92,6 +93,52 @@ message SubagentRole {
 // Presence distinguishes an omitted catalog from an explicitly empty catalog.
 message SubagentRoles {
   repeated SubagentRole roles = 1;
+}
+
+message SandboxSettings {
+  optional bool enabled = 1;
+  optional bool allow_unsandboxed_fallback = 2;
+  optional string main_agent_profile_id = 3;
+  optional string subagent_profile_id = 4;
+  repeated CustomSandboxProfile profiles = 5;
+}
+
+message CustomSandboxProfile {
+  optional string id = 1;
+  optional double revision = 2;
+  optional string name = 3;
+  optional string description = 4;
+  optional string kind = 5;
+  SandboxFilesystem filesystem = 6;
+  optional string temporary_directory = 7;
+  optional string network = 8;
+  SandboxEnvironment environment = 9;
+}
+message SandboxFilesystem {
+  optional string base = 1;
+  optional string workspace = 2;
+  repeated string readable = 3;
+  repeated string writable = 4;
+  repeated string blocked = 5;
+  repeated string caches = 6;
+}
+message SandboxEnvironment {
+  repeated string passthrough = 1;
+  map<string, string> overrides = 2;
+}
+
+// Describes the execution host and configured path, not a running command.
+message SandboxStatus {
+  string host_platform = 1;
+  bool available = 2;
+  optional string backend = 3;
+  optional bool requested_enabled = 4;
+  string effective_state = 5;
+  optional bool allow_unsandboxed_fallback = 6;
+  optional string error = 7;
+  optional string error_category = 8;
+  optional string remediation = 9;
+  repeated string limitations = 10;
 }
 
 // NOTE: Add the new secret fields under SECRETS_KEYS in src/shared/storage/state-keys.ts
@@ -327,6 +374,7 @@ message Settings {
   optional string act_mode_inference_speed = 215;
   optional bool cli_vim_mode = 216;
   optional SubagentRoles subagent_roles = 217;
+  optional SandboxSettings sandbox_settings = 218;
 }
 
 message State {
@@ -475,6 +523,7 @@ message UpdateSettingsRequest {
   optional bool utility_model_use_permission_handling = 54;
   optional string utility_model_permission_policy = 55;
   optional SubagentRoles subagent_roles = 56;
+  optional SandboxSettings sandbox_settings = 57;
 }
 
 message UserApprovedCommandsUpdate {

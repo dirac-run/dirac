@@ -1,0 +1,18 @@
+Dirac Windows MXC helper
+Copyright Dirac Delta Labs. Licensed under Apache-2.0 (APACHE-2.0.txt).
+
+Microsoft MXC SDK v1.0.1
+https://github.com/microsoft/mxc
+Pinned revision fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2
+Copyright (c) Microsoft Corporation. MIT license (MXC-LICENSE.txt).
+The SDK's doc-hidden BaseContainerRunner/PSEC interfaces are isolated in src/native.rs.
+
+OpenAI Codex native PSEC availability-probe reference
+https://github.com/openai/codex/tree/392ced7d3a9160fd35d40c606359869215f50522/codex-rs/mxc-sandbox
+Copyright OpenAI. Apache-2.0 (APACHE-2.0.txt).
+The create/startup/close probe pattern in src/native.rs is adapted from availability.rs.
+No Codex dispatcher, sandbox-account implementation, AppContainer fallback, or ACL mutation is used.
+
+Cargo.lock records the complete transitive dependency versions and checksums.
+Release maintainers must retain this notice and audit/ship transitive license
+notices from the locked dependency set in their release compliance bundle.

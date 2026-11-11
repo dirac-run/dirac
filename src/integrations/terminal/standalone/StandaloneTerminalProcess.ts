@@ -13,6 +13,7 @@ import { detectBestShell, getShellArgs, ShellInfo } from "@/utils/shell-detectio
 import { ChildProcess, spawn } from "child_process"
 import { EventEmitter } from "events"
 import { terminateProcessTree } from "@/utils/process-termination"
+import { prepareNativeSandbox, type NativeSandboxRequest, type PreparedSandboxLaunch } from "../sandbox"
 
 import {
 	isCompilingOutput,
@@ -22,6 +23,19 @@ import {
 	PROCESS_HOT_TIMEOUT_NORMAL,
 } from "../constants"
 import type { ITerminal, ITerminalProcess, TerminalCompletionDetails, TerminalProcessEvents } from "../types"
+
+function standaloneEnvironment(terminal: ITerminal): NodeJS.ProcessEnv {
+	return {
+		...process.env,
+		...terminal._env,
+		TERM: "xterm-256color",
+		PAGER: "cat",
+		EDITOR: process.env.EDITOR || "cat",
+		GIT_PAGER: "cat",
+		SYSTEMD_PAGER: "",
+		MANPAGER: "cat",
+	}
+}
 
 /**
  * Manages the execution of a command in a standalone terminal environment.
@@ -60,6 +74,8 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 	/** The spawned child process */
 	private childProcess: ChildProcess | null = null
+	private sandbox?: PreparedSandboxLaunch
+	private termination?: Promise<void>
 
 	/** Exit code from the process */
 	private exitCode: number | null = null
@@ -77,12 +93,25 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 		super()
 	}
 
+	/** Prepare all native prerequisites before the final synchronous launch authorization. */
+	static prepareSandbox(terminal: ITerminal, command: string, policy: NativeSandboxRequest["policy"], context?: NativeSandboxRequest["context"]): Promise<PreparedSandboxLaunch> {
+		const shell = detectBestShell()
+		return prepareNativeSandbox({
+			executable: terminal._shellPath || shell.path,
+			args: getShellArgs(shell, command),
+			cwd: terminal._cwd || process.cwd(),
+			env: standaloneEnvironment(terminal),
+			policy,
+			context,
+		})
+	}
+
 	/**
 	 * Run a command in the terminal.
 	 * @param terminal The terminal instance to run in
 	 * @param command The command to execute
 	 */
-	async run(terminal: ITerminal, command: string): Promise<void> {
+	async run(terminal: ITerminal, command: string, sandbox?: PreparedSandboxLaunch): Promise<void> {
 		// Get shell and working directory from terminal
 		const shell = (terminal as any)._shellPath || this.shellInfo.path
 		const cwd = (terminal as any)._cwd || process.cwd()
@@ -100,20 +129,14 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			} = {
 				cwd: cwd,
 				stdio: ["ignore", "pipe", "pipe"], // Disable STDIN to prevent interactivity
-				env: {
-					...process.env,
-					...(terminal as any)._env,
-					TERM: "xterm-256color",
-					PAGER: "cat", // Prevent less from being used, reducing interactivity
-					EDITOR: process.env.EDITOR || "cat", // Set EDITOR if not already set
-					GIT_PAGER: "cat", // Prevent git from using less
-					SYSTEMD_PAGER: "", // Disable systemd pager
-					MANPAGER: "cat", // Disable man pager
-				},
+				env: standaloneEnvironment(terminal),
 			}
 
 			// Enable the shell option for "cmd.exe" to prevent double quotes from being over escaped
-			if (shell.toLowerCase().includes("cmd")) {
+			if (sandbox) {
+				this.sandbox = sandbox
+				this.childProcess = sandbox.spawn()
+			} else if (shell.toLowerCase().includes("cmd")) {
 				shellOptions.shell = true
 
 				// Spawn the process with special handling for "cmd.exe"
@@ -180,8 +203,7 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			})
 
 			// Update terminal's process reference
-			;(terminal as any)._process = this.childProcess
-			;(terminal as any)._processId = this.childProcess.pid
+			Object.assign(terminal, { _process: this.childProcess, _processId: this.childProcess.pid })
 		} catch (error) {
 			this.emit("error", error)
 		}
@@ -333,8 +355,18 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 	 * - Graceful shutdown with SIGTERM
 	 * - SIGKILL fallback after 2 second timeout
 	 */
-	async terminate(): Promise<void> {
+	terminate(): Promise<void> {
+		this.termination ??= this.terminateOwnedProcess()
+		return this.termination
+	}
+
+	private async terminateOwnedProcess(): Promise<void> {
 		if (!this.childProcess || this.isCompleted) {
+			return
+		}
+
+		if (this.sandbox) {
+			await this.sandbox.terminate(this.childProcess)
 			return
 		}
 

@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert"
 import type { TaskletRecord } from "@core/storage/taskStorage"
 import { CardStatus } from "@shared/ExtensionMessage"
+import { sandboxTaskPolicyCatalog } from "@shared/SandboxTaskPolicy"
+import { DEFAULT_SANDBOX_SETTINGS, resolveSandboxProfile } from "@shared/SandboxSettings"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import type { IToolEnvironment, TaskletControls } from "../../interfaces/IToolEnvironment"
@@ -134,6 +136,37 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		assert.equal(updates[0].taskletReceipt.rows[0].role, "Reviewer")
 		assert.equal(updates[0].header, "Dirac → Feynman · Start agents")
 		assert.match(updates[0].body, /Feynman \(Reviewer\) — Review code/)
+	})
+
+	it("forwards typed task-local narrowing only and rejects settings authority", async () => {
+		const start = sinon.stub().resolves(record("Planck"))
+		const { env } = fixture(start)
+		const sandbox = { profileId: "builtin-workspace", restrictions: { workspace: "read-only", network: "blocked", writablePaths: [] } }
+		const [accepted] = await spawn(env, [{ ...assignment, sandbox }])
+		assert.equal(accepted.accepted, true)
+		sinon.assert.calledOnceWithExactly(start, { type: "default", title: "Inspect code", prompt: "Inspect", sandbox })
+		for (const invalid of [{ enabled: true }, { allowUnsandboxedFallback: true }, { restrictions: { environment: {} } }]) {
+			const [rejected] = await spawn(env, [{ ...assignment, sandbox: invalid }])
+			assert.equal(rejected.accepted, false)
+		}
+		assert.equal(start.callCount, 1)
+	})
+
+	it("discovers the catalog/ceiling without exposing environment override secrets", async () => {
+		const { env } = fixture()
+		const builtin = resolveSandboxProfile(DEFAULT_SANDBOX_SETTINGS, "builtin-workspace")
+		assert.ok("kind" in builtin)
+		const profile = { ...structuredClone(builtin), id: "secret-profile", name: "Secret profile", environment: { passthrough: ["PATH"], overrides: { TOKEN: "never-disclose-this-secret" } } }
+		Object.assign(env.orchestration.tasklets!, {
+			list: () => ({ items: [], totalItems: 0 }),
+			sandboxCatalog: () => sandboxTaskPolicyCatalog({ ...DEFAULT_SANDBOX_SETTINGS, enabled: true, subagentProfileId: profile.id, profiles: [profile] }),
+		})
+		const output = await new SubagentsTool().processCall({ operation: "list" }, env)
+		assert.equal(output.includes("never-disclose-this-secret"), false)
+		const result = JSON.parse(output)
+		assert.equal(result.sandbox.ceilingProfileId, profile.id)
+		assert.equal(result.sandbox.taskPolicyFallback, "forbidden")
+		assert.deepEqual(result.sandbox.profiles.find((p: { id: string }) => p.id === profile.id).environment.overrideKeys, ["TOKEN"])
 	})
 
 	it("describes asynchronous acceptance, later communication and inspection/sleep", () => {

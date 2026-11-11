@@ -110,13 +110,14 @@ describe("Tasklet integrated resource cleanup", function () {
 		})
 		stateManager = {
 			getGlobalSettingsKey: (key: keyof typeof SETTINGS_DEFAULTS) => SETTINGS_DEFAULTS[key],
+			getSystemDefaultSettingsKey: (key: keyof typeof SETTINGS_DEFAULTS) => SETTINGS_DEFAULTS[key],
 			getGlobalStateKey: () => undefined,
 			getWorkspaceStateKey: () => undefined,
 			getSecretKey: () => undefined,
 			getApiConfiguration: () => ({ actModeApiProvider: "anthropic", actModeApiModelId: "root" }),
 			setGlobalState: sandbox.stub().resolves(),
 			setWorkspaceState: sandbox.stub().resolves(),
-			flushPendingState: async () => {},
+			flushPendingState: async () => { },
 		} as unknown as StateManager
 		sandbox.stub(StateManager, "get").returns(stateManager)
 		sandbox.stub(ErrorService, "get").returns({
@@ -127,10 +128,10 @@ describe("Tasklet integrated resource cleanup", function () {
 		sandbox.stub(checkpointFactory, "buildCheckpointManager").callsFake(() => {
 			return {
 				isEnabled: () => true,
-				setEnabled() {},
-				initialize: async () => {},
+				setEnabled() { },
+				initialize: async () => { },
 				commit: async () => "controlled-checkpoint",
-				saveCheckpoint: async () => {},
+				saveCheckpoint: async () => { },
 				doesLatestTaskCompletionHaveNewChanges: async () => false,
 				restoreCheckpoint: async () => {
 					throw new Error("Cancellation must not restore the shared workspace")
@@ -265,24 +266,24 @@ process.on("SIGTERM", () => {
 			toolSelectionPolicy: { mode: "exact", toolIds: ["respond", "execute_command"] },
 			...(rootTaskId
 				? {
-						executionProfile: "tasklet" as const,
-						tasklet: {
-							// Resource isolation is tested with a controlled owner granting the command.
-							counterparty: {
-								recordResponse: async () => {},
-								requestInteraction: async () => ({
-									response: DiracAskResponse.APPROVE,
-									action: DiracAskResponse.APPROVE,
-								}),
-							},
-							storageAddress: { kind: "tasklet" as const, rootTaskId, taskletId: taskId },
-							postStateToOwner: sandbox.stub().resolves(),
-							postPresentationToOwner: sandbox.stub().resolves(),
-							withMutationAuthorization: <T>(_toolName: unknown, mutation: () => Promise<T>) => mutation(),
-							retainMutationUntil: () => {},
-							updateBackgroundCommandState: sandbox.stub(),
+					executionProfile: "tasklet" as const,
+					tasklet: {
+						// Resource isolation is tested with a controlled owner granting the command.
+						counterparty: {
+							recordResponse: async () => { },
+							requestInteraction: async () => ({
+								response: DiracAskResponse.APPROVE,
+								action: DiracAskResponse.APPROVE,
+							}),
 						},
-					}
+						storageAddress: { kind: "tasklet" as const, rootTaskId, taskletId: taskId },
+						postStateToOwner: sandbox.stub().resolves(),
+						postPresentationToOwner: sandbox.stub().resolves(),
+						withMutationAuthorization: <T>(_toolName: unknown, mutation: () => Promise<T>) => mutation(),
+						retainMutationUntil: () => { },
+						updateBackgroundCommandState: sandbox.stub(),
+					},
+				}
 				: {}),
 		}
 		const task = new Task(params)

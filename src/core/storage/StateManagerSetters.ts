@@ -75,6 +75,7 @@ export function setTaskSettings<K extends keyof Settings>(
 ): void {
 	guardInitialized(ctx)
 	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "sandboxSettings") throw new Error("Sandbox settings are user-global settings")
 	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 	ctx.taskStateCache[key] = normalizeLoadedSetting(key, value)
 	ctx.persistence.addPendingTaskState(taskId, key)
@@ -83,6 +84,7 @@ export function setTaskSettings<K extends keyof Settings>(
 export function setTaskSettingsBatch(ctx: StateManagerSettersContext, taskId: string, updates: Partial<Settings>): void {
 	guardInitialized(ctx)
 	if (Object.hasOwn(updates, "subagentRoles")) throw new Error("Subagent roles are user-global settings")
+	if (Object.hasOwn(updates, "sandboxSettings")) throw new Error("Sandbox settings are user-global settings")
 	if (Object.hasOwn(updates, "addedApiProviders")) throw new Error("Added API providers are user-global settings")
 	const normalizedUpdates = normalizeLoadedSettings(updates)
 	Object.assign(ctx.taskStateCache, normalizedUpdates)
@@ -109,6 +111,7 @@ export async function loadTaskSettings(ctx: StateManagerSettersContext, taskId: 
 	guardInitialized(ctx)
 	const taskSettings = (await ctx.persistence.loadTaskSettingsFromDisk(taskId)) as Partial<Settings>
 	delete taskSettings.subagentRoles
+	delete taskSettings.sandboxSettings
 	delete taskSettings.addedApiProviders
 	const normalizedTaskSettings = normalizeLoadedSettings(taskSettings)
 	Object.assign(ctx.taskStateCache, normalizedTaskSettings)
@@ -148,6 +151,7 @@ export function setSecretsBatch(ctx: StateManagerSettersContext, updates: Partia
 export function setWorkspaceState(ctx: StateManagerSettersContext, key: string, value: unknown): void {
 	guardInitialized(ctx)
 	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "sandboxSettings") throw new Error("Sandbox settings are user-global settings")
 	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 		; (ctx.workspaceStateCache as Record<string, unknown>)[key] = value
 	ctx.persistence.addPendingWorkspaceState(key as LocalStateKey)
@@ -156,6 +160,7 @@ export function setWorkspaceState(ctx: StateManagerSettersContext, key: string, 
 export function setWorkspaceStateBatch(ctx: StateManagerSettersContext, updates: Partial<LocalState>): void {
 	guardInitialized(ctx)
 	if (Object.hasOwn(updates, "subagentRoles")) throw new Error("Subagent roles are user-global settings")
+	if (Object.hasOwn(updates, "sandboxSettings")) throw new Error("Sandbox settings are user-global settings")
 	if (Object.hasOwn(updates, "addedApiProviders")) throw new Error("Added API providers are user-global settings")
 	const changedKeys: LocalStateKey[] = []
 	Object.entries(updates).forEach(([key, value]) => {
@@ -168,6 +173,7 @@ export function setWorkspaceStateBatch(ctx: StateManagerSettersContext, updates:
 export function setSessionOverride<K extends keyof Settings>(ctx: StateManagerSettersContext, key: K, value: Settings[K]): void {
 	guardInitialized(ctx)
 	if (key === "subagentRoles") throw new Error("Subagent roles are user-global settings")
+	if (key === "sandboxSettings") throw new Error("Sandbox settings are user-global settings")
 	if (key === "addedApiProviders") throw new Error("Added API providers are user-global settings")
 	ctx.sessionOverrideCache[key] = normalizeLoadedSetting(key, value)
 }

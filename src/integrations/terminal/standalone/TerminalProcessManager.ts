@@ -18,6 +18,7 @@ import { DiracTempManager } from "@services/temp"
 import * as fs from "fs"
 import { getErrorMessage } from "@/shared/errors"
 import { BACKGROUND_COMMAND_TIMEOUT_MS } from "../constants"
+import type { PreparedSandboxLaunch } from "../sandbox"
 import type { BackgroundCommand, TerminalInfo, TerminalProcessResultPromise } from "../types"
 import { StandaloneTerminalProcess } from "./StandaloneTerminalProcess"
 
@@ -68,7 +69,7 @@ export class TerminalProcessManager {
 	// =========================================================================
 
 	/** Spawn a command in the specified terminal, returning a merged promise/process object. */
-	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+	runCommand(terminalInfo: TerminalInfo, command: string, sandbox?: PreparedSandboxLaunch): TerminalProcessResultPromise {
 		terminalInfo.busy = true
 		terminalInfo.lastCommand = command
 
@@ -90,7 +91,7 @@ export class TerminalProcessManager {
 		})
 
 		// Run the command immediately (no shell integration wait needed)
-		process.run(terminalInfo.terminal, command)
+		process.run(terminalInfo.terminal, command, sandbox)
 
 		return mergePromise(process, promise)
 	}
@@ -121,12 +122,10 @@ export class TerminalProcessManager {
 	}
 
 	/** Terminate all tracked processes. */
-	terminateAll(): void {
-		for (const [_terminalId, process] of this.processes) {
-			if (process?.terminate) {
-				process.terminate()
-			}
-		}
+	async terminateAll(): Promise<void> {
+		const results = await Promise.allSettled(Array.from(this.processes.values(), (process) => process.terminate()))
+		const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Terminal cleanup failed")
 	}
 
 	/** Clear all process tracking (does not terminate — call terminateAll first). */
@@ -222,11 +221,16 @@ export class TerminalProcessManager {
 			this.backgroundLogFinalizers.delete(id)
 		})
 
-		const timeoutId = setTimeout(() => {
-			if (backgroundCommand.status === "running") {
-				backgroundCommand.status = "timed_out"
-				requestFinalization("\n[TIMEOUT] Process killed after 10 minutes\n")
-				if (process?.terminate) process.terminate()
+		const timeoutId = setTimeout(async () => {
+			this.backgroundTimeouts.delete(id)
+			if (backgroundCommand.status !== "running") return
+			backgroundCommand.status = "timed_out"
+			try {
+				await process.terminate?.()
+				requestFinalization("\n[TIMEOUT] Process stopped after 10 minutes\n")
+			} catch (error) {
+				backgroundCommand.status = "error"
+				requestFinalization(`\n[CLEANUP_ERROR] Timeout cleanup incomplete: ${getErrorMessage(error)}\n`)
 			}
 		}, BACKGROUND_COMMAND_TIMEOUT_MS)
 		this.backgroundTimeouts.set(id, timeoutId)
@@ -292,7 +296,7 @@ export class TerminalProcessManager {
 	}
 
 	/** Cancel/terminate a specific background command. Returns true if cancelled, false if not found or already completed. */
-	cancelBackgroundCommand(id: string): boolean {
+	async cancelBackgroundCommand(id: string): Promise<boolean> {
 		const command = this.backgroundCommands.get(id)
 		if (!command || command.status !== "running") {
 			return false
@@ -309,12 +313,8 @@ export class TerminalProcessManager {
 		this.backgroundLogFinalizers.get(id)?.("\n[CANCELLED] Command cancelled by user\n")
 		this.backgroundLogFinalizers.delete(id)
 
-		// Terminate process
-		if (command.process?.terminate) {
-			command.process.terminate()
-		}
-
 		command.status = "error"
+		await command.process.terminate?.()
 		return true
 	}
 

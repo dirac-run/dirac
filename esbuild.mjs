@@ -3,6 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import * as esbuild from "esbuild"
 import { copySourceCode } from "./scripts/copy-source.mjs"
+import { copyWindowsMxcArtifacts } from "./scripts/windows-mxc-artifacts.mjs"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -96,6 +97,7 @@ const copyAssets = {
 			// tree sitter
 			const sourceDir = path.join(__dirname, "node_modules", "web-tree-sitter")
 			const targetDir = path.join(__dirname, destDir)
+			copyWindowsMxcArtifacts(targetDir)
 
 			fs.rmSync(path.join(targetDir, "node_modules", "@vscode", "ripgrep"), { recursive: true, force: true })
 

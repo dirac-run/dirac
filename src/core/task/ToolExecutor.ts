@@ -27,6 +27,7 @@ import { canonicalizeResponseToolCall, isCompletionResponseCall } from "@shared/
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { getTaskScopedStateKey } from "@shared/taskletId"
+import { captureSandboxExecution } from "@shared/SandboxExecution"
 import { modelDoesntSupportWebp } from "@/utils/model-utils"
 import { ToolUse } from "../assistant-message"
 import { ContextManager } from "../context/context-management/ContextManager"
@@ -136,6 +137,7 @@ export class ToolExecutor {
 		private getSharedJournal?: () => import("./SharedJournalTypes").SharedJournalCapability | undefined,
 		private getPermissionCommandController?: () => CommandPermissionController,
 		private getCommandApprovals?: () => import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability | undefined,
+		private captureTaskCommandSandbox?: () => import("@shared/SandboxExecution").SandboxExecutionContext,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -452,6 +454,9 @@ export class ToolExecutor {
 				postStateToWebview: this.postStateToWebview.bind(this),
 				cancelTask: this.cancelTask,
 				executeCommandTool: this.executeCommandTool,
+				captureCommandSandbox: () => this.captureTaskCommandSandbox?.() ?? captureSandboxExecution(
+					this.stateManager.getSystemDefaultSettingsKey("sandboxSettings"), this.executionProfile === "tasklet",
+				),
 				cancelRunningCommandTool: this.cancelRunningCommandTool,
 				doesLatestTaskCompletionHaveNewChanges: this.doesLatestTaskCompletionHaveNewChanges,
 				getDiracMessages: () => this.messageStateHandler.getDiracMessages(),

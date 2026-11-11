@@ -16,6 +16,7 @@ export const CLI_SETTINGS_DESTINATIONS: CliSettingsDestination[] = [
 	SettingsTab.RUNNING_TASKS,
 	SettingsTab.TOOLS,
 	SettingsTab.TERMINAL,
+	SettingsTab.SANDBOX,
 	SettingsTab.GENERAL,
 ].map((key) => ({
 	key,

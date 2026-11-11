@@ -18,6 +18,7 @@ import { TelemetrySetting } from "@shared/TelemetrySetting"
 import { normalizeUserApprovedCommands, type UserApprovedCommand } from "@shared/UserApprovedCommand"
 import { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 import { DEFAULT_SUBAGENT_ROLES, type SubagentRole, validateSubagentRoles } from "@shared/subagentRoles"
+import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from "@shared/SandboxSettings"
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH FOR STORAGE KEYS
@@ -238,6 +239,8 @@ const USER_SETTINGS_FIELDS = {
 	utilityModelPermissionPolicy: { default: "" as string },
 	utilityModelSelection: { default: undefined as ModelProviderSelection | undefined },
 	subagentRoles: { default: DEFAULT_SUBAGENT_ROLES as SubagentRole[], transform: validateSubagentRoles },
+	// Preserve invalid persisted configuration: command/status boundaries report it without disabling the host.
+	sandboxSettings: { default: DEFAULT_SANDBOX_SETTINGS as SandboxSettings },
 	autoApprovalSettings: {
 		default: DEFAULT_AUTO_APPROVAL_SETTINGS as AutoApprovalSettings,
 	},

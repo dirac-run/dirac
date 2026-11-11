@@ -1,5 +1,9 @@
 import { modelProviderSelectionUpdates } from "@core/api/modelProviderSelection"
 import type { SubagentRole } from "@shared/subagentRoles"
+import { tmpdir } from "node:os"
+import { captureSandboxExecution, assertSandboxExecutionCurrent } from "@shared/SandboxExecution"
+import { freezeSandboxTaskPolicy, sandboxTaskPolicyCatalog } from "@shared/SandboxTaskPolicy"
+import { captureSandboxTaskPolicy, resolveSandboxTaskPolicy } from "@integrations/terminal/sandbox/taskPolicy"
 import { getProviderModelInfoKey } from "@shared/storage/provider-keys"
 import { getSavedApiConversationState, getSavedPresentationHistory, readSavedPresentationHistory } from "@core/storage/conversationHistory"
 import {
@@ -614,6 +618,7 @@ export class Task {
 		this.executionProfile = params.executionProfile ?? "standalone"
 		this.getPinnedContext = params.getPinnedContext ?? (() => Promise.resolve(params.pinnedContext))
 		this.taskletConfiguration = params.tasklet?.configuration
+		if (this.taskletConfiguration?.sandboxPolicy) freezeSandboxTaskPolicy(this.taskletConfiguration.sandboxPolicy)
 		this.ownerBindings = params.tasklet
 		this.inheritedParentConfiguration = params.tasklet?.getParentWorkingConfiguration?.()
 		if (this.executionProfile !== "standalone" && workingConfiguration.settings.mode !== "act") {
@@ -1050,6 +1055,7 @@ export class Task {
 				const host = this.taskletHost
 				if (!host) return undefined
 				return {
+					sandboxCatalog: () => sandboxTaskPolicyCatalog(this.stateManager.getSystemDefaultSettingsKey("sandboxSettings")),
 					start: (input) => host.start(input),
 					resume: (id, message) => host.resume(id, message),
 					list: (query) => host.listSummaries(query),
@@ -1088,6 +1094,7 @@ export class Task {
 					},
 				}
 			},
+			() => this.captureCommandSandbox(),
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1806,7 +1813,38 @@ export class Task {
 		timeoutSeconds: number | undefined,
 		options?: CommandExecutionOptions,
 	): Promise<CommandExecutionResult> {
-		return this.commandExecutor.execute(command, timeoutSeconds, options)
+		const readSandbox = () => this.captureCommandSandbox()
+		const sandboxContext = options?.sandboxContext ?? readSandbox()
+		return this.commandExecutor.execute(command, timeoutSeconds, {
+			...options,
+			sandboxContext,
+			sandbox: sandboxContext.enabled ? {
+				profile: "default", allowUnsandboxedFallback: sandboxContext.allowUnsandboxedFallback,
+				context: {
+					workspaceRoots: this.workspaceManager?.getRoots().map((root) => root.path) ?? [this.cwd],
+					protectedPaths: Object.values(this.stateManager.getStorageDirectories()),
+					...(sandboxContext.taskPolicy ? { pathIdentities: sandboxContext.taskPolicy.pathIdentities } : {}),
+				},
+			} : undefined,
+			assertAuthorized: () => {
+				this.taskState.abortSignal.throwIfAborted()
+				assertSandboxExecutionCurrent(sandboxContext, readSandbox())
+				options?.assertAuthorized?.()
+			},
+		})
+	}
+
+	/** Host-only capture shared by approval display and launch authorization. */
+	public captureCommandSandbox(): import("@shared/SandboxExecution").SandboxExecutionContext {
+		const settings = this.stateManager.getSystemDefaultSettingsKey("sandboxSettings")
+		const captured = captureSandboxExecution(settings, this.executionProfile === "tasklet", {
+			platform: process.platform,
+			temporaryDirectory: tmpdir(),
+		})
+		const taskPolicy = this.taskletConfiguration?.sandboxPolicy
+		if (!taskPolicy) return captured
+		const profile = resolveSandboxTaskPolicy(settings, taskPolicy, this.workspaceManager?.getRoots().map((root) => root.path) ?? [this.cwd])
+		return Object.freeze({ ...captured, profileId: profile.id, profile, enabled: true, allowUnsandboxedFallback: false, taskPolicy })
 	}
 
 	/**
@@ -2236,6 +2274,10 @@ export class TaskletHost {
 		if (this.listActive().length >= 16) throw new Error("Tasklet active child limit of 16 reached")
 		// Validate before clearing committed outcomes or appending a resumed event.
 		taskletWorkingConfiguration(this.options.workingConfiguration, child.record.configuration)
+		if (child.record.configuration?.sandboxPolicy) resolveSandboxTaskPolicy(
+			this.options.stateManager.getSystemDefaultSettingsKey("sandboxSettings"), child.record.configuration.sandboxPolicy,
+			this.options.workspaceManager?.getRoots().map((root) => root.path) ?? [this.options.cwd],
+		)
 		const record = { ...child.record, outcome: undefined }
 		// The newly admitted execution is starting even while its acceptance write is pending.
 		child.settling = false
@@ -2281,6 +2323,10 @@ export class TaskletHost {
 		const configuration = await resolveTaskletConfiguration(
 			input, this.options.workingConfiguration, StateManager.get().getSystemDefaultSettingsKey("subagentRoles"),
 			this.options.getParentModel?.(),
+		)
+		if (input.sandbox !== undefined) configuration.sandboxPolicy = captureSandboxTaskPolicy(
+			this.options.stateManager.getSystemDefaultSettingsKey("sandboxSettings"), input.sandbox,
+			this.options.workspaceManager?.getRoots().map((root) => root.path) ?? [this.options.cwd],
 		)
 		// Configuration loading may yield to reconstruction or root shutdown before admission.
 		if (this.reconstruction) await this.reconstruction
@@ -2344,6 +2390,10 @@ export class TaskletHost {
 		// A start admitted before shutdown still owns its write, but must not launch late work.
 		try {
 			if (!this.closing) await this.persistEvents(child)
+			if (!this.closing && record.configuration?.sandboxPolicy) resolveSandboxTaskPolicy(
+				this.options.stateManager.getSystemDefaultSettingsKey("sandboxSettings"), record.configuration.sandboxPolicy,
+				this.options.workspaceManager?.getRoots().map((root) => root.path) ?? [this.options.cwd],
+			)
 			// Communication persistence can yield to shutdown; never construct late work.
 			child.task = this.closing ? undefined : new this.TaskConstructor({
 				...this.options,

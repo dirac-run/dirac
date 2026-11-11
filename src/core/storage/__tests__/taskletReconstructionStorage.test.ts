@@ -7,6 +7,9 @@ import { HostProvider } from "@/hosts/host-provider"
 import { setVscodeHostProviderMock } from "@/test/host-provider-test-utils"
 import { CardKind, CardStatus } from "@shared/ExtensionMessage"
 import { ResponseOperation } from "@shared/responseTool"
+import { DEFAULT_SANDBOX_SETTINGS, type CustomSandboxProfile } from "@shared/SandboxSettings"
+import { captureSandboxTaskPolicy, resolveSandboxTaskPolicy } from "@integrations/terminal/sandbox/taskPolicy"
+import { assertTaskletConfiguration } from "@core/task/TaskletConfiguration"
 import { GlobalFileNames } from "../fileNames"
 import { getTaskDirectoryPath } from "../taskDirectory"
 import {
@@ -43,6 +46,29 @@ describe("tasklet reconstruction storage", () => {
 	afterEach(async () => {
 		HostProvider.reset()
 		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("preserves explicit task sandbox snapshots through real reload, migration and copied-root rebinding", async function () {
+		if (process.platform !== "linux" || process.arch !== "x64") this.skip()
+		const workspace = path.join(directory, "workspace"), temp = path.join(directory, "temp")
+		await fs.mkdir(workspace); await fs.mkdir(temp)
+		const profile: CustomSandboxProfile = { id: "ceiling", name: "Ceiling", description: "", revision: 1, kind: "custom", filesystem: { base: "selected", workspace: "read-write", readable: [], writable: [], blocked: [], caches: [] }, temporaryDirectory: temp, network: "deny", environment: { passthrough: [], overrides: {} } }
+		const settings = { ...DEFAULT_SANDBOX_SETTINGS, enabled: true, subagentProfileId: profile.id, profiles: [profile] }
+		const sandboxPolicy = captureSandboxTaskPolicy(settings, { restrictions: { workspace: "read-only" } }, [workspace])
+		const configuration = { name: "default", modelSelection: { provider: "anthropic" as const, modelId: "model" }, sandboxPolicy }
+		await saveTaskletRecord({ ...record(), configuration })
+		const [loaded] = await loadTaskletRecords("root")
+		assert.deepEqual(loaded.configuration?.sandboxPolicy, sandboxPolicy)
+		assertTaskletConfiguration(loaded.configuration)
+		assert.ok(loaded.configuration.sandboxPolicy)
+		assert.equal(resolveSandboxTaskPolicy({ ...DEFAULT_SANDBOX_SETTINGS, enabled: true }, loaded.configuration.sandboxPolicy, [workspace]).filesystem.workspace, "read-only")
+		await fs.cp(getTaskDirectoryPath("root"), getTaskDirectoryPath("fork"), { recursive: true })
+		await rebindCopiedTaskletRecords("root", "fork")
+		assert.deepEqual((await loadTaskletRecords("fork"))[0].configuration?.sandboxPolicy, sandboxPolicy)
+		await saveTaskletRecord({ ...record(), configuration: { ...configuration, sandboxPolicy: { version: 2 } } } as unknown as TaskletRecord)
+		const [malformed] = await loadTaskletRecords("root")
+		assert.deepEqual(malformed.configuration?.sandboxPolicy, { version: 2 })
+		assert.throws(() => assertTaskletConfiguration(malformed.configuration), /policy version/)
 	})
 
 	it("retains exact command grants on reload but strips them when copying to another root", async () => {

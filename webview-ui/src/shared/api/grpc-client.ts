@@ -276,6 +276,9 @@ export class StateServiceClient extends ProtoBusClient {
 	static async getAvailableTerminalProfiles(request: proto.dirac.EmptyRequest): Promise<proto.dirac.TerminalProfiles> {
 		return this.makeUnaryRequest("getAvailableTerminalProfiles", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.TerminalProfiles.fromJSON)
 	}
+	static async getSandboxStatus(request: proto.dirac.EmptyRequest): Promise<proto.dirac.SandboxStatus> {
+		return this.makeUnaryRequest("getSandboxStatus", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.SandboxStatus.fromJSON)
+	}
 	static subscribeToState(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.State>): ()=>void {
 		return this.makeStreamingRequest("subscribeToState", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.State.fromJSON, callbacks)
 	}

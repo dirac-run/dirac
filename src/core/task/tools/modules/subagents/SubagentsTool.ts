@@ -1,5 +1,6 @@
 import { formatResponse } from "@core/formatResponse"
 import { CardStatus } from "@shared/ExtensionMessage"
+import { validateSandboxTaskPolicyRequest } from "@shared/SandboxTaskPolicy"
 import {
 	formatTaskletReceipt,
 	TASKLET_RECEIPT_OPERATIONS,
@@ -51,6 +52,24 @@ const assignmentParameter: NonNullable<DiracToolSpec["parameters"]>[number] = {
 				type: "string",
 				minLength: 1,
 				description: "Complete assignment instructions and necessary context; no parent conversation is copied.",
+			},
+			sandbox: {
+				type: "object",
+				description: "Optional command-only narrowing, never settings mutation. Use list for saved profile IDs and user ceiling. Explicit policies require enabled native sandboxing and forbid fallback. Omitted restriction fields retain profile values; path lists replace profile lists. Existing canonical paths only; widening or unsupported combinations fail closed.",
+				properties: {
+					profileId: { type: "string", minLength: 1 },
+					restrictions: {
+						type: "object", additionalProperties: false,
+						properties: {
+							workspace: { type: "string", enum: ["read-only", "read-write"] },
+							hostFiles: { type: "string", enum: ["blocked", "read-only"], description: "blocked retains only the native system runtime baseline, workspace and explicit grants." },
+							network: { type: "string", enum: ["blocked", "allowed"] },
+							readablePaths: { type: "array", maxItems: 64, items: { type: "string" } },
+							writablePaths: { type: "array", maxItems: 64, items: { type: "string" } },
+							cachePaths: { type: "array", maxItems: 64, items: { type: "string" } },
+						},
+					},
+				}, additionalProperties: false,
 			},
 		},
 		required: ["type", "task_header", "task_description"],
@@ -149,7 +168,7 @@ export class SubagentsTool implements IDiracTool {
 		if (!input || typeof input !== "object" || Array.isArray(input))
 			throw new Error(`${subject} assignment must be an object`)
 		const args = input as Record<string, unknown>
-		rejectUnknownFields(args, ["type", "task_header", "task_description"], subject)
+		rejectUnknownFields(args, ["type", "task_header", "task_description", "sandbox"], subject)
 		const type = requireString(args, "type").trim()
 		const prompt = requireString(args, "task_description").trim()
 		const title = requireString(args, "task_header").trim().replace(/\s+/g, " ")
@@ -157,7 +176,7 @@ export class SubagentsTool implements IDiracTool {
 			throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_WORDS} words`)
 		if (title.length > SUBAGENT_TASK_TITLE_MAX_CHARS)
 			throw new Error(`${subject} task_header must contain no more than ${SUBAGENT_TASK_TITLE_MAX_CHARS} characters`)
-		return { title, prompt, type }
+		return { title, prompt, type, ...(args.sandbox === undefined ? {} : { sandbox: validateSandboxTaskPolicyRequest(args.sandbox) }) }
 	}
 }
 
@@ -515,7 +534,7 @@ function requireMessageText(args: Record<string, unknown>): string {
 async function executeOperation(controls: TaskletControls, request: ControlRequest): Promise<unknown> {
 	switch (request.operation) {
 		case "list":
-			return request.query ? controls.list(request.query) : controls.list()
+			return { ...(request.query ? controls.list(request.query) : controls.list()), ...(controls.sandboxCatalog ? { sandbox: controls.sandboxCatalog() } : {}) }
 		case "inspect":
 			return request.query ? controls.inspect(request.taskletId, request.query) : controls.inspect(request.taskletId)
 		case "message":

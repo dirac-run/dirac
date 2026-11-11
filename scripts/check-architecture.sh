@@ -82,11 +82,7 @@ check_any_ratchet() {
     echo "ERROR: check_any_ratchet requires a merge base with origin/master. In CI, set fetch-depth: 0." >&2
     return 2
   fi
-  git diff -U0 "$base" -- src cli/src webview-ui/src 2>/dev/null | \
-    awk '/^\+\+\+ b\// { file = substr($0, 7); next }
-         /^\+/ && ($0 ~ /as any([^A-Za-z0-9_]|$)/ || $0 ~ /: *any([^A-Za-z0-9_(]|$)/) {
-           if (file !~ /\.test\.|__tests__/) print file ":" substr($0, 2)
-         }'
+  node scripts/check-any-ratchet.mjs "$base" || return 2
 }
 
 SYNTAX_CHECKS="$ALL_SYNTAX_CHECKS"
@@ -97,7 +93,7 @@ for id in $SYNTAX_CHECKS; do
   status=0
   "$id" > "$TMPD/raw" 2>&1 || status=$?
   if [ "$status" -eq 2 ]; then
-    echo "ERROR: Critical failure in $id (missing merge base):" >&2
+    echo "ERROR: Critical failure in $id:" >&2
     cat "$TMPD/raw" >&2
     exit 2
   fi

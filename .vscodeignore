@@ -8,6 +8,8 @@ out/
 dist-standalone/
 node_modules/
 src/**
+# Native source/build caches stay out; verified artifacts are copied under dist/native.
+native/**
 standalone/**
 .gitignore
 .yarnrc

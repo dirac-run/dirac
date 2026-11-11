@@ -1,3 +1,4 @@
+import { DEFAULT_SANDBOX_SETTINGS } from "@shared/SandboxSettings"
 import * as apiModule from "@core/api"
 import { ToolRegistry } from "@core/task/tools/registry/ToolRegistry"
 import * as telemetryModule from "@services/telemetry"
@@ -184,6 +185,44 @@ describe("updateSettings", () => {
 
 	afterEach(() => {
 		sandbox.restore()
+	})
+
+	describe("global sandbox settings updates", () => {
+		for (const client of ["webview", "cli"] as const) {
+			const save = (controller: any, sandboxSettings: any) => client === "webview"
+				? updateSettings(controller, UpdateSettingsRequest.create({ sandboxSettings }))
+				: updateSettingsCli(controller, UpdateSettingsRequestCli.create({ settings: { sandboxSettings } }))
+			it(`${client} repairs saved configuration without installing task sandbox overrides`, async () => {
+				const controller = createMockController({ task: {} })
+				controller.stateManager._store.sandboxSettings = { enabled: "broken" }
+				await save(controller, DEFAULT_SANDBOX_SETTINGS)
+				expect(controller.stateManager._store.sandboxSettings).to.deep.equal(DEFAULT_SANDBOX_SETTINGS)
+				if (client === "webview") expect(controller.task.applyWorkingConfigurationUpdate.called).to.be.false
+				else expect(controller.task.lastAppliedPatch.settings).not.to.have.property("sandboxSettings")
+			})
+			it(`${client} assigns revisions at trusted custom sandbox persistence`, async () => {
+				const controller = createMockController()
+				const profile = {
+					id: "custom", revision: 77, kind: "custom", name: "Custom", description: "",
+					filesystem: { base: "broad-read", workspace: "read-only", readable: [], writable: [], blocked: [], caches: [] },
+					temporaryDirectory: "/tmp", network: "deny", environment: { passthrough: ["PATH"], overrides: {} }
+				}
+				const settings = { ...DEFAULT_SANDBOX_SETTINGS, profiles: [profile], mainAgentProfileId: "custom" }
+				await save(controller, settings)
+				expect(controller.stateManager._store.sandboxSettings.profiles[0].revision).to.equal(1)
+				await save(controller, { ...settings, profiles: [{ ...profile, network: "allow" }] })
+				expect(controller.stateManager._store.sandboxSettings.profiles[0].revision).to.equal(2)
+				await save(controller, { ...settings, profiles: [{ ...profile, network: "allow", revision: 800 }] })
+				expect(controller.stateManager._store.sandboxSettings.profiles[0].revision).to.equal(2)
+			})
+			it(`${client} rejects incomplete settings before persistence`, async () => {
+				const controller = createMockController({ task: {} })
+				let error: unknown
+				try { await save(controller, { enabled: false }) } catch (caught) { error = caught }
+				expect(error).to.be.instanceOf(Error)
+				expect(controller.stateManager._store).not.to.have.property("sandboxSettings")
+			})
+		}
 	})
 
 	describe("global role catalog updates", () => {

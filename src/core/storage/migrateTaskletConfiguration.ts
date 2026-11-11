@@ -12,7 +12,7 @@ export function historicalTaskletSelection(settings: Record<string, unknown>): M
 	const selector = settings.actModeVsCodeLmModelSelector as ModelProviderSelection["vsCodeLmModelSelector"]
 	const modelId = selectedProvider === "dify" ? "dify-workflow"
 		: selectedProvider === "vscode-lm" ? (selector ? stringifyVsCodeLmModelSelector(selector) : undefined)
-		: settings[getProviderModelIdKey(selectedProvider, "act")]
+			: settings[getProviderModelIdKey(selectedProvider, "act")]
 	if (typeof modelId !== "string" || !modelId.trim()) return undefined
 	const infoKey = getProviderModelInfoKey(selectedProvider, "act")
 	return Object.fromEntries(Object.entries({
@@ -40,7 +40,11 @@ export function migrateTaskletConfiguration(record: TaskletRecord, recovered?: M
 	delete (result as unknown as Record<string, unknown>).inheritedMessageCount
 	if (role !== undefined) result.role = role
 	if (selection !== undefined) {
-		result.configuration = { ...(role === undefined ? {} : { name: role }), modelSelection: selection }
+		result.configuration = {
+			...(role === undefined ? {} : { name: role }), modelSelection: selection,
+			// Explicit task-local authority is durable; even malformed snapshots must survive to fail closed at resume.
+			...(legacy?.sandboxPolicy === undefined ? {} : { sandboxPolicy: legacy.sandboxPolicy }),
+		}
 	} else {
 		delete result.configuration
 	}

@@ -5,6 +5,8 @@ import dotenv from "dotenv"
 import * as esbuild from "esbuild"
 // @ts-expect-error
 import { copySourceCode } from "../scripts/copy-source.mjs"
+// @ts-expect-error JavaScript packaging helper is intentionally shared with extension builds.
+import { copyWindowsMxcArtifacts } from "../scripts/windows-mxc-artifacts.mjs"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -120,6 +122,7 @@ const copyWasmFiles: esbuild.Plugin = {
 	setup(build) {
 		build.onEnd(() => {
 			const destDir = path.join(__dirname, "dist")
+			copyWindowsMxcArtifacts(destDir)
 
 			// Ensure dist directory exists
 			if (!fs.existsSync(destDir)) {

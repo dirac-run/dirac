@@ -1,3 +1,5 @@
+import type { CustomSandboxProfile } from "./SandboxSettings"
+
 export const SETTINGS_DESTINATION_IDS = [
 	"models-api",
 	"utility-model",
@@ -6,6 +8,7 @@ export const SETTINGS_DESTINATION_IDS = [
 	"running-tasks",
 	"tools",
 	"terminal",
+	"sandbox",
 	"browser",
 	"general",
 ] as const
@@ -86,6 +89,15 @@ export const SETTINGS_DESTINATIONS: Record<SettingsDestinationId, SettingsDestin
 		webviewTooltip: "Configure how Dirac runs and captures commands.",
 		keywords: ["shell", "command", "profile", "execution", "reuse", "output", "theme"],
 	},
+	sandbox: {
+		id: "sandbox",
+		label: "Sandbox",
+		compactLabel: "Sandbox",
+		question: "How should commands use native sandbox execution?",
+		shortHelp: "Configure command profiles, fallback, and host availability",
+		webviewTooltip: "Configure native command execution and inspect host limitations.",
+		keywords: ["sandbox", "isolation", "fallback", "profile", "bubblewrap", "seatbelt", "availability"],
+	},
 	browser: {
 		id: "browser",
 		label: "Browser",
@@ -114,6 +126,13 @@ export const TOOL_SOURCE_HELP = {
 } as const
 
 export const SETTINGS_HELP = {
+	sandboxCustom: "Available controls depend on the execution host's native backend, not the UI computer. Unsupported or invalid policies always block commands and cannot be discarded through fallback. Recognized prelaunch setup/availability failures for a supported policy may run unsandboxed only with explicit fallback authorization. Approvals never override restrictions. Network deny is not a promise to isolate every local IPC service.",
+	sandboxPaths: "Paths must belong to the execution host: POSIX absolute or ~/ paths on Linux/macOS; ASCII drive-absolute paths on Windows. Relative paths, globs and placeholders are unsupported. Windows UNC/device paths, streams, DOS aliases and reparse points are unsupported. Sources must exist; aliases, canonical conflicts and unsupported controls are checked before launch. Selected grants the backend's explicit system-runtime baseline plus workspace and saved grants, not all host files. Blocked rules take precedence. Linux private temp is an empty per-launch tmpfs; macOS/Windows use a unique host-backed directory under the configured parent, not a tmpfs. Saved custom paths are never silently remapped across hosts. No implicit host environment passthrough.",
+	sandboxCreate: "Built-in profiles are immutable. New custom profiles start from Workspace: selected system runtime paths, read/write workspace, network allowed, private /tmp, and PATH/HOME/LANG passthrough. Package caches require explicit directories; no home directory is granted implicitly. Customize or duplicate copies the saved policy; Advanced preserves all detailed rules.",
+	sandboxEnabled: "Off bypasses native sandbox launch and uses normal command execution. Changes affect future launches only, not running commands.",
+	sandboxFallback: "Authorize unsandboxed execution only for recognized setup or availability failures before a command starts. Never retries policy denials or commands that may have started. Off by default.",
+	sandboxDefault: "Default is permissive: no intentional additional filesystem or network restrictions. It does not provide meaningful isolation.",
+	sandboxCoverage: "Command execution only. Host-side file operations, custom tools, and other trusted services are not sandboxed. Existing command approvals still apply.",
 	approveAll:
 		"Approve All automatically approves every tool action, including all terminal commands—even commands Dirac considers unsafe—and permits model-requested conversation condensing. It does not switch between Plan and Act modes, create new tasks, or enable automatic threshold-triggered condensing; that is controlled separately by Auto-condense conversations.",
 	yolo: "YOLO Mode runs with maximum autonomy and bypasses confirmation prompts. It may switch from Plan to Act and disables the ask-question tool. It also permits autonomous task creation and conversation condensing. Use with extreme caution.",
@@ -132,3 +151,68 @@ export const SETTINGS_HELP = {
 		"Each part of a chained command must be approved separately. File redirects are not covered; 2>&1 is ignored when matching.",
 	managedSetting: "This setting is managed by your organization's remote configuration.",
 } as const
+
+export const SANDBOX_PROFILE_GROUPS = ["Identity", "Filesystem", "Network", "Environment"] as const
+
+/** Shared form fields keep CLI and editor policy drafts identical; no draft is persisted until Save. */
+export const SANDBOX_PROFILE_FIELDS = [
+	{ key: "name", label: "Name", group: "Identity", help: "A unique name; Default is reserved." },
+	{ key: "description", label: "Description", group: "Identity", help: "Optional note about this profile's intended use." },
+	{ key: "base", label: "Filesystem base", group: "Filesystem", help: "Starting read access, before workspace and explicit grants.", options: ["selected", "broad-read"], optionLabels: { selected: "System runtime paths", "broad-read": "Entire host filesystem (read-only)" } },
+	{ key: "workspace", label: "Workspace access", group: "Filesystem", help: "Access to all workspace folders.", options: ["read-only", "read-write"], optionLabels: { "read-only": "Read only", "read-write": "Read and write" } },
+	{ key: "readable", label: "Readable paths", group: "Filesystem", help: "Extra read-only access. One absolute or ~/ path per line." },
+	{ key: "writable", label: "Writable paths", group: "Filesystem", help: "Extra read/write access. One absolute or ~/ path per line." },
+	{ key: "blocked", label: "Blocked paths", group: "Filesystem", help: "Hidden paths, including children of otherwise allowed paths. One per line." },
+	{ key: "caches", label: "Writable cache paths", group: "Filesystem", help: "Host cache directories with read/write access. One path per line." },
+	{ key: "temporaryDirectory", label: "Private temporary directory", group: "Filesystem", help: "Linux: per-launch tmpfs at this path. macOS/Windows: parent of a unique host-backed directory. Must not overlap grants. Sets TMPDIR, TMP and TEMP." },
+	{ key: "network", label: "Network", group: "Network", help: "Deny blocks network access, not AF_UNIX/local IPC.", options: ["deny", "allow"], optionLabels: { deny: "Deny network access", allow: "Allow network access" } },
+	{ key: "passthrough", label: "Environment passthrough names", group: "Environment", help: "Host variable names to inherit, one per line. No other host variables pass through implicitly." },
+	{ key: "overrides", label: "Environment overrides (NAME=value; avoid secrets)", group: "Environment", help: "One NAME=value per line. Stored in plaintext settings, not a secret store." },
+] as const
+
+export function sandboxProfileSummary(profile: CustomSandboxProfile): string {
+	return `${profile.filesystem.base === "broad-read" ? "Host read access" : "Selected read access"} · workspace ${profile.filesystem.workspace === "read-write" ? "read/write" : "read-only"} · network ${profile.network === "deny" ? "denied" : "allowed"}`
+}
+
+/** These exact host messages are already explained by the overview and Default warning. Keep all unique details. */
+export function sandboxHostLimitations(limitations: readonly string[]): string[] {
+	const repeated = new Set([
+		"Default is permissive and provides no meaningful isolation.",
+		"Default is permissive and provides no meaningful isolation; filesystem and network remain accessible.",
+		"Only commands are covered; host file tools, custom tools and services remain trusted.",
+		"Custom controls cover command descendants only; host file tools, custom tools and services remain trusted.",
+	])
+	return [...new Set(limitations)].filter((line) => !repeated.has(line))
+}
+export type SandboxProfileDraft = Record<(typeof SANDBOX_PROFILE_FIELDS)[number]["key"], string>
+export function sandboxProfileDraft(profile?: CustomSandboxProfile, duplicate = false): SandboxProfileDraft {
+	return {
+		name: profile ? `${profile.name}${duplicate ? " copy" : ""}` : "", description: profile?.description ?? "",
+		base: profile?.filesystem.base ?? "selected", workspace: profile?.filesystem.workspace ?? "read-write",
+		readable: profile?.filesystem.readable.join("\n") ?? "", writable: profile?.filesystem.writable.join("\n") ?? "",
+		blocked: profile?.filesystem.blocked.join("\n") ?? "", caches: profile?.filesystem.caches.join("\n") ?? "",
+		temporaryDirectory: profile?.temporaryDirectory ?? "/tmp", network: profile?.network ?? "allow",
+		passthrough: profile?.environment.passthrough.join("\n") ?? "PATH\nHOME\nLANG",
+		overrides: Object.entries(profile?.environment.overrides ?? {}).map(([key, value]) => `${key}=${value}`).join("\n"),
+	}
+}
+export function sandboxProfileFromDraft(draft: SandboxProfileDraft, id: string, revision: number): CustomSandboxProfile {
+	const lines = (value: string) => value.split("\n").filter(Boolean)
+	const overrides: Record<string, string> = Object.create(null)
+	for (const line of lines(draft.overrides)) {
+		const equals = line.indexOf("=")
+		if (equals < 1) throw new Error("Environment overrides must use NAME=value, one per line")
+		const name = line.slice(0, equals)
+		if (Object.hasOwn(overrides, name)) throw new Error(`Duplicate environment override: ${name}`)
+		overrides[name] = line.slice(equals + 1)
+	}
+	return {
+		id, revision, kind: "custom", name: draft.name.trim(), description: draft.description,
+		filesystem: {
+			base: draft.base as "selected" | "broad-read", workspace: draft.workspace as "read-only" | "read-write",
+			readable: lines(draft.readable), writable: lines(draft.writable), blocked: lines(draft.blocked), caches: lines(draft.caches)
+		},
+		temporaryDirectory: draft.temporaryDirectory, network: draft.network as "allow" | "deny",
+		environment: { passthrough: lines(draft.passthrough), overrides },
+	}
+}

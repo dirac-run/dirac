@@ -37,8 +37,8 @@ describe("StatePersistenceManager", () => {
 			getTaskStateValue: (key) => taskSettings[key as keyof typeof taskSettings],
 			getSecretValue: () => undefined,
 			getWorkspaceStateValue: () => undefined,
-			setTaskHistoryInCache: () => {},
-			onTaskHistoryCommitMerged: () => {},
+			setTaskHistoryInCache: () => { },
+			onTaskHistoryCommitMerged: () => { },
 		})
 		persistence.addPendingTaskState(taskId, "mode")
 		const originalRename = fs.rename.bind(fs)
@@ -83,8 +83,8 @@ describe("StatePersistenceManager", () => {
 		const persistenceB = createHistoryPersistence(() => cacheB, (value) => {
 			cacheB = value
 		})
-		await persistenceA.setupTaskHistoryWatcher(() => true, async () => {})
-		await persistenceB.setupTaskHistoryWatcher(() => true, async () => {})
+		await persistenceA.setupTaskHistoryWatcher(() => true, async () => { })
+		await persistenceB.setupTaskHistoryWatcher(() => true, async () => { })
 
 		const mutationA: TaskHistoryMutation = { kind: "upsert", item: fromA }
 		cacheA = applyTaskHistoryMutations(cacheA, [mutationA])
@@ -118,7 +118,7 @@ function createHistoryPersistence(
 		getSecretValue: () => undefined,
 		getWorkspaceStateValue: () => undefined,
 		setTaskHistoryInCache: setHistory,
-		onTaskHistoryCommitMerged: () => {},
+		onTaskHistoryCommitMerged: () => { },
 	})
 }
 
@@ -129,10 +129,11 @@ function historyItem(id: string): RunHistoryItem {
 function createStorage(): StorageContext {
 	return {
 		globalState: {} as any,
-		globalStateBackingStore: { setBatch: () => {} } as any,
-		secrets: { setBatch: () => {} } as any,
-		workspaceState: { setBatch: () => {} } as any,
+		globalStateBackingStore: { setBatch: () => { } } as any,
+		secrets: { setBatch: () => { } } as any,
+		workspaceState: { setBatch: () => { } } as any,
 		dataDir: "",
+		diracDir: "",
 		workspaceStoragePath: "",
 	}
 }

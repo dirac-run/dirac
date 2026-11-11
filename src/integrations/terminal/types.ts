@@ -6,6 +6,7 @@
 
 import type { DiracToolResponseContent } from "@shared/messages"
 import type { EventEmitter } from "events"
+import type { PreparedSandboxLaunch } from "./sandbox"
 
 // =============================================================================
 // Terminal Process Types
@@ -188,7 +189,7 @@ export interface ITerminalManager {
 	 * @param command The command to execute
 	 * @returns A promise-like object that emits events and resolves on completion
 	 */
-	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise
+	runCommand(terminalInfo: TerminalInfo, command: string, sandbox?: PreparedSandboxLaunch): TerminalProcessResultPromise
 
 	/**
 	 * Get or create a terminal for the specified working directory.
@@ -370,6 +371,7 @@ export interface CommandExecutionMetadata {
 	logFilePath?: string
 	/** Resolves when a command handed off to the background actually exits. */
 	backgroundCompletion?: Promise<void>
+	sandbox?: import("@shared/SandboxExecution").SandboxExecutionStatus
 }
 
 export type CommandExecutionResult = [
@@ -380,6 +382,9 @@ export type CommandExecutionResult = [
 
 
 export interface CommandExecutionOptions {
+	/** Internal phase-one opt-in; Default is permissive, not meaningful isolation. */
+	sandbox?: { profile: "default"; allowUnsandboxedFallback?: boolean; context?: import("./sandbox").NativeSandboxRequest["context"] }
+	sandboxContext?: import("@shared/SandboxExecution").SandboxExecutionContext
 	/** Absolute working directory captured for this execution; defaults to the task directory. */
 	cwd?: string
 	/** Recheck current authority synchronously at the process-start boundary. */

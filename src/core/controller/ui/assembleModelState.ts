@@ -1,7 +1,14 @@
+import { validateSandboxSettings } from "@shared/SandboxSettings"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import type { StateManager } from "@core/storage/StateManager"
 import { getProviderMembershipState } from "@core/storage/providerMembership"
 import { featureFlagsService } from "@/services/feature-flags"
+
+/** Invalid saved settings stay repairable through settings UI; execution validates independently. */
+function sandboxSettingsForDisplay(stateManager: StateManager) {
+	try { return validateSandboxSettings(stateManager.getSystemDefaultSettingsKey("sandboxSettings")) }
+	catch { return undefined }
+}
 
 /** Reads persisted settings/state and shapes them into ExtensionState fields. */
 export function assembleModelState(stateManager: StateManager) {
@@ -11,6 +18,7 @@ export function assembleModelState(stateManager: StateManager) {
 		...getProviderMembershipState(stateManager),
 		modelProviderPresets: stateManager.getGlobalSettingsKey("modelProviderPresets"),
 		subagentRoles: stateManager.getSystemDefaultSettingsKey("subagentRoles"),
+		sandboxSettings: sandboxSettingsForDisplay(stateManager),
 		utilityModelEnabled: stateManager.getGlobalSettingsKey("utilityModelEnabled"),
 		utilityModelSelection: stateManager.getGlobalSettingsKey("utilityModelSelection"),
 		utilityModelUseCondense: stateManager.getGlobalSettingsKey("utilityModelUseCondense"),

@@ -1,3 +1,10 @@
+import { DEFAULT_SANDBOX_SETTINGS, getSandboxProfiles, validateSandboxSettings, type CustomSandboxProfile, type SandboxSettings } from "@shared/SandboxSettings"
+import { SandboxProfileEditor } from "./SandboxProfileEditor"
+import { SandboxTechnicalDetails } from "./SandboxTechnicalDetails"
+import { EmptyRequest } from "@shared/proto/dirac/common"
+import { UpdateSettingsRequest, type SandboxStatus } from "@shared/proto/dirac/state"
+import { getSandboxStatus } from "@/core/controller/state/getSandboxStatus"
+import { updateSettings } from "@/core/controller/state/updateSettings"
 import type { AutoApprovalSettings } from "@shared/AutoApprovalSettings"
 import { DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import type { ModelProviderSelection } from "@shared/api"
@@ -118,6 +125,31 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			setIsApplyingSetting(false)
 		}
 	}, [])
+	const [sandboxSettings, setSandboxSettings] = useState<SandboxSettings>(() => {
+		try { return validateSandboxSettings(stateManager.getGlobalSettingsKey("sandboxSettings")) }
+		catch { return DEFAULT_SANDBOX_SETTINGS } // UI only; RPC reports corrupt settings until an explicit repair.
+	})
+	const [sandboxEditor, setSandboxEditor] = useState<{ profile?: CustomSandboxProfile; duplicate?: boolean }>()
+	const [sandboxStatus, setSandboxStatus] = useState<SandboxStatus>()
+	const [sandboxAdvanced, setSandboxAdvanced] = useState(false)
+	const [sandboxStatusError, setSandboxStatusError] = useState<string>()
+	const sandboxStatusGeneration = React.useRef(0)
+	const refreshSandboxStatus = useCallback(async () => {
+		const request = ++sandboxStatusGeneration.current
+		setSandboxStatus(undefined)
+		setSandboxStatusError(undefined)
+		try {
+			if (!controller) throw new Error("Execution host controller unavailable")
+			const next = await getSandboxStatus(controller, EmptyRequest.create({}))
+			if (request === sandboxStatusGeneration.current) setSandboxStatus(next)
+		} catch (error) {
+			if (request === sandboxStatusGeneration.current) setSandboxStatusError(String(error))
+		}
+	}, [controller])
+	React.useEffect(() => {
+		if (!isAtHome && currentTab === SettingsTab.SANDBOX) void refreshSandboxStatus()
+		return () => { sandboxStatusGeneration.current++ }
+	}, [currentTab, isAtHome, refreshSandboxStatus])
 
 	// Tool toggle state
 	const [availableTools] = useState<ToolMetadata[]>(() => {
@@ -279,6 +311,10 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 
 	const settingsItemsProps: UseSettingsItemsProps = {
 		currentTab,
+		sandboxSettings,
+		sandboxStatus,
+		sandboxStatusError,
+		sandboxAdvanced,
 		planProvider: (controller?.task?.getWorkingConfiguration().apiConfiguration ?? stateManager.getApiConfiguration()).planModeApiProvider,
 		provider,
 		actModelId,
@@ -462,6 +498,36 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	const activateSettingsItem = useCallback(() => {
 		const item = items[selectedIndex]
 		if (!item) return
+		if (item.key === "sandboxRefresh") {
+			void refreshSandboxStatus()
+			return
+		}
+		if (item.key === "sandboxAdvanced") {
+			setSandboxAdvanced((value) => !value)
+			return
+		}
+		if (item.key === "sandboxCreate" || item.key.startsWith("sandboxEdit:") || item.key.startsWith("sandboxDuplicate:") || item.key.startsWith("sandboxCustomize:")) {
+			const profile = getSandboxProfiles(sandboxSettings).find((profile) => profile.id === item.key.split(":")[1])
+			setSandboxEditor({ profile: profile && "kind" in profile ? profile : undefined, duplicate: item.key.startsWith("sandboxDuplicate:") || item.key.startsWith("sandboxCustomize:") })
+			return
+		}
+		if (["sandboxEnabled", "sandboxFallback", "sandboxReset"].includes(item.key) || item.key.startsWith("sandbox:")) {
+			void runSettingsAction("sandbox update", async () => {
+				if (!controller) throw new Error("Execution host controller unavailable")
+				const next = { ...(item.key === "sandboxReset" ? DEFAULT_SANDBOX_SETTINGS : sandboxSettings) }
+				if (item.key === "sandboxEnabled") next.enabled = !next.enabled
+				else if (item.key === "sandboxFallback") next.allowUnsandboxedFallback = !next.allowUnsandboxedFallback
+				else if (item.key === "sandbox:mainAgentProfileId" || item.key === "sandbox:subagentProfileId") {
+					const key = item.key === "sandbox:mainAgentProfileId" ? "mainAgentProfileId" : "subagentProfileId"
+					const profiles = getSandboxProfiles(sandboxSettings)
+					next[key] = profiles[(profiles.findIndex((profile) => profile.id === next[key]) + 1) % profiles.length]!.id
+				}
+				await updateSettings(controller, UpdateSettingsRequest.create({ sandboxSettings: next }))
+				setSandboxSettings(next)
+				await refreshSandboxStatus()
+			})
+			return
+		}
 		if (item.key === "addSubagentRole" || item.key.startsWith("subagentRole:")) {
 			setRoleIndex(item.key === "addSubagentRole" ? -1 : Number(item.key.slice("subagentRole:".length)))
 			return
@@ -478,7 +544,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			openDestination(SettingsTab.UTILITY_MODEL)
 			return
 		}
-		if (item.key === "advancedConfiguration") {
+		if (item.key === "advancedConfiguration" || item.key === "sandboxDetails") {
 			setHelpItem(item)
 			return
 		}
@@ -495,7 +561,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			return
 		}
 		void runSettingsAction("update", handleAction)
-	}, [handleAction, items, openDestination, runSettingsAction, selectedIndex, stateManager, controller, refreshModelIds])
+	}, [handleAction, items, openDestination, runSettingsAction, selectedIndex, stateManager, controller, refreshModelIds, sandboxSettings, refreshSandboxStatus])
 
 	const selectSearchResult = useCallback(
 		(result: SettingsSearchResult) => {
@@ -511,12 +577,14 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	useInput(
 		(input, key) => {
 			if (accessProvider) return
+			if (sandboxEditor) return
 			if (endpointName !== null) return
 			if (selectionTarget) return
 			if (roleIndex !== null) return
 			if (objectEditor || openRouterRoutingModelId || isEditingApprovedCommands || isSearching) return
 			if (shouldIgnoreTerminalInput(input, key)) return
 			if (helpItem) {
+				if (helpItem.key === "sandboxDetails") return
 				if (key.escape || input === "?") setHelpItem(null)
 				return
 			}
@@ -597,6 +665,14 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	)
 
 	const renderContent = () => {
+		if (sandboxEditor) return <SandboxProfileEditor {...sandboxEditor} onCancel={() => setSandboxEditor(undefined)} onSave={async (profile) => {
+			if (!controller) throw new Error("Execution host controller unavailable")
+			const next = validateSandboxSettings({ ...sandboxSettings, profiles: [...(sandboxSettings.profiles ?? []).filter((entry) => entry.id !== profile.id), profile] })
+			await updateSettings(controller, UpdateSettingsRequest.create({ sandboxSettings: next }))
+			setSandboxSettings(stateManager.getGlobalSettingsKey("sandboxSettings"))
+			setSandboxEditor(undefined)
+			await refreshSandboxStatus()
+		}} />
 		if (roleIndex !== null) return <RoleSettingsEditor
 			role={subagentRoles[roleIndex]} controller={controller} onCancel={() => setRoleIndex(null)}
 			onSave={async (role) => {
@@ -643,6 +719,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			)
 		}
 		if (helpItem) {
+			if (helpItem.key === "sandboxDetails") return <SandboxTechnicalDetails details={helpItem.expandedHelp!} onClose={() => setHelpItem(null)} />
 			return (
 				<Box flexDirection="column">
 					<Text bold color={theme.strongText}>
@@ -814,10 +891,11 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 				refreshModelIds()
 			})}
 		/>
-		return <SettingsListView items={items} maxRows={settingsMaxRows} selectedIndex={selectedIndex} />
+		return <SettingsListView items={items} maxRows={currentTab === SettingsTab.SANDBOX ? Math.max(3, settingsMaxRows - 4) : settingsMaxRows} selectedIndex={selectedIndex} />
 	}
 
 	const hasNestedPage =
+		!!sandboxEditor ||
 		roleIndex !== null ||
 		!!selectionTarget ||
 		endpointName !== null ||
@@ -853,7 +931,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 					: "↑/↓ Navigate · Enter Edit · Space Toggle · / Search · ? Help · Esc Back"
 
 	return (
-		<Panel footer={footer} isSubpage={hasNestedPage || !isAtHome} label={panelLabel}>
+		<Panel footer={sandboxEditor || helpItem?.key === "sandboxDetails" ? undefined : footer} isSubpage={hasNestedPage || !isAtHome} label={panelLabel}>
 			{(settingsError || authStatusError) && (
 				<Text color={theme.error}>Settings error: {settingsError || authStatusError}</Text>
 			)}
