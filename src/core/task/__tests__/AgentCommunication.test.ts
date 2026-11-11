@@ -158,19 +158,53 @@ describe("Volatile agent communication", () => {
 		assert.ok(Buffer.byteLength(JSON.stringify(second)) <= 16384)
 	})
 
+	it("stably prioritizes message availability rather than status across cursor pages", () => {
+		const { root, group, entries } = fixture(25)
+		entries.forEach((entry, index) => {
+			entry.accepts_messages = index % 3 === 1
+			entry.status = entry.accepts_messages ? "completed" : "running"
+		})
+		const expected = [...entries.filter((entry) => entry.accepts_messages), ...entries.filter((entry) => !entry.accepts_messages)]
+		const first = root.list()
+		const last = root.list({ cursor: first.next_cursor })
+		assert.equal(first.agents.length, 20)
+		assert.equal(first.next_cursor, "20")
+		assert.deepEqual([...first.agents, ...last.agents].map(({ id }) => id), expected.map(({ id }) => id))
+		assert.equal(last.next_cursor, undefined)
+		assert.deepEqual(entries.map(({ id }) => id), fixture(25).entries.map(({ id }) => id), "Discovery must not reorder the source roster")
+		group.close()
+		assert.deepEqual(root.list().agents.map(({ id }) => id), entries.slice(0, 20).map(({ id }) => id))
+	})
+
+	it("preserves missing identity slots while partitioning visible message availability", () => {
+		const ids = ["Dirac", "Missing", "Settled", "Live", "Missing tail"]
+		const entries = ids.filter((id) => !id.startsWith("Missing"))
+			.map((id) => ({ id, title_preview: id, status: "running", accepts_messages: id === "Live" }))
+		const root = new AgentCommunication(() => entries, () => { }, undefined, () => ids).forAgent("Dirac")
+		const first = root.list({ limit: 1 })
+		assert.deepEqual(first.agents.map(({ id }) => id), ["Live"])
+		assert.equal(first.next_cursor, "2")
+		const last = root.list({ cursor: first.next_cursor })
+		assert.deepEqual(last.agents.map(({ id }) => id), ["Dirac", "Settled"])
+		assert.equal(last.next_cursor, undefined)
+		assert.deepEqual(root.list({ cursor: "5" }), { agents: [] })
+	})
+
 	it("returns bounded passive roster pages and rejects invalid page arguments", async () => {
 		const { root, group } = fixture(65)
 		const first = root.list()
-		assert.equal(first.agents.length, 10)
-		assert.equal(first.next_cursor, "10")
+		assert.equal(first.agents.length, 20)
+		assert.equal(first.next_cursor, "20")
 		assert.ok(first.agents.every((agent) => agent.title_preview.length <= 80))
-		const second = root.list({ cursor: first.next_cursor, limit: 50 })
-		assert.equal(second.agents.length, 50)
+		const second = root.list({ cursor: first.next_cursor, limit: 20 })
+		assert.equal(second.agents.length, 20)
 		assert.ok(Buffer.byteLength(JSON.stringify(second)) <= 16384)
-		const last = root.list({ cursor: second.next_cursor })
+		const third = root.list({ cursor: second.next_cursor })
+		assert.equal(third.agents.length, 20)
+		const last = root.list({ cursor: third.next_cursor })
 		assert.equal(last.agents.length, 6)
 		assert.equal(last.next_cursor, undefined)
-		for (const limit of [0, 51, 1.5]) assert.throws(() => root.list({ limit }), /limit/)
+		for (const limit of [0, -1, 21, 50, 1.5, NaN, Infinity]) assert.throws(() => root.list({ limit }), /limit/)
 		for (const cursor of ["-1", "1.1", "01", "bad", "1000"]) assert.throws(() => root.list({ cursor }), /cursor/)
 		assert.equal(group.hasPending("Dirac"), false)
 	})

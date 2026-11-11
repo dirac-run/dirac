@@ -216,14 +216,19 @@ export class AgentCommunication {
 	}
 
 	private list(input: { cursor?: string; limit?: number } = {}): AgentRosterPage {
-		const limit = input.limit ?? 10
-		if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Roster limit must be an integer from 1 to 50")
+		const limit = input.limit ?? 20
+		if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("Roster limit must be an integer from 1 to 20")
 		if (input.cursor !== undefined && !/^(0|[1-9]\d*)$/.test(input.cursor)) throw new Error("Invalid agent roster cursor")
 		const offset = Number(input.cursor ?? 0)
 		const entries = this.currentRoster()
-		const ids = this.rosterIds(entries)
-		if (!Number.isSafeInteger(offset) || offset > ids.length) throw new Error("Invalid agent roster cursor")
 		const byId = new Map(entries.map((entry) => [entry.id, entry]))
+		const slots = this.rosterIds(entries)
+		const visibleIds = slots.filter((id) => byId.has(id))
+			.sort((a, b) => Number(!this.closed && byId.get(b)!.accepts_messages) - Number(!this.closed && byId.get(a)!.accepts_messages))
+		let visibleIndex = 0
+		// Keep missing identity slots while prioritizing message availability among visible agents.
+		const ids = slots.map((id) => byId.has(id) ? visibleIds[visibleIndex++] : id)
+		if (!Number.isSafeInteger(offset) || offset > ids.length) throw new Error("Invalid agent roster cursor")
 		const page: AgentRosterPage = { agents: [] }
 		let next = offset
 		while (next < ids.length && page.agents.length < limit) {

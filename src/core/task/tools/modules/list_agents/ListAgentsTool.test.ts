@@ -55,13 +55,13 @@ describe("ListAgentsTool", () => {
 
 	it("forwards opaque cursors and maximum limit without consuming or filtering the roster", async () => {
 		const { env, list } = fixture()
-		await new ListAgentsTool().processCall({ cursor: "exact cursor", limit: 50 }, env)
-		sinon.assert.calledOnceWithExactly(list, { cursor: "exact cursor", limit: 50 })
+		await new ListAgentsTool().processCall({ cursor: "exact cursor", limit: 20 }, env)
+		sinon.assert.calledOnceWithExactly(list, { cursor: "exact cursor", limit: 20 })
 	})
 
 	it("rejects malformed queries and unsupported peer inspection/control fields", async () => {
 		const { env, list, createCard } = fixture()
-		const invalid = [null, [], "query", { cursor: " " }, { cursor: 1 }, ...[0, -1, 51, 1.5, "10", null, NaN].map((limit) => ({ limit })),
+		const invalid = [null, [], "query", { cursor: " " }, { cursor: 1 }, ...[0, -1, 21, 50, 1.5, "20", null, NaN].map((limit) => ({ limit })),
 			...["root", "from", "operation", "view", "tasklet_id", "offset"].map((key) => ({ [key]: "unexpected" }))]
 		for (const query of invalid) await assert.rejects(new ListAgentsTool().processCall(query, env))
 		sinon.assert.notCalled(list)
@@ -163,7 +163,10 @@ describe("ListAgentsTool", () => {
 			assert.equal(isDiscoveredToolAvailableToTaskProfile(executionProfile, { exposure, spec: list_agents_spec } as DiscoveredTool), true)
 		}
 		assert.deepEqual(exposure, { kind: "context_only" })
-		assert.match(list_agents_spec.description, /Default 10, maximum 50 agents and 16 KiB/)
+		assert.match(list_agents_spec.description, /Default 20, maximum 20 agents and 16 KiB/)
+		assert.match(list_agents_spec.description, /Agents accepting messages come first/)
+		assert.match(list_agents_spec.description, /availability changes can shift cursor pages/)
+		assert.equal(list_agents_spec.parameters?.find((parameter) => parameter.name === "limit")?.maximum, 20)
 		assert.deepEqual(list_agents_spec.parameters?.map((parameter) => parameter.name), ["cursor", "limit"])
 	})
 })
