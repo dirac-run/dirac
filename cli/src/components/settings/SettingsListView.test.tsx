@@ -22,6 +22,34 @@ describe("settings list row budget", () => {
 		expect(estimateItemRows(item, false, 76)).toBe(2)
 		expect(estimateItemRows(item, true, 76)).toBe(5)
 	})
+	it("counts wrapped always-visible descriptions once regardless of selection", () => {
+		const item = {
+			key: "role", label: "Reviewer", value: "Disabled", type: SettingsItemType.ACTION,
+			description: "help ".repeat(30).trim(), alwaysShowDescription: true,
+		}
+		expect(estimateItemRows(item, false, 76)).toBe(4)
+		expect(estimateItemRows(item, true, 76)).toBe(4)
+	})
+	it("budgets and displays unselected inline descriptions without changing contextual help", () => {
+		const items = [
+			{ key: "selected", label: "Selected", value: "", type: SettingsItemType.ACTION },
+			{
+				key: "role", label: "Reviewer", value: "Disabled", type: SettingsItemType.ACTION,
+				description: "help ".repeat(30).trim(), alwaysShowDescription: true
+			},
+			{ key: "context", label: "Context", value: "", type: SettingsItemType.ACTION, description: "Selection-only help" },
+			{ key: "last", label: "Last", value: "", type: SettingsItemType.ACTION },
+		]
+		const view = render(<Box width={76}><SettingsListView items={items} selectedIndex={0} maxRows={8} /></Box>)
+		const frame = view.lastFrame()!
+		expect(frame).toContain("Reviewer")
+		expect(frame).toContain("help help")
+		expect(frame).not.toContain("Selection-only help")
+		expect(frame).not.toContain("Last")
+		expect(frame).toContain("more below")
+		expect(frame.split("\n").length).toBeLessThanOrEqual(8)
+		view.unmount()
+	})
 	it("keeps the narrow sandbox viewport within its row budget", () => {
 		const view = render(
 			<Box width={76}>
@@ -42,7 +70,7 @@ describe("settings list row budget", () => {
 	it("keeps real profile and technical topic lists readable at 80x24", () => {
 		const editor = render(
 			<Box width={76}>
-				<SandboxProfileEditor onSave={async () => {}} onCancel={() => {}} />
+				<SandboxProfileEditor onSave={async () => { }} onCancel={() => { }} />
 			</Box>,
 		)
 		expect(editor.lastFrame()!.split("\n").length).toBeLessThanOrEqual(12)
@@ -56,7 +84,7 @@ describe("settings list row budget", () => {
 		).find((item) => item.key === "sandboxDetails")!.expandedHelp!
 		const topics = render(
 			<Box width={76}>
-				<SandboxTechnicalDetails details={details} onClose={() => {}} />
+				<SandboxTechnicalDetails details={details} onClose={() => { }} />
 			</Box>,
 		)
 		expect(topics.lastFrame()!.split("\n").length).toBeLessThanOrEqual(12)

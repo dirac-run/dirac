@@ -4,12 +4,14 @@ import { DEFAULT_SUBAGENT_ROLES, validateSubagentRoles } from "../subagentRoles"
 import { Settings, UpdateSettingsRequest } from "../proto/dirac/state"
 import { convertProtoToSubagentRoles, convertSubagentRolesToProto } from "../proto-conversions/subagent-roles"
 
-const reviewer = { name: "Reviewer", description: "Review code.", enabled: true,
-	modelSelection: { provider: "openai" as const, modelId: "custom-model", openAiProfileName: "Company server" } }
+const reviewer = {
+	name: "Reviewer", description: "Review code.", enabled: true,
+	modelSelection: { provider: "openai" as const, modelId: "custom-model", openAiProfileName: "Company server" }
+}
 
 describe("user-global subagent roles", () => {
-	it("provides four disabled starters without execution defaults", () => {
-		assert.deepEqual(DEFAULT_SUBAGENT_ROLES.map((role) => role.name), ["Scout", "Reviewer", "Simple coder", "Complex coder"])
+	it("provides five disabled starters without execution defaults", () => {
+		assert.deepEqual(DEFAULT_SUBAGENT_ROLES.map((role) => role.name), ["Scout", "Reviewer", "Simple coder", "Complex coder", "Verifier"])
 		assert.ok(DEFAULT_SUBAGENT_ROLES.every((role) => !role.enabled && role.modelSelection === undefined))
 		assert.deepEqual(validateSubagentRoles(DEFAULT_SUBAGENT_ROLES), DEFAULT_SUBAGENT_ROLES)
 	})

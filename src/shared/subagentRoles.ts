@@ -11,10 +11,11 @@ export interface SubagentRole {
 }
 
 export const DEFAULT_SUBAGENT_ROLES: SubagentRole[] = [
-	{ name: "Scout", description: "Quick code examinations.", enabled: false },
-	{ name: "Reviewer", description: "Code review.", enabled: false },
-	{ name: "Simple coder", description: "Simple coding tasks.", enabled: false },
-	{ name: "Complex coder", description: "Complex coding tasks.", enabled: false },
+	{ name: "Scout", description: "Quickly explores code and finds relevant information.", enabled: false },
+	{ name: "Reviewer", description: "Checks changes for bugs and potential issues.", enabled: false },
+	{ name: "Simple coder", description: "Handles small, straightforward coding tasks.", enabled: false },
+	{ name: "Complex coder", description: "Handles larger or more involved coding tasks.", enabled: false },
+	{ name: "Verifier", description: "Runs checks and confirms the work meets requirements.", enabled: false },
 ]
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

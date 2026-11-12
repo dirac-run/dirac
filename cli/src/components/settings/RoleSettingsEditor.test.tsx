@@ -5,6 +5,7 @@ import { render } from "ink-testing-library"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModelInfo, ModelProviderSelection } from "@shared/api"
 import type { SubagentRole } from "@shared/subagentRoles"
+import { SETTINGS_HELP } from "@shared/settings-presentation"
 import type { StateManager } from "@/core/storage/StateManager"
 import { RoleSettingsEditor } from "./RoleSettingsEditor"
 import { configuredModelChoices, ModelSelectionEditor } from "./ModelSelectionEditor"
@@ -44,6 +45,18 @@ beforeEach(() => {
 afterEach(() => { for (const view of views.splice(0)) view.unmount() })
 
 describe("CLI role editor", () => {
+	it("shows delegation-description guidance for new and existing roles, including while editing", async () => {
+		const existing = { name: "Reviewer", description: "Review code.", enabled: false }
+		for (const role of [undefined, existing]) {
+			const view = render(<RoleSettingsEditor role={role} onSave={vi.fn()} onCancel={vi.fn()} />)
+			views.push(view)
+			expect(view.lastFrame()!.replace(/\s+/g, " ")).toContain(SETTINGS_HELP.subagentRoleDescription)
+			await select("description")
+			await vi.waitFor(() => expect(view.lastFrame()).toContain(`Description: ${role?.description ?? ""}▏`))
+			expect(view.lastFrame()!.replace(/\s+/g, " ")).toContain(SETTINGS_HELP.subagentRoleDescription)
+			view.unmount()
+		}
+	})
 	it.each(["openAiApiKey", "openAiCompatibleCustomApiKey"])("defers unnamed endpoint discovery to backend resolution with %s", async (credentialKey) => {
 		mocks.secret.mockImplementation((key: string) => key === credentialKey ? "saved-key" : undefined)
 		mocks.global.mockImplementation((key: string) => key === "openAiCompatibleProfiles" ? [profile] : undefined)

@@ -1,3 +1,4 @@
+import { SETTINGS_HELP } from "@shared/settings-presentation"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { MainModelSelection } from "../MainModelSelection"
 import Section from "../Section"
@@ -39,11 +40,20 @@ const UtilityModelSection = ({ renderSectionHeader }: UtilityModelSectionProps) 
 				</label>
 				{planActSeparateModelsSetting ? (
 					<>
-						<MainModelSelection mode="plan" label="Plan" />
-						<MainModelSelection mode="act" label="Act" />
+						<div className="space-y-2">
+							<p className="text-xs text-description">{SETTINGS_HELP.planModel}</p>
+							<MainModelSelection mode="plan" label="Plan" />
+						</div>
+						<div className="space-y-2">
+							<p className="text-xs text-description">{SETTINGS_HELP.actModel}</p>
+							<MainModelSelection mode="act" label="Act" />
+						</div>
 					</>
 				) : (
-					<MainModelSelection mode={mode} label="Plan and Act" />
+					<div className="space-y-2">
+						<p className="text-xs text-description">{SETTINGS_HELP.planAndActModel}</p>
+						<MainModelSelection mode={mode} label="Plan and Act" />
+					</div>
 				)}
 				<UtilityModelSelection />
 				<SubagentRolesSection />

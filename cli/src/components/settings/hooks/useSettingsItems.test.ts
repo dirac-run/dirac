@@ -1,5 +1,7 @@
 import { openAiModelInfoSaneDefaults, openAiNativeDefaultModelId } from "@shared/api"
 import { DEFAULT_SUBAGENT_ROLES } from "@shared/subagentRoles"
+import { SETTINGS_HELP } from "@shared/settings-presentation"
+import { SettingsListView } from "../SettingsListView"
 import type { ToolMetadata } from "@shared/ExtensionMessage"
 import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
 import { render } from "ink-testing-library"
@@ -230,6 +232,31 @@ describe("OpenAI-compatible model metadata and settings presentation", () => {
 	})
 })
 describe("CLI subagent roles section", () => {
+	it("keeps model purposes and custom and starter role descriptions visible off selection", () => {
+		const roles = [...DEFAULT_SUBAGENT_ROLES, { name: "Custom", description: "Inspect database migrations before they are applied.", enabled: false }]
+		const items = createSettingsItems({
+			...props, currentTab: SettingsTab.UTILITY_MODEL,
+			utilityModelUseCases: { condense: false, generateCommitMessage: false, permissionHandling: false },
+			utilityPermissionPolicy: "", subagentRoles: roles,
+		})
+		for (const [key, description] of [
+			["planSelection", SETTINGS_HELP.planModel], ["actSelection", SETTINGS_HELP.actModel],
+			["utilityModelSelection", SETTINGS_HELP.utilityModel],
+			...roles.map((role, index) => [`subagentRole:${index}`, role.description]),
+		]) {
+			const item = items.find((item) => item.key === key)!
+			expect(item).toMatchObject({ description, alwaysShowDescription: true })
+			expect(item.persistentHelp).toBeUndefined()
+			expect(item.helpTone ?? "muted").toBe("muted")
+		}
+		expect(items.find((item) => item.key === "subagentRolesExplanation")?.value).toBe(SETTINGS_HELP.subagentRoles)
+		const view = render(React.createElement(SettingsListView, { items, selectedIndex: items.length - 1, maxRows: 200 }))
+		const frame = view.lastFrame()!.replace(/\s+/g, " ")
+		for (const description of [SETTINGS_HELP.planModel, SETTINGS_HELP.actModel, SETTINGS_HELP.utilityModel, ...roles.map((role) => role.description)]) {
+			expect(frame).toContain(description)
+		}
+		view.unmount()
+	})
 	it("shows disabled starters and one default explanation without an editable default row", () => {
 		const items = createSettingsItems({
 			...props, currentTab: SettingsTab.UTILITY_MODEL,

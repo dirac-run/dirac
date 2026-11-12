@@ -63,6 +63,7 @@ const UtilityModelSelection = () => {
 
 	return (
 		<div className="space-y-2">
+			<p className="text-xs text-description">{SETTINGS_HELP.utilityModel}</p>
 			<ModelSelectionEditor
 				label="Utility"
 				selection={selection}

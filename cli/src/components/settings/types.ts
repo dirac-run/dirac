@@ -36,6 +36,7 @@ export interface ListItem {
 	value: any
 	cycleOptions?: readonly string[]
 	description?: string
+	alwaysShowDescription?: boolean
 	expandedHelp?: string
 	keywords?: string[]
 	persistentHelp?: string

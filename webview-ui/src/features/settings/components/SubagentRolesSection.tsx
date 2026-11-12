@@ -3,6 +3,7 @@ import { supportsCustomModelId } from "@shared/customModelIds"
 import PROVIDERS from "@shared/providers/providers.json"
 import { convertSubagentRolesToProto } from "@shared/proto-conversions/subagent-roles"
 import { type SubagentRole, validateSubagentRoles } from "@shared/subagentRoles"
+import { SETTINGS_HELP } from "@shared/settings-presentation"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
@@ -64,7 +65,8 @@ export function SubagentRolesSection() {
 			</label>
 			<label className="block space-y-1 text-xs">
 				<span>Description</span>
-				<Input aria-label="Role description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+				<Input aria-label="Role description" aria-describedby="subagent-role-description-help" placeholder="Required: when to use this role" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+				<span id="subagent-role-description-help" className="block text-description">{SETTINGS_HELP.subagentRoleDescription}</span>
 			</label>
 			<ModelSelectionEditor key={editing} label="Role" selection={draft.modelSelection} allowCustomModelId={supportsCustomModelId} onValidityChange={setSelectionValid} onChange={(modelSelection) => setDraft({ ...draft, modelSelection })} />
 			<div className="flex items-center gap-2 text-xs">
@@ -76,7 +78,7 @@ export function SubagentRolesSection() {
 			<div className="flex flex-wrap items-center gap-2">
 				<Button type="button" size="sm" disabled={saving || !selectionValid} onClick={() => void saveDraft()}>Save role</Button>
 				<Button type="button" size="sm" variant="secondary" disabled={saving} onClick={closeEditor}>Cancel</Button>
-				{typeof editing === "number" && <Button type="button" size="sm" variant="ghost" className="ml-auto text-error" aria-label={`Remove ${catalog[editing].name}`} disabled={saving} onClick={() => void removeRole()}>Remove</Button>}
+				{typeof editing === "number" && <Button type="button" size="sm" variant="ghost" className="ml-auto text-error" aria-label={`Remove ${draft.name}`} disabled={saving} onClick={() => void removeRole()}>Remove</Button>}
 			</div>
 		</fieldset>
 	)
@@ -84,7 +86,7 @@ export function SubagentRolesSection() {
 	return (
 		<section className="mt-4 space-y-2" aria-label="Subagent roles">
 			<h3 className="text-sm font-medium">Subagent roles</h3>
-			<p className="text-xs text-description">Subagents use the current model by default. Enabled roles make alternative models available for specific kinds of work.</p>
+			<p className="text-xs text-description">{SETTINGS_HELP.subagentRoles}</p>
 			{catalog.map((role, index) => {
 				const selection = role.modelSelection
 				const provider = selection && (PROVIDERS.list.find((entry) => entry.value === selection.provider)?.label ?? selection.provider)
@@ -95,7 +97,8 @@ export function SubagentRolesSection() {
 					<div key={role.name} className="border-b border-(--vscode-panel-border) pb-2">
 						<div className="flex items-center gap-2 py-2">
 							<div className="min-w-0 flex-1">
-								<div className="truncate text-sm font-medium" title={role.description}>{role.name}</div>
+								<div className="truncate text-sm font-medium">{role.name}</div>
+								<div className="text-xs text-description break-words">{role.description}</div>
 								<div className="truncate text-xs text-description" title={modelSummary}>{modelSummary}</div>
 							</div>
 							{selection ? <div className="flex shrink-0 items-center gap-1.5 text-xs">

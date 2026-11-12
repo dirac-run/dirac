@@ -98,8 +98,8 @@ function createUtilityItems(props: UseSettingsItemsProps): ListItem[] {
 		: "Not configured"
 	const hasEnabledUseCase = Object.values(utilityModelUseCases).some(Boolean)
 	return [
-		{ key: "planSelection", label: "Plan", type: SettingsItemType.ACTION, value: props.planModelId || "Required: select a model" },
-		{ key: "actSelection", label: "Act", type: SettingsItemType.ACTION, value: props.actModelId || "Required: select a model" },
+		{ key: "planSelection", label: "Plan", type: SettingsItemType.ACTION, value: props.planModelId || "Required: select a model", description: SETTINGS_HELP.planModel, alwaysShowDescription: true },
+		{ key: "actSelection", label: "Act", type: SettingsItemType.ACTION, value: props.actModelId || "Required: select a model", description: SETTINGS_HELP.actModel, alwaysShowDescription: true },
 		checkbox("separateModels", "Use separate Plan / Act configurations", props.separateModels, "When disabled, model selection updates both modes."),
 		...(props.provider === "openrouter" ? [editable("actOpenRouterProviders", "Act allowed upstream providers", props.openRouterPinnedProviders[props.actModelId]?.join(", ") || "Unrestricted")] : []),
 		...(props.separateModels && props.planProvider === "openrouter" ? [editable("planOpenRouterProviders", "Plan allowed upstream providers", props.openRouterPinnedProviders[props.planModelId]?.join(", ") || "Unrestricted")] : []),
@@ -112,7 +112,8 @@ function createUtilityItems(props: UseSettingsItemsProps): ListItem[] {
 			label: "Utility",
 			type: SettingsItemType.ACTION,
 			value: selectionLabel,
-			description: "The model used for the enabled supporting operations below.",
+			description: SETTINGS_HELP.utilityModel,
+			alwaysShowDescription: true,
 		},
 		checkbox(
 			"utilityModelUseCondense",
@@ -165,11 +166,12 @@ function createUtilityItems(props: UseSettingsItemsProps): ListItem[] {
 			value: SETTINGS_HELP.utilityDisclosure,
 		},
 		{ key: "subagentRolesHeading", label: "Subagent roles", type: SettingsItemType.HEADER, value: "" },
-		{ key: "subagentRolesExplanation", label: "", type: SettingsItemType.READONLY, value: "Subagents use the current model by default unless you enable a role with different settings." },
+		{ key: "subagentRolesExplanation", label: "", type: SettingsItemType.READONLY, value: SETTINGS_HELP.subagentRoles },
 		...(props.subagentRoles ?? []).map((role, index) => ({
 			key: `subagentRole:${index}`, label: role.name, type: SettingsItemType.ACTION,
 			value: `${role.enabled ? "Enabled" : "Disabled"} · ${role.modelSelection ? `${role.modelSelection.openAiProfileName ?? getProviderLabel(role.modelSelection.provider)} · ${role.modelSelection.modelId}` : "Not configured"}`,
 			description: role.description,
+			alwaysShowDescription: true,
 		})),
 		{ key: "addSubagentRole", label: "Add role", type: SettingsItemType.ACTION, value: "" },
 	]

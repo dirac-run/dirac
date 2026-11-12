@@ -29,7 +29,7 @@ export const estimateItemRows = (item: ListItem, isSelected: boolean, width: num
 	const content = item.type === SettingsItemType.CHECKBOX ? `  [ ] ${item.label}` : `  ${item.label}${item.label && value !== "" ? ": " : ""}${value}`
 	let rows = textRows(content, item.type === SettingsItemType.CHECKBOX && item.isSubItem ? 2 : 0)
 	const helpIndent = item.isSubItem ? 8 : 6
-	if (isSelected && item.description) rows += textRows(item.description, helpIndent)
+	if ((isSelected || item.alwaysShowDescription) && item.description) rows += textRows(item.description, helpIndent)
 	if (item.persistentHelp && (item.alwaysShowHelp || isSelected || Boolean(item.value))) rows += textRows(item.persistentHelp, helpIndent)
 	return rows
 }
@@ -149,12 +149,12 @@ export const SettingsListView: React.FC<SettingsListViewProps> = ({ items, selec
 					)
 				}
 
-				const showSelectedHelp = isSelected && item.description
+				const showDescription = (isSelected || item.alwaysShowDescription) && item.description
 				const showPersistentHelp = item.persistentHelp && (item.alwaysShowHelp || isSelected || Boolean(item.value))
 				return (
 					<Box flexDirection="column" flexShrink={0} key={item.key}>
 						{row}
-						{showSelectedHelp && <HelpText item={item} />}
+						{showDescription && <HelpText item={item} />}
 						{showPersistentHelp && (
 							<Box marginLeft={item.isSubItem ? 8 : 6}>
 								<Text color={item.helpTone === "error" ? theme.error : theme.warning}>{item.persistentHelp}</Text>

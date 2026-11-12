@@ -126,6 +126,12 @@ export const TOOL_SOURCE_HELP = {
 } as const
 
 export const SETTINGS_HELP = {
+	planModel: "Main model for exploring code and planning changes.",
+	actModel: "Main model for implementing changes and running tools.",
+	planAndActModel: "Main model for both planning and implementing changes.",
+	utilityModel: "Model for the supporting operations you enable below.",
+	subagentRoles: "Subagents are helpers your main model can delegate work to. They use the current model by default. For alternatives, select a model and enable a role. Your main model sees each enabled role's name and description and decides when to use it; the subagent runs with your saved model settings.",
+	subagentRoleDescription: "Briefly describe when to use this role. Your main model uses this description to decide when to delegate to it.",
 	sandboxCustom: "Available controls depend on the execution host's native backend, not the UI computer. Unsupported or invalid policies always block commands and cannot be discarded through fallback. Recognized prelaunch setup/availability failures for a supported policy may run unsandboxed only with explicit fallback authorization. Approvals never override restrictions. Network deny is not a promise to isolate every local IPC service.",
 	sandboxPaths: "Paths must belong to the execution host: POSIX absolute or ~/ paths on Linux/macOS; ASCII drive-absolute paths on Windows. Relative paths, globs and placeholders are unsupported. Windows UNC/device paths, streams, DOS aliases and reparse points are unsupported. Sources must exist; aliases, canonical conflicts and unsupported controls are checked before launch. Selected grants the backend's explicit system-runtime baseline plus workspace and saved grants, not all host files. Blocked rules take precedence. Linux private temp is an empty per-launch tmpfs; macOS/Windows use a unique host-backed directory under the configured parent, not a tmpfs. Saved custom paths are never silently remapped across hosts. No implicit host environment passthrough.",
 	sandboxCreate: "Built-in profiles are immutable. New custom profiles start from Workspace: selected system runtime paths, read/write workspace, network allowed, private /tmp, and PATH/HOME/LANG passthrough. Package caches require explicit directories; no home directory is granted implicitly. Customize or duplicate copies the saved policy; Advanced preserves all detailed rules.",

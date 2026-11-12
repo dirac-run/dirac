@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModelProviderSelection } from "@shared/api"
 import { DEFAULT_SUBAGENT_ROLES } from "@shared/subagentRoles"
+import { SETTINGS_HELP } from "@shared/settings-presentation"
 import { convertProtoToSubagentRoles } from "@shared/proto-conversions/subagent-roles"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { SubagentRolesSection } from "./SubagentRolesSection"
@@ -28,11 +29,12 @@ describe("user-global subagent role settings", () => {
 		render(<SubagentRolesSection />)
 		for (const role of DEFAULT_SUBAGENT_ROLES) {
 			expect(screen.getByRole("button", { name: `Configure ${role.name}` })).toBeVisible()
+			expect(screen.getByText(role.description)).toBeVisible()
 			expect(screen.queryByRole("switch", { name: `Enable ${role.name}` })).not.toBeInTheDocument()
 		}
 		expect(screen.getAllByText("No model selected")).toHaveLength(DEFAULT_SUBAGENT_ROLES.length)
 		expect(screen.getAllByText("Not configured")).toHaveLength(DEFAULT_SUBAGENT_ROLES.length)
-		expect(screen.getByText(/Subagents use the current model by default/)).toHaveTextContent("Enabled roles make alternative models available for specific kinds of work.")
+		expect(screen.getByText(SETTINGS_HELP.subagentRoles)).toBeVisible()
 		expect(screen.queryByLabelText("Edit default")).not.toBeInTheDocument()
 		expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument()
 		expect(mocks.persist).not.toHaveBeenCalled()
@@ -61,10 +63,13 @@ describe("user-global subagent role settings", () => {
 	it("allows an unconfigured custom role and offers configuration rather than an invalid enable action", async () => {
 		render(<SubagentRolesSection />)
 		fireEvent.click(screen.getByText("Add role"))
+		expect(screen.getByLabelText("Role description")).toHaveAccessibleDescription(SETTINGS_HELP.subagentRoleDescription)
+		expect(screen.getByText(SETTINGS_HELP.subagentRoleDescription)).toBeVisible()
 		fireEvent.change(screen.getByLabelText("Role name"), { target: { value: "Researcher" } })
 		fireEvent.change(screen.getByLabelText("Role description"), { target: { value: "Research APIs." } })
 		fireEvent.click(screen.getByText("Save role"))
 		await screen.findByLabelText("Configure Researcher")
+		expect(screen.getByText("Research APIs.")).toBeVisible()
 		expect(convertProtoToSubagentRoles(mocks.persist.mock.calls[0][1]).at(-1)).toEqual({ name: "Researcher", description: "Research APIs.", enabled: false })
 		expect(screen.queryByLabelText("Enable Researcher")).not.toBeInTheDocument()
 		fireEvent.click(screen.getByLabelText("Configure Researcher"))
@@ -99,6 +104,15 @@ describe("user-global subagent role settings", () => {
 		fireEvent.click(screen.getByText("Cancel"))
 		fireEvent.click(screen.getByLabelText("Configure Reviewer"))
 		expect(screen.getByLabelText("Role name")).toHaveValue("Reviewer")
+		expect(mocks.persist).not.toHaveBeenCalled()
+	})
+
+	it("requires a description for a new role", async () => {
+		render(<SubagentRolesSection />)
+		fireEvent.click(screen.getByText("Add role"))
+		fireEvent.change(screen.getByLabelText("Role name"), { target: { value: "Researcher" } })
+		fireEvent.click(screen.getByText("Save role"))
+		expect(await screen.findByRole("alert")).toHaveTextContent("Role description must be non-empty text")
 		expect(mocks.persist).not.toHaveBeenCalled()
 	})
 

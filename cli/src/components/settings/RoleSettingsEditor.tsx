@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { Box, Text, useInput } from "ink"
 import type { SubagentRole } from "@shared/subagentRoles"
+import { SETTINGS_HELP } from "@shared/settings-presentation"
 import type { Controller } from "@/core/controller"
 import { getProviderLabel } from "../../utils/providers"
 import { theme } from "../../constants/theme"
@@ -42,6 +43,7 @@ export const RoleSettingsEditor: React.FC<Props> = ({ role, controller, onSave, 
 	const selection = draft.modelSelection
 	return <Box flexDirection="column">
 		<Text>{role ? `Edit ${role.name}` : "Add subagent role"}</Text>
+		<Text color={theme.muted}>{SETTINGS_HELP.subagentRoleDescription}</Text>
 		{error && <Text color={theme.error}>{error}</Text>}
 		{field ? <Text>{field === "name" ? "Name" : "Description"}: {text}▏</Text> : <SearchableList isActive={!busy} items={[
 			{ id: "name", label: `Name: ${draft.name || "Required"}` },
