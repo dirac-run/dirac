@@ -7,6 +7,18 @@ import { buildOrchestrationTrait } from "../OrchestrationTraitBuilder"
 describe("OrchestrationTraitBuilder", () => {
 	afterEach(() => sinon.restore())
 
+	for (const executionProfile of ["standalone", "tasklet", "goal_coordinator", "goal_followup"] as const) {
+		for (const agentRole of ["Reviewer", "default", undefined]) {
+			it(`forwards only saved child role ${agentRole ?? "missing"} for ${executionProfile}`, () => {
+				const { config } = createMockTaskConfig({ overrides: { executionProfile, agentRole } })
+				const identity = buildOrchestrationTrait(config).agentIdentity
+				assert.deepEqual(identity, executionProfile === "tasklet"
+					? { id: config.taskId, parent: "Dirac", role: agentRole }
+					: { id: "Dirac", parent: null })
+			})
+		}
+	}
+
 	for (const contained of [false, true]) {
 		it(`forwards ${contained ? "contained" : "root"} skill storage`, async () => {
 			const { config } = createMockTaskConfig()

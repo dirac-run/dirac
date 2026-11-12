@@ -1,6 +1,6 @@
 import type { TaskletObservedState } from "./taskletObservation"
 import { TASKLET_STATE_LABELS } from "./taskletObservation"
-import { formatTaskletLabel } from "./taskletLabel"
+import { formatAgentLabel, formatTaskletLabel } from "./taskletLabel"
 
 /** A frozen operation receipt, never the live execution state of a child. */
 export type TaskletReceiptOperation =
@@ -123,19 +123,24 @@ export function taskletReceiptRowTitle(row: Pick<TaskletReceiptRow, "taskletId" 
 	return formatTaskletLabel(row)
 }
 
-export function taskletReceiptTitle(receipt: TaskletReceipt, actor?: string): string {
-	if (actor) return taskletActionTitle(receipt, actor)
+export function taskletReceiptTitle(receipt: TaskletReceipt, actor?: string, actorRole?: string): string {
+	if (actor) return taskletActionTitle(receipt, formatAgentLabel({ id: actor, role: actorRole }))
 	const operation = receipt.operation === "inspect"
 		? `Inspect ${VIEW_LABELS[receipt.view ?? "status"]}`
 		: TASKLET_RECEIPT_OPERATIONS[receipt.operation].label
 	if (receipt.operation === "list" || receipt.rows.length === 0) return operation
-	if (receipt.rows.length === 1) return `${operation} · ${receipt.rows[0].taskletId ?? "agent"}`
+	if (receipt.rows.length === 1) {
+		const row = receipt.rows[0]
+		return `${operation} · ${formatAgentLabel({ id: row.taskletId ?? "agent", role: row.role })}`
+	}
 	return `${operation} · ${receipt.rows.length} agents`
 }
 
 function taskletActionTitle(receipt: TaskletReceipt, actor: string): string {
 	const targets = [...new Set(receipt.rows.map((row) => row.taskletId).filter((id): id is string => id !== undefined))]
-	const target = targets.length === 1 ? targets[0] : targets.length > 1 ? `${targets.length} agents` : undefined
+	const target = targets.length === 1
+		? formatAgentLabel({ id: targets[0], role: receipt.rows.find((row) => row.taskletId === targets[0])?.role })
+		: targets.length > 1 ? `${targets.length} agents` : undefined
 	const labels: Record<TaskletReceiptOperation, string> = {
 		spawn: "Start agents",
 		list: "Agents",
@@ -151,7 +156,9 @@ function taskletActionTitle(receipt: TaskletReceipt, actor: string): string {
 	}
 	if (receipt.operation === "sleep") {
 		const sources = receipt.waitSourceIds
-		const source = sources?.length === 1 ? sources[0] : receipt.waitScope === "time_or_user" ? "deadline or user" : "agents"
+		const source = sources?.length === 1
+			? formatAgentLabel({ id: sources[0], role: receipt.rows.find((row) => row.taskletId === sources[0])?.role })
+			: receipt.waitScope === "time_or_user" ? "deadline or user" : "agents"
 		return `${actor} · ${receipt.outcome === "requested" ? `Awaiting ${source}` : "Wait ended"}`
 	}
 	if (receipt.operation === "list") return `${actor} · ${labels.list}`

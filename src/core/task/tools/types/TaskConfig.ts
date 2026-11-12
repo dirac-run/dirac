@@ -27,6 +27,8 @@ import { TASK_CALLBACKS_KEYS, TASK_CONFIG_KEYS, TASK_SERVICES_KEYS } from "../ut
  * Strongly-typed configuration object passed to tool handlers
  */
 export interface TaskConfig extends ToolConfig {
+	/** Saved runtime role for the contained agent's presentation identity. */
+	readonly agentRole?: string
 
 	// State management
 	taskState: TaskState

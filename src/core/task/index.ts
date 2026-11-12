@@ -1095,6 +1095,7 @@ export class Task {
 				}
 			},
 			() => this.captureCommandSandbox(),
+			this.taskletConfiguration?.name,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -2523,7 +2524,7 @@ export class TaskletHost {
 		if (!this.communicationProjectionReady || !this.owner.publishCommunicationCard) return
 		for (const event of events) {
 			if (event.communication.type === "outcome" && !includeOutcomes) continue
-			const card = taskletCommunicationCard(event)
+			const card = taskletCommunicationCard(event, child.record.role)
 			if (!card) continue
 			const key = `${child.record.id}:${card.id}`
 			const snapshot = JSON.stringify(card)

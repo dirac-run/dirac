@@ -1,6 +1,7 @@
 import { CardStatus } from "@shared/ExtensionMessage"
 import { toError } from "@shared/errors"
 import { DiracIcon } from "@shared/icons"
+import { formatAgentLabel } from "@shared/taskletLabel"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
 import type { CardParams, ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
@@ -32,8 +33,9 @@ export class ListAgentsTool implements IDiracTool {
 		if (!communication) throw new Error("Agent discovery is unavailable for this execution")
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
+		const actorLabel = formatAgentLabel({ id: actor, role: identity.role })
 		const card = await createRosterCard({
-			header: `${actor} is listing agents`,
+			header: `${actorLabel} is listing agents`,
 			communication: { actor },
 			icon: DiracIcon.SUBAGENTS,
 			status: CardStatus.RUNNING,
@@ -47,7 +49,7 @@ export class ListAgentsTool implements IDiracTool {
 		} catch (error) {
 			if (card) {
 				await present(() => card.update({
-					header: `${actor} failed to list agents`,
+					header: `${actorLabel} failed to list agents`,
 					communication: { actor, detail: toError(error).message },
 				}), env)
 				await present(() => card.finalize(CardStatus.ERROR, true), env)
@@ -57,7 +59,7 @@ export class ListAgentsTool implements IDiracTool {
 		if (card) {
 			const roster = page.agents.map((agent) => `${agent.id} — ${agent.title_preview}\nStatus: ${agent.status}; messages: ${agent.accepts_messages ? "available" : "unavailable"}`)
 			await present(() => card.update({
-				header: `${actor} listed agents`,
+				header: `${actorLabel} listed agents`,
 				body: roster.length ? roster.join("\n\n") : "No agents on this page.",
 				communication: { actor, detail: page.next_cursor ? "More agents available." : undefined },
 			}), env)

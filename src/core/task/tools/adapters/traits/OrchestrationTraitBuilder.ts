@@ -14,7 +14,7 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 			if (config.invocationEffects) config.invocationEffects.failed = true
 		},
 		agentIdentity: config.executionProfile === "tasklet"
-			? { id: config.taskId, parent: "Dirac" }
+			? { id: config.taskId, parent: "Dirac", role: config.agentRole }
 			: { id: "Dirac", parent: null },
 		tasklets: config.executionProfile !== "tasklet" ? config.callbacks.tasklets : undefined,
 		agentCommunication: config.callbacks.agentCommunication,

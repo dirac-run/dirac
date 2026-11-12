@@ -134,8 +134,8 @@ describe("SubagentsTool asynchronous tasklet startup", () => {
 		const [result] = await spawn(env, [{ type: "Reviewer", task_header: "Review code", task_description: "Review" }])
 		assert.equal(result.role, "Reviewer")
 		assert.equal(updates[0].taskletReceipt.rows[0].role, "Reviewer")
-		assert.equal(updates[0].header, "Dirac → Feynman · Start agents")
-		assert.match(updates[0].body, /Feynman \(Reviewer\) — Review code/)
+		assert.equal(updates[0].header, "Dirac → Feynman [Reviewer] · Start agents")
+		assert.match(updates[0].body, /Feynman \[Reviewer\] — Review code/)
 	})
 
 	it("forwards typed task-local narrowing only and rejects settings authority", async () => {

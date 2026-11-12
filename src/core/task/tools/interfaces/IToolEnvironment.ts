@@ -295,7 +295,7 @@ export interface IOrchestrationTrait {
 	/** Report a returned semantic failure without changing the model-mistake counter. */
 	reportFailure(): void
 	/** Stable runtime identity; roots are always Dirac. */
-	readonly agentIdentity: { readonly id: string; readonly parent: string | null }
+	readonly agentIdentity: { readonly id: string; readonly parent: string | null; readonly role?: string }
 	/** Available only to an owning ordinary root; never exposes a live Task or host. */
 	readonly tasklets?: TaskletControls
 	/** Runtime-authenticated ordinary communication and discovery for roots and children. */

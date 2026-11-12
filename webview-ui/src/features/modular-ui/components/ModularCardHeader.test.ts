@@ -124,6 +124,25 @@ describe("getSubagentCardElapsedTime", () => {
 
 describe("tasklet header rendering", () => {
 	it.each([
+		["Reviewer", "Planck [Reviewer]"],
+		["Custom role", "Planck [Custom role]"],
+		["default", "Planck"],
+		[undefined, "Planck"],
+	])("renders role %s in the card header", (role, label) => {
+		const card = createTaskletPresentationCard({
+			taskletId: "Planck", title: "Review implementation", role,
+			prompt: "Inspect the interface", createdAt: 1_000,
+			status: "completed", communications: [], activity: [],
+		})
+		const view = render(createElement(ModularCardHeader, {
+			card, contentId: "body", isCollapsed: true, onToggleCollapse: vi.fn(),
+		}))
+		expect(view.getByText(`${label} — Review implementation`)).toBeInTheDocument()
+		expect(view.getByRole("button")).toHaveAttribute("title", `Expand ${label} — Review implementation`)
+		view.unmount()
+	})
+
+	it.each([
 		"running",
 		"waiting",
 		"completed",

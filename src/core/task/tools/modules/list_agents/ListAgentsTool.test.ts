@@ -11,7 +11,7 @@ import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDe
 import { ListAgentsTool, list_agents_spec } from "./ListAgentsTool"
 import { exposure } from "./tool"
 
-function fixture(identity = { id: "root-task-id", parent: null as string | null }) {
+function fixture(identity: IToolEnvironment["orchestration"]["agentIdentity"] = { id: "root-task-id", parent: null }) {
 	const page = { agents: [{ id: "Dirac", title_preview: "Root task", status: "running", accepts_messages: true }, { id: "Feynman", title_preview: "Inspect", status: "completed", accepts_messages: false }], next_cursor: "next" }
 	const list = sinon.stub().returns(page)
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
@@ -52,6 +52,23 @@ describe("ListAgentsTool", () => {
 		assert.equal(card.update.firstCall.args[0].body, "No agents on this page.")
 		assert.equal(card.update.firstCall.args[0].communication.detail, undefined)
 	})
+
+	for (const [role, label] of [["Reviewer", "Curie [Reviewer]"], ["default", "Curie"], [undefined, "Curie"]] as const) {
+		it(`formats saved actor role ${role ?? "missing"} on listing and failure headers only`, async () => {
+			for (const fails of [false, true]) {
+				const { env, list, page, card, createCard } = fixture({ id: "Curie", parent: "Dirac", role })
+				if (fails) list.throws(new Error("Roster unavailable"))
+				const result = new ListAgentsTool().processCall({}, env)
+				if (fails) await assert.rejects(result, /Roster unavailable/)
+				else assert.deepEqual(JSON.parse(await result), page)
+				assert.equal(createCard.firstCall.args[0].header, `${label} is listing agents`)
+				assert.equal(card.update.firstCall.args[0].header, `${label} ${fails ? "failed to list" : "listed"} agents`)
+				for (const value of [createCard.firstCall.args[0], card.update.firstCall.args[0]]) {
+					assert.equal(value.communication.actor, "Curie")
+				}
+			}
+		})
+	}
 
 	it("forwards opaque cursors and maximum limit without consuming or filtering the roster", async () => {
 		const { env, list } = fixture()

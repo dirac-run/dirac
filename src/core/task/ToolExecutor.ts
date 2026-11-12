@@ -138,6 +138,7 @@ export class ToolExecutor {
 		private getPermissionCommandController?: () => CommandPermissionController,
 		private getCommandApprovals?: () => import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability | undefined,
 		private captureTaskCommandSandbox?: () => import("@shared/SandboxExecution").SandboxExecutionContext,
+		private readonly agentRole?: string,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -386,6 +387,7 @@ export class ToolExecutor {
 		const config: TaskConfig = {
 			executionProfile: this.executionProfile,
 			taskId: this.taskId,
+			agentRole: this.agentRole,
 			storageAddress: this.storageAddress,
 			ulid: this.ulid,
 			mode: settings.mode,

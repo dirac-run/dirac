@@ -1,5 +1,6 @@
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
+import { formatAgentLabel } from "@shared/taskletLabel"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
 import { toError } from "@/shared/errors"
@@ -32,7 +33,8 @@ export class SendMessageTool implements IDiracTool {
 		if (!communication) throw new Error("Agent communication is unavailable for this execution")
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
-		const header = `${actor} → ${request.to} · Message`
+		const actorLabel = formatAgentLabel({ id: actor, role: identity.role })
+		const header = `${actorLabel} → ${request.to} · Message`
 		const card = await createMessageCard(
 			{
 				header,

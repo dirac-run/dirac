@@ -10,7 +10,7 @@ import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDe
 import { SendMessageTool, send_message_spec } from "./SendMessageTool"
 import { exposure } from "./tool"
 
-function fixture(identity = { id: "Feynman", parent: "Dirac" as string | null }) {
+function fixture(identity: IToolEnvironment["orchestration"]["agentIdentity"] = { id: "Feynman", parent: "Dirac" }) {
 	const send = sinon.stub().resolves({ accepted: true, message_id: "message-1" })
 	const card = { update: sinon.stub().resolves(), finalize: sinon.stub().resolves() }
 	const createCard = sinon.stub().resolves(card)
@@ -54,8 +54,21 @@ describe("SendMessageTool", () => {
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
 	})
 
+	for (const [role, label] of [["Reviewer", "Feynman [Reviewer]"], ["default", "Feynman"], [undefined, "Feynman"]] as const) {
+		it(`formats saved actor role ${role ?? "missing"} without changing recipient routing or actor metadata`, async () => {
+			const { env, send, card, createCard } = fixture({ id: "Feynman", parent: "Dirac", role })
+			const request = { to: "Planck", text: "Exact message" }
+			await new SendMessageTool().processCall(request, env)
+			for (const value of [createCard.firstCall.args[0], card.update.firstCall.args[0]]) {
+				assert.equal(value.header, `${label} → Planck · Message`)
+				assert.deepEqual(value.communication, { actor: "Feynman" })
+			}
+			sinon.assert.calledOnceWithExactly(send, request)
+		})
+	}
+
 	it("always names the root Dirac rather than its task ID", async () => {
-		const { env, card, createCard } = fixture({ id: "root-task-id", parent: null })
+		const { env, card, createCard } = fixture({ id: "root-task-id", parent: null, role: "Reviewer" })
 		await new SendMessageTool().processCall({ to: "Feynman", text: "hello" }, env)
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
 		assert.equal(card.update.firstCall.args[0].header, "Dirac → Feynman · Message")

@@ -1,5 +1,6 @@
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracIcon } from "@shared/icons"
+import { formatAgentLabel } from "@shared/taskletLabel"
 import type { DiracToolSpec } from "@shared/tools"
 import type { IDiracTool } from "../../interfaces/IDiracTool"
 import { toError } from "@/shared/errors"
@@ -30,7 +31,7 @@ export class SharedJournalTool implements IDiracTool {
 		if (!journal) throw new Error("Shared journal is unavailable for this execution")
 		const identity = env.orchestration.agentIdentity
 		const actor = identity.parent === null ? "Dirac" : identity.id
-		const header = `${actor} · Journal ${request.operation === "publish" ? "publication" : "read"}`
+		const header = `${formatAgentLabel({ id: actor, role: identity.role })} · Journal ${request.operation === "publish" ? "publication" : "read"}`
 		const authoredContent = request.operation === "publish" ? `${request.headline}\n\n${request.content}` : undefined
 		const card = await createJournalCard(
 			{

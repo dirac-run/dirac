@@ -158,7 +158,7 @@ export class SubagentsTool implements IDiracTool {
 					error: result.error,
 				})),
 			}
-			await present(() => card.update(receiptCard(receipt, status, env.orchestration.agentIdentity.id)), env)
+			await present(() => card.update(receiptCard(receipt, status, env.orchestration.agentIdentity.id, env.orchestration.agentIdentity.role)), env)
 			await present(() => card.finalize(status), env)
 		}
 		return JSON.stringify({ subagents: results }, null, 2)
@@ -187,7 +187,7 @@ async function createReceiptCard(
 ): Promise<ICardHandle | undefined> {
 	try {
 		const creation = env.ui.createCard({
-			...receiptCard(receipt, CardStatus.RUNNING, env.orchestration.agentIdentity.id),
+			...receiptCard(receipt, CardStatus.RUNNING, env.orchestration.agentIdentity.id, env.orchestration.agentIdentity.role),
 			rawInput,
 		})
 		const result = await waitForPresentationOperation(creation)
@@ -335,6 +335,7 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 	const args = requireArguments(input)
 	const request = parseControlRequest(args)
 	const actor = env.orchestration.agentIdentity.id
+	const actorRole = env.orchestration.agentIdentity.role
 	const initialReceipts = individualReceipts(controlReceipt(request))
 	const cards = await Promise.all(initialReceipts.map((receipt) => createReceiptCard(receipt, env, args)))
 	let result: unknown
@@ -356,6 +357,7 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 							},
 							CardStatus.ERROR,
 							actor,
+							actorRole,
 						),
 					),
 				env,
@@ -378,7 +380,7 @@ async function executeControlCall(input: unknown, env: IToolEnvironment): Promis
 			receipt.outcome === "failed" || receipt.outcome === "partial_failure" || receipt.outcome === "stale"
 				? CardStatus.ERROR
 				: CardStatus.SUCCESS
-		await present(() => card.update(receiptCard(receipt, status, actor)), env)
+		await present(() => card.update(receiptCard(receipt, status, actor, actorRole)), env)
 		await present(() => card.finalize(status), env)
 	}
 	return output
@@ -645,10 +647,10 @@ function controlReceipt(request: ControlRequest): TaskletReceipt {
 	}
 }
 
-function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: string) {
+function receiptCard(taskletReceipt: TaskletReceipt, status: CardStatus, actor: string, actorRole?: string) {
 	const detail = TASKLET_RECEIPT_OUTCOMES[taskletReceipt.outcome].label
 	return {
-		header: taskletReceiptTitle(taskletReceipt, actor),
+		header: taskletReceiptTitle(taskletReceipt, actor, actorRole),
 		icon: TASKLET_RECEIPT_OPERATIONS[taskletReceipt.operation].icon,
 		body: formatTaskletReceipt(taskletReceipt, true),
 		communication: { actor, detail },

@@ -40,6 +40,17 @@ describe("CLI tasklet cards", () => {
 	})
 
 	it.each([
+		["Reviewer", "Feynman [Reviewer]"],
+		["Custom role", "Feynman [Custom role]"],
+		["default", "Feynman"],
+		[undefined, "Feynman"],
+	])("renders role %s in the card header", (role, label) => {
+		const view = render(<ModularCard card={createTaskletPresentationCard({ ...data, role })} suppressBody />)
+		expect(plain(view.lastFrame())).toContain(`${label} — Inspect source · running`)
+		view.unmount()
+	})
+
+	it.each([
 		"running",
 		"waiting",
 		"completed",
@@ -119,7 +130,7 @@ describe("CLI tasklet cards", () => {
 	] as const)("keeps narrow %s headers within the one-row timeline budget", (status) => {
 		terminalSize.columns = 20
 		for (const taskletId of ["Feynman", "Planck"]) {
-			const tasklet = message({ ...data, taskletId, title: "Inspect a very long source title\nwith another line", status })
+			const tasklet = message({ ...data, taskletId, role: "Reviewer", title: "Inspect a very long source title\nwith another line", status })
 			for (const props of [{ suppressCardBody: true }, { tailOnly: true, maxContentLines: 1 }]) {
 				const view = render(
 					<Box flexDirection="column" width={20}>

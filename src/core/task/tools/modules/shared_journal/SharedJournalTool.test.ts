@@ -10,7 +10,7 @@ import { PRESENTATION_OPERATION_TIMEOUT_MS } from "../../subagent/PresentationDe
 import { SharedJournalTool, shared_journal_spec } from "./SharedJournalTool"
 import { exposure } from "./tool"
 
-function fixture(identity = { id: "Curie", parent: "Dirac" as string | null }) {
+function fixture(identity: IToolEnvironment["orchestration"]["agentIdentity"] = { id: "Curie", parent: "Dirac" }) {
 	const id = ulid()
 	const receipt = { published: true, message_id: id, notifications: { enqueued: 1, skipped_inactive: 1, rejected_capacity: 2 } }
 	const record = {
@@ -36,6 +36,19 @@ function fixture(identity = { id: "Curie", parent: "Dirac" as string | null }) {
 
 describe("SharedJournalTool", () => {
 	afterEach(() => sinon.restore())
+
+	for (const role of ["Scout", "Custom role", "default", undefined]) {
+		it(`shows only a non-default saved role (${role}) in journal headers`, async () => {
+			const { env, record, card, createCard } = fixture({ id: "Curie", parent: "Dirac", role })
+			const label = role && role !== "default" ? `Curie [${role}]` : "Curie"
+			await new SharedJournalTool().processCall({ operation: "publish", headline: "Finding", content: "Body" }, env)
+			assert.equal(createCard.firstCall.args[0].header, `${label} · Journal publication`)
+			assert.equal(card.update.firstCall.args[0].header, `${label} · Journal publication`)
+			assert.deepEqual(card.update.firstCall.args[0].communication, { actor: "Curie" })
+			await new SharedJournalTool().processCall({ operation: "read", message_id: record.id }, env)
+			assert.equal(card.update.lastCall.args[0].header, `${label} · Journal read`)
+		})
+	}
 
 	it("shows the verbatim finding with only a capacity warning beyond publication status", async () => {
 		const { env, publish, receipt, card, createCard } = fixture()
@@ -80,7 +93,7 @@ describe("SharedJournalTool", () => {
 		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.SUCCESS)
 	})
 	it("names the root Dirac for both publication and reading", async () => {
-		const { env, record, card, createCard } = fixture({ id: "root-task-id", parent: null })
+		const { env, record, card, createCard } = fixture({ id: "root-task-id", parent: null, role: "Scout" })
 		await new SharedJournalTool().processCall({ operation: "publish", headline: "Finding", content: "Body" }, env)
 		assert.equal(createCard.firstCall.args[0].communication.actor, "Dirac")
 		assert.equal(card.update.firstCall.args[0].header, "Dirac · Journal publication")

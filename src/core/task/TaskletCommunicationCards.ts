@@ -1,10 +1,12 @@
 import { CardStatus, type Card } from "@shared/ExtensionMessage"
 import { ResponseOperation } from "@shared/responseTool"
+import { formatAgentLabel } from "@shared/taskletLabel"
 import type { TaskletEvent, TaskletInteraction } from "./types/tasklet"
 import type { TaskRunOutcome } from "./TaskRunOutcome"
 
 /** Observational child-to-parent communication, never an interaction or permission control. */
-export function taskletCommunicationCard(event: Readonly<TaskletEvent>): Card | undefined {
+export function taskletCommunicationCard(event: Readonly<TaskletEvent>, role?: string): Card | undefined {
+	const actorLabel = formatAgentLabel({ id: event.taskletId, role })
 	const base = {
 		id: event.id,
 		communication: { actor: event.taskletId },
@@ -18,7 +20,7 @@ export function taskletCommunicationCard(event: Readonly<TaskletEvent>): Card | 
 		if (communication.response.operation !== ResponseOperation.PROGRESS) return undefined
 		return {
 			...base,
-			header: `${event.taskletId} · Update`,
+			header: `${actorLabel} · Update`,
 			body: communication.response.text,
 			status: CardStatus.SUCCESS,
 			endTime: event.createdAt,
@@ -29,7 +31,7 @@ export function taskletCommunicationCard(event: Readonly<TaskletEvent>): Card | 
 		const permission = request.kind === "permission" || request.permissionOperation !== undefined || request.permissionRequestKind !== undefined
 		return {
 			...base,
-			header: `${event.taskletId} · ${permission ? "Permission" : "Question"} for Dirac`,
+			header: `${actorLabel} · ${permission ? "Permission" : "Question"} for Dirac`,
 			body: interactionContent(request, permission),
 			status: request.status === "pending" ? CardStatus.RUNNING : request.status === "resolved" ? CardStatus.SUCCESS : CardStatus.CANCELLED,
 			endTime: request.resolvedAt ?? request.retiredAt,
@@ -38,7 +40,7 @@ export function taskletCommunicationCard(event: Readonly<TaskletEvent>): Card | 
 	if (communication.type !== "outcome") return undefined
 	return {
 		...base,
-		header: `${event.taskletId} · Result`,
+		header: `${actorLabel} · Result`,
 		body: outcomeContent(communication.outcome),
 		status: communication.outcome.kind === "completed" ? CardStatus.SUCCESS : communication.outcome.kind === "failed" ? CardStatus.ERROR : CardStatus.CANCELLED,
 		endTime: event.createdAt,

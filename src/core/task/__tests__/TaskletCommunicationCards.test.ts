@@ -37,6 +37,30 @@ function assertObservation(value: ReturnType<typeof card>) {
 }
 
 describe("Tasklet communication cards", () => {
+	for (const [role, label] of [["Reviewer", "Feynman [Reviewer]"], ["default", "Feynman"], [undefined, "Feynman"]] as const) {
+		it(`uses saved ${role ?? "missing"} role in every incoming header without changing actor identity`, () => {
+			const communications: [TaskletEvent["communication"], string][] = [
+				[{ type: "response", response: { operation: ResponseOperation.PROGRESS, text: "Update" } }, "Update"],
+				[{ type: "interaction", request: interaction() }, "Question for Dirac"],
+				[{ type: "interaction", request: interaction({ kind: "permission" }) }, "Permission for Dirac"],
+				[{ type: "outcome", outcome: { kind: "completed", response: "Result", completedAt: 2 } }, "Result"],
+			]
+			for (const [communication, action] of communications) {
+				const value = taskletCommunicationCard(event(communication), role)!
+				assert.equal(value.header, `${label} · ${action}`)
+				assert.deepEqual(value.communication, { actor: "Feynman" })
+				assert.equal(value.id, "opaque-event-id")
+				assertObservation(value)
+			}
+		})
+	}
+
+	it("never decorates Dirac with a role", () => {
+		const update = event({ type: "response", response: { operation: ResponseOperation.PROGRESS, text: "Update" } })
+		update.taskletId = "Dirac"
+		assert.equal(taskletCommunicationCard(update, "Reviewer")!.header, "Dirac · Update")
+	})
+
 	it("shows exact question text, choices and pending state without executable controls or IDs", () => {
 		const value = card(interaction())
 		assert.equal(value.header, "Feynman · Question for Dirac")

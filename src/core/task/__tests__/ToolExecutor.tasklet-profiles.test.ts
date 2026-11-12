@@ -25,6 +25,7 @@ describe("ToolExecutor shared root tasklet eligibility", () => {
 			const getTaskletControls = sinon.stub().returns(controls)
 			const executor = Object.assign(Object.create(ToolExecutor.prototype), {
 				executionProfile,
+				agentRole: "Saved Reviewer",
 				requestRuntime: () => runtime,
 				getCurrentWorkingConfiguration: () => workingConfiguration,
 				getTaskletControls,
@@ -35,6 +36,7 @@ describe("ToolExecutor shared root tasklet eligibility", () => {
 				if (typeof executor[key] !== "function") executor[key] = sinon.stub()
 			}
 			const config = executor.asToolConfig()
+			assert.equal(config.agentRole, "Saved Reviewer")
 			assert.equal(config.callbacks.tasklets, executionProfile === "tasklet" ? undefined : controls)
 			assert.equal(getTaskletControls.callCount, executionProfile === "tasklet" ? 0 : 1)
 		})

@@ -14,17 +14,42 @@ function receipt(operation: TaskletReceiptOperation, outcome: TaskletReceiptOutc
 }
 
 describe("Tasklet communication receipts", () => {
-	it("keeps actor and recipient compact without assignment titles or roles", () => {
+	it("keeps actor and recipient compact with roles but without assignment titles", () => {
 		for (const [operation, label] of [["guidance", "Guidance"], ["reply", "Answer"], ["spawn", "Start agents"], ["resume", "Resume"], ["inspect", "Inspect status"]] as const) {
-			assert.equal(taskletReceiptTitle(receipt(operation), "Feynman"), `Feynman → Planck · ${label}`)
+			assert.equal(taskletReceiptTitle(receipt(operation), "Feynman"), `Feynman → Planck [Reviewer] · ${label}`)
+			assert.equal(taskletReceiptTitle(receipt(operation), "Feynman", "Coder"), `Feynman [Coder] → Planck [Reviewer] · ${label}`)
 		}
 		assert.equal(taskletReceiptTitle(receipt("list", "retrieved"), "Dirac"), "Dirac · Agents")
+	})
+
+	it("suppresses default and Dirac roles in actor and recipient labels", () => {
+		for (const role of ["default", "DeFaUlT", "", undefined]) {
+			const item = receipt("message", "queued")
+			item.rows[0].role = role
+			assert.equal(taskletReceiptTitle(item, "Feynman", role), "Feynman → Planck · Messages")
+			assert.equal(taskletReceiptTitle(item), "Message agents · Planck")
+		}
+		const item = receipt("message", "queued")
+		item.rows[0].taskletId = "Dirac"
+		assert.equal(taskletReceiptTitle(item, "Dirac", "Coder"), "Dirac → Dirac · Messages")
+		assert.equal(taskletReceiptTitle(item), "Message agents · Dirac")
+	})
+
+	it("formats individual recipients without changing raw routing IDs or aggregate counts", () => {
+		const item = receipt("message", "queued")
+		assert.equal(taskletReceiptTitle(item), "Message agents · Planck [Reviewer]")
+		assert.equal(taskletReceiptTitle(item, "Dirac", "Coder"), "Dirac → Planck [Reviewer] · Messages")
+		item.rows.push({ ...item.rows[0] })
+		assert.equal(taskletReceiptTitle(item, "Dirac"), "Dirac → Planck [Reviewer] · Messages")
+		item.rows.push({ ...item.rows[0], taskletId: "Curie", role: "Coder" })
+		assert.equal(taskletReceiptTitle(item, "Dirac"), "Dirac → 2 agents · Messages")
+		assert.deepEqual(item.rows.map((row) => row.taskletId), ["Planck", "Planck", "Curie"])
 	})
 
 	it("retains outcome status in exports without duplicating communication metadata", () => {
 		for (const outcome of ["requested", "failed", "stale", "already_resolved"] as const) {
 			const item = receipt("reply", outcome)
-			assert.equal(taskletReceiptTitle(item, "Dirac"), "Dirac → Planck · Answer")
+			assert.equal(taskletReceiptTitle(item, "Dirac"), "Dirac → Planck [Reviewer] · Answer")
 			assert.match(formatTaskletReceipt(item), new RegExp(`Status: ${outcome === "already_resolved" ? "Already resolved" : outcome === "stale" ? "Stale request" : outcome[0].toUpperCase() + outcome.slice(1)}`))
 			assert.equal(formatTaskletReceipt(item, true), "")
 		}
@@ -53,7 +78,7 @@ describe("Tasklet communication receipts", () => {
 			const permission = receipt("permission_decision", "requires_user_approval")
 			permission.rows[0].decision = decision
 			permission.rows[0].requestId = "opaque-permission-id"
-			assert.equal(taskletReceiptTitle(permission, "Dirac"), "Dirac → Planck · Permission decision")
+			assert.equal(taskletReceiptTitle(permission, "Dirac"), "Dirac → Planck [Reviewer] · Permission decision")
 			let content = formatTaskletReceipt(permission, true)
 			assert.match(content, new RegExp(`Requested decision: ${decision}`))
 			assert.doesNotMatch(content, /opaque-permission-id/)
@@ -73,7 +98,7 @@ describe("Tasklet communication receipts", () => {
 		const list = receipt("list", "retrieved")
 		list.returnedCount = list.totalCount = 1
 		list.rows[0].observedState = "waiting_for_parent"
-		assert.equal(formatTaskletReceipt(list, true), "Planck (Reviewer) — Review code — Waiting for parent\n\n1 of 1 items")
+		assert.equal(formatTaskletReceipt(list, true), "Planck [Reviewer] — Review code — Waiting for parent\n\n1 of 1 items")
 		list.hasMore = true
 		assert.match(formatTaskletReceipt(list, true), /1 of 1 items · more available/)
 		list.hasMore = false
@@ -95,6 +120,14 @@ describe("Tasklet communication receipts", () => {
 		sleep.outcome = "cancelled"
 		assert.equal(taskletReceiptTitle(sleep, "Dirac"), "Dirac · Wait ended")
 		assert.equal(taskletReceiptNote(sleep), "Wait cancelled.")
+	})
+
+	it("formats a named sleep source from saved row metadata without modifying wait IDs", () => {
+		const sleep = receipt("sleep", "requested")
+		sleep.waitScope = "selected_tasklets"
+		sleep.waitSourceIds = ["Planck"]
+		assert.equal(taskletReceiptTitle(sleep, "Feynman", "Coder"), "Feynman [Coder] · Awaiting Planck [Reviewer]")
+		assert.deepEqual(sleep.waitSourceIds, ["Planck"])
 	})
 
 	it("uses concise wake reasons and leaves ordinary acceptance to the status label", () => {

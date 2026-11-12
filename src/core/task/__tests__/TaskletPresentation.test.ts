@@ -42,9 +42,9 @@ describe("Historical tasklet presentation and passive saved reads", () => {
 	})
 
 	it("formats saved custom/default roles consistently without inventing a legacy role", () => {
-		for (const role of ["Reviewer", "default", undefined]) {
+		for (const role of ["Reviewer", "default", "DEFAULT", "", undefined]) {
 			const identity = { taskletId: "Feynman", title: "Review changes", role }
-			const expected = `Feynman${role ? ` (${role})` : ""} — Review changes`
+			const expected = `Feynman${role === "Reviewer" ? " [Reviewer]" : ""} — Review changes`
 			const card = createTaskletPresentationCard({ ...data, ...identity })
 			assert.equal(card.header, expected)
 			assert.equal(taskletReceiptRowTitle(identity), expected)

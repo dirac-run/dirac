@@ -16,7 +16,7 @@ type CommunicationCard = {
 	status: CardStatus
 }
 
-function fixture(controls: Partial<TaskletControls>, actor = "Dirac") {
+function fixture(controls: Partial<TaskletControls>, actor = "Dirac", actorRole?: string) {
 	const cards: { initial: CommunicationCard; updates: CommunicationCard[]; finalized: CardStatus[] }[] = []
 	const handles: { update: sinon.SinonStub; finalize: sinon.SinonStub }[] = []
 	const createCard = sinon.stub().callsFake(async (initial: CommunicationCard) => {
@@ -35,7 +35,7 @@ function fixture(controls: Partial<TaskletControls>, actor = "Dirac") {
 	})
 	const warn = sinon.stub()
 	const env = {
-		orchestration: { reportFailure: sinon.stub(), tasklets: controls, agentIdentity: { id: actor } },
+		orchestration: { reportFailure: sinon.stub(), tasklets: controls, agentIdentity: { id: actor, role: actorRole } },
 		ui: { createCard },
 		logging: { warn },
 	} as unknown as IToolEnvironment
@@ -230,6 +230,25 @@ describe("Subagent supervision communication cards", () => {
 		)
 	})
 
+	for (const [role, actorLabel] of [["Reviewer", "Feynman [Reviewer]"], ["default", "Feynman"], [undefined, "Feynman"]] as const) {
+		it(`formats saved actor role ${role ?? "missing"} and recipient receipt role without changing routing IDs`, async () => {
+			const guidance = { tasklet_id: "Planck", type: "guidance", text: "Keep exact text" }
+			const { env, cards } = fixture({
+				message: async (items) => {
+					assert.deepEqual(items, [{ taskletId: "Planck", type: "guidance", text: guidance.text }])
+					return [{ taskletId: "Planck", role: "Coder", status: "queued" }]
+				},
+			}, "Feynman", role)
+			await message(env, [guidance])
+			assert.equal(cards[0].initial.header, `${actorLabel} → Planck · Guidance`)
+			assert.equal(cards[0].updates[0].header, `${actorLabel} → Planck [Coder] · Guidance`)
+			for (const value of [cards[0].initial, ...cards[0].updates]) {
+				assert.equal(value.communication.actor, "Feynman")
+				assert.equal(value.taskletReceipt.rows[0].taskletId, "Planck")
+			}
+		})
+	}
+
 	it("preserves exact reply text and choice without interpreting prose as permission", async () => {
 		let received: TaskletMessage[] = []
 		const { env, cards } = fixture(
@@ -342,7 +361,7 @@ describe("Subagent supervision communication cards", () => {
 		const output = await new SubagentsTool().processCall({ operation: "list" }, env)
 		assert.deepEqual(JSON.parse(output), page)
 		assert.equal(cards[0].updates[0].header, "Dirac · Agents")
-		assert.match(cards[0].updates[0].body, /Planck \(Reviewer\) — Review code — Running/)
+		assert.match(cards[0].updates[0].body, /Planck \[Reviewer\] — Review code — Running/)
 		assert.match(cards[0].updates[0].body, /Curie — Inspect UI — Waiting for parent/)
 		assert.match(cards[0].updates[0].body, /2 of 3 items · more available/)
 		assert.doesNotMatch(cards[0].updates[0].body, /passive read/)

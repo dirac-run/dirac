@@ -34,6 +34,14 @@ beforeEach(() => {
 })
 
 describe("CLI communication cards", () => {
+	it("preserves role labels in communication headers", () => {
+		const card = communication({ header: "Dirac → Curie [Scout] · Guidance" })
+		const view = render(<ModularCard card={card} />)
+		expect(plain(view.lastFrame())).toContain(card.header)
+		expect(plain(view.lastFrame()).split("\n")).toHaveLength(1)
+		view.unmount()
+	})
+
 	it.each([
 		undefined,
 		false,
@@ -75,7 +83,7 @@ describe("CLI communication cards", () => {
 	it("preserves escalation outcomes before disclosure hints at narrow widths", () => {
 		terminalSize.columns = 30
 		const card = communication({
-			header: "Dirac → Curie · Permission decision",
+			header: "Dirac → Curie [Scout] · Permission decision",
 			taskletReceipt: { operation: "permission_decision", outcome: "requires_user_approval", rows: [] },
 		})
 		const view = render(

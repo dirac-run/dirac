@@ -27,7 +27,7 @@ const inspection: TaskletReceipt = {
 describe("tasklet operation receipts", () => {
 	it("labels the inspected subject independently from the operation outcome", () => {
 		render(<ModularCardHeader card={receiptCard(inspection)} contentId="body" isCollapsed onToggleCollapse={vi.fn()} />)
-		expect(screen.getByText("Inspect pending requests · Planck 2")).toBeInTheDocument()
+		expect(screen.getByText("Inspect pending requests · Planck 2 [Reviewer]")).toBeInTheDocument()
 		expect(screen.getByText("Retrieved")).toBeInTheDocument()
 		expect(screen.queryByText("Completed")).not.toBeInTheDocument()
 		expect(screen.queryByText("Pending")).not.toBeInTheDocument()
