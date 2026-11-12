@@ -1,7 +1,8 @@
 import { once } from "node:events"
-import { mkdir, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import path from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import { createTaskletFixture } from "./tasklet-fixture.mjs"
 
 export const LONG_RESPONSE = Array.from(
@@ -82,23 +83,61 @@ function editFileArguments(completion) {
 	}
 }
 
+export const MODE_REQUESTS = "mode-switch-requests.jsonl"
+export const MODE_QUESTION = "Mode switch fixture: choose whether to continue."
+export const MODE_PLAN = "Mode switch fixture: proposed plan ready for acceptance."
+export const MODE_STREAM = "Mode switch fixture: streaming before the switch."
+export const MODE_DONE = "Mode switch fixture completed."
+
+function terminalResponseOperation(completion) {
+	const userText = completion.messages.filter((message) => message.role === "user").map((message) =>
+		typeof message.content === "string" ? message.content : message.content.map((part) => part.text ?? "").join("\n"),
+	).join("\n")
+	const mode = [...userText.matchAll(/# Current Mode\n(ACT|PLAN) MODE/g)].at(-1)?.[1]
+	if (!mode) throw new Error("Mode switch fixture requires an explicit current mode notice")
+	return mode === "PLAN" ? "plan" : "complete"
+}
+
+function modeSwitchCall(scenario, requestIndex, completion) {
+	if (!scenario.startsWith("mode-")) return undefined
+	if (requestIndex > 1) throw new Error("Mode switch fixture exceeded its two-request budget")
+	if (requestIndex === 1) return { name: "respond", args: { operation: terminalResponseOperation(completion), text: MODE_DONE } }
+	return {
+		name: "respond",
+		args:
+			scenario === "mode-question"
+				? { operation: "question", text: MODE_QUESTION, options: ["Continue", "Wait"] }
+				: scenario === "mode-plan"
+					? { operation: "plan", text: MODE_PLAN }
+					: { operation: "progress", text: "Mode switch fixture: stream released." },
+	}
+}
+
 /** Deterministic tool calls; all UI, provider parsing, task execution and storage remain real. */
 export async function startFixtureProvider(home, scenario = "long-response", workspace, vimMode = false) {
 	if (
-		!["long-response", "long-plan", "markdown-plan", "markdown-response", "create-file", "edit-file", "tasklets"].includes(
-			scenario,
-		)
+		![
+			"long-response", "long-plan", "markdown-plan", "markdown-response", "create-file", "edit-file", "tasklets",
+			"mode-question", "mode-plan", "mode-stream",
+		].includes(scenario)
 	) {
 		throw new Error(`Unknown fixture: ${scenario}`)
 	}
 	if (scenario === "edit-file") await writeFile(path.join(workspace, EDIT_FILE_PATH), EDIT_FILE_CONTENT)
 	const taskletFixture = scenario === "tasklets" ? createTaskletFixture(workspace) : undefined
 	let requests = 0
+	let releaseStream
+	const streamReleased = new Promise((resolve) => { releaseStream = resolve })
 	const server = createServer(async (request, response) => {
 		try {
 			if (request.method === "GET" && request.url === "/v1/models") {
 				response.setHeader("content-type", "application/json")
 				response.end(JSON.stringify({ object: "list", data: [{ id: "tui-fixture", object: "model" }] }))
+				return
+			}
+			if (scenario === "mode-stream" && request.method === "POST" && request.url === "/fixture/release-stream") {
+				releaseStream()
+				response.writeHead(204).end()
 				return
 			}
 			if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
@@ -108,16 +147,19 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 			let body = ""
 			for await (const chunk of request) body += chunk
 			const completion = JSON.parse(body)
-			const taskletCall = await taskletFixture?.(completion)
+			if (scenario.startsWith("mode-") || scenario === "create-file") {
+				await appendFile(path.join(home, MODE_REQUESTS), `${JSON.stringify(completion)}\n`, { mode: 0o600 })
+			}
+			const fixtureCall = modeSwitchCall(scenario, requests, completion) ?? await taskletFixture?.(completion)
 			const createFile = scenario === "create-file" && requests === 0
 			const readFile = scenario === "edit-file" && requests === 0
 			const editFile = scenario === "edit-file" && requests === 1
 			const toolName =
-				taskletCall?.name ?? (createFile ? "write_to_file" : readFile ? "read_file" : editFile ? "edit_file" : "respond")
+				fixtureCall?.name ?? (createFile ? "write_to_file" : readFile ? "read_file" : editFile ? "edit_file" : "respond")
 			const tool = completion.tools?.find((candidate) => candidate.function?.name === toolName)
 			if (!tool) throw new Error(`Fixture requires the native ${toolName} tool`)
-			const args = taskletCall
-				? taskletCall.args
+			const args = fixtureCall
+				? fixtureCall.args
 				: createFile
 					? { path: CREATE_FILE_PATH, content: CREATE_FILE_CONTENT }
 					: readFile
@@ -125,20 +167,20 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 						: editFile
 							? editFileArguments(completion)
 							: {
-									operation: scenario === "long-plan" || scenario === "markdown-plan" ? "plan" : "complete",
-									text:
-										scenario === "markdown-response"
-											? MARKDOWN_RESPONSE
-											: scenario === "markdown-plan"
-												? MARKDOWN_PLAN
-												: scenario === "long-plan"
-													? LONG_PLAN
-													: scenario === "edit-file"
-														? "File edit fixture completed."
-														: scenario === "create-file"
-															? "File creation fixture completed."
-															: LONG_RESPONSE,
-								}
+								operation: scenario === "long-plan" || scenario === "markdown-plan" ? "plan" : scenario === "create-file" ? terminalResponseOperation(completion) : "complete",
+								text:
+									scenario === "markdown-response"
+										? MARKDOWN_RESPONSE
+										: scenario === "markdown-plan"
+											? MARKDOWN_PLAN
+											: scenario === "long-plan"
+												? LONG_PLAN
+												: scenario === "edit-file"
+													? "File edit fixture completed."
+													: scenario === "create-file"
+														? "File creation fixture completed."
+														: LONG_RESPONSE,
+							}
 			requests++
 			const chunk = (delta, finishReason = null) => ({
 				id: `tui-completion-${requests}`,
@@ -148,6 +190,16 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 				choices: [{ index: 0, delta, finish_reason: finishReason }],
 			})
 			response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
+			if (scenario === "mode-stream" && requests === 1) {
+				response.write(`data: ${JSON.stringify(chunk({ role: "assistant", content: MODE_STREAM }))}\n\n`)
+				// The PTY test releases the stream only after it has pressed Tab. Bound the
+				// gate so a failed test cannot leave a model response hanging indefinitely.
+				await Promise.race([
+					streamReleased,
+					delay(30000, undefined, { ref: false }).then(() => { throw new Error("Streaming fixture was not released") }),
+				])
+				if (response.destroyed) return
+			}
 			response.write(
 				`data: ${JSON.stringify(
 					chunk({
@@ -208,6 +260,7 @@ export async function startFixtureProvider(home, scenario = "long-response", wor
 			return requests
 		},
 		async stop() {
+			releaseStream()
 			server.closeAllConnections()
 			await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
 		},

@@ -123,6 +123,33 @@ workspace rather than pointing it at user files. The #261 regressions verify the
 left-aligned, fully wrapped description at wide and narrow widths, resizing, and
 approval/denial behavior.
 
+For mode-switch continuity regressions, run the focused suite after rebuilding:
+
+```bash
+node --test tests/e2e/cli/mode-switch.test.mjs
+```
+
+The suite submits `/askDirac` prompts to avoid Goal routing. Tab must skip a
+pending file permission or follow-up question, continue in the same root task,
+and deliver both the skipped tool result and the new mode instructions to the
+next model request. Questions are covered in both directions; Plan → Act on a
+proposed plan must still accept the plan rather than skip it. Persisted card
+statuses, unchanged task IDs, bounded request counts, and an untouched target
+file are checked in addition to the terminal output.
+
+The opt-in `mode-question`, `mode-plan`, and `mode-stream` fixtures return one
+question, proposed plan, or gated streaming response, then a short final response.
+Because `respond:complete` is Act-only, the final Plan-mode response uses
+`respond:plan` and leaves one new proposed-plan card waiting for the user; all
+pre-switch interactions must already be skipped. Act-mode responses complete.
+The streaming cases press Tab before releasing the first SSE response through a
+loopback-only fixture endpoint; switching must preserve the active response and
+apply the new mode at the next natural request boundary. No timing-based model
+response delay or live provider is used. These fixtures and `create-file` capture
+model request bodies in the isolated home's `mode-switch-requests.jsonl`;
+no credentials are captured. A failed test prints its retained session directory.
+Keep the default temporary workspace.
+
 For existing-file edit approval scrolling (#266), use a seeded temporary file and
 real `read_file` → `edit_file` calls with two long insertions:
 
@@ -203,7 +230,8 @@ Operations: `screen`, `write`, `paste`, `key`, `resize`, `wait`, `stop`. Their
 properties mirror the CLI flags; deadlines use `timeoutMs`, dimensions use `cols`
 and `rows`, and repeated keypresses use `count`. `startSession` also accepts
 `command`, `args`, `cwd`, `live`, `idleMs`, and `fixture` (`long-response` by default
-or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-file` / `tasklets`).
+or `long-plan` / `markdown-plan` / `markdown-response` / `create-file` / `edit-file` / `tasklets`
+/ `mode-question` / `mode-plan` / `mode-stream`).
 
 ## Vim prompt editing regressions (#92)
 

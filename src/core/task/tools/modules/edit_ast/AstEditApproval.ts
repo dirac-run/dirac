@@ -7,6 +7,7 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { getErrorMessage } from "@/shared/errors"
 import type { ICardHandle, IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import type { ToolPermissionDisposition } from "../../autoApprove"
+import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import type { AstEditFormatter } from "./AstEditFormatter"
 import type { EditAstArgs } from "./EditAstValidator"
 
@@ -72,6 +73,7 @@ export class AstEditApproval {
 			try {
 				result = await approvalCard.waitForInteraction()
 			} catch (error) {
+				if (error instanceof ToolSkippedByUserMessage) throw error
 				try {
 					await this.finalizeApprovalCard(
 						approvalCard,

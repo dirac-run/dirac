@@ -7,9 +7,12 @@ import { SkillMetadata } from "@/shared/skills"
 import type { SteeringMessage } from "./steering"
 import type { SerializedTaskError, TaskCancellationIntent, TaskRunOutcome } from "./TaskRunOutcome"
 import type { HookExecution } from "./types/HookExecution"
+import type { ChatContent } from "@shared/ChatContent"
+import type { Mode } from "@shared/storage/types"
 
 export interface CardInteractionResponse {
 	response?: DiracAskResponse
+	modeSwitch?: Mode
 	action: string
 	value?: string
 	text?: string
@@ -21,6 +24,8 @@ export interface CardInteractionResponse {
 export interface PendingCardInteraction {
 	signal: AbortSignal
 	response?: CardInteractionResponse
+	/** Only root-owned waits opt into mode-change responses. */
+	modeSwitchResponse?: (mode: Mode, content?: ChatContent) => CardInteractionResponse
 }
 
 export class TaskState {
@@ -116,9 +121,8 @@ export class TaskState {
 
 	// Plan interaction and mode-entry state
 	isAwaitingPlanResponse = false
-	didRespondToPlanAskBySwitchingMode = false
 	/** Remains pending until the exact request that includes the notice is persisted. */
-	pendingModeNotice?: { mode: "plan" | "act"; includedInRequestId?: string }
+	pendingModeNotice?: { mode: "plan" | "act"; switched?: boolean; includedInRequestId?: string }
 
 	// Context and history
 	conversationHistoryDeletedRange?: [number, number]

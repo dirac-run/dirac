@@ -39,6 +39,7 @@ describe("EnvironmentManager mode-entry guidance", () => {
 		assert.match(entryDetails, /# Current Mode\nPLAN MODE/)
 		assert.match(entryDetails, /Research without modifying files/)
 		assert.doesNotMatch(entryDetails, /EDITING FILES/)
+		assert.doesNotMatch(entryDetails, /The user switched/)
 		assert.equal(taskState.pendingModeNotice.includedInRequestId, "request-1")
 
 		taskState.pendingModeNotice = undefined
@@ -61,6 +62,23 @@ describe("EnvironmentManager mode-entry guidance", () => {
 		taskState.pendingModeNotice = undefined
 		assert.equal(await manager.getEnvironmentDetails(false), "")
 	})
+
+	for (const mode of ["plan", "act"] as const) {
+		it(`delivers the explicit ${mode} switch notice with request-bound entry guidance`, async () => {
+			const taskState = new TaskState()
+			taskState.pendingModeNotice = { mode, switched: true }
+			const manager = createEnvironmentManager(taskState, { taskMode: mode })
+
+			const details = await manager.getEnvironmentDetails(false)
+
+			assert.match(details, new RegExp(`The user switched to ${mode.toUpperCase()} MODE`))
+			assert.match(details, new RegExp(`# Current Mode\\n${mode.toUpperCase()} MODE`))
+			assert.equal(taskState.pendingModeNotice.includedInRequestId, "request-1")
+			assert.equal(taskState.pendingModeNotice.switched, true)
+			taskState.pendingModeNotice = undefined
+			assert.equal(await manager.getEnvironmentDetails(false), "")
+		})
+	}
 
 	it("uses the request-bound mode and does not claim a newer mismatched notice", async () => {
 		const planState = new TaskState()

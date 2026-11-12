@@ -12,6 +12,9 @@ import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessag
 import type { TaskCounterparty, TaskInteractionRequest, TaskMessengerInvocationContext } from "../types/task-messenger"
 import * as hookExecutor from "@core/hooks/hook-executor"
 import { HookCleanupError } from "@core/hooks/HookCleanupError"
+import { Task } from ".."
+import { PlanInteractionResponse, ResponseOperation, responseCardInput } from "@shared/responseTool"
+import { modeSwitchNotice } from "@shared/modeSwitch"
 
 function createMessenger(postStateToWebview = sinon.stub().resolves(), counterparty?: TaskCounterparty, hooksEnabled = false) {
 	const messages: any[] = []
@@ -121,6 +124,135 @@ function invocationContext(hooksEnabled = false): TaskMessengerInvocationContext
 		hookModel: { provider: "anthropic", slug: "origin-model" },
 	}
 }
+
+function switchMode(taskState: TaskState, previous: "plan" | "act", next: "plan" | "act", content?: { message?: string; images?: string[]; files?: string[] }) {
+	const applyCommittedModeEffects = (Task.prototype as any).applyCommittedModeEffects
+	applyCommittedModeEffects.call({ taskState }, previous, next, content)
+}
+
+describe("TaskMessenger in-place mode switches", () => {
+	for (const kind of ["question", "permission"] as const) {
+		it(`skips a root ${kind} through the existing user-message path on mode switch`, async () => {
+			const { messenger, taskState, messages, messageStateHandler } = createMessenger()
+			const card = await messenger.createCard({ header: kind, requireFeedback: kind === "question", requireApproval: kind === "permission" })
+			const settled = assert.rejects(card.waitForInteraction(), (error: unknown) => {
+				assert.ok(error instanceof ToolSkippedByUserMessage)
+				assert.equal(error.userMessage, `${modeSwitchNotice("plan")}\n\nChange direction`)
+				assert.deepEqual(error.userImages, ["image"])
+				assert.deepEqual(error.userFiles, ["file"])
+				return true
+			})
+			await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+
+			switchMode(taskState, "act", "plan", { message: "Change direction", images: ["image"], files: ["file"] })
+
+			await withInteractionTimeout(taskState, settled)
+			assert.equal(taskState.abort, false)
+			assert.equal(taskState.didRejectTool, false)
+			assert.equal(taskState.pendingCardInteractions.size, 0)
+			assert.equal(messages.filter((message) => message.content.role === "user").length, 0, "synthetic switch notices must not be echoed as user chat")
+		})
+	}
+
+	it("approves a Plan card with the mode-toggle value and preserves composer attachments", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Proposed Plan", toolName: "respond", rawInput: responseCardInput(ResponseOperation.PLAN, "Plan"), requireFeedback: true })
+		const wait = card.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+
+		switchMode(taskState, "plan", "act", { message: "Go ahead", images: ["image"], files: ["file"] })
+
+		const result = await withInteractionTimeout(taskState, wait)
+		assert.equal(result.response, DiracAskResponse.APPROVE)
+		assert.equal(result.action, DiracAskResponse.APPROVE)
+		assert.equal(result.value, PlanInteractionResponse.MODE_TOGGLE)
+		assert.equal(result.text, "Go ahead")
+		assert.deepEqual(result.images, ["image"])
+		assert.deepEqual(result.files, ["file"])
+	})
+
+	it("settles parallel root waits while delivering accompanying content only once", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const first = await messenger.createCard({ header: "First", requireFeedback: true })
+		const second = await messenger.createCard({ header: "Second", requireApproval: true })
+		const skipped: ToolSkippedByUserMessage[] = []
+		const waits = [first, second].map((card) => assert.rejects(card.waitForInteraction(), (error: unknown) => {
+			assert.ok(error instanceof ToolSkippedByUserMessage)
+			skipped.push(error)
+			return true
+		}))
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledTwice, { interval: 1 })
+
+		switchMode(taskState, "act", "plan", { message: "Only once", images: ["image"], files: ["file"] })
+
+		await withInteractionTimeout(taskState, Promise.all(waits))
+		assert.equal(skipped.filter((error) => error.userMessage.includes("Only once")).length, 1)
+		assert.equal(skipped.filter((error) => error.userImages?.length).length, 1)
+		assert.equal(skipped.filter((error) => error.userFiles?.length).length, 1)
+		assert.ok(skipped.every((error) => error.userMessage.includes(modeSwitchNotice("plan"))))
+		assert.equal(taskState.pendingCardInteractions.size, 0)
+	})
+
+	it("keeps the first addressed answer when a mode switch races its consumption", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Permission", requireApproval: true })
+		const wait = card.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.APPROVE, text: "Original answer" })
+
+		switchMode(taskState, "act", "plan", { message: "Later draft" })
+
+		const result = await withInteractionTimeout(taskState, wait)
+		assert.equal(result.response, DiracAskResponse.APPROVE)
+		assert.equal(result.text, "Original answer")
+	})
+
+	it("does not auto-answer an escalated child interaction", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		const card = await messenger.createCard({ header: "Child permission", requireApproval: true, isTaskletInteraction: true })
+		const wait = card.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+		const pending = taskState.pendingCardInteractions.get(card.id)!
+		assert.equal(pending.modeSwitchResponse, undefined)
+
+		switchMode(taskState, "act", "plan")
+
+		assert.equal(pending.response, undefined)
+		assert.deepEqual(taskState.waitingCardIds, [card.id])
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.REJECT })
+		assert.equal((await withInteractionTimeout(taskState, wait)).response, DiracAskResponse.REJECT)
+	})
+})
+
+describe("TaskMessenger mode switch before wait registration", () => {
+	it("settles a root wait registered after the switch without echoing a synthetic user message", async () => {
+		const { messenger, taskState, messages } = createMessenger()
+		const card = await messenger.createCard({ header: "Late question", requireFeedback: true })
+		switchMode(taskState, "act", "plan")
+
+		await withInteractionTimeout(taskState, assert.rejects(card.waitForInteraction(), (error: unknown) => {
+			assert.ok(error instanceof ToolSkippedByUserMessage)
+			assert.equal(error.modeSwitch, "plan")
+			assert.equal(error.userMessage, modeSwitchNotice("plan"))
+			return true
+		}))
+
+		assert.equal(taskState.pendingCardInteractions.size, 0)
+		assert.equal(messages.filter((message) => message.content.role === "user").length, 0)
+	})
+
+	it("does not apply an unconsumed switch notice to a late child escalation", async () => {
+		const { messenger, taskState, messageStateHandler } = createMessenger()
+		switchMode(taskState, "act", "plan")
+		const card = await messenger.createCard({ header: "Child permission", requireApproval: true, isTaskletInteraction: true })
+		const wait = card.waitForInteraction()
+		await pWaitFor(() => messageStateHandler.publishCardInteractionReady.calledOnce, { interval: 1 })
+
+		assert.equal(taskState.pendingCardInteractions.get(card.id)!.response, undefined)
+		await submitCardResponse({ taskState }, { cardId: card.id, response: DiracAskResponse.REJECT })
+		assert.equal((await withInteractionTimeout(taskState, wait)).response, DiracAskResponse.REJECT)
+	})
+})
 
 describe("TaskMessenger invocation output isolation", () => {
 	it("keeps late invocation cards, text, streams and checkpoints off the current model stream", async () => {

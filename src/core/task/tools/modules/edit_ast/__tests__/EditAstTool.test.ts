@@ -4,6 +4,7 @@ import sinon from "sinon"
 import { CardStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import type { IToolEnvironment } from "../../../interfaces/IToolEnvironment"
+import { ToolSkippedByUserMessage } from "../../../types/ToolSkippedByUserMessage"
 import { EditAstTool } from "../EditAstTool"
 
 function card(status = CardStatus.RUNNING) {
@@ -202,6 +203,39 @@ describe("EditAstTool", () => {
 		sinon.assert.calledWith(approvalCard.finalize as sinon.SinonStub, CardStatus.CANCELLED)
 		sinon.assert.notCalled(env.editor.applyAndSaveSilently as sinon.SinonStub)
 	})
+
+	for (const modeSwitch of [undefined, "plan", "act"] as const) {
+		it(`propagates ${modeSwitch ? `${modeSwitch} mode-switch` : "user-message"} skips after hiding review without finalizing cards as errors`, async () => {
+			const { env, progressCard, approvalCard } = makeEnv()
+			const skip = new ToolSkippedByUserMessage("New instructions", ["image"], ["file"], modeSwitch)
+				; (env.config.callbacks.shouldAutoApproveToolWithPath as sinon.SinonStub).resolves(false)
+				; (env.sourceAst.planRename as sinon.SinonStub).resolves(renamePlan)
+			approvalCard.waitForInteraction.rejects(skip)
+
+			await assert.rejects(
+				tool.processCall(
+					{ operation: "rename", targets: [{ path: "src", symbol: "oldName", replacement: "newName" }] },
+					env,
+				),
+				(error) => {
+					sinon.assert.calledOnce(env.editor.hideReview as sinon.SinonStub)
+					return error === skip
+				},
+			)
+
+			sinon.assert.calledOnce(env.editor.showReview as sinon.SinonStub)
+			sinon.assert.callOrder(approvalCard.waitForInteraction, env.editor.hideReview as sinon.SinonStub)
+			assert.equal(approvalCard.status, CardStatus.WAITING_FOR_INPUT)
+			assert.equal(progressCard.status, CardStatus.RUNNING)
+			sinon.assert.notCalled(approvalCard.finalize)
+			sinon.assert.notCalled(progressCard.finalize)
+			sinon.assert.notCalled(approvalCard.update)
+			sinon.assert.notCalled(env.config.callbacks.assertMutationAuthorized as sinon.SinonStub)
+			sinon.assert.notCalled(env.editor.applyAndSaveSilently as sinon.SinonStub)
+			sinon.assert.notCalled(env.orchestration.setTaskState as sinon.SinonStub)
+			sinon.assert.notCalled(env.telemetry.captureCustomMetadata as sinon.SinonStub)
+		})
+	}
 
 	it("routes Utility-eligible paths through the approval card", async () => {
 		const { env, approvalCard } = makeEnv()

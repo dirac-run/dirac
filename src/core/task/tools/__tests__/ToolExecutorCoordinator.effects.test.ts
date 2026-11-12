@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert"
 import { describe, it, afterEach } from "mocha"
 import sinon from "sinon"
 import { CardStatus } from "@shared/ExtensionMessage"
+import { formatResponse } from "@core/formatResponse"
 import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { IToolEnvironment } from "../interfaces/IToolEnvironment"
 import { ToolExecutorCoordinator } from "../ToolExecutorCoordinator"
@@ -91,6 +92,83 @@ describe("ToolExecutorCoordinator invocation effects", () => {
 		const complete = await taskMessenger.createCard.secondCall.returnValue
 		sinon.assert.calledOnceWithExactly(live.finalize, CardStatus.SKIPPED, undefined)
 		sinon.assert.calledOnceWithExactly(complete.finalize, CardStatus.SUCCESS, undefined)
+	})
+
+	for (const modeSwitch of ["plan", "act"] as const) {
+		it(`returns a ${modeSwitch} mode-switch notice and attachments without a user-input effect`, async () => {
+			const message = `Switched to ${modeSwitch} mode.`
+			const images = ["data:image/png;base64,aW1hZ2U="]
+			const files = ["attached.ts"]
+			const formattedFiles = "Attached file content"
+			const formatAttachedFiles = sinon.stub().resolves(formattedFiles)
+			const { execute, taskState, taskMessenger } = fixture(async (_args, env) => {
+				sinon.stub(env.workspace, "formatAttachedFiles").callsFake(formatAttachedFiles)
+				await env.ui.createCard({ header: "Running", status: CardStatus.RUNNING })
+				await env.ui.createCard({ header: "Approval", status: CardStatus.WAITING_FOR_INPUT, requireApproval: true })
+				const complete = await env.ui.createCard({ header: "Complete" })
+				await complete.finalize(CardStatus.SUCCESS)
+				env.orchestration.setTaskState("consecutiveMistakeCount", 9)
+				throw new ToolSkippedByUserMessage(message, images, files, modeSwitch)
+			})
+
+			assert.deepEqual(await execute(), {
+				outcome: "cancelled",
+				content: formatResponse.toolResult(`[Interaction skipped. ${message}]`, images, formattedFiles),
+				effects: { mistake: "none" },
+			})
+			sinon.assert.calledOnceWithExactly(formatAttachedFiles, files)
+			assert.equal(taskState.consecutiveMistakeCount, 4)
+			assert.equal(taskState.pendingUserMessage, "existing message")
+			assert.deepEqual(taskState.pendingUserImages, ["existing image"])
+			assert.deepEqual(taskState.pendingUserFiles, ["existing file"])
+			for (const call of taskMessenger.createCard.getCalls().slice(0, 2)) {
+				const pending = await call.returnValue
+				sinon.assert.calledOnceWithExactly(pending.finalize, CardStatus.SKIPPED, undefined)
+			}
+			const complete = await taskMessenger.createCard.thirdCall.returnValue
+			sinon.assert.calledOnceWithExactly(complete.finalize, CardStatus.SUCCESS, undefined)
+		})
+	}
+
+	it("returns a text-only mode-switch notice without formatting absent attachments", async () => {
+		const formatAttachedFiles = sinon.stub()
+		const { execute } = fixture(async (_args, env) => {
+			sinon.stub(env.workspace, "formatAttachedFiles").callsFake(formatAttachedFiles)
+			throw new ToolSkippedByUserMessage("Switched to plan mode.", undefined, [], "plan")
+		})
+
+		assert.deepEqual(await execute(), {
+			outcome: "cancelled",
+			content: "[Interaction skipped. Switched to plan mode.]",
+			effects: { mistake: "none" },
+		})
+		sinon.assert.notCalled(formatAttachedFiles)
+	})
+
+	it("does not publish a sibling-cancelling user-input effect when a concurrent invocation switches mode", async () => {
+		const siblingStarted = deferred()
+		const finishSibling = deferred()
+		let calls = 0
+		const { execute } = fixture(async () => {
+			if (++calls === 1) {
+				siblingStarted.resolve()
+				await finishSibling.promise
+				return "sibling completed"
+			}
+			throw new ToolSkippedByUserMessage("Switched to plan mode.", undefined, undefined, "plan")
+		})
+
+		const sibling = execute()
+		await siblingStarted.promise
+		const skipped = await execute()
+		assert.equal(skipped.outcome, "cancelled")
+		assert.deepEqual(skipped.effects, { mistake: "none" })
+		finishSibling.resolve()
+		assert.deepEqual(await sibling, {
+			outcome: "success",
+			content: "sibling completed",
+			effects: { mistake: "reset" },
+		})
 	})
 
 	it("returns no mistake effect for surface rejection", async () => {

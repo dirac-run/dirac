@@ -304,30 +304,76 @@ describe("Task (original)", () => {
 		assert.equal(t.api, installed, "non-provider settings must preserve the handler and its cache session")
 	})
 
-	it("records notices only for actual mode transitions", () => {
-		const taskState = {
-			pendingModeNotice: undefined as { mode: "plan" | "act" } | undefined,
-			isAwaitingPlanResponse: false,
-			didRespondToPlanAskBySwitchingMode: false,
+	it("records notices only for actual mode transitions and leaves waits untouched on no-op updates", () => {
+		const pending = {
+			signal: new AbortController().signal,
+			modeSwitchResponse: sandbox.stub().returns({ action: "message", modeSwitch: "plan" }),
+			response: undefined as any,
 		}
-		const task = { taskState }
+		const taskState = {
+			pendingModeNotice: undefined as { mode: "plan" | "act"; switched?: boolean } | undefined,
+			pendingCardInteractions: new Map([["card", pending]]),
+		}
+		const notifyUserMessage = sandbox.stub()
+		const task = { taskState, taskletHost: { notifyUserMessage } }
 		const applyEffects = (previousMode: "plan" | "act", nextMode: "plan" | "act") =>
 			(Task.prototype as any).applyCommittedModeEffects.call(task, previousMode, nextMode)
 
 		applyEffects("act", "act")
 		assert.equal(taskState.pendingModeNotice, undefined)
+		sinon.assert.notCalled(pending.modeSwitchResponse)
+		sinon.assert.notCalled(notifyUserMessage)
 
 		applyEffects("act", "plan")
-		assert.deepEqual(taskState.pendingModeNotice, { mode: "plan" })
+		assert.deepEqual(taskState.pendingModeNotice, { mode: "plan", switched: true })
+		sinon.assert.calledOnce(pending.modeSwitchResponse)
+		sinon.assert.calledOnce(notifyUserMessage)
 
-		taskState.pendingModeNotice = undefined
+		const notice = taskState.pendingModeNotice
 		applyEffects("plan", "plan")
-		assert.equal(taskState.pendingModeNotice, undefined)
+		assert.equal(taskState.pendingModeNotice, notice)
+		sinon.assert.calledOnce(pending.modeSwitchResponse)
+		sinon.assert.calledOnce(notifyUserMessage)
+	})
 
-		taskState.isAwaitingPlanResponse = true
-		applyEffects("plan", "act")
-		assert.deepEqual(taskState.pendingModeNotice, { mode: "act" })
-		assert.equal(taskState.didRespondToPlanAskBySwitchingMode, true)
+	it("settles all eligible parallel waits but passes composer content only to the first", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const pending = (signal = new AbortController().signal) => ({
+			signal,
+			modeSwitchResponse: sandbox.stub().callsFake((mode, content) => ({ action: "message", modeSwitch: mode, text: content?.message })),
+			response: undefined as any,
+		})
+		const aborted = pending(controller.signal)
+		const answered = pending()
+		const originalResponse = { action: "approve" }
+		answered.response = originalResponse
+		const child = { signal: new AbortController().signal, response: undefined }
+		const first = pending()
+		const second = pending()
+		const taskState = {
+			pendingCardInteractions: new Map<string, any>([
+				["aborted", aborted], ["answered", answered], ["child", child], ["first", first], ["second", second],
+			])
+		}
+		const content = { message: "New direction", images: ["image"], files: ["file"] }
+
+		const applyCommittedModeEffects = (Task.prototype as any).applyCommittedModeEffects
+		applyCommittedModeEffects.call({ taskState }, "act", "plan", content)
+
+		sinon.assert.notCalled(aborted.modeSwitchResponse)
+		sinon.assert.notCalled(answered.modeSwitchResponse)
+		assert.equal(answered.response, originalResponse)
+		assert.equal(child.response, undefined)
+		sinon.assert.calledOnceWithExactly(first.modeSwitchResponse, "plan", content)
+		sinon.assert.calledOnceWithExactly(second.modeSwitchResponse, "plan", undefined)
+		assert.equal(first.response.modeSwitch, "plan")
+		assert.equal(second.response.modeSwitch, "plan")
+
+		applyCommittedModeEffects.call({ taskState }, "plan", "act", { message: "Later switch" })
+		sinon.assert.calledOnce(first.modeSwitchResponse)
+		sinon.assert.calledOnce(second.modeSwitchResponse)
+		assert.equal(first.response.text, "New direction", "the first answer wins until consumed")
 	})
 
 	it("commits mode, YOLO state, API propagation, and tool inventory only after beforeCommit succeeds", async () => {
@@ -488,7 +534,7 @@ describe("Task (original)", () => {
 	})
 
 	it("ignores a card response when no card is waiting", async () => {
-		const taskState = { lastWaitingCardId: undefined } as any
+		const taskState = { lastWaitingCardId: undefined, pendingCardInteractions: new Map() } as any
 		const task = {
 			taskState,
 			withStateLock: async (callback: () => Promise<void>) => callback(),

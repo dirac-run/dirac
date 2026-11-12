@@ -1,6 +1,7 @@
 import { ApiHandler } from "@core/api"
 import { FileContextTracker } from "@core/context/context-tracking/FileContextTracker"
 import { formatResponse } from "@core/formatResponse"
+import { modeSwitchNotice } from "@shared/modeSwitch"
 import { getEditingFilesInstructions } from "@core/prompts/system-prompt/sections/editing-files"
 import type { TaskWorkingConfiguration } from "./runtime/TaskWorkingConfiguration"
 import type { TaskRequestRuntime } from "./runtime/TaskRequestRuntime"
@@ -158,6 +159,7 @@ export class EnvironmentManager {
 		const modeNotice = this.taskState.pendingModeNotice
 		if (modeNotice?.mode === mode) {
 			if (requestRuntime) modeNotice.includedInRequestId = requestRuntime.requestId
+			if (modeNotice.switched) details += `\n\n${modeSwitchNotice(mode)}`
 			details += "\n\n# Current Mode"
 			if (mode === "plan") {
 				details += `\nPLAN MODE\n${formatResponse.planModeInstructions()}`

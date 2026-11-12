@@ -148,7 +148,9 @@ export class ToolExecutorCoordinator {
 				response = `Tool '${block.name}' cancelled: ${error instanceof Error ? error.message : String(error)}`
 			} else if (error instanceof ToolSkippedByUserMessage) {
 				outcome = "cancelled"
-				effects.userInput = { message: error.userMessage, images: error.userImages, files: error.userFiles }
+				if (!error.modeSwitch) {
+					effects.userInput = { message: error.userMessage, images: error.userImages, files: error.userFiles }
+				}
 
 				for (const card of env.getCreatedCards()) {
 					if (!isFinalStatus(card.status)) {
@@ -157,7 +159,13 @@ export class ToolExecutorCoordinator {
 				}
 
 				env.telemetry.captureCustomMetadata({ skippedByUser: true, userMessageLength: error.userMessage.length })
-				response = `[Tool '${block.name}' skipped by user with message: "${error.userMessage}"]`
+				response = error.modeSwitch
+					? formatResponse.toolResult(
+						`[Interaction skipped. ${error.userMessage}]`,
+						error.userImages,
+						error.userFiles?.length ? await env.workspace.formatAttachedFiles(error.userFiles) : "",
+					)
+					: `[Tool '${block.name}' skipped by user with message: "${error.userMessage}"]`
 			} else {
 				executionError = error instanceof Error ? error : new Error(String(error))
 				outcome = "failure"

@@ -1,11 +1,8 @@
 import { buildApiHandler } from "@core/api"
 import type { StateManager } from "@core/storage/StateManager"
 import type { ChatContent } from "@shared/ChatContent"
-import { TaskStatus } from "@shared/ExtensionMessage"
-import { PlanInteractionResponse } from "@shared/responseTool"
 import type { Mode } from "@shared/storage/types"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
-import { DiracAskResponse } from "@shared/WebviewMessage"
 import { telemetryService } from "@/services/telemetry"
 import { persistModeSelection } from "./persistModeSelection"
 
@@ -14,7 +11,6 @@ export interface StateControllerDependencies {
 	get task(): import("@core/task").Task | undefined
 	buildApiHandlerFn: typeof buildApiHandler
 	postStateToWebviewFn: () => Promise<void>
-	cancelTaskFn: () => Promise<void>
 	captureModeSwitchFn: (taskId: string, mode: Mode) => void
 }
 
@@ -23,7 +19,6 @@ export class StateController {
 	private readonly getTask: () => import("@core/task").Task | undefined
 	private readonly buildApiHandlerFn: typeof buildApiHandler
 	private readonly postStateToWebviewFn: () => Promise<void>
-	private readonly cancelTaskFn: () => Promise<void>
 	private readonly captureModeSwitchFn: (taskId: string, mode: Mode) => void
 
 	constructor(deps: StateControllerDependencies) {
@@ -31,7 +26,6 @@ export class StateController {
 		this.getTask = () => deps.task
 		this.buildApiHandlerFn = deps.buildApiHandlerFn
 		this.postStateToWebviewFn = deps.postStateToWebviewFn
-		this.cancelTaskFn = deps.cancelTaskFn
 		this.captureModeSwitchFn = deps.captureModeSwitchFn
 	}
 
@@ -67,34 +61,16 @@ export class StateController {
 	}
 
 	async togglePlanActMode(modeToSwitchTo: Mode, chatContent?: ChatContent): Promise<boolean> {
-		const didSwitchToActMode = modeToSwitchTo === "act"
 		const task = this.getTask()
 		const persistMode = () => persistModeSelection(this.stateManager, modeToSwitchTo)
-
-		if (task) await task.applyWorkingConfigurationUpdate({ settings: { mode: modeToSwitchTo } }, persistMode)
+		// Retain exact waiters so a concurrent answer cannot clear an unconsumed draft.
+		const waiting = task ? [...task.stateView.pendingCardInteractions.values()].filter((pending) => !pending.response) : []
+		if (task) await task.applyWorkingConfigurationUpdate({ settings: { mode: modeToSwitchTo } }, persistMode, chatContent)
 		else persistMode()
 
 		this.captureModeSwitchFn(task?.ulid ?? "0", modeToSwitchTo)
 		await this.postStateToWebviewFn()
-
-		if (!task) return false
-		if (task.stateView.isAwaitingPlanResponse && didSwitchToActMode) {
-			const cardId = task.stateView.lastWaitingCardId
-			if (cardId) {
-				await task.submitCardResponse(
-					cardId,
-					DiracAskResponse.APPROVE,
-					chatContent?.message || PlanInteractionResponse.MODE_TOGGLE,
-					chatContent?.images || [],
-					chatContent?.files || [],
-				)
-			}
-			return true
-		}
-		if (task.stateView.status === TaskStatus.COMPLETED) return false
-
-		await this.cancelTaskFn()
-		return false
+		return waiting.some((pending) => pending.response?.modeSwitch === modeToSwitchTo)
 	}
 
 	async getTelemetrySetting(): Promise<TelemetrySetting> {

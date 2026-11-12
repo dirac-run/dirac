@@ -57,6 +57,7 @@ export async function presentPlanForApproval(response: string, env: IToolEnviron
 	}
 
 	const {
+		value,
 		text,
 		images,
 		files: planResponseFiles,
@@ -72,7 +73,7 @@ export async function presentPlanForApproval(response: string, env: IToolEnviron
 	const fileContentString =
 		planResponseFiles && planResponseFiles.length > 0 ? await env.workspace.formatAttachedFiles(planResponseFiles) : ""
 
-	const didSwitchMode = env.orchestration.getTaskState("didRespondToPlanAskBySwitchingMode")
+	const didSwitchMode = value === PlanInteractionResponse.MODE_TOGGLE
 	const selectedOption = userText && options.includes(userText)
 
 	if (didSwitchMode || selectedOption) {
@@ -83,7 +84,6 @@ export async function presentPlanForApproval(response: string, env: IToolEnviron
 	}
 
 	if (didSwitchMode) {
-		env.orchestration.setTaskState("didRespondToPlanAskBySwitchingMode", false)
 		return formatResponse.toolResult(
 			`[The user has switched to ACT MODE, so you may now proceed with the task.]` +
 			(userText

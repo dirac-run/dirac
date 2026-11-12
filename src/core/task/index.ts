@@ -1,5 +1,6 @@
 import { modelProviderSelectionUpdates } from "@core/api/modelProviderSelection"
 import type { SubagentRole } from "@shared/subagentRoles"
+import type { ChatContent } from "@shared/ChatContent"
 import { tmpdir } from "node:os"
 import { captureSandboxExecution, assertSandboxExecutionCurrent } from "@shared/SandboxExecution"
 import { freezeSandboxTaskPolicy, sandboxTaskPolicyCatalog } from "@shared/SandboxTaskPolicy"
@@ -1276,7 +1277,7 @@ export class Task {
 					hasPendingUserInput: () =>
 						this.taskState.steeringMessages.some(
 							(message) => message.deliveryState === SteeringDeliveryState.QUEUED,
-						) || this.hasPendingChatInput(),
+						) || this.hasPendingChatInput() || this.taskState.pendingModeNotice?.switched === true,
 				},
 				{
 					controller,
@@ -1317,6 +1318,7 @@ export class Task {
 	public async applyWorkingConfigurationUpdate(
 		patch: TaskWorkingConfigurationPatch | ((current: TaskWorkingConfiguration) => TaskWorkingConfigurationPatch),
 		beforeCommit?: (candidate: TaskWorkingConfiguration) => void | Promise<void>,
+		modeSwitchContent?: ChatContent,
 	): Promise<TaskWorkingConfiguration> {
 		return this.mutationGate.withTransition(() =>
 			this.withStateLock(async () => {
@@ -1345,7 +1347,7 @@ export class Task {
 
 				this.workingConfiguration = candidate
 				this.installApiHandler(candidateApi)
-				this.applyCommittedModeEffects(previous.settings.mode, candidate.settings.mode)
+				this.applyCommittedModeEffects(previous.settings.mode, candidate.settings.mode, modeSwitchContent)
 				this.diracIgnoreController.yoloMode = !!candidate.settings.yoloModeToggled
 				if (resolvedPatch.settings && Object.hasOwn(resolvedPatch.settings, "toolToggles")) {
 					this.toolExecutor.markToolsDirty("tool_toggles_changed")
@@ -1447,11 +1449,15 @@ export class Task {
 		this.responseProcessor.setApi(api)
 	}
 
-	private applyCommittedModeEffects(previousMode: Mode, nextMode: Mode): void {
+	private applyCommittedModeEffects(previousMode: Mode, nextMode: Mode, content?: ChatContent): void {
 		if (previousMode === nextMode) return
-		this.taskState.pendingModeNotice = { mode: nextMode }
-		if (previousMode === "plan" && nextMode === "act" && this.taskState.isAwaitingPlanResponse) {
-			this.taskState.didRespondToPlanAskBySwitchingMode = true
+		this.taskState.pendingModeNotice = { mode: nextMode, switched: true }
+		this.taskletHost?.notifyUserMessage()
+		for (const pending of this.taskState.pendingCardInteractions.values()) {
+			if (pending.signal.aborted || pending.response || !pending.modeSwitchResponse) continue
+			pending.response = pending.modeSwitchResponse(nextMode, content)
+			// Accompanying composer input belongs to one interaction, not every parallel wait.
+			content = undefined
 		}
 	}
 

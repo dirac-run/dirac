@@ -24,7 +24,8 @@ import { getTaskHookModelContext } from "./runtime/TaskRuntimeModelContext"
 import { clearAskResponse } from "./TaskUserInput"
 import type { PendingCardInteraction } from "./TaskState"
 import { TaskMessengerDependencies, type TaskInteractionRequest, type TaskMessengerInvocationContext } from "./types/task-messenger"
-import { ResponseOperation, type ResponseArguments } from "@shared/responseTool"
+import { isPlanResponseCard, PlanInteractionResponse, ResponseOperation, type ResponseArguments } from "@shared/responseTool"
+import { modeSwitchNotice } from "@shared/modeSwitch"
 import Mutex from "p-mutex"
 
 interface TaskCardParams extends CardParams {
@@ -34,6 +35,7 @@ interface TaskCardParams extends CardParams {
 	utilityPermissionSkipped?: TaskInteractionRequest["utilityPermissionSkipped"]
 	toolCall?: TaskInteractionRequest["toolCall"]
 	isAutoApproved?: () => boolean
+	isTaskletInteraction?: boolean
 }
 
 export interface TaskCardHandle extends ICardHandle {
@@ -147,6 +149,7 @@ export class TaskMessenger implements ITaskMessenger {
 			const card = structuredClone(request.card)
 			handle = await this.createCard({
 				kind: card.kind,
+				isTaskletInteraction: true,
 				header: `${child.id} · Your ${card.requireApproval ? "approval" : "input"} needed`,
 				toolName: card.toolName,
 				icon: card.icon,
@@ -460,8 +463,35 @@ export class TaskMessenger implements ITaskMessenger {
 						this.statusBeforeRootWait = state.status
 						if (state.askResponseCardId !== id) clearAskResponse(state)
 					}
-					const pending: PendingCardInteraction = { signal: cancellation }
+					const pending: PendingCardInteraction = {
+						signal: cancellation,
+						modeSwitchResponse: params.isTaskletInteraction ? undefined : (mode, content) => {
+							if (mode === "act" && isPlanResponseCard(card)) {
+								return {
+									response: DiracAskResponse.APPROVE,
+									action: DiracAskResponse.APPROVE,
+									value: PlanInteractionResponse.MODE_TOGGLE,
+									modeSwitch: mode,
+									text: content?.message,
+									images: content?.images,
+									files: content?.files,
+								}
+							}
+							return {
+								response: DiracAskResponse.MESSAGE,
+								action: DiracAskResponse.MESSAGE,
+								modeSwitch: mode,
+								text: [modeSwitchNotice(mode), content?.message].filter(Boolean).join("\n\n"),
+								images: content?.images,
+								files: content?.files,
+							}
+						},
+					}
 					state.pendingCardInteractions.set(id, pending)
+					// A switch can commit while this card is being created or its old model turn is still streaming.
+					if (state.pendingModeNotice?.switched && pending.modeSwitchResponse) {
+						pending.response = pending.modeSwitchResponse(state.pendingModeNotice.mode)
+					}
 					state.waitingCardIds.push(id)
 					const readResponse = () => {
 						if (pending.response) return pending.response
@@ -523,9 +553,11 @@ export class TaskMessenger implements ITaskMessenger {
 							!!responseText || (responseImages?.length ?? 0) > 0 || (responseFiles?.length ?? 0) > 0
 						if (result.response === DiracAskResponse.MESSAGE && hasUserMessageContent) {
 							// Echo the user's message in the chat UI
-							await this.upsertText(responseText ?? "", false, responseImages, responseFiles, "user", undefined, invocation)
+							if (!pending.response?.modeSwitch) {
+								await this.upsertText(responseText ?? "", false, responseImages, responseFiles, "user", undefined, invocation)
+							}
 							const { ToolSkippedByUserMessage } = await import("./tools/types/ToolSkippedByUserMessage")
-							throw new ToolSkippedByUserMessage(responseText ?? "", responseImages, responseFiles)
+							throw new ToolSkippedByUserMessage(responseText ?? "", responseImages, responseFiles, pending.response?.modeSwitch)
 						}
 
 						return result

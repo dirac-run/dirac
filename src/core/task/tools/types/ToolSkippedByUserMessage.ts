@@ -1,3 +1,5 @@
+import type { Mode } from "@shared/storage/types"
+
 /**
  * Thrown by waitForInteraction when the user sends a plain text message
  * instead of responding to a card's approval/feedback request.
@@ -10,6 +12,7 @@ export class ToolSkippedByUserMessage extends Error {
 		public readonly userMessage: string,
 		public readonly userImages?: string[],
 		public readonly userFiles?: string[],
+		public readonly modeSwitch?: Mode,
 	) {
 		super(`Tool skipped by user with message: "${userMessage}"`)
 		this.name = "ToolSkippedByUserMessage"

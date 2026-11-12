@@ -1,6 +1,10 @@
 import "should"
 import * as apiModule from "@core/api"
 import type { TaskWorkingConfigurationPatch } from "@core/task/runtime/TaskWorkingConfiguration"
+import type { ChatContent } from "@shared/ChatContent"
+import { Task } from "@core/task"
+import { TaskState } from "@core/task/TaskState"
+import { PlanInteractionResponse } from "@shared/responseTool"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import sinon from "sinon"
@@ -12,7 +16,6 @@ describe("StateController active-task characterization", () => {
 	function createHarness(options?: {
 		status?: TaskStatus
 		awaitingPlanResponse?: boolean
-		lastWaitingCardId?: string
 		withoutTask?: boolean
 		initialMode?: "plan" | "act"
 	}) {
@@ -21,35 +24,28 @@ describe("StateController active-task characterization", () => {
 		const task = options?.withoutTask
 			? undefined
 			: ({
-					ulid: "task-ulid",
-					applyWorkingConfigurationUpdate: sinon
-						.stub()
-						.callsFake(async (patch: TaskWorkingConfigurationPatch, beforeCommit?: () => void | Promise<void>) => {
-							apiModule.buildApiHandler({}, (patch.settings?.mode ?? mode) as "plan" | "act")
-							events.push("validate-runtime")
-							await beforeCommit?.()
-							const previousMode = mode
-							mode = patch.settings?.mode ?? mode
-							events.push("commit-runtime")
-							if (previousMode !== mode) {
-								task!.taskState.pendingModeNotice = { mode }
-								if (previousMode === "plan" && mode === "act" && task!.taskState.isAwaitingPlanResponse) {
-									task!.taskState.didRespondToPlanAskBySwitchingMode = true
-								}
-							}
-						}),
-					submitCardResponse: sinon.stub().callsFake(async () => events.push("submit-card")),
-					taskState: {
-						status: options?.status ?? TaskStatus.COMPLETED,
-						pendingModeNotice: undefined,
-						isAwaitingPlanResponse: options?.awaitingPlanResponse ?? false,
-						didRespondToPlanAskBySwitchingMode: false,
-						lastWaitingCardId: options?.lastWaitingCardId,
-					},
-					get stateView() {
-						return this.taskState
-					},
-				} as any)
+				ulid: "task-ulid",
+				applyWorkingConfigurationUpdate: sinon
+					.stub()
+					.callsFake(async (patch: TaskWorkingConfigurationPatch, beforeCommit?: () => void | Promise<void>, content?: ChatContent) => {
+						apiModule.buildApiHandler({}, (patch.settings?.mode ?? mode) as "plan" | "act")
+						events.push("validate-runtime")
+						await beforeCommit?.()
+						const previousMode = mode
+						mode = patch.settings?.mode ?? mode
+						events.push("commit-runtime")
+						const applyCommittedModeEffects = (Task.prototype as any).applyCommittedModeEffects
+						applyCommittedModeEffects.call(task, previousMode, mode, content)
+					}),
+				submitCardResponse: sinon.stub().callsFake(async () => events.push("submit-card")),
+				taskState: Object.assign(new TaskState(), {
+					status: options?.status ?? TaskStatus.COMPLETED,
+					isAwaitingPlanResponse: options?.awaitingPlanResponse ?? false,
+				}),
+				get stateView() {
+					return this.taskState
+				},
+			} as any)
 		const stateManager = {
 			setGlobalState: sinon.stub().callsFake(() => events.push("persist-global-mode")),
 			setSessionOverride: sinon.stub().callsFake(() => events.push("set-session-mode")),
@@ -59,7 +55,6 @@ describe("StateController active-task characterization", () => {
 			clearSessionOverride: sinon.stub().callsFake(() => events.push("clear-session-mode")),
 		} as any
 		const postStateToWebviewFn = sinon.stub().callsFake(async () => events.push("publish-state"))
-		const cancelTaskFn = sinon.stub().callsFake(async () => events.push("cancel-task"))
 		const buildApiHandlerFn = sinon.stub() as any
 		const captureModeSwitchFn = sinon.stub().callsFake(() => events.push("capture-telemetry"))
 		const controller = new StateController({
@@ -69,7 +64,6 @@ describe("StateController active-task characterization", () => {
 			},
 			buildApiHandlerFn,
 			postStateToWebviewFn,
-			cancelTaskFn,
 			captureModeSwitchFn,
 		})
 		return {
@@ -77,7 +71,6 @@ describe("StateController active-task characterization", () => {
 			task,
 			stateManager,
 			postStateToWebviewFn,
-			cancelTaskFn,
 			buildApiHandlerFn,
 			captureModeSwitchFn,
 			events,
@@ -86,7 +79,7 @@ describe("StateController active-task characterization", () => {
 
 	beforeEach(() => sinon.stub(apiModule, "buildApiHandler").returns({} as any))
 
-	it("commits the selected mode before publishing and cancelling an active streaming task", async () => {
+	it("commits the selected mode before publishing an active streaming task without restarting it", async () => {
 		const harness = createHarness({ status: TaskStatus.STREAMING_TEXT })
 
 		const result = await harness.controller.togglePlanActMode("plan")
@@ -94,10 +87,10 @@ describe("StateController active-task characterization", () => {
 		result.should.equal(false)
 		sinon.assert.calledOnce(harness.task!.applyWorkingConfigurationUpdate)
 		harness.task!.taskState.pendingModeNotice.mode.should.equal("plan")
-		sinon.assert.calledOnce(harness.cancelTaskFn)
+		harness.task!.taskState.pendingModeNotice.switched.should.equal(true)
 		harness.events.indexOf("persist-global-mode").should.be.lessThan(harness.events.indexOf("commit-runtime"))
 		harness.events.indexOf("commit-runtime").should.be.lessThan(harness.events.indexOf("publish-state"))
-		harness.events.indexOf("publish-state").should.be.lessThan(harness.events.indexOf("cancel-task"))
+		sinon.assert.notCalled(harness.task!.submitCardResponse)
 	})
 
 	it("turns a waiting Plan response into an approval only after the Task transition", async () => {
@@ -105,8 +98,22 @@ describe("StateController active-task characterization", () => {
 			status: TaskStatus.AWAITING_USER_INPUT,
 			awaitingPlanResponse: true,
 			initialMode: "plan",
-			lastWaitingCardId: "plan-card",
 		})
+
+		const pending = {
+			signal: new AbortController().signal,
+			modeSwitchResponse: sinon.stub().callsFake((mode, content) => ({
+				response: DiracAskResponse.APPROVE,
+				action: DiracAskResponse.APPROVE,
+				value: PlanInteractionResponse.MODE_TOGGLE,
+				modeSwitch: mode,
+				text: content?.message,
+				images: content?.images,
+				files: content?.files,
+			})),
+			response: undefined as any,
+		}
+		harness.task!.taskState.pendingCardInteractions.set("plan-card", pending)
 
 		const result = await harness.controller.togglePlanActMode("act", {
 			message: "approved plan",
@@ -116,18 +123,48 @@ describe("StateController active-task characterization", () => {
 
 		result.should.equal(true)
 		harness.task!.taskState.pendingModeNotice.mode.should.equal("act")
-		harness.task!.taskState.didRespondToPlanAskBySwitchingMode.should.equal(true)
-		sinon.assert.calledOnceWithExactly(
-			harness.task!.submitCardResponse,
-			"plan-card",
-			DiracAskResponse.APPROVE,
-			"approved plan",
-			["image"],
-			["file"],
-		)
-		sinon.assert.notCalled(harness.cancelTaskFn)
+		pending.response.should.deepEqual({
+			response: DiracAskResponse.APPROVE,
+			action: DiracAskResponse.APPROVE,
+			value: PlanInteractionResponse.MODE_TOGGLE,
+			modeSwitch: "act",
+			text: "approved plan",
+			images: ["image"],
+			files: ["file"],
+		})
+		sinon.assert.notCalled(harness.task!.submitCardResponse)
 		harness.events.indexOf("commit-runtime").should.be.lessThan(harness.events.indexOf("publish-state"))
-		harness.events.indexOf("publish-state").should.be.lessThan(harness.events.indexOf("submit-card"))
+	})
+
+	it("does not consume composer content for a no-op selection or an already answered wait", async () => {
+		const harness = createHarness({ initialMode: "act" })
+		const pending = {
+			signal: new AbortController().signal,
+			modeSwitchResponse: sinon.stub().returns({ action: "message", modeSwitch: "act" }),
+			response: undefined as any,
+		}
+		harness.task!.taskState.pendingCardInteractions.set("card", pending)
+
+		const unchanged = await harness.controller.togglePlanActMode("act", { message: "Keep my draft" })
+		unchanged.should.equal(false)
+		sinon.assert.notCalled(pending.modeSwitchResponse)
+		pending.response = { action: "approve" }
+		const answered = await harness.controller.togglePlanActMode("plan", { message: "Still keep it" })
+		answered.should.equal(false)
+		sinon.assert.notCalled(pending.modeSwitchResponse)
+	})
+
+	it("recognizes a captured response even if its wait unregisters before publication completes", async () => {
+		const harness = createHarness({ initialMode: "act" })
+		harness.task!.taskState.pendingCardInteractions.set("card", {
+			signal: new AbortController().signal,
+			modeSwitchResponse: (mode: string) => ({ action: "message", modeSwitch: mode }),
+		})
+		harness.postStateToWebviewFn.callsFake(async () => harness.task!.taskState.pendingCardInteractions.clear())
+
+		const consumed = await harness.controller.togglePlanActMode("plan", { message: "Consumed" })
+		consumed.should.equal(true)
+		harness.task!.taskState.pendingCardInteractions.size.should.equal(0)
 	})
 
 	it("persists a mode selection without a Task runtime when no task exists", async () => {
@@ -139,7 +176,6 @@ describe("StateController active-task characterization", () => {
 		sinon.assert.calledWithExactly(harness.stateManager.setGlobalState, "mode", "plan")
 		sinon.assert.calledWithExactly(harness.stateManager.setSessionOverride, "mode", "plan")
 		sinon.assert.calledWithExactly(harness.captureModeSwitchFn, "0", "plan")
-		sinon.assert.notCalled(harness.cancelTaskFn)
 	})
 
 	it("YOLO mode switching commits Act without cancelling or capturing a normal mode event", async () => {
@@ -151,13 +187,13 @@ describe("StateController active-task characterization", () => {
 		sinon.assert.calledWithExactly(harness.stateManager.setGlobalState, "mode", "act")
 		sinon.assert.calledWithExactly(harness.stateManager.setSessionOverride, "mode", "act")
 		sinon.assert.calledOnce(harness.task!.applyWorkingConfigurationUpdate)
-		sinon.assert.notCalled(harness.cancelTaskFn)
 		sinon.assert.notCalled(harness.captureModeSwitchFn)
 	})
 
 	it("does not persist, publish, or capture telemetry when candidate construction fails", async () => {
 		const harness = createHarness({ status: TaskStatus.STREAMING_TEXT })
-		;(apiModule.buildApiHandler as sinon.SinonStub).throws(new Error("invalid mode runtime"))
+		const buildApiHandler = apiModule.buildApiHandler as sinon.SinonStub
+		buildApiHandler.throws(new Error("invalid mode runtime"))
 
 		await harness.controller.togglePlanActMode("plan").should.be.rejectedWith("invalid mode runtime")
 
@@ -165,7 +201,6 @@ describe("StateController active-task characterization", () => {
 		sinon.assert.notCalled(harness.stateManager.setSessionOverride)
 		sinon.assert.notCalled(harness.postStateToWebviewFn)
 		sinon.assert.notCalled(harness.captureModeSwitchFn)
-		sinon.assert.notCalled(harness.cancelTaskFn)
 	})
 
 	it("does not publish or capture telemetry when persistence fails", async () => {
@@ -177,7 +212,6 @@ describe("StateController active-task characterization", () => {
 		harness.events.should.not.containEql("commit-runtime")
 		sinon.assert.notCalled(harness.postStateToWebviewFn)
 		sinon.assert.notCalled(harness.captureModeSwitchFn)
-		sinon.assert.notCalled(harness.cancelTaskFn)
 	})
 
 	it("rolls back global and session mode when the session write throws after mutation", async () => {

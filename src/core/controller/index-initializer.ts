@@ -91,7 +91,6 @@ export class Initializer {
 			},
 			buildApiHandlerFn: buildApiHandler,
 			postStateToWebviewFn: () => controller.postStateToWebview(),
-			cancelTaskFn: () => controller.cancelTask(),
 			captureModeSwitchFn: (taskId, mode) => void telemetryService.captureModeSwitch(taskId, mode),
 		})
 

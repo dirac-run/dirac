@@ -15,7 +15,7 @@ describe("StateController", () => {
 			taskState: {
 				status,
 				pendingModeNotice: undefined,
-				isAwaitingPlanResponse: false,
+				pendingCardInteractions: new Map(),
 			},
 			get stateView() {
 				return this.taskState
@@ -29,7 +29,6 @@ describe("StateController", () => {
 			clearSessionOverride: sinon.stub(),
 		} as any
 		const postStateToWebviewFn = sinon.stub().resolves()
-		const cancelTaskFn = sinon.stub().resolves()
 		const buildApiHandlerFn = sinon.stub() as any
 		const captureModeSwitchFn = sinon.stub()
 
@@ -40,31 +39,23 @@ describe("StateController", () => {
 			},
 			buildApiHandlerFn,
 			postStateToWebviewFn,
-			cancelTaskFn,
 			captureModeSwitchFn,
 		})
 
-		return { controller, task, stateManager, postStateToWebviewFn, cancelTaskFn }
+		return { controller, task, stateManager, postStateToWebviewFn }
 	}
 
-	it("switches mode without cancelling a completed task", async () => {
-		const { controller, task, stateManager, postStateToWebviewFn, cancelTaskFn } = createController(TaskStatus.COMPLETED)
+	for (const status of [TaskStatus.COMPLETED, TaskStatus.STREAMING_TEXT]) {
+		it(`switches mode in place for a ${status} task without claiming composer input`, async () => {
+			const { controller, task, stateManager, postStateToWebviewFn } = createController(status)
 
-		const sentMessage = await controller.togglePlanActMode("plan")
+			const sentMessage = await controller.togglePlanActMode("plan")
 
-		sentMessage.should.equal(false)
-		sinon.assert.calledWith(stateManager.setGlobalState, "mode", "plan")
-		sinon.assert.calledWith(stateManager.setSessionOverride, "mode", "plan")
-		sinon.assert.calledOnce(postStateToWebviewFn)
-		sinon.assert.calledOnce(task.applyWorkingConfigurationUpdate)
-		sinon.assert.notCalled(cancelTaskFn)
-	})
-
-	it("still cancels an active task when switching mode", async () => {
-		const { controller, cancelTaskFn } = createController(TaskStatus.STREAMING_TEXT)
-
-		await controller.togglePlanActMode("plan")
-
-		sinon.assert.calledOnce(cancelTaskFn)
-	})
+			sentMessage.should.equal(false)
+			sinon.assert.calledWith(stateManager.setGlobalState, "mode", "plan")
+			sinon.assert.calledWith(stateManager.setSessionOverride, "mode", "plan")
+			sinon.assert.calledOnce(postStateToWebviewFn)
+			sinon.assert.calledOnce(task.applyWorkingConfigurationUpdate)
+		})
+	}
 })
