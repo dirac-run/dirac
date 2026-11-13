@@ -1,0 +1,107 @@
+{
+	"schemaVersion": 1,
+	"version": "0.6.0",
+	"kind": "minor",
+	"announce": true,
+	"sourceTag": "v0.5.24",
+	"analyzedCommit": "b643464b27d98051ab0e815b92dd49e176c9d071",
+	"headline": "Dirac 0.6.0 introduces asynchronous subagents, direct agent collaboration, and BraKet-powered command permissions.",
+	"summaryMd": "This release substantially expands how Dirac can approach larger tasks. Independent assignments can run alongside the main agent's work, agents can exchange discoveries directly, and saved conversations let an assignment continue where it left off. We also integrated BraKet, the command categorizer we built, into the permission flow. Together with configurable specialist roles, optional command sandboxing, and clearer visibility into ongoing work, these changes give you much more room to delegate while keeping control of execution.\n\n**Upgrade note:** Goals saved in the previous execution format require a fresh start with `/goal`; existing files are preserved. Older subagent previews remain viewable, while resuming a saved conversation requires a recoverable model selection.",
+	"highlights": [
+		{
+			"id": "collaborating-subagents",
+			"title": "Subagents keep working while Dirac moves ahead",
+			"bodyMd": "Dirac can now launch independent assignments and continue the main task while they run. It can inspect progress, give an agent more direction, interrupt its work, or explicitly resume its saved conversation for a follow-up. Goals use the same supervision. This makes room for longer research, implementation, and verification assignments within a task, with the main agent responsible for bringing the work together.",
+			"evidence": [
+				"11353bf3bda36624856861b86cae9bbde3d8f1f9",
+				"343f5925dd79ece11e3d075796953d9ceb712d2c",
+				"9ad8f2753bc3498be8e7b3095dce09827a186f12",
+				"d3a16d562fc0e4d8edad6c2ce91fe82982d291c1",
+				"481d185842d322f083f4541c2acdf2f78e4cf515"
+			]
+		},
+		{
+			"id": "agent-communication",
+			"title": "Agents can exchange discoveries directly",
+			"bodyMd": "Agents working on the same task can discover available teammates, send each other messages, and publish findings to a persistent shared journal. A reviewer can send a finding to the agent implementing a change, and research can become a reference for several assignments. The main agent retains responsibility for assignments and approvals, while direct communication gives specialists a way to coordinate the details of their work.",
+			"evidence": [
+				"528cba5fe694be49604f5d597578c9de86ec45da",
+				"03eced801ea9454c056ca5e533e661761339d216",
+				"043e3ac3b37c3626db4e8758088ab0d202ea86a6",
+				"4ad858e72b5fadd8cb4175faf2cf78d639f8f58b"
+			]
+		},
+		{
+			"id": "category-command-approvals",
+			"title": "Command permissions powered by BraKet",
+			"bodyMd": "We built BraKet to classify the access shell commands need, and Dirac now uses it to make permission decisions across ten categories, including filesystem, network, software, and credentials. Eligible prompts let you approve an invocation or explicitly grant a category and access level for the current task and its subagents. Grants survive task resume. Eligible subagent requests can pass through the Utility Model and supervising agent before reaching you, and a new VS Code approval tray and numbered CLI choices make pending decisions easier to follow.",
+			"evidence": [
+				"799d677c50821ff61e8de273458047a54cd25c17",
+				"13d5426f57054a4b39abf00d0f37289e657427f8",
+				"47ae8de94b805800903736e37f19333a58edfc51"
+			],
+			"actions": [
+				{
+					"title": "Explore BraKet",
+					"url": "https://github.com/dirac-run/braket"
+				}
+			]
+		},
+		{
+			"id": "command-sandbox-profiles",
+			"title": "Set filesystem and network boundaries for commands",
+			"bodyMd": "Optional native sandboxing gives commands explicit filesystem and network limits. Choose Workspace, Offline workspace, or Read-only profiles, or save custom profiles with specific folder and cache grants. Separate main-agent and subagent assignments let you give delegated command execution a narrower scope. The CLI and VS Code expose the profile settings, and command approvals show the requested sandbox and fallback policy. Enforcement applies to commands and their descendants; other agent tools retain their own permission controls.",
+			"evidence": [
+				"91afa91678978f6d65df24cbfc03e9b7f66735be"
+			]
+		},
+		{
+			"id": "subagent-roles",
+			"title": "Choose a model for each kind of work",
+			"bodyMd": "Configure named specialist roles with their own models and supported reasoning settings. Starter roles include Scout, Reviewer, Simple coder, Complex coder, and Verifier; you can edit them or create roles for your workflow. Descriptions help Dirac choose an appropriate specialist, and role labels identify their work throughout the interface. Provider setup is now separate from model selection for Plan, Act, Utility, and subagents, making it easier to prepare several providers and decide where to use each one.",
+			"evidence": [
+				"c67057014bd483b5a3fb06bf964c99ffaf5c6372",
+				"facf0fb107f57cf4959a462266e17fc5b41bbc80",
+				"3a9dd8ab2671636b81e9e3c5ce031ced646e34ab"
+			]
+		},
+		{
+			"id": "expanded-model-support",
+			"title": "More models, with reasoning controls to match",
+			"bodyMd": "The catalog adds GPT-6.1 Terra, Claude Sonnet 5.5, Haiku 5.5 and Fable 5.1, MiniMax-M3.1-Flash, Kimi K3.1 Pro and Pro Highspeed, and Mistral Large 4. The integrations include model-specific reasoning controls and thinking support, with capability-aware settings for each provider. Mistral also gains structured thinking replay and cached-input accounting, and the OpenAI integrations honor an explicit reasoning-off selection.",
+			"evidence": [
+				"3f8801a49b9e1b69fecd9c02ded728b2d94cd2f7"
+			]
+		},
+		{
+			"id": "agent-progress-and-usage",
+			"title": "Follow the work across your agents",
+			"bodyMd": "Active-agent counts and compact communication cards give you a view of ongoing work from the main conversation. Use `/agents` for a local snapshot, or the CLI's `/agent` browser to inspect paginated transcripts and communications without sending a model message. VS Code task headers also show ChatGPT subscription quota where available, with freshness and reset details, alongside the existing task-cost reporting. Accrued charges remain visible when you switch providers.",
+			"evidence": [
+				"dd9550c50373c88e9794b31873197c511a9cc77a",
+				"e09f660c2a52ad99452ef62bb840e0b6a2db93a1",
+				"3b19d9cceb4b2efab1503385ca1f64b13f0cbd39",
+				"128111bac05796a8185e72e00cea2c5622bdad00",
+				"d22983b159ae9326e3f0f676703bacefcfe5f198",
+				"b643464b27d98051ab0e815b92dd49e176c9d071"
+			]
+		}
+	],
+	"fixes": [
+		"Switching between Plan and Act keeps the conversation running. Resume, Proceed, and Retry actions correctly resume the task, and messages and attachments are preserved when waking an agent waiting on delegated work.",
+		"Cancellation and shutdown clean up owned work more reliably. Task completion waits for active subagents to settle, and tool cancellation is distinguished from execution failure.",
+		"Approval decisions preserve your composer draft, and guidance sent during a pending approval stays separate from consent. Command approvals are rechecked before launch against current permissions; supervisory decisions remain bounded by your authority and Plan-mode restrictions.",
+		"Conversation condensation follows workspace-read approval settings. AI-assisted approval settings explain when a missing model or policy prevents activation.",
+		"Subagent usage is retained across retries, interruption, resume, and checkpoint restoration without duplicating recorded usage. Internal accounting entries are kept out of ordinary chat and ACP tool activity, and Moonshot cache usage is accounted for more accurately.",
+		"ACP session forks retain independent subagent histories. Clients lacking boolean-setting support receive Off/On choices, OpenRouter model lists prioritize current models, and terminal cancellation avoids waiting indefinitely on stalled host cleanup requests.",
+		"Relative Markdown file links open in the editor. File edits respect unsaved editor contents, and background diff reviews open when you choose to inspect them, preserving editor focus while you work.",
+		"Editor diagnostics are offered where the host supports them, with an explicit unavailable result elsewhere. Diagnostic scans collect editor and language-service reports; builds and linters remain separate checks.",
+		"Custom-tool creation uses explicit implementations and smoke-test arguments. Failed updates retain the installed tool, and updating a disabled tool preserves its disabled state.",
+		"Keyless custom OpenAI-compatible endpoints work without an unwanted Authorization header, and CLI Bedrock setup supports a custom endpoint URL. Anthropic and Vertex can recover from the specific error caused by thinking blocks belonging to another conversation while preserving saved history.",
+		"Agent behavior: subagents share your workspace and receive the supplied assignment as their starting context. Reopening a task restores saved history; continuing an agent requires explicit resume. Direct messages are best-effort queued communication, while journal entries persist. Starter roles require model configuration and explicit enabling.",
+		"Permission compatibility: category grants depend on your approval settings. Unknown or restricted commands require individual review under ordinary permission settings. BraKet classification is enabled on supported POSIX hosts, including Linux and macOS; Windows commands remain unclassified.",
+		"Sandbox compatibility: sandboxing is off by default, and the permissive Default profile provides no meaningful isolation. Restrictive profiles require host support: Linux x86-64 needs Bubblewrap 0.12.0, macOS needs a successful native capability check, and Windows needs a built and packaged native helper whose enforcement remains unverified. Unsandboxed fallback requires explicit opt-in.",
+		"Model compatibility: availability and capabilities vary by provider. Claude Code requires 2.1.284 or newer for Sonnet 5.5 and 2.1.293 or newer for Haiku 5.5. The new Bedrock Sonnet and Haiku entries require supported inference profiles; cost estimates are currently unavailable. ChatGPT quota reflects account-level subscription usage.",
+		"The optional double-check-completion verifier and its --double-check-completion CLI flag have been removed. Update scripts that pass the flag; ordinary tests and review remain part of verifying the work."
+	]
+}
