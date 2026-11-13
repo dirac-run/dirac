@@ -4,20 +4,23 @@ import { DiracAskResponse } from "@shared/WebviewMessage"
 import { Button } from "@/shared/ui/button"
 import { cn } from "@/lib/utils"
 import { CheckIcon, XIcon } from "lucide-react"
+import { useChatStore } from "@/features/chat/store/chatStore"
 
 interface CardActionsProps {
 	card: Card
-	onAction?: (value: string) => void
+	onAction?: (value: string, commandApprovalChoiceId?: string) => void
 	isActive?: boolean
 }
 
 export const CardActions: React.FC<CardActionsProps> = ({ card, isActive, onAction }) => {
+	const hasApprovalTray = useChatStore((state) => state.uiActionState?.pendingApprovalCardIds !== undefined)
 	const { requireApproval, actions, status } = card
 	const hasActions = (actions && actions.length > 0) || requireApproval
 
 	const showActions = !isFinalStatus(status) && (isActive || status === CardStatus.WAITING_FOR_INPUT)
 
-	if (!showActions || !hasActions) {
+	// A removed waiter must not regain transcript authority while its card finalizes.
+	if ((hasApprovalTray && requireApproval) || !showActions || !hasActions) {
 		return null
 	}
 
@@ -28,8 +31,19 @@ export const CardActions: React.FC<CardActionsProps> = ({ card, isActive, onActi
 				requireApproval ? "border-warning/20" : "border-foreground/10",
 			)}>
 			{requireApproval && <div className="flex items-center gap-1.5 text-xs text-warning font-medium">Action required</div>}
-			<div className="flex flex-wrap gap-2">
-				{actions && actions.length > 0 ? (
+			<div className={cn("flex gap-2", requireApproval && card.commandApprovalChoices ? "flex-col items-stretch" : "flex-wrap")}>
+				{requireApproval && card.commandApprovalChoices ? (
+					card.commandApprovalChoices.map((choice) => (
+						<Button
+							key={choice.id}
+							variant={choice.id === "reject" ? "danger" : choice.id === "approve" ? "success" : "secondary"}
+							size="sm"
+							className="min-h-6 h-auto text-xs px-3 py-1 justify-start whitespace-normal text-left"
+							onClick={() => onAction?.(choice.id === "reject" ? DiracAskResponse.REJECT : DiracAskResponse.APPROVE, choice.id)}>
+							{choice.label}
+						</Button>
+					))
+				) : actions && actions.length > 0 ? (
 					actions.map((action, index) => (
 						<Button
 							key={index}

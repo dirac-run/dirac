@@ -16,7 +16,7 @@ describe("TaskUserInput addressed card actions", () => {
 		it(`does not route an empty-card ${response} to the foreground waiter`, async () => {
 			const taskState = waitingState("foreground-card")
 
-			await submitCardResponse({ taskState }, { cardId: "", response })
+			await assert.rejects(submitCardResponse({ taskState }, { cardId: "", response }), /exact card ID/)
 
 			assert.equal(taskState.askResponse, undefined)
 			assert.equal(taskState.askResponseAction, undefined)
@@ -28,7 +28,7 @@ describe("TaskUserInput addressed card actions", () => {
 	it("ignores a retired card instead of answering the new request", async () => {
 		const taskState = waitingState("new-card")
 
-		await submitCardResponse({ taskState }, { cardId: "retired-card", response: DiracAskResponse.APPROVE })
+		await assert.rejects(submitCardResponse({ taskState }, { cardId: "retired-card", response: DiracAskResponse.APPROVE }), /no pending interaction/)
 
 		assert.equal(taskState.askResponse, undefined)
 		assert.equal(taskState.askResponseCardId, undefined)
@@ -75,9 +75,34 @@ describe("TaskUserInput addressed card actions", () => {
 	it("does not overwrite an accepted response before its waiter consumes it", async () => {
 		const taskState = waitingState("card")
 		await submitCardResponse({ taskState }, { cardId: "card", response: DiracAskResponse.APPROVE, value: "first" })
-		await submitCardResponse({ taskState }, { cardId: "card", response: DiracAskResponse.REJECT, value: "duplicate" })
+		await assert.rejects(submitCardResponse({ taskState }, { cardId: "card", response: DiracAskResponse.REJECT, value: "duplicate" }), /no longer awaiting/)
 		assert.equal(taskState.pendingCardInteractions.get("card")?.response?.response, DiracAskResponse.APPROVE)
 		assert.equal(taskState.pendingCardInteractions.get("card")?.response?.value, "first")
+	})
+
+	it("keeps a command approval choice on its addressed interaction only", async () => {
+		const taskState = waitingState("first-card", "command-card")
+		await submitCardResponse({ taskState }, {
+			cardId: "command-card",
+			response: DiracAskResponse.APPROVE,
+			commandApprovalChoiceId: "allow-filesystem-mutate",
+		})
+		assert.equal(taskState.pendingCardInteractions.get("command-card")?.response?.commandApprovalChoiceId, "allow-filesystem-mutate")
+		assert.equal(taskState.pendingCardInteractions.get("first-card")?.response, undefined)
+		assert.equal(taskState.askResponse, undefined)
+		await assert.rejects(submitCardResponse({ taskState }, {
+			cardId: "command-card", response: DiracAskResponse.APPROVE, commandApprovalChoiceId: "replacement",
+		}), /no longer awaiting/)
+		assert.equal(taskState.pendingCardInteractions.get("command-card")?.response?.commandApprovalChoiceId, "allow-filesystem-mutate")
+	})
+
+	it("does not infer a capability grant from generic approval text or value", async () => {
+		const taskState = waitingState("command-card")
+		await submitCardResponse({ taskState }, {
+			cardId: "command-card", response: DiracAskResponse.APPROVE,
+			text: "allow-filesystem-mutate", value: "allow-filesystem-mutate",
+		})
+		assert.equal(taskState.pendingCardInteractions.get("command-card")?.response?.commandApprovalChoiceId, undefined)
 	})
 
 	it("ignores a cancelled interaction even before waiter cleanup runs", async () => {
@@ -85,7 +110,7 @@ describe("TaskUserInput addressed card actions", () => {
 		const controller = new AbortController()
 		taskState.pendingCardInteractions.set("card", { signal: controller.signal })
 		controller.abort()
-		await submitCardResponse({ taskState }, { cardId: "card", response: DiracAskResponse.APPROVE })
+		await assert.rejects(submitCardResponse({ taskState }, { cardId: "card", response: DiracAskResponse.APPROVE }), /no pending interaction/)
 		assert.equal(taskState.pendingCardInteractions.get("card")?.response, undefined)
 		assert.equal(taskState.askResponse, undefined)
 	})

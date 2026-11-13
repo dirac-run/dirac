@@ -145,6 +145,9 @@ import type {
 import { inspectTasklet, summarizeTasklet, pageInspectionItems, type TaskletInspectionQuery } from "./TaskletInspection"
 import { taskletCommunicationCard } from "./TaskletCommunicationCards"
 import { TaskletCommandApprovals } from "./TaskletCommandApprovals"
+import { TaskCommandCapabilities } from "./TaskCommandCapabilities"
+import { loadTaskCommandCapabilities, saveTaskCommandCapabilities } from "@core/storage/taskStorage"
+import type { TaskCommandCapabilitiesCapability } from "./tools/interfaces/TaskCommandCapabilities"
 import type { ToolSnapshotDirtyReason } from "./tools/runtime/ToolSnapshot"
 import { extractProviderDomainFromUrl } from "./utils"
 export type {
@@ -167,6 +170,7 @@ export interface TaskletExecutionBindings {
 	agentCommunication?: AgentCommunication
 	sharedJournal?: SharedJournal
 	commandApprovals?: import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability
+	commandCapabilities?: TaskCommandCapabilitiesCapability
 	getPermissionCommandController?: () => CommandPermissionController
 	hasPendingInteraction?: () => boolean
 	configuration?: TaskletConfiguration
@@ -226,6 +230,8 @@ export class Task {
 	// Core task variables
 	readonly taskId: string
 	readonly storageAddress: TaskStorageAddress
+	readonly commandCapabilities: TaskCommandCapabilitiesCapability
+	private readonly ownedCommandCapabilities?: TaskCommandCapabilities
 	// Sequence number for prompt-metadata debug artifacts — see promptArtifactsContext.
 	// Each API request within a task gets its own file instead of overwriting the last.
 	private promptArtifactSeq = 0
@@ -288,8 +294,6 @@ export class Task {
 			taskState: this.taskState,
 			messageStateHandler: this.messageStateHandler,
 			taskMessenger: this.taskMessenger,
-			allowWhileWaitingForInteraction:
-				this.executionProfile === "goal_coordinator" || this.executionProfile === "goal_followup",
 			postStateToWebview: () => this.postStateToWebview(),
 			withStateLock: (fn) => this.withStateLock(fn),
 			onUserInputAccepted: () => {
@@ -635,6 +639,16 @@ export class Task {
 			throw new Error("Tasklet identity must match its storage address and cannot own a root Task lock")
 		}
 		this.storageAddress = Object.freeze(contained ? { ...contained.storageAddress } : { kind: "task", taskId })
+		const rootTaskId = contained?.storageAddress.rootTaskId ?? taskId
+		if (contained?.commandCapabilities) {
+			this.commandCapabilities = contained.commandCapabilities
+		} else {
+			this.ownedCommandCapabilities = new TaskCommandCapabilities(
+				() => loadTaskCommandCapabilities(rootTaskId),
+				(snapshot) => saveTaskCommandCapabilities(rootTaskId, snapshot),
+			)
+			this.commandCapabilities = this.ownedCommandCapabilities
+		}
 		getTaskDirectoryPath(this.storageAddress)
 		this.updateTaskHistory = contained ? async () => [] : updateTaskHistory
 		this.postStateToWebview = contained ? contained.postStateToOwner : postStateToWebview
@@ -826,6 +840,11 @@ export class Task {
 		this.diracIgnoreController.yoloMode = !!workingConfiguration.settings.yoloModeToggled
 
 		this.commandPermissionController = new CommandPermissionController()
+		const commandApprovals = contained?.commandApprovals ?? new TaskletCommandApprovals(
+			undefined,
+			(command) => this.commandPermissionController.getCommandRestrictionContext(command),
+			() => this.taskState.abortSignal.throwIfAborted(),
+		)
 
 		// Determine terminal execution mode and create appropriate terminal manager
 		// When backgroundExec mode is selected, use StandaloneTerminalManager for hidden execution
@@ -1077,8 +1096,7 @@ export class Task {
 			() => (this.ownerBindings?.sharedJournal ?? this.taskletHost?.sharedJournal)?.forAgent(this.agentAddress),
 			contained?.getPermissionCommandController,
 			() => {
-				const approvals = contained?.commandApprovals
-				if (!approvals) return undefined
+				const approvals = commandApprovals
 				return {
 					authorize: (requests, approve) => {
 						this.taskState.abortSignal.throwIfAborted()
@@ -1097,6 +1115,7 @@ export class Task {
 			},
 			() => this.captureCommandSandbox(),
 			this.taskletConfiguration?.name,
+			() => this.commandCapabilities,
 		)
 		this.environmentManager = new EnvironmentManager({
 			cwd: this.cwd,
@@ -1253,6 +1272,7 @@ export class Task {
 					executionProfile: this.executionProfile,
 					getAgentCommunicationState: () => this.getAgentCommunicationState(),
 					getPermissionCommandController: () => this.commandPermissionController,
+					commandCapabilities: this.commandCapabilities,
 					recordTaskletUsage: async (id, usage) => {
 						await this.messageStateHandler.upsertTaskletUsage(id, taskletUsageTotal(usage))
 						void this.postPresentationToWebview().catch((error) =>
@@ -1271,7 +1291,8 @@ export class Task {
 							mutation,
 						),
 					escalateInteraction: (child, request, signal) => {
-						const operation = () => this.taskMessenger.escalateTaskletInteraction(child, request, signal)
+						const operation = () => this.taskMessenger.escalateTaskletInteraction(child, request, signal,
+							() => this.toolExecutor.authorizeTaskletPermission(request, signal, { staticOnly: true }))
 						return params.duringTaskletUserInteraction ? params.duringTaskletUserInteraction(operation) : operation()
 					},
 					hasPendingUserInput: () =>
@@ -1530,6 +1551,7 @@ export class Task {
 		images?: string[],
 		files?: string[],
 		value?: string,
+		commandApprovalChoiceId?: string,
 	) {
 		await this.withStateLock(async () => {
 			if (!cardId && response !== DiracAskResponse.MESSAGE) {
@@ -1548,9 +1570,9 @@ export class Task {
 				return
 			}
 			if (cardId && cardId !== this.taskState.lastWaitingCardId) {
-				return submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value })
+				return submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value, commandApprovalChoiceId })
 			}
-			await submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value })
+			await submitCardResponse({ taskState: this.taskState }, { cardId, response, text, images, files, value, commandApprovalChoiceId })
 			this.taskletHost?.notifyUserMessage()
 		})
 	}
@@ -1689,6 +1711,7 @@ export class Task {
 		this.taskRunAdmitted = true
 		let outcome: TaskRunOutcome
 		try {
+			await this.commandCapabilities.ready()
 			outcome = (await run()) ?? this.taskRunOutcomeFromState()
 		} catch (error) {
 			outcome = { kind: "failed", error: serializeTaskError(error), failedAt: Date.now() }
@@ -1794,6 +1817,11 @@ export class Task {
 		const failures: unknown[] = []
 		try {
 			await this.taskletHost?.shutdown()
+		} catch (error) {
+			failures.push(error)
+		}
+		try {
+			await this.ownedCommandCapabilities?.retirePersistence()
 		} catch (error) {
 			failures.push(error)
 		}
@@ -1984,6 +2012,7 @@ export type TaskletTaskOptions = Pick<
 export interface TaskletOwner extends Pick<Task, "taskId" | "executionProfile"> {
 	getAgentCommunicationState?: () => Pick<AgentRosterEntry, "status" | "accepts_messages">
 	getPermissionCommandController?: () => CommandPermissionController
+	commandCapabilities?: TaskCommandCapabilitiesCapability
 	authorizePermission: ToolExecutor["authorizeTaskletPermission"]
 	retainMutationUntil: TaskletExecutionBindings["retainMutationUntil"]
 	assertPermissionAllowed: ToolExecutor["assertTaskletPermissionAllowed"]
@@ -2235,20 +2264,11 @@ export class TaskletHost {
 	}
 
 
-	private commitCommandGrants(child: OwnedTasklet, grants: import("./tools/interfaces/CommandApprovals").CommandGrantSnapshot): Promise<void> {
-		const commandGrants = structuredClone(grants)
-		child.recordWrites = child.recordWrites.then(async () => {
-			await saveTaskletRecord({ ...structuredClone(child.record), commandGrants })
-			child.record = { ...child.record, commandGrants }
-		})
-		return child.recordWrites
-	}
 
 	private persistRecord(child: OwnedTasklet): Promise<void> {
 		const record = structuredClone(child.record)
 		child.recordWrites = child.recordWrites.then(async () => {
-			// A usage snapshot queued before a grant commit must not overwrite committed authority.
-			await saveTaskletRecord({ ...record, commandGrants: child.record.commandGrants })
+			await saveTaskletRecord(record)
 			if (!this.usageProjectionReady || !record.usage || child.usageProjectionError) return
 			try {
 				await this.owner.recordTaskletUsage?.(record.id, record.usage)
@@ -2419,9 +2439,9 @@ export class TaskletHost {
 				tasklet: {
 					agentCommunication: this.agentCommunication,
 					sharedJournal: this.sharedJournal,
+					commandCapabilities: this.owner.commandCapabilities,
 					commandApprovals: new TaskletCommandApprovals(
 						child.record.commandGrants,
-						(snapshot) => this.commitCommandGrants(child, snapshot),
 						(command) => {
 							const permissions = this.owner.getPermissionCommandController?.()
 							if (!permissions) throw new Error("Command permission authority is unavailable")
@@ -2432,7 +2452,6 @@ export class TaskletHost {
 								throw new Error("Tasklet command approval authority is inactive")
 							}
 						},
-						(count) => Logger.info(`[Tasklet ${child.record.id}] Reusing ${count} committed command approval(s)`),
 					),
 					hasPendingInteraction: () => [...child.interactions.values()].some(({ record }) => record.status === "pending"),
 					configuration: record.configuration,

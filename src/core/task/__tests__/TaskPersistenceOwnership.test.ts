@@ -3,6 +3,7 @@ import { describe, it } from "mocha"
 import sinon from "sinon"
 import { Task } from "../index"
 import { TaskState } from "../TaskState"
+import { TaskCommandCapabilities, type TaskCommandCapabilitySnapshot } from "../TaskCommandCapabilities"
 import { SteeringDeliveryState } from "../steering"
 
 function taskWithPersistenceOwner() {
@@ -46,6 +47,62 @@ describe("Task persistence ownership", () => {
 		finishRetirement()
 		await retirement
 		sinon.assert.calledOnce(task.releaseTaskLock)
+	})
+
+	it("drains capability commits before handing root ownership to a reopened task", async () => {
+		const task = taskWithPersistenceOwner()
+		let saved: TaskCommandCapabilitySnapshot | undefined
+		let release!: () => void
+		let enter!: () => void
+		const barrier = new Promise<void>((resolve) => { release = resolve })
+		const entered = new Promise<void>((resolve) => { enter = resolve })
+		const authority = new TaskCommandCapabilities(async () => saved, async (snapshot) => {
+			enter()
+			await barrier
+			saved = structuredClone(snapshot)
+		})
+		task.commandCapabilities = authority
+		task.ownedCommandCapabilities = authority
+		const saving = (await authority.offerApproval(7)).approve("allow-filesystem-7")
+		await entered
+		const retirement = task.retirePersistence()
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			sinon.assert.notCalled(task.releaseTaskLock)
+		} finally {
+			release()
+			await saving
+			await retirement
+		}
+		sinon.assert.calledOnce(task.releaseTaskLock)
+		const reopened = new TaskCommandCapabilities(async () => saved, async (snapshot) => { saved = structuredClone(snapshot) })
+		await reopened.ready()
+		assert.equal(reopened.current() & 7, 7)
+		await (await reopened.offerApproval(1 << 3)).approve("allow-network-1")
+		assert.equal(saved!.capabilities & 7, 7)
+		assert.equal((saved!.capabilities >>> 3) & 7, 1)
+	})
+
+	it("retains root ownership if an admitted capability commit fails", async () => {
+		const task = taskWithPersistenceOwner()
+		const error = new Error("capability disk failure")
+		const authority = new TaskCommandCapabilities(async () => undefined, async () => { throw error })
+		task.commandCapabilities = authority
+		task.ownedCommandCapabilities = authority
+		await assert.rejects((await authority.offerApproval(7)).approve("allow-filesystem-7"), (actual) => actual === error)
+		await assert.rejects(task.retirePersistence(), (actual) => actual === error)
+		sinon.assert.calledOnce(task.messageStateHandler.retirePersistence)
+		sinon.assert.notCalled(task.releaseTaskLock)
+	})
+
+	it("does not retire the shared root capability writer when a child settles", async () => {
+		const task = taskWithPersistenceOwner()
+		const authority = new TaskCommandCapabilities(async () => undefined, async () => { })
+		task.executionProfile = "tasklet"
+		task.commandCapabilities = authority
+		await task.settleTaskRun({ kind: "completed", response: "done", completedAt: 1 })
+		await (await authority.offerApproval(7)).approve("allow-filesystem-7")
+		assert.equal(authority.current() & 7, 7)
 	})
 
 	it("keeps completed and cancelled standalone tasks exclusively open for follow-up", async () => {

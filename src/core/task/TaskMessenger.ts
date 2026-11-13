@@ -34,7 +34,7 @@ interface TaskCardParams extends CardParams {
 	utilityPermissionEscalation?: TaskInteractionRequest["utilityPermissionEscalation"]
 	utilityPermissionSkipped?: TaskInteractionRequest["utilityPermissionSkipped"]
 	toolCall?: TaskInteractionRequest["toolCall"]
-	isAutoApproved?: () => boolean
+	isAutoApproved?: () => boolean | Promise<boolean>
 	isTaskletInteraction?: boolean
 }
 
@@ -122,17 +122,19 @@ export class TaskMessenger implements ITaskMessenger {
 		await this.dependencies.counterparty?.recordResponse(response)
 	}
 
-	/** One user decision for one retained child request; never changes permission settings. */
+	/** Resolve one retained child request through the user or current root authority; never change settings. */
 	async escalateTaskletInteraction(
 		child: { id: string; title: string },
 		request: TaskInteractionRequest,
 		signal: AbortSignal,
+		authorizeAutomatically?: () => Promise<{ approved: boolean; assertCurrent: () => void }>,
 	): ReturnType<ICardHandle["waitForInteraction"]> {
 		if (this.routesToOwner) throw new Error("Only a root messenger may escalate tasklet interactions")
 		const cancellation = AbortSignal.any([signal, this.dependencies.taskState.abortSignal])
 		cancellation.throwIfAborted()
 		let handle: TaskCardHandle | undefined
 		let finalization: Promise<void> | undefined
+		let assertAutomaticAuthorityCurrent: (() => void) | undefined
 		const finalize = (status: CardStatus) => {
 			if (handle)
 				finalization ??= handle.finalize(status).catch((error) => {
@@ -150,6 +152,15 @@ export class TaskMessenger implements ITaskMessenger {
 			handle = await this.createCard({
 				kind: card.kind,
 				isTaskletInteraction: true,
+				isAutoApproved: card.requireApproval && request.permissionOperation && authorizeAutomatically
+					? async () => {
+						cancellation.throwIfAborted()
+						const authority = await authorizeAutomatically()
+						authority.assertCurrent()
+						assertAutomaticAuthorityCurrent = authority.approved ? authority.assertCurrent : undefined
+						return authority.approved
+					}
+					: undefined,
 				header: `${child.id} · Your ${card.requireApproval ? "approval" : "input"} needed`,
 				toolName: card.toolName,
 				icon: card.icon,
@@ -165,6 +176,7 @@ export class TaskMessenger implements ITaskMessenger {
 				diffs: card.diffs,
 				locations: card.locations,
 				requireApproval: card.requireApproval,
+				commandApprovalChoices: card.commandApprovalChoices,
 				approvalScope: card.requireApproval ? "once" : undefined,
 				requireFeedback: card.requireFeedback,
 				feedbackPlaceholder: card.feedbackPlaceholder,
@@ -184,12 +196,14 @@ export class TaskMessenger implements ITaskMessenger {
 			}
 			const rejected = result.action === DiracAskResponse.REJECT || result.response === DiracAskResponse.REJECT
 			const approved = result.action === DiracAskResponse.APPROVE || result.response === DiracAskResponse.APPROVE
+			if (approved) assertAutomaticAuthorityCurrent?.()
 			await handle.update({
-				header: `${child.id} · ${rejected ? "Declined by you" : card.requireApproval && approved ? "Approved by you" : "Your response recorded"}`,
+				header: `${child.id} · ${rejected ? "Declined by you" : card.requireApproval && approved ? (assertAutomaticAuthorityCurrent ? "Approved by current settings" : "Approved by you") : "Your response recorded"}`,
 				collapsed: true,
 			}).catch((error) => { throw new TaskletEscalationCleanupError(error) })
 			await finalize(rejected ? CardStatus.CANCELLED : CardStatus.SUCCESS)
 			cancellation.throwIfAborted()
+			if (approved) assertAutomaticAuthorityCurrent?.()
 			return result
 		} catch (error) {
 			await finalize(CardStatus.CANCELLED)
@@ -332,6 +346,7 @@ export class TaskMessenger implements ITaskMessenger {
 			diffs: params.diffs,
 			locations: params.locations,
 			requireApproval: params.requireApproval,
+			commandApprovalChoices: params.commandApprovalChoices,
 			approvalScope: params.approvalScope,
 			requireFeedback: params.requireFeedback,
 			feedbackPlaceholder: params.feedbackPlaceholder,
@@ -446,7 +461,8 @@ export class TaskMessenger implements ITaskMessenger {
 						]),
 					)
 				}
-				if (params.isAutoApproved?.() === true) return autoApprovedInteraction()
+				const initialApproval = params.isAutoApproved?.()
+				if (initialApproval === true || (initialApproval instanceof Promise && await initialApproval)) return autoApprovedInteraction()
 				const card = getCard()
 				const isAsk = !!(card.requireApproval || card.requireFeedback)
 				const isFinal = isFinalStatus(card.status)
@@ -518,7 +534,7 @@ export class TaskMessenger implements ITaskMessenger {
 							throw error
 						}
 						cancellation.throwIfAborted()
-						if (params.isAutoApproved?.() === true && !readResponse()) return autoApprovedInteraction()
+						if (!readResponse() && await params.isAutoApproved?.() === true && !readResponse()) return autoApprovedInteraction()
 
 						const messageTs = getCardMessageTimestamp()
 						if (state.lastWaitingCardId === id) state.lastMessageTs = messageTs
@@ -533,7 +549,7 @@ export class TaskMessenger implements ITaskMessenger {
 						this.dependencies.messageStateHandler.publishCardInteractionReady(id)
 
 						await pWaitFor(
-							() => cancellation.aborted || readResponse() !== undefined || params.isAutoApproved?.() === true,
+							async () => cancellation.aborted || readResponse() !== undefined || await params.isAutoApproved?.() === true,
 							{ interval: 100 },
 						)
 						cancellation.throwIfAborted()

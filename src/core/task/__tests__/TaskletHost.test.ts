@@ -19,6 +19,8 @@ import * as taskModule from "../index"
 import { TaskletHost, type TaskletTaskOptions } from "../index"
 import type { TaskRunOutcome } from "../TaskRunOutcome"
 import { TaskletEscalationCleanupError } from "../TaskMessenger"
+
+import { TaskCommandCapabilities } from "../TaskCommandCapabilities"
 import { createTaskWorkingConfiguration } from "../runtime/TaskWorkingConfiguration"
 import { StateManager } from "@core/storage/StateManager"
 import type { SubagentRole } from "@shared/subagentRoles"
@@ -133,71 +135,33 @@ describe("TaskletHost asynchronous ownership", () => {
 		await fs.rm(directory, { recursive: true, force: true })
 	})
 
-	it("durably scopes command approvals to the child and reuses them across resume and reconstruction", async () => {
+	it("keeps exact-command consent one-shot and does not persist it on child records", async () => {
 		owner.getPermissionCommandController = () => ({ getCommandRestrictionContext: () => [] }) as any
 		const request = { identity: { kind: "command" as const, command: "npm test", cwd: "/workspace" }, effectiveCommand: "npm test" }
-		const first = await host.start({ type: "default", title: "first", prompt: "work" })
-		const firstApprovals = constructed.firstCall.args[0].tasklet.commandApprovals
-		await firstApprovals.authorize([request], async () => true)
-		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants?.grants.length, 1)
-		const second = await host.start({ type: "default", title: "second", prompt: "work" })
-		const secondApprovals = constructed.secondCall.args[0].tasklet.commandApprovals
-		assert.equal(await secondApprovals.authorize([request], async () => false), false)
-		await host.interrupt(first.id)
-		await host.resume(first.id, "same operation after edits")
-		assert.equal(await constructed.lastCall.args[0].tasklet.commandApprovals.authorize([request], async () => false), true)
-		await host.shutdown()
-		host = new TaskletHost(owner, taskOptions(), constructed as unknown as typeof taskModule.Task)
-		await host.reconstruct()
-		await host.resume(first.id, "after reload")
-		assert.equal(await constructed.lastCall.args[0].tasklet.commandApprovals.authorize([request], async () => false), true)
-		assert.equal(host.inspect(second.id).commandGrants, undefined)
+		const record = await host.start({ type: "default", title: "first", prompt: "work" })
+		const approvals = constructed.firstCall.args[0].tasklet.commandApprovals
+		let asks = 0
+		const approve = async () => { asks++; return asks === 1 }
+		assert.equal(await approvals.authorize([request], approve), true)
+		approvals.assertCurrent([request])
+		assert.equal(await approvals.authorize([request], approve), false)
+		assert.equal(asks, 2)
+		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants, undefined)
+		await host.interrupt(record.id)
+		await host.resume(record.id, "same command after resume")
+		assert.equal(await constructed.lastCall.args[0].tasklet.commandApprovals.authorize([request], approve), false)
+		assert.equal(asks, 3)
+		assert.equal(host.inspect(record.id).commandGrants, undefined)
+		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants, undefined)
 	})
 
-	it("does not release command authorization before its atomic child record write", async () => {
-		owner.getPermissionCommandController = () => ({ getCommandRestrictionContext: () => [] }) as any
+	it("shares the root TaskCommandCapabilities instance with each hosted child", async () => {
+		const capabilities = new TaskCommandCapabilities(async () => undefined, async () => { })
+		owner.commandCapabilities = capabilities
 		await host.start({ type: "default", title: "first", prompt: "work" })
-		const approvals = constructed.firstCall.args[0].tasklet.commandApprovals
-		const entered = deferred<void>()
-		const release = deferred<void>()
-		const save = storage.saveTaskletRecord
-		sandbox.stub(storage, "saveTaskletRecord").callsFake(async (record) => {
-			if (record.commandGrants) { entered.resolve(); await release.promise }
-			return save(record)
-		})
-		let returned = false
-		const request = { identity: { kind: "command" as const, command: "npm test", cwd: "/workspace" }, effectiveCommand: "npm test" }
-		const authorization = approvals.authorize([request], async () => true).then(() => { returned = true })
-		await entered.promise
-		assert.equal(returned, false)
-		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants, undefined)
-		const child = host["children"].values().next().value!
-		assert.equal(child.record.commandGrants, undefined, "uncommitted authority must not enter the live record")
-		const laterSnapshot = host["persistRecord"](child)
-		release.resolve()
-		await authorization
-		await laterSnapshot
-		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants?.grants.length, 1)
-	})
-
-	it("keeps failed command grant writes out of live and reconstructed authority", async () => {
-		expectLoggerErrors()
-		owner.getPermissionCommandController = () => ({ getCommandRestrictionContext: () => [] }) as any
-		const first = await host.start({ type: "default", title: "first", prompt: "work" })
-		const approvals = constructed.firstCall.args[0].tasklet.commandApprovals
-		const request = { identity: { kind: "command" as const, command: "npm test", cwd: "/workspace" }, effectiveCommand: "npm test" }
-		const write = sandbox.stub(storage, "saveTaskletRecord").rejects(new Error("grant disk failure"))
-		await assert.rejects(approvals.authorize([request], async () => true), /grant disk failure/)
-		assert.equal(host.inspect(first.id).commandGrants, undefined)
-		assert.equal((await storage.loadTaskletRecords("root"))[0].commandGrants, undefined)
-		await assert.rejects(host.interrupt(first.id), /interruption failed/)
-		await assert.rejects(host.resume(first.id, "retry"), /not settled successfully/)
-		await assert.rejects(host.shutdown())
-		write.restore()
-		host = new TaskletHost(owner, taskOptions(), constructed as unknown as typeof taskModule.Task)
-		await host.reconstruct()
-		await host.resume(first.id, "after reload")
-		assert.equal(await constructed.lastCall.args[0].tasklet.commandApprovals.authorize([request], async () => false), false)
+		assert.strictEqual(constructed.firstCall.args[0].tasklet.commandCapabilities, capabilities)
+		await host.start({ type: "default", title: "second", prompt: "work" })
+		assert.strictEqual(constructed.secondCall.args[0].tasklet.commandCapabilities, capabilities)
 	})
 
 	it("observes child voluntary wait, wakes selected parent sleep, and keeps the child active until cancellation", async () => {

@@ -6,6 +6,8 @@ import type { IUITrait, IInteractionTrait, ICardHandle, CardParams } from "../..
 import type { TaskConfig } from "../../types/TaskConfig"
 import { CardHandle } from "../CardHandle"
 import { ApprovedPermissionCardHandle } from "../ApprovedPermissionCardHandle"
+import { DiracDefaultTool } from "@shared/tools"
+import { resolveCommandApproval } from "../../autoApprove"
 
 // Builds the UI trait — text streaming and card creation.
 export function buildUiTrait(
@@ -76,6 +78,18 @@ export async function askPermissionOnCard(
 	}
 }
 
+function commandApprovalPredicate(config: TaskConfig, params: CardParams): (() => boolean) | undefined {
+	const tool = config.toolUse?.name ?? params.toolName
+	if (!params.requireApproval || params.operationalInput || params.permissionOperation?.kind !== "commands" ||
+		(tool !== DiracDefaultTool.EXECUTE_COMMAND && tool !== DiracDefaultTool.UPSERT_TOOL)) return undefined
+	const commands = [...params.permissionOperation.commands]
+	return () => {
+		if (isUnrestrictedToolApproval(config)) return true
+		return commands.length > 0 && !resolveCommandApproval(commands, config.permissionDecisionBinding !== undefined,
+			config.autoApprover, config.services.commandPermissionController, tool).required
+	}
+}
+
 // Resolves explicitly classified tool permissions before falling back to the displayed-card path.
 export async function createCardFromMessenger(
 	config: TaskConfig,
@@ -85,10 +99,11 @@ export async function createCardFromMessenger(
 	if (config.taskMessenger.routesToOwner) return createTaskletPermissionCard(config, params, tracker)
 	const { permissionRequestKind, ...cardParams } = params
 	if (permissionRequestKind === undefined) {
-		return createDisplayedCardFromMessenger(config, cardParams, tracker)
+		const isAutoApproved = commandApprovalPredicate(config, cardParams)
+		return createDisplayedCardFromMessenger(config, cardParams, tracker, true, isAutoApproved)
 	}
 
-	const isAutoApproved = () => isUnrestrictedToolApproval(config)
+	const isAutoApproved = commandApprovalPredicate(config, cardParams) ?? (() => isUnrestrictedToolApproval(config))
 	if (isAutoApproved()) {
 		return new ApprovedPermissionCardHandle(cardParams)
 	}

@@ -8,6 +8,28 @@ function matches(entries: UserApprovedCommand[]) {
 }
 
 describe("UserApprovedCommandMatcher", () => {
+	for (const match of ["exact", "prefix"] as const) {
+		it(`preserves argument boundaries in ${match} patterns`, () => {
+			const isApproved = matches([{ command: "rm 'file --recursive'", match }])
+			assert.equal(areCommandSegmentsApproved("rm file --recursive", isApproved), false)
+			assert.equal(areCommandSegmentsApproved('rm "file --recursive"', isApproved), true)
+			assert.equal(areCommandSegmentsApproved("rm file\\ --recursive", isApproved), true)
+		})
+	}
+
+	it("preserves empty arguments and whitespace within arguments", () => {
+		const isApproved = matches([{ command: "echo '' 'two  spaces'", match: "exact" }])
+		assert.equal(areCommandSegmentsApproved("echo 'two spaces'", isApproved), false)
+		assert.equal(areCommandSegmentsApproved("echo '' 'two spaces'", isApproved), false)
+		assert.equal(areCommandSegmentsApproved('echo "" "two  spaces"', isApproved), true)
+	})
+
+	it("does not reinterpret quoted operators as command boundaries", () => {
+		const isApproved = matches([{ command: "echo 'hello; rm file'", match: "exact" }])
+		assert.equal(areCommandSegmentsApproved('echo "hello; rm file"', isApproved), true)
+		assert.equal(areCommandSegmentsApproved("echo hello; rm file", isApproved), false)
+	})
+
 	it("matches exact commands only in exact mode", () => {
 		const isApproved = matches([{ command: "npm test", match: "exact" }])
 

@@ -3,7 +3,7 @@
 		"ts"
 	],
 	"require": [
-		"ts-node/register",
+		"ts-node/register/transpile-only",
 		"source-map-support/register",
 		"./src/test/requires.ts",
 		"./src/test/loggerGuard.ts"

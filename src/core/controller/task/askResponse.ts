@@ -22,8 +22,7 @@ export async function askResponse(controller: Controller, request: AskResponseRe
 			return Empty.create()
 		}
 		if (!controller.task) {
-			Logger.warn("askResponse: No active task to receive response")
-			return Empty.create()
+			throw new Error("No active task to receive response")
 		}
 
 		// Map the string responseType to the DiracAskResponse enum
@@ -67,6 +66,7 @@ export async function askResponse(controller: Controller, request: AskResponseRe
 			request.images,
 			request.files,
 			request.value,
+			request.commandApprovalChoiceId,
 		)
 
 		return Empty.create()

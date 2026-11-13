@@ -8,6 +8,7 @@ import { TaskMessenger, TaskletEscalationCleanupError } from "../TaskMessenger"
 import { expectLoggerErrors } from "@/test/loggerGuard"
 import { TaskState } from "../TaskState"
 import { submitCardResponse } from "../TaskUserInput"
+import { CardHandle } from "../tools/adapters/CardHandle"
 import { ToolSkippedByUserMessage } from "../tools/types/ToolSkippedByUserMessage"
 import type { TaskCounterparty, TaskInteractionRequest, TaskMessengerInvocationContext } from "../types/task-messenger"
 import * as hookExecutor from "@core/hooks/hook-executor"
@@ -129,6 +130,40 @@ function switchMode(taskState: TaskState, previous: "plan" | "act", next: "plan"
 	const applyCommittedModeEffects = (Task.prototype as any).applyCommittedModeEffects
 	applyCommittedModeEffects.call({ taskState }, previous, next, content)
 }
+
+describe("command approval choice transport", () => {
+	for (const routed of [false, true]) {
+		it(`preserves choices and selected IDs through ${routed ? "child escalation" : "root tool cards"}`, async () => {
+			const root = createMessenger()
+			const owner = routed ? createMessenger(sinon.stub().resolves(), {
+				recordResponse: sinon.stub().resolves(),
+				requestInteraction: (request, signal) => root.messenger.escalateTaskletInteraction(
+					{ id: "child", title: "Worker" }, request, signal,
+				),
+			}) : root
+			const choices = [
+				{ id: "approve", label: "Approve this command" },
+				{ id: "allow-filesystem-7", label: "Approve + allow filesystem/mutate for this task" },
+				{ id: "reject", label: "Reject" },
+			]
+			const protocolHandle = await owner.messenger.createCard({
+				header: "Execute command", requireApproval: true, commandApprovalChoices: choices,
+				permissionOperation: { kind: "commands", commands: ["touch file"] },
+			})
+			assert.deepEqual(protocolHandle.getCard().commandApprovalChoices, choices)
+			root.messageStateHandler.publishCardInteractionReady.callsFake((cardId: string) => {
+				const message = root.messages.find((candidate) => candidate.content.card?.id === cardId)
+				assert.deepEqual(message.content.card.commandApprovalChoices, choices)
+				void submitCardResponse({ taskState: root.taskState }, {
+					cardId, response: DiracAskResponse.APPROVE, commandApprovalChoiceId: "allow-filesystem-7",
+				})
+			})
+			const result = await withInteractionTimeout(root.taskState, new CardHandle(protocolHandle).waitForInteraction())
+			assert.equal(result.response, DiracAskResponse.APPROVE)
+			assert.equal(result.commandApprovalChoiceId, "allow-filesystem-7")
+		})
+	}
+})
 
 describe("TaskMessenger in-place mode switches", () => {
 	for (const kind of ["question", "permission"] as const) {
@@ -441,6 +476,46 @@ describe("TaskMessenger tasklet escalation", () => {
 			permissionOperation: { kind: "commands", commands: ["echo example"] },
 		}
 	}
+
+	it("re-evaluates current parent authority while an escalated child permission waits", async () => {
+		const { messenger, taskState, messages } = createMessenger()
+		let enabled = false
+		const assertCurrent = sinon.spy()
+		const authorize = sinon.stub().callsFake(async () => ({ approved: enabled, assertCurrent }))
+		const waiting = messenger.escalateTaskletInteraction(child, request(), new AbortController().signal, authorize)
+		await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT)
+		enabled = true
+		const result = await withInteractionTimeout(taskState, waiting)
+		assert.equal(result.action, DiracAskResponse.APPROVE)
+		assert.equal(result.commandApprovalChoiceId, undefined)
+		assert.equal(messages[0].content.card.status, CardStatus.SUCCESS)
+		assert.deepEqual(taskState.waitingCardIds, [])
+		sinon.assert.called(assertCurrent)
+	})
+
+	it("does not turn an automatic child approval into stale one-shot consent", async () => {
+		const { messenger, taskState, messages, messageStateHandler } = createMessenger()
+		let current = true
+		const assertCurrent = () => { if (!current) throw new Error("authority changed") }
+		messageStateHandler.flushPendingWrites.callsFake(async () => {
+			if (messages.some((message) => message.content.card?.status === CardStatus.SUCCESS)) current = false
+		})
+		await assert.rejects(messenger.escalateTaskletInteraction(child, request(), new AbortController().signal,
+			async () => ({ approved: true, assertCurrent })), /authority changed/)
+		assert.deepEqual(taskState.waitingCardIds, [])
+	})
+
+	it("keeps operational child questions manual even with an automatic authority callback", async () => {
+		const { messenger, taskState } = createMessenger()
+		const input = request()
+		delete input.permissionOperation
+		const authorize = sinon.stub().resolves({ approved: true, assertCurrent: sinon.spy() })
+		const waiting = messenger.escalateTaskletInteraction(child, input, new AbortController().signal, authorize)
+		await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT)
+		submitCardResponse({ taskState }, { cardId: taskState.lastWaitingCardId!, response: DiracAskResponse.REJECT })
+		assert.equal((await withInteractionTimeout(taskState, waiting)).action, DiracAskResponse.REJECT)
+		sinon.assert.notCalled(authorize)
+	})
 
 	it("copies full operation details into a fresh card and accepts an immediate response", async () => {
 		const { messenger, messages, taskState, messageStateHandler } = createMessenger()
@@ -1346,6 +1421,39 @@ describe("TaskMessenger text authorship", () => {
 		await assert.rejects(interaction, ToolSkippedByUserMessage)
 		assert.deepEqual(taskState.waitingCardIds, [])
 	})
+
+	for (const permissionRequestKind of [undefined, "tool", "manual_tool"] as const) {
+		for (const setting of ["approve-all", "command-pattern"] as const) {
+			it(`${setting} updates release an already waiting ${permissionRequestKind ?? "legacy"} command permission`, async () => {
+				const { createCardFromMessenger } = await import("../tools/adapters/traits/UiTraitBuilder")
+				const { AutoApprove } = await import("../tools/autoApprove")
+				const { SETTINGS_DEFAULTS } = await import("@shared/storage/state-keys")
+				const { messenger, taskState } = createMessenger()
+				let settings = { ...structuredClone(SETTINGS_DEFAULTS), autoApproveAllToggled: true, yoloModeToggled: false } as import("@shared/storage/state-keys").Settings
+				settings.userApprovedCommands = []
+				settings.autoApprovalSettings.actions.executeCommands = false
+				const permissions = { assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: true }) }
+				const autoApprover = new AutoApprove(permissions as any, () => settings, false)
+				settings = { ...settings, autoApproveAllToggled: false }
+				const card = await createCardFromMessenger({
+					taskMessenger: messenger, taskState, autoApprover,
+					toolUse: { name: "execute_command" }, services: { commandPermissionController: permissions },
+				} as any, {
+					header: "Permission", requireApproval: true, status: CardStatus.WAITING_FOR_INPUT, permissionRequestKind,
+					permissionOperation: { kind: "commands", commands: ["npm test"] },
+				}, [])
+				const interaction = card.waitForInteraction()
+				await pWaitFor(() => taskState.status === TaskStatus.AWAITING_USER_INPUT)
+				settings = setting === "approve-all"
+					? { ...settings, autoApproveAllToggled: true }
+					: { ...settings, userApprovedCommands: [{ command: "npm test", match: "exact" }] }
+				const result = await withInteractionTimeout(taskState, interaction)
+				assert.equal(result.action, DiracAskResponse.APPROVE)
+				assert.deepEqual(taskState.waitingCardIds, [])
+				await card.finalize(CardStatus.SUCCESS)
+			})
+		}
+	}
 
 	it("resolves a waiting tool permission when live auto-approval is enabled", async () => {
 		const { messenger, taskState } = createMessenger()

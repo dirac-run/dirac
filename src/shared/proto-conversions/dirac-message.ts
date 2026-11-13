@@ -4,6 +4,9 @@ import {
 	Card as AppCard,
 	CardKind as AppCardKind,
 	CardStatus as AppCardStatus,
+	CommandApprovalAccess as AppCommandApprovalAccess,
+	CommandApprovalCategory as AppCommandApprovalCategory,
+	CommandApprovalChoice as AppCommandApprovalChoice,
 	DiracMessage as AppDiracMessage,
 	DiracMessageType as AppDiracMessageType,
 	SteeringTranscriptStatus as AppSteeringTranscriptStatus,
@@ -13,6 +16,9 @@ import {
 	Card,
 	CardKind as ProtoCardKind,
 	CardStatus as ProtoCardStatus,
+	CommandApprovalAccess as ProtoCommandApprovalAccess,
+	CommandApprovalCategory as ProtoCommandApprovalCategory,
+	CommandApprovalChoice as ProtoCommandApprovalChoice,
 	DiracMessage as ProtoDiracMessage,
 	SteeringTranscriptStatus as ProtoSteeringTranscriptStatus,
 } from "@shared/proto/dirac/ui"
@@ -138,6 +144,38 @@ function parseCardRecord(value: string | undefined): Record<string, unknown> | u
 	}
 }
 
+const commandApprovalCategories: Record<AppCommandApprovalCategory, ProtoCommandApprovalCategory> = {
+	filesystem: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_FILESYSTEM,
+	network: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_NETWORK,
+	processes: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_PROCESSES,
+	execution: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_EXECUTION,
+	credentials: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_CREDENTIALS,
+	software: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_SOFTWARE,
+	configuration: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_CONFIGURATION,
+	devices: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_DEVICES,
+	remote_resources: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_REMOTE_RESOURCES,
+	system: ProtoCommandApprovalCategory.COMMAND_APPROVAL_CATEGORY_SYSTEM,
+}
+
+const commandApprovalAccessLevels: Record<AppCommandApprovalAccess, ProtoCommandApprovalAccess> = {
+	use: ProtoCommandApprovalAccess.COMMAND_APPROVAL_ACCESS_USE,
+	read: ProtoCommandApprovalAccess.COMMAND_APPROVAL_ACCESS_READ,
+	mutate: ProtoCommandApprovalAccess.COMMAND_APPROVAL_ACCESS_MUTATE,
+}
+
+function convertProtoCommandApprovalChoice(choice: ProtoCommandApprovalChoice): AppCommandApprovalChoice {
+	const category = (Object.keys(commandApprovalCategories) as AppCommandApprovalCategory[])
+		.find((key) => commandApprovalCategories[key] === choice.category)
+	const access = (Object.keys(commandApprovalAccessLevels) as AppCommandApprovalAccess[])
+		.find((key) => commandApprovalAccessLevels[key] === choice.access)
+	return {
+		id: choice.id,
+		label: choice.label,
+		...(category === undefined ? {} : { category }),
+		...(access === undefined ? {} : { access }),
+	}
+}
+
 function convertCardToProto(card: AppCard): Card {
 	return {
 		id: card.id,
@@ -174,6 +212,12 @@ function convertCardToProto(card: AppCard): Card {
 				path: location.path,
 				line: location.line,
 			})) ?? [],
+		commandApprovalChoices: card.commandApprovalChoices?.map((choice) => ({
+			id: choice.id,
+			label: choice.label,
+			category: choice.category === undefined ? undefined : commandApprovalCategories[choice.category],
+			access: choice.access === undefined ? undefined : commandApprovalAccessLevels[choice.access],
+		})) ?? [],
 		actions:
 			card.actions?.map((action) => ({
 				label: action.label,
@@ -219,6 +263,9 @@ function convertProtoToCard(protoCard: Card): AppCard {
 			protoCard.locations.length > 0
 				? protoCard.locations.map((location) => ({ path: location.path, line: location.line ?? undefined }))
 				: undefined,
+		commandApprovalChoices: protoCard.commandApprovalChoices?.length
+			? protoCard.commandApprovalChoices.map(convertProtoCommandApprovalChoice)
+			: undefined,
 		actions:
 			protoCard.actions?.map((action) => ({
 				label: action.label,
@@ -245,9 +292,9 @@ export function convertDiracMessageToProto(message: AppDiracMessage): ProtoDirac
 		conversationHistoryIndex: message.conversationHistoryIndex ?? 0,
 		conversationHistoryDeletedRange: message.conversationHistoryDeletedRange
 			? {
-					startIndex: message.conversationHistoryDeletedRange[0],
-					endIndex: message.conversationHistoryDeletedRange[1],
-				}
+				startIndex: message.conversationHistoryDeletedRange[0],
+				endIndex: message.conversationHistoryDeletedRange[1],
+			}
 			: undefined,
 		modelInfo: message.modelInfo ?? undefined,
 		multiCommandState: undefined, // multiCommandState is deprecated or handled elsewhere

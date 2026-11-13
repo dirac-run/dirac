@@ -125,6 +125,35 @@ message CardCommunication {
   optional string detail = 2;
 }
 
+// Display-only metadata; the selected choice ID alone identifies approval authority.
+enum CommandApprovalCategory {
+  COMMAND_APPROVAL_CATEGORY_UNSPECIFIED = 0;
+  COMMAND_APPROVAL_CATEGORY_FILESYSTEM = 1;
+  COMMAND_APPROVAL_CATEGORY_NETWORK = 2;
+  COMMAND_APPROVAL_CATEGORY_PROCESSES = 3;
+  COMMAND_APPROVAL_CATEGORY_EXECUTION = 4;
+  COMMAND_APPROVAL_CATEGORY_CREDENTIALS = 5;
+  COMMAND_APPROVAL_CATEGORY_SOFTWARE = 6;
+  COMMAND_APPROVAL_CATEGORY_CONFIGURATION = 7;
+  COMMAND_APPROVAL_CATEGORY_DEVICES = 8;
+  COMMAND_APPROVAL_CATEGORY_REMOTE_RESOURCES = 9;
+  COMMAND_APPROVAL_CATEGORY_SYSTEM = 10;
+}
+
+enum CommandApprovalAccess {
+  COMMAND_APPROVAL_ACCESS_UNSPECIFIED = 0;
+  COMMAND_APPROVAL_ACCESS_USE = 1;
+  COMMAND_APPROVAL_ACCESS_READ = 2;
+  COMMAND_APPROVAL_ACCESS_MUTATE = 3;
+}
+
+message CommandApprovalChoice {
+  string id = 1;
+  string label = 2;
+  optional CommandApprovalCategory category = 3;
+  optional CommandApprovalAccess access = 4;
+}
+
 message Card {
   string id = 1;
   string header = 2;
@@ -154,6 +183,7 @@ message Card {
   optional ArchitectureReference architecture_reference = 26;
   optional CardCommunication communication = 27;
   optional string tasklet_receipt_json = 28;
+  repeated CommandApprovalChoice command_approval_choices = 29;
 }
 
 // Enum for DiracSayTool tool types

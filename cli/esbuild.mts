@@ -3,6 +3,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import dotenv from "dotenv"
 import * as esbuild from "esbuild"
+// @ts-expect-error JavaScript packaging helper is intentionally shared with extension builds.
+import { braketAssetsPlugin } from "../scripts/braket-assets.mjs"
 // @ts-expect-error
 import { copySourceCode } from "../scripts/copy-source.mjs"
 // @ts-expect-error JavaScript packaging helper is intentionally shared with extension builds.
@@ -247,7 +249,7 @@ const sharedOptions: Partial<esbuild.BuildOptions> = {
 	logLevel: "silent",
 	define: buildEnvVars,
 	tsconfig: path.join(__dirname, "tsconfig.json"),
-	plugins: [copyWasmFiles, aliasResolverPlugin, stubOptionalModulesPlugin, esbuildProblemMatcherPlugin],
+	plugins: [copyWasmFiles, braketAssetsPlugin(), aliasResolverPlugin, stubOptionalModulesPlugin, esbuildProblemMatcherPlugin],
 	format: "esm",
 	sourcesContent: false,
 	platform: "node",

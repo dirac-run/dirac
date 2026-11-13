@@ -1,3 +1,5 @@
+import wrapAnsi from "wrap-ansi"
+
 export interface ChatLayoutInput {
 	terminalRows: number
 	hasConversationContent: boolean
@@ -123,18 +125,22 @@ function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max)
 }
 
-export function calculatePermissionModalLayout(terminalColumns: number, terminalRows: number): PermissionModalLayout {
+export function calculatePermissionModalLayout(terminalColumns: number, terminalRows: number, approvalChoiceLabels: readonly string[] = []): PermissionModalLayout {
 	const columns = Math.max(1, terminalColumns)
 	const rows = Math.max(1, terminalRows)
 	const availableWidth = Math.max(1, columns - 2)
 	const desiredWidth = Math.max(1, Math.floor(columns * 0.8))
 	const width = Math.min(availableWidth, desiredWidth)
 	const height = Math.max(1, Math.min(32, rows - 4))
+	const approvalChoiceRows = approvalChoiceLabels.reduce(
+		(total, label, index) => total + wrapAnsi(`${index + 1} ${label}`, Math.max(1, width - 4), { hard: true, trim: false }).split("\n").length,
+		0,
+	)
 
 	return {
 		width,
 		height,
-		bodyLines: Math.max(1, height - 7),
+		bodyLines: Math.max(1, height - 7 - Math.max(0, approvalChoiceRows - 1)),
 		bodyColumns: Math.max(1, width - 6),
 	}
 }

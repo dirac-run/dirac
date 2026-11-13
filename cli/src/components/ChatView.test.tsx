@@ -240,6 +240,59 @@ vi.mock("@/services/telemetry", () => ({
 // Helper to create a typed mock for onExit
 const createExitMock = (): ExitMockFn => vi.fn() as ExitMockFn
 
+describe("ChatView approve-all shortcut", () => {
+	beforeEach(() => vi.clearAllMocks())
+	afterEach(() => vi.restoreAllMocks())
+
+	it("commits disable and re-enable to the active task before persisting and publishing", async () => {
+		const { StateManager } = await import("@/core/storage/StateManager")
+		const stateManager = StateManager.get()
+		let enabled = true
+		const applyWorkingConfigurationUpdate = vi.fn(async (patch, persist) => {
+			expect(stateManager.setGlobalState).toHaveBeenCalledTimes(enabled ? 0 : 1)
+			await persist()
+			enabled = patch.settings.autoApproveAllToggled
+		})
+		const controller = {
+			task: { getWorkingConfiguration: () => ({ settings: { autoApproveAllToggled: enabled } }), applyWorkingConfigurationUpdate },
+			postStateToWebview: vi.fn(async () => { }),
+		}
+		vi.spyOn(StateManager, "get").mockReturnValue(stateManager)
+		const view = render(<ChatView controller={controller} />)
+		await delay()
+		await Promise.all([latestChatInputProps.toggleAutoApproveAll(), latestChatInputProps.toggleAutoApproveAll()])
+		expect(enabled).toBe(true)
+		expect(applyWorkingConfigurationUpdate.mock.calls.map(([patch]) => patch.settings.autoApproveAllToggled)).toEqual([false, true])
+		expect(stateManager.setGlobalState).toHaveBeenNthCalledWith(1, "autoApproveAllToggled", false)
+		expect(stateManager.setGlobalState).toHaveBeenNthCalledWith(2, "autoApproveAllToggled", true)
+		expect(controller.postStateToWebview).toHaveBeenCalledTimes(2)
+		view.unmount()
+	})
+
+	it("does not persist or publish a rejected active-task update", async () => {
+		const { StateManager } = await import("@/core/storage/StateManager")
+		const stateManager = StateManager.get()
+		vi.spyOn(StateManager, "get").mockReturnValue(stateManager)
+		const controller = {
+			task: {
+				getWorkingConfiguration: () => ({ settings: { autoApproveAllToggled: false } }),
+				applyWorkingConfigurationUpdate: vi.fn().mockRejectedValue(new Error("configuration rejected")),
+			},
+			postStateToWebview: vi.fn(),
+		}
+		const view = render(<ChatView controller={controller} />)
+		await delay()
+		const setLastError = vi.mocked(useTaskContext).mock.results.at(-1)!.value.setLastError
+		const frameBefore = view.lastFrame()
+		await latestChatInputProps.toggleAutoApproveAll()
+		expect(stateManager.setGlobalState).not.toHaveBeenCalled()
+		expect(controller.postStateToWebview).not.toHaveBeenCalled()
+		expect(setLastError).toHaveBeenCalledWith("configuration rejected")
+		expect(view.lastFrame()).toEqual(frameBefore)
+		view.unmount()
+	})
+})
+
 describe("ChatView Exit and Cleanup", () => {
 	let mockOnExit: ExitMockFn
 
@@ -505,6 +558,7 @@ describe("ChatView active input", () => {
 		const task = {
 			taskId: "sleeping-root",
 			canAcceptSteeringMessage: vi.fn(() => true),
+			enqueueSteeringMessage: vi.fn(async (_text: string): Promise<void> => undefined),
 			submitCardResponse: vi.fn(async (): Promise<void> => undefined),
 		}
 		const controller = {
@@ -674,6 +728,7 @@ describe("ChatView active input", () => {
 				undefined,
 				undefined,
 				undefined,
+				undefined,
 			)
 			expect(controller.sendGoalMessage).not.toHaveBeenCalled()
 		} else {
@@ -683,7 +738,54 @@ describe("ChatView active input", () => {
 		app.unmount()
 	})
 
-	it("preserves pending approval responses instead of submitting empty-card steering", async () => {
+	it.each([
+		["1", DiracAskResponse.APPROVE, "approve"],
+		["2", DiracAskResponse.APPROVE, "allow-network"],
+		["3", DiracAskResponse.APPROVE, "allow-files"],
+		["4", DiracAskResponse.REJECT, "reject"],
+	])("routes command shortcut %s with its exact typed choice", async (shortcut, responseType, choiceId) => {
+		const card = {
+			id: "command-approval",
+			ts: 1,
+			content: {
+				type: DiracMessageType.CARD,
+				card: {
+					id: "command-approval",
+					status: "waiting_for_input",
+					requireApproval: true,
+					commandApprovalChoices: [
+						{ id: "approve", label: "Approve this command" },
+						{ id: "allow-network", label: "Approve + allow network access for this task" },
+						{ id: "allow-files", label: "Approve + allow file writes for this task" },
+						{ id: "reject", label: "Reject" },
+					],
+				},
+			},
+		}
+		const { task, controller } = activeChat({
+			diracMessages: [card],
+			uiActionState: { activeCardId: card.id, globalButtons: [], cardButtons: [] },
+		})
+		const app = render(<ChatView controller={controller} />)
+		expect(latestChatInputProps.handleAskShortcuts("5", {}, "")).toBe(false)
+		latestChatInputProps.setTextInput("Unrelated composer draft")
+		await delay()
+		expect(latestChatInputProps.handleAskShortcuts(shortcut, {}, "draft")).toBe(false)
+		expect(latestChatInputProps.handleAskShortcuts(shortcut, {}, "")).toBe(true)
+		await delay()
+		expect(task.submitCardResponse).toHaveBeenCalledExactlyOnceWith(
+			card.id, responseType, undefined, undefined, undefined, undefined, choiceId,
+		)
+		expect(latestChatInputProps.textInputRef.current).toBe("Unrelated composer draft")
+		await latestChatInputProps.handleSubmit("Unrelated composer draft", [])
+		expect(task.enqueueSteeringMessage).toHaveBeenCalledExactlyOnceWith("Unrelated composer draft")
+		expect(task.submitCardResponse).toHaveBeenCalledTimes(1)
+		app.unmount()
+	})
+
+	it.each([
+		[false, "yes"], [false, "no"], [false, "guidance"], [true, "yes"], [true, "no"], [true, "guidance"],
+	] as const)("sends permission-wait guidance without approving or rejecting (Goal: %s, text: %s)", async (withGoal, text) => {
 		const card = {
 			id: "approval",
 			ts: 1,
@@ -699,19 +801,40 @@ describe("ChatView active input", () => {
 		}
 		const { task, controller } = activeChat({
 			diracMessages: [card],
+			goal: withGoal ? { id: "goal", status: "waiting" } : undefined,
 			uiActionState: { activeCardId: card.id, globalButtons: [], cardButtons: [] },
 		})
 		const app = render(<ChatView controller={controller} />)
-		await latestChatInputProps.handleSubmit("yes", [])
-		expect(task.submitCardResponse).toHaveBeenCalledWith(
-			card.id,
-			DiracAskResponse.APPROVE,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-		)
+		await latestChatInputProps.handleSubmit(text, [])
+		expect(task.submitCardResponse).not.toHaveBeenCalled()
+		if (withGoal) expect(controller.sendGoalMessage).toHaveBeenCalledWith("goal", text)
+		else expect(task.enqueueSteeringMessage).toHaveBeenCalledWith(text)
 		expect(controller.prepareTaskForFollowUp).not.toHaveBeenCalled()
 		app.unmount()
 	})
+	it("preserves edits made during permission guidance and retains failed drafts for retry", async () => {
+		const card = { id: "approval", ts: 1, content: { type: DiracMessageType.CARD, card: { status: "pending", requireApproval: true } } }
+		const { task, controller, setLastError } = activeChat({ diracMessages: [card], uiActionState: { activeCardId: card.id, globalButtons: [], cardButtons: [] } })
+		let release!: () => void
+		task.enqueueSteeringMessage.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve }))
+		const app = render(<ChatView controller={controller} />)
+		try {
+			latestChatInputProps.setTextInput("First guidance")
+			await delay()
+			const sending = latestChatInputProps.handleSubmit("First guidance", [])
+			latestChatInputProps.setTextInput("Edited guidance")
+			await delay()
+			release()
+			await sending
+			expect(latestChatInputProps.textInputRef.current).toBe("Edited guidance")
+			task.enqueueSteeringMessage.mockRejectedValueOnce(new Error("Guidance rejected"))
+			await latestChatInputProps.handleSubmit("Edited guidance", [])
+			expect(latestChatInputProps.textInputRef.current).toBe("Edited guidance")
+			expect(setLastError).toHaveBeenLastCalledWith(expect.stringContaining("Guidance rejected"))
+			await latestChatInputProps.handleSubmit("Edited guidance", [])
+			expect(task.enqueueSteeringMessage).toHaveBeenCalledTimes(3)
+			expect(task.submitCardResponse).not.toHaveBeenCalled()
+		} finally { app.unmount() }
+	})
+
 })

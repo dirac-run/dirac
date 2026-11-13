@@ -15,6 +15,7 @@ export interface CardInteractionResponse {
 	modeSwitch?: Mode
 	action: string
 	value?: string
+	commandApprovalChoiceId?: string
 	text?: string
 	images?: string[]
 	files?: string[]

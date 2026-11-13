@@ -67,6 +67,7 @@ export interface MessageHandlers {
 		images?: string[],
 		files?: string[],
 		cardId?: string,
+		commandApprovalChoiceId?: string,
 	) => Promise<void>
 	handleSendMessage: (text: string, images: string[], files: string[]) => Promise<void>
 	handleTaskCloseButtonClick: () => void

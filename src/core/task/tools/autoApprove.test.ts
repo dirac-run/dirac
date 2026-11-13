@@ -220,7 +220,7 @@ describe("resolveCommandApproval child static policy", () => {
 			})
 		}
 
-		it(`honors user-approved command segments with safe-command settings disabled (Utility: ${utilityEnabled})`, () => {
+		it(`does not salvage an unknown compound through user-approved segments (Utility: ${utilityEnabled})`, () => {
 			const currentSettings = settings()
 			currentSettings.autoApprovalSettings.actions.executeCommands = false
 			currentSettings.userApprovedCommands = [{ command: "npm test", match: "prefix" }]
@@ -230,7 +230,7 @@ describe("resolveCommandApproval child static policy", () => {
 			assert.deepEqual(
 				resolveCommandApproval(["pwd && npm test -- --runInBand 2>&1"], utilityEnabled, autoApprove, permissions as any),
 				{
-					required: false,
+					required: true,
 					utilityEligible: false,
 				},
 			)
@@ -248,11 +248,11 @@ describe("resolveCommandApproval child static policy", () => {
 			currentSettings.autoApprovalSettings.actions.executeCommands = false
 			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 			permissions.validateTool
-				.withArgs("execute_command", "npm run build")
-				.returns({ allowed: true, reason: "allowed", matchedPattern: "npm run build" })
+				.withArgs("execute_command", "npm test")
+				.returns({ allowed: true, reason: "allowed", matchedPattern: "npm test" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-			assert.deepEqual(resolveCommandApproval(["ls", "npm run build"], utilityEnabled, autoApprove, permissions as any), {
+			assert.deepEqual(resolveCommandApproval(["ls", "npm test"], utilityEnabled, autoApprove, permissions as any), {
 				required: false,
 				utilityEligible: false,
 			})
@@ -326,11 +326,12 @@ describe("resolveCommandApproval child static policy", () => {
 		]
 		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
 		const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
-		for (const command of ["ls $OPTIONS", 'ls "$OPTIONS"', "npm test $OPTIONS", "ls *.ts", "(ls)", "ls `pwd`", "ls $(pwd)"]) {
+		for (const command of ["ls $OPTIONS", 'ls "$OPTIONS"', "npm test $OPTIONS", "ls *.ts", "ls `pwd`", "ls $(pwd)"]) {
 			assert.equal(autoApprove.isCommandAutoApproved(command), false, command)
 		}
 		assert.equal(autoApprove.isCommandAutoApproved("npm test"), true)
-		assert.equal(autoApprove.isCommandAutoApproved("pwd && npm test"), true)
+		assert.equal(autoApprove.isCommandAutoApproved("pwd && npm test"), false)
+		assert.equal(autoApprove.isCommandAutoApproved("(ls)"), true)
 	})
 
 	it("preserves root safe-command settings and legacy unrestricted precedence", () => {

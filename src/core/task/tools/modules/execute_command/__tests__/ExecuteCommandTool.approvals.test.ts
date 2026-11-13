@@ -3,23 +3,33 @@ import path from "node:path"
 import { afterEach, describe, it } from "mocha"
 import sinon from "sinon"
 import { DiracAskResponse } from "@shared/WebviewMessage"
+import { CardStatus } from "@shared/ExtensionMessage"
 import { TaskletCommandApprovals } from "../../../../TaskletCommandApprovals"
-import type { CommandGrantSnapshot } from "../../../interfaces/CommandApprovals"
+import { TaskCommandCapabilities, type TaskCommandCapabilitySnapshot } from "../../../../TaskCommandCapabilities"
 import type { CardParams, IToolEnvironment } from "../../../interfaces/IToolEnvironment"
+import { isSafeCommand } from "../../../utils/CommandSafetyChecker"
 import { ExecuteCommandTool } from "../ExecuteCommandTool"
 
-function fixture(options: { utility?: boolean; multiRoot?: boolean; initial?: CommandGrantSnapshot } = {}) {
-	let durable = structuredClone(options.initial ?? { version: 1 as const, grants: [] })
+function rootAuthority(initial?: TaskCommandCapabilitySnapshot) {
+	let durable = initial
+	const persist = sinon.stub().callsFake(async (snapshot: TaskCommandCapabilitySnapshot) => { durable = structuredClone(snapshot) })
+	return { capabilities: new TaskCommandCapabilities(async () => initial, persist), persist, durable: () => durable }
+}
+
+function fixture(options: { utility?: boolean; child?: boolean; masterGate?: boolean; root?: ReturnType<typeof rootAuthority>; multiRoot?: boolean } = {}) {
+	const root = options.root ?? rootAuthority()
 	let restrictions: string[] = []
-	const persist = sinon.stub().callsFake(async (snapshot: CommandGrantSnapshot) => { durable = structuredClone(snapshot) })
-	const assertActive = sinon.stub()
-	const approvals = new TaskletCommandApprovals(options.initial, persist, () => restrictions, assertActive)
+	const abortController = new AbortController()
+	const assertActive = sinon.stub().callsFake(() => abortController.signal.throwIfAborted())
+	const approvals = new TaskletCommandApprovals(undefined, () => restrictions, assertActive)
 	const ignore = { validateCommand: sinon.stub().returns(undefined) }
 	const permissions = { assertConfigurationValid: sinon.stub(), validateTool: sinon.stub().returns({ allowed: true }) }
 	const autoApprover = {
-		requiresCounterpartyApproval: true,
+		requiresCounterpartyApproval: options.child ?? true,
 		isUnrestrictedAutoApprove: sinon.stub().returns(false),
-		isCommandAutoApproved: sinon.stub().returns(false),
+		shouldAutoApproveTool: sinon.stub().returns(options.masterGate ?? true),
+		isCommandAutoApproved: sinon.stub().callsFake((command: string) =>
+			((options.child ?? true) || (options.masterGate ?? true)) && isSafeCommand(command, root.capabilities.current())),
 	}
 	let workspaceRoot = path.resolve("/work/secondary")
 	const workspaceManager = { getRootByName: sinon.stub().callsFake(() => ({ name: "secondary", path: workspaceRoot })) }
@@ -36,157 +46,142 @@ function fixture(options: { utility?: boolean; multiRoot?: boolean; initial?: Co
 	const config = { cwd: path.resolve("/work/primary"), permissionDecisionBinding: options.utility ? {} : undefined }
 	const env = {
 		config,
-		orchestration: { commandApprovals: approvals, reportFailure: sinon.stub(), getTaskState: () => new AbortController().signal },
+		orchestration: { commandCapabilities: root.capabilities, commandApprovals: approvals, reportFailure: sinon.stub(), getTaskState: () => abortController.signal },
 		ui: { createCard, upsertText: sinon.stub().resolves() },
 		system: { executeCommand },
 		telemetry: { captureCustomMetadata: sinon.stub() },
 	} as unknown as IToolEnvironment
 	const tool = new ExecuteCommandTool(ignore, permissions, autoApprover, workspaceManager, options.multiRoot ?? false)
 	return {
-		tool, env, config, approvals, persist, assertActive, ignore, permissions, autoApprover,
-		waitForInteraction, approvalCards, executionCards, onExecutionCard, executeCommand, workspaceManager,
-		durable: () => durable,
+		tool, env, config, approvals, root, assertActive, abortController, ignore, permissions, autoApprover,
+		waitForInteraction, approvalCards, executionCards, onExecutionCard, executeCommand, createCard,
 		setRestrictions: (next: string[]) => { restrictions = next },
 		setWorkspaceRoot: (next: string) => { workspaceRoot = next },
 		run: (commands: string[]) => tool.processCall({ commands }, env),
 		script: (script: string, language: string) => tool.processCall({ script, language }, env),
 	}
 }
+const ids = (test: ReturnType<typeof fixture>, index = 0) => test.approvalCards[index].commandApprovalChoices?.map(({ id }) => id)
+const select = (test: ReturnType<typeof fixture>, id: string) => test.waitForInteraction.resolves({ action: DiracAskResponse.APPROVE, commandApprovalChoiceId: id })
 
-function promptedCommands(test: ReturnType<typeof fixture>): string[][] {
-	return test.approvalCards.map((card) => {
-		assert.equal(card.permissionOperation?.kind, "commands")
-		return (card.permissionOperation as { kind: "commands"; commands: string[] }).commands
-	})
-}
-
-describe("ExecuteCommandTool child approval integration", () => {
+describe("ExecuteCommandTool task capability approvals", () => {
 	afterEach(() => sinon.restore())
 
 	for (const utility of [false, true]) {
-		it(`commits once and reuses exact approval with Utility ${utility ? "enabled" : "disabled"}`, async () => {
+		it(`plain/Utility approval is one-shot with Utility ${utility ? "enabled" : "disabled"}`, async () => {
 			const test = fixture({ utility })
-			await test.run(["npm run mutate"])
-			await test.run(["npm run mutate"])
-			assert.deepEqual(promptedCommands(test), [["npm run mutate"]])
-			sinon.assert.calledOnce(test.persist)
+			await test.run(["rm file"])
+			await test.run(["rm file"])
+			assert.equal(test.approvalCards.length, 2)
+			sinon.assert.notCalled(test.root.persist)
 			sinon.assert.calledTwice(test.executeCommand)
-			sinon.assert.callOrder(test.waitForInteraction, test.persist, test.executeCommand)
 			assert.equal(test.approvalCards[0].permissionRequestKind, utility ? "tool" : undefined)
-			assert.deepEqual(test.durable().grants[0].identity, {
-				kind: "command", command: "npm run mutate", cwd: test.config.cwd,
-			})
 		})
 	}
 
-	it("captures sandbox context before approval, displays it, and marks fallback including background results", async () => {
-		const test = fixture({ utility: true })
-		const { captureSandboxExecution } = await import("@shared/SandboxExecution")
-		const { DEFAULT_SANDBOX_SETTINGS } = await import("@shared/SandboxSettings")
-		const requested = captureSandboxExecution({ ...DEFAULT_SANDBOX_SETTINGS, enabled: true, allowUnsandboxedFallback: true }, true)
-		test.env.system.captureCommandSandbox = () => requested
-		test.waitForInteraction.callsFake(async () => {
-			assert.equal(test.approvalCards[0].permissionOperation?.kind, "commands")
-			assert.match(test.approvalCards[0].body!, /no meaningful isolation.*fallback: authorized/)
-			return { action: DiracAskResponse.APPROVE }
-		})
-		test.executeCommand.resolves({ output: "Running in background", completed: false, sandbox: { requested, effective: "unsandboxed-fallback", reason: "helper unavailable" } })
-		const output = await test.run(["command-A"])
-		assert.equal(test.executeCommand.firstCall.args[1].sandboxContext, requested)
-		assert.match(output, /Unsandboxed fallback/)
-		const card = await (test.env.ui.createCard as sinon.SinonStub).secondCall.returnValue
-		assert.match((card.update as sinon.SinonStub).firstCall.args[0].header, /Unsandboxed fallback/)
-		assert.equal((card.update as sinon.SinonStub).firstCall.args[0].rawOutput.sandbox.effective, "unsandboxed-fallback")
-	})
-
-	it("reuses a restored durable grant but not an unrelated child's empty grants", async () => {
-		const original = fixture()
-		await original.run(["command-A"])
-		const resumed = fixture({ initial: original.durable() })
-		await resumed.run(["command-A"])
+	it("shares one selected category with the root and all existing/future children, survives resume, isolates roots", async () => {
+		const shared = rootAuthority()
+		const root = fixture({ root: shared, child: false })
+		const child = fixture({ root: shared })
+		select(child, "allow-filesystem-7")
+		await child.run(["rm file"])
+		await root.run(["touch other"])
+		await fixture({ root: shared }).run(["rm third"])
+		assert.equal(root.approvalCards.length, 0)
+		sinon.assert.calledOnce(shared.persist)
+		const resumed = fixture({ root: rootAuthority(shared.durable()) })
+		await resumed.run(["rm file"])
 		assert.equal(resumed.approvalCards.length, 0)
-		sinon.assert.notCalled(resumed.persist)
-		const sibling = fixture()
-		await sibling.run(["command-A"])
-		assert.deepEqual(promptedCommands(sibling), [["command-A"]])
+		const unrelated = fixture()
+		await unrelated.run(["rm file"])
+		assert.equal(unrelated.approvalCards.length, 1)
 	})
 
-	it("prompts only for C after approving [A,B] and then requesting [A,C]", async () => {
+	it("approves the whole current multi-deficit command but saves only the selected category", async () => {
 		const test = fixture()
-		await test.run(["command-A", "command-B"])
-		await test.run(["command-A", "command-C"])
-		assert.deepEqual(promptedCommands(test), [["command-A", "command-B"], ["command-C"]])
-		assert.deepEqual(test.executeCommand.getCalls().map((call) => call.args[0]), ["command-A", "command-B", "command-A", "command-C"])
-		assert.equal(test.durable().grants.length, 3)
+		select(test, "allow-filesystem-7")
+		await test.run(["curl https://example.com > file"])
+		assert.deepEqual(ids(test), ["approve", "allow-filesystem-7", "allow-remote_resources-3", "reject"])
+		sinon.assert.calledOnce(test.executeCommand)
+		test.waitForInteraction.resolves({ action: DiracAskResponse.APPROVE })
+		await test.run(["curl https://example.com > file"])
+		assert.deepEqual(ids(test, 1), ["approve", "allow-remote_resources-3", "allow-network-1", "reject"])
+		sinon.assert.calledOnce(test.root.persist)
 	})
 
-	it("reuses python/python3 source identity despite different generated wrappers", async () => {
-		const test = fixture()
-		const random = sinon.stub(Math, "random")
-		random.onFirstCall().returns(0.1)
-		random.onSecondCall().returns(0.2)
-		await test.script("print('same source')", "python")
-		await test.script("print('same source')", "python3")
-		assert.equal(test.approvalCards.length, 1)
-		assert.notEqual(test.executeCommand.firstCall.args[0], test.executeCommand.secondCall.args[0])
-		assert.match(test.executeCommand.firstCall.args[0], /^python3 << /)
-		assert.deepEqual(test.durable().grants[0].identity, {
-			kind: "script", script: "print('same source')", interpreter: "python3", cwd: test.config.cwd,
-		})
+	it("unknown commands and mixed unknown batches offer only approve/reject", async () => {
+		const test = fixture({ utility: true })
+		await test.run(["unknown-dirac-command", "rm file"])
+		assert.deepEqual(ids(test), ["approve", "reject"])
+		assert.equal(test.approvalCards[0].permissionRequestKind, "manual_tool")
+		sinon.assert.notCalled(test.root.persist)
 	})
 
-	it("separates script source, interpreter, and cwd, and does not cover literal shell commands", async () => {
+	it("does not allow arbitrary, unoffered, or text-derived capability grants", async () => {
 		const test = fixture()
-		await test.script("echo first", "bash")
-		await test.script("echo second", "bash")
-		await test.script("echo second", "sh")
-		test.config.cwd = path.resolve("/work/other")
-		await test.script("echo second", "sh")
-		await test.run([test.executeCommand.lastCall.args[0]])
-		assert.equal(test.approvalCards.length, 5)
-		assert.equal(test.durable().grants.length, 5)
+		select(test, "allow-credentials-7")
+		await assert.rejects(test.run(["rm file"]), /not offered/)
+		const card = await test.createCard.firstCall.returnValue
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.CANCELLED)
+		sinon.assert.notCalled(test.executeCommand)
+		sinon.assert.notCalled(test.root.persist)
+		test.waitForInteraction.resolves({ action: DiracAskResponse.APPROVE, text: "allow filesystem/mutate for this task" })
+		await test.run(["rm file"])
+		sinon.assert.notCalled(test.root.persist)
 	})
 
-	it("does not split an approved compound into constituent grants", async () => {
-		const test = fixture()
-		await test.run(["command-A && command-B"])
-		await test.run(["command-A", "command-B"])
-		assert.deepEqual(promptedCommands(test), [["command-A && command-B"], ["command-A", "command-B"]])
+	it("suppresses persistent offers when root master gate is disabled or permissions require manual approval", async () => {
+		const root = fixture({ child: false, masterGate: false })
+		await root.run(["rm file"])
+		assert.deepEqual(ids(root), ["approve", "reject"])
+		const restricted = fixture({ utility: true })
+		restricted.permissions.validateTool.returns({ allowed: false })
+		await restricted.run(["rm file"])
+		assert.deepEqual(ids(restricted), ["approve", "reject"])
+		assert.equal(restricted.approvalCards[0].permissionRequestKind, "manual_tool")
 	})
 
-	for (const failure of ["exit", "throw"] as const) {
-		it(`retains approval after command ${failure} failure`, async () => {
-			const test = fixture()
-			if (failure === "exit") test.executeCommand.onFirstCall().resolves({ output: "failed", exitCode: 1 })
-			else test.executeCommand.onFirstCall().rejects(new Error("Process launch failed"))
-			await test.run(["command-A"])
-			await test.run(["command-A"])
-			assert.equal(test.approvalCards.length, 1)
-			sinon.assert.calledTwice(test.executeCommand)
-			sinon.assert.calledOnce(test.persist)
-		})
-	}
-
-	it("never dispatches or installs a reusable grant when durable commit fails", async () => {
+	it("does not dispatch or install a reusable grant when capability persistence fails", async () => {
 		const test = fixture()
-		const failure = new Error("Grant persistence failed")
-		test.persist.onFirstCall().rejects(failure)
-		await assert.rejects(test.run(["command-A"]), (error) => error === failure)
+		select(test, "allow-filesystem-7")
+		test.root.persist.rejects(new Error("disk failure"))
+		await assert.rejects(test.run(["rm file"]), /disk failure/)
+		const card = await test.createCard.firstCall.returnValue
+		sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.CANCELLED)
 		sinon.assert.notCalled(test.executeCommand)
 		assert.equal(test.executionCards.length, 0)
-		assert.equal(test.durable().grants.length, 0)
-		await test.run(["command-A"])
-		assert.deepEqual(promptedCommands(test), [["command-A"], ["command-A"]])
-		sinon.assert.calledOnce(test.executeCommand)
+		assert.equal(test.root.durable(), undefined)
 	})
 
-	it("waits for durable commit before executing", async () => {
+	for (const failure of ["cancellation", "ignore", "configuration"] as const) {
+		it(`finalizes the approval card when ${failure} fails after interaction`, async () => {
+			const test = fixture()
+			const error = new Error(`approval ${failure} failure`)
+			const initialCapabilities = test.root.capabilities.current()
+			test.waitForInteraction.callsFake(async () => {
+				if (failure === "cancellation") test.abortController.abort(error)
+				else if (failure === "ignore") test.ignore.validateCommand.throws(error)
+				else test.permissions.assertConfigurationValid.throws(error)
+				return { action: DiracAskResponse.APPROVE, commandApprovalChoiceId: "allow-filesystem-7" }
+			})
+			await assert.rejects(test.run(["rm file"]), (caught) => caught === error)
+			const card = await test.createCard.firstCall.returnValue
+			sinon.assert.calledOnceWithExactly(card.finalize, CardStatus.CANCELLED)
+			sinon.assert.calledWithMatch(card.update, { header: "Cancelled: rm file", collapsed: true })
+			sinon.assert.notCalled(test.executeCommand)
+			sinon.assert.notCalled(test.root.persist)
+			assert.equal(test.root.capabilities.current(), initialCapabilities)
+		})
+	}
+
+	it("waits for durable category commit before executing", async () => {
 		const test = fixture()
+		select(test, "allow-filesystem-7")
 		let release!: () => void
 		let entered!: () => void
 		const writing = new Promise<void>((resolve) => { entered = resolve })
-		test.persist.callsFake(async () => { entered(); await new Promise<void>((resolve) => { release = resolve }) })
-		const running = test.run(["command-A"])
+		test.root.persist.callsFake(async () => { entered(); await new Promise<void>((resolve) => { release = resolve }) })
+		const running = test.run(["rm file"])
 		await writing
 		sinon.assert.notCalled(test.executeCommand)
 		release()
@@ -194,8 +189,34 @@ describe("ExecuteCommandTool child approval integration", () => {
 		sinon.assert.calledOnce(test.executeCommand)
 	})
 
+	for (const change of ["cancellation", "restrictions"] as const) {
+		it(`does not dispatch when ${change} change during a blocked durable capability commit`, async () => {
+			const test = fixture()
+			select(test, "allow-filesystem-7")
+			let release!: () => void
+			let entered!: () => void
+			const writing = new Promise<void>((resolve) => { entered = resolve })
+			test.root.persist.callsFake(async () => { entered(); await new Promise<void>((resolve) => { release = resolve }) })
+			const running = test.run(["rm file"])
+			await writing
+			if (change === "cancellation") test.abortController.abort(new Error("cancelled during commit"))
+			else test.setRestrictions(["new manual restriction"])
+			release()
+			await assert.rejects(running, change === "cancellation" ? /cancelled during commit/ : /restrictions changed/)
+			sinon.assert.notCalled(test.executeCommand)
+			assert.equal(test.executionCards.length, 0)
+		})
+	}
+
+	it("script approvals remain one-shot despite identical source and different generated wrappers", async () => {
+		const test = fixture()
+		await test.script("print('same source')", "python")
+		await test.script("print('same source')", "python3")
+		assert.equal(test.approvalCards.length, 2)
+	})
+
 	for (const workspace of [false, true]) {
-		it(`freezes ${workspace ? "workspace hint" : "environment"} cwd before an approval wait`, async () => {
+		it(`freezes ${workspace ? "workspace hint" : "environment"} cwd before approval`, async () => {
 			const test = fixture({ multiRoot: workspace })
 			const originalCwd = workspace ? path.resolve("/work/secondary") : test.config.cwd
 			test.waitForInteraction.callsFake(async () => {
@@ -203,27 +224,21 @@ describe("ExecuteCommandTool child approval integration", () => {
 				test.setWorkspaceRoot(path.resolve("/work/moved-root"))
 				return { action: DiracAskResponse.APPROVE }
 			})
-			const input = workspace ? "@secondary:command-A" : "command-A"
-			await test.run([input])
-			assert.deepEqual(promptedCommands(test), [["command-A"]])
-			assert.equal(test.executeCommand.firstCall.args[0], "command-A")
+			await test.run([workspace ? "@secondary:rm file" : "rm file"])
+			assert.equal(test.executeCommand.firstCall.args[0], "rm file")
 			assert.equal(test.executeCommand.firstCall.args[1].cwd, originalCwd)
-			assert.equal(test.durable().grants[0].identity.cwd, originalCwd)
 			assert.ok(test.approvalCards[0].body?.includes(JSON.stringify(originalCwd)))
-			assert.equal((test.approvalCards[0].rawInput as { commands: { cwd: string }[] }).commands[0].cwd, originalCwd)
-			await test.run([input])
-			assert.equal(test.approvalCards.length, 2, "The same text in the new cwd needs its own approval")
 		})
 	}
 
 	for (const boundary of ["approval", "execution-card"] as const) {
-		it(`rechecks ignore policy after ${boundary} yields and before dispatch`, async () => {
+		it(`rechecks ignore policy after ${boundary} and before dispatch`, async () => {
 			const test = fixture()
 			const change = () => test.ignore.validateCommand.returns("newly ignored")
 			if (boundary === "approval") test.waitForInteraction.callsFake(async () => { change(); return { action: DiracAskResponse.APPROVE } })
 			else test.onExecutionCard.callsFake(async () => { change() })
-			if (boundary === "approval") await assert.rejects(test.run(["command-A"]), /Diracignore error/)
-			else assert.match(await test.run(["command-A"]), /Diracignore error/)
+			if (boundary === "approval") await assert.rejects(test.run(["rm file"]), /Diracignore error/)
+			else assert.match(await test.run(["rm file"]), /Diracignore error/)
 			sinon.assert.notCalled(test.executeCommand)
 		})
 
@@ -232,69 +247,28 @@ describe("ExecuteCommandTool child approval integration", () => {
 			const change = () => test.setRestrictions(["new restrictive rule"])
 			if (boundary === "approval") test.waitForInteraction.callsFake(async () => { change(); return { action: DiracAskResponse.APPROVE } })
 			else test.onExecutionCard.callsFake(async () => { change() })
-			if (boundary === "approval") await assert.rejects(test.run(["command-A"]), /restrictions changed/)
-			else assert.match(await test.run(["command-A"]), /current restrictions/)
+			if (boundary === "approval") await assert.rejects(test.run(["rm file"]), /restrictions changed/)
+			else assert.match(await test.run(["rm file"]), /current restrictions/)
 			sinon.assert.notCalled(test.executeCommand)
 		})
 	}
 
-	it("does not dispatch if restrictions tighten during the durable commit", async () => {
+	it("revalidates newly covered commands against live capability and manual permissions before execution", async () => {
 		const test = fixture()
-		test.persist.callsFake(async () => { test.setRestrictions(["new restrictive rule"]) })
-		await assert.rejects(test.run(["command-A"]), /current restrictions/)
+		test.onExecutionCard.callsFake(async () => { test.permissions.validateTool.returns({ allowed: false }) })
+		assert.match(await test.run(["cat file"]), /now requires approval/)
 		sinon.assert.notCalled(test.executeCommand)
-		assert.equal(test.executionCards.length, 0)
 	})
 
-	it("invalidates a prior grant when restrictions tighten between calls", async () => {
-		const test = fixture({ utility: true })
-		await test.run(["command-A"])
-		test.setRestrictions(["manual restriction"])
-		test.permissions.validateTool.returns({ allowed: false })
-		await test.run(["command-A"])
-		await test.run(["command-A"])
-		assert.deepEqual(promptedCommands(test), [["command-A"], ["command-A"]])
-		assert.equal(test.approvalCards[1].permissionRequestKind, "manual_tool")
-		assert.deepEqual(test.durable().grants[0].restrictions, ["manual restriction"])
-	})
-
-	for (const changedPolicy of ["restrictions", "ignore", "retirement"] as const) {
-		it(`supplies a spawn-time guard rejecting ${changedPolicy} changes during terminal acquisition`, async () => {
-			const test = fixture()
-			const spawn = sinon.stub().returns({ output: "spawned", exitCode: 0 })
-			test.executeCommand.callsFake(async (_command: string, options: { assertAuthorized: () => void }) => {
-				await Promise.resolve() // Simulate asynchronous backend/terminal acquisition.
-				if (changedPolicy === "restrictions") test.setRestrictions(["new restrictive rule"])
-				else if (changedPolicy === "ignore") test.ignore.validateCommand.returns("newly ignored")
-				else test.assertActive.throws(new Error("Child retired"))
-				assert.equal(typeof options.assertAuthorized, "function")
-				options.assertAuthorized()
-				return spawn()
-			})
-			const output = await test.run(["command-A"])
-			assert.match(output, /current restrictions|Diracignore error|Child retired/)
-			sinon.assert.calledOnce(test.executeCommand)
-			sinon.assert.notCalled(spawn)
-		})
-	}
-
-	it("rechecks formerly auto-approved commands if policy changes before dispatch", async () => {
+	it("retains captured sandbox restrictions regardless of capability approval", async () => {
 		const test = fixture()
-		test.autoApprover.isCommandAutoApproved.returns(true)
-		test.onExecutionCard.callsFake(async () => { test.autoApprover.isCommandAutoApproved.returns(false) })
-		assert.match(await test.run(["command-A"]), /now requires approval/)
-		sinon.assert.notCalled(test.executeCommand)
-		sinon.assert.notCalled(test.persist)
+		const { captureSandboxExecution } = await import("@shared/SandboxExecution")
+		const { DEFAULT_SANDBOX_SETTINGS } = await import("@shared/SandboxSettings")
+		const requested = captureSandboxExecution({ ...DEFAULT_SANDBOX_SETTINGS, enabled: true, allowUnsandboxedFallback: true }, true)
+		test.env.system.captureCommandSandbox = () => requested
+		select(test, "allow-filesystem-7")
+		await test.run(["rm file"])
+		assert.equal(test.executeCommand.firstCall.args[1].sandboxContext, requested)
+		assert.match(test.approvalCards[0].body!, /no meaningful isolation/)
 	})
-
-	for (const action of [DiracAskResponse.REJECT, DiracAskResponse.MESSAGE]) {
-		it(`does not grant or dispatch after ${action}`, async () => {
-			const test = fixture()
-			test.waitForInteraction.resolves({ action, text: "Do not run" })
-			await test.run(["command-A"])
-			sinon.assert.notCalled(test.persist)
-			sinon.assert.notCalled(test.executeCommand)
-			assert.equal(test.durable().grants.length, 0)
-		})
-	}
 })

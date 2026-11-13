@@ -115,6 +115,7 @@ export class CardHandle implements ICardHandle {
 		action: string
 		response: DiracAskResponse
 		value?: string
+		commandApprovalChoiceId?: string
 		text?: string
 		images?: string[]
 		files?: string[]
@@ -168,6 +169,7 @@ export class CardHandle implements ICardHandle {
 			action,
 			response: result.response,
 			value,
+			commandApprovalChoiceId: result.commandApprovalChoiceId,
 			text: result.text,
 			images: result.images,
 			files: result.files,

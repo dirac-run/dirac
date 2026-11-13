@@ -183,7 +183,7 @@ describe("useMessageHandlers tasklet routing", () => {
 	it.each([
 		false,
 		true,
-	])("routes a text response to the actual shared root escalation (Goal: %s), never the waiting child's card", async (withGoal) => {
+	])("routes guidance independently of the permission escalation (Goal: %s)", async (withGoal) => {
 		hydrate(runningActions(), withGoal)
 		const { result } = mountHandlers()
 		publishRootEscalation()
@@ -194,16 +194,13 @@ describe("useMessageHandlers tasklet routing", () => {
 			await result.current.handlers.handleSendMessage("Use the focused verification only", [], [])
 		})
 
-		expect(taskService.askResponse).toHaveBeenCalledExactlyOnceWith(
-			AskResponseRequest.create({
-				cardId: escalation.id,
-				responseType: DiracAskResponse.MESSAGE,
-				text: "Use the focused verification only",
-				images: [],
-				files: [],
-			}),
-		)
-		expect(taskService.steerTask).not.toHaveBeenCalled()
+		expect(taskService.askResponse).not.toHaveBeenCalled()
+		if (withGoal) {
+			expect(goalService.sendGoalMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ goalId: root.id, message: "Use the focused verification only" }))
+			expect(taskService.steerTask).not.toHaveBeenCalled()
+		} else {
+			expect(taskService.steerTask).toHaveBeenCalledExactlyOnceWith(SteerTaskRequest.create({ text: "Use the focused verification only" }))
+		}
 		expect(taskService.newTask).not.toHaveBeenCalled()
 	})
 
@@ -231,6 +228,28 @@ describe("useMessageHandlers tasklet routing", () => {
 		)
 		expect(taskService.steerTask).not.toHaveBeenCalled()
 		expect(taskService.newTask).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		[DiracAskResponse.APPROVE, "approve"],
+		[DiracAskResponse.APPROVE, "allow-network"],
+		[DiracAskResponse.APPROVE, "allow-files"],
+		[DiracAskResponse.REJECT, "reject"],
+	] as const)("forwards command decision %s with only its typed choice %s", async (responseType, commandApprovalChoiceId) => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		await act(async () => {
+			await result.current.handlers.executeButtonAction(
+				responseType, undefined, undefined, undefined, undefined, escalation.id, commandApprovalChoiceId,
+			)
+		})
+		expect(taskService.askResponse).toHaveBeenCalledExactlyOnceWith(AskResponseRequest.create({
+			cardId: escalation.id,
+			responseType,
+			commandApprovalChoiceId,
+		}))
+		expect(taskService.steerTask).not.toHaveBeenCalled()
 	})
 
 	it.each([DiracAskResponse.APPROVE, "proceed", "retry"] as const)(
@@ -327,6 +346,130 @@ describe("useMessageHandlers tasklet routing", () => {
 	})
 })
 
+describe("composer and permission independence", () => {
+	function draft(result: ReturnType<typeof mountHandlers>["result"], text = "Unrelated draft") {
+		act(() => {
+			result.current.chatState.setInputValue(text)
+			result.current.chatState.setSelectedImages(["image"])
+			result.current.chatState.setSelectedFiles(["draft.ts"])
+			result.current.chatState.setActiveQuote("quoted context")
+		})
+	}
+
+	it.each([
+		[DiracAskResponse.APPROVE, undefined], [DiracAskResponse.REJECT, undefined],
+		[DiracAskResponse.APPROVE, "allow-files"], [DiracAskResponse.REJECT, "reject"],
+	] as const)("keeps composer edits while decision %s (%s) is in flight", async (action, choice) => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		draft(result)
+		let resolve!: () => void
+		taskService.askResponse.mockReturnValueOnce(new Promise<void>((done) => { resolve = done }))
+		let decision!: Promise<void>
+		act(() => { decision = result.current.handlers.executeButtonAction(action, undefined, "Unrelated draft", ["image"], ["draft.ts"], escalation.id, choice) })
+		draft(result, "Edited during approval")
+		await act(async () => { resolve(); await decision })
+		expect(result.current.chatState.inputValue).toBe("Edited during approval")
+		expect(result.current.chatState.selectedImages).toEqual(["image"])
+		expect(result.current.chatState.selectedFiles).toEqual(["draft.ts"])
+		expect(result.current.chatState.activeQuote).toBe("quoted context")
+		expect(taskService.askResponse).toHaveBeenCalledExactlyOnceWith(AskResponseRequest.create({ cardId: escalation.id, responseType: action, commandApprovalChoiceId: choice }))
+	})
+
+	it("sends guidance immediately after approval without stale-card answers or a sticky send lock", async () => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		act(() => result.current.chatState.setInputValue("Only run focused tests"))
+		await act(async () => result.current.handlers.executeButtonAction(DiracAskResponse.APPROVE, undefined, undefined, undefined, undefined, escalation.id, "approve"))
+		// Backend presentation still names the just-answered permission card.
+		await act(async () => result.current.handlers.handleSendMessage(result.current.chatState.inputValue, [], []))
+		expect(taskService.askResponse).toHaveBeenCalledTimes(1)
+		expect(taskService.steerTask).toHaveBeenCalledExactlyOnceWith(SteerTaskRequest.create({ text: "Only run focused tests" }))
+		expect(result.current.chatState.inputValue).toBe("")
+		expect(result.current.chatState.sendingDisabled).toBe(false)
+	})
+
+	it("allows guidance and independent parallel decisions without consuming another card or the draft", async () => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		let resolve!: () => void
+		taskService.askResponse.mockReturnValueOnce(new Promise<void>((done) => { resolve = done }))
+		let first!: Promise<void>
+		act(() => { first = result.current.handlers.executeButtonAction(DiracAskResponse.APPROVE, undefined, undefined, undefined, undefined, "first", "approve") })
+		act(() => result.current.chatState.setInputValue("Guidance"))
+		await act(async () => result.current.handlers.handleSendMessage("Guidance", [], []))
+		draft(result)
+		await act(async () => result.current.handlers.executeButtonAction(DiracAskResponse.REJECT, undefined, undefined, undefined, undefined, "second", "reject"))
+		await act(async () => { resolve(); await first })
+		expect(taskService.askResponse.mock.calls.map(([request]) => request.cardId)).toEqual(["first", "second"])
+		expect(result.current.chatState.inputValue).toBe("Unrelated draft")
+		expect(result.current.chatState.sendingDisabled).toBe(false)
+	})
+
+	it("retains a failed decision's composer and reports rejection to the caller", async () => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		draft(result)
+		taskService.askResponse.mockRejectedValueOnce(new Error("Already answered"))
+		await act(async () => { await expect(result.current.handlers.executeButtonAction(DiracAskResponse.REJECT)).rejects.toThrow("Already answered") })
+		expect(result.current.chatState.inputValue).toBe("Unrelated draft")
+		expect(result.current.chatState.activeQuote).toBe("quoted context")
+	})
+
+	it("retains failed guidance and releases its in-flight guard for retry", async () => {
+		hydrate()
+		const { result } = mountHandlers()
+		publishRootEscalation()
+		vi.spyOn(console, "error").mockImplementation(() => { })
+		act(() => result.current.chatState.setInputValue("Guidance"))
+		taskService.steerTask.mockRejectedValueOnce(new Error("Not accepted"))
+		await act(async () => result.current.handlers.handleSendMessage("Guidance", [], []))
+		expect(result.current.chatState.inputValue).toBe("Guidance")
+		expect(localSnapshotText().at(-1)).toContain("Not accepted")
+		await act(async () => result.current.handlers.handleSendMessage("Guidance", [], []))
+		expect(taskService.steerTask).toHaveBeenCalledTimes(2)
+		expect(result.current.chatState.inputValue).toBe("")
+		expect(result.current.chatState.sendingDisabled).toBe(false)
+	})
+
+	it("does not erase new composer fields after an accepted send", async () => {
+		hydrate()
+		const { result } = mountHandlers()
+		let resolve!: () => void
+		taskService.steerTask.mockReturnValueOnce(new Promise<void>((done) => { resolve = done }))
+		act(() => { result.current.chatState.setInputValue("First"); result.current.chatState.setActiveQuote("Old quote") })
+		let send!: Promise<void>
+		act(() => { send = result.current.handlers.handleSendMessage("First", [], []) })
+		draft(result, "Next message")
+		await act(async () => { resolve(); await send })
+		expect(result.current.chatState.inputValue).toBe("Next message")
+		expect(result.current.chatState.selectedImages).toEqual(["image"])
+		expect(result.current.chatState.selectedFiles).toEqual(["draft.ts"])
+		expect(result.current.chatState.activeQuote).toBe("quoted context")
+	})
+
+	it("still addresses explicit feedback questions, preserving unaccepted answers", async () => {
+		hydrate()
+		const question = cardMessage({ id: "question", header: "Question", status: CardStatus.WAITING_FOR_INPUT, renderType: "text", requireFeedback: true })
+		useChatStore.getState().applyExtensionState({ diracMessages: [root, question], taskStatus: TaskStatus.AWAITING_USER_INPUT, uiActionState: { ...runningActions(question.id), cardButtons: [] } })
+		const { result } = mountHandlers()
+		vi.spyOn(console, "error").mockImplementation(() => { })
+		draft(result, "Answer")
+		taskService.askResponse.mockRejectedValueOnce(new Error("Stale card"))
+		await act(async () => result.current.handlers.handleSendMessage("Answer", ["image"], ["draft.ts"]))
+		expect(taskService.askResponse).toHaveBeenCalledWith(expect.objectContaining({ cardId: "question", responseType: DiracAskResponse.MESSAGE }))
+		expect(result.current.chatState.inputValue).toBe("Answer")
+		expect(result.current.chatState.selectedImages).toEqual(["image"])
+		expect(result.current.chatState.selectedFiles).toEqual(["draft.ts"])
+		expect(result.current.chatState.activeQuote).toBe("quoted context")
+		expect(result.current.chatState.sendingDisabled).toBe(false)
+	})
+})
+
 function inventoryPage(overrides: Partial<TaskletInventoryPage> = {}): TaskletInventoryPage {
 	return {
 		rootTaskId: root.id,
@@ -364,8 +507,8 @@ describe("local /agents routing", () => {
 		await act(async () => result.current.handlers.handleSendMessage("/agents", [], []))
 		expect(localSnapshotText()).toHaveLength(1)
 		expect(localSnapshotText()[0]).toContain("16 active")
-		expect(localSnapshotText()[0]).toContain("Worker 0 — Waiting for parent")
-		expect(localSnapshotText()[0]).toContain("Worker 15 — Running")
+		expect(localSnapshotText()[0]).toContain("tasklet-0 — Worker 0 · Waiting for parent")
+		expect(localSnapshotText()[0]).toContain("tasklet-15 — Worker 15 · Running")
 		expect(useChatStore.getState().diracMessages).toEqual(before)
 		expect(taskService.steerTask).not.toHaveBeenCalled()
 		expect(taskService.newTask).not.toHaveBeenCalled()

@@ -123,6 +123,13 @@ workspace rather than pointing it at user files. The #261 regressions verify the
 left-aligned, fully wrapped description at wide and narrow widths, resizing, and
 approval/denial behavior.
 
+For live approval-setting regressions, rebuild then run
+`node --test tests/e2e/cli/approval-settings.test.mjs`. The isolated `create-file`
+fixture pauses for permission, retains an independent composer draft, and receives
+xterm Shift+Tab (`ESC [ Z`) to enable Approve All. The pending operation must finish
+without another approval or model polling, and the draft must survive. Both normal
+and narrow terminals are covered; no live credentials or user workspace files are used.
+
 For mode-switch continuity regressions, run the focused suite after rebuilding:
 
 ```bash

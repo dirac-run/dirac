@@ -304,6 +304,7 @@ export interface IOrchestrationTrait {
 	readonly agentWait?: import("../../AgentCommunication").AgentWaitCapability
 	readonly sharedJournal?: import("../../SharedJournalTypes").SharedJournalCapability
 	readonly commandApprovals?: import("./CommandApprovals").CommandApprovalsCapability
+	readonly commandCapabilities?: import("./TaskCommandCapabilities").TaskCommandCapabilitiesCapability
 
 
 	/**

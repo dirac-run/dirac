@@ -3463,6 +3463,71 @@ describe("Tasklet real Task execution", function () {
 		}
 	})
 
+	it("drains root capability writes before releasing the real storage lock", async () => {
+		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub
+		acquire.restore()
+		const rootDirectory = getTaskDirectoryPath("root")
+		const params = parameters()
+		const rootParams: TaskParams = {
+			...params,
+			taskId: "root",
+			executionProfile: "standalone",
+			tasklet: undefined,
+			updateTaskHistory: async () => [],
+			postStateToWebview: async () => { },
+			postPresentationToWebview: async () => { },
+		}
+		const releaseLock = sandbox.spy(await taskLocks.acquireTaskLock(rootDirectory))
+		const root = create({ ...rootParams, releaseTaskLock: releaseLock })
+		const childParams = parameters()
+		const child = create({
+			...childParams,
+			tasklet: { ...childParams.tasklet!, commandCapabilities: root.commandCapabilities },
+		})
+		await child.abortTask()
+		await child.retirePersistence()
+
+		const atomic = await import("@core/storage/atomicWrite")
+		const write = atomic.atomicWriteFile
+		const entered = deferred<void>()
+		const release = deferred<void>()
+		sandbox.stub(atomic, "atomicWriteFile").callsFake(async (...args) => {
+			if (args[0].endsWith(`${path.sep}command-capabilities.json`)) {
+				entered.resolve()
+				await release.promise
+			}
+			return write(...args)
+		})
+		const late = await root.commandCapabilities.offerApproval(7 << 6)
+		const saving = (await root.commandCapabilities.offerApproval(7)).approve("allow-filesystem-7")
+		await entered.promise
+		await root.abortTask()
+		const retirement = root.retirePersistence()
+		try {
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			sinon.assert.notCalled(releaseLock)
+			await assert.rejects(taskLocks.acquireTaskLock(rootDirectory), /another Dirac instance/)
+		} finally {
+			release.resolve()
+			await saving
+			await retirement
+		}
+		sinon.assert.calledOnce(releaseLock)
+		const reopened = create({ ...rootParams, releaseTaskLock: await taskLocks.acquireTaskLock(rootDirectory) })
+		try {
+			await reopened.commandCapabilities.ready()
+			assert.equal(reopened.commandCapabilities.current() & 7, 7)
+			await (await reopened.commandCapabilities.offerApproval(1 << 3)).approve("allow-network-1")
+			await assert.rejects(late.approve("allow-processes-7"), /retired/)
+			const saved = JSON.parse(await fs.readFile(path.join(rootDirectory, "command-capabilities.json"), "utf8"))
+			assert.equal(saved.capabilities & 7, 7)
+			assert.equal((saved.capabilities >>> 3) & 7, 1)
+		} finally {
+			await reopened.abortTask()
+			await reopened.retirePersistence()
+		}
+	})
+
 	it("keeps root ownership on a child transcript-flush failure while retiring writers and settling siblings", async () => {
 		expectLoggerErrors()
 		const acquire = taskLocks.acquireTaskLock as sinon.SinonStub

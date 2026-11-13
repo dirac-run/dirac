@@ -38,6 +38,15 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 			: undefined
 	})
 	const cancelInFlightRef = useRef(false)
+	const sendInFlightRef = useRef(false)
+
+	// Clear only the submitted fields, never edits made while the request was in flight.
+	const clearSubmittedInput = useCallback((text?: string, images?: string[], files?: string[], quote?: string | null) => {
+		if (text !== undefined) setInputValue((current) => current === text ? "" : current)
+		if (images?.length) setSelectedImages((current) => current.length === images.length && current.every((image, index) => image === images[index]) ? [] : current)
+		if (files?.length) setSelectedFiles((current) => current.length === files.length && current.every((file, index) => file === files[index]) ? [] : current)
+		if (quote) setActiveQuote((current) => current === quote ? null : current)
+	}, [setInputValue, setSelectedImages, setSelectedFiles, setActiveQuote])
 
 	// Handle sending a message
 	const handleSendMessage = useCallback(
@@ -56,7 +65,8 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 			}
 			const hasContent = messageToSend || images.length > 0 || files.length > 0
 
-			if (!hasContent) return
+			if (!hasContent || sendInFlightRef.current) return
+			sendInFlightRef.current = true
 
 			let finalMessage = messageToSend
 			if (activeQuote) {
@@ -69,10 +79,13 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 				activeCard?.content.type === DiracMessageType.CARD
 					? getCardKind(activeCard.content.card)
 					: CardKind.GENERIC
+			const isPermission = (activeCard?.content.type === DiracMessageType.CARD && activeCard.content.card.requireApproval === true) ||
+				(!activeCard && (uiActionState?.pendingApprovalCardIds?.length ?? 0) > 0)
+			const isResumePrompt = activeCardKind === CardKind.RESUME_TASK || activeCardKind === CardKind.RESUME_COMPLETED_TASK
 
 			try {
 				setExpandTaskHeader(false)
-				if (goal && interactionState !== InteractionState.AWAITING_RESPONSE) {
+				if (goal && (interactionState !== InteractionState.AWAITING_RESPONSE || (isPermission && !isResumePrompt))) {
 					if (images.length > 0 || files.length > 0) {
 						throw new Error("Goal messages currently support text only")
 					}
@@ -102,6 +115,12 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 							await TaskServiceClient.newTask(NewTaskRequest.create({ text: finalMessage, images, files }))
 							break
 						case InteractionState.AWAITING_RESPONSE: {
+							// Guidance is independent of approval, and must not answer the FIFO permission card.
+							if (isPermission && !isResumePrompt) {
+								if (images.length > 0 || files.length > 0) throw new Error("Mid-turn guidance currently supports text only")
+								await TaskServiceClient.steerTask(SteerTaskRequest.create({ text: finalMessage }))
+								break
+							}
 							const isResume =
 								activeCardKind === CardKind.RESUME_TASK ||
 								activeCardKind === CardKind.RESUME_COMPLETED_TASK ||
@@ -139,14 +158,13 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 							break
 					}
 
-				// Clear local input state immediately on success
-				setInputValue("")
-				setActiveQuote(null)
-				setSendingDisabled(goal ? false : interactionState !== InteractionState.RUNNING)
-				setSelectedImages([])
-				setSelectedFiles([])
+				clearSubmittedInput(text, images, files, activeQuote)
 			} catch (error) {
 				console.error("[ChatView] Failed to send message:", error)
+				const state = useChatStore.getState()
+				state.appendLocalObservation(state.observationGeneration, `Could not send message: ${error instanceof Error ? error.message : String(error)}. Your draft has been kept.`)
+			} finally {
+				sendInFlightRef.current = false
 			}
 		},
 		[
@@ -161,6 +179,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 			setExpandTaskHeader,
 			uiActionState,
 			activeCard,
+			clearSubmittedInput,
 		],
 	)
 
@@ -170,13 +189,6 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 		await TaskServiceClient.clearTask(EmptyRequest.create({}))
 	}, [setActiveQuote])
 
-	// Clear input state helper
-	const clearInputState = useCallback(() => {
-		setInputValue("")
-		setActiveQuote(null)
-		setSelectedImages([])
-		setSelectedFiles([])
-	}, [setInputValue, setActiveQuote, setSelectedImages, setSelectedFiles])
 
 	// Execute button action based on type
 	const executeButtonAction = useCallback(
@@ -187,6 +199,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 			images?: string[],
 			files?: string[],
 			cardId?: string,
+			commandApprovalChoiceId?: string,
 		) => {
 			const trimmedInput = text?.trim()
 			const hasContent = trimmedInput || (images && images.length > 0) || (files && files.length > 0)
@@ -198,6 +211,23 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 			}
 
 			const finalCardId = cardId || uiActionState?.activeCardId || ""
+			const clearInputState = () => {
+				if (hasContent) clearSubmittedInput(text, images, files)
+			}
+			const isResumeCard = activeCard?.id === finalCardId && activeCard?.content.type === DiracMessageType.CARD &&
+				[CardKind.RESUME_TASK, CardKind.RESUME_COMPLETED_TASK].includes(getCardKind(activeCard.content.card))
+
+			if (commandApprovalChoiceId !== undefined || (finalCardId && !isResumeCard &&
+				(actionType === DiracAskResponse.APPROVE || actionType === DiracAskResponse.REJECT))) {
+				await TaskServiceClient.askResponse(
+					AskResponseRequest.create({
+						cardId: finalCardId,
+						responseType: actionType,
+						commandApprovalChoiceId,
+					}),
+				)
+				return
+			}
 
 			// A global Resume continues the lifecycle; only addressed cards receive approval decisions.
 			if (
@@ -227,7 +257,6 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 							responseType: DiracAskResponse.APPROVE,
 						}),
 					)
-					clearInputState()
 					break
 				case DiracAskResponse.APPROVE:
 					if (hasContent) {
@@ -362,7 +391,7 @@ export function useMessageHandlers(chatState: ChatState): MessageHandlers {
 					break
 			}
 		},
-		[uiActionState, taskStatus, lastMessage, clearInputState, startNewTask, backgroundCommandRunning, setSendingDisabled, handleSendMessage],
+		[uiActionState, taskStatus, lastMessage, activeCard, clearSubmittedInput, startNewTask, backgroundCommandRunning, setSendingDisabled, handleSendMessage],
 	)
 
 	// Handle task close button click

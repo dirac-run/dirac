@@ -219,21 +219,21 @@ export enum DiracMessageType {
 export type DiracMessageContent =
 	/** Stateless conversational content (speech, reasoning, info) */
 	| {
-			type: DiracMessageType.MARKDOWN
-			content: string
-			isReasoning?: boolean
-			images?: string[]
-			files?: string[]
-			isCompletion?: boolean
-			completionType?: "act" | "plan"
-			showFeedback?: boolean
-			role?: "user" | "assistant"
-			agentId?: number
-			agentName?: string
-			steering?: { status: SteeringTranscriptStatus }
-			/** Source identities for durable contextual input; transcript-only transport metadata. */
-			contextualInput?: { references: string[] }
-	  }
+		type: DiracMessageType.MARKDOWN
+		content: string
+		isReasoning?: boolean
+		images?: string[]
+		files?: string[]
+		isCompletion?: boolean
+		completionType?: "act" | "plan"
+		showFeedback?: boolean
+		role?: "user" | "assistant"
+		agentId?: number
+		agentName?: string
+		steering?: { status: SteeringTranscriptStatus }
+		/** Source identities for durable contextual input; transcript-only transport metadata. */
+		contextualInput?: { references: string[] }
+	}
 	/** Stateful tool-mediated unit of work */
 	| { type: DiracMessageType.CARD; card: Card }
 	/** System telemetry and vitals (tokens, cost, latency) */
@@ -459,6 +459,9 @@ export interface UIActionState {
 	/** Promoted buttons for the currently active tool card (if any) */
 	cardButtons: UIActionButton[]
 
+	/** Live, unanswered user-facing approval waiters, in registration order. */
+	pendingApprovalCardIds?: string[]
+
 	/** The ID of the card that currently has the "focus" */
 	activeCardId?: string
 
@@ -491,6 +494,29 @@ export enum CardKind {
 	RESUME_COMPLETED_TASK = "resume_completed_task",
 }
 
+/** Display-only capability metadata; never interpreted as approval authority. */
+export type CommandApprovalCategory =
+	| "filesystem"
+	| "network"
+	| "processes"
+	| "execution"
+	| "credentials"
+	| "software"
+	| "configuration"
+	| "devices"
+	| "remote_resources"
+	| "system"
+export type CommandApprovalAccess = "use" | "read" | "mutate"
+
+/** Ordered host-offered command decisions; clients return only the selected ID. */
+export interface CommandApprovalChoice {
+	id: string
+	label: string
+	/** Present only on reusable category grants; IDs remain opaque to clients. */
+	category?: CommandApprovalCategory
+	access?: CommandApprovalAccess
+}
+
 export interface Card {
 	id: string
 	/** Optional execution owner correlation; legacy cards may omit it. */
@@ -514,6 +540,7 @@ export interface Card {
 	diffs?: CardDiff[]
 	locations?: CardLocation[]
 	requireApproval?: boolean
+	commandApprovalChoices?: CommandApprovalChoice[]
 	/** Restricts approval to this operation; clients must not offer or persist broader permission rules. */
 	approvalScope?: "once"
 	requireFeedback?: boolean
@@ -576,6 +603,7 @@ export interface CardParams {
 	diffs?: CardDiff[]
 	locations?: CardLocation[]
 	requireApproval?: boolean
+	commandApprovalChoices?: CommandApprovalChoice[]
 	approvalScope?: Card["approvalScope"]
 	requireFeedback?: boolean
 	feedbackPlaceholder?: string
@@ -601,5 +629,6 @@ export interface ICardHandleBase {
 		userEdits?: Record<string, string>
 		action: string
 		value?: string
+		commandApprovalChoiceId?: string
 	}>
 }

@@ -5,7 +5,8 @@ import { CommandPermissionController } from "@/core/permissions/CommandPermissio
 import { HostProvider } from "@/hosts/host-provider"
 import { getCwd, getDesktopDir, isLocatedInPath, isLocatedInWorkspace } from "@/utils/path"
 import type { DeepReadonly } from "../runtime/TaskWorkingConfiguration"
-import { isSafeCommand, isSupportedShellSyntax } from "./utils/CommandSafetyChecker"
+import { classifyCommandCapabilities, DEFAULT_COMMAND_CAPABILITIES, getMissingCommandCapabilities } from "./utils/CommandSafetyChecker"
+import { isSupportedUserCommandPatternSyntax } from "./utils/UserApprovedCommandSyntax"
 import { areCommandSegmentsApproved, isUserApprovedCommandSegment } from "./utils/UserApprovedCommandMatcher"
 
 const WRITE_TOOLS: DiracDefaultTool[] = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
@@ -32,6 +33,10 @@ export function resolveCommandApproval(
 	})
 	if (results.some(({ permission }) => !permission.allowed)) return { required: true, utilityEligible: false }
 	if (!isChild && autoApprover.isUnrestrictedAutoApprove()) return { required: false, utilityEligible: false }
+	// Unknown has no capability grant and cannot use legacy command-pattern shortcuts.
+	if (results.some(({ actualCommand }) => classifyCommandCapabilities(actualCommand) === -1)) {
+		return { required: true, utilityEligible: false }
+	}
 	const required = results.some(
 		({ actualCommand, permission }) => !autoApprover.isCommandAutoApproved(actualCommand) && !permission.matchedPattern,
 	)
@@ -66,6 +71,7 @@ export class AutoApprove {
 		private readonly settingsSource: DeepReadonly<Settings> | (() => DeepReadonly<Settings>),
 		private readonly multiRootEnabled: boolean,
 		public readonly requiresCounterpartyApproval = false,
+		private readonly commandCapabilities: () => number = () => DEFAULT_COMMAND_CAPABILITIES,
 	) {
 		this.commandPermissionController = commandPermissionController
 	}
@@ -260,18 +266,17 @@ export class AutoApprove {
 
 	public isCommandAutoApproved(command: string): boolean {
 		this.commandPermissionController.assertConfigurationValid()
-		const entries = this.setting("userApprovedCommands")
+		const classification = classifyCommandCapabilities(command)
+		const missing = getMissingCommandCapabilities(classification, this.commandCapabilities())
+		if (missing === undefined) return false
 		const autoApproveResult = this.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND)
-		const safeCommandAutoApprovalEnabled =
+		const capabilityAutoApprovalEnabled =
 			this.requiresCounterpartyApproval || (Array.isArray(autoApproveResult) ? autoApproveResult[0] : autoApproveResult)
+		if (capabilityAutoApprovalEnabled && missing.length === 0) return true
+		if (!isSupportedUserCommandPatternSyntax(command)) return false
 
-		if (safeCommandAutoApprovalEnabled && isSafeCommand(command)) return true
-		if (!isSupportedShellSyntax(command)) return false
-
-		return areCommandSegmentsApproved(command, (segment) => {
-			if (isUserApprovedCommandSegment(segment, [...entries])) return true
-			return safeCommandAutoApprovalEnabled && isSafeCommand(segment)
-		})
+		const entries = this.setting("userApprovedCommands")
+		return areCommandSegmentsApproved(command, (segment) => isUserApprovedCommandSegment(segment, [...entries]))
 	}
 
 	/**

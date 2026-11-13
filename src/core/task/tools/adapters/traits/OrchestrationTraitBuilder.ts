@@ -20,7 +20,8 @@ export function buildOrchestrationTrait(config: TaskConfig): IOrchestrationTrait
 		agentCommunication: config.callbacks.agentCommunication,
 		agentWait: config.executionProfile === "tasklet" ? config.callbacks.agentWait : undefined,
 		sharedJournal: config.callbacks.sharedJournal,
-		commandApprovals: config.executionProfile === "tasklet" ? config.callbacks.commandApprovals : undefined,
+		commandApprovals: config.callbacks.commandApprovals,
+		commandCapabilities: config.callbacks.commandCapabilities,
 		runHook: async (name, input, options) => {
 			const { executeHook } = await import("@core/hooks/hook-executor")
 			return await executeHook({

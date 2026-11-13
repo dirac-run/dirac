@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import type { TaskletRecord, TaskletEvent } from "@core/task/types/tasklet"
 import { isCommandGrantSnapshot } from "@core/task/TaskletCommandApprovals"
+import { isTaskCommandCapabilitySnapshot, type TaskCommandCapabilitySnapshot } from "@core/task/TaskCommandCapabilities"
 import { historicalTaskletSelection, migrateTaskletConfiguration } from "./migrateTaskletConfiguration"
 import { isTaskletUsageSnapshot } from "@shared/taskletUsage"
 import { GlobalState, Settings } from "@shared/storage/state-keys"
@@ -16,6 +17,26 @@ import { GlobalFileNames } from "./fileNames"
 import { getTaskDirectoryPath, type TaskStorageAddress } from "./taskDirectory"
 
 export type { TaskletRecord, TaskletEvent } from "@core/task/types/tasklet"
+
+/** Root identity prevents copied task directories from copying permission authority. */
+export async function loadTaskCommandCapabilities(rootTaskId: string): Promise<TaskCommandCapabilitySnapshot | undefined> {
+	let value: unknown
+	try {
+		value = JSON.parse(await fs.readFile(path.join(getTaskDirectoryPath(rootTaskId), "command-capabilities.json"), "utf8"))
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+		throw error
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid task command capability record")
+	const { rootTaskId: owner, ...snapshot } = value as Record<string, unknown>
+	if (typeof owner !== "string" || !isTaskCommandCapabilitySnapshot(snapshot)) throw new Error("Invalid task command capability record")
+	return owner === rootTaskId ? snapshot : undefined
+}
+
+export async function saveTaskCommandCapabilities(rootTaskId: string, snapshot: TaskCommandCapabilitySnapshot): Promise<void> {
+	const directory = await ensureTaskDirectoryExists(rootTaskId)
+	await atomicWriteFile(path.join(directory, "command-capabilities.json"), JSON.stringify({ rootTaskId, ...snapshot }))
+}
 
 /** Read only the owning root's contained records; reconstruction never starts executions. */
 export async function loadTaskletRecords(rootTaskId: string): Promise<TaskletRecord[]> {

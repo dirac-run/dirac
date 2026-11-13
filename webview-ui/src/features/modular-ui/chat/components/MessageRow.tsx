@@ -57,11 +57,11 @@ export const MessageRenderer = memo(
 						<ModularCard
 							card={message.content.card}
 							isActive={message.id === activeCardId}
-							onAction={(value) => {
+							onAction={(value, commandApprovalChoiceId) => {
 								if (value === DiracAskResponse.APPROVE) {
-									onApprove?.(message.id)
+									onApprove?.(message.id, commandApprovalChoiceId)
 								} else if (value === DiracAskResponse.REJECT) {
-									onReject?.(message.id)
+									onReject?.(message.id, commandApprovalChoiceId)
 								} else {
 									onAction?.(value, message.id)
 								}

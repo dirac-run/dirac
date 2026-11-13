@@ -31,7 +31,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({ task, chatState, messageH
 	// Single effect to handle all configuration updates
 	useEffect(() => {
 		if (uiActionState) {
-			setSendingDisabled(uiActionState.sendingDisabled)
+			setSendingDisabled(uiActionState.pendingApprovalCardIds?.length ? false : uiActionState.sendingDisabled)
 		}
 	}, [uiActionState, setSendingDisabled])
 

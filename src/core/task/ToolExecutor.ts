@@ -139,6 +139,7 @@ export class ToolExecutor {
 		private getCommandApprovals?: () => import("./tools/interfaces/CommandApprovals").CommandApprovalsCapability | undefined,
 		private captureTaskCommandSandbox?: () => import("@shared/SandboxExecution").SandboxExecutionContext,
 		private readonly agentRole?: string,
+		private getTaskCommandCapabilities?: () => import("./tools/interfaces/TaskCommandCapabilities").TaskCommandCapabilitiesCapability,
 	) {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
@@ -174,11 +175,13 @@ export class ToolExecutor {
 	}
 
 	private requestAutoApprover(): AutoApprove {
+		const capabilities = this.getTaskCommandCapabilities?.()
 		return new AutoApprove(
 			this.permissionCommandController(),
 			() => (this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)().settings,
 			(this.getPermissionWorkingConfiguration ?? this.getCurrentWorkingConfiguration)().executionOptions.multiRootEnabled,
 			this.executionProfile === "tasklet",
+			capabilities ? () => capabilities.current() : undefined,
 		)
 	}
 
@@ -191,10 +194,11 @@ export class ToolExecutor {
 		}
 	}
 
-	/** Checks authority only after an explicit parent approval; never decides for the parent. */
+	/** Check current root authority for parent approval or a pending escalation; static checks never consult Utility. */
 	public async authorizeTaskletPermission(
 		request: TaskInteractionRequest,
 		signal: AbortSignal,
+		options?: { staticOnly: boolean },
 	): Promise<{ approved: boolean; assertCurrent: () => void }> {
 		const configuration = this.getCurrentWorkingConfiguration()
 		const permissionRevision = this.permissionCommandController().revision
@@ -214,7 +218,7 @@ export class ToolExecutor {
 		const disposition = await this.taskletPermissionDisposition(request, autoApprover, !!binding)
 		assertCurrent()
 		if (disposition === "auto_approve") return { approved: true, assertCurrent }
-		if (disposition !== "utility_eligible" || !binding || request.utilityPermissionEscalation !== undefined) {
+		if (options?.staticOnly || disposition !== "utility_eligible" || !binding || request.utilityPermissionEscalation !== undefined) {
 			return { approved: false, assertCurrent }
 		}
 		const decision = await binding.service.decide({
@@ -444,6 +448,7 @@ export class ToolExecutor {
 				agentWait: this.executionProfile === "tasklet" ? this.getAgentWait?.() : undefined,
 				sharedJournal: this.getSharedJournal?.(),
 				commandApprovals: this.getCommandApprovals?.(),
+				commandCapabilities: this.getTaskCommandCapabilities?.(),
 				assertMutationAuthorized: (toolName) => this.assertMutationAuthorized(toolName, runtime),
 				withMutationAuthorization: (toolName, mutation) => this.withMutationAuthorization(toolName, mutation, runtime),
 				transitionFromMutation: (transition) => this.transitionFromMutation(transition),

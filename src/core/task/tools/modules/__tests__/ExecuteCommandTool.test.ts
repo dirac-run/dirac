@@ -235,7 +235,7 @@ describe("ExecuteCommandTool", () => {
 	})
 
 	for (const utilityEnabled of [false, true]) {
-		it(`auto-approves static whitelist matches (Utility enabled: ${utilityEnabled})`, async () => {
+		it(`auto-approves known commands matching explicit permission patterns (Utility enabled: ${utilityEnabled})`, async () => {
 			const { tool, env, commandPermissionController, autoApprover, mockCard } = createMocks()
 			if (utilityEnabled) {
 				; (env.config as any).permissionDecisionBinding = { service: { decide: sinon.stub() }, authorityMode: "act", configurationRevision: 1 }
@@ -247,7 +247,7 @@ describe("ExecuteCommandTool", () => {
 				matchedPattern: "npm test*",
 			})
 
-			await tool.processCall({ commands: ["npm test -- --runInBand"] }, env as any)
+			await tool.processCall({ commands: ["npm test"] }, env as any)
 
 			sinon.assert.calledOnce(env.ui.createCard as sinon.SinonStub)
 			assert.equal(env.ui.createCard.firstCall.args[0].requireApproval, undefined)
@@ -288,7 +288,7 @@ describe("ExecuteCommandTool", () => {
 		sinon.assert.calledOnce(env.system.executeCommand as sinon.SinonStub)
 	})
 
-	it("does not require approval for a user-approved command with stderr redirected to stdout", async () => {
+	it("requires approval for an unknown user-approved command even with stderr redirected to stdout", async () => {
 		const { env, diracIgnoreController, commandPermissionController, mockCard } = createMocks()
 		const stateManager = {
 			getGlobalSettingsKey: sinon.stub().callsFake((key: string) => {
@@ -323,7 +323,7 @@ describe("ExecuteCommandTool", () => {
 
 		await tool.processCall({ commands: ["uv run pytest -v 2>&1"] }, env as any)
 
-		assert.ok(mockCard.waitForInteraction.notCalled)
+		assert.ok(mockCard.waitForInteraction.calledOnce)
 		assert.ok((env.system.executeCommand as sinon.SinonStub).calledOnce)
 	})
 

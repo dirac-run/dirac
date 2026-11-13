@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { cn } from "@/lib/utils"
 import { Navbar } from "@/shared/ui/Navbar"
 import { ChatLayout } from "./components/ChatLayout"
+import { ApprovalTray } from "./components/ApprovalTray"
 import { InteractionState, useInteractionState } from "./context/InteractionStateContext"
 // Decorators
 import { ActionButtonsDecorator } from "./decorators/view/ActionButtonsDecorator"
@@ -150,7 +151,7 @@ export const ModularChatView: React.FC<ChatViewProps> = ({ isHidden, showAnnounc
 						effectiveMode === "plan" ? "bg-grid-plan" : "",
 					)}>
 					{showNavbar && <Navbar />}
-					<div className="flex-1 flex flex-col overflow-hidden relative">
+					<div className="flex-1 min-h-0 flex flex-col overflow-hidden relative">
 						{sections.map((section) => (
 							<React.Fragment key={section.id}>
 								{section.id !== "input" && section.shouldRender(context) && section.render(context)}
@@ -163,6 +164,8 @@ export const ModularChatView: React.FC<ChatViewProps> = ({ isHidden, showAnnounc
 							<React.Fragment key={decorator.id}>{decorator.render?.(context)}</React.Fragment>
 						))}
 					</div>
+
+					<ApprovalTray messageHandlers={messageHandlers} />
 
 					<div className="px-4">{InputSection.shouldRender(context) && InputSection.render(context)}</div>
 				</div>

@@ -95,6 +95,7 @@ import { HistoryPanelContent } from "./HistoryPanelContent"
 import { OpenAiCodexUsagePanel } from "./OpenAiCodexUsagePanel"
 import { PermissionModal } from "./PermissionModal"
 import { SettingsPanelContent } from "./SettingsPanelContent"
+import { commitInteractiveSetting } from "./settings/settingsTransaction"
 import { SkillsPanelContent } from "./SkillsPanelContent"
 import { SlashCommandMenu } from "./SlashCommandMenu"
 import { ThinkingIndicator } from "./ThinkingIndicator"
@@ -236,12 +237,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		}
 	}, [taskState.autoApproveAllToggled, autoApproveAll])
 
-	const toggleAutoApproveAll = useCallback(async () => {
-		const newValue = !autoApproveAll
-		setAutoApproveAll(newValue)
-		StateManager.get().setGlobalState("autoApproveAllToggled", newValue)
-		await ctrl?.postStateToWebview()
-	}, [autoApproveAll, ctrl])
+	const approvalToggleQueue = useRef(Promise.resolve())
+	const toggleAutoApproveAll = useCallback(() => {
+		const toggle = async () => {
+			const stateManager = StateManager.get()
+			const current = ctrl?.task?.getWorkingConfiguration().settings.autoApproveAllToggled
+				?? stateManager.getGlobalSettingsKey("autoApproveAllToggled") ?? false
+			const newValue = !current
+			try {
+				await commitInteractiveSetting(ctrl, { settings: { autoApproveAllToggled: newValue } }, () => {
+					stateManager.setGlobalState("autoApproveAllToggled", newValue)
+				})
+				setAutoApproveAll(newValue)
+			} catch (error) {
+				setLastError(error instanceof Error ? error.message : String(error))
+			}
+		}
+		approvalToggleQueue.current = approvalToggleQueue.current.then(toggle)
+		return approvalToggleQueue.current
+	}, [ctrl, setLastError])
 
 	const toggleQuietMode = useCallback(() => {
 		setQuietMode((current) => {
@@ -449,7 +463,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			(pendingAsk.content.card.requireApproval || pendingAsk.content.card.requireFeedback)
 			? pendingAsk.content.card
 			: null
-	const permissionModalLayout = calculatePermissionModalLayout(terminalColumns, terminalRows)
+	const permissionModalLayout = calculatePermissionModalLayout(
+		terminalColumns, terminalRows, permissionCard?.commandApprovalChoices?.map((choice) => choice.label),
+	)
 
 	// Feedback and approval cards also open at the beginning of their body.
 	const [permissionCardScrollFromTop, setPermissionCardScrollFromTop] = useState(0)
@@ -552,6 +568,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 		disarmGoalStopConfirmation,
 	})
 	resetComposerInputRef.current = resetInput
+	const composerDraftRef = useRef({ textInput, pastedTexts, imagePaths })
+	composerDraftRef.current = { textInput, pastedTexts, imagePaths }
 
 	const toggleMode = useCallback(async () => {
 		if (selectedGoal) {
@@ -569,15 +587,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
 	}, [mode, ctrl, textInput, pastedTexts, selectedGoal, setLastError])
 
 	const sendAskResponse = useCallback(
-		async (responseType: DiracAskResponse | string, text?: string, value?: string, images?: string[]) => {
+		async (responseType: DiracAskResponse | string, text?: string, value?: string, images?: string[], commandApprovalChoiceId?: string) => {
 			if (!ctrl?.task || !pendingAsk) return false
 			if (!isProcessing) setIsProcessing(true)
 			const expandedText = text ? expandPastedTexts(text, pastedTexts) : text
 			setLastError(null)
 			try {
-				await ctrl.task.submitCardResponse(pendingAsk.id, responseType, expandedText, images, undefined, value)
+				await ctrl.task.submitCardResponse(pendingAsk.id, responseType, expandedText, images, undefined, value, commandApprovalChoiceId)
 				setRespondedToAsk(pendingAsk.id)
-				resetInput()
+				// A decision does not submit the composer draft.
+				if (text !== undefined || images?.length) resetInput()
 				return true
 			} catch (error) {
 				reportInteractionError("Failed to send response", error)
@@ -661,14 +680,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
 						if (isResumeChoiceActive) {
 							await submitResumeResponse()
 						} else {
-							await sendAskResponse(DiracAskResponse.APPROVE)
+							await sendAskResponse(DiracAskResponse.APPROVE, undefined, undefined, undefined, value)
 						}
 						break
 					case UIActionButtonType.REJECT:
 						if (isCompletionChoiceActive || isResumeChoiceActive) {
 							handleExit()
 						} else {
-							await sendAskResponse(DiracAskResponse.REJECT)
+							await sendAskResponse(DiracAskResponse.REJECT, undefined, undefined, undefined, value)
 						}
 						break
 					case UIActionButtonType.PROCEED:
@@ -723,6 +742,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			if (!pendingAsk || currentTextInput !== "" || isProcessing) return false
 			if (pendingAsk.content.type !== DiracMessageType.CARD) return false
 			const { card } = pendingAsk.content
+
+			if (card.requireApproval && card.commandApprovalChoices) {
+				const choice = /^[1-4]$/.test(input) ? card.commandApprovalChoices[Number(input) - 1] : undefined
+				if (!choice) return false
+				handleButtonAction(choice.id === "reject" ? DiracAskResponse.REJECT : DiracAskResponse.APPROVE, choice.id !== "reject", choice.id)
+				return true
+			}
 
 			if (card.requireApproval && (!card.actions || card.actions.length === 0)) {
 				if (input.toLowerCase() === "y") {
@@ -801,6 +827,38 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			}
 			if (!ctrl || (!text.trim() && images.length === 0) || steeringSubmissionRef.current) return
 			const activeTask = ctrl.task
+			// Keep guidance routing stable while a just-answered card remains in host state.
+			const permissionWait = (taskState.diracMessages ?? []).some((message) =>
+				message.id === activeCardId && message.content.type === DiracMessageType.CARD &&
+				message.content.card.requireApproval && !isFinalStatus(message.content.card.status))
+			const isPermissionWait = permissionWait && !isResumeChoiceActive && !isCompletionChoiceActive
+			if (isPermissionWait) {
+				if (images.length > 0) {
+					setLastError("Permission-wait guidance currently supports text only. Your draft has been kept.")
+					return
+				}
+				steeringSubmissionRef.current = true
+				setLastError(null)
+				const submittedDraft = composerDraftRef.current
+				try {
+					const guidance = expandPastedTexts(text, pastedTexts).trim()
+					if (taskState.goal) await ctrl.sendGoalMessage(taskState.goal.id, guidance)
+					else {
+						if (!activeTask) throw new Error("No active task to receive guidance")
+						await activeTask.enqueueSteeringMessage(guidance)
+					}
+					const currentDraft = composerDraftRef.current
+					if (currentDraft.textInput === submittedDraft.textInput && currentDraft.pastedTexts === submittedDraft.pastedTexts &&
+						currentDraft.imagePaths.length === submittedDraft.imagePaths.length && currentDraft.imagePaths.every((image, index) => image === submittedDraft.imagePaths[index])) {
+						resetInput()
+					}
+				} catch (error) {
+					reportInteractionError("Failed to send guidance", error)
+				} finally {
+					steeringSubmissionRef.current = false
+				}
+				return
+			}
 			if (!taskState.goal && !pendingAsk && activeTask?.canAcceptSteeringMessage()) {
 				steeringSubmissionRef.current = true
 				setLastError(null)
@@ -850,7 +908,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			if (pendingAsk && pendingAsk.content.type === DiracMessageType.CARD) {
 				const prompt = text.trim()
 				const normalized = prompt.toLowerCase()
-				const { card } = pendingAsk.content
 
 				if (isCompletionChoiceActive || isResumeChoiceActive) {
 					if (normalized === "q" || normalized === "quit" || normalized === "exit") {
@@ -863,17 +920,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 					}
 				}
 
-				if (
-					card.requireApproval &&
-					(!card.actions || card.actions.length === 0) &&
-					(normalized === "y" || normalized === "yes")
-				) {
-					await sendAskResponse(DiracAskResponse.APPROVE)
-				} else {
-					const validImages =
-						images.length > 0 ? await processImagePaths(images, footerStatus.workspacePath) : undefined
-					await sendAskResponse(DiracAskResponse.MESSAGE, prompt, undefined, validImages)
-				}
+				const validImages = images.length > 0 ? await processImagePaths(images, footerStatus.workspacePath) : undefined
+				await sendAskResponse(DiracAskResponse.MESSAGE, prompt, undefined, validImages)
 				return
 			}
 			setIsProcessing(true)
@@ -917,6 +965,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 			reportInteractionError,
 			footerStatus.workspacePath,
 			taskState.goal,
+			taskState.diracMessages,
+			activeCardId,
 			showAgentSnapshot,
 		],
 	)

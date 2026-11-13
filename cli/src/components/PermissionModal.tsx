@@ -78,12 +78,19 @@ function renderFooter(card: CardType, scrollOffset: number, maxScrollOffset: num
 					{canScrollUp ? "↑" : " "} / {canScrollDown ? "↓" : " "} scroll
 				</Text>
 			)}
-			{card.requireApproval && (!card.actions || card.actions.length === 0) && (
+			{card.requireApproval && card.commandApprovalChoices ? (
+				card.commandApprovalChoices.map((choice, index) => (
+					<Text key={choice.id} color={theme.muted}>
+						<Text bold color={choice.id === "reject" ? theme.error : theme.info}>{index + 1}</Text>{" "}
+						{choice.label}
+					</Text>
+				))
+			) : card.requireApproval && (!card.actions || card.actions.length === 0) ? (
 				<Text color={theme.muted}>
 					<Text backgroundColor={theme.buttonPrimaryBg} color={theme.buttonPrimaryText}> y </Text> approve{"  "}
 					<Text backgroundColor={theme.buttonSecondaryBg} color={theme.buttonSecondaryText}> n </Text> deny
 				</Text>
-			)}
+			) : null}
 			{card.requireFeedback && card.actions && card.actions.length > 0 && (
 				<Text color={theme.muted}>
 					{card.actions.map((action, index) => (

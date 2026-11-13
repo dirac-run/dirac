@@ -51,6 +51,22 @@ function createSteerableTask() {
 }
 
 describe("Task steering inbox", () => {
+	it("queues guidance independently of unanswered and answered approval waiters", async () => {
+		const { task } = createSteerableTask()
+		task.taskState.status = TaskStatus.AWAITING_USER_INPUT
+		task.taskState.waitingCardIds = ["permission"]
+		const pending = { signal: new AbortController().signal, response: undefined as { action: string } | undefined }
+		task.taskState.pendingCardInteractions.set("permission", pending)
+		await task.enqueueSteeringMessage("Keep this draft separate")
+		assert.equal(pending.response, undefined)
+		pending.response = { action: "approve" }
+		await task.enqueueSteeringMessage("More guidance before waiter cleanup")
+		assert.deepEqual(pending.response, { action: "approve" })
+		assert.equal(task.taskState.steeringMessages.length, 2)
+		assert.equal(task.taskState.status, TaskStatus.AWAITING_USER_INPUT)
+		assert.equal(task.taskState.didRejectTool, false)
+	})
+
 	it("enqueues a queued user transcript message without interrupting task state", async () => {
 		const { task, messages } = createSteerableTask()
 

@@ -43,6 +43,7 @@ export interface ICardHandle {
 		action: DiracAskResponse | string
 		response: DiracAskResponse
 		value?: string
+		commandApprovalChoiceId?: string
 		text?: string
 		images?: string[]
 		files?: string[]

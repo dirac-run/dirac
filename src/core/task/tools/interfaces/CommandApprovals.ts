@@ -20,9 +20,9 @@ export interface CommandGrantSnapshot {
 	grants: CommandGrant[]
 }
 
-/** Child-bound authority; caller cannot choose a root or sibling identity. */
+/** Invocation-bound consent, separate from reusable root capability grants. */
 export interface CommandApprovalsCapability {
-	/** Serializes lookup, the approval of missing item indices, and durable commit before returning. */
+	/** Requests one-shot approval for every item, without holding a lock or persisting command identities. */
 	authorize(requests: readonly CommandApprovalRequest[], approve: (missing: readonly number[]) => Promise<boolean>): Promise<boolean>
 	/** Rechecks cancellation and current restrictions immediately before dispatch. */
 	assertCurrent(requests: readonly CommandApprovalRequest[]): void

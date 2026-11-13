@@ -128,4 +128,34 @@ describe("projectUIActionState", () => {
 
 		projectUIActionState(state, messages, 3).activeCardId!.should.equal("active")
 	})
+	it("projects only live unanswered approval waiters in registration order", () => {
+		const state = new TaskState()
+		state.status = TaskStatus.AWAITING_USER_INPUT
+		const ids = ["second", "first", "answered", "aborted", "final", "feedback", "informational"]
+		const messages: DiracMessage[] = ids.map((id, ts) => ({
+			id, ts, content: {
+				type: DiracMessageType.CARD, card: {
+					id, header: id, renderType: "text",
+					status: id === "final" ? CardStatus.SUCCESS : CardStatus.WAITING_FOR_INPUT,
+					requireApproval: id !== "feedback",
+				}
+			},
+		}))
+		for (const id of ids.filter((id) => id !== "informational")) {
+			const controller = new AbortController()
+			if (id === "aborted") controller.abort()
+			state.pendingCardInteractions.set(id, {
+				signal: controller.signal,
+				response: id === "answered" ? { action: "approve" } : undefined,
+			})
+		}
+		projectUIActionState(state, messages, 3).pendingApprovalCardIds!.should.deepEqual(["second", "first"])
+		projectUIActionState(state, (id) => messages.find((message) => message.id === id), 3)
+			.pendingApprovalCardIds!.should.deepEqual(["second", "first"])
+		state.status = TaskStatus.CANCELLING
+		projectUIActionState(state, messages, 3).pendingApprovalCardIds!.should.deepEqual([])
+		state.status = TaskStatus.AWAITING_USER_INPUT
+		state.abort = true
+		projectUIActionState(state, messages, 3).pendingApprovalCardIds!.should.deepEqual([])
+	})
 })

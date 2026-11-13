@@ -60,7 +60,7 @@ export const MessageRenderer = memo(
 					onAction={(value, cardId) =>
 						messageHandlers.executeButtonAction("utility", value, undefined, undefined, undefined, cardId)
 					}
-					onApprove={() =>
+					onApprove={(_cardId, commandApprovalChoiceId) =>
 						messageHandlers.executeButtonAction(
 							DiracAskResponse.APPROVE,
 							undefined,
@@ -68,10 +68,11 @@ export const MessageRenderer = memo(
 							undefined,
 							undefined,
 							message.id,
+							commandApprovalChoiceId,
 						)
 					}
 					onCancelCommand={() => messageHandlers.executeButtonAction("cancel")}
-					onReject={() =>
+					onReject={(_cardId, commandApprovalChoiceId) =>
 						messageHandlers.executeButtonAction(
 							DiracAskResponse.REJECT,
 							undefined,
@@ -79,6 +80,7 @@ export const MessageRenderer = memo(
 							undefined,
 							undefined,
 							message.id,
+							commandApprovalChoiceId,
 						)
 					}
 					onSetQuote={onSetQuote}

@@ -7,8 +7,8 @@ export interface ChatRowProps {
 	sendMessageFromChatRow?: (text: string, images: string[], files: string[]) => void
 	onSetQuote: (text: string | null) => void
 	onCancelCommand?: () => void
-	onApprove?: (cardId?: string) => void
-	onReject?: (cardId?: string) => void
+	onApprove?: (cardId?: string, commandApprovalChoiceId?: string) => void
+	onReject?: (cardId?: string, commandApprovalChoiceId?: string) => void
 	onAction?: (value: string, cardId?: string) => void
 	activeCardId?: string
 	activeVoiceStreamId?: string

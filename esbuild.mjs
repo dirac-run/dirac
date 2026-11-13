@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import * as esbuild from "esbuild"
+import { braketAssetsPlugin } from "./scripts/braket-assets.mjs"
 import { copySourceCode } from "./scripts/copy-source.mjs"
 import { copyWindowsMxcArtifacts } from "./scripts/windows-mxc-artifacts.mjs"
 
@@ -215,6 +216,7 @@ const baseConfig = {
 	tsconfig: path.resolve(__dirname, "tsconfig.json"),
 	plugins: [
 		copyAssets,
+		braketAssetsPlugin(),
 		aliasResolverPlugin,
 		/* add to the end of plugins array */
 		esbuildProblemMatcherPlugin,

@@ -17,9 +17,17 @@ export function projectUIActionState(
 	messages: readonly DiracMessage[] | ((id: string) => DiracMessage | undefined),
 	maxConsecutiveMistakes: number,
 ): UIActionState {
+	const pendingApprovalCardIds = state?.abort || state?.status === TaskStatus.CANCELLING ? [] :
+		[...(state?.pendingCardInteractions ?? [])].flatMap(([id, interaction]) => {
+			if (interaction.signal.aborted || interaction.response) return []
+			const message = typeof messages === "function" ? messages(id) : messages.find((entry) => entry.id === id)
+			return message?.content.type === DiracMessageType.CARD &&
+				message.content.card.requireApproval && !isFinalStatus(message.content.card.status) ? [id] : []
+		})
 	const uiState: UIActionState = {
 		globalButtons: [],
 		cardButtons: [],
+		pendingApprovalCardIds,
 		sendingDisabled: state?.status === TaskStatus.CANCELLING,
 	}
 
@@ -45,9 +53,9 @@ export function projectUIActionState(
 				card.actions?.map(mapCardActionToUIButton) ||
 				(card.requireApproval
 					? [
-							{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
-							{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
-						]
+						{ label: "Approve", action: UIActionButtonType.APPROVE, primary: true },
+						{ label: "Reject", action: UIActionButtonType.REJECT, style: "secondary" },
+					]
 					: [])
 			return uiState
 		}

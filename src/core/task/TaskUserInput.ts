@@ -1,6 +1,5 @@
 import { formatResponse } from "@core/formatResponse"
 import { processFilesIntoText } from "@integrations/misc/extract-text"
-import { Logger } from "@shared/services/Logger"
 import { TaskStatus } from "@shared/ExtensionMessage"
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import { DiracContent } from "@shared/messages/content"
@@ -59,26 +58,25 @@ export async function submitCardResponse(
 		images?: string[]
 		files?: string[]
 		value?: string
+		commandApprovalChoiceId?: string
 		userEdits?: Record<string, string>
 	},
 ): Promise<void> {
-	const { cardId, response, text, images, files, value, userEdits } = params
+	const { cardId, response, text, images, files, value, userEdits, commandApprovalChoiceId } = params
 	const state = ctx.taskState
 	if (!cardId && response !== DiracAskResponse.MESSAGE) {
-		Logger.warn(`[Task] Received unaddressed card action ${response}`)
-		return
+		throw new Error(`An exact card ID is required for action ${response}`)
 	}
 	const targetCardId = cardId || state.lastWaitingCardId
 	const pending = targetCardId ? state.pendingCardInteractions.get(targetCardId) : undefined
 	if (cardId && (!pending || pending.signal.aborted)) {
-		Logger.warn(`[Task] Received response for card ${cardId}, but it has no pending interaction`)
-		return
+		throw new Error(`Card ${cardId} has no pending interaction`)
 	}
 	const isStandardResponse = Object.values(DiracAskResponse).includes(response as DiracAskResponse)
 	const standardResponse = isStandardResponse ? (response as DiracAskResponse) : undefined
 	if (pending) {
-		if (pending.signal.aborted || pending.response) return
-		pending.response = { response: standardResponse, action: response, text, images, files, value, userEdits }
+		if (pending.signal.aborted || pending.response) throw new Error(`Card ${targetCardId} is no longer awaiting a response`)
+		pending.response = { response: standardResponse, action: response, text, images, files, value, userEdits, commandApprovalChoiceId }
 	} else {
 		state.askResponse = standardResponse
 		state.askResponseCardId = undefined

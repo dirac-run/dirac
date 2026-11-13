@@ -14,6 +14,7 @@ import { SurfaceType } from "../../interfaces/SurfaceType"
 import { ToolSkippedByUserMessage } from "../../types/ToolSkippedByUserMessage"
 import { resolveCommandTimeoutSeconds } from "../../utils/CommandTimeoutUtils"
 import { resolveCommandApproval } from "../../autoApprove"
+import { classifyCommandCapabilities, mergeCommandCapabilities } from "../../utils/CommandSafetyChecker"
 
 import { shortenCommandForDisplay } from "./path-display"
 
@@ -101,6 +102,7 @@ export class ExecuteCommandTool implements IDiracTool {
 	}
 
 	public async processCall(args: any, env: IToolEnvironment): Promise<any> {
+		if (env.orchestration.commandCapabilities) await env.orchestration.commandCapabilities.ready()
 		const sandboxContext = env.system.captureCommandSandbox?.()
 		const commands = this.normalizeCommands(args).map((command) => ({ ...this.prepareCommand(command, env), sandboxContext }))
 		if (commands.length === 0) {
@@ -215,11 +217,19 @@ export class ExecuteCommandTool implements IDiracTool {
 		utilityPermissionHandlingEnabled: boolean,
 	): Promise<{ approved: boolean; message?: string }> {
 		const label = this.permissionCardLabel(commands, env.config.cwd)
+		const classified = commands.map(({ command }) => classifyCommandCapabilities(command))
+		const required = classified.includes(-1) ? -1 : classified.reduce(mergeCommandCapabilities, 0)
+		const capabilities = env.orchestration.commandCapabilities
+		const grantsEnabled = capabilities && utilityEligible && (
+			this.autoApprover.requiresCounterpartyApproval || this.autoApprover.shouldAutoApproveTool(DiracDefaultTool.EXECUTE_COMMAND) === true
+		)
+		const capabilityApproval = capabilities ? await capabilities.offerApproval(grantsEnabled ? required : -1) : undefined
 		const card = await env.ui.createCard({
 			header: commands.length === 1 ? `Execute: ${label}` : `Execute ${label}?`,
 			status: CardStatus.WAITING_FOR_INPUT,
 			icon: DiracIcon.COMMAND,
 			requireApproval: true,
+			commandApprovalChoices: capabilityApproval ? [...capabilityApproval.choices] : undefined,
 			permissionOperation: {
 				kind: "commands",
 				commands: commands.map(({ command }) => command),
@@ -248,9 +258,30 @@ export class ExecuteCommandTool implements IDiracTool {
 			collapsed: false,
 		})
 
-		let interaction: Awaited<ReturnType<ICardHandle["waitForInteraction"]>>
 		try {
-			interaction = await card.waitForInteraction()
+			const interaction = await card.waitForInteraction()
+			if (interaction.action === DiracAskResponse.MESSAGE) {
+				if (interaction.text) {
+					await env.ui.upsertText(interaction.text, false, "user")
+				}
+				await this.resolvePermissionCard(card, "Skipped", label, CardStatus.SKIPPED, "↩ Skipped by user")
+				return { approved: false, message: interaction.text }
+			}
+			if (interaction.action !== DiracAskResponse.APPROVE) {
+				await this.resolvePermissionCard(card, "Rejected", label, CardStatus.CANCELLED, "Execution denied by user.")
+				return { approved: false, message: interaction.text }
+			}
+			const choiceId = interaction.commandApprovalChoiceId
+			if (choiceId !== undefined && !capabilityApproval) throw new Error("Command approval choice was not offered by the host")
+			env.orchestration.getTaskState("abortSignal").throwIfAborted()
+			this.validateCommands(commands)
+			this.commandPermissionController.assertConfigurationValid()
+			if (capabilityApproval && !await capabilityApproval.approve(choiceId ?? "approve")) {
+				await this.resolvePermissionCard(card, "Rejected", label, CardStatus.CANCELLED, "Execution denied by user.")
+				return { approved: false }
+			}
+			await this.resolvePermissionCard(card, "Approved", label, CardStatus.SUCCESS)
+			return { approved: true }
 		} catch (error) {
 			if (error instanceof ToolSkippedByUserMessage) {
 				await this.resolvePermissionCard(card, "Skipped", label, CardStatus.SKIPPED, "↩ Skipped by user")
@@ -259,20 +290,6 @@ export class ExecuteCommandTool implements IDiracTool {
 			}
 			throw error
 		}
-
-		if (interaction.action === DiracAskResponse.MESSAGE) {
-			if (interaction.text) {
-				await env.ui.upsertText(interaction.text, false, "user")
-			}
-			await this.resolvePermissionCard(card, "Skipped", label, CardStatus.SKIPPED, "↩ Skipped by user")
-			return { approved: false, message: interaction.text }
-		}
-		if (interaction.action !== DiracAskResponse.APPROVE) {
-			await this.resolvePermissionCard(card, "Rejected", label, CardStatus.CANCELLED, "Execution denied by user.")
-			return { approved: false, message: interaction.text }
-		}
-		await this.resolvePermissionCard(card, "Approved", label, CardStatus.SUCCESS)
-		return { approved: true }
 	}
 
 	private permissionCardLabel(commands: NormalizedCommand[], cwd?: string): string {

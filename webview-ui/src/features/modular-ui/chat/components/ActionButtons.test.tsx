@@ -76,6 +76,15 @@ function expectDraftUntouched(chatState: ChatState) {
 }
 
 describe("ActionButtons draft preservation", () => {
+	it("keeps ordinary messaging available while host approval waiters are pending", () => {
+		const props = createProps()
+		props.chatState.uiActionState = { pendingApprovalCardIds: ["approval-a", "approval-b"], globalButtons: [], cardButtons: [], sendingDisabled: true }
+		const { rerender } = render(<ActionButtons {...props} />)
+		expect(props.chatState.setSendingDisabled).toHaveBeenLastCalledWith(false)
+		expectDraftUntouched(props.chatState)
+		rerender(<ActionButtons {...props} chatState={{ ...props.chatState, uiActionState: { ...props.chatState.uiActionState, pendingApprovalCardIds: [], globalButtons: [], cardButtons: [], sendingDisabled: true } }} />)
+		expect(props.chatState.setSendingDisabled).toHaveBeenLastCalledWith(true)
+	})
 
 	it("preserves an unsent draft and attachments when a command is followed by an API request", () => {
 		const props = createProps()

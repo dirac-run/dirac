@@ -56,14 +56,35 @@ const signal = () => new AbortController().signal
 describe("ToolExecutor tasklet parent authority", () => {
 	afterEach(() => sinon.restore())
 
+	it("re-evaluates static root permission settings without consulting Utility", async () => {
+		const h = harness(true)
+		const input = request()
+		const options = { staticOnly: true }
+		assert.equal((await h.executor.authorizeTaskletPermission(input, signal(), options)).approved, false)
+		h.settings.autoApproveAllToggled = true
+		h.change()
+		const approved = await h.executor.authorizeTaskletPermission(input, signal(), options)
+		assert.equal(approved.approved, true)
+		h.settings.autoApproveAllToggled = false
+		h.change()
+		assert.throws(approved.assertCurrent, /authority changed/)
+		assert.equal((await h.executor.authorizeTaskletPermission(input, signal(), options)).approved, false)
+		h.settings.autoApproveAllToggled = true
+		h.change()
+		assert.equal((await h.executor.authorizeTaskletPermission(input, signal(), options)).approved, true)
+		sinon.assert.notCalled(h.decide)
+		h.permissions.assertConfigurationValid.throws(new Error("invalid configuration"))
+		await assert.rejects(h.executor.authorizeTaskletPermission(input, signal(), options), /invalid configuration/)
+	})
+
 	it("supplies the exact resolved cwd per command when parent Utility evaluates a child request", async () => {
 		const h = harness(true)
 		const operation = {
 			kind: "commands" as const,
-			commands: ["python clean.py", "npm run clean"],
+			commands: ["npm test", "rm report.txt"],
 			executionContexts: [
-				{ command: "python clean.py", cwd: "/workspace" },
-				{ command: "npm run clean", cwd: "/sensitive/secondary" },
+				{ command: "npm test", cwd: "/workspace" },
+				{ command: "rm report.txt", cwd: "/sensitive/secondary" },
 			],
 		}
 		const expected = structuredClone(operation)
@@ -86,16 +107,19 @@ describe("ToolExecutor tasklet parent authority", () => {
 		assert.throws(result.assertCurrent, /authority changed/)
 	})
 
-	it("applies current command rules to custom-tool smoke execution", async () => {
+	it("keeps unknown custom-tool smoke commands manual unless current root unrestricted approval permits them", async () => {
 		const h = harness()
 		const smoke = request("upsert_tool", { kind: "commands", commands: ["npx tsx '/task/test-harness.ts'"] })
 		assert.equal((await h.executor.authorizeTaskletPermission(smoke, signal())).approved, false)
 		h.settings.userApprovedCommands = [{ command: "npx tsx '/task/test-harness.ts'", match: "exact" }]
+		assert.equal((await h.executor.authorizeTaskletPermission(smoke, signal())).approved, false)
+		h.settings.autoApproveAllToggled = true
 		h.change()
 		const approved = await h.executor.authorizeTaskletPermission(smoke, signal())
 		assert.equal(approved.approved, true)
 		approved.assertCurrent()
 		h.settings.userApprovedCommands = []
+		h.settings.autoApproveAllToggled = false
 		h.change()
 		assert.throws(approved.assertCurrent, /authority changed/)
 		assert.equal((await h.executor.authorizeTaskletPermission(smoke, signal())).approved, false)

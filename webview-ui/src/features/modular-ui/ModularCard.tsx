@@ -9,7 +9,7 @@ import { ModularCardHeader } from "./components/ModularCardHeader"
 interface ModularCardProps {
 	card: Card
 	isActive?: boolean
-	onAction?: (value: string) => void
+	onAction?: (value: string, commandApprovalChoiceId?: string) => void
 }
 
 const initialCollapsedState = (card: Card) =>

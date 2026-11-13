@@ -11,7 +11,7 @@ import { TaskletReceiptBody } from "./TaskletReceiptBody"
 interface ModularCardBodyProps {
 	card: Card
 	isActive?: boolean
-	onAction?: (value: string) => void
+	onAction?: (value: string, commandApprovalChoiceId?: string) => void
 	scrollRef?: React.Ref<HTMLDivElement>
 }
 
