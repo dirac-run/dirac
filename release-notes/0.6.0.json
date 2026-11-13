@@ -5,7 +5,7 @@
 	"announce": true,
 	"sourceTag": "v0.5.24",
 	"analyzedCommit": "b643464b27d98051ab0e815b92dd49e176c9d071",
-	"headline": "Dirac 0.6.0 introduces asynchronous subagents, direct agent collaboration, and BraKet-powered command permissions.",
+	"headline": "Dirac 0.6.0 introduces asynchronous subagents, direct agent collaboration, and BraKet-powered command permissions. It is the biggest update we ever released.",
 	"summaryMd": "This release substantially expands how Dirac can approach larger tasks. Independent assignments can run alongside the main agent's work, agents can exchange discoveries directly, and saved conversations let an assignment continue where it left off. We also integrated BraKet, the command categorizer we built, into the permission flow. Together with configurable specialist roles, optional command sandboxing, and clearer visibility into ongoing work, these changes give you much more room to delegate while keeping control of execution.\n\n**Upgrade note:** Goals saved in the previous execution format require a fresh start with `/goal`; existing files are preserved. Older subagent previews remain viewable, while resuming a saved conversation requires a recoverable model selection.",
 	"highlights": [
 		{
