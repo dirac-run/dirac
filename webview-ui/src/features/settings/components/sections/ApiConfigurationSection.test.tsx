@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import ApiConfigurationSection from "./ApiConfigurationSection"
@@ -34,6 +34,12 @@ const editProvider = (label: string) => fireEvent.click(screen.getByRole("button
 
 beforeEach(() => {
 	useSettingsStore.setState({
+		openAiCodexIsAuthenticated: false,
+		openAiCodexEmail: undefined,
+		openAiCodexUsage: undefined,
+		openAiCodexUsageRefreshing: false,
+		openAiCodexUsageRefreshError: undefined,
+		refreshOpenAiCodexUsage: vi.fn().mockResolvedValue(undefined),
 		configuredApiProviders: ["anthropic", "gemini"],
 		apiConfiguration: { actModeApiProvider: "anthropic", planModeApiProvider: "gemini" },
 	})
@@ -55,6 +61,7 @@ describe("API provider settings navigation", () => {
 		expect(screen.getByRole("button", { name: "+ Add provider" })).toBeInTheDocument()
 		expect(screen.getByText(/Provider setup does not change your active model selection/)).toBeInTheDocument()
 		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: /usage\/details/i })).not.toBeInTheDocument()
 	})
 
 	it("opens a dedicated add view with no initial provider and returns to the list", () => {
@@ -150,5 +157,163 @@ describe("API provider settings navigation", () => {
 		editProvider("OpenAI Compatible")
 		expect(screen.getByRole("heading", { name: "OpenAI Compatible setup" })).toBeInTheDocument()
 		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openai")
+	})
+
+	it("expands saved ChatGPT account and usage details lazily without changing models or setup navigation", () => {
+		const refreshUsage = vi.fn().mockResolvedValue(undefined)
+		const configuration = { actModeApiProvider: "anthropic" as const, planModeApiProvider: "gemini" as const }
+		useSettingsStore.setState({
+			configuredApiProviders: ["openai-codex", "anthropic"],
+			apiConfiguration: configuration,
+			openAiCodexIsAuthenticated: true,
+			openAiCodexEmail: "person@example.com",
+			openAiCodexUsage: {
+				planType: "plus",
+				rateLimits: [{ limitId: "codex", primary: { usedPercent: 32, windowMinutes: 300 } }],
+				credits: { hasCredits: true, unlimited: false, balance: "$18.50" },
+				quotaFetchedAt: Date.now(),
+			},
+			refreshOpenAiCodexUsage: refreshUsage,
+		})
+		render(<ApiConfigurationSection />)
+
+		const toggle = screen.getByRole("button", { name: "Show usage/details for ChatGPT" })
+		expect(toggle).toHaveTextContent("Show usage/details")
+		expect(toggle).toHaveAttribute("aria-expanded", "false")
+		expect(document.getElementById(toggle.getAttribute("aria-controls")!)).not.toBeVisible()
+		expect(screen.queryByRole("heading", { name: "Subscription usage" })).not.toBeInTheDocument()
+		expect(screen.getByText("Saved setup for openai-codex")).toBeInTheDocument()
+		expect(refreshUsage).not.toHaveBeenCalled()
+
+		fireEvent.click(toggle)
+
+		expect(toggle).toHaveAttribute("aria-expanded", "true")
+		expect(toggle).toHaveAccessibleName("Hide usage/details for ChatGPT")
+		expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toBeVisible()
+		expect(screen.getByRole("heading", { name: "ChatGPT account" })).toBeInTheDocument()
+		expect(screen.getByText("person@example.com · Connected")).toBeInTheDocument()
+		expect(screen.getByRole("heading", { name: "Subscription usage" })).toBeInTheDocument()
+		expect(screen.getByText("$18.50")).toBeInTheDocument()
+		expect(screen.getByText("Plus")).toBeInTheDocument()
+		expect(refreshUsage).toHaveBeenCalledExactlyOnceWith(false)
+		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+		expect(useSettingsStore.getState().apiConfiguration).toBe(configuration)
+
+		fireEvent.click(toggle)
+		expect(toggle).toHaveAttribute("aria-expanded", "false")
+		expect(screen.queryByRole("heading", { name: "Subscription usage" })).not.toBeInTheDocument()
+		expect(refreshUsage).toHaveBeenCalledTimes(1)
+		fireEvent.click(toggle)
+		expect(refreshUsage).toHaveBeenCalledTimes(2)
+
+		editProvider("ChatGPT Subscription")
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openai-codex")
+		expect(screen.queryByRole("heading", { name: "Subscription usage" })).not.toBeInTheDocument()
+		backToProviders()
+		expect(screen.getByRole("button", { name: "Show usage/details for ChatGPT" })).toHaveAttribute("aria-expanded", "false")
+		expect(useSettingsStore.getState().apiConfiguration).toBe(configuration)
+	})
+
+	it("offers read-only ChatGPT details even before account state arrives", () => {
+		useSettingsStore.setState({ configuredApiProviders: ["openai-codex"] })
+		render(<ApiConfigurationSection />)
+
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+		expect(screen.getByText("Not connected. Use Edit setup to sign in to ChatGPT.")).toBeInTheDocument()
+		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).not.toHaveBeenCalled()
+
+		act(() => useSettingsStore.setState({ openAiCodexIsAuthenticated: true }))
+		expect(screen.getByText("ChatGPT user · Connected")).toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledExactlyOnceWith(false)
+	})
+
+	it("shows a nonempty snapshot without email and preserves refresh errors and manual refresh", () => {
+		useSettingsStore.setState({
+			configuredApiProviders: ["openai-codex"],
+			openAiCodexIsAuthenticated: true,
+			openAiCodexUsage: { rateLimits: [], credits: { hasCredits: true, unlimited: true } },
+			openAiCodexUsageRefreshError: "Usage service unavailable",
+		})
+		render(<ApiConfigurationSection />)
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+
+		expect(screen.getByText("Unlimited")).toBeInTheDocument()
+		expect(screen.getByText(/Usage service unavailable/)).toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledExactlyOnceWith(false)
+		fireEvent.click(screen.getByRole("button", { name: "Refresh ChatGPT usage" }))
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenLastCalledWith(true)
+	})
+
+	it("offers account details and lazy loading before the first usage snapshot arrives", () => {
+		useSettingsStore.setState({
+			configuredApiProviders: ["openai-codex"],
+			openAiCodexIsAuthenticated: true,
+			openAiCodexEmail: "person@example.com",
+			openAiCodexUsageRefreshing: true,
+		})
+		render(<ApiConfigurationSection />)
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+
+		expect(screen.getByText("person@example.com · Connected")).toBeInTheDocument()
+		expect(screen.getByText("Loading subscription usage…")).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Refresh ChatGPT usage" })).toBeDisabled()
+		expect(screen.getByRole("heading", { name: "Subscription usage" })).toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledExactlyOnceWith(false)
+	})
+
+	it.each([
+		undefined,
+		{ rateLimits: [] },
+		{ rateLimits: [], quotaFetchedAt: Date.now(), activityFetchedAt: Date.now() },
+		{ rateLimits: [], activity: { dailyUsageBuckets: [] } },
+	])("loads ChatGPT details after reload without email or cached usage (%j)", (snapshot) => {
+		useSettingsStore.setState({
+			configuredApiProviders: ["openai-codex"],
+			openAiCodexIsAuthenticated: true,
+			openAiCodexUsage: snapshot,
+		})
+		const { unmount } = render(<ApiConfigurationSection />)
+
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).not.toHaveBeenCalled()
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledExactlyOnceWith(false)
+		expect(screen.getByText("ChatGPT user · Connected")).toBeInTheDocument()
+		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+
+		act(() => useSettingsStore.setState({
+			openAiCodexUsage: { rateLimits: [], planType: "plus", credits: { hasCredits: true, unlimited: true } },
+		}))
+		expect(screen.getByText("Plus")).toBeInTheDocument()
+		expect(screen.getByText("Unlimited")).toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledTimes(1)
+
+		unmount()
+		act(() => useSettingsStore.setState({ openAiCodexUsage: undefined }))
+		render(<ApiConfigurationSection />)
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledTimes(2)
+		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+	})
+
+	it("hides private account data on signout but keeps the details view available", () => {
+		useSettingsStore.setState({
+			configuredApiProviders: ["openai-codex"],
+			openAiCodexIsAuthenticated: true,
+			openAiCodexEmail: "person@example.com",
+			openAiCodexUsage: { rateLimits: [], credits: { hasCredits: true, unlimited: false, balance: "$9.25" } },
+		})
+		render(<ApiConfigurationSection />)
+		fireEvent.click(screen.getByRole("button", { name: "Show usage/details for ChatGPT" }))
+		expect(screen.getByText("$9.25")).toBeInTheDocument()
+
+		act(() => useSettingsStore.setState({ openAiCodexIsAuthenticated: false }))
+
+		expect(screen.queryByText("$9.25")).not.toBeInTheDocument()
+		expect(screen.queryByText("person@example.com · Connected")).not.toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Hide usage/details for ChatGPT" })).toBeInTheDocument()
+		expect(screen.getByText("Not connected. Use Edit setup to sign in to ChatGPT.")).toBeInTheDocument()
+		expect(useSettingsStore.getState().refreshOpenAiCodexUsage).toHaveBeenCalledTimes(1)
+		expect(screen.queryByRole("button", { name: "Refresh ChatGPT usage" })).not.toBeInTheDocument()
 	})
 })

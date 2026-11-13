@@ -5,6 +5,8 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { useAutoApproveActions } from "@/shared/hooks/useAutoApproveActions"
 import { useAutoApproveAll } from "@/shared/hooks/useAutoApproveAll"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
+import { Button } from "@/shared/ui/button"
+import { getProviderLabel } from "@/shared/lib/getConfiguredProviders"
 import AutoApproveMenuItem from "@/features/modular-ui/chat/components/AutoApprove/AutoApproveMenuItem"
 import { ACTION_METADATA, NOTIFICATIONS_SETTING } from "@/features/modular-ui/chat/components/AutoApprove/constants"
 import Section from "../Section"
@@ -32,9 +34,18 @@ const ApprovalsSettingsSection = ({ renderSectionHeader }: ApprovalsSettingsSect
 	const { updateAutoApproveAll } = useAutoApproveAll()
 	const isYoloRemoteLocked = remoteConfigSettings?.yoloModeToggled !== undefined
 	const effectiveYoloMode = isYoloRemoteLocked ? remoteConfigSettings.yoloModeToggled : yoloModeToggled
-	const utilityApprovalEnabled =
-		utilityModelUsePermissionHandling && Boolean(utilityModelSelection?.modelId) && utilityModelPermissionPolicy.trim() !== ""
-
+	const utilityModelId = utilityModelSelection?.modelId.trim()
+	const missingUtilityConfiguration = [
+		!utilityModelId && "Utility Model",
+		!utilityModelPermissionPolicy.trim() && "permission policy",
+	]
+		.filter(Boolean)
+		.join(" and ")
+	const utilityApprovalStatus = !utilityModelUsePermissionHandling
+		? "Disabled"
+		: missingUtilityConfiguration
+			? `Not ready — missing ${missingUtilityConfiguration}`
+			: "Enabled"
 
 	return (
 		<div className="mb-2">
@@ -75,20 +86,48 @@ const ApprovalsSettingsSection = ({ renderSectionHeader }: ApprovalsSettingsSect
 							explicitly switch to Act.
 						</p>
 					</div>
-					<div className="text-sm">
-						<span className="font-medium">AI-assisted approvals:</span>{" "}
-						<span>{utilityApprovalEnabled ? "Enabled with Utility Model" : "Not configured"}</span>
-						<p className="mt-1 text-xs text-description">
-							Configure the model and approval policy in Utility Model.{" "}
-							<button
-								className="cursor-pointer border-0 bg-transparent p-0 text-(--vscode-textLink-foreground)"
-								onClick={() => navigateToSettings("utility-model")}
-								type="button">
-								Configure…
-							</button>
-						</p>
-					</div>
 				</div>
+
+				<section
+					aria-labelledby="utility-approvals-heading"
+					className="rounded border border-(--vscode-widget-border) p-3"
+					id="utility-approvals">
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<h3 className="m-0 text-sm font-medium" id="utility-approvals-heading">
+							AI-assisted approvals
+						</h3>
+						<Button
+							className="max-w-full whitespace-normal"
+							onClick={() => navigateToSettings("utility-model")}
+							size="sm"
+							type="button"
+							variant="secondary">
+							Configure Utility Model
+						</Button>
+					</div>
+					<p className="mb-2 mt-2 text-sm">
+						Use your Utility Model and permission policy to review tool permission requests.
+					</p>
+					<dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+						<dt className="text-description">Status</dt>
+						<dd className="m-0 break-words font-medium">{utilityApprovalStatus}</dd>
+						<dt className="text-description">Provider</dt>
+						<dd className="m-0 break-words">
+							{utilityModelSelection ? getProviderLabel(utilityModelSelection.provider) : "Not selected"}
+							{utilityModelSelection?.openAiProfileName && ` (${utilityModelSelection.openAiProfileName})`}
+						</dd>
+						<dt className="text-description">Model</dt>
+						<dd className="m-0 break-words">{utilityModelId || "Not selected"}</dd>
+						<dt className="text-description">Permission policy</dt>
+						<dd className="m-0">{utilityModelPermissionPolicy.trim() ? "Configured" : "Not configured"}</dd>
+					</dl>
+					{!utilityModelUsePermissionHandling && (
+						<p className="mb-0 mt-2 text-xs text-description">
+							Enable “Handle permission requests” in Utility Model to use AI-assisted approvals.
+						</p>
+					)}
+					<p className="mb-0 mt-2 text-xs text-description">{SETTINGS_HELP.utilityPermissionFallback}</p>
+				</section>
 
 				<div className="rounded border border-(--vscode-widget-border) p-3" id="approve-all">
 					<Tooltip>

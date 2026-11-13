@@ -5,6 +5,7 @@ import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { Button } from "@/shared/ui/button"
 import ApiOptions from "../ApiOptions"
 import { ProviderSetupSummary } from "../ProviderSetupSummary"
+import { OpenAiCodexConfiguredDetails } from "../providers/openai-codex/OpenAiCodexConfiguredDetails"
 import Section from "../Section"
 
 interface ApiConfigurationSectionProps {
@@ -74,6 +75,7 @@ const ApiConfigurationSection = ({ renderSectionHeader }: ApiConfigurationSectio
 												Edit setup
 											</Button>
 										</div>
+										{provider === "openai-codex" && <OpenAiCodexConfiguredDetails />}
 										{provider === "openai" && profiles.length > 0 && (
 											<ul aria-label="OpenAI Compatible profiles" className="mt-2 list-none space-y-1 pl-3">
 												{profiles.map((profile) => (
