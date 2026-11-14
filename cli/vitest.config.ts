@@ -1,5 +1,8 @@
+import { createRequire } from "node:module"
 import path from "path"
 import { defineConfig } from "vitest/config"
+
+const require = createRequire(import.meta.url)
 
 export default defineConfig({
 	test: {
@@ -12,10 +15,27 @@ export default defineConfig({
 		projects: [
 			{
 				extends: true,
+				resolve: {
+					// Standalone CLI installs share one Ink peer. The workspace also
+					// has an older root Ink, so align the real provider and renderer.
+					alias: { ink: require.resolve("ink") },
+				},
+				test: {
+					name: "startup",
+					include: ["src/components/App.raw-mode.test.tsx"],
+					server: { deps: { inline: ["ink-picture"] } },
+				},
+			},
+			{
+				extends: true,
 				test: {
 					name: "unit",
 					include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
-					exclude: ["src/**/*.markdown.test.tsx", "src/components/ChatMessage.test.tsx"],
+					exclude: [
+						"src/**/*.markdown.test.tsx",
+						"src/components/ChatMessage.test.tsx",
+						"src/components/App.raw-mode.test.tsx",
+					],
 				},
 			},
 			{

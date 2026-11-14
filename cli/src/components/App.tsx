@@ -89,14 +89,16 @@ interface AppProps {
 	isRawModeSupported?: boolean
 }
 
-export const App: React.FC<AppProps> = (props) => {
+export const App: React.FC<AppProps> = ({ isRawModeSupported = true, ...props }) => {
 	const { exit } = useApp()
 
 	return (
 		<ErrorBoundary exit={exit}>
-			<TerminalInfoProvider>
-				<InternalApp {...props} />
-			</TerminalInfoProvider>
+			<StdinProvider isRawModeSupported={isRawModeSupported}>
+				<TerminalInfoProvider>
+					<InternalApp {...props} />
+				</TerminalInfoProvider>
+			</StdinProvider>
 		</ErrorBoundary>
 	)
 }
@@ -140,7 +142,6 @@ const InternalApp: React.FC<AppProps> = ({
 	initialPrompt,
 	initialImages,
 	timeoutSeconds,
-	isRawModeSupported = true,
 }) => {
 	const { resizeKey } = useTerminalSize()
 	const [currentView, setCurrentView] = useState<ViewType>(initialView)
@@ -243,9 +244,5 @@ const InternalApp: React.FC<AppProps> = ({
 			content = null
 	}
 
-	return (
-		<StdinProvider isRawModeSupported={isRawModeSupported}>
-			<Box key={resizeKey}>{content}</Box>
-		</StdinProvider>
-	)
+	return <Box key={resizeKey}>{content}</Box>
 }

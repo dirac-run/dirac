@@ -32,8 +32,8 @@ const WindowsSessionRawModeKeeper: React.FC<{ isRawModeSupported: boolean }> = (
 			return
 		}
 
-		// Keep one Ink raw-mode claim alive for the full session so view transitions
-		// do not briefly drop keyboard handling on Windows.
+		// Mount before terminal-capability probes: their temporary raw-mode claims
+		// must not return Windows stdin to cooked mode between queries or views.
 		setRawMode(true)
 		if (stdin && typeof stdin.resume === "function") {
 			stdin.resume()

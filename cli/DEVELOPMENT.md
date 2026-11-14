@@ -117,6 +117,8 @@ Commander parsers must reject invalid values rather than silently changing them.
 
 Components render terminal state; hooks own input and stateful interaction. Keep task execution outside rendering components. The `TaskContext` subscription is the boundary from core state into the TUI.
 
+The Windows session raw-mode owner must mount before `TerminalInfoProvider`, which gates its children while probing terminal capabilities. Keep that owner above both the probe gate and resize-keyed views: query-local raw-mode releases must not return stdin to cooked mode during startup. Startup regression coverage must retain the real Ink ownership counter and terminal probes; a passthrough provider mock cannot test this invariant.
+
 Input handlers must ignore terminal control sequences they do not own. Layout code must account for live terminal resizing and very narrow terminals. Modal lists clamp their selection and viewport whenever their contents or available height changes.
 
 Use semantic tokens from `cli/src/constants/theme.ts`; do not place raw named colors in components. Dark mode is the fallback. Light mode is selected by `DIRAC_COLOR_MODE=light` or a light background reported through `COLORFGBG`.
