@@ -23,7 +23,7 @@ import type { ApiConfiguration, ModelProviderSelection } from "@shared/api"
 import { CardStatus, DiracMessage } from "@shared/ExtensionMessage"
 import { Logger } from "@shared/services/Logger"
 import { DiracContent } from "@shared/messages/content"
-import { canonicalizeResponseToolCall, isCompletionResponseCall } from "@shared/responseTool"
+import { isCompletionResponseCall } from "@shared/responseTool"
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
 import { getTaskScopedStateKey } from "@shared/taskletId"
@@ -52,8 +52,6 @@ import { ToolDisplayUtils } from "./tools/utils/ToolDisplayUtils"
 import type { TaskExecutionProfile } from "./TaskExecutionProfile"
 import { isDiscoveredToolAvailableToTaskProfile } from "./TaskExecutionProfile"
 import type { TaskInteractionRequest } from "./types/task-messenger"
-
-export { canonicalizeResponseToolCall }
 
 // Main tool execution entry point — dispatches tool calls, manages hooks, errors, and results.
 export class ToolExecutor {
@@ -568,7 +566,6 @@ export class ToolExecutor {
 
 	private async execute(block: ToolUse, isComplete = true): Promise<boolean> {
 		try {
-			canonicalizeResponseToolCall(block, isComplete)
 			const runtime = this.requestRuntime()
 			const coordinator = this.coordinator
 			if (!coordinator.has(block.name)) return false
@@ -646,7 +643,6 @@ export class ToolExecutor {
 	/** Capture implementation and request attribution before admission or any asynchronous wait. */
 	public prepareInvocation(block: ToolUse, runtime = this.requestRuntime()) {
 		const captured = structuredClone(block)
-		canonicalizeResponseToolCall(captured, true)
 		const coordinator = runtime.toolSnapshot?.coordinator ?? this.coordinator
 		if (!coordinator.has(captured.name)) throw new Error(`Unknown tool: ${captured.name}`)
 		const config = this.asToolConfig(coordinator, runtime)

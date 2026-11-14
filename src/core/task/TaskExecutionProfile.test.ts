@@ -39,7 +39,6 @@ describe("Task execution profiles", () => {
 	it("permits shared delegation and supervision for every root, never for tasklets", () => {
 		for (const profile of profiles) {
 			assert.equal(isToolAvailableToTaskProfile(profile, "subagents"), profile !== "tasklet")
-			assert.equal(isToolAvailableToTaskProfile(profile, "tasklets"), false)
 			assert.equal(isToolAvailableToTaskProfile(profile, "read_file"), true)
 		}
 	})

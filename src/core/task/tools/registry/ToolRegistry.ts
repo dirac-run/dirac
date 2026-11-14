@@ -7,10 +7,13 @@ import type { IDiracTool } from "../interfaces/IDiracTool"
 import type { TaskConfig } from "../types/TaskConfig"
 import type { DiscoveredTool, ToolSource } from "../discovery/DiscoveredTool"
 import { StateManager } from "@/core/storage/StateManager"
-import { LEGACY_RESPONSE_TOOLS, RESPOND_TOOL_NAME } from "@shared/responseTool"
+import { LegacyResponseTool } from "@shared/responseTool"
 import Mutex from "p-mutex"
 
 const SOURCE_PRIORITY: Record<ToolSource, number> = { builtin: 0, global: 1, workspace: 2, task: 3 }
+
+// Old card identities remain readable; custom tools must not impersonate that metadata.
+const historicalResponseNames = new Set<string>(Object.values(LegacyResponseTool))
 
 
 
@@ -308,14 +311,8 @@ export class ToolRegistry {
 
 
 	loadToggles(toggles: Record<string, boolean>): void {
-		const migrated = { ...toggles }
-		const legacyNames = Object.keys(LEGACY_RESPONSE_TOOLS)
-		if (!(RESPOND_TOOL_NAME in migrated) && legacyNames.some((name) => name in migrated)) {
-			migrated[RESPOND_TOOL_NAME] = legacyNames.every((name) => migrated[name] ?? true)
-		}
-		for (const name of legacyNames) delete migrated[name]
 		this.enabledOverrides = new Map(
-			Object.entries(migrated).filter(([toolId]) => this.getTool(toolId)?.exposure.kind === "configurable"),
+			Object.entries(toggles).filter(([toolId]) => this.getTool(toolId)?.exposure.kind === "configurable"),
 		)
 	}
 
@@ -572,7 +569,7 @@ export class ToolRegistry {
 
 	private collidesWithBuiltin(tool: DiscoveredTool): boolean {
 		return (
-			[...this.toolIdentifiers(tool)].some((id) => id in LEGACY_RESPONSE_TOOLS) ||
+			[...this.toolIdentifiers(tool)].some((id) => historicalResponseNames.has(id)) ||
 			Array.from(this.builtinTools.values()).some((builtin) => this.toolsCollide(builtin, tool))
 		)
 	}

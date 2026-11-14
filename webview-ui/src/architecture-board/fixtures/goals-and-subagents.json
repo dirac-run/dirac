@@ -1,288 +1,108 @@
 {
-  "title": "Goals vs subagents: asynchronous supervision vs synchronous fork/join",
-  "summary": "Current implementation, not a proposal. Read the two numbered flows independently. GOAL: one durable objective owns a foreground coordinator Task and multiple private child Tasks. start_task returns a child record without waiting for completion; the coordinator can keep working, steer children, resolve their interactions, and explicitly wait for ordered events. SUBAGENTS: a Task calls use_subagents; the tool runs several SubagentRunner instances concurrently and returns only after the batch settles. Synchronous means the parent is awaiting the tool result, not that the agents run sequentially. Both mechanisms use the same workspace: separate conversations are not separate files or worktrees. They compose: a Goal coordinator or child Task can itself use subagents when enabled. Click nodes and edges for implementation details and source links.",
+  "title": "Parallel routing lanes: feedback cycles and fan-out / merge",
+  "summary": "Geometry-only fixture for the reported 15-node / 24-relationship readability regression. The lanes, branches and feedback connections are synthetic routing examples, not documentation of the current runtime or delegation API. Historical filenames and graph IDs remain stable for regression assertions; node kinds, relationship kinds and topology are retained to exercise layout and routing.",
   "nodes": [
     {
       "id": "goal-group",
       "kind": "group",
-      "label": "A. GOAL — durable, asynchronous task supervision",
-      "description": "A Goal is lifecycle state plus a coordinator Task, not a different kind of LLM engine. Private children are full Task instances. Goal execution and child Tasks use Act mode."
+      "label": "A. FEEDBACK LANE — grouped cyclic flow and branching",
+      "description": "Geometry-only group shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-lifecycle",
       "kind": "component",
-      "label": "GoalController + GoalLoop",
+      "label": "Flow owner + lifecycle-shaped hub",
       "parentId": "goal-group",
-      "description": "GoalController owns foreground selection; GoalLoop owns one coordinator and its child host. It constructs/reconstructs the coordinator, pins the durable objective and active-child summary into context, and owns lifecycle transitions. States: working, waiting, paused, blocked, achieved, stopped. Pause/stop abort owned execution and settle children. Recovery pauses interrupted execution and marks nonterminal children interrupted; it does not automatically restart those workers. Explicit resume reconstructs the coordinator from history. An achieved Goal cannot resume; a follow-up turn can run without changing the durable lifecycle.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalController.ts",
-          "symbol": "GoalController"
-        },
-        {
-          "path": "src/core/goal/GoalLoop.ts",
-          "symbol": "GoalLoop.constructRuntime"
-        },
-        {
-          "path": "src/core/goal/GoalLifecycle.ts"
-        },
-        {
-          "path": "src/core/goal/GoalStore.ts",
-          "symbol": "GoalStore.recoverInterruptedExecution"
-        }
-      ]
+      "description": "Geometry-only component shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-coordinator",
       "kind": "class",
-      "label": "1. Foreground coordinator Task",
+      "label": "1. Foreground-shaped coordinator node",
       "parentId": "goal-group",
-      "description": "An ordinary Task with the goal_coordinator execution profile. Receives the objective and user steering, can work directly, and is the only Goal agent communicating with the end user. Gives each child a complete self-contained assignment. After starting workers it can take more actions; it is not automatically blocked waiting for them. It synthesizes private child updates rather than mechanically forwarding them.",
-      "code": [
-        {
-          "path": "src/core/task/TaskExecutionProfile.ts",
-          "symbol": "taskProfileSystemInstructions"
-        },
-        {
-          "path": "src/core/goal/GoalLoop.ts",
-          "symbol": "GoalLoop.constructRuntime"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-host",
       "kind": "class",
-      "label": "2. GoalTaskHost — start & supervise",
+      "label": "2. Dispatch hub — start & supervise paths",
       "parentId": "goal-group",
-      "description": "Owns the live-child registry, pending interactions, and ordered event delivery. Goal tools reach it through IToolEnvironment.goal / IGoalTrait, wired by GoalCoordinatorToolEnvironment and GoalLoop. start_task creates a durable child record, constructs a full Task through GoalTaskFactory, starts its run, and observes settlement asynchronously. Other tools list Tasks, read transcripts, send steering, cancel Tasks, resolve interactions, and wait for events. verify_goal uses the same start path with role verification.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalTaskHost.ts",
-          "symbol": "GoalTaskHost.startTask"
-        },
-        {
-          "path": "src/core/goal/GoalTaskFactory.ts",
-          "symbol": "GoalTaskFactory.create"
-        },
-        {
-          "path": "src/core/goal/GoalLoop.ts",
-          "symbol": "GoalLoop.goalTrait"
-        },
-        {
-          "path": "src/core/task/tools/interfaces/IToolEnvironment.ts",
-          "symbol": "IGoalTrait"
-        },
-        {
-          "path": "src/core/task/tools/modules/start_task/StartTaskTool.ts"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-child-a",
       "kind": "class",
-      "label": "3a. Child Task A — independent loop",
+      "label": "3a. Branch endpoint A — independent path",
       "parentId": "goal-group",
-      "description": "A new Task ID, conversation, TaskState, and normal Task execution loop. Starts from the supplied assignment, not a copy of the coordinator's conversation. Runs privately in Act mode. GoalChildToolEnvironment records respond progress/completion and captures questions/approvals for the host. The child cannot spawn Goal Tasks, but can call use_subagents when enabled. It shares the workspace with the coordinator and other workers.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalTaskFactory.ts",
-          "symbol": "GoalTaskFactory.create"
-        },
-        {
-          "path": "src/core/goal/GoalTaskEnvironment.ts",
-          "symbol": "GoalChildToolEnvironment"
-        },
-        {
-          "path": "src/core/task/TaskExecutionProfile.ts",
-          "symbol": "isToolAvailableToTaskProfile"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-child-b",
       "kind": "class",
-      "label": "3b. Child Task B — runs concurrently",
+      "label": "3b. Branch endpoint B — parallel path",
       "parentId": "goal-group",
-      "description": "Another full private Task, not a serial step after A. Children can finish, fail, be cancelled, be interrupted, or wait for an interaction independently. A verify_goal call creates a child through this same mechanism with a verification assignment containing the durable objective and child-status summary. No automatic filesystem or worktree isolation is created by this path.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalTaskHost.ts",
-          "symbol": "GoalTaskHost.startVerification"
-        },
-        {
-          "path": "src/core/goal/GoalTaskHost.ts",
-          "symbol": "GoalTaskHost.observeRun"
-        },
-        {
-          "path": "src/shared/goal.ts"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "goal-store",
       "kind": "database",
-      "label": "Durable objective, children & events",
+      "label": "State-shaped node, records & feedback",
       "parentId": "goal-group",
-      "description": "GoalStore persists the objective and its revision, lifecycle, child records, sequenced events, wake metadata, and accounting. Full Task conversations are persisted separately. Responses are recorded durably before their events are published. wait_for_goal_events claims an ordered event batch; delivery is acknowledged only once the coordinator conversation persists it. This supports recovery without treating transient in-memory workers as resumable background processes.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalStore.ts",
-          "symbol": "GoalStore"
-        },
-        {
-          "path": "src/shared/goal.ts",
-          "symbol": "GoalRecord"
-        },
-        {
-          "path": "src/core/goal/GoalTaskHost.ts",
-          "symbol": "GoalTaskHost.waitForEvents"
-        },
-        {
-          "path": "src/core/goal/GoalTaskHost.ts",
-          "symbol": "GoalTaskHost.acknowledgePersistedWake"
-        }
-      ]
+      "description": "Geometry-only database shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-group",
       "kind": "group",
-      "label": "B. SUBAGENTS — parallel work inside one awaited tool call",
-      "description": "Structured fork/join inside a Task. SubagentRunner is a dedicated API/tool loop, not a new full Task. Sibling runners execute concurrently; the parent waits for their batch to settle."
+      "label": "B. PARALLEL LANE — fan-out and merge with a return cycle",
+      "description": "Geometry-only group shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-parent",
       "kind": "class",
-      "label": "1. Parent Task — awaits tool result",
+      "label": "1. Entry node — receives merged return",
       "parentId": "subagent-group",
-      "description": "May be a standalone Task, Goal coordinator, or Goal child when subagents are enabled. Calls use_subagents with a list of assignments. Its next model step depends on the aggregate tool result; it does not get a Goal-style registry of independently steerable subagent Tasks. Progress cards can update while the model is waiting. Cancelling the parent propagates to the runners.",
-      "code": [
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts",
-          "symbol": "UseSubagentsTool.processCall"
-        },
-        {
-          "path": "src/core/task/TaskExecutionProfile.ts"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-tool",
       "kind": "component",
-      "label": "2. use_subagents — fork the batch",
+      "label": "2. Fan-out component — branch requests",
       "parentId": "subagent-group",
-      "description": "Validates requests, allocates agent identities, and creates aggregate/per-agent cards. Uses requests.map(async ...) to start one execution per request. Each execution calls env.orchestration.runSubagent; OrchestrationTraitBuilder constructs SubagentRunner and connects cancellation, progress, recording, and usage accounting. The tool owns this entire batch lifecycle. Recursive subagent spawning is rejected.",
-      "code": [
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts",
-          "symbol": "UseSubagentsTool.runSubagents"
-        },
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts",
-          "symbol": "UseSubagentsTool.validateExecution"
-        },
-        {
-          "path": "src/core/task/tools/adapters/traits/OrchestrationTraitBuilder.ts",
-          "symbol": "buildOrchestrationTrait"
-        }
-      ]
+      "description": "Geometry-only component shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-a",
       "kind": "class",
-      "label": "3a. SubagentRunner A — LLM ⇄ tools",
+      "label": "3a. Branch endpoint A — request ⇄ result",
       "parentId": "subagent-group",
-      "description": "Own API handler/runtime, local conversation, fresh TaskState, and scoped tool dispatcher; NOT new Task(...). Inherits the parent's task identity, workspace and mode through TaskConfig. Starts with its prompt and workspace metadata; include_history optionally seeds its conversation with the parent's API history. Builds its own prompt/tool snapshot. SubagentToolExecutor intercepts respond complete to end this run; other permitted tools dispatch through the normal tool infrastructure.",
-      "code": [
-        {
-          "path": "src/core/task/tools/subagent/SubagentRunner.ts",
-          "symbol": "SubagentRunner.executeRun"
-        },
-        {
-          "path": "src/core/task/tools/subagent/SubagentRunner.ts",
-          "symbol": "SubagentRunner.createSubagentTaskConfig"
-        },
-        {
-          "path": "src/core/task/ToolExecutor.ts",
-          "symbol": "ToolExecutor.createSubagentRuntime"
-        },
-        {
-          "path": "src/core/task/tools/subagent/SubagentToolExecutor.ts",
-          "symbol": "SubagentToolExecutor.executeToolCalls"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-b",
       "kind": "class",
-      "label": "3b. SubagentRunner B — runs concurrently",
+      "label": "3b. Branch endpoint B — parallel route",
       "parentId": "subagent-group",
-      "description": "Same execution structure as A, with separate local conversation/state and provider runtime. Default work deadline is 600 seconds, configurable per request. Deadline expiry enters wrap-up, disallows further task work, and allows up to 90 seconds to report completion before termination. Parent cancellation aborts the run. No nested subagents. Sibling failure does not short-circuit Promise.allSettled for the rest of the batch.",
-      "code": [
-        {
-          "path": "src/core/task/tools/subagent/SubagentRunner.ts",
-          "symbol": "SubagentRunner.run"
-        },
-        {
-          "path": "src/core/task/tools/subagent/SubagentExecutionPolicy.ts"
-        },
-        {
-          "path": "src/core/task/tools/subagent/SubagentToolExecutor.ts",
-          "symbol": "SubagentToolExecutor.executeToolCalls"
-        }
-      ]
+      "description": "Geometry-only class shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-join",
       "kind": "function",
-      "label": "4. Join all → aggregate tool result",
+      "label": "4. Merge all → aggregate return connection",
       "parentId": "subagent-group",
-      "description": "This is the join phase inside UseSubagentsTool, not a separate service. await Promise.allSettled(execution) waits for all executions, reconciles each success/failure/cancellation and usage, finalizes presentation, and formats a combined result. The parent model then continues with that tool result. Subagent completion ends only that runner, not the parent Task.",
-      "code": [
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts",
-          "symbol": "UseSubagentsTool.runSubagents"
-        },
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts",
-          "symbol": "UseSubagentsTool.formatFinalResponse"
-        }
-      ]
+      "description": "Geometry-only function shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "subagent-observability",
       "kind": "component",
-      "label": "Live cards + parent-owned run artifacts",
+      "label": "Observation node + parallel branch artifacts",
       "parentId": "subagent-group",
-      "description": "Progress/tool trajectory/usage updates feed the aggregate and per-agent cards while the parent awaits. SubagentRunRecorder writes transcript.md and diagnostics.md under the parent task directory at subagents/<runId>/, with an index.md. Usage is published into the parent message state. These are observable run artifacts, not independent resumable Task records; recorder/presentation failures are logged rather than defining the execution result.",
-      "code": [
-        {
-          "path": "src/core/task/tools/subagent/SubagentRunRecorder.ts",
-          "symbol": "SubagentRunRecorder.create"
-        },
-        {
-          "path": "src/core/task/tools/adapters/traits/SubagentUsagePublisher.ts",
-          "symbol": "SubagentUsagePublisher"
-        },
-        {
-          "path": "src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts"
-        }
-      ]
+      "description": "Geometry-only component shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     },
     {
       "id": "workspace",
       "kind": "component",
-      "label": "Shared workspace — not isolated worktrees",
-      "description": "GoalTaskFactory passes the same cwd/workspace manager into its Tasks; SubagentRunner derives its config from the parent. Both mechanisms separate conversation/execution state, but neither path automatically isolates filesystem changes. Concurrent assignments must avoid conflicting edits, and writes made before a failure/cancellation are not automatically rolled back by these mechanisms.",
-      "code": [
-        {
-          "path": "src/core/goal/GoalTaskFactory.ts",
-          "symbol": "GoalTaskFactory.create"
-        },
-        {
-          "path": "src/core/task/tools/subagent/SubagentRunner.ts",
-          "symbol": "SubagentRunner.createSubagentTaskConfig"
-        }
-      ]
+      "label": "Shared endpoint — dependencies from both lanes",
+      "description": "Geometry-only component shape in a retained regression graph. Its connections exercise grouped placement, branching, cycles and shared endpoints; it does not identify a current implementation component."
     }
   ],
   "edges": [
@@ -291,175 +111,175 @@
       "kind": "aggregation",
       "source": "goal-lifecycle",
       "target": "goal-coordinator",
-      "label": "construct / resume / stop"
+      "label": "construct / restore / stop path"
     },
     {
       "id": "goal-owns-host",
       "kind": "aggregation",
       "source": "goal-lifecycle",
       "target": "goal-host",
-      "label": "owns child lifecycle"
+      "label": "owns branch-shaped connection"
     },
     {
       "id": "goal-start",
       "kind": "api_call",
       "source": "goal-coordinator",
       "target": "goal-host",
-      "label": "start_task → immediate child record",
-      "description": "Via StartTaskTool → IToolEnvironment.goal → GoalLoop's IGoalTrait binding → GoalTaskHost. Waits for startup, not for the child's run to complete. The coordinator can keep acting after the record is returned."
+      "label": "first request → immediate return path",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "goal-control",
       "kind": "api_call",
       "source": "goal-coordinator",
       "target": "goal-host",
-      "label": "steer / inspect / resolve / cancel",
-      "description": "send_task_message injects steering into a live child; read_task_transcript and list_tasks inspect it. resolve_task_interaction can answer/allow/reject or relay an interaction to the user through the coordinator."
+      "label": "second request / inspect / adjust path",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "goal-spawn-a",
       "kind": "api_call",
       "source": "goal-host",
       "target": "goal-child-a",
-      "label": "GoalTaskFactory → new Task"
+      "label": "dispatch hub → branch endpoint A"
     },
     {
       "id": "goal-spawn-b",
       "kind": "api_call",
       "source": "goal-host",
       "target": "goal-child-b",
-      "label": "start another Task without joining A"
+      "label": "dispatch another branch parallel to A"
     },
     {
       "id": "goal-feedback-a",
       "kind": "data_flow",
       "source": "goal-child-a",
       "target": "goal-host",
-      "label": "private progress / questions / outcome",
-      "description": "GoalChildToolEnvironment observes responses and captures interactions; observeRun records terminal outcomes. These become host-managed events, not direct user messages."
+      "label": "branch feedback / questions / outcome",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "goal-feedback-b",
       "kind": "data_flow",
       "source": "goal-child-b",
       "target": "goal-host",
-      "label": "private progress / questions / outcome"
+      "label": "branch feedback / questions / outcome"
     },
     {
       "id": "goal-persist",
       "kind": "data_flow",
       "source": "goal-host",
       "target": "goal-store",
-      "label": "persist registry + ordered events"
+      "label": "registry-shaped records + ordered feedback"
     },
     {
       "id": "goal-context",
       "kind": "data_flow",
       "source": "goal-store",
       "target": "goal-coordinator",
-      "label": "pin objective + active-child summary",
-      "description": "GoalLoop.pinnedContext supplies current durable context to the coordinator."
+      "label": "state-shaped context → coordinator",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "goal-wake",
       "kind": "data_flow",
       "source": "goal-host",
       "target": "goal-coordinator",
-      "label": "4. wait_for_goal_events → event batch",
-      "description": "Explicit wait returns queued responses, interactions, failures, completions or steering in sequence, plus active-task status. The coordinator reasons about what to do next; children do not automatically suspend/resume the model on every update."
+      "label": "4. feedback request → ordered return batch",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "goal-complete",
       "kind": "api_call",
       "source": "goal-coordinator",
       "target": "goal-lifecycle",
-      "label": "5. complete → no-live-child guard → achieved",
-      "description": "GoalLoop.commitCompletion uses GoalTaskHost.commitTerminalAttempt to reject completion while any child is active. Only successful completion of active Goal pursuit requests achieved; a follow-up completion ends just that turn."
+      "label": "5. close cycle → lifecycle-shaped owner",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "subagent-call",
       "kind": "api_call",
       "source": "subagent-parent",
       "target": "subagent-tool",
-      "label": "await use_subagents([...])"
+      "label": "enter fan-out component from caller"
     },
     {
       "id": "subagent-fork-a",
       "kind": "api_call",
       "source": "subagent-tool",
       "target": "subagent-a",
-      "label": "env.orchestration.runSubagent(prompt A)",
-      "description": "The tool uses IToolEnvironment; OrchestrationTraitBuilder creates and runs the SubagentRunner."
+      "label": "dispatch parallel request to branch A",
+      "description": "Geometry-only relationship retained for parallel handles, return cycles and cross-node routing. Its direction and relationship kind are layout inputs, not a current runtime contract."
     },
     {
       "id": "subagent-fork-b",
       "kind": "api_call",
       "source": "subagent-tool",
       "target": "subagent-b",
-      "label": "env.orchestration.runSubagent(prompt B)"
+      "label": "dispatch parallel request to branch B"
     },
     {
       "id": "subagent-result-a",
       "kind": "data_flow",
       "source": "subagent-a",
       "target": "subagent-join",
-      "label": "result / error / cancellation + usage"
+      "label": "result / error / cancellation + usage path"
     },
     {
       "id": "subagent-result-b",
       "kind": "data_flow",
       "source": "subagent-b",
       "target": "subagent-join",
-      "label": "result / error / cancellation + usage"
+      "label": "result / error / cancellation + usage path"
     },
     {
       "id": "subagent-return",
       "kind": "data_flow",
       "source": "subagent-join",
       "target": "subagent-parent",
-      "label": "all settled → parent model continues"
+      "label": "merged branch results → caller return"
     },
     {
       "id": "subagent-progress-a",
       "kind": "data_flow",
       "source": "subagent-a",
       "target": "subagent-observability",
-      "label": "live trajectory + diagnostics"
+      "label": "live trajectory + diagnostic-shaped data"
     },
     {
       "id": "subagent-progress-b",
       "kind": "data_flow",
       "source": "subagent-b",
       "target": "subagent-observability",
-      "label": "live trajectory + diagnostics"
+      "label": "live trajectory + diagnostic-shaped data"
     },
     {
       "id": "goal-workspace-a",
       "kind": "dependency",
       "source": "goal-child-a",
       "target": "workspace",
-      "label": "same cwd"
+      "label": "shared endpoint A"
     },
     {
       "id": "goal-workspace-b",
       "kind": "dependency",
       "source": "goal-child-b",
       "target": "workspace",
-      "label": "same cwd"
+      "label": "shared endpoint B"
     },
     {
       "id": "subagent-workspace-a",
       "kind": "dependency",
       "source": "subagent-a",
       "target": "workspace",
-      "label": "inherits parent workspace"
+      "label": "dependency to shared endpoint A"
     },
     {
       "id": "subagent-workspace-b",
       "kind": "dependency",
       "source": "subagent-b",
       "target": "workspace",
-      "label": "inherits parent workspace"
+      "label": "dependency to shared endpoint B"
     }
   ]
 }

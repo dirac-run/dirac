@@ -21,12 +21,7 @@ interface ResponseToolCall {
 	params: {
 		[ResponseParameter.OPERATION]?: unknown
 		[ResponseParameter.TEXT]?: unknown
-		[LegacyResponseParameter.MESSAGE]?: unknown
-		[LegacyResponseParameter.RESULT]?: unknown
-		[LegacyResponseParameter.RESPONSE]?: unknown
-		[LegacyResponseParameter.QUESTION]?: unknown
 		[ResponseParameter.OPTIONS]?: unknown
-		[LegacyResponseParameter.NEEDS_MORE_EXPLORATION]?: unknown
 	}
 }
 
@@ -39,6 +34,7 @@ export enum ResponseOperation {
 export const RESPONSE_OPERATIONS = Object.values(ResponseOperation)
 const RESPONSE_PARAMETERS = new Set<string>(Object.values(ResponseParameter))
 
+/** Retired tool names retained for reading historical cards and provider transcripts only. */
 export enum LegacyResponseTool {
 	PROGRESS = "say",
 	COMPLETE = "attempt_completion",
@@ -58,21 +54,13 @@ export enum PlanInteractionResponse {
 	MODE_TOGGLE = "PLAN_MODE_TOGGLE_RESPONSE",
 }
 
-export const LEGACY_RESPONSE_TOOLS = {
+// History-only metadata: these names are not executable response tools.
+const HISTORICAL_RESPONSE_CARD_OPERATIONS = {
 	[LegacyResponseTool.PROGRESS]: ResponseOperation.PROGRESS,
 	[LegacyResponseTool.COMPLETE]: ResponseOperation.COMPLETE,
 	[LegacyResponseTool.PLAN]: ResponseOperation.PLAN,
 	[LegacyResponseTool.QUESTION]: ResponseOperation.QUESTION,
 } as const satisfies Record<string, ResponseOperation>
-
-export type LegacyResponseToolName = keyof typeof LEGACY_RESPONSE_TOOLS
-
-const LEGACY_RESPONSE_TEXT_PARAMETERS = {
-	[ResponseOperation.PROGRESS]: LegacyResponseParameter.MESSAGE,
-	[ResponseOperation.COMPLETE]: LegacyResponseParameter.RESULT,
-	[ResponseOperation.PLAN]: LegacyResponseParameter.RESPONSE,
-	[ResponseOperation.QUESTION]: LegacyResponseParameter.QUESTION,
-} as const satisfies Record<ResponseOperation, LegacyResponseParameter>
 
 export interface ResponseArguments {
 	operation: ResponseOperation
@@ -147,33 +135,11 @@ export function responseOperationFromToolCall(call: ResponseToolCall): ResponseO
 	if (call.name === RESPOND_TOOL_NAME && RESPONSE_OPERATIONS.includes(operation as ResponseOperation)) {
 		return operation as ResponseOperation
 	}
-	return LEGACY_RESPONSE_TOOLS[call.name as LegacyResponseToolName]
+	return undefined
 }
 
 export function isCompletionResponseCall(call: ResponseToolCall): boolean {
 	return responseOperationFromToolCall(call) === ResponseOperation.COMPLETE
-}
-
-export function canonicalizeResponseToolCall(call: ResponseToolCall, rejectRemovedFields = true): boolean {
-	const operation = LEGACY_RESPONSE_TOOLS[call.name as LegacyResponseToolName]
-	if (!operation) return false
-	if (call.params[LegacyResponseParameter.NEEDS_MORE_EXPLORATION] !== undefined && !rejectRemovedFields) return false
-	if (call.params[LegacyResponseParameter.NEEDS_MORE_EXPLORATION] !== undefined) {
-		throw new ResponseShapeError(
-			`'${LegacyResponseParameter.NEEDS_MORE_EXPLORATION}' is not supported. Continue exploring with tools instead.`,
-		)
-	}
-
-	const textField = LEGACY_RESPONSE_TEXT_PARAMETERS[operation]
-	const fallbackText =
-		operation === ResponseOperation.COMPLETE ? call.params[LegacyResponseParameter.RESPONSE] : undefined
-	call.name = RESPOND_TOOL_NAME
-	call.params = {
-		operation,
-		text: call.params[textField] ?? fallbackText,
-		...(call.params.options !== undefined ? { options: call.params.options } : {}),
-	}
-	return true
 }
 
 export function responseOperationFromCard(card: Pick<Card, "header" | "toolName" | "rawInput">): ResponseOperation | undefined {
@@ -186,7 +152,8 @@ export function responseOperationFromCard(card: Pick<Card, "header" | "toolName"
 	}
 	for (const metadataTool of [card.toolName, rawTool]) {
 		if (typeof metadataTool !== "string") continue
-		const legacyOperation = LEGACY_RESPONSE_TOOLS[metadataTool as LegacyResponseToolName]
+		const legacyOperation =
+			HISTORICAL_RESPONSE_CARD_OPERATIONS[metadataTool as keyof typeof HISTORICAL_RESPONSE_CARD_OPERATIONS]
 		if (legacyOperation) return legacyOperation
 	}
 	return card.header === ResponseCardHeader.PROPOSED_PLAN ? ResponseOperation.PLAN : undefined

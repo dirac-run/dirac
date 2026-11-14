@@ -1,93 +1,93 @@
 {
-	"title": "Goals vs synchronous subagents",
-	"summary": "Reported wraparound routing regression.",
+	"title": "Two-lane geometry with wraparound routing",
+	"summary": "Geometry-only fixture for the reported 15-node / 20-relationship wraparound-routing regression. The lanes, branches and feedback connections are synthetic routing examples, not documentation of the current runtime or delegation API. Historical filenames and graph IDs remain stable for regression assertions; node kinds, relationship kinds and topology are retained to exercise layout and routing.",
 	"nodes": [
 		{
 			"id": "goal",
 			"kind": "group",
-			"label": "Goal: asynchronous Task orchestration"
+			"label": "Lane A: asynchronous-shaped feedback connections"
 		},
 		{
 			"id": "goal-coordinator",
 			"kind": "component",
-			"label": "Foreground Goal coordinator",
+			"label": "Foreground-shaped coordinator node",
 			"parentId": "goal"
 		},
 		{
 			"id": "goal-tools",
 			"kind": "api_endpoint",
-			"label": "Goal tools → IGoalTrait",
+			"label": "Request interface → dispatch boundary",
 			"parentId": "goal"
 		},
 		{
 			"id": "goal-host",
 			"kind": "class",
-			"label": "GoalTaskHost + Task factory",
+			"label": "Dispatch hub + branch endpoint factory",
 			"parentId": "goal"
 		},
 		{
 			"id": "goal-children",
 			"kind": "component",
-			"label": "Parallel full Tasks: A, B, …",
+			"label": "Parallel branch endpoints: A, B, …",
 			"parentId": "goal"
 		},
 		{
 			"id": "goal-events",
 			"kind": "component",
-			"label": "Ordered events / wait_for_goal_events",
+			"label": "Ordered feedback / return-path relay",
 			"parentId": "goal"
 		},
 		{
 			"id": "goal-lifecycle",
 			"kind": "database",
-			"label": "Durable objective + Goal lifecycle",
+			"label": "State-shaped node + lifecycle records",
 			"parentId": "goal"
 		},
 		{
 			"id": "subagents",
 			"kind": "group",
-			"label": "Subagents: synchronous batch, parallel workers"
+			"label": "Lane B: fan-out and merge, parallel branch paths"
 		},
 		{
 			"id": "sub-parent",
 			"kind": "component",
-			"label": "Calling Task waits here",
+			"label": "Entry node receives merged return",
 			"parentId": "subagents"
 		},
 		{
 			"id": "sub-tool",
 			"kind": "component",
-			"label": "use_subagents: fan out assignments",
+			"label": "Fan-out component: parallel assignments",
 			"parentId": "subagents"
 		},
 		{
 			"id": "sub-env",
 			"kind": "api_endpoint",
-			"label": "IOrchestrationTrait.runSubagent",
+			"label": "Request boundary → branch dispatcher",
 			"parentId": "subagents"
 		},
 		{
 			"id": "sub-runners",
 			"kind": "component",
-			"label": "Parallel SubagentRunners: A, B, …",
+			"label": "Parallel branch endpoints: A, B, …",
 			"parentId": "subagents"
 		},
 		{
 			"id": "sub-join",
 			"kind": "function",
-			"label": "Join ALL → one tool result",
+			"label": "Merge ALL → one return connection",
 			"parentId": "subagents"
 		},
 		{
 			"id": "sub-observability",
 			"kind": "database",
-			"label": "Live cards + run audit files",
+			"label": "Observation node + audit-shaped records",
 			"parentId": "subagents"
 		},
 		{
 			"id": "workspace",
 			"kind": "component",
-			"label": "Shared workspace — not a sandbox"
+			"label": "Shared endpoint — outside the grouped lanes"
 		}
 	],
 	"edges": [
@@ -96,140 +96,140 @@
 			"kind": "api_call",
 			"source": "goal-coordinator",
 			"target": "goal-tools",
-			"label": "1. start / inspect / steer / cancel"
+			"label": "1. request / inspect / adjust / cancel path"
 		},
 		{
 			"id": "g-dispatch",
 			"kind": "api_call",
 			"source": "goal-tools",
 			"target": "goal-host",
-			"label": "via GoalLoop's environment implementation"
+			"label": "via the grouped request-dispatch connection"
 		},
 		{
 			"id": "g-launch",
 			"kind": "api_call",
 			"source": "goal-host",
 			"target": "goal-children",
-			"label": "2. launch; do NOT await completion"
+			"label": "2. branch; separate completion connection"
 		},
 		{
 			"id": "g-start-return",
 			"kind": "data_flow",
 			"source": "goal-host",
 			"target": "goal-coordinator",
-			"label": "3. start_task returns child record"
+			"label": "3. return record to the entry-shaped node"
 		},
 		{
 			"id": "g-publish",
 			"kind": "data_flow",
 			"source": "goal-children",
 			"target": "goal-events",
-			"label": "4. progress / questions / terminal outcome"
+			"label": "4. progress / questions / terminal outcome path"
 		},
 		{
 			"id": "g-wait",
 			"kind": "api_call",
 			"source": "goal-coordinator",
 			"target": "goal-events",
-			"label": "5. wait_for_goal_events"
+			"label": "5. explicit feedback-path request"
 		},
 		{
 			"id": "g-wake",
 			"kind": "data_flow",
 			"source": "goal-events",
 			"target": "goal-coordinator",
-			"label": "6. ordered batch; decide next action"
+			"label": "6. ordered feedback; next-action path"
 		},
 		{
 			"id": "g-persist-host",
 			"kind": "dependency",
 			"source": "goal-host",
 			"target": "goal-lifecycle",
-			"label": "persist child registry / enforce terminal guard"
+			"label": "registry-shaped dependency / terminal guard path"
 		},
 		{
 			"id": "g-persist-events",
 			"kind": "data_flow",
 			"source": "goal-events",
 			"target": "goal-lifecycle",
-			"label": "durable queue + delivered cursors"
+			"label": "queue-shaped data + delivery cursor path"
 		},
 		{
 			"id": "g-context",
 			"kind": "data_flow",
 			"source": "goal-lifecycle",
 			"target": "goal-coordinator",
-			"label": "objective + active Tasks pinned to context"
+			"label": "objective-shaped records + active context path"
 		},
 		{
 			"id": "s-call",
 			"kind": "api_call",
 			"source": "sub-parent",
 			"target": "sub-tool",
-			"label": "1. await use_subagents(batch)"
+			"label": "1. enter the parallel fan-out component"
 		},
 		{
 			"id": "s-fanout",
 			"kind": "api_call",
 			"source": "sub-tool",
 			"target": "sub-env",
-			"label": "2. invoke once per assignment, concurrently"
+			"label": "2. one connection per parallel branch path"
 		},
 		{
 			"id": "s-run",
 			"kind": "api_call",
 			"source": "sub-env",
 			"target": "sub-runners",
-			"label": "3. construct runner; await run()"
+			"label": "3. connect branch endpoints; result path"
 		},
 		{
 			"id": "s-result",
 			"kind": "data_flow",
 			"source": "sub-runners",
 			"target": "sub-join",
-			"label": "4. complete / fail / cancel"
+			"label": "4. completion / failure / cancellation path"
 		},
 		{
 			"id": "s-join",
 			"kind": "dependency",
 			"source": "sub-tool",
 			"target": "sub-join",
-			"label": "Promise.allSettled(batch)"
+			"label": "parallel branches → merge dependency"
 		},
 		{
 			"id": "s-return",
 			"kind": "data_flow",
 			"source": "sub-join",
 			"target": "sub-parent",
-			"label": "5. aggregate result; parent continues"
+			"label": "5. aggregate return; closes entry cycle"
 		},
 		{
 			"id": "s-observe",
 			"kind": "data_flow",
 			"source": "sub-runners",
 			"target": "sub-observability",
-			"label": "progress + usage + transcript events"
+			"label": "progress + usage + transcript-shaped records"
 		},
 		{
 			"id": "composition",
 			"kind": "dependency",
 			"source": "goal-children",
 			"target": "sub-parent",
-			"label": "A Goal child can be this caller"
+			"label": "cross-lane dependency between grouped flows"
 		},
 		{
 			"id": "g-workspace",
 			"kind": "dependency",
 			"source": "goal-children",
 			"target": "workspace",
-			"label": "same cwd / workspace roots"
+			"label": "first lane / shared endpoint dependency"
 		},
 		{
 			"id": "s-workspace",
 			"kind": "dependency",
 			"source": "sub-runners",
 			"target": "workspace",
-			"label": "inherits parent's workspace"
+			"label": "second lane / shared endpoint dependency"
 		}
 	]
 }

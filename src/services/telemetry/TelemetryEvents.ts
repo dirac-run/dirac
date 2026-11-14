@@ -57,7 +57,6 @@ export const TELEMETRY_EVENTS = {
 		HISTORICAL_LOADED: "task.historical_loaded",
 		// Tracks when the retry button is clicked for failed operations
 		RETRY_CLICKED: "task.retry_clicked",
-		// Tracks when a diff edit (replace_in_file) operation fails
 
 		// Tracks when the browser tool is started
 		BROWSER_TOOL_START: "task.browser_tool_start",

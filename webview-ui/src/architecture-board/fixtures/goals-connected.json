@@ -1,114 +1,114 @@
 {
-	"title": "Goals, Tasks and subagents — connected architecture",
-	"summary": "Reproduction of cross-group routing with shared execution infrastructure.",
+	"title": "Connected routing groups — cross-group paths and shared endpoints",
+	"summary": "Geometry-only fixture for the reported 19-node / 22-relationship cross-group retention regression. The lanes, branches and feedback connections are synthetic routing examples, not documentation of the current runtime or delegation API. Historical filenames and graph IDs remain stable for regression assertions; node kinds, relationship kinds and topology are retained to exercise layout and routing.",
 	"nodes": [
 		{
 			"id": "entry",
 			"kind": "component",
-			"label": "GoalController → GoalLoop"
+			"label": "External entry → grouped feedback flow"
 		},
 		{
 			"id": "goal",
 			"kind": "group",
-			"label": "Goal runtime — durable multi-Task orchestration"
+			"label": "Feedback group — branching paths with a return cycle"
 		},
 		{
 			"id": "coordinator",
 			"kind": "component",
-			"label": "Goal coordinator — full Task",
+			"label": "Coordinator-shaped node — feedback entry",
 			"parentId": "goal"
 		},
 		{
 			"id": "host",
 			"kind": "service",
-			"label": "GoalTaskHost — creates full child Tasks",
+			"label": "Dispatch hub — connects parallel branch endpoints",
 			"parentId": "goal"
 		},
 		{
 			"id": "child-a",
 			"kind": "component",
-			"label": "Child Task A — can call use_subagents",
+			"label": "Branch endpoint A — cross-group connection",
 			"parentId": "goal"
 		},
 		{
 			"id": "child-b",
 			"kind": "component",
-			"label": "Child Task B — independent sibling",
+			"label": "Branch endpoint B — independent sibling path",
 			"parentId": "goal"
 		},
 		{
 			"id": "events",
 			"kind": "component",
-			"label": "Child environment → ordered Goal events",
+			"label": "Branch feedback → ordered return-path relay",
 			"parentId": "goal"
 		},
 		{
 			"id": "store",
 			"kind": "database",
-			"label": "GoalStore — durable objective + registry",
+			"label": "State-shaped node — objective + registry records",
 			"parentId": "goal"
 		},
 		{
 			"id": "parent",
 			"kind": "component",
-			"label": "Standalone Task — another possible caller"
+			"label": "Standalone entry — another cross-group caller"
 		},
 		{
 			"id": "subagents",
 			"kind": "group",
-			"label": "Inside the calling Task — awaited parallel batch"
+			"label": "Parallel group — fan-out paths with a merge function"
 		},
 		{
 			"id": "fork",
 			"kind": "component",
-			"label": "use_subagents tool — fan-out",
+			"label": "Fan-out component — parallel request paths",
 			"parentId": "subagents"
 		},
 		{
 			"id": "orchestration",
 			"kind": "api_endpoint",
-			"label": "env.orchestration.runSubagent",
+			"label": "Request interface → parallel branch boundary",
 			"parentId": "subagents"
 		},
 		{
 			"id": "runner-a",
 			"kind": "component",
-			"label": "SubagentRunner A — private model/tool loop",
+			"label": "Branch endpoint A — private request/result cycle",
 			"parentId": "subagents"
 		},
 		{
 			"id": "runner-b",
 			"kind": "component",
-			"label": "SubagentRunner B — parallel sibling",
+			"label": "Branch endpoint B — parallel sibling path",
 			"parentId": "subagents"
 		},
 		{
 			"id": "join",
 			"kind": "function",
-			"label": "allSettled → one batch tool result",
+			"label": "Merge function → one aggregate return connection",
 			"parentId": "subagents"
 		},
 		{
 			"id": "shared",
 			"kind": "group",
-			"label": "Common execution infrastructure — reused, not global"
+			"label": "Shared group — common dependencies across routing lanes"
 		},
 		{
 			"id": "dispatch",
 			"kind": "component",
-			"label": "ToolExecutorCoordinator → tool module",
+			"label": "Dispatch component → execution-shaped endpoint",
 			"parentId": "shared"
 		},
 		{
 			"id": "environment",
 			"kind": "api_endpoint",
-			"label": "IToolEnvironment → SurfaceAdapter / Goal wrappers",
+			"label": "Environment-shaped interface → capability boundary",
 			"parentId": "shared"
 		},
 		{
 			"id": "workspace",
 			"kind": "component",
-			"label": "Shared workspace, commands and host services",
+			"label": "Shared endpoint, commands and service-shaped dependencies",
 			"parentId": "shared"
 		}
 	],
@@ -118,154 +118,154 @@
 			"kind": "aggregation",
 			"source": "entry",
 			"target": "coordinator",
-			"label": "owns coordinator lifecycle"
+			"label": "external entry → grouped lifecycle-shaped path"
 		},
 		{
 			"id": "goal-dispatch",
 			"kind": "api_call",
 			"source": "coordinator",
 			"target": "host",
-			"label": "start_task → env.goal.startTask"
+			"label": "request → dispatch-shaped interface path"
 		},
 		{
 			"id": "spawn-a",
 			"kind": "api_call",
 			"source": "host",
 			"target": "child-a",
-			"label": "new Task; start without awaiting finish"
+			"label": "branch endpoint A; separate completion path"
 		},
 		{
 			"id": "spawn-b",
 			"kind": "api_call",
 			"source": "host",
 			"target": "child-b",
-			"label": "new Task; independent run"
+			"label": "branch endpoint B; independent parallel path"
 		},
 		{
 			"id": "child-a-events",
 			"kind": "data_flow",
 			"source": "child-a",
 			"target": "events",
-			"label": "child's own respond / interaction / outcome"
+			"label": "branch response / interaction / outcome path"
 		},
 		{
 			"id": "child-b-events",
 			"kind": "data_flow",
 			"source": "child-b",
 			"target": "events",
-			"label": "child updates and outcome"
+			"label": "branch updates and outcome path"
 		},
 		{
 			"id": "wake",
 			"kind": "data_flow",
 			"source": "events",
 			"target": "coordinator",
-			"label": "wait_for_goal_events returns ordered batch"
+			"label": "feedback relay returns an ordered batch"
 		},
 		{
 			"id": "host-store",
 			"kind": "dependency",
 			"source": "host",
 			"target": "store",
-			"label": "persist registry + events"
+			"label": "registry-shaped records + feedback connection"
 		},
 		{
 			"id": "store-context",
 			"kind": "data_flow",
 			"source": "store",
 			"target": "coordinator",
-			"label": "pinned objective + active-task context"
+			"label": "objective-shaped records + active context path"
 		},
 		{
 			"id": "child-sub-call",
 			"kind": "api_call",
 			"source": "child-a",
 			"target": "fork",
-			"label": "CONNECTION: await use_subagents([...])"
+			"label": "CROSS-GROUP: branch endpoint → fan-out path"
 		},
 		{
 			"id": "coordinator-sub-call",
 			"kind": "api_call",
 			"source": "coordinator",
 			"target": "fork",
-			"label": "can also await its own subagent batch"
+			"label": "additional cross-group fan-out connection"
 		},
 		{
 			"id": "sub-call",
 			"kind": "api_call",
 			"source": "parent",
 			"target": "fork",
-			"label": "same tool; no Goal required"
+			"label": "standalone entry; same grouped fan-out node"
 		},
 		{
 			"id": "fork-orchestration",
 			"kind": "api_call",
 			"source": "fork",
 			"target": "orchestration",
-			"label": "one runSubagent call per assignment"
+			"label": "one request-shaped connection per branch"
 		},
 		{
 			"id": "fork-a",
 			"kind": "api_call",
 			"source": "orchestration",
 			"target": "runner-a",
-			"label": "construct runner + await run"
+			"label": "connect endpoint + separate return path"
 		},
 		{
 			"id": "fork-b",
 			"kind": "api_call",
 			"source": "orchestration",
 			"target": "runner-b",
-			"label": "construct parallel runner + await run"
+			"label": "connect parallel endpoint + return path"
 		},
 		{
 			"id": "result-a",
 			"kind": "data_flow",
 			"source": "runner-a",
 			"target": "join",
-			"label": "complete / failure / cancellation"
+			"label": "completion / failure / cancellation path"
 		},
 		{
 			"id": "result-b",
 			"kind": "data_flow",
 			"source": "runner-b",
 			"target": "join",
-			"label": "complete / failure / cancellation"
+			"label": "completion / failure / cancellation path"
 		},
 		{
 			"id": "return-results",
 			"kind": "data_flow",
 			"source": "join",
 			"target": "child-a",
-			"label": "illustrated caller resumes with results"
+			"label": "cross-group return to the illustrated entry"
 		},
 		{
 			"id": "task-shared-dispatch",
 			"kind": "dependency",
 			"source": "child-a",
 			"target": "dispatch",
-			"label": "full Task dispatch path (representative)"
+			"label": "first group → shared dispatch dependency"
 		},
 		{
 			"id": "subagent-shared-dispatch",
 			"kind": "dependency",
 			"source": "runner-a",
 			"target": "dispatch",
-			"label": "SubagentToolExecutor → scoped sibling dispatcher"
+			"label": "parallel group → shared dispatch dependency"
 		},
 		{
 			"id": "dispatch-env",
 			"kind": "dependency",
 			"source": "dispatch",
 			"target": "environment",
-			"label": "tool module executes through environment"
+			"label": "execution-shaped node → environment interface"
 		},
 		{
 			"id": "env-workspace",
 			"kind": "dependency",
 			"source": "environment",
 			"target": "workspace",
-			"label": "workspace / execution / host capabilities"
+			"label": "workspace / execution / capability-shaped dependency"
 		}
 	]
 }

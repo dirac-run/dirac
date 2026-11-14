@@ -1,105 +1,105 @@
 {
-  "title": "Goals vs. subagents: independent Tasks vs. a blocking parallel batch",
-  "summary": "Current implementation, traced from source; not a proposed redesign. A Goal owns a foreground coordinator Task and private full child Tasks. start_task returns after launch, so the coordinator can continue working and later consume ordered events. use_subagents starts parallel SubagentRunner instances but awaits every result before returning to the caller. These mechanisms compose: a Goal child can itself call use_subagents when enabled. Both share the workspace; private conversation state is not filesystem isolation. Goal execution is always Act; subagents inherit the caller's mode. Inspect nodes and edges for context, lifecycle details, constraints, and code links.",
+  "title": "Compound routing: independent lanes with a shared endpoint",
+  "summary": "Geometry-only fixture for the reported 17-node / 22-relationship compound-flow regression. The lanes, branches and feedback connections are synthetic routing examples, not documentation of the current runtime or delegation API. Historical filenames and graph IDs remain stable for regression assertions; node kinds, relationship kinds and topology are retained to exercise layout and routing.",
   "nodes": [
     {
       "id": "goal-lane",
       "kind": "group",
-      "label": "GOAL — durable orchestration across Tasks"
+      "label": "LANE A — compound flow with a feedback cycle"
     },
     {
       "id": "goal-owner",
       "kind": "component",
-      "label": "GoalLoop — lifecycle owner",
+      "label": "Flow owner — lifecycle-shaped hub",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-coordinator",
       "kind": "component",
-      "label": "Coordinator Task — keeps working",
+      "label": "Coordinator-shaped node — cyclic flow",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-api",
       "kind": "api_endpoint",
-      "label": "Goal tools → IToolEnvironment.goal",
+      "label": "Request interface → dispatch boundary",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-host",
       "kind": "component",
-      "label": "GoalTaskHost — launch / supervise",
+      "label": "Dispatch hub — branching connections",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-children",
       "kind": "component",
-      "label": "Task A ∥ Task B ∥ … — full workers",
+      "label": "Parallel endpoints A ∥ B ∥ …",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-state",
       "kind": "database",
-      "label": "GoalStore — objective, children, events",
+      "label": "State-shaped node — records and events",
       "parentId": "goal-lane"
     },
     {
       "id": "goal-wake",
       "kind": "function",
-      "label": "wait_for_goal_events → ordered wake",
+      "label": "Feedback relay → ordered return path",
       "parentId": "goal-lane"
     },
     {
       "id": "subagent-lane",
       "kind": "group",
-      "label": "SUBAGENTS — parallel work within one tool call"
+      "label": "LANE B — parallel paths with a return cycle"
     },
     {
       "id": "parent-task",
       "kind": "component",
-      "label": "Calling Task — waits for batch",
+      "label": "Entry node — receives the return path",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-tool",
       "kind": "function",
-      "label": "use_subagents — fan out requests",
+      "label": "Fan-out function — parallel requests",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-api",
       "kind": "api_endpoint",
-      "label": "env.orchestration.runSubagent",
+      "label": "Request boundary → branch dispatcher",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-runners",
       "kind": "component",
-      "label": "Runner A ∥ Runner B ∥ …",
+      "label": "Branch A ∥ Branch B ∥ …",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-executor",
       "kind": "component",
-      "label": "Scoped tool execution + respond",
+      "label": "Execution-shaped node + return path",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-join",
       "kind": "function",
-      "label": "Promise.allSettled → one tool result",
+      "label": "Merge function → one return connection",
       "parentId": "subagent-lane"
     },
     {
       "id": "subagent-observability",
       "kind": "database",
-      "label": "Parent-owned cards, logs and usage",
+      "label": "Observation-shaped node, logs and usage",
       "parentId": "subagent-lane"
     },
     {
       "id": "shared-workspace",
       "kind": "database",
-      "label": "Same workspace — no per-worker worktree"
+      "label": "Shared endpoint — cross-lane dependencies"
     }
   ],
   "edges": [
@@ -108,154 +108,154 @@
       "kind": "aggregation",
       "source": "goal-owner",
       "target": "goal-coordinator",
-      "label": "owns foreground conversation"
+      "label": "owns foreground-shaped connection"
     },
     {
       "id": "goal-owner-host",
       "kind": "aggregation",
       "source": "goal-owner",
       "target": "goal-host",
-      "label": "owns child lifecycle"
+      "label": "owns branching connection"
     },
     {
       "id": "goal-coordinator-api",
       "kind": "api_call",
       "source": "goal-coordinator",
       "target": "goal-api",
-      "label": "1. start_task / inspect / steer"
+      "label": "1. request / inspect / adjust"
     },
     {
       "id": "goal-api-host",
       "kind": "api_call",
       "source": "goal-api",
       "target": "goal-host",
-      "label": "environment delegates to host"
+      "label": "interface connects to dispatch hub"
     },
     {
       "id": "goal-host-children",
       "kind": "aggregation",
       "source": "goal-host",
       "target": "goal-children",
-      "label": "2. launch; do NOT await completion"
+      "label": "2. branch; separate return connection"
     },
     {
       "id": "goal-host-api",
       "kind": "data_flow",
       "source": "goal-host",
       "target": "goal-api",
-      "label": "3. return child record immediately"
+      "label": "3. return record along reverse path"
     },
     {
       "id": "goal-children-state",
       "kind": "data_flow",
       "source": "goal-children",
       "target": "goal-state",
-      "label": "4. private responses / interactions / outcomes"
+      "label": "4. responses / interactions / outcomes"
     },
     {
       "id": "goal-host-state",
       "kind": "dependency",
       "source": "goal-host",
       "target": "goal-state",
-      "label": "registry + durable state updates"
+      "label": "registry-shaped state connection"
     },
     {
       "id": "goal-coordinator-wake",
       "kind": "api_call",
       "source": "goal-coordinator",
       "target": "goal-wake",
-      "label": "5. explicitly wait when idle"
+      "label": "5. explicit feedback request"
     },
     {
       "id": "goal-state-wake",
       "kind": "data_flow",
       "source": "goal-state",
       "target": "goal-wake",
-      "label": "ordered pending events"
+      "label": "ordered records on feedback path"
     },
     {
       "id": "goal-wake-coordinator",
       "kind": "data_flow",
       "source": "goal-wake",
       "target": "goal-coordinator",
-      "label": "6. wake → decide / steer / finish"
+      "label": "6. feedback → next step / adjustment"
     },
     {
       "id": "parent-subagent-tool",
       "kind": "api_call",
       "source": "parent-task",
       "target": "subagent-tool",
-      "label": "1. delegate batch; caller waits"
+      "label": "1. enter fan-out path from caller"
     },
     {
       "id": "subagent-tool-api",
       "kind": "api_call",
       "source": "subagent-tool",
       "target": "subagent-api",
-      "label": "2. one call per request, concurrently"
+      "label": "2. one connection per parallel branch"
     },
     {
       "id": "subagent-api-runners",
       "kind": "aggregation",
       "source": "subagent-api",
       "target": "subagent-runners",
-      "label": "3. create separate runners"
+      "label": "3. connect separate branch endpoints"
     },
     {
       "id": "subagent-runners-executor",
       "kind": "api_call",
       "source": "subagent-runners",
       "target": "subagent-executor",
-      "label": "4. repeated model → tool turns"
+      "label": "4. repeated request → result cycle"
     },
     {
       "id": "subagent-executor-runners",
       "kind": "data_flow",
       "source": "subagent-executor",
       "target": "subagent-runners",
-      "label": "tool results / progress / completion"
+      "label": "results / progress / completion path"
     },
     {
       "id": "subagent-runners-join",
       "kind": "data_flow",
       "source": "subagent-runners",
       "target": "subagent-join",
-      "label": "5. result or failure from every run"
+      "label": "5. results from the parallel branches"
     },
     {
       "id": "subagent-join-parent",
       "kind": "data_flow",
       "source": "subagent-join",
       "target": "parent-task",
-      "label": "6. aggregate result; caller resumes"
+      "label": "6. merged result; closes caller cycle"
     },
     {
       "id": "subagent-runners-observability",
       "kind": "data_flow",
       "source": "subagent-runners",
       "target": "subagent-observability",
-      "label": "live progress, recording, usage"
+      "label": "observation, recording, usage path"
     },
     {
       "id": "goal-children-subagents",
       "kind": "dependency",
       "source": "goal-children",
       "target": "parent-task",
-      "label": "can itself be the calling Task"
+      "label": "cross-lane dependency for routing coverage"
     },
     {
       "id": "goal-children-workspace",
       "kind": "dependency",
       "source": "goal-children",
       "target": "shared-workspace",
-      "label": "read / edit / execute via tools"
+      "label": "first lane → shared endpoint"
     },
     {
       "id": "subagent-executor-workspace",
       "kind": "dependency",
       "source": "subagent-executor",
       "target": "shared-workspace",
-      "label": "read / edit / execute via tools"
+      "label": "second lane → shared endpoint"
     }
   ]
 }

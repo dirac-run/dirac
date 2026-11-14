@@ -158,11 +158,11 @@ describe("CLI Commands", () => {
 		it("should parse repeated comma-separated tool deltas", () => {
 			const taskCmd = program.commands.find((c) => c.name() === "task")!
 			taskCmd.parse(
-				["test prompt", "--enable-tool", "read_file, edit_file", "--enable-tool", "search_files", "--disable-tool", "use_subagents"],
+				["test prompt", "--enable-tool", "read_file, edit_file", "--enable-tool", "search_files", "--disable-tool", "browser_action"],
 				{ from: "user" },
 			)
 			expect(taskCmd.opts().enableTool).toEqual(["read_file", "edit_file", "search_files"])
-			expect(taskCmd.opts().disableTool).toEqual(["use_subagents"])
+			expect(taskCmd.opts().disableTool).toEqual(["browser_action"])
 		})
 
 		it("should reject only-tools with delta options", () => {

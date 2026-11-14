@@ -10,7 +10,7 @@ function fixture(controls: Partial<TaskletControls> = {}) {
 	const finalized: CardStatus[] = []
 	const updates: Record<string, unknown>[] = []
 	const environment = {
-		orchestration: { tasklets: controls, agentIdentity: { id: "Dirac" } },
+		orchestration: { tasklets: controls, agentIdentity: { id: "Dirac" }, reportFailure: () => { } },
 		ui: {
 			createCard: async () => ({
 				update: async (patch: Record<string, unknown>) => {

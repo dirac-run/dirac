@@ -173,20 +173,6 @@ check_no_numeric_or_default	src/core/prompts/system-prompt/spec.ts:const width =
 check_no_numeric_or_default	src/core/task/StreamingMetricsManager.ts:(this.metrics.cacheReadTokens || 0)
 check_no_numeric_or_default	src/core/task/StreamingMetricsManager.ts:(this.metrics.cacheWriteTokens || 0) +
 check_no_numeric_or_default	src/core/task/tools/modules/condense/CondenseTool.ts:env.config.model.info.contextWindow || 256_000,
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const cacheReads = entries.reduce((acc: number, e) => acc + (e.cacheReads || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const cacheWrites = entries.reduce((acc: number, e) => acc + (e.cacheWrites || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const contextWindow = entries.reduce((acc, entry) => Math.max(acc, entry.contextWindow || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const contextWindow = entries.reduce((acc: number, e) => Math.max(acc, e.contextWindow || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const inputTokens = entries.reduce((acc: number, e) => acc + (e.inputTokens || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextTokens = entries.reduce((acc, entry) => Math.max(acc, entry.contextTokens || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextTokens = entries.reduce((acc: number, e) => Math.max(acc, e.contextTokens || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextUsagePercentage = entries.reduce((acc, entry) => Math.max(acc, entry.contextUsagePercentage || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const maxContextUsagePercentage = entries.reduce((acc: number, e) => Math.max(acc, e.contextUsagePercentage || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const outputTokens = entries.reduce((acc: number, e) => acc + (e.outputTokens || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const toolCalls = entries.reduce((acc: number, e) => acc + (e.toolCalls || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalCacheReads = entries.reduce((acc, entry) => acc + (entry.cacheReads || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalCacheWrites = entries.reduce((acc, entry) => acc + (entry.cacheWrites || 0), 0)
-check_no_numeric_or_default	src/core/task/tools/modules/use_subagents/UseSubagentsTool.ts:const totalToolCalls = entries.reduce((acc, entry) => acc + (entry.toolCalls || 0), 0)
 check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:const contextWindow = configuredContextWindow || 256_000
 check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.cacheReadTokens += chunk.cacheReadTokens || 0
 check_no_numeric_or_default	src/core/task/tools/subagent/SubagentRunner.ts:requestUsage.cacheWriteTokens += chunk.cacheWriteTokens || 0

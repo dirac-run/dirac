@@ -92,6 +92,7 @@ async function createSnapshot(
 	const environment = {
 		config,
 		context: { save: sinon.stub().resolves() },
+		orchestration: { getTaskState: sinon.stub().returns(undefined) },
 		getCustomMetadata: () => ({}),
 		getCreatedCards: () => [],
 	} as unknown as ToolExecutionEnvironment
@@ -272,7 +273,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 				const list = sinon.stub().returns({ items: [], totalItems: 0 })
 				const start = sinon.stub()
 				Object.assign(environment, {
-					orchestration: { agentIdentity: { id: "Dirac" }, tasklets: { list, start } },
+					orchestration: { ...environment.orchestration, agentIdentity: { id: "Dirac" }, tasklets: { list, start } },
 					ui: { createCard: async () => ({ id: "control-card", update: async () => undefined, finalize: async () => undefined }) },
 				})
 				const result = (await snapshot.coordinator.execute(config, { type: "tool_use", name: "subagents", params: { operation: "create", assignments: [{ type: "default", task_header: "Blocked", task_description: "Blocked" }] }, isComplete: true })).content
@@ -299,7 +300,7 @@ describe("ToolSnapshotManager Goal and tasklet profile integration", () => {
 			const resume = sinon.stub().resolves(tasklet)
 			Object.assign(environment, {
 				toolName: "subagents",
-				orchestration: { agentIdentity: { id: "Dirac" }, tasklets: { start, list, resume } },
+				orchestration: { ...environment.orchestration, agentIdentity: { id: "Dirac" }, tasklets: { start, list, resume } },
 				ui: { createCard: async () => ({ id: "tool-card", update: async () => undefined, finalize: async () => undefined }) },
 			})
 			const spawnParams = { operation: "create", assignments: [{ type: "default", task_header: "Inspect", task_description: "Inspect it" }] }

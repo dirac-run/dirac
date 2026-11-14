@@ -172,7 +172,7 @@ describe("Architecture connection presentation", () => {
 			}
 		}
 	}, 10_000)
-	it("lays out the real Goals/Subagents cycle with distinct routes and correct call direction", async () => {
+	it("lays out the retained geometry-only cycle with distinct routes and correct call direction", async () => {
 		const dimensions = Object.fromEntries(diagram.nodes.map((node) => [node.id, { width: 248, height: 110 }]))
 		const graph = toElkGraph({ diagram, dimensions })
 		// A caller with an incoming result cannot use ELK's hard FIRST constraint.

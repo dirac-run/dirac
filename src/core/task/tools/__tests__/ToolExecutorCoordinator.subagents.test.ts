@@ -29,7 +29,11 @@ function fixture(strict = true) {
 	const createCard = sinon.stub().resolves(card)
 	const save = sinon.stub().resolves()
 	const environment = {
-		orchestration: { tasklets: controls as unknown as TaskletControls, agentIdentity: { id: "Dirac", parent: null } },
+		orchestration: {
+			tasklets: controls as unknown as TaskletControls,
+			agentIdentity: { id: "Dirac", parent: null },
+			getTaskState: sinon.stub().returns(undefined),
+		},
 		ui: { createCard },
 		context: { ...context, save },
 		telemetry: { captureCustomMetadata: sinon.stub() },
@@ -69,7 +73,7 @@ function strictArguments(operation: string, overrides: Record<string, unknown> =
 	}
 }
 
-describe("ToolExecutorCoordinator tasklets strict input normalization", () => {
+describe("ToolExecutorCoordinator subagents strict input normalization", () => {
 	it("executes list with every optional field null through injected parent controls", async () => {
 		const { controls, card, createCard, save, create, config, execute } = fixture()
 		assert.deepEqual(JSON.parse((await execute(strictArguments("list"))) as string), { items: [], totalItems: 0 })

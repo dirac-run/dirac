@@ -209,7 +209,7 @@ Frequently used task options include:
 Tool selections apply only to ordinary CLI tasks for the current invocation and are never persisted. They cannot be used with ACP, detached listen mode, Kanban, or Goals, and they never alter task-scoped tools. `--enable-tool` and `--disable-tool` may be combined when their resolved tool sets are disjoint. Lists accept canonical tool IDs or unambiguous tool names separated by commas, and each option may be repeated. Unknown, non-configurable, or conflicting tools stop startup with an error.
 
 ```bash
-dirac --yolo --enable-tool read_file,edit_file --disable-tool use_subagents "Fix the issue"
+dirac --yolo --enable-tool read_file,edit_file --disable-tool browser_action "Fix the issue"
 dirac --only-tools read_file,search_files,respond "Analyze the workspace"
 ```
 

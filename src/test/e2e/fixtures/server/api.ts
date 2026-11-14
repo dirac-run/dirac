@@ -26,26 +26,6 @@ export const E2E_REGISTERED_MOCK_ENDPOINTS = {
 	},
 }
 
-const edit_file_response = `I successfully replaced "john" with "dirac" in the test.ts file. The change has been completed and the file now contains:
-
-\`\`\`typescript
-export const name = "dirac"
-\`\`\`
-
-The specific task of updating the name in test.ts has been completed successfully.
-
-<respond>
-<operation>complete</operation>
-<text>
-I have successfully replaced the name "john" with "dirac" in the test.ts file. The file now exports:
-
-\`\`\`typescript
-export const name = "dirac"
-\`\`\`
-
-The change has been applied and saved to the file.
-</text>
-</respond>`
 
 const edit_request = `<thinking>
 The user wants me to replace the name "john" with "dirac" in the test.ts file. I can see the file content provided:
@@ -78,6 +58,5 @@ I'll replace "john" with "dirac" in the test.ts file.
 
 export const E2E_MOCK_API_RESPONSES = {
 	DEFAULT: "Hello! I'm a mock Dirac API response.",
-	REPLACE_REQUEST: edit_file_response,
 	EDIT_REQUEST: edit_request,
 }

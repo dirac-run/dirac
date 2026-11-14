@@ -7,8 +7,6 @@ import type { DiracDefaultTool, DiracToolSpec } from "@/shared/tools"
 import { LegacyResponseTool, RESPOND_TOOL_NAME } from "@shared/responseTool"
 import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
 
-const legacyCompletionToolName = LegacyResponseTool.COMPLETE
-const legacyProgressToolName = LegacyResponseTool.PROGRESS
 const legacyResponseToolNames = Object.values(LegacyResponseTool)
 
 function makeTool(overrides: Partial<DiscoveredTool> = {}): DiscoveredTool {
@@ -112,9 +110,22 @@ describe("ToolRegistry", () => {
 			assert.strictEqual(registry.getToolsBySource("global").length, 0)
 		})
 
-		it("reserves legacy response aliases after their built-ins are removed", () => {
+		it("reserves historical card identities without registering retired response tools", () => {
 			const registry = ToolRegistry.getInstance()
-			assert.equal(registry.registerUserTool(makeTool({ id: legacyCompletionToolName, source: "global" })), false)
+			registry.registerBuiltin(makeTool({ id: RESPOND_TOOL_NAME }))
+			for (const name of legacyResponseToolNames) {
+				assert.equal(registry.registerUserTool(makeTool({ id: name, source: "global" })), false)
+				assert.equal(registry.isEnabled(name), false)
+			}
+			assert.deepEqual(registry.getToolsBySource("global"), [])
+		})
+
+		it("rejects custom names that would be misclassified as historical response cards", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: RESPOND_TOOL_NAME }))
+			for (const name of legacyResponseToolNames) {
+				assert.equal(registry.registerUserTool(makeTool({ id: `custom_${name}`, name, source: "global" })), false)
+			}
 		})
 
 		it("lets workspace user tools override global user tools", () => {
@@ -449,24 +460,27 @@ describe("ToolRegistry", () => {
 			assert.deepStrictEqual(toggles, { a: false })
 		})
 
-		it("migrates legacy response toggles conservatively", () => {
+		it("ignores retired response toggles instead of migrating them to respond", () => {
 			const registry = ToolRegistry.getInstance()
 			registry.registerBuiltin(makeTool({ id: RESPOND_TOOL_NAME, source: "builtin" }))
 
-			registry.loadToggles({})
-			assert.deepStrictEqual(registry.getToggles(), {})
+			for (const enabled of [true, false]) {
+				registry.loadToggles(Object.fromEntries(legacyResponseToolNames.map((name) => [name, enabled])))
+				assert.deepStrictEqual(registry.getToggles(), {})
+				assert.equal(registry.isEnabled(RESPOND_TOOL_NAME), true)
+			}
 
+			registry.loadToggles({ [RESPOND_TOOL_NAME]: false, [LegacyResponseTool.COMPLETE]: true })
+			assert.deepStrictEqual(registry.getToggles(), { [RESPOND_TOOL_NAME]: false })
+			assert.equal(registry.isEnabled(RESPOND_TOOL_NAME), false)
+		})
+
+		it("does not enable reserved historical card names through old toggles", () => {
+			const registry = ToolRegistry.getInstance()
+			registry.registerBuiltin(makeTool({ id: RESPOND_TOOL_NAME }))
 			registry.loadToggles(Object.fromEntries(legacyResponseToolNames.map((name) => [name, true])))
-			assert.deepStrictEqual(registry.getToggles(), { [RESPOND_TOOL_NAME]: true })
-
-			registry.loadToggles(Object.fromEntries(legacyResponseToolNames.map((name) => [name, false])))
-			assert.deepStrictEqual(registry.getToggles(), { [RESPOND_TOOL_NAME]: false })
-
-			registry.loadToggles({ [legacyProgressToolName]: true, [legacyCompletionToolName]: false })
-			assert.deepStrictEqual(registry.getToggles(), { [RESPOND_TOOL_NAME]: false })
-
-			registry.loadToggles({ [RESPOND_TOOL_NAME]: true, [legacyCompletionToolName]: false })
-			assert.deepStrictEqual(registry.getToggles(), { [RESPOND_TOOL_NAME]: true })
+			assert.deepStrictEqual(registry.getToggles(), {})
+			for (const name of legacyResponseToolNames) assert.equal(registry.isEnabled(name), false)
 		})
 	})
 

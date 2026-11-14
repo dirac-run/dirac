@@ -378,9 +378,6 @@ export class DiracApiServerMock {
 						const parsed = JSON.parse(body)
 						const { _messages, model = "claude-3-5-sonnet-20241022", stream = true } = parsed
 						let responseText = E2E_MOCK_API_RESPONSES.DEFAULT
-						if (body.includes("[replace_in_file for 'test.ts'] Result:")) {
-							responseText = E2E_MOCK_API_RESPONSES.REPLACE_REQUEST
-						}
 						if (body.includes("edit_request")) {
 							responseText = E2E_MOCK_API_RESPONSES.EDIT_REQUEST
 						}

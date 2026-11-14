@@ -11,7 +11,7 @@ const diagram: ArchitectureDiagram = {
 	title: "The function can receive a result from its right",
 	summary: "",
 	nodes: [
-		{ id: "tool", kind: "component", label: "use_subagents" },
+		{ id: "tool", kind: "component", label: "Fan-out component" },
 		{ id: "join", kind: "function", label: "Join ALL" },
 	],
 	edges: [{ id: "join", source: "tool", target: "join", kind: "dependency" }],

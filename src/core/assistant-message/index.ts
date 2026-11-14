@@ -88,7 +88,7 @@ export type ToolParamName = (typeof toolParamNames)[number]
 
 export interface ToolUse {
 	type: "tool_use"
-	name: DiracDefaultTool | string // accepted legacy and dynamic names are normalized before dispatch
+	name: DiracDefaultTool | string // dynamic names are resolved against the current tool inventory
 	// params is a partial record, allowing only some or none of the possible parameters to be used
 	params: Partial<Record<ToolParamName, any>>
 	/**
