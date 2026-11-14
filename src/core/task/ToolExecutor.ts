@@ -26,7 +26,7 @@ import { DiracContent } from "@shared/messages/content"
 import { isCompletionResponseCall } from "@shared/responseTool"
 import { DiracDefaultTool, type DiracToolSpec } from "@shared/tools"
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
-import { getTaskScopedStateKey } from "@shared/taskletId"
+import { getRootTaskId } from "@shared/taskletId"
 import { captureSandboxExecution } from "@shared/SandboxExecution"
 import { modelDoesntSupportWebp } from "@/utils/model-utils"
 import { ToolUse } from "../assistant-message"
@@ -142,7 +142,7 @@ export class ToolExecutor {
 		this.coordinator = new ToolExecutorCoordinator(environmentFactory)
 		this.snapshotManager = new ToolSnapshotManager({
 			createTaskConfig: (coordinator) => this.asToolConfig(coordinator),
-			getTaskToolOwnerKey: () => getTaskScopedStateKey(this.taskId, this.storageAddress),
+			getTaskToolOwnerKey: () => getRootTaskId(this.storageAddress ?? this.taskId),
 			getWorkspaceRoot: () => this.workspaceManager?.getPrimaryRoot()?.path,
 			getToggles: () => this.requestRuntime().workingConfiguration.settings.toolToggles || {},
 			getSelectionPolicy: () => this.toolSelectionPolicy,

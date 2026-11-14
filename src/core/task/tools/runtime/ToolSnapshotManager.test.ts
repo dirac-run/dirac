@@ -5,11 +5,12 @@ import type { SystemPromptContext } from "@core/prompts/system-prompt/types"
 import { setHostCapabilities } from "@/hosts/host-capabilities"
 import { diagnostics_scan_spec, DiagnosticsScanTool } from "../modules/diagnostics_scan"
 import type { DiracDefaultTool, DiracToolSpec } from "@shared/tools"
-import { getTaskScopedStateKey } from "@shared/taskletId"
+import { getRootTaskId, type TaskStorageAddress } from "@shared/taskletId"
 import { ToolDiscoveryService } from "../discovery/ToolDiscoveryService"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { ToolRegistry } from "../registry/ToolRegistry"
 import { refreshTaskTools } from "../registry/refreshToolRegistry"
+import { withTaskToolTransaction } from "../registry/TaskToolTransactions"
 import { ToolSnapshotManager } from "./ToolSnapshotManager"
 import type { ToolSelectionPolicy } from "./ToolSelectionPolicy"
 import type { TaskConfig } from "../types/TaskConfig"
@@ -203,7 +204,7 @@ describe("ToolSnapshotManager task isolation", () => {
 		const diskModule = require("@core/storage/disk")
 		sinon.stub(diskModule, "ensureTaskDirectoryExists").resolves("/test/task")
 		const taskTool = { ...makeTool("task-tool"), source: "task" as const, ownerTaskId: "task-id" }
-		sinon.stub(ToolDiscoveryService, "scanUserToolDirectory").resolves([taskTool])
+		const scan = sinon.stub(ToolDiscoveryService, "scanUserToolDirectory").resolves([taskTool])
 		const registry = ToolRegistry.getInstance()
 		const registerSpy = sinon.spy(registry, "registerUserTool")
 
@@ -224,12 +225,52 @@ describe("ToolSnapshotManager task isolation", () => {
 		const refreshPromise = refreshTaskTools("task-id")
 		await new Promise((resolve) => setImmediate(resolve))
 		assert.equal(registerSpy.called, false)
+		sinon.assert.notCalled(scan)
 
 		releaseRegistry()
 		await lockPromise
 		assert.deepEqual(await refreshPromise, ["task-tool"])
+		sinon.assert.calledOnceWithExactly(scan, "/test/task/tools", "task")
 		assert.equal(registerSpy.called, false)
 		assert.equal(registry.getAllTools("task-id").some((tool) => tool.id === "task-tool"), true)
+	})
+
+	it("waits for the root's task-tool transaction before refreshing while another root can refresh", async () => {
+		const diskModule = await import("@core/storage/disk")
+		const directory = sinon.stub(diskModule, "ensureTaskDirectoryExists").callsFake(async (address) => `/test/${address}`)
+		const scan = sinon.stub(ToolDiscoveryService, "scanUserToolDirectory").resolves([
+			{ ...makeTool("shared-tool"), source: "task" as const },
+		])
+		let releaseTransaction!: () => void
+		const transactionBarrier = new Promise<void>((resolve) => { releaseTransaction = resolve })
+		let transactionStarted!: () => void
+		const transactionStartedBarrier = new Promise<void>((resolve) => { transactionStarted = resolve })
+		const transaction = withTaskToolTransaction("root", async () => {
+			transactionStarted()
+			await transactionBarrier
+		})
+		await transactionStartedBarrier
+		try {
+			const child = { kind: "tasklet" as const, rootTaskId: "root", taskletId: "child" }
+			const refresh = refreshTaskTools(child.taskletId, child)
+			await new Promise((resolve) => setImmediate(resolve))
+			sinon.assert.notCalled(directory)
+			sinon.assert.notCalled(scan)
+			assert.deepEqual(await refreshTaskTools("other-root"), ["shared-tool"])
+			sinon.assert.calledOnceWithExactly(directory, "other-root")
+			sinon.assert.calledOnceWithExactly(scan, "/test/other-root/tools", "task")
+			releaseTransaction()
+			await transaction
+			assert.deepEqual(await refresh, ["shared-tool"])
+			sinon.assert.calledWithExactly(directory, "root")
+			sinon.assert.calledWithExactly(scan, "/test/root/tools", "task")
+			assert.equal(scan.callCount, 2)
+			assert.equal(ToolRegistry.getInstance().getAllTools("root").find((tool) => tool.id === "shared-tool")?.ownerTaskId, "root")
+			assert.equal(ToolRegistry.getInstance().getAllTools("other-root").find((tool) => tool.id === "shared-tool")?.ownerTaskId, "other-root")
+		} finally {
+			releaseTransaction()
+			await transaction
+		}
 	})
 
 	it("keeps colliding task tools owner-scoped and removes only the addressed owner", async () => {
@@ -267,18 +308,25 @@ describe("ToolSnapshotManager task isolation", () => {
 		assert.equal(registry.getAllTools("task-b").find((tool) => tool.id === "same-name")?.modulePath, taskBTool.modulePath)
 	})
 
-	it("executes source/fork task tool versions independently and retains the fork after source cleanup", async () => {
-		const taskId = "tasklet_00000000-0000-4000-8000-000000000001"
-		const addresses = ["source", "fork"].map((rootTaskId) => ({ kind: "tasklet" as const, rootTaskId, taskletId: taskId }))
-		const owners = addresses.map((address) => getTaskScopedStateKey(taskId, address))
+	it("shares live task tools across a root and its children while isolating copied children under another root", async () => {
+		const copiedTaskletId = "tasklet_00000000-0000-4000-8000-000000000001"
+		const addresses: TaskStorageAddress[] = [
+			{ kind: "task", taskId: "source" },
+			{ kind: "tasklet", rootTaskId: "source", taskletId: copiedTaskletId },
+			{ kind: "tasklet", rootTaskId: "source", taskletId: "tasklet_00000000-0000-4000-8000-000000000002" },
+			{ kind: "tasklet", rootTaskId: "fork", taskletId: copiedTaskletId },
+		]
+		const owners = addresses.map(getRootTaskId)
+		const taskIds = addresses.map((address) => address.kind === "task" ? address.taskId : address.taskletId)
 		const diskModule = await import("@core/storage/disk")
 		sinon.stub(diskModule, "ensureTaskDirectoryExists").callsFake(async (address) => {
-			assert.ok(typeof address !== "string" && address.kind === "tasklet")
-			return `/test/${address.rootTaskId}`
+			assert.ok(address === "source" || address === "fork", "tools must use root storage, not child storage")
+			return `/test/${address}`
 		})
 		sinon.stub(ToolDiscoveryService, "scanWorkspaceTools").resolves([])
+		let sourceVersion = "source version"
 		sinon.stub(ToolDiscoveryService, "scanUserToolDirectory").callsFake(async (directory) => {
-			const label = directory.includes("/fork/") ? "fork version" : "source version"
+			const label = directory.includes("/fork/") ? "fork version" : sourceVersion
 			const spec = { ...makeTool("fork-tool").spec, description: label }
 			return [{
 				...makeTool("fork-tool"), source: "task" as const, spec,
@@ -286,32 +334,59 @@ describe("ToolSnapshotManager task isolation", () => {
 				factory: () => ({ spec: () => spec, supportedSurfaces: () => ["all"], processCall: async () => label }),
 			}]
 		})
-		await Promise.all(addresses.map((address) => refreshTaskTools(taskId, address)))
-		const config = {
-			taskId, ulid: "copied-conversation", mode: "act", hooksEnabled: false,
+		await refreshTaskTools(taskIds[0], addresses[0])
+		await refreshTaskTools(taskIds[3], addresses[3])
+		const configs = addresses.map((storageAddress, index) => ({
+			taskId: taskIds[index], storageAddress, ulid: "copied-conversation", mode: "act", hooksEnabled: false,
 			vscodeTerminalExecutionMode: "backgroundExec", providerId: "anthropic",
 			model: { id: "test-model", info: {} }, taskState: { consecutiveMistakeCount: 0 },
-		} as TaskConfig
+		}) as TaskConfig)
 		const environment = {
 			context: { save: sinon.stub().resolves() }, getCustomMetadata: () => ({}), getCreatedCards: () => [],
+			orchestration: { getTaskState: () => new AbortController().signal },
 		} as unknown as ToolExecutionEnvironment
 		sinon.stub(telemetry, "telemetryService").value({ captureToolUsage: sinon.stub() })
-		const managers = owners.map((owner) => createManager({}, owner, "/test-workspace", undefined, {
-			createTaskConfig: () => config, environmentFactory: { create: () => environment },
+		const managers = owners.map((owner, index) => createManager({}, owner, "/test-workspace", undefined, {
+			createTaskConfig: () => configs[index], environmentFactory: { create: () => environment },
 		}))
-		const execute = async (index: number, requestId: string) => {
+		const execute = async (index: number, requestId: string, expected: string) => {
 			const snapshot = await managers[index].getSnapshotForRequest(context, { requestId, configurationRevision: 1 })
-			assert.equal(snapshot.inventoryEnabledTools.find((tool) => tool.id === "fork-tool")?.ownerTaskId, owners[index])
-			config.activeToolSnapshot = snapshot
-			return (await snapshot.coordinator.execute(config, {
+			const tool = snapshot.inventoryEnabledTools.find((tool) => tool.id === "fork-tool")
+			assert.equal(tool?.ownerTaskId, owners[index])
+			assert.equal(tool?.spec.description, expected)
+			assert.equal(snapshot.promptVisibleSpecs.find((spec) => spec.name === "fork-tool")?.description, expected)
+			assert.equal(snapshot.executableToolNames.has("fork-tool"), true)
+			configs[index].activeToolSnapshot = snapshot
+			assert.equal((await snapshot.coordinator.execute(configs[index], {
 				type: "tool_use", id: requestId, name: "fork-tool", params: {}, isNativeToolCall: true,
-			})).content
+			})).content, expected)
+			return snapshot
 		}
-		assert.equal(await execute(0, "source-request"), "source version")
-		assert.equal(await execute(1, "fork-request"), "fork version")
-		ToolRegistry.getInstance().removeTaskTools(owners[0])
-		assert.equal(await execute(1, "fork-after-source-cleanup"), "fork version")
-		assert.equal(ToolRegistry.getInstance().getAllTools(owners[0]).some((tool) => tool.source === "task"), false)
+		const originalRootSnapshot = await execute(0, "source-root", "source version")
+		await execute(1, "source-child", "source version")
+		await execute(2, "source-sibling", "source version")
+		await execute(3, "fork-child", "fork version")
+
+		// A child's update is visible on the next request in every member of its root,
+		// without marking each manager dirty or replacing an already captured request.
+		sourceVersion = "child-updated version"
+		await refreshTaskTools(taskIds[1], addresses[1])
+		await execute(0, "updated-root", sourceVersion)
+		await execute(1, "updated-child", sourceVersion)
+		await execute(2, "updated-sibling", sourceVersion)
+		await execute(3, "unchanged-fork", "fork version")
+		assert.equal(originalRootSnapshot.promptVisibleSpecs.find((spec) => spec.name === "fork-tool")?.description, "source version")
+
+		ToolRegistry.getInstance().removeTaskTools("source")
+		for (const index of [0, 1, 2]) {
+			const snapshot = await managers[index].getSnapshotForRequest(context, {
+				requestId: `after-root-cleanup-${index}`, configurationRevision: 1,
+			})
+			assert.equal(snapshot.inventoryEnabledTools.some((tool) => tool.id === "fork-tool"), false)
+			assert.equal(snapshot.coordinator.has("fork-tool"), false)
+		}
+		await execute(3, "fork-after-source-cleanup", "fork version")
+		assert.equal(ToolRegistry.getInstance().getAllTools("source").some((tool) => tool.source === "task"), false)
 	})
 
 	it("reconciles deleted task tools out of the owner inventory", async () => {

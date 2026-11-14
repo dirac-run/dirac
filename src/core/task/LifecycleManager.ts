@@ -708,10 +708,13 @@ export class LifecycleManager {
 	private async performOwnedResourceCleanup(): Promise<void> {
 		const failures: unknown[] = []
 		try {
-			const { ToolRegistry } = await import("@core/task/tools/registry/ToolRegistry")
-			await ToolRegistry.withExclusiveAccess((registry) => {
-				registry.removeTaskTools(getTaskScopedStateKey(this.dependencies.taskId, this.dependencies.storageAddress))
-			})
+			// Task tools belong to the root; a settling tasklet must not retire its siblings' tools.
+			if (this.dependencies.storageAddress?.kind !== "tasklet") {
+				const { ToolRegistry } = await import("@core/task/tools/registry/ToolRegistry")
+				await ToolRegistry.withExclusiveAccess((registry) => {
+					registry.removeTaskTools(this.dependencies.taskId)
+				})
+			}
 			this.dependencies.taskState.taskScopedToolIds = []
 		} catch (error) {
 			failures.push(error)

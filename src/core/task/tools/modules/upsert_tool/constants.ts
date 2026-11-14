@@ -1,4 +1,5 @@
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
+import { getRootTaskId } from "@shared/taskletId"
 import * as path from "path"
 import { DiracToolSpec, DiracDefaultTool } from "@/shared/tools"
 
@@ -29,7 +30,7 @@ export const upsert_tool_spec: DiracToolSpec = {
 						type: "string",
 						enum: ["global", "workspace", "task"],
 						description:
-							"Where the tool lives: 'global' (all workspaces), 'workspace' (this project only), or 'task' (current task only, survives resume).",
+							"Where the tool lives: 'global' (all workspaces), 'workspace' (this project only), or 'task' (shared by the root task and all its children, survives resume; unrelated roots are isolated). No child-specific scope.",
 					},
 					description: {
 						type: "string",
@@ -96,7 +97,7 @@ export interface ManifestData {
 
 export async function resolveTaskToolDir(name: string, address: string | TaskStorageAddress): Promise<string> {
 	const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
-	const taskDir = await ensureTaskDirectoryExists(address)
+	const taskDir = await ensureTaskDirectoryExists(getRootTaskId(address))
 	return path.join(taskDir, "tools", name)
 }
 

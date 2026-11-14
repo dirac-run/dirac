@@ -705,6 +705,61 @@ describe("LifecycleManager", () => {
 		})
 	})
 
+	describe("task tool ownership during cleanup", () => {
+		for (const shutdown of ["abortTask", "finalizeTaskRun"] as const) {
+			for (const storageKind of ["legacy root", "root", "tasklet"] as const) {
+				it(`${shutdown} ${storageKind === "tasklet" ? "preserves shared root tools" : "retires only its root's tools"} for ${storageKind} storage`, async () => {
+					const { ToolRegistry } = require("../tools/registry/ToolRegistry")
+					const registry = ToolRegistry.getInstance()
+					const rootId = "cleanup-root"
+					const otherRootId = "cleanup-other-root"
+					const taskletId = "tasklet_00000000-0000-4000-8000-000000000001"
+					deps.taskId = storageKind === "tasklet" ? taskletId : rootId
+					deps.storageAddress = storageKind === "legacy root"
+						? undefined
+						: storageKind === "tasklet"
+							? { kind: "tasklet", rootTaskId: rootId, taskletId }
+							: { kind: "task", taskId: rootId }
+					deps.taskState.taskScopedToolIds = ["shared-root-tool"]
+					for (const [ownerTaskId, id] of [[rootId, "shared-root-tool"], [otherRootId, "other-root-tool"]]) {
+						registry.replaceUserTool({
+							id,
+							name: id,
+							source: "task",
+							ownerTaskId,
+							exposure: { kind: "configurable" },
+							spec: { id, name: id, description: "Cleanup ownership regression" },
+							factory: () => ({}),
+							modulePath: `/${ownerTaskId}/tools/${id}/tool.ts`,
+						})
+					}
+					const removeTaskTools = sinon.spy(registry, "removeTaskTools")
+					const rootTool = registry.getAllTools(rootId).find((tool: any) => tool.id === "shared-root-tool")
+					const otherRootTool = registry.getAllTools(otherRootId).find((tool: any) => tool.id === "other-root-tool")
+					try {
+						assert.ok(rootTool)
+						assert.ok(otherRootTool)
+						await manager[shutdown]()
+
+						if (storageKind === "tasklet") {
+							sinon.assert.notCalled(removeTaskTools)
+							assert.equal(registry.getAllTools(rootId).find((tool: any) => tool.id === "shared-root-tool"), rootTool)
+						} else {
+							sinon.assert.calledOnceWithExactly(removeTaskTools, rootId)
+							assert.equal(registry.getAllTools(rootId).some((tool: any) => tool.id === "shared-root-tool"), false)
+						}
+						assert.equal(registry.getAllTools(otherRootId).find((tool: any) => tool.id === "other-root-tool"), otherRootTool)
+						assert.deepEqual(deps.taskState.taskScopedToolIds, [])
+					} finally {
+						removeTaskTools.restore()
+						registry.removeTaskTools(rootId)
+						registry.removeTaskTools(otherRootId)
+					}
+				})
+			}
+		}
+	})
+
 	describe("abortTask", () => {
 		for (const fatal of [false, true]) {
 			it(`LifecycleManager joins TaskCancel ownership and ${fatal ? "propagates cleanup failure" : "fails open for ordinary hook errors"}`, async () => {

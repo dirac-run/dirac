@@ -26,7 +26,7 @@ Choose a snake_case **name**, a **description** shown to the model, and **parame
 Choose the **scope**:
 - **Global** (\`~/.dirac/tools/\`, or \`$DIRAC_DIR/tools/\`): all workspaces.
 - **Workspace** (\`<workspace>/.dirac/tools/\`): this project only.
-- **Task** (\`<task storage>/tools/\`): this task, including resume. Contained tasklets use their own task storage.
+- **Task** (\`<root task storage>/tools/\`): the root task and all its children share these tools, including across resume. Creating or updating a task-scoped tool from any child changes the shared root tool; there is no child-specific scope. Unrelated root tasks are isolated.
 
 ## Step 2: Write the Implementation
 
@@ -59,7 +59,7 @@ Call \`upsert_tool\` with a \`tools\` array. Each entry contains \`name\`, \`sco
 
 ## Step 4: Inform the User
 
-Report the installed name, scope and activation state only after a successful result. Newly installed tools are registered and enabled; updating an existing disabled tool preserves its disabled state. Global and workspace tools appear in the **Tools** tab, where they can be enabled. Task-scoped tools persist with their owning conversation. Availability still respects the current execution profile, permissions and any tasklet allowlist.
+Report the installed name, scope and activation state only after a successful result. Newly installed tools are registered and enabled; updating an existing disabled tool preserves its disabled state. Global and workspace tools appear in the **Tools** tab, where they can be enabled. Task-scoped tools persist with their owning root task and are shared live with all its children on subsequent requests. Availability still respects the current execution profile, permissions and any tasklet allowlist.
 `
 
 const WEB_SEARCH_SKILL_INSTRUCTIONS = `

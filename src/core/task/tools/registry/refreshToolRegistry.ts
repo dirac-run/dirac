@@ -1,10 +1,11 @@
 import type { TaskStorageAddress } from "@core/storage/taskDirectory"
-import { getTaskScopedStateKey } from "@shared/taskletId"
+import { getRootTaskId } from "@shared/taskletId"
 import * as path from "path"
 import type { DiscoveredTool } from "../discovery/DiscoveredTool"
 import { UserToolLoader } from "../discovery/UserToolLoader"
 import { ToolDiscoveryService } from "../discovery/ToolDiscoveryService"
 import { ToolRegistry } from "./ToolRegistry"
+import { withTaskToolTransaction } from "./TaskToolTransactions"
 
 export interface RefreshToolRegistryOptions {
 	workspaceRoot?: string
@@ -46,15 +47,19 @@ export async function refreshToolRegistryForWorkspace<T>(
 	})
 }
 
-/** Scan task tools first, then register the complete result under global-registry exclusivity. */
+/** Serialize resume scans with sibling builds, then reconcile under registry exclusivity. */
 export async function refreshTaskTools(taskId: string, storageAddress: string | TaskStorageAddress = taskId): Promise<string[]> {
-	const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
-	const taskDir = await ensureTaskDirectoryExists(storageAddress)
-	const toolsDir = path.join(taskDir, "tools")
-	const ownerTaskId = getTaskScopedStateKey(taskId, storageAddress)
-	const taskTools = (await ToolDiscoveryService.scanUserToolDirectory(toolsDir, "task")).map((tool) => ({
-		...tool,
-		ownerTaskId,
-	}))
-	return ToolRegistry.withExclusiveAccess((registry) => registry.reconcileTaskTools(ownerTaskId, taskTools))
+	const ownerTaskId = getRootTaskId(storageAddress)
+	return withTaskToolTransaction(ownerTaskId, async () => {
+		const { ensureTaskDirectoryExists } = await import("@core/storage/disk")
+		const taskDir = await ensureTaskDirectoryExists(ownerTaskId)
+		const toolsDir = path.join(taskDir, "tools")
+		return ToolRegistry.withExclusiveAccess(async (registry) => {
+			const taskTools = (await ToolDiscoveryService.scanUserToolDirectory(toolsDir, "task")).map((tool) => ({
+				...tool,
+				ownerTaskId,
+			}))
+			return registry.reconcileTaskTools(ownerTaskId, taskTools)
+		})
+	})
 }

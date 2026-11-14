@@ -5,11 +5,12 @@ import { diracHomeDir } from "@/shared/config/environment"
 import { getErrorMessage } from "@/shared/errors"
 import { Logger } from "@/shared/services/Logger"
 import { DiracToolSpec } from "@/shared/tools"
-import { getTaskScopedStateKey } from "@shared/taskletId"
+import { getRootTaskId } from "@shared/taskletId"
 import { UserToolLoader } from "../../discovery/UserToolLoader"
 import { IDiracTool } from "../../interfaces/IDiracTool"
 import { IToolEnvironment } from "../../interfaces/IToolEnvironment"
 import { ToolRegistry } from "../../registry/ToolRegistry"
+import { withTaskToolTransaction } from "../../registry/TaskToolTransactions"
 import { parseSmokeArguments, validateImplementationBody, validateStagedTool } from "./builder-validation"
 import {
 	buildManifest,
@@ -29,6 +30,15 @@ import {
 } from "./tool-lifecycle"
 
 export { upsert_tool_spec }
+
+interface ToolDefinition {
+	name: string
+	scope: ToolScope
+	description: string
+	parameters: NonNullable<DiracToolSpec["parameters"]>
+	implementation: string
+	smoke_args: string
+}
 
 interface PreparedTool {
 	name: string
@@ -65,6 +75,12 @@ export class UpsertTool implements IDiracTool {
 			return validationError
 		}
 
+		const install = () => this.installTools(tools, env)
+		if (!tools.some((tool: { scope: ToolScope }) => tool.scope === "task")) return install()
+		return withTaskToolTransaction(getRootTaskId(env.config.storageAddress ?? env.config.taskId), install)
+	}
+
+	private async installTools(tools: ToolDefinition[], env: IToolEnvironment): Promise<string> {
 		const progressLines: string[] = []
 		const progressCard = await env.ui.createCard({
 			header: `Installing ${tools.length} tool${tools.length > 1 ? "s" : ""}`,
@@ -152,7 +168,7 @@ interface ToolBuildOutcome {
 }
 
 async function buildAndActivateTools(
-	tools: any[],
+	tools: ToolDefinition[],
 	env: IToolEnvironment,
 	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
 	newlyEnabledToolIds: Set<string>,
@@ -196,7 +212,7 @@ async function buildAndActivateTools(
 }
 
 async function prepareTool(
-	definition: any,
+	definition: ToolDefinition,
 	env: IToolEnvironment,
 	updateProgress: (phase: string, detail?: string, status?: CardStatus) => Promise<void>,
 ): Promise<PreparedTool | string> {
@@ -272,7 +288,7 @@ async function promoteAndActivateTool(
 		}
 
 		const loadedTool = prepared.scope === "task"
-			? { ...loadResult.tool, ownerTaskId: getTaskScopedStateKey(env.config.taskId, env.config.storageAddress) }
+			? { ...loadResult.tool, ownerTaskId: getRootTaskId(env.config.storageAddress ?? env.config.taskId) }
 			: loadResult.tool
 		const workspaceRoot = env.config.workspaceManager?.getPrimaryRoot()?.path ?? env.config.cwd
 		await updateProgress(`[${prepared.name}] Registering`, "promotion and loading passed")

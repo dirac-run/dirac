@@ -3704,6 +3704,7 @@ describe("Tasklet real Task execution", function () {
 
 	it("explicitly follows up a completed real tasklet under the same handle and restores task-local context", async () => {
 		const host = createHost()
+		const { ToolRegistry } = await import("../tools/registry/ToolRegistry")
 		const resumed = sandbox.spy(Task.prototype, "resumeTaskFromHistory")
 		const child = await host.start({ type: "default", title: "follow-up", prompt: "READ_BEFORE_FOLLOWUP" })
 		try {
@@ -3712,7 +3713,7 @@ describe("Tasklet real Task execution", function () {
 			await updateTaskMetadata(address, (metadata) => {
 				metadata.active_skill_ids = ["retained-tasklet-skill"]
 			})
-			const toolDirectory = path.join(getTaskDirectoryPath(address), "tools", "retained_tasklet_tool")
+			const toolDirectory = path.join(getTaskDirectoryPath("root"), "tools", "retained_tasklet_tool")
 			await fs.mkdir(toolDirectory, { recursive: true })
 			await fs.writeFile(
 				path.join(toolDirectory, "dirac-tool.json"),
@@ -3759,12 +3760,16 @@ describe("Tasklet real Task execution", function () {
 			assert.equal(task.ulid, child.conversationUlid)
 			assert.deepEqual(task.stateView.activeSkillIds, ["retained-tasklet-skill"])
 			assert.equal(contextRestored, true)
+			const retainedTool = ToolRegistry.getInstance().getAllTools("root").find((tool) => tool.id === "retained_tasklet_tool")
+			assert.ok(retainedTool, "Child completion must preserve the root's shared tool registry")
+			assert.equal(retainedTool.ownerTaskId, "root")
 			const transcript = JSON.stringify(await host.readTranscript(child.id))
 			assert.match(transcript, /PRIVATE_FILE_CONTENT/)
 			assert.match(transcript, /PARENT_FOLLOWUP_ONLY/)
 			assert.equal(host.list().length, 1)
 		} finally {
 			await host.shutdown()
+			await ToolRegistry.withExclusiveAccess((registry) => registry.removeTaskTools("root"))
 		}
 	})
 

@@ -3,6 +3,12 @@ import { SUBAGENT_NAMES } from "./subagentNames";
 /** Storage location only, not proof of ownership or permission to access an execution. */
 export type TaskStorageAddress = { kind: "task"; taskId: string } | { kind: "tasklet"; rootTaskId: string; taskletId: string }
 
+/** Root identity for resources shared by the main task and all of its tasklets. */
+export function getRootTaskId(address: string | TaskStorageAddress): string {
+	if (typeof address === "string") return address
+	return address.kind === "tasklet" ? address.rootTaskId : address.taskId
+}
+
 /** Process-local state only; copied tasklet identities remain distinct under different roots. */
 export function getTaskScopedStateKey(identity: string, address?: string | TaskStorageAddress): string {
 	return typeof address !== "string" && address?.kind === "tasklet"
