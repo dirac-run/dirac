@@ -141,7 +141,7 @@ export async function createCardFromMessenger(
 	return new ApprovedPermissionCardHandle(cardParams)
 }
 
-/** Only unresolved execute_command permissions may consult Utility before the owner. */
+/** YOLO bypasses tool permissions; otherwise only unresolved execute_command permissions may consult Utility. */
 async function createTaskletPermissionCard(
 	config: TaskConfig,
 	params: CardParams,
@@ -150,6 +150,7 @@ async function createTaskletPermissionCard(
 	if (params.operationalInput || (!params.requireApproval && params.permissionRequestKind === undefined)) {
 		return createOwnerCard(config, params, tracker)
 	}
+	if (isUnrestrictedToolApproval(config)) return new ApprovedPermissionCardHandle(params)
 	if (config.toolUse?.name !== "execute_command" || params.permissionOperation?.kind !== "commands") {
 		return createOwnerCard(config, {
 			...params,
@@ -177,6 +178,7 @@ async function createTaskletPermissionCard(
 	signal.throwIfAborted()
 	const decision = await binding.service.decide(request, signal)
 	signal.throwIfAborted()
+	if (isUnrestrictedToolApproval(config)) return new ApprovedPermissionCardHandle(params)
 	const currentBinding = config.permissionDecisionBinding
 	if (!currentBinding || currentBinding.configurationRevision !== binding.configurationRevision ||
 		currentBinding.commandPermissionRevision !== binding.commandPermissionRevision) {

@@ -35,6 +35,12 @@ function fixture(child = false) {
 		taskState: { abortSignal: cancellation.signal },
 		taskMessenger: { routesToOwner: child, createCard },
 		autoApprover: { isUnrestrictedAutoApprove: sinon.stub().returns(false) },
+		services: {
+			commandPermissionController: {
+				assertConfigurationValid: sinon.stub(),
+				validateTool: sinon.stub().returns({ allowed: false, reason: "denied" }),
+			}
+		},
 		permissionDecisionBinding: { authorityMode: "act", configurationRevision: 1, commandPermissionRevision: 0, service: { decide } },
 	} as unknown as TaskConfig
 	const params: CardParams = {
@@ -147,7 +153,7 @@ describe("Root Utility approval publication", () => {
 						},
 						signal: executionAbort.signal,
 						appendOutput: async () => { },
-						beginWait: async () => ({ release: async () => {} }),
+						beginWait: async () => ({ release: async () => { } }),
 					}
 				})
 				if (phase === "evaluation") {

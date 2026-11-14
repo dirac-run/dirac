@@ -7,9 +7,16 @@ import { UtilityPermissionDecisionService } from "@core/permissions/UtilityPermi
 import type { TaskConfig } from "../../types/TaskConfig"
 import type { CardParams } from "../../interfaces/ICardHandle"
 import { createCardFromMessenger, createManualInteractionCardFromMessenger } from "../traits/UiTraitBuilder"
+import { SETTINGS_DEFAULTS, type Settings } from "@shared/storage/state-keys"
+import { AutoApprove } from "../../autoApprove"
 
-function fixture() {
+function fixture(yolo = false) {
 	const cancellation = new AbortController()
+	const settings = structuredClone(SETTINGS_DEFAULTS) as Settings
+	settings.yoloModeToggled = yolo
+	settings.autoApproveAllToggled = false
+	const assertConfigurationValid = sinon.stub()
+	const autoApprover = new AutoApprove({ assertConfigurationValid } as any, () => settings, false, true)
 	const decide = sinon.stub().resolves({ decision: "approve", reason: "Allowed by policy" })
 	const createCard = sinon.stub().callsFake(async (params) => ({
 		id: "card",
@@ -20,12 +27,12 @@ function fixture() {
 		executionProfile: "tasklet",
 		cwd: "/workspace",
 		mode: "act",
-		yoloModeToggled: true,
+		yoloModeToggled: yolo,
 		toolUse: { name: "execute_command", params: { script: "python tool.py", language: "bash" } },
 		taskId: "Feynman",
 		taskState: { abortSignal: cancellation.signal },
 		taskMessenger: { routesToOwner: true, createCard },
-		autoApprover: { isUnrestrictedAutoApprove: sinon.stub().returns(true) },
+		autoApprover,
 		permissionDecisionBinding: { authorityMode: "act", configurationRevision: 1, commandPermissionRevision: 0, service: { decide } },
 	} as unknown as TaskConfig
 	const params: CardParams = {
@@ -34,8 +41,91 @@ function fixture() {
 		permissionRequestKind: "tool",
 		permissionOperation: { kind: "commands", commands: ["@root:python tool.py"] },
 	}
-	return { config, params, decide, createCard, cancellation }
+	return { config, params, decide, createCard, cancellation, settings, assertConfigurationValid }
 }
+
+describe("Tasklet YOLO permission bypass", () => {
+	for (const name of ["execute_command", "write_to_file", "edit_file", "edit_ast", "browser_action", "upsert_tool", "custom_tool"]) {
+		for (const kind of ["tool", "manual_tool", undefined] as const) {
+			it(`automatically approves ${kind ?? "unclassified"} ${name} permissions under YOLO`, async () => {
+				const h = fixture(true)
+				h.config.toolUse!.name = name
+				h.params.permissionRequestKind = kind
+				if (name !== "execute_command") h.params.permissionOperation = { kind: "tool", manualOnly: kind === "manual_tool" }
+				const tracker: Parameters<typeof createCardFromMessenger>[2] = []
+
+				const card = await createCardFromMessenger(h.config, h.params, tracker)
+
+				assert.equal(card.requiresUserInteraction, false)
+				assert.equal((await card.waitForInteraction()).action, DiracAskResponse.APPROVE)
+				sinon.assert.calledOnce(h.assertConfigurationValid)
+				sinon.assert.notCalled(h.decide)
+				sinon.assert.notCalled(h.createCard)
+				assert.deepEqual(tracker, [])
+			})
+		}
+	}
+
+	it("keeps Auto-Approve All noncommand permissions owner-routed", async () => {
+		const h = fixture()
+		h.settings.autoApproveAllToggled = true
+		h.config.toolUse!.name = "browser_action"
+		const card = await createCardFromMessenger(h.config, h.params, [])
+		assert.equal((await card.waitForInteraction()).action, DiracAskResponse.REJECT)
+		sinon.assert.notCalled(h.decide)
+		sinon.assert.calledOnce(h.createCard)
+	})
+
+	for (const request of ["operational input", "nonpermission"] as const) {
+		it(`keeps ${request} owner-routed under YOLO`, async () => {
+			const h = fixture(true)
+			if (request === "operational input") h.params.operationalInput = true
+			else {
+				h.params.requireApproval = false
+				h.params.permissionRequestKind = undefined
+			}
+			const card = await createCardFromMessenger(h.config, h.params, [])
+			assert.equal((await card.waitForInteraction()).action, DiracAskResponse.REJECT)
+			sinon.assert.notCalled(h.assertConfigurationValid)
+			sinon.assert.notCalled(h.decide)
+			sinon.assert.calledOnce(h.createCard)
+		})
+	}
+
+	it("does not bypass invalid permission configuration under YOLO", async () => {
+		const h = fixture(true)
+		h.assertConfigurationValid.throws(new Error("Invalid permission configuration"))
+		await assert.rejects(createCardFromMessenger(h.config, h.params, []), /Invalid permission configuration/)
+		sinon.assert.notCalled(h.decide)
+		sinon.assert.notCalled(h.createCard)
+	})
+
+	for (const decision of ["approve", "escalate"] as const) {
+		it(`honors live YOLO enabled during Utility evaluation returning ${decision}`, async () => {
+			const h = fixture()
+			h.decide.callsFake(async () => {
+				h.settings.yoloModeToggled = true
+				h.config.permissionDecisionBinding = undefined
+				return { decision, reason: "Evaluated before YOLO" }
+			})
+			const card = await createCardFromMessenger(h.config, h.params, [])
+			assert.equal((await card.waitForInteraction()).action, DiracAskResponse.APPROVE)
+			sinon.assert.calledOnce(h.decide)
+			sinon.assert.notCalled(h.createCard)
+		})
+	}
+
+	it("retains execution cancellation before applying live YOLO", async () => {
+		const h = fixture()
+		h.decide.callsFake(async () => {
+			h.settings.yoloModeToggled = true
+			h.cancellation.abort()
+			return { decision: "approve", reason: "Allowed" }
+		})
+		await assert.rejects(createCardFromMessenger(h.config, h.params, []), /abort/i)
+		sinon.assert.notCalled(h.createCard)
+	})
+})
 
 describe("Tasklet command Utility routing", () => {
 	it("approves a command before owner interaction and supplies full arguments, resolved commands and child identity", async () => {
@@ -82,7 +172,7 @@ describe("Tasklet command Utility routing", () => {
 		})
 	}
 
-	it("routes Utility escalation to the owner with its reason, without YOLO bypass", async () => {
+	it("routes Utility escalation to the owner with its reason when YOLO is disabled", async () => {
 		const h = fixture()
 		h.decide.resolves({ decision: "escalate", reason: "Policy does not cover this command" })
 		const card = await createCardFromMessenger(h.config, h.params, [])
@@ -184,7 +274,7 @@ describe("Tasklet command Utility routing", () => {
 	}
 
 	it("keeps explicit manual interactions owner-routed", async () => {
-		const h = fixture()
+		const h = fixture(true)
 		await createManualInteractionCardFromMessenger(h.config, h.params, [])
 		sinon.assert.notCalled(h.decide)
 		sinon.assert.calledOnce(h.createCard)

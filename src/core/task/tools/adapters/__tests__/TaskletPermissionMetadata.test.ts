@@ -8,8 +8,11 @@ import type { TaskConfig } from "../../types/TaskConfig"
 describe("Tasklet permission metadata", () => {
 	async function forward(params: CardParams) {
 		const createCard = sinon.stub().resolves({})
-		const config = { taskMessenger: { routesToOwner: true, createCard },
-			toolUse: { name: "some_tool", params: { input: "original" } } } as unknown as TaskConfig
+		const config = {
+			taskMessenger: { routesToOwner: true, createCard },
+			autoApprover: { isUnrestrictedAutoApprove: sinon.stub().returns(false) },
+			toolUse: { name: "some_tool", params: { input: "original" } }
+		} as unknown as TaskConfig
 		await createCardFromMessenger(config, params, [])
 		return createCard.firstCall.args[0]
 	}

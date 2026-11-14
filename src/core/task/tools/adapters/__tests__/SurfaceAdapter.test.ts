@@ -49,10 +49,10 @@ describe("SurfaceAdapter", () => {
 		}
 		for (const permissionRequestKind of [undefined, "tool", "manual_tool"] as const) {
 			for (const manual of [false, true]) {
-				it(`bypasses every approval shortcut for ${permissionRequestKind ?? "unclassified"} (${manual ? "manual" : "ordinary"} card)`, async () => {
+				it(`retains owner authority for ${permissionRequestKind ?? "unclassified"} (${manual ? "manual under YOLO" : "ordinary without YOLO"} card)`, async () => {
 					config.taskMessenger.routesToOwner = true
-					config.yoloModeToggled = true
-					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
+					config.yoloModeToggled = manual
+					config.autoApprover.isUnrestrictedAutoApprove.returns(manual)
 					config.permissionDecisionBinding = {
 						authorityMode: "act", configurationRevision: 1,
 						service: { decide: sinon.stub().resolves({ decision: "approve" }) },
@@ -93,7 +93,8 @@ describe("SurfaceAdapter", () => {
 					expect((await card.waitForInteraction()).response).to.equal(DiracAskResponse.REJECT)
 					sinon.assert.calledOnce(protocol.waitForInteraction)
 					sinon.assert.notCalled(liveApproval)
-					sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+					if (manual) sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+					else sinon.assert.calledOnce(config.autoApprover.isUnrestrictedAutoApprove)
 					sinon.assert.notCalled(config.permissionDecisionBinding.service.decide)
 				})
 			}
@@ -107,8 +108,8 @@ describe("SurfaceAdapter", () => {
 			] satisfies NonNullable<CardParams["permissionOperation"]>[]) {
 				it(`preserves the resolved ${permissionOperation.kind} operation for the owner (${manual ? "manual" : "ordinary"} card)`, async () => {
 					config.taskMessenger.routesToOwner = true
-					config.yoloModeToggled = true
-					config.autoApprover.isUnrestrictedAutoApprove.returns(true)
+					config.yoloModeToggled = manual
+					config.autoApprover.isUnrestrictedAutoApprove.returns(manual)
 					const protocol = attachCardState({ id: "owner-operation" })
 					config.taskMessenger.createCard.resolves(protocol)
 					const params: CardParams = {
@@ -123,7 +124,8 @@ describe("SurfaceAdapter", () => {
 					const forwarded = config.taskMessenger.createCard.firstCall.args[0]
 					expect(forwarded.permissionOperation).to.deep.equal(permissionOperation)
 					expect(forwarded.requireApproval).to.equal(true)
-					sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+					if (manual) sinon.assert.notCalled(config.autoApprover.isUnrestrictedAutoApprove)
+					else sinon.assert.calledOnce(config.autoApprover.isUnrestrictedAutoApprove)
 				})
 			}
 		}

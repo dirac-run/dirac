@@ -54,9 +54,9 @@ describe("AutoApprove condensation policy", () => {
 		})
 	}
 
-	it("keeps child condensation owner-routed despite read and unrestricted approval settings", () => {
+	it("keeps child condensation owner-routed with Auto-Approve-All and read approval", () => {
 		const currentSettings = settings()
-		currentSettings.yoloModeToggled = true
+		currentSettings.yoloModeToggled = false
 		currentSettings.autoApproveAllToggled = true
 		currentSettings.autoApprovalSettings.actions.readFiles = true
 		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
@@ -69,9 +69,12 @@ describe("AutoApprove condensation policy", () => {
 describe("AutoApprove child static policy", () => {
 	afterEach(() => sinon.restore())
 
-	it("keeps non-write paths owner-routed without reading settings or rules", async () => {
+	it("keeps non-write paths owner-routed with Auto-Approve-All without consulting rules", async () => {
 		const permissions = commandPermissionController({ allowed: false, reason: "denied" })
-		const settingsSource = sinon.stub().returns(settings())
+		const currentSettings = settings()
+		currentSettings.yoloModeToggled = false
+		currentSettings.autoApproveAllToggled = true
+		const settingsSource = sinon.stub().returns(currentSettings)
 		const autoApprove = new AutoApprove(permissions as any, settingsSource, false, true)
 		const writes = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
 
@@ -82,7 +85,7 @@ describe("AutoApprove child static policy", () => {
 			assert.equal(autoApprove.shouldAutoApproveWithRules(tool, "/workspace/file.ts"), false)
 		}
 		assert.equal(autoApprove.isUnrestrictedAutoApprove(), false)
-		sinon.assert.notCalled(settingsSource)
+		sinon.assert.called(settingsSource)
 		sinon.assert.notCalled(permissions.validateTool)
 	})
 
@@ -125,10 +128,10 @@ describe("AutoApprove child static policy", () => {
 			assert.equal(await autoApprove.resolveToolPathPermission(tool, "/outside/file.ts"), "manual_only")
 		})
 
-		it(`does not let child unrestricted flags bypass a denied ${tool} path`, async () => {
+		it(`does not let child Auto-Approve-All bypass a denied ${tool} path`, async () => {
 			stubWorkspace()
 			const currentSettings = settings()
-			currentSettings.yoloModeToggled = true
+			currentSettings.yoloModeToggled = false
 			currentSettings.autoApproveAllToggled = true
 			const permissions = commandPermissionController({ allowed: false, reason: "denied" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
@@ -137,9 +140,9 @@ describe("AutoApprove child static policy", () => {
 		})
 	}
 
-	it("keeps browser launches manual-only despite unrestricted settings and allow rules", () => {
+	it("keeps browser launches manual-only with Auto-Approve-All and allow rules", () => {
 		const currentSettings = settings()
-		currentSettings.yoloModeToggled = true
+		currentSettings.yoloModeToggled = false
 		currentSettings.autoApproveAllToggled = true
 		currentSettings.autoApprovalSettings.actions.useBrowser = true
 		const permissions = commandPermissionController({ allowed: true, reason: "allowed", matchedPattern: "**" })
@@ -148,6 +151,116 @@ describe("AutoApprove child static policy", () => {
 		assert.equal(resolveBrowserLaunchPermission("https://example.com", autoApprove, permissions as any), "manual_only")
 		sinon.assert.notCalled(permissions.validateTool)
 	})
+})
+
+describe("AutoApprove live child YOLO policy", () => {
+	afterEach(() => sinon.restore())
+
+	it("switches reads, writes, browser launches, and condensation with the live owner's YOLO setting", async () => {
+		stubWorkspace()
+		let currentSettings = settings()
+		const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+		const child = new AutoApprove(permissions as any, () => currentSettings, false, true)
+		const root = new AutoApprove(permissions as any, () => currentSettings, false)
+		const reads = [
+			DiracDefaultTool.FILE_READ, DiracDefaultTool.INSPECT_AST, DiracDefaultTool.DIAGNOSTICS_SCAN,
+			DiracDefaultTool.LIST_FILES, DiracDefaultTool.SEARCH,
+		]
+		const writes = [DiracDefaultTool.FILE_NEW, DiracDefaultTool.EDIT_FILE, DiracDefaultTool.EDIT_AST]
+
+		for (const yoloModeToggled of [false, true, false]) {
+			currentSettings = settings()
+			currentSettings.yoloModeToggled = yoloModeToggled
+			currentSettings.autoApproveAllToggled = false
+			currentSettings.autoApprovalSettings.actions.readFiles = false
+			currentSettings.autoApprovalSettings.actions.editFiles = false
+			currentSettings.autoApprovalSettings.actions.useBrowser = false
+			assert.equal(child.requiresCounterpartyApproval, !yoloModeToggled)
+			assert.equal(child.isUnrestrictedAutoApprove(), yoloModeToggled)
+
+			for (const tool of [...reads, ...writes]) {
+				assert.deepEqual(
+					child.shouldAutoApproveTool(tool),
+					yoloModeToggled ? [true, true] : writes.includes(tool) ? [false, false] : false,
+				)
+				assert.equal(await child.shouldAutoApproveToolWithPath(tool, "/workspace/file.ts"), yoloModeToggled)
+				assert.equal(
+					await child.resolveToolPathPermission(tool, "/workspace/file.ts"),
+					yoloModeToggled ? "auto_approve" : writes.includes(tool) ? "utility_eligible" : "manual_only",
+				)
+				if (yoloModeToggled) {
+					assert.deepEqual(child.shouldAutoApproveTool(tool), root.shouldAutoApproveTool(tool))
+					assert.equal(await child.shouldAutoApproveToolWithPath(tool, "/outside/file.ts"), true)
+				}
+			}
+			assert.equal(child.shouldAutoApproveTool(DiracDefaultTool.CONDENSE), yoloModeToggled)
+			assert.equal(child.shouldAutoApproveTool(DiracDefaultTool.BROWSER), yoloModeToggled)
+			assert.equal(
+				resolveBrowserLaunchPermission("https://example.com", child, permissions as any),
+				yoloModeToggled ? "auto_approve" : "manual_only",
+			)
+		}
+	})
+
+	it("preserves root Utility path and browser restrictions in child YOLO", async () => {
+		stubWorkspace()
+		const currentSettings = settings()
+		currentSettings.yoloModeToggled = true
+		const permissions = commandPermissionController({ allowed: false, reason: "denied" })
+		for (const isSubagent of [false, true]) {
+			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, isSubagent)
+			assert.equal(await autoApprove.shouldAutoApproveToolWithPath(DiracDefaultTool.EDIT_FILE, "/workspace/private.ts"), true)
+			for (const tool of [DiracDefaultTool.FILE_READ, DiracDefaultTool.EDIT_FILE]) {
+				assert.equal(await autoApprove.resolveToolPathPermission(tool, "/workspace/private.ts"), "manual_only")
+			}
+			assert.equal(resolveBrowserLaunchPermission("https://example.com", autoApprove, permissions as any), "manual_only")
+			permissions.validateTool.returns({ allowed: true, reason: "no_config" })
+			assert.equal(await autoApprove.resolveToolPathPermission(DiracDefaultTool.EDIT_FILE, "/outside/file.ts"), "manual_only")
+			permissions.validateTool.returns({ allowed: false, reason: "denied" })
+		}
+	})
+
+	for (const utilityEnabled of [false, true]) {
+		for (const { command, tool, utilityEligible } of [
+			{ command: "curl https://example.com", tool: DiracDefaultTool.EXECUTE_COMMAND, utilityEligible: true },
+			{ command: "ls > out.txt", tool: DiracDefaultTool.EXECUTE_COMMAND, utilityEligible: true },
+			{
+				command: "pwd && npm test -- --runInBand 2>&1",
+				tool: DiracDefaultTool.EXECUTE_COMMAND,
+				utilityEligible: false,
+			},
+			{ command: "npx tsx test-harness.ts", tool: DiracDefaultTool.UPSERT_TOOL, utilityEligible: false },
+		] as const) {
+			it(`switches child ${tool} approval for ${command} with live YOLO (Utility: ${utilityEnabled})`, () => {
+				const currentSettings = settings()
+				currentSettings.autoApproveAllToggled = true
+				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+				const child = new AutoApprove(permissions as any, () => currentSettings, false, true)
+				for (const yoloModeToggled of [false, true, false]) {
+					currentSettings.yoloModeToggled = yoloModeToggled
+					assert.deepEqual(resolveCommandApproval([command], utilityEnabled, child, permissions as any, tool), {
+						required: !yoloModeToggled,
+						utilityEligible: !yoloModeToggled && utilityEligible,
+					})
+				}
+			})
+		}
+
+		it(`preserves root command deny precedence in child YOLO (Utility: ${utilityEnabled})`, () => {
+			const currentSettings = settings()
+			currentSettings.yoloModeToggled = true
+			const permissions = commandPermissionController({ allowed: false, reason: "denied" })
+			for (const isSubagent of [false, true]) {
+				const autoApprove = new AutoApprove(permissions as any, currentSettings, false, isSubagent)
+				for (const tool of [DiracDefaultTool.EXECUTE_COMMAND, DiracDefaultTool.UPSERT_TOOL] as const) {
+					assert.deepEqual(
+						resolveCommandApproval(["curl https://example.com"], utilityEnabled, autoApprove, permissions as any, tool),
+						{ required: utilityEnabled, utilityEligible: false },
+					)
+				}
+			}
+		})
+	}
 })
 
 describe("invalid configuration blocks unrestricted automatic authorization", () => {
@@ -260,7 +373,8 @@ describe("resolveCommandApproval child static policy", () => {
 
 		it(`keeps deny rules manual-only before safe or user-approved shortcuts (Utility: ${utilityEnabled})`, () => {
 			const currentSettings = settings()
-			currentSettings.yoloModeToggled = true
+			currentSettings.yoloModeToggled = false
+			currentSettings.autoApproveAllToggled = true
 			currentSettings.userApprovedCommands = [{ command: "npm test", match: "exact" }]
 			const permissions = commandPermissionController({ allowed: false, reason: "denied" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
@@ -275,26 +389,23 @@ describe("resolveCommandApproval child static policy", () => {
 			sinon.assert.notCalled(commandCheck)
 		})
 
-		it(`does not inherit blanket YOLO or Auto-Approve-All command bypasses (Utility: ${utilityEnabled})`, () => {
-			for (const setting of ["yoloModeToggled", "autoApproveAllToggled"] as const) {
-				const currentSettings = settings()
-				currentSettings[setting] = true
-				const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
-				const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
+		it(`does not inherit blanket Auto-Approve-All command bypasses (Utility: ${utilityEnabled})`, () => {
+			const currentSettings = settings()
+			currentSettings.yoloModeToggled = false
+			currentSettings.autoApproveAllToggled = true
+			const permissions = commandPermissionController({ allowed: true, reason: "no_config" })
+			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)
 
-				assert.deepEqual(
-					resolveCommandApproval(["curl https://example.com"], utilityEnabled, autoApprove, permissions as any),
-					{
-						required: true,
-						utilityEligible: true,
-					},
-				)
-			}
+			assert.deepEqual(
+				resolveCommandApproval(["curl https://example.com"], utilityEnabled, autoApprove, permissions as any),
+				{ required: true, utilityEligible: true },
+			)
 		})
 
 		it(`keeps upsert smoke commands manual-only before static approval (Utility: ${utilityEnabled})`, () => {
 			const currentSettings = settings()
-			currentSettings.yoloModeToggled = true
+			currentSettings.yoloModeToggled = false
+			currentSettings.autoApproveAllToggled = true
 			currentSettings.userApprovedCommands = [{ command: "npx tsx", match: "prefix" }]
 			const permissions = commandPermissionController({ allowed: true, reason: "allowed", matchedPattern: "**" })
 			const autoApprove = new AutoApprove(permissions as any, currentSettings, false, true)

@@ -599,7 +599,7 @@ describe("Tasklet real Task execution", function () {
 				const host = root.taskletHost!
 				const expectedStatus =
 					execution === "coordinator" ? "working" : execution === "paused follow-up" ? "paused" : "achieved"
-				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+				await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
 				const child = await host.start({ type: "default", title: "Goal permission worker", prompt: "GOAL_CHILD_INTERACTION_ASSIGNMENT" })
 				const question = await waitForInteraction(host, child.id)
 				assert.equal((await h.store.read("root")).status, expectedStatus, "Child-local question is not a user wait")
@@ -2888,15 +2888,43 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(root.stateView.lastWaitingCardId, undefined)
 	})
 
+	for (const flag of ["yoloModeToggled", "autoApproveAllToggled"] as const) {
+		it(`bypasses parent command permission only for YOLO (${flag})`, async () => {
+			const root = createResolutionRoot()
+			await root.applyWorkingConfigurationUpdate({ settings: { [flag]: true } })
+			const host = root.taskletHost!
+			let turn = 0
+			nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
+			const child = await host.start({ type: "default", title: "command", prompt: "Execute the command" })
+			if (flag === "autoApproveAllToggled") {
+				const request = await waitForInteraction(host, child.id)
+				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+				await host.resolveInteraction(child.id, request.id, { operation: "reject" })
+			}
+			const result = await waitForOutcome(host, child.id)
+			assert.equal(result.outcome?.kind, "completed")
+			if (flag === "yoloModeToggled") {
+				assert.deepEqual(result.interactions, [])
+				await fs.access(path.join(cwd, "permission-bypass-marker"))
+			} else {
+				await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+			}
+			assert.equal(root.stateView.lastWaitingCardId, undefined)
+		})
+	}
+
 	it("uses the parent's current authority rather than the child's spawn settings for real command approval", async () => {
 		const root = createResolutionRoot()
 		const host = root.taskletHost!
 		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		let turn = 0
-		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
+		nextTurn = async () => {
+			if (++turn !== 1) return "complete"
+			await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
+			return "execute_command"
+		}
 		const child = await host.start({ type: "default", title: "command", prompt: "Ask command permission" })
 		const request = await waitForInteraction(host, child.id)
-		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: false } })
 		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "approve" }), {
 			status: "requires_user_approval",
 		})
@@ -3004,22 +3032,18 @@ describe("Tasklet real Task execution", function () {
 		assert.equal(final.content.card.status, CardStatus.SUCCESS)
 	})
 
-	it("keeps explicit real-root escalation interactive even under current YOLO permission", async () => {
+	it("approves an escalated command using current YOLO permission without waiting for the user", async () => {
 		const root = createResolutionRoot()
-		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
 		const host = root.taskletHost!
 		let turn = 0
 		nextTurn = async () => (++turn === 1 ? "execute_command" : "complete")
 		const child = await host.start({ type: "default", title: "command", prompt: "Explicitly escalate" })
 		const request = await waitForInteraction(host, child.id)
-		const escalation = host.resolveInteraction(child.id, request.id, { operation: "escalate" })
-		const card = await waitForRootCard(root)
-		assert.equal(host.inspect(child.id).interactions[0].status, "pending")
-		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
-		await root.submitCardResponse(card.id, DiracAskResponse.REJECT)
-		await escalation
+		await root.applyWorkingConfigurationUpdate({ settings: { yoloModeToggled: true } })
+		assert.deepEqual(await host.resolveInteraction(child.id, request.id, { operation: "escalate" }), { status: "resolved" })
 		assert.equal((await waitForOutcome(host, child.id)).outcome?.kind, "completed")
-		await assert.rejects(fs.stat(path.join(cwd, "permission-bypass-marker")), { code: "ENOENT" })
+		await fs.access(path.join(cwd, "permission-bypass-marker"))
+		assert.equal(root.stateView.lastWaitingCardId, undefined)
 	})
 
 	it("answers real runtime retry intervention without treating the answer as a permission grant", async () => {
@@ -3081,7 +3105,7 @@ describe("Tasklet real Task execution", function () {
 	})
 
 	for (const operation of ["question", "execute_command", "condense"] as const) {
-		it(`routes real ${operation} to the owner despite YOLO, permits a sibling to finish, and retires on shutdown`, async () => {
+		it(`routes real ${operation} to the owner without YOLO, permits a sibling to finish, and retires on shutdown`, async () => {
 			expectLoggerErrors() // Aborting a real tool wait is an expected tool cancellation.
 			const notification = sandbox.stub(notifications, "showSystemNotification")
 			const params = parameters()
@@ -3098,14 +3122,14 @@ describe("Tasklet real Task execution", function () {
 					...SETTINGS_DEFAULTS,
 					mode: "act",
 					hooksEnabled: false,
-					yoloModeToggled: true,
+					yoloModeToggled: false,
 					toolToggles: { read_file: true, execute_command: true },
 					autoApprovalSettings: { ...SETTINGS_DEFAULTS.autoApprovalSettings!, enableNotifications: true },
 				} as Settings,
 			})
 			let turn = 0
 			nextTurn = async () => (++turn === 1 ? operation : "complete")
-			const host = createHost(params)
+			const host = operation === "execute_command" ? createResolutionRoot().taskletHost! : createHost(params)
 			try {
 				const child = await host.start({ type: "default", title: "waiting", prompt: "Private request" })
 				const request = await waitForInteraction(host, child.id)

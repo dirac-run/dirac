@@ -178,9 +178,8 @@ describe("ToolExecutor request-runtime authorization", () => {
 		sinon.assert.alwaysCalledWithExactly(harness.commandPermissionController.validateTool, DiracDefaultTool.EDIT_FILE, "src/index.ts")
 	})
 
-	it("exposes Utility permission evaluation to tasklets without enabling YOLO interactions", () => {
-		const current = configuration("act", 2, true)
-		const workingConfiguration = { ...current, settings: { ...current.settings, yoloModeToggled: true } }
+	it("exposes Utility permission evaluation and live YOLO interactions to tasklets", () => {
+		let workingConfiguration = configuration("act", 2, true)
 		const runtime = createTaskRequestRuntime(workingConfiguration, { getModel: () => ({ id: "test", info: {} }) } as any, "request-1")
 		const executor = Object.assign(Object.create(ToolExecutor.prototype), {
 			executionProfile: "tasklet",
@@ -197,6 +196,17 @@ describe("ToolExecutor request-runtime authorization", () => {
 		assert.equal(config.executionProfile, "tasklet")
 		assert.ok(config.permissionDecisionBinding)
 		sinon.assert.calledOnce(executor.createPermissionDecisionBinding)
+		workingConfiguration = {
+			...workingConfiguration,
+			settings: { ...workingConfiguration.settings, yoloModeToggled: true },
+		}
+		assert.equal(config.yoloModeToggled, true)
+		workingConfiguration = configuration("act", 3, true)
+		assert.equal(config.yoloModeToggled, false)
+		workingConfiguration = {
+			...workingConfiguration,
+			settings: { ...workingConfiguration.settings, yoloModeToggled: true },
+		}
 		executor.executionProfile = "standalone"
 		const foreground = executor.asToolConfig()
 		assert.equal(foreground.yoloModeToggled, true)
@@ -212,7 +222,7 @@ describe("ToolExecutor request-runtime authorization", () => {
 			requestRuntime: () => createTaskRequestRuntime(child, { getModel: () => ({ id: "test", info: {} }) } as any, "child"),
 			getCurrentWorkingConfiguration: () => child,
 			getPermissionWorkingConfiguration: () => parent,
-			commandPermissionController: {},
+			commandPermissionController: { assertConfigurationValid: sinon.stub() },
 			createPermissionDecisionBinding: sinon.stub().returns({ service: {} }),
 		})
 		for (const key of TASK_CALLBACKS_KEYS) {
@@ -224,6 +234,21 @@ describe("ToolExecutor request-runtime authorization", () => {
 		parent = configuration("plan", 3)
 		assert.ok(config.permissionDecisionBinding)
 		sinon.assert.calledWithExactly(executor.createPermissionDecisionBinding, parent)
+		const autoApprover = executor.requestAutoApprover()
+		assert.equal(autoApprover.requiresCounterpartyApproval, true)
+		parent = {
+			...parent,
+			revision: 4,
+			settings: { ...parent.settings, autoApproveAllToggled: true, yoloModeToggled: true },
+		}
+		assert.equal(child.settings.yoloModeToggled, false)
+		assert.equal(config.yoloModeToggled, true)
+		assert.equal(autoApprover.requiresCounterpartyApproval, false)
+		assert.equal(autoApprover.isUnrestrictedAutoApprove(), true)
+		parent = configuration("plan", 5, true)
+		assert.equal(config.yoloModeToggled, false)
+		assert.equal(autoApprover.requiresCounterpartyApproval, true)
+		assert.equal(autoApprover.isUnrestrictedAutoApprove(), false)
 		assert.equal(config.mode, "act")
 	})
 

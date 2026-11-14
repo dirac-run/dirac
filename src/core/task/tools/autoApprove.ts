@@ -70,10 +70,14 @@ export class AutoApprove {
 		commandPermissionController: CommandPermissionController,
 		private readonly settingsSource: DeepReadonly<Settings> | (() => DeepReadonly<Settings>),
 		private readonly multiRootEnabled: boolean,
-		public readonly requiresCounterpartyApproval = false,
+		private readonly isSubagent = false,
 		private readonly commandCapabilities: () => number = () => DEFAULT_COMMAND_CAPABILITIES,
 	) {
 		this.commandPermissionController = commandPermissionController
+	}
+
+	get requiresCounterpartyApproval(): boolean {
+		return this.isSubagent && !this.setting("yoloModeToggled")
 	}
 
 	private setting<K extends keyof Settings>(key: K): DeepReadonly<Settings[K]> {

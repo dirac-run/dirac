@@ -97,7 +97,7 @@ describe("command capability approval integration", () => {
 				settings[setting] = true
 				for (const utility of [false, true]) {
 					assert.deepEqual(resolveCommandApproval(["unknown_command_xyz"], utility, approval, permissions), {
-						required: child, utilityEligible: false,
+						required: child && setting !== "yoloModeToggled", utilityEligible: false,
 					})
 				}
 			})

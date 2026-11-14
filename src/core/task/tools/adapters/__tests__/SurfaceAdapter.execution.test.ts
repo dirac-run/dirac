@@ -38,6 +38,7 @@ function fixture() {
 	setHostCapabilities({})
 	const { config } = createMockTaskConfig()
 	config.yoloModeToggled = false
+	config.autoApprover.isUnrestrictedAutoApprove = sinon.stub().returns(false)
 	const first = execution("first")
 	const second = execution("second")
 	const firstConfig = { ...config, execution: first.leased, invocationEffects: { consecutiveMistakeCount: 3 } }
