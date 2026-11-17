@@ -67,6 +67,32 @@ describe("OpenAiNativeHandler persisted reasoning", () => {
 		createStub.firstCall.args[0].service_tier.should.equal("fast")
 	})
 
+	for (const modelId of ["gpt-6.2-astra", "gpt-6.2-sol"]) {
+		it(`sends ${modelId} with Fast mode and persisted reasoning`, async () => {
+			const createStub = sinon.stub().resolves(createAsyncIterable())
+			const handler = createHandler(createStub, { modelId, inferenceSpeed: "fast" })
+
+			await drain(
+				handler.createMessage(
+					"system",
+					[
+						{ role: "user", content: "old question" },
+						currentModelResponse(modelId),
+						{ role: "user", content: "new question" },
+					] as any,
+					tools,
+				),
+			)
+
+			const params = createStub.firstCall.args[0]
+			params.model.should.equal(modelId)
+			params.service_tier.should.equal("fast")
+			params.previous_response_id.should.equal("resp_123")
+			params.reasoning.context.should.equal("all_turns")
+			if (modelId === "gpt-6.2-sol") params.reasoning.effort.should.equal("medium")
+		})
+	}
+
 	it("continues a supported model with all-turn reasoning context", async () => {
 		const createStub = sinon.stub().resolves(createAsyncIterable())
 		const handler = createHandler(createStub)

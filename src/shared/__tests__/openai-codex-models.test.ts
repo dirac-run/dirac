@@ -16,6 +16,8 @@ describe("openAiCodexModels", () => {
 			"gpt-5.4-nano",
 			"gpt-5.4-pro",
 			"gpt-5.6-sol",
+			"gpt-6.2-astra",
+			"gpt-6.2-sol",
 			"gpt-6-astra",
 			"gpt-6-sol",
 			"gpt-6.1-sol",
@@ -24,6 +26,44 @@ describe("openAiCodexModels", () => {
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
 		])
+	})
+
+	for (const [modelId, inputPrice, cacheReadsPrice, outputPrice, previousModelId] of [
+		["gpt-6.2-astra", 8, 0.4, 40, "gpt-6-astra"],
+		["gpt-6.2-sol", 2, 0.1, 10, "gpt-6.1-sol"],
+	] as const) {
+		it(`defines ${modelId} API pricing and subscription capabilities`, () => {
+			const native = openAiNativeModels[modelId]
+			const codex = openAiCodexModels[modelId]
+			const previous = openAiNativeModels[previousModelId]
+			native.inputPrice.should.equal(inputPrice)
+			native.cacheReadsPrice.should.equal(cacheReadsPrice)
+			native.outputPrice.should.equal(outputPrice)
+			native.fastModePriceMultiplier.should.equal(previous.fastModePriceMultiplier)
+			for (const model of [native, codex]) {
+				model.name!.should.equal(modelId === "gpt-6.2-astra" ? "GPT-6.2 Astra" : "GPT-6.2 Sol")
+				model.contextWindow!.should.equal(previous.contextWindow!)
+				model.maxTokens!.should.equal(previous.maxTokens!)
+				model.supportsImages!.should.equal(true)
+				model.supportsReasoning!.should.equal(true)
+				model.supportsPromptCache.should.equal(true)
+				model.supportsFastMode.should.equal(true)
+				model.supportsPersistedReasoning.should.equal(true)
+			}
+			codex.inputPrice.should.equal(0)
+			codex.outputPrice.should.equal(0)
+			codex.description.should.containEql("ChatGPT subscription")
+		})
+	}
+
+	it("retains GPT-6.1 Sol reasoning options and pricing tiers for GPT-6.2 Sol", () => {
+		const native = openAiNativeModels["gpt-6.2-sol"]
+		const previous = openAiNativeModels["gpt-6.1-sol"]
+		native.reasoningEffortOptions!.should.deepEqual(previous.reasoningEffortOptions!)
+		native.defaultReasoningEffort!.should.equal("medium")
+		native.supportsStrictTools!.should.equal(true)
+		native.tiers.should.deepEqual(previous.tiers)
+		openAiCodexModels["gpt-6.2-sol"].reasoningEffortOptions!.should.deepEqual(native.reasoningEffortOptions!)
 	})
 
 	it("uses GPT-6 Astra as the OpenAI Native and Codex default", () => {
@@ -38,13 +78,13 @@ describe("openAiCodexModels", () => {
 		openAiCodexModels["gpt-5.5"].description!.should.containEql("Dec 01, 2025")
 	})
 
-	it("configures GPT-6 Astra like GPT-5.6 Sol", () => {
+	it("configures GPT-6 Astra capabilities like GPT-5.6 Sol with distinct pricing", () => {
 		const nativeAstra = openAiNativeModels["gpt-6-astra"]
 		const nativeSol = openAiNativeModels["gpt-5.6-sol"]
 		nativeAstra.maxTokens!.should.equal(nativeSol.maxTokens!)
 		nativeAstra.contextWindow!.should.equal(nativeSol.contextWindow!)
-		nativeAstra.inputPrice.should.equal(nativeSol.inputPrice)
-		nativeAstra.outputPrice.should.equal(nativeSol.outputPrice)
+		nativeAstra.inputPrice.should.equal(10)
+		nativeAstra.outputPrice.should.equal(50)
 		nativeAstra.fastModePriceMultiplier.should.equal(nativeSol.fastModePriceMultiplier)
 		nativeAstra.supportsPersistedReasoning.should.equal(true)
 

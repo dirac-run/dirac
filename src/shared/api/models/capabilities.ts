@@ -431,6 +431,26 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 		supportsImages: true,
 		supportsReasoning: true,
 	},
+	// GPT-6.2 retains the preceding Astra/Sol capability baselines pending updated limits.
+	"gpt-6.2-astra": {
+		name: "GPT-6.2 Astra",
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsReasoning: true,
+	},
+	"gpt-6.2-sol": {
+		name: "GPT-6.2 Sol",
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsReasoning: true,
+		supportsReasoningEffort: true,
+		reasoningEffortOptions: ["low", "medium", "high", "xhigh", "max"],
+		defaultReasoningEffort: "medium",
+		supportsTools: true,
+		supportsStrictTools: true,
+	},
 	"gpt-6-astra": {
 		name: "GPT-6 Astra",
 		maxTokens: 128_000,

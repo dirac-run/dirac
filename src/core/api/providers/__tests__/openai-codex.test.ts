@@ -96,6 +96,24 @@ describe("OpenAiCodexHandler persisted reasoning", () => {
 		requests[0].service_tier.should.equal("priority")
 	})
 
+	for (const modelId of ["gpt-6.2-astra", "gpt-6.2-sol"]) {
+		it(`sends ${modelId} with Fast mode and persisted reasoning`, async () => {
+			const handler = createHandler(modelId, { inferenceSpeed: "fast" })
+			const requests: any[] = []
+			sinon.stub(handler as any, "createResponseStreamWebsocket").callsFake(async function* (request: any) {
+				requests.push(request)
+			})
+
+			await drain(handler.createMessage("system", [{ role: "user", content: "hello" }] as any, tools))
+
+			requests[0].model.should.equal(modelId)
+			requests[0].service_tier.should.equal("priority")
+			requests[0].reasoning.context.should.equal("all_turns")
+			requests[0].store.should.equal(false)
+			if (modelId === "gpt-6.2-sol") requests[0].reasoning.effort.should.equal("medium")
+		})
+	}
+
 	it("uses GPT-6 Sol's default reasoning effort", async () => {
 		const handler = createHandler("gpt-6-sol")
 		const requests: any[] = []
