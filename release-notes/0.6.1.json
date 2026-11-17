@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "version": "0.6.1",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.6.0",
+  "analyzedCommit": "8e6e0d1eeb8d3ba22e2871f50a54beb2899bd72b",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "feat-8e6e0d1e",
+      "title": "gpt 6.2 astra + gpt 6.2 sol",
+      "category": "feat",
+      "evidence": [
+        "8e6e0d1eeb8d3ba22e2871f50a54beb2899bd72b"
+      ]
+    },
+    {
+      "id": "fix-f733f9a3",
+      "title": "yolo mode allows subagents to work autonomously",
+      "category": "fix",
+      "evidence": [
+        "f733f9a387cfee92075e77bd1eef6101dff84e52"
+      ]
+    },
+    {
+      "id": "fix-1ee52cdb",
+      "title": "keep task scoped tools available to all agents in a task",
+      "category": "fix",
+      "evidence": [
+        "1ee52cdb4a496491070ab0352254fba464c5d5e3"
+      ]
+    },
+    {
+      "id": "fix-7a876e07",
+      "title": "preserve Windows raw mode during terminal detection",
+      "category": "fix",
+      "evidence": [
+        "7a876e071a40f2bea207ab028c7235e70d13530e"
+      ]
+    }
+  ]
+}
