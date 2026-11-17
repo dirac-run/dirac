@@ -150,6 +150,14 @@ afterEach(async () => {
 })
 
 describe("ACP protocol conformance over raw stdio", () => {
+	it.each([true, false])("advertises only Act/Plan as a mode selector (boolean support: %s)", async (supportsBoolean) => {
+		const { client, cwd } = await createClient()
+		await client.initialize(supportsBoolean ? { session: { configOptions: { boolean: {} } } } : {})
+		const session = await client.request("session/new", { cwd, mcpServers: [] })
+		const options = session.result?.configOptions as Array<Record<string, unknown>>
+		expect(options.filter((option) => option.category === "mode").map((option) => option.id)).toEqual(["mode"])
+	})
+
 	it("continues after malformed and schema-invalid frames", async () => {
 		const { client } = await createClient()
 		client.write("this is not JSON")

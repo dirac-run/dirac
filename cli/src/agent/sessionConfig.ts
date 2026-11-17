@@ -204,7 +204,6 @@ export class SessionConfigManager {
 				name: "Auto-approve",
 				description: "Automatically approve actions when YOLO is disabled",
 				type: "boolean",
-				category: "mode",
 				currentValue: Boolean(sessionOverrides.autoApproveAllToggled),
 			},
 			{
@@ -212,7 +211,6 @@ export class SessionConfigManager {
 				name: "YOLO",
 				description: "Bypass approval and safety prompts; takes priority over auto-approve",
 				type: "boolean",
-				category: "mode",
 				currentValue: Boolean(sessionOverrides.yoloModeToggled),
 			},
 			{
