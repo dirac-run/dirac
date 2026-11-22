@@ -47,13 +47,52 @@ describe("openExternal", () => {
 		const child = new EventEmitter()
 		mocks.fallbackOpen.mockResolvedValue(child)
 		const result = openExternal("https://example.com")
-		const assertion = outcome === "success"
-			? expect(result).resolves.toBeUndefined()
-			: expect(result).rejects.toThrow(outcome === "spawn error" ? "ENOENT" : "Browser launcher failed")
+		const assertion =
+			outcome === "success"
+				? expect(result).resolves.toBeUndefined()
+				: expect(result).rejects.toThrow(outcome === "spawn error" ? "ENOENT" : "Browser launcher failed")
 		await vi.waitFor(() => expect(child.listenerCount("close")).toBe(1))
 		if (outcome === "spawn error") child.emit("error", new Error("ENOENT"))
-		else child.emit("close", outcome === "success" ? 0 : outcome === "signal" ? null : 3, outcome === "signal" ? "SIGTERM" : null)
+		else
+			child.emit(
+				"close",
+				outcome === "success" ? 0 : outcome === "signal" ? null : 3,
+				outcome === "signal" ? "SIGTERM" : null,
+			)
 		await assertion
 		expect(mocks.fallbackOpen).toHaveBeenCalledWith("https://example.com")
+	})
+
+	it("normalizes Windows drive paths to file URLs without throwing disallowed scheme error", async () => {
+		mocks.hostOpen.mockResolvedValue({})
+		await openExternal("C:\\Users\\test\\AppData\\Roaming\\dirac\\cli.log")
+		expect(mocks.hostOpen).toHaveBeenCalledWith({
+			value: "file:///C:/Users/test/AppData/Roaming/dirac/cli.log",
+		})
+	})
+
+	it("normalizes Windows forward-slash drive paths to file URLs", async () => {
+		mocks.hostOpen.mockResolvedValue({})
+		await openExternal("d:/projects/dirac/log.txt")
+		expect(mocks.hostOpen).toHaveBeenCalledWith({
+			value: "file:///d:/projects/dirac/log.txt",
+		})
+	})
+
+	it("accepts file:// URLs directly", async () => {
+		mocks.hostOpen.mockResolvedValue({})
+		await openExternal("file:///C:/Users/test/file.txt")
+		expect(mocks.hostOpen).toHaveBeenCalledWith({
+			value: "file:///C:/Users/test/file.txt",
+		})
+	})
+
+	it("blocks URLs with disallowed schemes", async () => {
+		await expect(openExternal("javascript:alert(1)")).rejects.toThrow("Blocked URL with disallowed scheme 'javascript:'")
+		await expect(openExternal("data:text/html,<b>hello</b>")).rejects.toThrow("Blocked URL with disallowed scheme 'data:'")
+	})
+
+	it("throws on invalid URLs", async () => {
+		await expect(openExternal("http://")).rejects.toThrow("Invalid URL: http://")
 	})
 })

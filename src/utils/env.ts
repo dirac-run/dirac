@@ -1,3 +1,5 @@
+import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { EmptyRequest, StringRequest } from "@shared/proto/dirac/common"
 import { HostProvider } from "@/hosts/host-provider"
 import { getErrorMessage } from "@/shared/errors"
@@ -35,18 +37,26 @@ export async function readTextFromClipboard(): Promise<string> {
 }
 
 /**
- * Opens an external URL in the default browser.
+ * Opens an external URL or local file in the default handler or browser.
  * Uses the host bridge RPC first (VS Code's openExternal which handles remote environments).
  * Falls back to the `open` npm package if the host doesn't implement the RPC (e.g., JetBrains).
- * @param url The URL to open
+ * @param url The URL or file path to open
  * @returns Promise that resolves when the operation is complete
  */
-const ALLOWED_OPEN_SCHEMES = ["https:", "http:"]
+const ALLOWED_OPEN_SCHEMES = ["https:", "http:", "file:"]
+
+export function normalizeOpenTarget(target: string): string {
+	if (path.isAbsolute(target) || /^[a-zA-Z]:[/\\]/.test(target) || target.startsWith("\\\\")) {
+		return pathToFileURL(target).href
+	}
+	return target
+}
 
 export async function openExternal(url: string): Promise<void> {
+	const targetUrl = normalizeOpenTarget(url)
 	let parsed: URL
 	try {
-		parsed = new URL(url)
+		parsed = new URL(targetUrl)
 	} catch {
 		throw new Error(`Invalid URL: ${url}`)
 	}
@@ -54,14 +64,14 @@ export async function openExternal(url: string): Promise<void> {
 		throw new Error(`Blocked URL with disallowed scheme '${parsed.protocol}'`)
 	}
 
-	Logger.log("Opening browser:", url)
+	Logger.log("Opening browser:", targetUrl)
 	try {
-		await HostProvider.env.openExternal(StringRequest.create({ value: url }))
+		await HostProvider.env.openExternal(StringRequest.create({ value: targetUrl }))
 		return
 	} catch (error) {
 		// Fallback for hosts that don't implement openExternal (e.g., JetBrains plugin).
 		Logger.warn(`Host openExternal RPC failed, falling back to 'open' package: ${error}`)
 	}
 
-	await openBrowser(url)
+	await openBrowser(targetUrl)
 }
