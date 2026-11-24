@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "version": "0.6.2",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.6.1",
+  "analyzedCommit": "20012fbf9edc67a23e9700b32d32c5fb4a19b596",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-1e1acde5",
+      "title": "handle Windows drive letters and file paths in openExternal",
+      "category": "fix",
+      "evidence": [
+        "1e1acde54596e3aa3d2d09633d08112f2b5f185f"
+      ]
+    },
+    {
+      "id": "fix-be0397e5",
+      "title": "keep boolean options out of the mode selector",
+      "category": "fix",
+      "evidence": [
+        "be0397e5503dde2e024af4baa0e17f1aa2a2ffad"
+      ]
+    }
+  ]
+}
