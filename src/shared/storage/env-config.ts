@@ -26,7 +26,6 @@ export const ENV_VAR_TO_SECRET_KEY: Record<string, keyof Secrets> = {
 	OPENCODE_API_KEY: "openAiNativeApiKey",
 	KIMI_API_KEY: "openAiNativeApiKey",
 	DEEPSEEK_API_KEY: "deepSeekApiKey",
-	UNBIASED_API_KEY: "unbiasedApiKey",
 	QWEN_API_KEY: "qwenApiKey",
 	TOGETHER_API_KEY: "togetherApiKey",
 	FIREWORKS_API_KEY: "fireworksApiKey",
@@ -175,7 +174,6 @@ export function getProviderFromEnv(): ApiProvider | undefined {
 	if (process.env.AI_GATEWAY_API_KEY) return "vercel-ai-gateway"
 	if (process.env.OPENCODE_API_KEY || process.env.KIMI_API_KEY) return "openai-native"
 	if (process.env.DEEPSEEK_API_KEY) return "deepseek"
-	if (process.env.UNBIASED_API_KEY) return "unbiased"
 	if (process.env.QWEN_API_KEY) return "qwen"
 	if (process.env.TOGETHER_API_KEY) return "together"
 	if (process.env.FIREWORKS_API_KEY) return "fireworks"

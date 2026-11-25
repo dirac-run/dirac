@@ -19,7 +19,6 @@ import { OpenAiModelsRequest } from "@shared/proto/dirac/models"
 import { EmptyRequest } from "@shared/proto/dirac/common"
 import { bedrockModels, bedrockDefaultModelId } from "@shared/api"
 import type { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
-import { fromProtobufModelInfo } from "@shared/proto-conversions/models/typeConversion"
 import { ModelAutocomplete } from "./common/ModelAutocomplete"
 import { ReasoningEffortInput } from "./ReasoningEffortSelector"
 import { AdaptiveThinkingInput } from "./AdaptiveThinkingToggle"
@@ -55,14 +54,12 @@ export function ModelSelectionEditor({
 		openAiApiKey: state.apiConfiguration.openAiApiKey,
 		openAiCompatibleCustomApiKey: state.apiConfiguration.openAiCompatibleCustomApiKey,
 		openAiHeaders: state.apiConfiguration.openAiHeaders,
-		unbiasedApiKey: state.apiConfiguration.unbiasedApiKey,
 		aihubmixApiKey: state.apiConfiguration.aihubmixApiKey,
 		aihubmixBaseUrl: state.apiConfiguration.aihubmixBaseUrl,
 		lmStudioBaseUrl: state.apiConfiguration.lmStudioBaseUrl,
 		qwenApiLine: state.apiConfiguration.qwenApiLine,
 		zaiApiLine: state.apiConfiguration.zaiApiLine,
 	})))
-	const pendingUnbiasedKey = useSettingsStore((state) => Object.hasOwn(state.pendingApiConfigurationUpdates, "unbiasedApiKey"))
 	const profiles: OpenAiCompatibleProfile[] = apiConfiguration.openAiCompatibleProfiles ?? []
 	const [draft, setDraft] = useState(selection)
 	const previousSelection = useRef(selection)
@@ -82,27 +79,6 @@ export function ModelSelectionEditor({
 	useEffect(() => {
 		let active = true
 		setProviderCatalog({})
-		if (
-			current?.provider === "unbiased" &&
-			apiConfiguration.unbiasedApiKey &&
-			!pendingUnbiasedKey
-		) {
-			void ModelsServiceClient.refreshUnbiasedModelsRpc(EmptyRequest.create({}))
-				.then((response) => {
-					if (active)
-						setProviderCatalog(
-							Object.fromEntries(
-								Object.entries(response.models).map(([id, info]) => [
-									id,
-									{ ...fromProtobufModelInfo(info), name: info.name, supportsTools: info.supportsTools },
-								]),
-							),
-						)
-				})
-				.catch((cause: unknown) => {
-					if (active) setError(String(cause))
-				})
-		}
 		if (current?.provider === "aihubmix") {
 			void ModelsServiceClient.getAihubmixModels(EmptyRequest.create({}))
 				.then((response) => {
@@ -117,8 +93,6 @@ export function ModelSelectionEditor({
 		}
 	}, [
 		current?.provider,
-		apiConfiguration.unbiasedApiKey,
-		pendingUnbiasedKey,
 		apiConfiguration.aihubmixApiKey,
 		apiConfiguration.aihubmixBaseUrl,
 	])
@@ -227,7 +201,7 @@ export function ModelSelectionEditor({
 				? apiConfiguration.zaiApiLine === "china" ? mainlandZAiModels : internationalZAiModels
 				: Object.assign({}, ...ALL_MODEL_MAPS.filter(([id]) => id === provider).map(([, entries]) => entries))
 		let dynamicModels = catalog
-		if (provider === "unbiased" || provider === "aihubmix") dynamicModels = providerCatalog
+		if (provider === "aihubmix") dynamicModels = providerCatalog
 		if (provider === "lmstudio") dynamicModels = lmStudioModels
 		if (provider === "openai") dynamicModels = endpointModels
 		if (provider === "vscode-lm") dynamicModels = Object.fromEntries(

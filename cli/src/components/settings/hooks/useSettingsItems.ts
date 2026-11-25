@@ -44,8 +44,6 @@ export interface UseSettingsItemsProps {
 	openAiHeaders: Record<string, string>
 	autoCondenseContextLimit: number
 	openAiCodexIsAuthenticated: boolean
-	unbiasedIsAuthenticated: boolean
-	unbiasedWorkloadName?: string
 	openAiCodexEmail?: string
 	githubIsAuthenticated: boolean
 	githubEmail?: string
@@ -82,10 +80,6 @@ const checkbox = (
 
 function createModelItems(props: UseSettingsItemsProps): ListItem[] {
 	return [
-		...(props.unbiasedIsAuthenticated ? [
-			{ key: "unbiasedAccount", label: "Unbiased", type: SettingsItemType.READONLY, value: props.unbiasedWorkloadName || "Unbiased" },
-			{ key: "unbiasedSignOut", label: "Sign out of Unbiased", type: SettingsItemType.ACTION, value: "" },
-		] : [{ key: "unbiasedSignIn", label: "Sign in with Unbiased", type: SettingsItemType.ACTION, value: "" }]),
 		...(props.openAiCodexIsAuthenticated ? [{ key: "codexSignOut", label: `ChatGPT · ${props.openAiCodexEmail || "Signed in"}`, type: SettingsItemType.ACTION, value: "Sign out" }] : []),
 		...(props.githubIsAuthenticated ? [{ key: "githubSignOut", label: `GitHub · ${props.githubEmail || "Signed in"}`, type: SettingsItemType.ACTION, value: "Sign out" }] : []),
 	]
@@ -497,8 +491,6 @@ export function useSettingsItems(props: UseSettingsItemsProps): ListItem[] {
 			props.openAiHeaders,
 			props.autoCondenseContextLimit,
 			props.openAiCodexIsAuthenticated,
-			props.unbiasedIsAuthenticated,
-			props.unbiasedWorkloadName,
 			props.openAiCodexEmail,
 			props.githubIsAuthenticated,
 			props.githubEmail,

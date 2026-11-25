@@ -56,6 +56,17 @@ function validateSelection(value: unknown): ModelProviderSelection {
 	return structuredClone(Object.fromEntries(Object.entries(selection).filter(([, value]) => value !== undefined))) as unknown as ModelProviderSelection
 }
 
+/** Read boundary: a saved role whose provider this version does not have keeps its identity and loses its model. */
+export function readSavedSubagentRoles(value: unknown): SubagentRole[] {
+	if (!Array.isArray(value)) return validateSubagentRoles(value)
+	return validateSubagentRoles(value.map((role) => {
+		const provider = role?.modelSelection?.provider
+		if (provider === undefined || ALL_PROVIDERS.includes(provider)) return role
+		const { modelSelection: _unavailable, ...identity } = role
+		return { ...identity, enabled: false }
+	}))
+}
+
 /** Validate a complete catalog before persistence; an empty catalog intentionally removes all roles. */
 export function validateSubagentRoles(value: unknown): SubagentRole[] {
 	if (!Array.isArray(value)) throw new Error("Subagent roles must be an array")

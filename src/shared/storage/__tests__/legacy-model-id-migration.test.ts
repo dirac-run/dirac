@@ -1,9 +1,11 @@
 import { expect } from "chai"
 import { describe, it } from "mocha"
+import { type ApiProvider, DEFAULT_API_PROVIDER } from "@shared/api"
 import {
 	buildLegacyAnthropicFastModeStateUpdates,
 	buildRetiredDeepSeekModelStateUpdates,
 	buildLegacyModelIdStateUpdates,
+	buildUnavailableProviderStateUpdates,
 	buildLegacySynthetic1mStateUpdates,
 	normalizeLegacyOpenRouterPinMap,
 	normalizeLegacySynthetic1mModelId,
@@ -187,4 +189,42 @@ describe("retired DeepSeek model migration", () => {
 		})).to.deep.equal({})
 	})
 
+})
+
+describe("saved selections of a provider this version does not have", () => {
+	const unavailable = "provider-from-another-version" as ApiProvider
+
+	it("returns only the affected mode to the default provider without a model", () => {
+		expect(
+			buildUnavailableProviderStateUpdates({
+				planModeApiProvider: unavailable,
+				planModeApiModelId: "its-model",
+				actModeApiProvider: "anthropic",
+				actModeApiModelId: "claude-opus-5",
+			}),
+		).to.deep.equal({ planModeApiProvider: DEFAULT_API_PROVIDER, planModeApiModelId: undefined })
+	})
+
+	it("clears a utility-model selection and drops model-provider presets", () => {
+		const kept = { id: "anthropic::claude-opus-5", provider: "anthropic" as const, modelId: "claude-opus-5", lastUsedAt: 1 }
+		expect(
+			buildLegacyModelIdStateUpdates({
+				utilityModelSelection: { provider: unavailable, modelId: "its-model" },
+				modelProviderPresets: [
+					{ id: `${unavailable}::its-model`, provider: unavailable, modelId: "its-model", lastUsedAt: 2 },
+					kept,
+				],
+			}),
+		).to.deep.equal({ utilityModelSelection: undefined, modelProviderPresets: [kept] })
+	})
+
+	it("leaves supported selections unchanged", () => {
+		expect(
+			buildLegacyModelIdStateUpdates({
+				planModeApiProvider: "anthropic",
+				actModeApiProvider: "openrouter",
+				utilityModelSelection: { provider: "anthropic", modelId: "claude-opus-5" },
+			}),
+		).to.deep.equal({})
+	})
 })

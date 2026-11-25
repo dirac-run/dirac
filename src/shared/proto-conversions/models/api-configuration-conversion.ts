@@ -337,8 +337,6 @@ export function convertApiProviderToProto(provider: ApiProvider | undefined): Pr
 			return ProtoApiProvider.TOGETHER
 		case "deepseek":
 			return ProtoApiProvider.DEEPSEEK
-		case "unbiased":
-			return ProtoApiProvider.UNBIASED
 		case "qwen":
 			return ProtoApiProvider.QWEN
 		case "qwen-code":
@@ -452,8 +450,6 @@ export function convertProtoToApiProvider(provider: ProtoApiProvider): ApiProvid
 			return "together"
 		case ProtoApiProvider.DEEPSEEK:
 			return "deepseek"
-		case ProtoApiProvider.UNBIASED:
-			return "unbiased"
 		case ProtoApiProvider.QWEN:
 			return "qwen"
 		case ProtoApiProvider.QWEN_CODE:
@@ -552,7 +548,6 @@ export function convertApiConfigurationToProto(config: ApiConfiguration): ProtoA
 		geminiBaseUrl: config.geminiBaseUrl,
 		openAiNativeApiKey: config.openAiNativeApiKey,
 		deepSeekApiKey: config.deepSeekApiKey,
-		unbiasedApiKey: config.unbiasedApiKey,
 		requestyApiKey: config.requestyApiKey,
 		requestyBaseUrl: config.requestyBaseUrl,
 		togetherApiKey: config.togetherApiKey,
@@ -702,7 +697,6 @@ export function convertProtoToApiConfiguration(protoConfig: ProtoApiConfiguratio
 		geminiBaseUrl: protoConfig.geminiBaseUrl,
 		openAiNativeApiKey: protoConfig.openAiNativeApiKey,
 		deepSeekApiKey: protoConfig.deepSeekApiKey,
-		unbiasedApiKey: protoConfig.unbiasedApiKey,
 		requestyApiKey: protoConfig.requestyApiKey,
 		requestyBaseUrl: protoConfig.requestyBaseUrl,
 		togetherApiKey: protoConfig.togetherApiKey,

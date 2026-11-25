@@ -1,4 +1,4 @@
-import type { ModelProviderPreset } from "@shared/api"
+import { ALL_PROVIDERS, DEFAULT_API_PROVIDER, type ModelProviderPreset } from "@shared/api"
 import type { GlobalStateAndSettings, SettingsKey } from "./state-keys"
 
 const LEGACY_MODEL_ID_SETTINGS = [
@@ -67,7 +67,25 @@ export function buildLegacyModelIdStateUpdates(
 		...synthetic1mUpdates,
 		...buildRetiredDeepSeekModelStateUpdates(normalizedState),
 		...buildLegacyAnthropicFastModeStateUpdates(normalizedState),
+		...buildUnavailableProviderStateUpdates(normalizedState),
 	}
+}
+
+/** A saved selection of a provider this version does not have is read as if it had never been made. */
+export function buildUnavailableProviderStateUpdates(
+	state: Partial<GlobalStateAndSettings>,
+): Partial<GlobalStateAndSettings> {
+	const updates: Partial<GlobalStateAndSettings> = {}
+	for (const mode of ["plan", "act"] as const) {
+		const providerKey = `${mode}ModeApiProvider` as const
+		const provider = state[providerKey]
+		if (!provider || ALL_PROVIDERS.includes(provider)) continue
+		updates[providerKey] = DEFAULT_API_PROVIDER
+		updates[`${mode}ModeApiModelId`] = undefined
+	}
+	const utilitySelection = state.utilityModelSelection
+	if (utilitySelection && !ALL_PROVIDERS.includes(utilitySelection.provider)) updates.utilityModelSelection = undefined
+	return updates
 }
 export function buildRetiredDeepSeekModelStateUpdates(
 	state: Partial<GlobalStateAndSettings>,
@@ -152,7 +170,8 @@ export function buildLegacySynthetic1mStateUpdates(
 export function normalizeLegacyModelProviderPresets(presets: ModelProviderPreset[]): ModelProviderPreset[] {
 	const normalizedPresets: ModelProviderPreset[] = []
 	const presetIndexesById = new Map<string, number>()
-	for (const preset of presets.map(normalizeLegacyModelProviderPreset)) {
+	const availablePresets = presets.filter((preset) => ALL_PROVIDERS.includes(preset.provider))
+	for (const preset of availablePresets.map(normalizeLegacyModelProviderPreset)) {
 		const existingIndex = presetIndexesById.get(preset.id)
 		if (existingIndex === undefined) {
 			presetIndexesById.set(preset.id, normalizedPresets.length)

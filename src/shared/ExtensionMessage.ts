@@ -87,7 +87,6 @@ export interface ExtensionState {
 	goal?: GoalViewState | null
 	isNewUser: boolean
 	welcomeViewCompleted: boolean
-	shouldShowUnbiasedWelcome?: boolean
 	onboardingModels?: OnboardingModelGroup | undefined
 	apiConfiguration?: ApiConfiguration
 	/** Explicit keyless additions and the membership projected from global saved setup/auth. */
@@ -177,8 +176,6 @@ export interface ExtensionState {
 	availableTools: ToolMetadata[]
 	toolToggles: Record<string, boolean>
 	welcomeBanners?: BannerCardData[]
-	/** Explicit null clears identity from an earlier Unbiased login. */
-	unbiasedWorkloadName?: string | null
 	openAiCodexIsAuthenticated?: boolean
 	openAiCodexEmail?: string
 	openAiCodexUsage?: OpenAiCodexUsageSnapshot

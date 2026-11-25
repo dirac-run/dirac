@@ -17,6 +17,7 @@ import type { DiracMemento } from "@/shared/storage/DiracStorage"
 import type { StorageContext } from "@/shared/storage/storage-context"
 import { StateManager } from "../StateManager"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
+import { DEFAULT_API_PROVIDER } from "@shared/api"
 import { expectLoggerErrors } from "@test/loggerGuard"
 
 import {
@@ -220,6 +221,60 @@ describe("StateManager", () => {
 			sm.getGlobalSettingsKey("utilityModelUseCondense").should.equal(true)
 			sm.getGlobalSettingsKey("utilityModelUseGenerateCommitMessage").should.equal(true)
 			sinon.assert.notCalled(setBatch)
+		})
+	})
+
+	describe("saved selections of a provider this version does not have", () => {
+		const unavailable = "provider-from-another-version"
+		const supported = { provider: "anthropic", modelId: TEST_MODEL_IDS.ANTHROPIC }
+
+		async function setPersisted(key: string, value: unknown): Promise<void> {
+			await storage.globalState.update(key, value)
+			storage.globalStateBackingStore.set(key, value)
+		}
+
+		it("starts on the default provider and drops every saved use of the missing one", async () => {
+			for (const mode of ["plan", "act"]) {
+				await setPersisted(`${mode}ModeApiProvider`, unavailable)
+				await setPersisted(`${mode}ModeApiModelId`, "its-model")
+			}
+			await setPersisted("utilityModelSelection", { provider: unavailable, modelId: "its-model" })
+			await setPersisted("modelProviderPresets", [
+				{ id: `${unavailable}::its-model`, provider: unavailable, modelId: "its-model", lastUsedAt: 2 },
+				{ id: `anthropic::${supported.modelId}`, ...supported, lastUsedAt: 1 },
+			])
+			await setPersisted("subagentRoles", [
+				{ name: "Reviewer", description: "Review code.", enabled: true, modelSelection: { provider: unavailable, modelId: "its-model" } },
+				{ name: "Scout", description: "Explore code.", enabled: true, modelSelection: supported },
+			])
+
+			const sm = await StateManager.initialize(storage)
+
+			const configuration = sm.getApiConfiguration()
+			expect(configuration.planModeApiProvider).to.equal(DEFAULT_API_PROVIDER)
+			expect(configuration.actModeApiProvider).to.equal(DEFAULT_API_PROVIDER)
+			expect(sm.getGlobalSettingsKey("utilityModelSelection")).to.equal(undefined)
+			expect(sm.getGlobalSettingsKey("modelProviderPresets").map((preset) => preset.provider)).to.deep.equal(["anthropic"])
+			expect(sm.getSystemDefaultSettingsKey("subagentRoles")).to.deep.equal([
+				{ name: "Reviewer", description: "Review code.", enabled: false },
+				{ name: "Scout", description: "Explore code.", enabled: true, modelSelection: supported },
+			])
+			expect(storage.globalStateBackingStore.get("planModeApiProvider")).to.equal(DEFAULT_API_PROVIDER)
+			expect(storage.globalStateBackingStore.get("actModeApiProvider")).to.equal(DEFAULT_API_PROVIDER)
+			expect(storage.globalStateBackingStore.get("utilityModelSelection")).to.equal(undefined)
+		})
+
+		it("leaves supported selections untouched", async () => {
+			await setPersisted("planModeApiProvider", "anthropic")
+			await setPersisted("actModeApiProvider", "anthropic")
+			await setPersisted("utilityModelSelection", supported)
+			const write = sandbox.spy(storage.globalStateBackingStore, "setBatch")
+
+			const sm = await StateManager.initialize(storage)
+
+			expect(sm.getApiConfiguration().actModeApiProvider).to.equal("anthropic")
+			expect(sm.getGlobalSettingsKey("utilityModelSelection")).to.deep.equal(supported)
+			sinon.assert.notCalled(write)
 		})
 	})
 

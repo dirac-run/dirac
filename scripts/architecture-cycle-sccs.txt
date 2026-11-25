@@ -41,7 +41,6 @@ src/shared/api/models/qwen-mainland.ts
 src/shared/api/models/requesty.ts
 src/shared/api/models/sambanova.ts
 src/shared/api/models/types.ts
-src/shared/api/models/unbiased.ts
 src/shared/api/models/vertex.ts
 src/shared/api/models/wandb.ts
 src/shared/api/models/xai.ts
@@ -89,7 +88,6 @@ src/core/api/providers/qwen.ts
 src/core/api/providers/requesty.ts
 src/core/api/providers/sambanova.ts
 src/core/api/providers/together.ts
-src/core/api/providers/unbiased.ts
 src/core/api/providers/vercel-ai-gateway.ts
 src/core/api/providers/vertex.ts
 src/core/api/providers/vscode-lm.ts

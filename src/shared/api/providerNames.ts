@@ -12,7 +12,6 @@ export type ApiProvider =
 	| "requesty"
 	| "together"
 	| "deepseek"
-	| "unbiased"
 	| "qwen"
 	| "qwen-code"
 	| "doubao"
@@ -53,7 +52,6 @@ export const ALL_PROVIDERS: ApiProvider[] = [
 	"requesty",
 	"together",
 	"deepseek",
-	"unbiased",
 	"qwen",
 	"qwen-code",
 	"doubao",
