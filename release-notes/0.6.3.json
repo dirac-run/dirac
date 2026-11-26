@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "version": "0.6.3",
+  "kind": "patch",
+  "announce": true,
+  "sourceTag": "v0.6.2",
+  "analyzedCommit": "eb7152ad8218c14cd78d77da0c5dc18c319305ca",
+  "headline": "Updates and improvements",
+  "highlights": [
+    {
+      "id": "fix-e61ddb13",
+      "title": "replace legacy OAuth with subscription auth and cached model discovery",
+      "category": "fix",
+      "evidence": [
+        "e61ddb135f86aeed833a8fd985ced8eb954be075"
+      ]
+    }
+  ]
+}
