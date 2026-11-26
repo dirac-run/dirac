@@ -17,8 +17,6 @@ service ModelsService {
   rpc getVsCodeLmModels(EmptyRequest) returns (VsCodeLmModelsArray);
   // Refreshes and returns OpenRouter models
   rpc refreshOpenRouterModelsRpc(EmptyRequest) returns (OpenRouterCompatibleModelInfo);
-  // Refreshes and returns the authenticated Unbiased model catalog.
-  rpc refreshUnbiasedModelsRpc(EmptyRequest) returns (OpenRouterCompatibleModelInfo);
   // Reads public model metadata from a local Qwen Subscription credentials cache; no network requests.
   rpc getQwenCodeModels(StringRequest) returns (OpenRouterCompatibleModelInfo);
   // Fetches optional OpenRouter model popularity rankings
@@ -43,10 +41,6 @@ service ModelsService {
   rpc updateApiConfigurationPartial(UpdateApiConfigurationPartialRequest) returns (Empty);
   // Authenticates with OpenAI Codex (ChatGPT subscription)
   rpc authenticateOpenAiCodex(OpenAiCodexAuthRequest) returns (stream OpenAiCodexAuthEvent);
-  // Signs in to Unbiased with a device code and stores the resulting API key.
-  rpc authenticateUnbiased(EmptyRequest) returns (stream UnbiasedAuthEvent);
-  // Clears the local Unbiased key and invalidates pending device sign-ins.
-  rpc signOutUnbiased(EmptyRequest) returns (Empty);
   // Signs out from OpenAI Codex
   rpc signOutOpenAiCodex(EmptyRequest) returns (Empty);
   // Silently refreshes and returns ChatGPT subscription usage.
@@ -76,14 +70,6 @@ message OpenAiCodexAuthEvent {
   string url = 1;
   optional string user_code = 2;
   bool completed = 3;
-}
-
-message UnbiasedAuthEvent {
-  string url = 1;
-  string user_code = 2;
-  bool completed = 3;
-  optional string workload_name = 4;
-  string verification_uri_complete = 5;
 }
 
 message OpenAiCodexUsageWindow {
@@ -296,7 +282,7 @@ message ModelsApiSecrets {
   optional string dify_api_key = 35;
   optional string minimax_api_key = 38;
   optional string aihubmix_api_key = 39;
-  optional string unbiased_api_key = 40;
+  reserved 40;
 }
 
 // API configuration options (non-secret settings)
@@ -551,7 +537,7 @@ enum ApiProvider {
   WANDB = 41;
   GITHUB_COPILOT = 42;
   OCA = 43;
-  UNBIASED = 44;
+  reserved 44;
 }
 
 enum ApiFormat {
@@ -698,7 +684,7 @@ message ModelsApiConfiguration {
   optional string wandb_api_key = 87;
   map<string, StringArray> open_router_pinned_providers = 89;
   optional bool open_router_prevent_fallbacks = 90;
-  optional string unbiased_api_key = 91;
+  reserved 91;
 
   // Plan mode configurations
   optional ApiProvider plan_mode_api_provider = 100;

@@ -1,7 +1,6 @@
 import { StateManager } from "@core/storage/StateManager"
 import { openAiCodexUsageService } from "@/integrations/openai-codex/OpenAiCodexUsageService"
 import { githubCopilotAuthManager } from "@/integrations/github-copilot/auth"
-import { getUnbiasedOAuthWorkloadName } from "@/integrations/unbiased/oauth-account"
 
 /** Gathers provider authentication status and account identity for the UI. */
 export async function assembleAuthState(stateManager: StateManager) {
@@ -13,7 +12,6 @@ export async function assembleAuthState(stateManager: StateManager) {
 			githubCopilotIsAuthenticated: undefined,
 			githubCopilotEmail: undefined,
 			githubCopilotModels: undefined,
-			unbiasedWorkloadName: null,
 		}
 	}
 
@@ -26,11 +24,5 @@ export async function assembleAuthState(stateManager: StateManager) {
 		githubCopilotIsAuthenticated: await githubCopilotAuthManager.isAuthenticated(),
 		githubCopilotEmail: (await githubCopilotAuthManager.getEmail()) ?? undefined,
 		githubCopilotModels,
-		unbiasedWorkloadName:
-			getUnbiasedOAuthWorkloadName(
-				stateManager.getApiConfiguration().unbiasedApiKey,
-				stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
-				stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
-			) ?? null,
 	}
 }

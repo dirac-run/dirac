@@ -45,7 +45,6 @@ import { QwenCodeHandler } from "./providers/qwen-code"
 import { RequestyHandler } from "./providers/requesty"
 import { SambanovaHandler } from "./providers/sambanova"
 import { TogetherHandler } from "./providers/together"
-import { UnbiasedHandler } from "./providers/unbiased"
 import { VercelAIGatewayHandler } from "./providers/vercel-ai-gateway"
 import { VertexHandler } from "./providers/vertex"
 import { WandbHandler } from "./providers/wandb"
@@ -281,13 +280,6 @@ const PROVIDER_REGISTRY: Record<
 			disableRetries: cfg.disableRetries,
 			deepSeekApiKey: cfg.deepSeekApiKey,
 			reasoningEffort: mc.reasoningEffort,
-			apiModelId: mc.apiModelId,
-		}),
-	unbiased: (cfg, mc) =>
-		new UnbiasedHandler({
-			onRetryAttempt: cfg.onRetryAttempt,
-			disableRetries: cfg.disableRetries,
-			unbiasedApiKey: cfg.unbiasedApiKey,
 			apiModelId: mc.apiModelId,
 		}),
 	requesty: (cfg, mc) =>

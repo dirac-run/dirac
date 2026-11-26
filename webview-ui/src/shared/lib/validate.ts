@@ -43,9 +43,6 @@ export function validateApiConfiguration(currentMode: Mode, apiConfiguration?: A
 					return "You must provide a valid API key or choose a different provider."
 				}
 				break
-			case "unbiased":
-				if (!apiConfiguration.unbiasedApiKey) return "Sign in with Unbiased or enter an API key."
-				break
 			case "xai":
 				if (!apiConfiguration.xaiApiKey) {
 					return "You must provide a valid API key or choose a different provider."

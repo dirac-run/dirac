@@ -29,10 +29,6 @@
 			"label": "DeepSeek"
 		},
 		{
-			"value": "unbiased",
-			"label": "Unbiased"
-		},
-		{
 			"value": "openai-native",
 			"label": "OpenAI"
 		},

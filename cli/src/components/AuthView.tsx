@@ -27,7 +27,6 @@ import { ImportView } from "./ImportView"
 import { GithubAuthView } from "./GithubAuthView"
 import { CUSTOM_MODEL_ID, getDefaultModelId, hasModelPicker, ModelPicker } from "./ModelPicker"
 import { OpenAiCodexAuthView } from "./OpenAiCodexAuthView"
-import { UnbiasedAuthView } from "./UnbiasedAuthView"
 import { getProviderLabel } from "./ProviderPicker"
 import { QwenCodeSetup } from "./QwenCodeSetup"
 
@@ -41,7 +40,6 @@ type AuthStep =
 	| "success"
 	| "error"
 	| "openai_codex_auth"
-	| "unbiased_auth"
 	| "bedrock"
 	| "import"
 	| "bedrock_custom"
@@ -177,7 +175,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 
 		// Add OpenAI Codex options for ChatGPT subscribers
 		items.push({ label: "Sign in with ChatGPT Subscription", value: "openai_codex_auth" })
-		items.push({ label: "Sign in with Unbiased", value: "unbiased_auth" })
 		items.push({ label: "Sign in with GitHub Copilot", value: "github_copilot_auth" })
 
 		// Add import options if detected
@@ -248,8 +245,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				onComplete?.()
 			} else if (value === "openai_codex_auth") {
 				setStep("openai_codex_auth")
-			} else if (value === "unbiased_auth") {
-				setStep("unbiased_auth")
 			} else if (value === "github_copilot_auth") {
 				setStep("github_copilot_auth")
 			} else if (value === "configure_byo") {
@@ -484,9 +479,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 			case "openai_codex_auth":
 				setStep("menu")
 				break
-			case "unbiased_auth":
-				setStep("menu")
-				break
 			case "github_copilot_auth":
 				setStep("menu")
 				break
@@ -643,16 +635,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 						}}
 					/>
 				)
-
-			case "unbiased_auth":
-				return <UnbiasedAuthView controller={controller} onCancel={goBack} onComplete={async () => {
-					const stateManager = StateManager.get()
-					stateManager.setGlobalState("welcomeViewCompleted", true)
-					await stateManager.flushPendingState()
-					setSelectedProvider("unbiased")
-					setModelId("pareto")
-					setStep("success")
-				}} />
 
 			case "github_copilot_auth":
 				return (

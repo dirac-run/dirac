@@ -55,7 +55,6 @@ export function ModelSelectionEditor({
 		openAiApiKey: state.apiConfiguration.openAiApiKey,
 		openAiCompatibleCustomApiKey: state.apiConfiguration.openAiCompatibleCustomApiKey,
 		openAiHeaders: state.apiConfiguration.openAiHeaders,
-		unbiasedApiKey: state.apiConfiguration.unbiasedApiKey,
 		aihubmixApiKey: state.apiConfiguration.aihubmixApiKey,
 		aihubmixBaseUrl: state.apiConfiguration.aihubmixBaseUrl,
 		lmStudioBaseUrl: state.apiConfiguration.lmStudioBaseUrl,
@@ -63,7 +62,6 @@ export function ModelSelectionEditor({
 		qwenCodeOauthPath: state.apiConfiguration.qwenCodeOauthPath,
 		zaiApiLine: state.apiConfiguration.zaiApiLine,
 	})))
-	const pendingUnbiasedKey = useSettingsStore((state) => Object.hasOwn(state.pendingApiConfigurationUpdates, "unbiasedApiKey"))
 	const profiles: OpenAiCompatibleProfile[] = apiConfiguration.openAiCompatibleProfiles ?? []
 	const [draft, setDraft] = useState(selection)
 	const previousSelection = useRef(selection)
@@ -83,27 +81,6 @@ export function ModelSelectionEditor({
 	useEffect(() => {
 		let active = true
 		setProviderCatalog({})
-		if (
-			current?.provider === "unbiased" &&
-			apiConfiguration.unbiasedApiKey &&
-			!pendingUnbiasedKey
-		) {
-			void ModelsServiceClient.refreshUnbiasedModelsRpc(EmptyRequest.create({}))
-				.then((response) => {
-					if (active)
-						setProviderCatalog(
-							Object.fromEntries(
-								Object.entries(response.models).map(([id, info]) => [
-									id,
-									{ ...fromProtobufModelInfo(info), name: info.name, supportsTools: info.supportsTools },
-								]),
-							),
-						)
-				})
-				.catch((cause: unknown) => {
-					if (active) setError(String(cause))
-				})
-		}
 		if (current?.provider === "qwen-code") {
 			void ModelsServiceClient.getQwenCodeModels(StringRequest.create({ value: apiConfiguration.qwenCodeOauthPath ?? "" }))
 				.then((response) => {
@@ -129,8 +106,6 @@ export function ModelSelectionEditor({
 		}
 	}, [
 		current?.provider,
-		apiConfiguration.unbiasedApiKey,
-		pendingUnbiasedKey,
 		apiConfiguration.aihubmixApiKey,
 		apiConfiguration.aihubmixBaseUrl,
 		apiConfiguration.qwenCodeOauthPath,
@@ -240,7 +215,7 @@ export function ModelSelectionEditor({
 				? apiConfiguration.zaiApiLine === "china" ? mainlandZAiModels : internationalZAiModels
 				: Object.assign({}, ...ALL_MODEL_MAPS.filter(([id]) => id === provider).map(([, entries]) => entries))
 		let dynamicModels = catalog
-		if (provider === "unbiased" || provider === "aihubmix") dynamicModels = providerCatalog
+		if (provider === "aihubmix") dynamicModels = providerCatalog
 		if (provider === "lmstudio") dynamicModels = lmStudioModels
 		if (provider === "openai") dynamicModels = endpointModels
 		if (provider === "vscode-lm") dynamicModels = Object.fromEntries(

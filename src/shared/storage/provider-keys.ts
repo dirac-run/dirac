@@ -19,7 +19,6 @@ import {
 	nousResearchDefaultModelId,
 	openAiNativeDefaultModelId,
 	requestyDefaultModelId,
-	unbiasedDefaultModelId,
 	wandbDefaultModelId,
 	xaiDefaultModelId,
 } from "../api"
@@ -76,7 +75,6 @@ export const ProviderToApiKeyMap: Partial<Record<ApiProvider, keyof Secrets | (k
 	requesty: "requestyApiKey",
 	together: "togetherApiKey",
 	deepseek: "deepSeekApiKey",
-	unbiased: "unbiasedApiKey",
 	qwen: "qwenApiKey",
 	doubao: "doubaoApiKey",
 	mistral: "mistralApiKey",
@@ -119,7 +117,6 @@ const ProviderDefaultModelMap: Partial<Record<ApiProvider, string>> = {
 	moonshot: moonshotDefaultModelId,
 	qwen: internationalQwenDefaultModelId,
 	deepseek: deepSeekDefaultModelId,
-	unbiased: unbiasedDefaultModelId,
 	wandb: wandbDefaultModelId,
 } as const
 

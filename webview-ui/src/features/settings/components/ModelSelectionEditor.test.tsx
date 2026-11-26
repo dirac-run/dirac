@@ -39,9 +39,6 @@ vi.mock("@/shared/api/grpc-client", () => ({
 	ModelsServiceClient: {
 		getQwenCodeModels: vi.fn().mockResolvedValue({ models: { "account-model": { supportsPromptCache: false, contextWindow: 262144, supportsImages: true, reasoningEffortOptions: [], tiers: [] } } }),
 		refreshOpenAiModels: vi.fn().mockResolvedValue({ values: [] }),
-		refreshUnbiasedModelsRpc: vi
-			.fn()
-			.mockResolvedValue({ models: { "pareto-versioned": { supportsPromptCache: false, name: "Versioned Pareto", reasoningEffortOptions: [], tiers: [] } } }),
 		getAihubmixModels: vi
 			.fn()
 			.mockResolvedValue({ models: { "discovered-model": { supportsPromptCache: false, contextWindow: 12345 } } }),
@@ -124,11 +121,10 @@ describe("controlled model selections", () => {
 	})
 
 	it.each([
-		{ provider: "unbiased" as const, modelId: "pareto-versioned", info: { name: "Versioned Pareto" } },
 		{ provider: "aihubmix" as const, modelId: "discovered-model", info: { contextWindow: 12345 } },
 		{ provider: "qwen-code" as const, modelId: "account-model", info: { contextWindow: 262144, supportsImages: true } },
 	])("loads $provider discovered model metadata", async ({ provider, modelId, info }) => {
-		useSettingsStore.setState({ apiConfiguration: { unbiasedApiKey: "key" }, configuredApiProviders: [provider] })
+		useSettingsStore.setState({ apiConfiguration: {}, configuredApiProviders: [provider] })
 		const save = vi.fn()
 		render(
 			<ModelSelectionEditor

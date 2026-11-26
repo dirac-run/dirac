@@ -13,8 +13,6 @@ import {
 	claudeCodeModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
-	unbiasedDefaultModelId,
-	unbiasedModels,
 	doubaoDefaultModelId,
 	doubaoModels,
 	fireworksDefaultModelId,
@@ -138,8 +136,6 @@ export function getModelsForProvider(
 			return openAiCodexModels
 		case "deepseek":
 			return deepSeekModels
-		case "unbiased":
-			return unbiasedModels
 		case "qwen-code":
 			return qwenCodeModels
 		case "doubao":
@@ -246,16 +242,6 @@ export function normalizeApiConfiguration(
 			return getProviderData(openAiCodexModels, openAiCodexDefaultModelId)
 		case "deepseek":
 			return getProviderData(deepSeekModels, deepSeekDefaultModelId)
-		case "unbiased":
-			// Preserve discovered Pareto versions even when their metadata is not available here.
-			if (modelId?.startsWith("pareto-")) {
-				return {
-					selectedProvider: provider,
-					selectedModelId: modelId,
-					selectedModelInfo: dynamicModelInfoDefaults,
-				}
-			}
-			return getProviderData(unbiasedModels, unbiasedDefaultModelId)
 		case "qwen":
 			const qwenModels = apiConfiguration?.qwenApiLine === "china" ? mainlandQwenModels : internationalQwenModels
 			const qwenDefaultId =
@@ -727,7 +713,6 @@ export async function syncModeConfigurations(
 		case "openai-native":
 		case "openai-codex":
 		case "deepseek":
-		case "unbiased":
 		case "qwen":
 		case "doubao":
 		case "mistral":
