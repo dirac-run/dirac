@@ -1,253 +1,133 @@
-import { promises as fs } from "node:fs"
-import { ModelInfo, QwenCodeModelId, qwenCodeDefaultModelId, qwenCodeModels } from "@shared/api"
+import { ModelInfo, qwenCodeDefaultModelId } from "@shared/api"
 import OpenAI from "openai"
 import type { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
-import { getQwenCachedCredentialPath } from "@/utils/qwenCodeCredentialPath"
 import { buildExternalBasicHeaders } from "@/services/EnvUtils"
 import { DiracStorageMessage } from "@/shared/messages/content"
 import { fetch } from "@/shared/net"
-import { Logger } from "@/shared/services/Logger"
+import { getQwenCachedCredentialPath } from "@/utils/qwenCodeCredentialPath"
 import { ApiHandler, CommonApiHandlerOptions } from "../"
-import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { getOpenAIToolParams, ToolCallProcessor } from "../transform/tool-call-processor"
+import { getCachedQwenCodeModels } from "./qwen-code-models"
+import { QwenSubscriptionSession } from "./qwen-subscription-session"
 
-// --- Constants for Qwen OAuth2 ---
-const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
-const QWEN_OAUTH_TOKEN_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token`
-const QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
-
-interface QwenOAuthCredentials {
-	access_token: string
-	refresh_token: string
-	token_type: string
-	expiry_date: number
-	resource_url?: string
-}
+const QWEN_SUBSCRIPTION_BASE_URL = "https://api.qwen.ai/compatible-mode/v1"
 
 interface QwenCodeHandlerOptions extends CommonApiHandlerOptions {
 	qwenCodeOauthPath?: string
 	apiModelId?: string
-}
-
-
-function objectToUrlEncoded(data: Record<string, string>): string {
-	return Object.keys(data)
-		.map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
-		.join("&")
+	reasoningEffort?: string
+	thinkingBudgetTokens?: number
 }
 
 export class QwenCodeHandler implements ApiHandler {
-	private options: QwenCodeHandlerOptions
-	private credentials: QwenOAuthCredentials | null = null
-	private client: OpenAI | undefined
+	private readonly session: QwenSubscriptionSession
 
-	constructor(options: QwenCodeHandlerOptions) {
-		this.options = options
+	constructor(private readonly options: QwenCodeHandlerOptions) {
+		this.session = new QwenSubscriptionSession(getQwenCachedCredentialPath(options.qwenCodeOauthPath), fetch)
 	}
 
-	private ensureClient(): OpenAI {
-		if (!this.client) {
-			// Create the client instance with dummy key initially
-			// The API key will be updated dynamically via ensureAuthenticated
-			const externalHeaders = buildExternalBasicHeaders()
-			this.client = new OpenAI({
-				apiKey: "dummy-key-will-be-replaced",
-				baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-				defaultHeaders: externalHeaders,
-				fetch,
-			})
-		}
-		return this.client
-	}
+	private createClient(accessToken: string): OpenAI {
+		return new OpenAI({
+			apiKey: accessToken,
+			baseURL: QWEN_SUBSCRIPTION_BASE_URL,
+			organization: null,
+			project: null,
+			maxRetries: 0,
+			// Identify Dirac honestly; gateway acceptance by third-party clients is not guaranteed.
+			defaultHeaders: buildExternalBasicHeaders(),
+			fetch: async (input, init) => {
+				const url = new URL(input instanceof Request ? input.url : input.toString())
+				if (url.href !== `${QWEN_SUBSCRIPTION_BASE_URL}/chat/completions`) {
+					throw new Error("Unsupported Qwen Subscription inference destination")
+				}
+				const response = await fetch(input, { ...init, redirect: "error" })
+				if (response.status !== 405 && !response.headers.get("content-type")?.toLowerCase().includes("text/html"))
+					return response
 
-	private async loadCachedQwenCredentials(): Promise<QwenOAuthCredentials> {
-		try {
-			const keyFile = getQwenCachedCredentialPath(this.options.qwenCodeOauthPath)
-			const credsStr = await fs.readFile(keyFile, "utf-8")
-			return JSON.parse(credsStr)
-		} catch (error) {
-			Logger.error(
-				`Error reading or parsing credentials file at ${getQwenCachedCredentialPath(this.options.qwenCodeOauthPath)}`,
-			)
-			throw new Error(`Failed to load Qwen OAuth credentials: ${error}`)
-		}
-	}
-
-	private async refreshAccessToken(credentials: QwenOAuthCredentials): Promise<QwenOAuthCredentials> {
-		if (!credentials.refresh_token) {
-			throw new Error("No refresh token available in credentials.")
-		}
-
-		const bodyData = {
-			grant_type: "refresh_token",
-			refresh_token: credentials.refresh_token,
-			client_id: QWEN_OAUTH_CLIENT_ID,
-		}
-
-		const response = await fetch(QWEN_OAUTH_TOKEN_ENDPOINT, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/x-www-form-urlencoded",
-				Accept: "application/json",
+				// Do not expose gateway HTML (or pretend a WAF diagnosis is established).
+				await response.body?.cancel()
+				return new Response(
+					JSON.stringify({
+						error: {
+							message: `Qwen Subscription gateway returned HTTP ${response.status}${response.status === 405 ? " (method not allowed)" : " with HTML instead of an API response"}. Verify subscription access with Qwen; this gateway may require Qwen-supported client access. Dirac identifies itself as Dirac, not Qwen Code.`,
+						},
+					}),
+					{ status: response.ok ? 502 : response.status, headers: { "content-type": "application/json" } },
+				)
 			},
-			body: objectToUrlEncoded(bodyData),
 		})
-
-		if (!response.ok) {
-			const errorText = await response.text()
-			throw new Error(`Token refresh failed: ${response.status} ${response.statusText}. Response: ${errorText}`)
-		}
-
-		const tokenData = await response.json()
-
-		if (tokenData.error) {
-			throw new Error(`Token refresh failed: ${tokenData.error} - ${tokenData.error_description}`)
-		}
-
-		const newCredentials = {
-			...credentials,
-			access_token: tokenData.access_token,
-			token_type: tokenData.token_type,
-			refresh_token: tokenData.refresh_token || credentials.refresh_token,
-			expiry_date: Date.now() + tokenData.expires_in * 1000,
-		}
-
-		const filePath = getQwenCachedCredentialPath(this.options.qwenCodeOauthPath)
-		await fs.writeFile(filePath, JSON.stringify(newCredentials, null, 2))
-
-		return newCredentials
 	}
 
-	private isTokenValid(credentials: QwenOAuthCredentials): boolean {
-		const TOKEN_REFRESH_BUFFER_MS = 30 * 1000 // 30s buffer
-		if (!credentials.expiry_date) {
-			return false
-		}
-		return Date.now() < credentials.expiry_date - TOKEN_REFRESH_BUFFER_MS
-	}
+	private getThinkingParams(info: ModelInfo): { enable_thinking: boolean; thinking_budget?: number } {
+		const effort = this.options.reasoningEffort
+		const disabled = effort === "none" || effort === "off" || (!effort && this.options.thinkingBudgetTokens === 0)
+		if (disabled && !info.thinkingAlwaysOn) return { enable_thinking: false }
 
-	private async ensureAuthenticated(): Promise<void> {
-		if (!this.credentials) {
-			this.credentials = await this.loadCachedQwenCredentials()
-		}
-
-		if (!this.isTokenValid(this.credentials)) {
-			this.credentials = await this.refreshAccessToken(this.credentials)
-		}
-
-		// After authentication, update the apiKey and baseURL on the existing client
-		const client = this.ensureClient()
-		client.apiKey = this.credentials.access_token
-		client.baseURL = this.getBaseUrl(this.credentials)
-	}
-
-	private getBaseUrl(creds: QwenOAuthCredentials): string {
-		let baseUrl = creds.resource_url || "https://dashscope.aliyuncs.com/compatible-mode/v1"
-		if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-			baseUrl = `https://${baseUrl}`
-		}
-		return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`
-	}
-
-	private async callApiWithRetry<T>(apiCall: () => Promise<T>): Promise<T> {
-		try {
-			return await apiCall()
-		} catch (error: any) {
-			if (error.status !== 401 || this.options.disableRetries) throw error
-
-			// Token expired, refresh and retry
-			this.credentials = await this.refreshAccessToken(this.credentials!)
-			const client = this.ensureClient()
-			client.apiKey = this.credentials.access_token
-			client.baseURL = this.getBaseUrl(this.credentials)
-			return await apiCall()
+		const effortBudget =
+			effort === "minimal" || effort === "low" ? 4096 : ["high", "xhigh", "max"].includes(effort ?? "") ? 32768 : 16384
+		return {
+			enable_thinking: true,
+			thinking_budget:
+				this.options.thinkingBudgetTokens && this.options.thinkingBudgetTokens > 0
+					? this.options.thinkingBudgetTokens
+					: effortBudget,
 		}
 	}
 
-	@withRetry()
 	async *createMessage(systemPrompt: string, messages: DiracStorageMessage[], tools?: OpenAITool[]): ApiStream {
-		await this.ensureAuthenticated()
-		const client = this.ensureClient()
 		const model = this.getModel()
-
-		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
-			role: "system",
-			content: systemPrompt,
-		}
-
-		const convertedMessages = [
-			systemMessage,
-			...convertToOpenAiMessages(messages, undefined, this.getModel().info.supportsImages !== false),
-		]
-
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+		const request: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 			model: model.id,
-			temperature: 0,
-			messages: convertedMessages,
+			messages: [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages, "qwen-code", model.info.supportsImages === true),
+			],
 			stream: true,
 			stream_options: { include_usage: true },
-			max_completion_tokens: model.info.maxTokens,
-			...getOpenAIToolParams(tools),
+			...getOpenAIToolParams(tools, this.options.enableParallelToolCalling),
+			...this.getThinkingParams(model.info),
 		}
 
-		const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+		const accessToken = await this.session.accessToken()
+		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+		try {
+			stream = await this.createClient(accessToken).chat.completions.create(request)
+		} catch (error) {
+			if (!(error instanceof OpenAI.APIError) || error.status !== 401 || this.options.disableRetries) throw error
+			const refreshedToken = await this.session.accessToken(accessToken)
+			stream = await this.createClient(refreshedToken).chat.completions.create(request)
+		}
 
+		// Only opening the HTTP stream is retried, never stream consumption or partially delivered output.
 		const toolCallProcessor = new ToolCallProcessor()
-		let fullContent = ""
-
-		for await (const apiChunk of stream) {
-			const delta = apiChunk.choices[0]?.delta ?? {}
-
-			if (delta.content) {
-				const newText = delta.content.startsWith(fullContent)
-					? delta.content.substring(fullContent.length)
-					: delta.content
-				fullContent = delta.content
-				yield* this.parseQwenContent(newText)
+		for await (const chunk of stream) {
+			const delta = chunk.choices?.[0]?.delta
+			if (delta && "reasoning_content" in delta && typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+				yield { type: "reasoning", reasoning: delta.reasoning_content }
 			}
-
+			// Chat Completions content is a delta, not a cumulative snapshot. Repeated prefixes are valid text.
+			if (delta?.content) yield { type: "text", text: delta.content }
 			if (delta?.tool_calls) yield* toolCallProcessor.processToolCallDeltas(delta.tool_calls)
-
-			if ("reasoning_content" in delta && delta.reasoning_content) {
-				yield { type: "reasoning", reasoning: (delta.reasoning_content as string | undefined) || "" }
-			}
-
-			if (apiChunk.usage) {
+			if (chunk.usage) {
 				yield {
 					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
+					inputTokens: chunk.usage.prompt_tokens ?? 0,
+					outputTokens: chunk.usage.completion_tokens ?? 0,
 				}
 			}
 		}
 	}
 
-	// Parses Qwen content that may contain <think> blocks. Even-indexed parts are text,
-	// odd-indexed parts are reasoning. Falls back to plain text if no think tags present.
-	private *parseQwenContent(newText: string): Generator<any> {
-		if (!newText) return
-		if (!newText.includes("<think>") && !newText.includes("</think>")) {
-			yield { type: "text", text: newText }
-			return
-		}
-		const parts = newText.split(/<\/?think>/g)
-		for (let i = 0; i < parts.length; i++) {
-			if (!parts[i]) continue
-			yield i % 2 === 0 ? { type: "text", text: parts[i] } : { type: "reasoning", reasoning: parts[i] }
-		}
-	}
-
-	getModel(): { id: QwenCodeModelId; info: ModelInfo } {
-		const modelId = this.options.apiModelId
-		if (modelId && modelId in qwenCodeModels) {
-			const id = modelId as QwenCodeModelId
-			return { id, info: qwenCodeModels[id] }
-		}
-		return {
-			id: qwenCodeDefaultModelId,
-			info: qwenCodeModels[qwenCodeDefaultModelId],
-		}
+	getModel(): { id: string; info: ModelInfo } {
+		const models = getCachedQwenCodeModels(this.options.qwenCodeOauthPath)
+		const configuredId = this.options.apiModelId
+		const retired = configuredId === "qwen3-coder-plus" || configuredId === "qwen3-coder-flash"
+		const id =
+			configuredId && (!retired || Object.hasOwn(models, configuredId))
+				? configuredId
+				: (Object.keys(models)[0] ?? qwenCodeDefaultModelId)
+		return { id, info: Object.hasOwn(models, id) ? models[id] : { supportsPromptCache: false } }
 	}
 }

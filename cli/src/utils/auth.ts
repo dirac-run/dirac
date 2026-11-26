@@ -1,3 +1,5 @@
+import * as fs from "node:fs"
+import { getQwenCachedCredentialPath } from "@/utils/qwenCodeCredentialPath"
 import type { ApiConfiguration, ApiProvider } from "@shared/api"
 import { ProviderToApiKeyMap } from "@shared/storage"
 import { getSecretsFromEnv } from "@shared/storage/env-config"
@@ -76,15 +78,15 @@ export function isSelectedProviderConfigured(configuration: ApiConfiguration, mo
 
 	if (provider === "openai-codex") return Boolean(configuration["openai-codex-oauth-credentials"])
 	if (provider === "github-copilot") return Boolean(configuration["github-copilot-oauth-credentials"])
-	if (provider === "qwen-code") return Boolean(configuration.qwenCodeOauthPath)
+	if (provider === "qwen-code") return fs.existsSync(getQwenCachedCredentialPath(configuration.qwenCodeOauthPath))
 	if (provider === "vertex") return Boolean(configuration.vertexProjectId || configuration.geminiApiKey)
 	if (provider === "lmstudio") return Boolean(configuration.lmStudioBaseUrl)
 	if (provider === "bedrock") {
 		return Boolean(
 			configuration.awsBedrockApiKey ||
-				(configuration.awsAccessKey && configuration.awsSecretKey) ||
-				(configuration.awsUseProfile && configuration.awsProfile) ||
-				configuration.awsRegion,
+			(configuration.awsAccessKey && configuration.awsSecretKey) ||
+			(configuration.awsUseProfile && configuration.awsProfile) ||
+			configuration.awsRegion,
 		)
 	}
 	if (provider === "claude-code") return true
@@ -112,6 +114,9 @@ export async function checkAnyProviderConfigured(): Promise<boolean> {
 
 	// Check OpenAI Codex OAuth (stored in SECRETS_KEYS, loaded into config)
 	if (config["openai-codex-oauth-credentials"]) return true
+
+	// Qwen Code shares the official CLI's subscription cache; no API key is used.
+	if (fs.existsSync(getQwenCachedCredentialPath(config.qwenCodeOauthPath as string | undefined))) return true
 
 	// Check all BYO provider API keys (loaded into config from secrets)
 	for (const [provider, keyField] of Object.entries(ProviderToApiKeyMap)) {

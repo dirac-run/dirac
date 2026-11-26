@@ -15,6 +15,7 @@ import type { Settings } from "@shared/storage/state-keys"
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels"
 import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels"
 import { getOpenAiModels } from "@/core/controller/models/refreshOpenAiModels"
+import { getCachedQwenCodeModels } from "@/core/api/providers/qwen-code-models"
 import { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import {
@@ -558,6 +559,10 @@ export class SessionConfigManager {
 						if (!refreshDynamicCatalog) return []
 						const openAiModels = await getOpenAiModels()
 						return Object.keys(openAiModels).sort((a, b) => a.localeCompare(b))
+					}
+					if (provider === "qwen-code") {
+						const path = StateManager.get().getApiConfiguration().qwenCodeOauthPath
+						return Object.keys(getCachedQwenCodeModels(path))
 					}
 					if (hasStaticModels(provider)) return getModelList(provider)
 					if (provider === "dify") return ["dify-workflow"]

@@ -29,6 +29,7 @@ import { CUSTOM_MODEL_ID, getDefaultModelId, hasModelPicker, ModelPicker } from 
 import { OpenAiCodexAuthView } from "./OpenAiCodexAuthView"
 import { UnbiasedAuthView } from "./UnbiasedAuthView"
 import { getProviderLabel } from "./ProviderPicker"
+import { QwenCodeSetup } from "./QwenCodeSetup"
 
 type AuthStep =
 	| "menu"
@@ -45,6 +46,7 @@ type AuthStep =
 	| "import"
 	| "bedrock_custom"
 	| "github_copilot_auth"
+	| "qwen_code_setup"
 
 interface AuthViewProps {
 	controller: any
@@ -272,6 +274,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				setStep("github_copilot_auth")
 			} else if (value === "bedrock") {
 				setStep("bedrock")
+			} else if (value === "qwen-code") {
+				setStep("qwen_code_setup")
 			} else {
 				setStep("apikey")
 			}
@@ -614,6 +618,15 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 						<Text color={theme.text}> Saving configuration...</Text>
 					</Box>
 				)
+
+			case "qwen_code_setup":
+				return <QwenCodeSetup controller={controller} onCancel={() => setStep("provider")} onComplete={async () => {
+					await applyProviderConfig({ providerId: "qwen-code", controller })
+					const stateManager = StateManager.get()
+					stateManager.setGlobalState("welcomeViewCompleted", true)
+					await stateManager.flushPendingState()
+					setStep("success")
+				}} />
 
 			case "openai_codex_auth":
 				return (

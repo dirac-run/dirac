@@ -13,6 +13,7 @@ import { setSessionOverride, setTaskSettings, setTaskSettingsBatch, setWorkspace
 
 describe("global provider membership publication", () => {
 	beforeEach(() => {
+		sinon.stub(process, "env").value({ ...process.env, QWEN_HOME: undefined })
 		sinon.stub(fs, "existsSync").returns(false)
 		sinon.stub(envConfig, "getSettingsFromEnv").returns({})
 		sinon.stub(envConfig, "getSecretsFromEnv").returns({})
@@ -45,7 +46,7 @@ describe("global provider membership publication", () => {
 	})
 
 	it("retains default-file Qwen OAuth setup after both modes switch away", () => {
-		const credentialPath = path.join(os.homedir(), ".qwen", "oauth_creds.json")
+		const credentialPath = path.join(os.homedir(), ".qwen", "subscription_credentials.json")
 		const exists = fs.existsSync as sinon.SinonStub
 		exists.withArgs(credentialPath).returns(true)
 		const settings = {
@@ -66,6 +67,21 @@ describe("global provider membership publication", () => {
 		// No credentials are read or refreshed: expiry is irrelevant to membership.
 		exists.withArgs(credentialPath).returns(false)
 		assert.deepEqual(getProviderMembershipState(stateManager).configuredApiProviders, [])
+	})
+
+	it("uses QWEN_HOME and lets a custom credential file take precedence", () => {
+		process.env.QWEN_HOME = "~/qwen-subscription"
+		const exists = fs.existsSync as sinon.SinonStub
+		exists.withArgs(path.join(os.homedir(), "qwen-subscription", "subscription_credentials.json")).returns(true)
+		const settings = { ...SETTINGS_DEFAULTS } as Settings
+		const stateManager: Pick<StateManager, "getSystemDefaultSettingsKey" | "getSecretKey"> = {
+			getSystemDefaultSettingsKey: (key) => settings[key],
+			getSecretKey: () => undefined,
+		}
+		assert.deepEqual(getProviderMembershipState(stateManager).configuredApiProviders, ["qwen-code"])
+		settings.qwenCodeOauthPath = "~/other/subscription_credentials.json"
+		getProviderMembershipState(stateManager)
+		assert.equal(exists.lastCall.args[0], path.join(os.homedir(), "other", "subscription_credentials.json"))
 	})
 
 	it("ignores task, session and explicit overrides of membership metadata", () => {

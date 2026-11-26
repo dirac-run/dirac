@@ -43,3 +43,40 @@ Dirac uses the default Google Cloud authentication chain. Ensure you have authen
 ```bash
 gcloud auth application-default login
 ```
+
+## Qwen Code Plus / Pro
+
+The **Qwen Code** provider uses subscription credentials cached by the
+[official Qwen Code CLI](https://github.com/QwenLM/qwen-code). It is separate from
+Dirac's **Qwen** provider, which uses a DashScope API key.
+
+1. Install and launch the official CLI (`qwen`).
+2. Run `/auth` and choose Qwen Code subscription sign-in with your Plus or Pro account.
+3. After sign-in creates `subscription_credentials.json`, select **Qwen Code** in
+   Dirac's API Providers settings. In the Dirac CLI, select Qwen Code during provider
+   setup; it asks for an optional credential file path, not an API key.
+
+Both the VS Code extension and Dirac CLI resolve the file in this order:
+
+1. The optional **Subscription Credentials Path** (`qwenCodeOauthPath`), used as a file path.
+2. `QWEN_HOME/subscription_credentials.json`, when `QWEN_HOME` is set.
+3. `~/.qwen/subscription_credentials.json` otherwise.
+
+Home-relative paths (`~/...`) work for both the custom path and `QWEN_HOME`.
+`QWEN_HOME` must be available to the process running Dirac (the extension host for
+VS Code); setting it only in an unrelated terminal does not change that process.
+A custom path overrides `QWEN_HOME`. Leave it blank to restore automatic lookup.
+
+Provider availability uses saved setup or local file presence; it does not prove
+that credentials are valid, that your subscription is active, or that a model is
+available to your account. Setup and automated tests do not perform a live sign-in
+or verify subscription entitlement. Use the official CLI's `/auth` again if your
+subscription credentials need to be renewed. Do not paste credential file contents
+into Dirac settings or an API-key field.
+
+Inference requests identify Dirac as the client; Dirac does not impersonate the
+official Qwen Code CLI. If Qwen's gateway rejects third-party clients or your
+subscription does not permit this use, use the official client or Dirac's API-key
+**Qwen** / **OpenAI Compatible** provider with an authorized endpoint instead.
+Renaming or copying a credential file does not change gateway policy or account
+entitlement.

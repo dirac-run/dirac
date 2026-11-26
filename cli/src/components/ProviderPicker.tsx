@@ -5,6 +5,7 @@
 import React, { useMemo } from "react"
 import { StateManager } from "@/core/storage/StateManager"
 import type { ApiConfiguration } from "@/shared/api"
+import { isSelectedProviderConfigured } from "../utils/auth"
 import { getProviderLabel, useValidProviders } from "../utils/providers"
 import { SearchableList, type SearchableListItem } from "./SearchableList"
 
@@ -39,8 +40,9 @@ function isProviderConfigured(providerId: string, config: ApiConfiguration): boo
 		case "xai":
 			return !!config.xaiApiKey
 		case "qwen":
-		case "qwen-code":
 			return !!config.qwenApiKey
+		case "qwen-code":
+			return isSelectedProviderConfigured({ ...config, actModeApiProvider: "qwen-code" }, "act")
 		case "doubao":
 			return !!config.doubaoApiKey
 		case "mistral":

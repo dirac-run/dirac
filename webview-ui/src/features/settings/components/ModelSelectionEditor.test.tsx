@@ -37,6 +37,7 @@ vi.mock("./common/ModelAutocomplete", () => ({
 }))
 vi.mock("@/shared/api/grpc-client", () => ({
 	ModelsServiceClient: {
+		getQwenCodeModels: vi.fn().mockResolvedValue({ models: { "account-model": { supportsPromptCache: false, contextWindow: 262144, supportsImages: true, reasoningEffortOptions: [], tiers: [] } } }),
 		refreshOpenAiModels: vi.fn().mockResolvedValue({ values: [] }),
 		refreshUnbiasedModelsRpc: vi
 			.fn()
@@ -125,6 +126,7 @@ describe("controlled model selections", () => {
 	it.each([
 		{ provider: "unbiased" as const, modelId: "pareto-versioned", info: { name: "Versioned Pareto" } },
 		{ provider: "aihubmix" as const, modelId: "discovered-model", info: { contextWindow: 12345 } },
+		{ provider: "qwen-code" as const, modelId: "account-model", info: { contextWindow: 262144, supportsImages: true } },
 	])("loads $provider discovered model metadata", async ({ provider, modelId, info }) => {
 		useSettingsStore.setState({ apiConfiguration: { unbiasedApiKey: "key" }, configuredApiProviders: [provider] })
 		const save = vi.fn()
@@ -139,6 +141,16 @@ describe("controlled model selections", () => {
 		await waitFor(() => expect(screen.getByLabelText("Utility model").getAttribute("data-models")).toContain(modelId))
 		fireEvent.change(screen.getByLabelText("Utility model"), { target: { value: modelId } })
 		expect(save).toHaveBeenCalledWith(expect.objectContaining({ modelId, modelInfo: expect.objectContaining(info) }))
+	})
+
+	it("allows a Qwen Subscription account ID not present in the cached catalog", async () => {
+		useSettingsStore.setState({ configuredApiProviders: ["qwen-code"] })
+		const save = vi.fn()
+		render(<ModelSelectionEditor label="Utility" selection={{ provider: "qwen-code", modelId: "" }} onChange={save} allowCustomModelId={supportsCustomModelId} />)
+		await waitFor(() => expect(screen.getByLabelText("Utility model").getAttribute("data-models")).toContain("account-model"))
+		expect(screen.getByLabelText("Utility model").getAttribute("data-models")).not.toContain("qwen3.8-max")
+		fireEvent.change(screen.getByLabelText("Utility model"), { target: { value: "private-account-model" } })
+		expect(save).toHaveBeenCalledWith(expect.objectContaining({ provider: "qwen-code", modelId: "private-account-model", modelInfo: undefined }))
 	})
 
 	it.each([

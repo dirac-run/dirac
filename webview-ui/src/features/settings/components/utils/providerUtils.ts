@@ -262,7 +262,13 @@ export function normalizeApiConfiguration(
 				apiConfiguration?.qwenApiLine === "china" ? mainlandQwenDefaultModelId : internationalQwenDefaultModelId
 			return getProviderData(qwenModels, qwenDefaultId)
 		case "qwen-code":
-			return getProviderData(qwenCodeModels, qwenCodeDefaultModelId)
+			return {
+				selectedProvider: provider,
+				selectedModelId: modelId || qwenCodeDefaultModelId,
+				selectedModelInfo: Object.hasOwn(qwenCodeModels, modelId || qwenCodeDefaultModelId)
+					? qwenCodeModels[(modelId || qwenCodeDefaultModelId) as keyof typeof qwenCodeModels]
+					: { supportsPromptCache: false },
+			}
 		case "doubao":
 			return getProviderData(doubaoModels, doubaoDefaultModelId)
 		case "mistral":

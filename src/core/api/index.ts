@@ -330,6 +330,9 @@ const PROVIDER_REGISTRY: Record<
 			disableRetries: cfg.disableRetries,
 			qwenCodeOauthPath: cfg.qwenCodeOauthPath,
 			apiModelId: mc.apiModelId,
+			thinkingBudgetTokens: mc.thinkingBudgetTokens,
+			reasoningEffort: mc.reasoningEffort,
+			enableParallelToolCalling: cfg.enableParallelToolCalling,
 		}),
 	doubao: (cfg, mc) =>
 		new DoubaoHandler({

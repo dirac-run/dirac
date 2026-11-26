@@ -1,26 +1,22 @@
 import type { ModelInfo } from "./types"
-import { MODEL_CAPABILITIES } from "./capabilities"
 
 export type QwenCodeModelId = keyof typeof qwenCodeModels
-export const qwenCodeDefaultModelId: QwenCodeModelId = "qwen3-coder-plus"
+export const qwenCodeDefaultModelId: QwenCodeModelId = "qwen3.8-max"
 
+// Compatibility choices when Qwen Code has not cached an account catalog yet.
+// Availability and context limits are account-owned; do not advertise guessed
+// token limits, token prices, image support, or free access for a subscription.
 export const qwenCodeModels = {
-	"qwen3-coder-plus": {
-		...MODEL_CAPABILITIES["qwen3-coder-plus"],
+	"qwen3.8-max": {
 		supportsPromptCache: false,
-		inputPrice: 0,
-		outputPrice: 0,
-		cacheWritesPrice: 0,
-		cacheReadsPrice: 0,
-		description: "Qwen3 Coder Plus - High-performance coding model with 1M context window for large codebases",
+		description: "Qwen3.8 Max (fallback ID). Account availability and subscription limits apply.",
 	},
-	"qwen3-coder-flash": {
-		...MODEL_CAPABILITIES["qwen3-coder-flash"],
+	"qwen4-max": {
 		supportsPromptCache: false,
-		inputPrice: 0,
-		outputPrice: 0,
-		cacheWritesPrice: 0,
-		cacheReadsPrice: 0,
-		description: "Qwen3 Coder Flash - Fast coding model with 1M context window optimized for speed",
+		description: "Qwen4 Max (fallback ID). Account availability and subscription limits apply.",
+	},
+	"qwen3.8-flash": {
+		supportsPromptCache: false,
+		description: "Qwen3.8 Flash (fallback ID). Account availability and subscription limits apply.",
 	},
 } as const satisfies Record<string, ModelInfo>

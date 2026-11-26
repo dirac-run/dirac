@@ -1,6 +1,38 @@
+import * as path from "node:path"
+import * as os from "node:os"
+import * as fs from "node:fs"
 import type { ApiConfiguration } from "@shared/api"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { isSelectedProviderConfigured } from "./auth.js"
+
+vi.mock("node:fs", async (original) => ({ ...(await original<typeof import("node:fs")>()), existsSync: vi.fn() }))
+it("recognizes the default Qwen subscription cache without a custom path or API key", () => {
+	vi.stubEnv("QWEN_HOME", "")
+	vi.mocked(fs.existsSync).mockReturnValue(true)
+	expect(isSelectedProviderConfigured({ actModeApiProvider: "qwen-code" }, "act")).toBe(true)
+	expect(fs.existsSync).toHaveBeenLastCalledWith(path.join(os.homedir(), ".qwen", "subscription_credentials.json"))
+})
+
+it("uses QWEN_HOME, then lets a custom Qwen path override it", () => {
+	vi.stubEnv("QWEN_HOME", "~/qwen-account")
+	vi.mocked(fs.existsSync).mockReturnValue(true)
+	const configuration: ApiConfiguration = { planModeApiProvider: "qwen-code" }
+	expect(isSelectedProviderConfigured(configuration, "plan")).toBe(true)
+	expect(fs.existsSync).toHaveBeenLastCalledWith(path.join(os.homedir(), "qwen-account", "subscription_credentials.json"))
+	configuration.qwenCodeOauthPath = "~/custom/subscription_credentials.json"
+	expect(isSelectedProviderConfigured(configuration, "plan")).toBe(true)
+	expect(fs.existsSync).toHaveBeenLastCalledWith(path.join(os.homedir(), "custom", "subscription_credentials.json"))
+})
+
+it("does not accept a Qwen API key or a missing custom subscription file", () => {
+	vi.mocked(fs.existsSync).mockReturnValue(false)
+	const configuration: ApiConfiguration = { actModeApiProvider: "qwen-code", qwenApiKey: "direct-api-key" }
+	expect(isSelectedProviderConfigured(configuration, "act")).toBe(false)
+	configuration.qwenCodeOauthPath = "/missing/subscription_credentials.json"
+	expect(isSelectedProviderConfigured(configuration, "act")).toBe(false)
+})
+
+afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })
 
 describe("isSelectedProviderConfigured", () => {
 	it("accepts a coherent DeepSeek configuration", () => {

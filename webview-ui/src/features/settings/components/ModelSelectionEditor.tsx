@@ -16,7 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover"
 import { useSettingsStore } from "@/features/settings/store/settingsStore"
 import { ModelsServiceClient } from "@/shared/api/grpc-client"
 import { OpenAiModelsRequest } from "@shared/proto/dirac/models"
-import { EmptyRequest } from "@shared/proto/dirac/common"
+import { EmptyRequest, StringRequest } from "@shared/proto/dirac/common"
 import { bedrockModels, bedrockDefaultModelId } from "@shared/api"
 import type { LanguageModelChatSelector } from "@shared/vsCodeSelectorUtils"
 import { fromProtobufModelInfo } from "@shared/proto-conversions/models/typeConversion"
@@ -60,6 +60,7 @@ export function ModelSelectionEditor({
 		aihubmixBaseUrl: state.apiConfiguration.aihubmixBaseUrl,
 		lmStudioBaseUrl: state.apiConfiguration.lmStudioBaseUrl,
 		qwenApiLine: state.apiConfiguration.qwenApiLine,
+		qwenCodeOauthPath: state.apiConfiguration.qwenCodeOauthPath,
 		zaiApiLine: state.apiConfiguration.zaiApiLine,
 	})))
 	const pendingUnbiasedKey = useSettingsStore((state) => Object.hasOwn(state.pendingApiConfigurationUpdates, "unbiasedApiKey"))
@@ -103,6 +104,17 @@ export function ModelSelectionEditor({
 					if (active) setError(String(cause))
 				})
 		}
+		if (current?.provider === "qwen-code") {
+			void ModelsServiceClient.getQwenCodeModels(StringRequest.create({ value: apiConfiguration.qwenCodeOauthPath ?? "" }))
+				.then((response) => {
+					if (active) setProviderCatalog(Object.fromEntries(
+						Object.entries(response.models).map(([id, info]) => [id, fromProtobufModelInfo(info)]),
+					))
+				})
+				.catch(() => {
+					if (active) setError("Cached Qwen account models could not be read. Enter an account model ID or use a fallback ID.")
+				})
+		}
 		if (current?.provider === "aihubmix") {
 			void ModelsServiceClient.getAihubmixModels(EmptyRequest.create({}))
 				.then((response) => {
@@ -121,6 +133,7 @@ export function ModelSelectionEditor({
 		pendingUnbiasedKey,
 		apiConfiguration.aihubmixApiKey,
 		apiConfiguration.aihubmixBaseUrl,
+		apiConfiguration.qwenCodeOauthPath,
 	])
 	const [vsCodeModels, setVsCodeModels] = useState<LanguageModelChatSelector[]>([])
 	const [lmStudioModels, setLmStudioModels] = useState<Record<string, ModelInfo>>({})
@@ -237,6 +250,7 @@ export function ModelSelectionEditor({
 			const dify = normalizeApiConfiguration({ actModeApiProvider: "dify" }, "act")
 			dynamicModels = { [dify.selectedModelId]: dify.selectedModelInfo }
 		}
+		if (provider === "qwen-code" && Object.keys(providerCatalog).length) return providerCatalog
 		return { ...staticModels, ...dynamicModels }
 	}, [current?.provider, apiConfiguration.qwenApiLine, apiConfiguration.zaiApiLine, catalog, providerCatalog, lmStudioModels, endpointModels, vsCodeModels])
 	const choices = configured.flatMap<{ id: string; label: string; provider: ApiProvider; profile?: string }>((provider) => {

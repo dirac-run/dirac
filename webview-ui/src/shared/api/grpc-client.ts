@@ -192,6 +192,9 @@ export class ModelsServiceClient extends ProtoBusClient {
 	static async refreshUnbiasedModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
 		return this.makeUnaryRequest("refreshUnbiasedModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
+	static async getQwenCodeModels(request: proto.dirac.StringRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
+		return this.makeUnaryRequest("getQwenCodeModels", request, proto.dirac.StringRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
+	}
 	static async fetchOpenRouterModelRankings(request: proto.dirac.EmptyRequest): Promise<proto.dirac.StringArray> {
 		return this.makeUnaryRequest("fetchOpenRouterModelRankings", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.StringArray.fromJSON)
 	}

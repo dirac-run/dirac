@@ -5,9 +5,17 @@ import { describe, it } from "mocha"
 import { getQwenCachedCredentialPath } from "./qwenCodeCredentialPath"
 
 describe("Qwen Code credential path", () => {
-	it("preserves the default OAuth file location", () => {
-		assert.equal(getQwenCachedCredentialPath(), path.join(os.homedir(), ".qwen", "oauth_creds.json"))
-		assert.equal(getQwenCachedCredentialPath(""), getQwenCachedCredentialPath())
+	it("finds subscription credentials under QWEN_HOME or the default home", () => {
+		const prior = process.env.QWEN_HOME
+		try {
+			delete process.env.QWEN_HOME
+			assert.equal(getQwenCachedCredentialPath(), path.join(os.homedir(), ".qwen", "subscription_credentials.json"))
+			process.env.QWEN_HOME = "~/custom-qwen"
+			assert.equal(getQwenCachedCredentialPath(""), path.join(os.homedir(), "custom-qwen", "subscription_credentials.json"))
+		} finally {
+			if (prior === undefined) delete process.env.QWEN_HOME
+			else process.env.QWEN_HOME = prior
+		}
 	})
 
 	it("preserves home-relative custom paths", () => {

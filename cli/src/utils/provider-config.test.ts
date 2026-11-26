@@ -92,6 +92,20 @@ describe("provider configuration transactions", () => {
 		stateManager.flushPendingState.mockResolvedValue(undefined)
 	})
 
+	it("saves only the Qwen subscription credential path without activating a model", async () => {
+		await saveProviderSetup({ providerId: "qwen-code", qwenCodeOauthPath: " ~/account/subscription_credentials.json ", controller: createController() })
+		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({ qwenCodeOauthPath: "~/account/subscription_credentials.json" })
+		expect(stateManager.setGlobalState).toHaveBeenCalledWith("addedApiProviders", ["qwen-code"])
+		expect(applyApiConfigurationTransaction).not.toHaveBeenCalled()
+		await saveProviderSetup({ providerId: "qwen-code", qwenCodeOauthPath: "" })
+		expect(stateManager.setApiConfiguration).toHaveBeenLastCalledWith({ qwenCodeOauthPath: "" })
+	})
+
+	it("rejects subscription credential paths for other providers", async () => {
+		await expect(saveProviderSetup({ providerId: "openrouter", qwenCodeOauthPath: "/private/subscription_credentials.json" })).rejects.toThrow("only supported by Qwen Code")
+		expect(stateManager.setApiConfiguration).not.toHaveBeenCalled()
+	})
+
 	it("records explicit keyless addition and restores membership on failed persistence", async () => {
 		await saveProviderSetup({ providerId: "lmstudio" })
 		expect(stateManager.setApiConfiguration).toHaveBeenCalledWith({})

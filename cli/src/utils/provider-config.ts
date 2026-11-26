@@ -295,6 +295,7 @@ export async function applyBedrockConfig(options: ApplyBedrockConfigOptions): Pr
 
 export type SaveProviderSetupOptions = Omit<ApplyProviderConfigOptions, "modelId"> & {
 	headers?: Record<string, string>
+	qwenCodeOauthPath?: string
 }
 
 /** Build access/setup fields only; saving access must not choose a model. */
@@ -311,6 +312,10 @@ function buildProviderSetupPatch(options: SaveProviderSetupOptions): ApiConfigur
 		if (baseUrlKey) config[baseUrlKey] = baseUrl.trim().replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "")
 	}
 	if (azureApiVersion !== undefined) config.azureApiVersion = azureApiVersion
+	if (options.qwenCodeOauthPath !== undefined) {
+		if (providerId !== "qwen-code") throw new Error("Subscription credential paths are only supported by Qwen Code")
+		config.qwenCodeOauthPath = options.qwenCodeOauthPath.trim()
+	}
 	if (options.headers !== undefined) {
 		if (providerId !== "openai") throw new Error("Custom headers are not supported by this provider setup form")
 		config.openAiHeaders = options.headers

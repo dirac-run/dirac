@@ -196,8 +196,9 @@ export function getConfiguredProviders(
 		configured.push("claude-code")
 	}
 
-	// Qwen Code - requires API key (same as Qwen)
-	if (apiConfiguration.qwenApiKey) {
+	// Qwen Code uses the official CLI's subscription cache, never the direct Qwen API key.
+	// The host publishes default-file availability via configuredApiProviders.
+	if (apiConfiguration.qwenCodeOauthPath) {
 		configured.push("qwen-code")
 	}
 

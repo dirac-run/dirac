@@ -15,6 +15,8 @@ import { saveRoleSettings } from "./roleSettingsBinding"
 import { EndpointSetupForm } from "./EndpointSetupForm"
 import { ApiProvidersPage } from "./ApiProvidersPage"
 import { ProviderAccessForm } from "./ProviderAccessForm"
+import { QwenCodeSetup } from "../QwenCodeSetup"
+import { applyProviderConfig } from "../../utils/provider-config"
 import { ProviderToBaseUrlKeyMap } from "@shared/storage/provider-keys"
 import type { ApiProvider } from "@shared/api"
 import { readModeSelection, saveApplicationModelSelection } from "./modelSelectionBinding"
@@ -685,6 +687,13 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 				setRoleIndex(null)
 				setSelectedIndex(0)
 			}} />
+		if (accessProvider === "qwen-code") return <QwenCodeSetup controller={controller}
+			onCancel={() => { setAccessProvider(null); if (initialMode) setIsPickingProvider(true) }}
+			onComplete={async () => {
+				if (initialMode === "provider-picker") await applyProviderConfig({ providerId: "qwen-code", controller })
+				setAccessProvider(null); refreshModelIds()
+				if (initialMode) onClose()
+			}} />
 		if (accessProvider) return <ProviderAccessForm provider={accessProvider} controller={controller} onCancel={() => setAccessProvider(null)} onDone={() => { setAccessProvider(null); refreshModelIds() }} />
 		if (endpointName !== null) return <EndpointSetupForm
 			profile={stateManager.getSystemDefaultSettingsKey("openAiCompatibleProfiles").find((item) => item.name === endpointName)}
@@ -780,7 +789,10 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			return (
 				<ProviderPickerPage
 					isActive={isPickingProvider && !isApplyingSetting}
-					onSelect={(providerId) => runSettingsAction("provider update", () => handleProviderSelect(providerId))}
+					onSelect={(providerId) => {
+						if (providerId === "qwen-code") { setIsPickingProvider(false); setAccessProvider("qwen-code"); return }
+						void runSettingsAction("provider update", () => handleProviderSelect(providerId))
+					}}
 				/>
 			)
 		}
@@ -883,7 +895,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			isActive={!isApplyingSetting} onCancel={returnHome}
 			onEndpoint={setEndpointName}
 			onLegacyEndpoint={() => setAccessProvider("openai")}
-			onProvider={(id) => { if (id === "openai") setEndpointName(""); else if (id === "unbiased") setIsWaitingForUnbiasedAuth(true); else if (id !== "bedrock" && ProviderToBaseUrlKeyMap[id as ApiProvider]) setAccessProvider(id as ApiProvider); else void runSettingsAction("provider setup", () => handleProviderSelect(id)) }}
+			onProvider={(id) => { if (id === "openai") setEndpointName(""); else if (id === "unbiased") setIsWaitingForUnbiasedAuth(true); else if (id === "qwen-code" || (id !== "bedrock" && ProviderToBaseUrlKeyMap[id as ApiProvider])) setAccessProvider(id as ApiProvider); else void runSettingsAction("provider setup", () => handleProviderSelect(id)) }}
 			actions={items.filter((item) => item.key.endsWith("SignOut"))}
 			onAction={(item) => void runSettingsAction("sign out", async () => {
 				if (item.key === "unbiasedSignOut") await signOutUnbiasedKey(stateManager, controller?.task)

@@ -5,6 +5,8 @@
  * the same provider/model lists as the interactive CLI.
  */
 
+import { getCachedQwenCodeModels } from "@/core/api/providers/qwen-code-models";
+import { StateManager } from "@/core/storage/StateManager";
 import type { Controller } from "@/core/controller";
 import { refreshGithubCopilotModels } from "@/core/controller/models/refreshGithubCopilotModels";
 import { getHuggingFaceModels } from "@/core/controller/models/refreshHuggingFaceModels";
@@ -110,18 +112,23 @@ export interface DynamicModelFetchOptions {
 	headers?: Record<string, string>
 }
 
-// Single source of truth mapping dynamic providers to their remote catalog loaders.
+// Single source of truth mapping dynamic providers to their catalog loaders.
 const DYNAMIC_MODEL_LOADERS: Record<string, (options: DynamicModelFetchOptions) => Promise<Record<string, unknown>>> = {
 	openrouter: (options) => refreshOpenRouterModels(options.controller),
 	huggingface: () => getHuggingFaceModels(),
 	"github-copilot": () => refreshGithubCopilotModels(),
 	openai: (options) => getOpenAiModels(options),
+	"qwen-code": async (options) => {
+		const stateManager = options.controller?.stateManager ?? StateManager.get()
+		return getCachedQwenCodeModels(stateManager.getApiConfiguration().qwenCodeOauthPath)
+	},
 }
 
 const CUSTOM_MODEL_LABELS: Record<string, string> = {
 	bedrock: "Custom (ARN / Inference Profile)",
 	openrouter: "Custom Model ID / Preset",
 	openai: "Custom Model ID / Preset",
+	"qwen-code": "Account Model ID",
 }
 
 export function hasStaticModels(provider: string): boolean {

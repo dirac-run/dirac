@@ -78,7 +78,6 @@ export const ProviderToApiKeyMap: Partial<Record<ApiProvider, keyof Secrets | (k
 	deepseek: "deepSeekApiKey",
 	unbiased: "unbiasedApiKey",
 	qwen: "qwenApiKey",
-	"qwen-code": "qwenApiKey",
 	doubao: "doubaoApiKey",
 	mistral: "mistralApiKey",
 	litellm: "liteLlmApiKey",

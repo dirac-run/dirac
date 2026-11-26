@@ -7,6 +7,7 @@ export function supportsCustomModelId(provider: ApiProvider): boolean {
 
 const CUSTOM_MODEL_ID_PROVIDERS = new Set<ApiProvider>([
 	"openai",
+	"qwen-code",
 	"lmstudio",
 	"litellm",
 	"openrouter",
