@@ -8,10 +8,6 @@ Dirac is an open-source coding agent you can use in VS Code, from the terminal, 
 
 Dirac combines autonomous task execution with purpose-built code tools: hash-anchored file editing, syntax-tree inspection and refactoring, parallel operations, subagents, continuous steering, and configurable permission controls. The goal is simple: give capable models better infrastructure so they can work longer, faster, and with less token overhead.
 
-## Sponsors
-
-Interested in sponsoring Dirac? [Get in touch](https://dirac.run/contact).
-
 ## Why Dirac?
 
 <details>
