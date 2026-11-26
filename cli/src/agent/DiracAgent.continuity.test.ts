@@ -131,6 +131,7 @@ const stateManager: any = {
 		return undefined
 	}),
 	getApiConfiguration: vi.fn(() => ({})),
+	getModelInfo: vi.fn(() => undefined),
 	getGlobalStateKey: vi.fn(() => []),
 	upsertTaskHistoryItem: vi.fn(),
 	removeTaskHistoryItems: vi.fn(),
@@ -237,6 +238,84 @@ describe("DiracAgent ACP conversation continuity", () => {
 	afterEach(() => {
 		mocks.reset()
 		vi.clearAllMocks()
+	})
+
+	it.each(["act", "plan"] as const)("distinguishes absent and cleared startup %s models and honors --model", async (mode) => {
+		const openRouterModels = await import("../utils/openrouter-models.js")
+		const modelId = "anthropic/claude-sonnet-4.6"
+		const fetchModels = vi.spyOn(openRouterModels, "fetchOpenRouterModels").mockResolvedValue({
+			[modelId]: { contextWindow: 200_000, supportsPromptCache: false },
+		})
+		const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-acp-startup-model-"))
+		const originalDefaults = stateManager.getSystemDefaultSettingsKey.getMockImplementation()
+		const agents: InstanceType<typeof DiracAgent>[] = []
+		try {
+			for (const selection of ["absent", "cleared", "override"]) {
+				stateManager.getSystemDefaultSettingsKey.mockImplementation((key: string) => {
+					if (key === "mode") return mode
+					if (key === "actModeApiProvider" || key === "planModeApiProvider") return "openrouter"
+					if (key === "actModeOpenRouterModelId" || key === "planModeOpenRouterModelId") {
+						return selection === "absent" ? undefined : ""
+					}
+					return undefined
+				})
+				const agent = new DiracAgent({ cwd: "/tmp/workspace", model: selection === "override" ? modelId : undefined })
+				agents.push(agent)
+					; (agent as any).ctx = { extensionContext: {}, DATA_DIR: dataDir }
+				const created = await agent.newSession({ cwd: "/tmp/workspace", mcpServers: [] })
+				expect(created.configOptions).toContainEqual(expect.objectContaining({
+					id: "model", currentValue: selection === "cleared" ? "" : modelId,
+				}))
+			}
+		} finally {
+			for (const agent of agents) await agent.shutdown()
+			stateManager.getSystemDefaultSettingsKey.mockImplementation(originalDefaults)
+			fetchModels.mockRestore()
+			fs.rmSync(dataDir, { recursive: true, force: true })
+		}
+	})
+
+	it.each(["act", "plan"] as const)("loads a saved %s session with a cleared model for repair, not inference", async (mode) => {
+		const { setSessionRuntimeConfig, getSessionRuntimeConfig } = await import("../acp/acp-session-runtime-config.js")
+		const openRouterModels = await import("../utils/openrouter-models.js")
+		const modelId = "anthropic/claude-sonnet-4.6"
+		const fetchModels = vi.spyOn(openRouterModels, "fetchOpenRouterModels").mockResolvedValue({
+			[modelId]: { contextWindow: 200_000, supportsPromptCache: false },
+		})
+		const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dirac-acp-cleared-model-"))
+		const sessionId = crypto.randomUUID()
+		const agent = new DiracAgent({ cwd: "/tmp/workspace" })
+			; (agent as any).ctx = { extensionContext: {}, DATA_DIR: dataDir }
+			; (agent as any).sendAvailableCommands = vi.fn(async () => undefined)
+			; (agent as any).setSessionTitleFromFirstExchange = vi.fn(async () => undefined)
+		try {
+			setSessionRuntimeConfig(dataDir, sessionId, {
+				cwd: "/tmp/workspace",
+				settings: {
+					mode,
+					planModeApiProvider: "openrouter",
+					actModeApiProvider: "openrouter",
+					planModeOpenRouterModelId: "",
+					actModeOpenRouterModelId: "",
+				},
+			})
+			const loaded = await agent.loadSession({ sessionId, cwd: "/tmp/workspace", mcpServers: [] })
+			expect(loaded.configOptions).toContainEqual(expect.objectContaining({ id: "model", currentValue: "" }))
+			await agent.setSessionConfigOption({ sessionId, configId: "auto_approve", type: "boolean", value: true })
+			expect(getSessionRuntimeConfig(dataDir, sessionId)?.settings[`${mode}ModeOpenRouterModelId`]).toBe("")
+			const prompt = { sessionId, prompt: [{ type: "text" as const, text: "hello" }] }
+			await expect(agent.prompt(prompt)).rejects.toMatchObject({ code: "model_unavailable" })
+			expect(mocks.controllers[0].initTask).not.toHaveBeenCalled()
+
+			await agent.setSessionConfigOption({ sessionId, configId: "model", value: modelId })
+			await expect(agent.prompt(prompt)).resolves.toEqual({ stopReason: "end_turn" })
+			expect(mocks.controllers[0].initTask).toHaveBeenCalledOnce()
+		} finally {
+			await agent.shutdown()
+			fetchModels.mockRestore()
+			deleteSessionUpdates(sessionId)
+			fs.rmSync(dataDir, { recursive: true, force: true })
+		}
 	})
 
 	it("filters old accounting tool calls and refreshes usage when replaying a cached ACP journal", async () => {

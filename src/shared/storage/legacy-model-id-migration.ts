@@ -82,6 +82,9 @@ export function buildUnavailableProviderStateUpdates(
 		if (!provider || ALL_PROVIDERS.includes(provider)) continue
 		updates[providerKey] = DEFAULT_API_PROVIDER
 		updates[`${mode}ModeApiModelId`] = undefined
+		// An empty ID blocks task inheritance and survives JSON persistence.
+		updates[`${mode}ModeOpenRouterModelId`] = ""
+		updates[`${mode}ModeOpenRouterModelInfo`] = undefined
 	}
 	const utilitySelection = state.utilityModelSelection
 	if (utilitySelection && !ALL_PROVIDERS.includes(utilitySelection.provider)) updates.utilityModelSelection = undefined

@@ -8,7 +8,7 @@ import { Logger } from "@shared/services/Logger"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 import { setVscodeHostProviderMock } from "@test/host-provider-test-utils"
 import sinon from "sinon"
-import { type ApiHandler, buildApiHandler, createRegistryHandler, validateApiConfiguration } from "../index"
+import { type ApiHandler, buildApiHandler, createRegistryHandler, validateApiConfiguration, validateSessionSettings } from "../index"
 
 // Minimal vscode-lm handler stub — the real VsCodeLmHandler lives in src/hosts/vscode and imports "vscode".
 const stubVsCodeLmHandler: ApiHandler = {
@@ -475,6 +475,31 @@ describe("Provider Registry", () => {
 		)
 
 		handler.getModel().should.deepEqual({ id: "task-owned-model", info: requestyDefaultModelInfo })
+	})
+
+	for (const [provider, actModelKey] of [
+		["openrouter", "actModeOpenRouterModelId"],
+		["together", "actModeTogetherModelId"],
+		["vercel-ai-gateway", "actModeVercelAiGatewayModelId"],
+		["aihubmix", "actModeAihubmixModelId"],
+	] as const) {
+		it(`requires the ${provider} model field rather than the generic model ID`, () => {
+			const config = { actModeApiProvider: provider, actModeApiModelId: "wrong-field" }
+			const error = `${provider} requires an explicit model ID`
+			should(() => validateSessionSettings(config, "act")).throw(error)
+			const cleared = { ...config, [actModelKey]: "" }
+			should(() => validateApiConfiguration(cleared, "act")).throw(error)
+			if (provider === "openrouter") should(() => validateSessionSettings(cleared, "act")).not.throw()
+			else should(() => validateSessionSettings(cleared, "act")).throw(error)
+			should(() => validateApiConfiguration({ ...config, [actModelKey]: "selected/model" }, "act")).not.throw()
+		})
+	}
+
+	it("validates connection prerequisites even when editing session settings", () => {
+		should(() => validateSessionSettings({ actModeApiProvider: "dify", difyApiKey: "test-key" }, "act"))
+			.throw("Dify requires both an API key and base URL")
+		should(() => validateSessionSettings({ planModeApiProvider: "openai", planModeOpenAiProfileName: "gone" }, "plan"))
+			.throw("OpenAI-compatible profile not found: gone")
 	})
 
 	it("rejects a persisted OpenRouter provider without an explicit model", () => {

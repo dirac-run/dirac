@@ -55,6 +55,8 @@ describe("task settings saved with a provider this version does not have", () =>
 		assert.deepEqual(settings, {
 			actModeApiProvider: DEFAULT_API_PROVIDER,
 			actModeApiModelId: undefined,
+			actModeOpenRouterModelId: "",
+			actModeOpenRouterModelInfo: undefined,
 			planModeApiProvider: "anthropic",
 			preferredLanguage: "French",
 		})

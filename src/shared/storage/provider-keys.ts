@@ -23,7 +23,10 @@ import {
 	xaiDefaultModelId,
 } from "../api"
 
-const ProviderKeyMap: Partial<Record<ApiProvider, string>> = {
+type ModeModelIdKey = Extract<SettingsKey, `${"act" | "plan"}Mode${string}ModelId`>
+type ModelIdSuffix = Extract<ModeModelIdKey, `actMode${string}`> extends `actMode${infer Suffix}` ? Suffix : never
+
+const ProviderKeyMap: Partial<Record<ApiProvider, ModelIdSuffix>> = {
 	openrouter: "OpenRouterModelId",
 	openai: "OpenAiModelId",
 	lmstudio: "LmStudioModelId",
@@ -124,11 +127,11 @@ const ProviderDefaultModelMap: Partial<Record<ApiProvider, string>> = {
  * Get the provider-specific model ID key for a given provider and mode.
  * Different providers store their model IDs in different state keys.
  */
-export function getProviderModelIdKey(provider: ApiProvider, mode: "act" | "plan"): SettingsKey {
+export function getProviderModelIdKey(provider: ApiProvider, mode: "act" | "plan"): ModeModelIdKey {
 	const keySuffix = ProviderKeyMap[provider]
 	if (keySuffix) {
 		// E.g. actModeOpenAiModelId, planModeOpenAiModelId, etc.
-		return `${mode}Mode${keySuffix}` as SettingsKey
+		return `${mode}Mode${keySuffix}`
 	}
 
 	// For providers without a specific key (anthropic, gemini, bedrock, etc.),

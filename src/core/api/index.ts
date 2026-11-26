@@ -3,15 +3,14 @@ import {
 	type ApiProvider,
 	getModelInfo,
 	type ModelProviderSelection,
-	modelSupportsInferenceSpeed,
 	openAiModelInfoSaneDefaults,
-	providerSupportsInferenceSpeed,
 	QwenApiRegions,
 } from "@shared/api"
-import { DEFAULT_INFERENCE_SPEED, isInferenceSpeed, type Mode } from "@shared/storage/types"
+import type { Mode } from "@shared/storage/types"
 import { getHostCapabilities } from "@/hosts/host-capabilities"
 import { Logger } from "@/shared/services/Logger"
 import { ApiConfigurationError, ApiConfigurationErrorCode } from "./ApiConfigurationError"
+import { assertInferenceSpeedSupported, assertProviderPrerequisites, assertRequiredModelSelected } from "./providerConfigurationValidation"
 import { modelProviderSelectionUpdates } from "./modelProviderSelection"
 import { AIhubmixHandler } from "./providers/aihubmix"
 import { AnthropicHandler } from "./providers/anthropic"
@@ -511,7 +510,7 @@ function configuredProvider(configuration: ApiConfiguration, mode: Mode): string
 	return (mode === "plan" ? configuration.planModeApiProvider : configuration.actModeApiProvider) ?? configuration.apiProvider
 }
 
-function assertProviderSupported(provider: string | undefined): asserts provider is string {
+function assertProviderSupported(provider: string | undefined): asserts provider is ApiProvider {
 	if (!provider) {
 		throw new ApiConfigurationError(
 			ApiConfigurationErrorCode.ProviderMissing,
@@ -519,7 +518,7 @@ function assertProviderSupported(provider: string | undefined): asserts provider
 			"Select a provider before starting or resuming the task.",
 		)
 	}
-	if (!PROVIDER_REGISTRY[provider]) {
+	if (!Object.hasOwn(PROVIDER_REGISTRY, provider)) {
 		throw new ApiConfigurationError(
 			ApiConfigurationErrorCode.ProviderUnsupported,
 			`Unsupported API provider: ${provider}`,
@@ -528,78 +527,25 @@ function assertProviderSupported(provider: string | undefined): asserts provider
 	}
 }
 
-/**
- * Validate provider identity and prerequisites for one runtime mode, or for both
- * persisted modes when no mode is supplied.
- */
+/** Require a runnable configuration for the selected mode, or for both modes when omitted. */
 export function validateApiConfiguration(configuration: ApiConfiguration, mode?: Mode): void {
-	const modes = mode === undefined ? (["plan", "act"] as const) : [mode]
-	for (const selectedMode of modes) {
-		const provider = configuredProvider(configuration, selectedMode)
-		assertProviderSupported(provider)
-		const modeConfig = resolveModeConfig(configuration, selectedMode)
-		const configuredInferenceSpeed = modeConfig.inferenceSpeed
-		if (configuredInferenceSpeed !== undefined && !isInferenceSpeed(configuredInferenceSpeed)) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ProviderConfigurationIncomplete,
-				`Invalid inference speed: ${String(configuredInferenceSpeed)}`,
-				"Select Default, Standard, or Fast before retrying.",
-			)
-		}
-		const inferenceSpeed = configuredInferenceSpeed ?? DEFAULT_INFERENCE_SPEED
-		if (inferenceSpeed === "standard" && !providerSupportsInferenceSpeed(provider as ApiProvider)) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ModelUnavailable,
-				`Provider ${provider} does not support inference speed controls`,
-				"Reset inference speed to Default before retrying.",
-			)
-		}
-		if (
-			inferenceSpeed === "fast" &&
-			(!modeConfig.apiModelId || !modelSupportsInferenceSpeed(provider as ApiProvider, modeConfig.apiModelId))
-		) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ModelUnavailable,
-				`Model ${modeConfig.apiModelId || "(unconfigured)"} does not support Fast mode`,
-				"Select a Fast-capable model or reset inference speed to Default.",
-			)
-		}
-		if (
-			provider === "openai" &&
-			modeConfig.openAiProfileName &&
-			!configuration.openAiCompatibleProfiles?.some((profile) => profile.name === modeConfig.openAiProfileName)
-		) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ProfileMissing,
-				`OpenAI-compatible profile not found: ${modeConfig.openAiProfileName}`,
-				"Select an available profile before retrying.",
-			)
-		}
-		if (provider === "dify" && (!configuration.difyApiKey || !configuration.difyBaseUrl)) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ProviderConfigurationIncomplete,
-				"Dify requires both an API key and base URL",
-				"Configure both values before selecting Dify.",
-			)
-		}
-		const dynamicProviderModelId =
-			provider === "openrouter"
-				? modeConfig.openRouterModelId
-				: provider === "together"
-					? modeConfig.togetherModelId
-					: provider === "vercel-ai-gateway"
-						? modeConfig.vercelAiGatewayModelId
-						: provider === "aihubmix"
-							? modeConfig.aihubmixModelId
-							: undefined
-		if (["openrouter", "together", "vercel-ai-gateway", "aihubmix"].includes(provider) && !dynamicProviderModelId) {
-			throw new ApiConfigurationError(
-				ApiConfigurationErrorCode.ModelUnavailable,
-				`${provider} requires an explicit model ID`,
-				"Select a model before retrying.",
-			)
-		}
+	for (const selectedMode of mode === undefined ? (["plan", "act"] as const) : [mode]) {
+		validateModeConfiguration(configuration, selectedMode, { editingSettings: false })
 	}
+}
+
+/** Validate a session being edited without requiring a migrated model to have been reselected. */
+export function validateSessionSettings(configuration: ApiConfiguration, mode: Mode): void {
+	validateModeConfiguration(configuration, mode, { editingSettings: true })
+}
+
+function validateModeConfiguration(configuration: ApiConfiguration, mode: Mode, options: { editingSettings: boolean }): void {
+	const provider = configuredProvider(configuration, mode)
+	assertProviderSupported(provider)
+	const { apiModelId, inferenceSpeed } = resolveModeConfig(configuration, mode)
+	assertInferenceSpeedSupported(provider, apiModelId, inferenceSpeed)
+	assertProviderPrerequisites(provider, configuration, mode)
+	assertRequiredModelSelected(provider, configuration, mode, options)
 }
 
 export function createRegistryHandler(configuration: ApiConfiguration, mode: Mode): ApiHandler {

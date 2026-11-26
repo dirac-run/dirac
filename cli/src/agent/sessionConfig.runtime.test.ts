@@ -1,3 +1,4 @@
+import { validateApiConfiguration, validateSessionSettings } from "@core/api"
 import { type ModelInfo, openAiModelInfoSaneDefaults } from "@shared/api"
 import type { Settings } from "@shared/storage/state-keys"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -165,6 +166,77 @@ describe("SessionConfigManager task runtime behavior", () => {
 			inputPrice: 0.15,
 			outputPrice: 0.6,
 		})
+	})
+
+	it.each(["act", "plan"] as const)("preserves an explicitly cleared %s model until the user selects one", async (mode) => {
+		const manager = new SessionConfigManager()
+		const runtime: Partial<Settings> = JSON.parse(JSON.stringify({
+			mode,
+			planActSeparateModelsSetting: true,
+			planModeApiProvider: "openrouter",
+			actModeApiProvider: "openrouter",
+			planModeOpenRouterModelId: "",
+			actModeOpenRouterModelId: "",
+			// A previous provider's model must not become the replacement selection.
+			planModeApiModelId: "claude-sonnet-4-6",
+			actModeApiModelId: "claude-sonnet-4-6",
+		}))
+		const model = selectOption(await manager.getSessionConfigOptions(session(mode), runtime), "model")
+
+		expect(model.currentValue).toBe("")
+		expect(model.options).toContainEqual({ value: "", name: "Select a model" })
+		expect(optionValues(model)).toContain(dynamicOpenRouterModelId)
+		expect(runtime[`${mode}ModeOpenRouterModelId`]).toBe("")
+		expect(() => validateSessionSettings(runtime, mode)).not.toThrow()
+		expect(() => validateApiConfiguration(runtime, mode)).toThrow("requires an explicit model ID")
+		expect(() => validateSessionSettings({ ...runtime, [`${mode}ModeInferenceSpeed`]: "fast" }, mode)).toThrow(
+			"does not support Fast mode",
+		)
+		await expect(manager.assertTaskRuntimeAvailable(session(mode), runtime)).rejects.toMatchObject({
+			code: "model_unavailable",
+		})
+
+		await manager.applyModelConfigOption(session(mode), dynamicOpenRouterModelId, runtime)
+		expect(runtime[`${mode}ModeOpenRouterModelId`]).toBe(dynamicOpenRouterModelId)
+		expect(runtime[`${mode === "act" ? "plan" : "act"}ModeOpenRouterModelId`]).toBe("")
+		await expect(manager.assertTaskRuntimeAvailable(session(mode), runtime)).resolves.toBeUndefined()
+	})
+
+	it("does not switch away from a cleared OpenRouter selection when the provider is disabled", async () => {
+		const manager = new SessionConfigManager({
+			isProviderEnabled: (provider: string) => provider !== "openrouter",
+			assertProviderEnabled: () => { throw new Error("Provider openrouter is disabled") },
+		} as never)
+		const runtime: Partial<Settings> = {
+			mode: "act",
+			actModeApiProvider: "openrouter",
+			actModeOpenRouterModelId: "",
+		}
+		const provider = selectOption(await manager.getSessionConfigOptions(session(), runtime), "provider")
+		expect(provider.currentValue).toBe("openrouter")
+		expect(optionValues(provider)).toContain("openrouter")
+		expect(runtime.actModeOpenRouterModelId).toBe("")
+		await expect(manager.assertTaskRuntimeAvailable(session(), runtime)).rejects.toThrow("Provider openrouter is disabled")
+	})
+
+	it("retains empty-model defaulting for other providers", async () => {
+		const manager = new SessionConfigManager()
+		const runtime = { ...linkedDeepSeekRuntime(), actModeApiModelId: "" }
+		expect(await manager.getCurrentModeModelId("act", "deepseek", runtime)).toBe("deepseek-flash")
+		const model = selectOption(await manager.getSessionConfigOptions(session(), runtime), "model")
+		expect(model.currentValue).toBe("deepseek-flash")
+	})
+
+	it.each(["absent", "undefined"])("retains automatic model selection for an %s model ID", async (selection) => {
+		const manager = new SessionConfigManager()
+		const runtime: Partial<Settings> = { mode: "act", actModeApiProvider: "openrouter" }
+		if (selection === "undefined") runtime.actModeOpenRouterModelId = undefined
+
+		expect(() => validateSessionSettings(runtime, "act")).toThrow("requires an explicit model ID")
+		const model = selectOption(await manager.getSessionConfigOptions(session(), runtime), "model")
+		expect(model.currentValue).toBe(dynamicOpenRouterModelId)
+		expect(runtime.actModeOpenRouterModelId).toBe(dynamicOpenRouterModelId)
+		await expect(manager.assertTaskRuntimeAvailable(session(), runtime)).resolves.toBeUndefined()
 	})
 
 	it("normalizes a retired DeepSeek model to the provider default", async () => {

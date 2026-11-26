@@ -271,13 +271,8 @@ export class StatePersistenceManager {
 		await Promise.all(
 			Array.from(pendingTaskStates.entries()).map(([taskId, keys]) => {
 				if (keys.size === 0) return Promise.resolve()
-				const settingsToWrite: Record<string, any> = {}
-				for (const key of keys) {
-					const value = this.accessors.getTaskStateValue(key)
-					if (value !== undefined) {
-						settingsToWrite[key] = value
-					}
-				}
+				// Include clears: the disk writer merges this patch before JSON drops undefined values.
+				const settingsToWrite = Object.fromEntries(Array.from(keys, (key) => [key, this.accessors.getTaskStateValue(key)]))
 				return writeTaskSettingsToStorage(taskId, settingsToWrite)
 			}),
 		)

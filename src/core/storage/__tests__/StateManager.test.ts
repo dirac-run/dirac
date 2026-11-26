@@ -16,6 +16,7 @@ import type { DiracFileStorage } from "@/shared/storage/DiracFileStorage"
 import type { DiracMemento } from "@/shared/storage/DiracStorage"
 import type { StorageContext } from "@/shared/storage/storage-context"
 import { StateManager } from "../StateManager"
+import { readTaskSettingsFromStorage, writeTaskSettingsToStorage } from "../taskStorage"
 import { TEST_MODEL_IDS } from "@test/fixtures/model-ids"
 import { DEFAULT_API_PROVIDER } from "@shared/api"
 import { expectLoggerErrors } from "@test/loggerGuard"
@@ -263,6 +264,78 @@ describe("StateManager", () => {
 			expect(storage.globalStateBackingStore.get("actModeApiProvider")).to.equal(DEFAULT_API_PROVIDER)
 			expect(storage.globalStateBackingStore.get("utilityModelSelection")).to.equal(undefined)
 		})
+
+		for (const mode of ["plan", "act"] as const) {
+			const otherMode = mode === "plan" ? "act" : "plan"
+			const providerKey = `${mode}ModeApiProvider` as const
+			const modelKey = `${mode}ModeOpenRouterModelId` as const
+			const infoKey = `${mode}ModeOpenRouterModelInfo` as const
+			const otherProviderKey = `${otherMode}ModeApiProvider` as const
+			const otherModelKey = `${otherMode}ModeOpenRouterModelId` as const
+			const otherInfoKey = `${otherMode}ModeOpenRouterModelInfo` as const
+			const staleInfo = { contextWindow: 123 }
+			const keptInfo = { contextWindow: 456 }
+
+			function expectClearedSelection(sm: StateManager): void {
+				const configuration = sm.getApiConfiguration()
+				expect(configuration[providerKey]).to.equal(DEFAULT_API_PROVIDER)
+				expect(configuration[modelKey]).to.equal("")
+				expect(configuration[infoKey]).to.equal(undefined)
+				expect(sm.getGlobalSettingsKey(modelKey)).to.equal("")
+				expect(sm.getGlobalSettingsKey(infoKey)).to.equal(undefined)
+				expect(configuration[otherProviderKey]).to.equal("openrouter")
+				expect(configuration[otherModelKey]).to.equal("kept/model")
+				expect(configuration[otherInfoKey]).to.deep.equal(keptInfo)
+			}
+
+			it(`clears stale global OpenRouter selection only for ${mode} mode, including after restart`, async () => {
+				await setPersisted(providerKey, unavailable)
+				await setPersisted(modelKey, "stale/model")
+				await setPersisted(infoKey, staleInfo)
+				await setPersisted(otherProviderKey, "openrouter")
+				await setPersisted(otherModelKey, "kept/model")
+				await setPersisted(otherInfoKey, keptInfo)
+
+				const sm = await StateManager.initialize(storage)
+				expectClearedSelection(sm)
+				expect(storage.globalStateBackingStore.get(modelKey)).to.equal("")
+				expect(storage.globalStateBackingStore.get(infoKey)).to.equal(undefined)
+				storage.globalState.get = storage.globalStateBackingStore.get.bind(storage.globalStateBackingStore)
+				await sm.reInitialize()
+				expectClearedSelection(StateManager.get())
+			})
+
+			for (const taskHasOpenRouterSelection of [false, true]) {
+				it(`blocks ${taskHasOpenRouterSelection ? "task" : "inherited global"} OpenRouter selection in ${mode} mode after task reload`, async () => {
+					Object.assign(HostProvider.get(), { globalStorageFsPath: tempDir })
+					await setPersisted(providerKey, "openrouter")
+					await setPersisted(modelKey, "global/stale-model")
+					await setPersisted(infoKey, staleInfo)
+					await setPersisted(otherProviderKey, "openrouter")
+					await setPersisted(otherModelKey, "kept/model")
+					await setPersisted(otherInfoKey, keptInfo)
+					const taskId = "unavailable-provider-task"
+					await writeTaskSettingsToStorage(taskId, {
+						[providerKey]: unavailable,
+						...(taskHasOpenRouterSelection ? { [modelKey]: "task/stale-model", [infoKey]: staleInfo } : {}),
+					} as Partial<Settings>)
+
+					const sm = await StateManager.initialize(storage)
+					await sm.loadTaskSettings(taskId)
+					expectClearedSelection(sm)
+					await sm.flushPendingState()
+					const saved = await readTaskSettingsFromStorage(taskId) as Partial<Settings>
+					expect(saved[providerKey]).to.equal(DEFAULT_API_PROVIDER)
+					expect(saved[modelKey]).to.equal("")
+					expect(saved[infoKey]).to.equal(undefined)
+					await sm.clearTaskSettings()
+					await sm.loadTaskSettings(taskId)
+					expectClearedSelection(sm)
+					expect(sm.getSystemDefaultSettingsKey(modelKey)).to.equal("global/stale-model")
+					expect(sm.getSystemDefaultSettingsKey(infoKey)).to.deep.equal(staleInfo)
+				})
+			}
+		}
 
 		it("leaves supported selections untouched", async () => {
 			await setPersisted("planModeApiProvider", "anthropic")

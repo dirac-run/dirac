@@ -101,6 +101,8 @@ export class SessionConfigManager {
 		const mode = this.getSessionMode(session, sessionOverrides)
 		const providerKey = mode === "act" ? "actModeApiProvider" : "planModeApiProvider"
 		const requestedProvider = sessionOverrides[providerKey] as ApiProvider | undefined
+		// An explicit empty selection survives provider retirement; only the user may replace it.
+		if (requestedProvider === "openrouter" && sessionOverrides[getProviderModelIdKey(requestedProvider, mode)] === "") return
 		const providers = requestedProvider
 			? [requestedProvider, ...getValidCliProviders().filter((provider) => provider !== requestedProvider)]
 			: getValidCliProviders()
@@ -221,7 +223,7 @@ export class SessionConfigManager {
 				type: "select",
 				category: "_provider",
 				currentValue: currentProvider,
-				options: providerOptions,
+				options: this.withCurrentSelectOption(providerOptions, currentProvider, getProviderLabel(currentProvider)),
 			},
 			{
 				id: "model",
@@ -230,7 +232,10 @@ export class SessionConfigManager {
 				type: "select",
 				category: "model",
 				currentValue: currentModelId,
-				options: currentCatalog.modelIds.map((modelId) => ({ value: modelId, name: modelId })),
+				options: [
+					...(currentModelId === "" ? [{ value: "", name: "Select a model" }] : []),
+					...currentCatalog.modelIds.map((modelId) => ({ value: modelId, name: modelId })),
+				],
 			},
 			...(providerSupportsInferenceSpeed(currentProvider)
 				? [
@@ -433,7 +438,9 @@ export class SessionConfigManager {
 	async getCurrentModeModelId(mode: Mode, provider?: ApiProvider, sessionOverrides?: Partial<Settings>): Promise<string> {
 		if (!provider) return ""
 		const modelKey = getProviderModelIdKey(provider, mode)
-		return (sessionOverrides?.[modelKey] as string | undefined) || getDefaultModelId(provider)
+		const modelId = sessionOverrides?.[modelKey] as string | undefined
+		if (provider === "openrouter" && modelId === "") return ""
+		return modelId || getDefaultModelId(provider)
 	}
 
 	async assertTaskRuntimeAvailable(session: DiracAcpSession, sessionOverrides: Partial<Settings>): Promise<void> {

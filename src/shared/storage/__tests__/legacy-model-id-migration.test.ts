@@ -1,6 +1,7 @@
 import { expect } from "chai"
 import { describe, it } from "mocha"
 import { type ApiProvider, DEFAULT_API_PROVIDER } from "@shared/api"
+import type { GlobalStateAndSettings } from "../state-keys"
 import {
 	buildLegacyAnthropicFastModeStateUpdates,
 	buildRetiredDeepSeekModelStateUpdates,
@@ -194,16 +195,33 @@ describe("retired DeepSeek model migration", () => {
 describe("saved selections of a provider this version does not have", () => {
 	const unavailable = "provider-from-another-version" as ApiProvider
 
-	it("returns only the affected mode to the default provider without a model", () => {
-		expect(
-			buildUnavailableProviderStateUpdates({
-				planModeApiProvider: unavailable,
-				planModeApiModelId: "its-model",
-				actModeApiProvider: "anthropic",
-				actModeApiModelId: "claude-opus-5",
-			}),
-		).to.deep.equal({ planModeApiProvider: DEFAULT_API_PROVIDER, planModeApiModelId: undefined })
-	})
+	for (const mode of ["plan", "act"] as const) {
+		it(`returns only ${mode} mode to the default provider without a stale OpenRouter model`, () => {
+			const otherMode = mode === "plan" ? "act" : "plan"
+			const state: Partial<GlobalStateAndSettings> = {
+				[`${mode}ModeApiProvider`]: unavailable,
+				[`${mode}ModeApiModelId`]: "its-model",
+				[`${mode}ModeOpenRouterModelId`]: "stale/model",
+				[`${mode}ModeOpenRouterModelInfo`]: { contextWindow: 123 },
+				[`${otherMode}ModeApiProvider`]: "openrouter",
+				[`${otherMode}ModeOpenRouterModelId`]: "kept/model",
+				[`${otherMode}ModeOpenRouterModelInfo`]: { contextWindow: 456 },
+			}
+			const updates = buildLegacyModelIdStateUpdates(state)
+			expect(updates).to.deep.equal({
+				[`${mode}ModeApiProvider`]: DEFAULT_API_PROVIDER,
+				[`${mode}ModeApiModelId`]: undefined,
+				[`${mode}ModeOpenRouterModelId`]: "",
+				[`${mode}ModeOpenRouterModelInfo`]: undefined,
+			})
+			const reloaded = JSON.parse(JSON.stringify({ ...state, ...updates }))
+			expect(reloaded[`${mode}ModeOpenRouterModelId`]).to.equal("")
+			expect(reloaded[`${mode}ModeOpenRouterModelInfo`]).to.equal(undefined)
+			expect(reloaded[`${otherMode}ModeOpenRouterModelId`]).to.equal("kept/model")
+			expect(reloaded[`${otherMode}ModeOpenRouterModelInfo`]).to.deep.equal({ contextWindow: 456 })
+			expect(buildUnavailableProviderStateUpdates(reloaded)).to.deep.equal({})
+		})
+	}
 
 	it("clears a utility-model selection and drops model-provider presets", () => {
 		const kept = { id: "anthropic::claude-opus-5", provider: "anthropic" as const, modelId: "claude-opus-5", lastUsedAt: 1 }

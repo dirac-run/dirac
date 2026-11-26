@@ -65,6 +65,13 @@ export function getSettingWithOverride<K extends keyof Settings>(
 	key: K,
 	caches: Pick<StateManagerSettingsCaches, "sessionOverrideCache" | "taskStateCache" | "globalStateCache">,
 ): Settings[K] {
+	// A migrated empty model selection must not inherit cached metadata either.
+	if (key === "planModeOpenRouterModelInfo" && getSettingWithOverride("planModeOpenRouterModelId", caches) === "") {
+		return undefined as Settings[K]
+	}
+	if (key === "actModeOpenRouterModelInfo" && getSettingWithOverride("actModeOpenRouterModelId", caches) === "") {
+		return undefined as Settings[K]
+	}
 	if (key === "subagentRoles" || key === "addedApiProviders" || key === "sandboxSettings") return caches.globalStateCache[key]
 	if (Object.hasOwn(caches.sessionOverrideCache, key)) return caches.sessionOverrideCache[key] as Settings[K]
 	const taskValue = caches.taskStateCache[key]

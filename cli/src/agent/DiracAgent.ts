@@ -34,7 +34,7 @@ import {
 import { DiracAskResponse } from "@shared/WebviewMessage"
 import pWaitFor from "p-wait-for"
 import simpleGit from "simple-git"
-import { ApiConfigurationError, ApiConfigurationErrorCode, validateApiConfiguration } from "@/core/api"
+import { ApiConfigurationError, ApiConfigurationErrorCode, validateApiConfiguration, validateSessionSettings } from "@/core/api"
 import { Controller } from "@/core/controller"
 import { getAvailableSlashCommands } from "@/core/controller/slash/getAvailableSlashCommands"
 import { GoalStore } from "@/core/goal/GoalStore"
@@ -800,8 +800,10 @@ export class DiracAgent implements acp.Agent {
 					runtimeValues[modelInfoKey] ||= structuredClone(profile.modelInfo)
 				}
 			}
-			; (overrides as Record<string, unknown>)[modelKey] =
-				(overrides[modelKey] as string | undefined) || getDefaultModelId(defaultProvider)
+			if (defaultProvider !== "openrouter") {
+				; (overrides as Record<string, unknown>)[modelKey] =
+					(overrides[modelKey] as string | undefined) || getDefaultModelId(defaultProvider)
+			}
 
 			const thinkingKey = mode === "act" ? "actModeThinkingBudgetTokens" : "planModeThinkingBudgetTokens"
 			const reasoningKey = mode === "act" ? "actModeReasoningEffort" : "planModeReasoningEffort"
@@ -953,7 +955,7 @@ export class DiracAgent implements acp.Agent {
 		}
 
 		const captured = StateManager.get().captureEffectiveTaskConfiguration(overrides)
-		validateApiConfiguration(captured.apiConfiguration as ApiConfiguration, mode)
+		validateSessionSettings(captured.apiConfiguration as ApiConfiguration, mode)
 		return {
 			settings: overrides,
 			apiConfiguration: captured.apiConfiguration as ApiConfiguration,
@@ -1499,7 +1501,7 @@ export class DiracAgent implements acp.Agent {
 		const sessionOverrides = copyTaskRuntimeSettings(persistedRuntimeConfig.settings)
 		const configOptions = await this.sessionConfig.getSessionConfigOptions(session, sessionOverrides)
 		const loadRuntime = StateManager.get().captureEffectiveTaskConfiguration(sessionOverrides)
-		validateApiConfiguration(loadRuntime.apiConfiguration as ApiConfiguration, persistedMode)
+		validateSessionSettings(loadRuntime.apiConfiguration as ApiConfiguration, persistedMode)
 
 		if (history) {
 			await controller.getTaskWithId(history.taskId)
