@@ -27,6 +27,26 @@ Start an interactive CLI session with `/goal <objective>`. Dirac can keep workin
 </details>
 
 <details>
+<summary><strong>Delegate work without stopping the main task</strong></summary>
+
+Dirac can send a subagent to investigate a failing test and keep working on the implementation. Each subagent starts with its own assignment and shares the workspace. Agents can message each other directly or publish findings to a shared journal. The main agent can guide or interrupt an assignment, then resume its saved conversation for a follow-up.
+
+Use `/agents` for a snapshot of active agents, or `/agent` in the CLI to browse their transcripts without sending a model request.
+
+![Dirac guiding subagents, Gödel messaging Kolmogorov, and both publishing to the shared journal](assets/media/subagents.png)
+
+</details>
+
+<details>
+<summary><strong>Choose a model for each kind of work</strong></summary>
+
+Subagents use the main agent’s model by default. In **Subagent roles**, you can give Scout a fast model for codebase exploration and Reviewer a different model for code review. Give each role a description, select its model and supported reasoning settings, and enable it. Dirac uses the descriptions to decide which specialist to assign.
+
+![Enabled Reviewer, Simple coder, Coder, and Scout roles with their descriptions and model selections](assets/media/subagent-roles.png)
+
+</details>
+
+<details>
 <summary><strong>Dirac can extend itself</strong></summary>
 
 Use `/new-tool <description>` to build a tool tailored to your workflow while you work. Dirac turns the requirements into a typed tool, compiles it, validates it, and smoke-tests it. Task-scoped tools are available immediately; persistent workspace and global tools appear in the **Tools** tab and can be enabled without starting a new conversation.
@@ -58,16 +78,25 @@ If something occurs to you after a task starts, send another message at any time
 <details>
 <summary><strong>Use a separate Utility model for supporting work</strong></summary>
 
-Route context compaction, new-task handoffs, commit-message generation, and permission decisions to a separate, cheaper model so the main model can stay focused on implementation. In our context-compaction case study, this model arbitrage reduced cost by more than 80%: [Sol vs. Luna: token arbitrage for AI agents](https://dirac.run/posts/token-arbitrage-sol-vs-luna).
-
-![Utility model use cases and configuration](assets/media/utility.png)
+Route context compaction, commit-message generation, and permission decisions to a separate, cheaper model so the main model can stay focused on implementation. In our context-compaction case study, this model arbitrage reduced cost by more than 80%: [Sol vs. Luna: token arbitrage for AI agents](https://dirac.run/posts/token-arbitrage-sol-vs-luna).
 
 </details>
 
 <details>
 <summary><strong>No more approval fatigue</strong></summary>
 
+On supported POSIX hosts such as Linux and macOS, [BraKet](https://github.com/dirac-run/braket) classifies shell commands by the access they need. For eligible commands, approve one invocation or grant a category and access level for the current task and its subagents. Those grants still apply when you resume the task.
+
 Configure the Utility model as the first pass for permission requests and give it an explicit natural-language policy. It approves requests that satisfy the policy and escalates unsafe or uncertain requests to you. Every automatic approval remains visible in the transcript with its reason.
+
+</details>
+
+<details>
+<summary><strong>Set filesystem and network limits for commands</strong></summary>
+
+On supported hosts, enable native sandboxing to limit what an approved command can access. For example, choose **Workspace** for the main agent and **Read-only** for subagents so only the main agent’s commands can edit workspace files. Choose **Offline workspace** for commands that need to edit files but don’t need the network.
+
+Sandboxing is off by default. Profiles apply to commands and their descendants; other tools keep their own permission controls.
 
 </details>
 
@@ -141,17 +170,6 @@ When automatic approval is disabled, Dirac groups related changes into a single 
 Before the first request reaches the model, Dirac detects likely filenames, directory paths, and symbol names and assembles a bounded context packet. Named symbols receive definition-first context and indexed references.
 
 You can also mention Git changes, workspace diagnostics, terminal output, URLs, text files, PDFs, DOCX files, spreadsheets, notebooks, and images. Applicable `AGENTS.md` instructions, matching rules, and active skills join the request as repository guidance.
-
-</details>
-
-<details>
-<summary><strong>Concurrent, first-class subagents</strong></summary>
-
-Subagents can research, edit, run commands, and validate work concurrently. Each receives complete assignment instructions rather than a copy of the parent conversation, runs under the parent's authority, and has no automatic execution deadline. The main agent creates and supervises children through `subagents`; `send_message` provides ordinary peer communication, and `shared_journal` stores longer findings once for interested agents to read. Neither messages nor publications grant permissions or restart completed children. Dirac tracks source freshness and rejects stale edits at write time; agents still share workspace contents.
-
-Agents run in the background without streaming separate cards into the main chat. The status area shows the active count; `/agents` prints a frozen local snapshot without sending anything to the model. In the CLI, `/agent` opens a read-only transcript browser with explicit refresh and paging. Ask the main agent to guide, stop, or resume a child—there is no direct child chat or approval surface.
-
-![Multiple subagents working concurrently](assets/media/subagents.png)
 
 </details>
 
