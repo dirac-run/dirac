@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "mocha"
-import { DEFAULT_SUBAGENT_ROLES, validateSubagentRoles } from "../subagentRoles"
+import { DEFAULT_SUBAGENT_ROLES, readSavedSubagentRoles, validateSubagentRoles } from "../subagentRoles"
 import { Settings, UpdateSettingsRequest } from "../proto/dirac/state"
 import { convertProtoToSubagentRoles, convertSubagentRolesToProto } from "../proto-conversions/subagent-roles"
 
@@ -32,6 +32,15 @@ describe("user-global subagent roles", () => {
 			[{ ...reviewer, modelSelection: { provider: "unknown", modelId: "model" } }],
 			[{ ...reviewer, modelSelection: { provider: "openai", modelId: "" } }],
 		]) assert.throws(() => validateSubagentRoles(roles))
+	})
+
+	it("reads a saved role whose provider is not available as disabled and without a model", () => {
+		const saved = { ...reviewer, modelSelection: { provider: "provider-from-another-version", modelId: "model" } }
+		assert.deepEqual(readSavedSubagentRoles([saved, { ...reviewer, name: "Scout" }]), [
+			{ name: "Reviewer", description: "Review code.", enabled: false },
+			{ ...reviewer, name: "Scout" },
+		])
+		assert.throws(() => readSavedSubagentRoles([{ ...reviewer, name: "default" }]))
 	})
 
 	it("round-trips role selections and distinguishes clearing from omission", () => {

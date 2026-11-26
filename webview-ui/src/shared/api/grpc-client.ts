@@ -189,9 +189,6 @@ export class ModelsServiceClient extends ProtoBusClient {
 	static async refreshOpenRouterModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
 		return this.makeUnaryRequest("refreshOpenRouterModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
 	}
-	static async refreshUnbiasedModelsRpc(request: proto.dirac.EmptyRequest): Promise<proto.dirac.OpenRouterCompatibleModelInfo> {
-		return this.makeUnaryRequest("refreshUnbiasedModelsRpc", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.OpenRouterCompatibleModelInfo.fromJSON)
-	}
 	static async fetchOpenRouterModelRankings(request: proto.dirac.EmptyRequest): Promise<proto.dirac.StringArray> {
 		return this.makeUnaryRequest("fetchOpenRouterModelRankings", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.StringArray.fromJSON)
 	}
@@ -224,12 +221,6 @@ export class ModelsServiceClient extends ProtoBusClient {
 	}
 	static authenticateOpenAiCodex(request: proto.dirac.OpenAiCodexAuthRequest, callbacks: Callbacks<proto.dirac.OpenAiCodexAuthEvent>): ()=>void {
 		return this.makeStreamingRequest("authenticateOpenAiCodex", request, proto.dirac.OpenAiCodexAuthRequest.toJSON, proto.dirac.OpenAiCodexAuthEvent.fromJSON, callbacks)
-	}
-	static authenticateUnbiased(request: proto.dirac.EmptyRequest, callbacks: Callbacks<proto.dirac.UnbiasedAuthEvent>): ()=>void {
-		return this.makeStreamingRequest("authenticateUnbiased", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.UnbiasedAuthEvent.fromJSON, callbacks)
-	}
-	static async signOutUnbiased(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest("signOutUnbiased", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 	static async signOutOpenAiCodex(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("signOutOpenAiCodex", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
@@ -314,9 +305,6 @@ export class StateServiceClient extends ProtoBusClient {
 	}
 	static async setWelcomeViewCompleted(request: proto.dirac.BooleanRequest): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("setWelcomeViewCompleted", request, proto.dirac.BooleanRequest.toJSON, proto.dirac.Empty.fromJSON)
-	}
-	static async dismissUnbiasedWelcomeOffer(request: proto.dirac.EmptyRequest): Promise<proto.dirac.Empty> {
-		return this.makeUnaryRequest("dismissUnbiasedWelcomeOffer", request, proto.dirac.EmptyRequest.toJSON, proto.dirac.Empty.fromJSON)
 	}
 	static async updateInfoBannerVersion(request: proto.dirac.Int64Request): Promise<proto.dirac.Empty> {
 		return this.makeUnaryRequest("updateInfoBannerVersion", request, proto.dirac.Int64Request.toJSON, proto.dirac.Empty.fromJSON)

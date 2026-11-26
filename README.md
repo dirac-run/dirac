@@ -10,16 +10,6 @@ Dirac combines autonomous task execution with purpose-built code tools: hash-anc
 
 ## Sponsors
 
-<a href="https://unbiased.ai/">
-  <img src="assets/sponsors/unbiased-icon.png" alt="" height="40" />
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/sponsors/unbiased-wordmark-dark.png" />
-    <img src="assets/sponsors/unbiased-wordmark.png" alt="Unbiased AI" height="32" />
-  </picture>
-</a>
-
-Thank you to [Unbiased AI](https://unbiased.ai/) for sponsoring Dirac's open-source development.
-
 Interested in sponsoring Dirac? [Get in touch](https://dirac.run/contact).
 
 ## Why Dirac?

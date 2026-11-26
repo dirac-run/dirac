@@ -1,5 +1,4 @@
 # check_id	path:content — known-debt violations; shrink to zero as items land
-check_env_centralized	src/core/controller/models/signOutUnbiased.ts:if (process.env.UNBIASED_API_KEY) throw new Error("Remove UNBIASED_API_KEY from the environment to sign out.")
 check_env_centralized	src/core/task/tools/subagent/AgentConfigLoader.ts:const baseDir = process.env.DIRAC_DIR || path.join(homeDir, ".dirac")
 check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: chunk.usage.prompt_tokens || 0,
 check_no_numeric_or_default	src/core/api/providers/aihubmix.ts:inputTokens: usage.input_tokens || 0,

@@ -27,8 +27,6 @@ import { normalizeUserApprovedCommands, type UserApprovedCommand } from "@shared
 import { Box, Text, useInput } from "ink"
 import React, { useCallback, useMemo, useState } from "react"
 import { StateManager } from "@/core/storage/StateManager"
-import { signOutUnbiasedKey } from "@/core/controller/models/signOutUnbiased"
-import { getUnbiasedOAuthWorkloadName } from "@/integrations/unbiased/oauth-account"
 import type { TaskWorkingConfigurationPatch } from "@/core/task/runtime/TaskWorkingConfiguration"
 import { ToolRegistry } from "@/core/task/tools/registry/ToolRegistry"
 import { Logger } from "@/shared/services/Logger"
@@ -36,7 +34,6 @@ import { TerminalColorMode, terminalColorMode, theme } from "../../constants/the
 import { useStdinContext } from "../../context/StdinContext"
 import { useTerminalSize } from "../../hooks/useTerminalSize"
 import { OpenAiCodexAuthView } from "../OpenAiCodexAuthView"
-import { UnbiasedAuthView } from "../UnbiasedAuthView"
 import { shouldIgnoreTerminalInput } from "../../utils/input"
 import { usesOpenRouterModels } from "../../utils/openrouter-models"
 import type { ObjectEditorState } from "../ConfigViewComponents"
@@ -96,7 +93,6 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	const [pendingProvider, setPendingProvider] = useState<string | null>(null)
 	const [isConfiguringBedrock, setIsConfiguringBedrock] = useState(false)
 	const [isWaitingForCodexAuth, setIsWaitingForCodexAuth] = useState(false)
-	const [isWaitingForUnbiasedAuth, setIsWaitingForUnbiasedAuth] = useState(false)
 	const [isWaitingForGithubAuth, setIsWaitingForGithubAuth] = useState(false)
 	const [githubAuthData, setGithubAuthData] = useState<any>(null)
 	const [apiKeyValue, setApiKeyValue] = useState("")
@@ -338,12 +334,6 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		openAiHeaders,
 		autoCondenseContextLimit,
 		openAiCodexIsAuthenticated,
-		unbiasedIsAuthenticated: !!stateManager.getApiConfiguration().unbiasedApiKey,
-		unbiasedWorkloadName: getUnbiasedOAuthWorkloadName(
-			stateManager.getApiConfiguration().unbiasedApiKey,
-			stateManager.getGlobalStateKey("unbiasedOAuthApiKeyHash"),
-			stateManager.getGlobalStateKey("unbiasedOAuthWorkloadName"),
-		),
 		openAiCodexEmail,
 		githubIsAuthenticated,
 		githubEmail,
@@ -548,20 +538,8 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			setHelpItem(item)
 			return
 		}
-		if (item.key === "unbiasedSignIn") {
-			setIsWaitingForUnbiasedAuth(true)
-			return
-		}
-		if (item.key === "unbiasedSignOut") {
-			void runSettingsAction("Unbiased sign-out", async () => {
-				await signOutUnbiasedKey(stateManager, controller?.task)
-				await controller?.postStateToWebview()
-				refreshModelIds()
-			})
-			return
-		}
 		void runSettingsAction("update", handleAction)
-	}, [handleAction, items, openDestination, runSettingsAction, selectedIndex, stateManager, controller, refreshModelIds, sandboxSettings, refreshSandboxStatus])
+	}, [handleAction, items, openDestination, runSettingsAction, selectedIndex, controller, sandboxSettings, refreshSandboxStatus])
 
 	const selectSearchResult = useCallback(
 		(result: SettingsSearchResult) => {
@@ -614,7 +592,6 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 				return
 			}
 			if (isWaitingForCodexAuth) return
-			if (isWaitingForUnbiasedAuth) return
 			if (isWaitingForGithubAuth) {
 				if (key.escape) cancelGithubAuth()
 				return
@@ -812,11 +789,6 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 				/>
 			)
 		}
-		if (isWaitingForUnbiasedAuth) return (
-			<UnbiasedAuthView setupOnly controller={controller} onCancel={() => setIsWaitingForUnbiasedAuth(false)} onComplete={() => {
-				setIsWaitingForUnbiasedAuth(false)
-			}} />
-		)
 		if (isWaitingForCodexAuth) return (
 			<OpenAiCodexAuthView onCancel={() => setIsWaitingForCodexAuth(false)} onComplete={completeCodexAuth} />
 		)
@@ -883,11 +855,10 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			isActive={!isApplyingSetting} onCancel={returnHome}
 			onEndpoint={setEndpointName}
 			onLegacyEndpoint={() => setAccessProvider("openai")}
-			onProvider={(id) => { if (id === "openai") setEndpointName(""); else if (id === "unbiased") setIsWaitingForUnbiasedAuth(true); else if (id !== "bedrock" && ProviderToBaseUrlKeyMap[id as ApiProvider]) setAccessProvider(id as ApiProvider); else void runSettingsAction("provider setup", () => handleProviderSelect(id)) }}
+			onProvider={(id) => { if (id === "openai") setEndpointName(""); else if (id !== "bedrock" && ProviderToBaseUrlKeyMap[id as ApiProvider]) setAccessProvider(id as ApiProvider); else void runSettingsAction("provider setup", () => handleProviderSelect(id)) }}
 			actions={items.filter((item) => item.key.endsWith("SignOut"))}
 			onAction={(item) => void runSettingsAction("sign out", async () => {
-				if (item.key === "unbiasedSignOut") await signOutUnbiasedKey(stateManager, controller?.task)
-				else await handleAction(item)
+				await handleAction(item)
 				refreshModelIds()
 			})}
 		/>
@@ -907,7 +878,6 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		isEnteringApiKey ||
 		isConfiguringBedrock ||
 		isWaitingForCodexAuth ||
-		isWaitingForUnbiasedAuth ||
 		isBedrockCustomFlow ||
 		isWaitingForGithubAuth ||
 		isEditing ||

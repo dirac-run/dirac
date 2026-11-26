@@ -17,7 +17,6 @@ export async function assembleRuntimeState(stateManager: StateManager) {
 		banners: BannerService.get().getActiveBanners() ?? [],
 		welcomeBanners: BannerService.get().getWelcomeBanners() ?? [],
 		releaseNotes: getPendingReleaseNotes(stateManager),
-		shouldShowUnbiasedWelcome: stateManager.getGlobalStateKey("unbiasedWelcomeOfferStatus") === "pending",
 		latestAnnouncementId,
 	}
 }

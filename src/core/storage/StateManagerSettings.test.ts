@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { describe, it } from "mocha"
+import { type ApiProvider, DEFAULT_API_PROVIDER } from "@shared/api"
 import { GLOBAL_STATE_DEFAULTS, isSettingsKey, SETTINGS_DEFAULTS, type Settings } from "@shared/storage/state-keys"
-import { buildEffectiveSettingsFromCache, type StateManagerSettingsCaches } from "./StateManagerSettings"
+import { buildEffectiveSettingsFromCache, normalizeLoadedSettings, type StateManagerSettingsCaches } from "./StateManagerSettings"
 
 describe("retired completion-check setting", () => {
 	for (const legacyValue of [undefined, false, true]) {
@@ -39,5 +40,23 @@ describe("global role settings resolution", () => {
 		assert.deepEqual(settings.subagentRoles, roles)
 		assert.equal(settings.preferredLanguage, "explicit")
 		assert.equal(buildEffectiveSettingsFromCache(caches).preferredLanguage, "session")
+	})
+})
+
+describe("task settings saved with a provider this version does not have", () => {
+	it("load on the default provider and keep their other values", () => {
+		const settings = normalizeLoadedSettings({
+			actModeApiProvider: "provider-from-another-version" as ApiProvider,
+			actModeApiModelId: "its-model",
+			planModeApiProvider: "anthropic",
+			preferredLanguage: "French",
+		})
+
+		assert.deepEqual(settings, {
+			actModeApiProvider: DEFAULT_API_PROVIDER,
+			actModeApiModelId: undefined,
+			planModeApiProvider: "anthropic",
+			preferredLanguage: "French",
+		})
 	})
 })
